@@ -1,3 +1,4 @@
+// Define the lead sourcing sweep workflow.
 export const meta = {
   name: 'lead-sweep',
   description: 'Multi-modal lead-sourcing sweep: parallel finders per signal lane, dedupe barrier, fresh-context verify, ALL leads presented',
@@ -103,12 +104,24 @@ const checked = await parallel(batches.map((b, bi) => () => agent(
   `Fresh-context source checks — you have not seen any finder's reasoning. For EACH numbered claim below: open the cited source (plus one cheap corroborating search if warranted) and report whether it actually supports the claim. You are checking EXISTENCE and accuracy only — never whether a lead is "good enough"; qualification belongs to Joe on the board. Unreachable or ambiguous source = say so in the note, do not guess. Echo each claim number and name exactly.\n${b.map((l, i) => `${i + 1}. "${l.name}"${l.practice ? ` (${l.practice})` : ''} — ${l.signal.slice(0, 300)} — source: ${l.sourceUrl}`).join('\n')}`,
   { label: `verify:batch${bi + 1}`, phase: 'Verify', model: 'sonnet', schema: CHECKS })))
 // Join by batch + claim number, never by name: same-name leads at different locations
-// stay separate after Dedupe and must keep their own check (WR-000513).
+// stay separate after Dedupe and must keep their own check (WR-000513). A claim number
+// returned twice, or echoed with another lead's name, is ambiguous: refuse, never guess.
 const byLead = new Map()
+const refused = new Map()
 checked.forEach((c, bi) => {
-  for (const k of (c?.checks || [])) if (batches[bi][k.item - 1]) byLead.set(batches[bi][k.item - 1], k)
+  const counts = new Map()
+  for (const k of (c?.checks || [])) counts.set(k.item, (counts.get(k.item) || 0) + 1)
+  for (const k of (c?.checks || [])) {
+    const lead = batches[bi][k.item - 1]
+    if (!lead) continue
+    if (counts.get(k.item) > 1) refused.set(lead, `verifier returned claim ${k.item} more than once`)
+    else if (norm(k.name) !== norm(lead.name)) refused.set(lead, `verifier echoed "${k.name}" for claim ${k.item}`)
+    else byLead.set(lead, k)
+  }
 })
-const verified = candidates.map(l => ({ ...l, check: byLead.get(l) || null }))
+const verified = candidates.map(l => refused.has(l)
+  ? { ...l, check: null, checkRefused: refused.get(l) }
+  : { ...l, check: byLead.get(l) || null })
 
 phase('Present')
 const out = verified.filter(Boolean).map(l => ({

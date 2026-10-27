@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Fill a deal spreadsheet template with supplied inputs.
 import sys, json, subprocess, os, shutil, tempfile, openpyxl
 def fill(template, out, inputs):
     wb = openpyxl.load_workbook(template)

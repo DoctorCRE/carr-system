@@ -15,7 +15,7 @@ class NightlyTests(unittest.TestCase):
     def test_a_failed_job_does_not_prevent_the_other_jobs_from_running(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for name in ("bin/nightly.sh", "bin/run-lock.sh", "bin/step-timeout.zsh", "bin/with-timeout.py"):
+            for name in ("bin/nightly.sh", "bin/run-lock.sh", "bin/step-timeout.zsh", "bin/with-timeout.py", "ops/nightly-log.py"):
                 target = root / name
                 target.parent.mkdir(exist_ok=True)
                 shutil.copy2(ROOT / name, target)
@@ -36,7 +36,7 @@ class NightlyTests(unittest.TestCase):
             self.assertFalse(any("nightly.credential-" in row for row in rows))
             self.assertTrue(any("nightly.cadence-engine" in row for row in rows))
             self.assertTrue(all("bin/with-timeout.py" in row for row in rows))
-            self.assertFalse((root / "out/nightly-runs").exists())
+            self.assertEqual(len(list((root / "out/nightly-runs").glob("nightly-*.log"))), 1)
 
 
     def test_backup_failure_pings_only_the_backup_result(self):
@@ -66,7 +66,7 @@ class HealthcheckTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
         for name in ("bin/nightly.sh", "bin/hc-ping.sh", "bin/run-lock.sh",
-                     "bin/step-timeout.zsh", "bin/with-timeout.py"):
+                     "bin/step-timeout.zsh", "bin/with-timeout.py", "ops/nightly-log.py"):
             target = self.root / name
             target.parent.mkdir(exist_ok=True)
             shutil.copy2(ROOT / name, target)

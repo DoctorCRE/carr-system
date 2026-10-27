@@ -272,6 +272,10 @@ export function governedCorrespondenceStoreTools({ withEnvelope, writeEvent, Too
 
     "read-correspondence-thread": {
       write: false,
+      // The readback filters by carr.sponsoring_human_slug, which only the
+      // writer route's setWriterActorContext installs; the plain reader route
+      // carries no actor, so every read there came back empty (WR-000530).
+      writerConnection: true,
       description: "The provenance-preserving read of one correspondence thread (V5-J103): every adapter read receipt stored for one native identity in YOUR sponsor's own mailbox, each carrying the partner, the adapter, the mailbox account DIGEST and the full (source_system, native_id, native_id_epoch) identity, with typed thread metadata only — never a subject, body or attachment bytes. Every stored digest is recomputed on read and a mismatch refuses the whole read. Answers `unavailable` naming the owed seam when no receipt exists, which today is always: no adapter can write receipts yet.",
       inputSchema: {
         type: "object", additionalProperties: false,

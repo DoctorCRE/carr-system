@@ -1,3 +1,4 @@
+// Tests generation and validation of Worker verb request types.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { appendFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";

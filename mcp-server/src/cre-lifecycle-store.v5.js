@@ -1039,7 +1039,7 @@ const OPERATION_SCHEMAS = deepFreeze({
   // made HERE as well so an agent that somehow reached this function still
   // refuses before any load happens.
   "commit-winning-property": {
-    write: true, humanOnly: false, humanCallerOnly: true, authorityOnly: true,
+    write: true, humanOnly: false, authorityOnly: true,
     transition: "commit-winning-property", subject_kind: "assignment",
     keys: TRANSITION_PAYLOAD_KEYS, required: ["idempotency_key", "subject_ref", "evidence_refs"],
   },
@@ -1054,12 +1054,12 @@ const OPERATION_SCHEMAS = deepFreeze({
     keys: TRANSITION_PAYLOAD_KEYS, required: ["idempotency_key", "subject_ref", "evidence_refs"],
   },
   "record-deal-closing": {
-    write: true, humanOnly: false, humanCallerOnly: true, authorityOnly: true,
+    write: true, humanOnly: false, authorityOnly: true,
     transition: "record-deal-closing", subject_kind: "deal",
     keys: TRANSITION_PAYLOAD_KEYS, required: ["idempotency_key", "subject_ref", "evidence_refs"],
   },
   "cancel-pending-deal": {
-    write: true, humanOnly: false, humanCallerOnly: true, authorityOnly: true,
+    write: true, humanOnly: false, authorityOnly: true,
     transition: "cancel-pending-deal", subject_kind: "deal",
     keys: TRANSITION_PAYLOAD_KEYS, required: ["idempotency_key", "subject_ref", "evidence_refs"],
   },
@@ -1178,12 +1178,17 @@ export function v5J102ToolRegistrations() {
     "record-lifecycle-reconciliation": "recordLifecycleReconciliation",
     "run-migration-shadow": "runMigrationShadow",
   };
+  // WHO MAY CALL IS WHAT assertOperationAuthority ENFORCES (WR-000529): a
+  // humanOnly operation needs a human principal and an authorityOnly one needs
+  // the verified_partner class, so either one is a literal-human act and the
+  // registration says so, rather than admitting a sponsored agent to refuse it.
+  const literalHuman = name => OPERATION_SCHEMAS[name].humanOnly || OPERATION_SCHEMAS[name].authorityOnly;
   const entries = V5_J102_OPERATIONS.map(name => ({
     name,
     store_operation: name,
     write: OPERATION_SCHEMAS[name].write,
-    humanOnly: OPERATION_SCHEMAS[name].humanOnly || OPERATION_SCHEMAS[name].humanCallerOnly === true,
-    humanCallerOnly: OPERATION_SCHEMAS[name].humanCallerOnly === true,
+    humanOnly: literalHuman(name),
+    humanCallerOnly: literalHuman(name),
     authorityOnly: OPERATION_SCHEMAS[name].authorityOnly,
     role: roles[name],
     handler: handlers[name],
@@ -1233,6 +1238,10 @@ export function v5J102ToolRegistrations() {
     name: V5_J102_PARTNER_FACT_VERB,
     store_operation: "record-lifecycle-fact",
     authorityOnly: true,
+    // Its purpose is the partner-authored kinds, which H5 refuses to anyone but
+    // a verified partner; other kinds keep record-lifecycle-fact (WR-000529).
+    humanOnly: true,
+    humanCallerOnly: true,
     role: "Append one partner-authored first-party business record (closing settlement, deal failure, winning-property commitment or lifecycle correction) on the partner's authority credential, bound to the exact subject it is about; advances no lifecycle state.",
   });
   return deepFreeze(entries);

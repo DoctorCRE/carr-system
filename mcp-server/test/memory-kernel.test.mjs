@@ -1,3 +1,4 @@
+// Tests contextual memory recall, authority, and lifecycle behavior.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";

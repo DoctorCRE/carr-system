@@ -1,3 +1,4 @@
+// Find a suitable disposable Chromium binary for tests.
 import { existsSync, realpathSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import os from "node:os";

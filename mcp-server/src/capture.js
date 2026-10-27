@@ -1,6 +1,8 @@
+// Handle capture sessions and their recorded outcomes.
 import { randomString } from "./google-oidc.js";
 import { publicError } from "./public-errors.ts";
 import { isCalendarDate } from "./calendar-date.ts";
+import { bearerCredential } from "./bearer.ts";
 
 const JSON_HEADERS = { "content-type": "application/json" };
 const json = (body, status = 200) =>
@@ -27,12 +29,9 @@ function canonical(value) {
   return value;
 }
 
-function bearer(request) {
-  return (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-}
-
 function captureDevice(request, env) {
-  const token = bearer(request);
+  const token = bearerCredential(request.headers.get("authorization"));
+  if (!token) return null;
   let tokens;
   try { tokens = JSON.parse(env.CAPTURE_TOKENS || "{}"); }
   catch { tokens = {}; }
@@ -314,6 +313,15 @@ async function candidates(request, dependencies) {
         refuse(409, { error: "key_reuse" });
       const items = structuredClone(body.items);
       if (session.post_call && !prior.rows.length) {
+        for (const item of items.filter(item => ["next_step", "phase_move"].includes(item.kind))) {
+          const bases = await client.query(
+            `select distinct on (field) field,id as event_id from event
+              where subject_type='deal' and subject_id=$1 and field in ('next_step','next_date')
+              order by field,recorded_at desc,id desc
+              /* capture:post-call-next-step-base */`, [item.payload.deal]);
+          item.payload.plan_base = { next_step: null, next_date: null,
+            ...Object.fromEntries(bases.rows.map(row => [row.field, row.event_id])) };
+        }
         for (const item of items.filter(item => item.kind === "phase_move")) {
           const latest = await client.query(
             `select id as event_id from event
@@ -408,7 +416,7 @@ async function callContext(request, dependencies) {
     return json({ error: "invalid_call_context_deals" }, 400);
   try {
     const result = await dependencies.withWriter(async client => {
-      await authenticatedSession(client, bearer(request));
+      await authenticatedSession(client, bearerCredential(request.headers.get("authorization")));
       return client.query(
         `select deal_id,deal_name,owner,operating_state,participant_party_id,participant_party_ref,
                 participant_name,participant_email,participant_role
@@ -476,7 +484,7 @@ async function postCallReport(request, dependencies) {
 async function session(request, dependencies) {
   try {
     const result = await dependencies.withWriter(async client => {
-      const authenticated = await authenticatedSession(client, bearer(request));
+      const authenticated = await authenticatedSession(client, bearerCredential(request.headers.get("authorization")));
       return client.query(
         `select s.state,s.post_call,
                 count(c.id) filter (where c.status='pending')::int as pending,

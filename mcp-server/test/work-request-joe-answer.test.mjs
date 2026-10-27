@@ -1,3 +1,4 @@
+// Tests recording and reading Joe answers on Work Requests.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
@@ -112,14 +113,15 @@ test("answer-work-request-for-joe refuses a machine actor, and still refuses ext
   assert.equal(stale.human_ref, "WR-000001");
 });
 
-test("answer-work-request-for-joe refuses a sponsored partner-authority agent even though the dispatch gate admits the actor class", async () => {
+test("answer-work-request-for-joe refuses a sponsored partner-authority agent at the registered gate", async () => {
   // The generic humanOnly gate (tools.js) admits CLAUDE_FOR_JOE for most
   // humanOnly verbs, because most of them record a partner's decision made
-  // THROUGH a verified sponsored agent. This verb must still refuse it: the
-  // answer has to be the human's own, not an agent's on his behalf.
+  // THROUGH a verified sponsored agent. This verb records the human's own
+  // answer, so it declares humanCallerOnly (WR-000529) and the gate refuses
+  // the agent before the handler's own direct-human check is reached.
   const db = new JoeAnswerFake();
   const out = await rejected(() => executeRegisteredTool(db, CLAUDE_FOR_JOE, "answer-work-request-for-joe", structuredClone(ARGS)));
-  assert.equal(out.error, "human_only_verb_requires_direct_human_actor");
+  assert.equal(out.error, "human_only_verb_requires_verified_partner");
   assert.equal(out.verb, "answer-work-request-for-joe");
   assert.equal(db.calls.length, 0, "a sponsored agent must not reach the database on this verb");
 });

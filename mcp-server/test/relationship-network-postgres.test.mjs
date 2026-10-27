@@ -1,3 +1,4 @@
+// Tests relationship network concurrency and attribution on PostgreSQL.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
@@ -25,7 +26,7 @@ async function fixtures(db){
   return {actor,id,party,client,deal,vendor,lead};
 }
 const link=async(db,actor,args)=>{await db.query('savepoint action');await db.query('set local role carr_writer');try{const r=await TOOLS['link-parties'].handler(db,actor,{idempotency_key:randomUUID(),...args});await db.query('release savepoint action');return r;}catch(e){await db.query('rollback to savepoint action');throw e;}finally{await db.query('reset role');}};
-const network=async db=>{await db.query('savepoint read');await db.query('set local role carr_reader');try{return projectNetwork((await db.query(networkStatement)).rows[0].snapshot,new Date().toISOString());}finally{await db.query('rollback to savepoint read');await db.query('reset role');}};
+const network=async db=>{await db.query('savepoint read');await db.query('set local role carr_reader');try{return projectNetwork((await db.query(networkStatement)).rows[0].snapshot,'2026-10-04T12:00:00.000Z');}finally{await db.query('rollback to savepoint read');await db.query('reset role');}};
 const referredDeals=(snapshot,party)=>snapshot.edges.filter(e=>e.kind==='referred'&&e.from==='party:'+party&&e.to.startsWith('deal:')).map(e=>e.to).sort();
 
 test('W14 PostgreSQL: coverage and exact attachments serialize in both commit orders', async t => {
@@ -284,7 +285,7 @@ test('W14 PostgreSQL: exact referrals, deduplication, broker attribution, holds 
     assert.equal((await db.query('select count(*)::int n from public.party_link_deal where link_id=$1',[result.link_id])).rows[0].n,3);
     await db.query('update public.vendor set deal_evidence=$2 where id=$1',[vendor,JSON.stringify([{deal_id:won,role:'worked',occurred_at:'2026-10-01T00:00:00Z',evidence_ref:'Demo original work entry'},{deal_id:won,role:'referred',occurred_at:'2026-10-01T00:00:00Z',evidence_ref:'Demo vendor referral'}])]);
     const offer=await call({from_party:vp,to_party:target,kind:'can_introduce',note:'Demo offer to connect',idempotency_key:randomUUID()});
-    const read=async()=>{await db.query('savepoint read');await db.query('set local role carr_reader');try{return projectNetwork((await db.query(networkStatement)).rows[0].snapshot,new Date().toISOString());}catch(e){await db.query('rollback to savepoint read');throw e;}finally{await db.query('reset role');}};
+    const read=async()=>{await db.query('savepoint read');await db.query('set local role carr_reader');try{return projectNetwork((await db.query(networkStatement)).rows[0].snapshot,'2026-10-04T12:00:00.000Z');}catch(e){await db.query('rollback to savepoint read');throw e;}finally{await db.query('reset role');}};
     let network=await read();
     const row=network.referrals.find(r=>r.node_id==='party:'+cp);assert.deepEqual(row,{node_id:'party:'+cp,deals:3,won:1,lost:1,win_rate:.5});
     assert.equal(network.referrals.find(r=>r.node_id==='party:'+vp).deals,1);

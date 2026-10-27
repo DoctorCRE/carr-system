@@ -1,3 +1,4 @@
+// Tests conflict tiering for disjoint and overlapping fields.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

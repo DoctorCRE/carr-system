@@ -1,3 +1,5 @@
+import { NOW } from "./helpers/fixed-clock.mjs";
+// Test rejection of future activity occurrence timestamps.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -30,7 +32,7 @@ class Fake {
   }
 }
 
-const iso = (msFromNow) => new Date(Date.now() + msFromNow).toISOString();
+const iso = (msFromNow) => new Date(NOW + msFromNow).toISOString();
 const DAY = 86_400_000;
 
 const logIt = (fake, occurred_at, kind = "call") =>
@@ -69,7 +71,7 @@ test("the refusal explains the staleness consequence, not just the rule", async 
 
 test("a touch dated now is fine", async () => {
   const fake = new Fake();
-  const out = await logIt(fake, new Date().toISOString());
+  const out = await logIt(fake, new Date(NOW).toISOString());
   assert.equal(out.ok, true);
 });
 

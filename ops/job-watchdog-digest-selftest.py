@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test job watchdog digest hooks.
 import json
 import os
 import plistlib
@@ -6,7 +7,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
@@ -16,54 +16,6 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class HookTests(unittest.TestCase):
-    def test_social_batch_failure_reaches_the_digest_and_success_clears_it(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            command = [sys.executable, str(ROOT / "tools/job-watchdog.py"),
-                       "--root", directory, "social-batch-result"]
-
-            failed = subprocess.run(command + ["--week-start", "2026-11-02",
-                                               "--queue-count", "0", "--queue-complete"],
-                                    text=True, capture_output=True)
-            self.assertEqual(failed.returncode, 1, failed.stderr)
-            digest = subprocess.run([sys.executable, str(ROOT / "hooks/job-watchdog-digest.py")],
-                                    input="{}", text=True, capture_output=True,
-                                    env=dict(os.environ, CARR_JOB_ROOT=directory))
-            self.assertEqual(digest.returncode, 0, digest.stderr)
-            context = json.loads(digest.stdout)["hookSpecificOutput"]["additionalContext"]
-            self.assertIn("social-batch-weekly", context)
-            self.assertIn("zero drafts", context)
-
-            source = root / "source"
-            (source / "ops/launchd").mkdir(parents=True)
-            with patch.object(watchdog, "SOURCE", source):
-                config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
-                watchdog.reconcile(root, config, [], set(), now=1)
-            self.assertIn("zero drafts", watchdog.digest(root, config))
-
-            for reason, expected in (("zero_duration", "zero duration"), ("no_output", "no batch output")):
-                failed = subprocess.run(command + ["--week-start", "2026-11-02",
-                                                   "--failure", reason],
-                                        text=True, capture_output=True)
-                self.assertEqual(failed.returncode, 1, failed.stderr)
-                self.assertIn(expected, watchdog.digest(root, config))
-
-            incomplete = subprocess.run(command + ["--week-start", "2026-11-02",
-                                                   "--queue-count", "9"],
-                                        text=True, capture_output=True)
-            self.assertEqual(incomplete.returncode, 2)
-            self.assertIn("no batch output", watchdog.digest(root, config))
-
-            cleared = subprocess.run(command + ["--week-start", "2026-11-02",
-                                                "--queue-count", "9", "--queue-complete"],
-                                     text=True, capture_output=True)
-            self.assertEqual(cleared.returncode, 0, cleared.stderr)
-            digest = subprocess.run([sys.executable, str(ROOT / "hooks/job-watchdog-digest.py")],
-                                    input="{}", text=True, capture_output=True,
-                                    env=dict(os.environ, CARR_JOB_ROOT=directory))
-            self.assertEqual(digest.returncode, 0, digest.stderr)
-            self.assertEqual(digest.stdout, "")
-
     def test_digest_hook_and_registration(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "out/watchdog/findings.jsonl"

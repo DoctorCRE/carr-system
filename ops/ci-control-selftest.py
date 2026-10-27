@@ -68,11 +68,19 @@ class Controls(unittest.TestCase):
             self.assertNotIn('needs.scope', json.dumps(step))
 
     def test_postgres_install_is_bounded_and_retries_once(self):
-        installs = [step for job in workflow()['jobs'].values() for step in job.get('steps', [])
+        installs = [step for filename in ('ci.yml', 'main-canary.yml')
+                    for job in workflow(filename)['jobs'].values() for step in job.get('steps', [])
                     if step.get('name') == 'Install PostgreSQL 17']
         for step in installs:
             self.assertEqual(step.get('timeout-minutes'), 5)
             self.assertEqual(step['run'], 'bash ops/ci-postgres.sh')
+        canary = workflow('main-canary.yml')['jobs']['classes']['steps']
+        install = next(step for step in canary if step.get('name') == 'Install PostgreSQL 17')
+        configure = next(step for step in canary
+                         if 'create_main_cluster = false' in step.get('run', ''))
+        self.assertLess(canary.index(configure), canary.index(install))
+        self.assertEqual(configure.get('if'), "contains(matrix.classes, 'migration')")
+        self.assertFalse(any('apt-get install' in step.get('run', '') for step in canary))
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             timeout = root / 'timeout'
@@ -82,9 +90,9 @@ class Controls(unittest.TestCase):
                 "n=int(p.read_text())+1 if p.exists() else 1\n"
                 "p.write_text(str(n))\n"
                 "assert sys.argv[1:] == ['--kill-after=5s','110s','bash','-euo','pipefail','-c','install_postgres']\n"
-                "sys.exit(124 if os.environ['INSTALL_RESULT']=='timeout' or n==1 else 0)\n")
+                "sys.exit({'timeout':124,'failure':1,'missing':127}.get(os.environ['INSTALL_RESULT'], 1 if n==1 else 0))\n")
             timeout.chmod(0o755)
-            for mode, expected in [('retry-success', 0), ('timeout', 1)]:
+            for mode, expected in [('retry-success', 0), ('timeout', 1), ('failure', 1), ('missing', 1)]:
                 attempts = root / (mode + '-attempts')
                 result = subprocess.run(['bash', 'ops/ci-postgres.sh'], cwd=ROOT,
                     env={**os.environ, 'PATH': directory + os.pathsep + os.environ['PATH'],
@@ -105,13 +113,11 @@ class Controls(unittest.TestCase):
         self.assertFalse(any(row == {'classes': 'gates'} for row in exclusions))
         self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
 
-    def test_ready_metadata_does_not_replace_required_check(self):
+    def test_ready_transition_runs_required_check(self):
         wf = workflow()
         triggers = wf['on']['pull_request']['types']
-        self.assertNotIn('ready_for_review', triggers)
-        self.assertNotIn('edited', triggers)
-        self.assertNotIn('labeled', triggers)
-        self.assertTrue({'opened', 'synchronize', 'reopened'} <= set(triggers))
+        self.assertEqual(triggers, ['opened', 'synchronize', 'reopened',
+                                    'converted_to_draft', 'ready_for_review'])
         self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
 
     def test_events(self):

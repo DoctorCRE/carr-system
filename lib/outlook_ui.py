@@ -131,12 +131,16 @@ def is_main_window(window: dict) -> bool:
 
 
 def is_compose_window(window: dict) -> bool:
-    """Any sizeable Outlook window that is not a mailbox window may hold a draft.
+    """Protect possible drafts, except the observed unassigned off-screen window.
 
-    Toolbar and full-screen helper surfaces are a few dozen points tall and
-    untitled; a compose window is roughly 917x911 and titled by its subject.
+    The 500x500 window has an empty title and unknown purpose; AX did not resolve it.
+    Keep all other sizeable non-mailbox windows protected, even without a subject.
     """
     bounds = window.get('bounds') or {}
+    if (window.get('title') == '' and bounds.get('width') == 500
+            and bounds.get('height') == 500 and window.get('is_on_screen') is False
+            and 'on_current_space' in window and window['on_current_space'] is None):
+        return False
     return (not is_main_window(window) and bounds.get('width', 0) >= 400
             and bounds.get('height', 0) >= 400)
 
@@ -181,16 +185,30 @@ def usable_window(pid: int) -> dict | None:
 
 
 def _quit(pid: int, windows: list[dict], waits: Waits) -> bool:
-    try:
-        cua('invoke_menu', {'pid': pid, 'window_id': windows[0]['window_id'], 'path': QUIT})
-    except (CuaError, IndexError, KeyError):
-        subprocess.run(['osascript', '-e', f'tell application "{APP}" to quit'],
-                       capture_output=True, timeout=30)
+    full_screen_height = load_settings().full_screen_height
+    window = next((w for w in windows if is_ordinary_main_window(w, full_screen_height)), None)
+    fallback_at = time.monotonic()
+    if window is not None:
+        try:
+            cua('invoke_menu', {'pid': pid, 'window_id': window['window_id'], 'path': QUIT})
+            fallback_at = time.monotonic() + min(2, waits.quit_seconds / 2)
+        except (CuaError, KeyError):
+            pass
     deadline = time.monotonic() + waits.quit_seconds
+    fallback_at = min(fallback_at, deadline)
     while outlook_pid() is not None:
-        if time.monotonic() >= deadline:
+        now = time.monotonic()
+        if now >= deadline:
             return False
-        time.sleep(waits.poll_seconds)
+        if now >= fallback_at:
+            try:
+                subprocess.run(['osascript', '-e', f'tell application "{APP}" to quit'],
+                               capture_output=True, timeout=min(30, deadline - now))
+            except subprocess.TimeoutExpired:
+                return False
+            fallback_at = float('inf')
+            continue
+        time.sleep(min(waits.poll_seconds, deadline - now, fallback_at - now))
     return True
 
 

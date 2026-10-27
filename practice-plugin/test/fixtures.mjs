@@ -1,3 +1,4 @@
+// Provide synthetic inputs for practice planning calculator tests.
 export const runwayFixture = () => ({ start_month: '2027-01', horizon_months: 3, opening_month: 1, delay_months: 0, initial_cash_usd: 100000, reserve_floor_usd: 10000,
   cash_injections: [], one_time_costs: [{ id: 'startup', month: 1, timing: 'fixed_calendar', amount_usd: 20000 }],
   recurring_costs: [{ id: 'operations', start_month: 1, end_month: 3, timing: 'fixed_calendar', monthly_usd: 20000 }], receipts: { mode: 'cash', monthly_usd: [0, 10000, 30000] }, missing_cost_categories: [] });

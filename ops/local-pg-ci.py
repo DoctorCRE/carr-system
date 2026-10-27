@@ -270,7 +270,7 @@ def run_local_ci(
     integration_base: str | None = None,
     migration_part: str = "all",
 ) -> int:
-    if migration_part not in {"all", "core", "proofs", "gates", "gates-serial", "gates-isolated", "acceptance"}:
+    if migration_part not in {"all", "core", "proofs", "gates", "acceptance"}:
         raise LocalPGRefusal("unknown local DB lane migration part")
     if migration_part != "all" and (ci_class != "migration" or integration_base is not None):
         raise LocalPGRefusal("partitioned migration proof requires the ordinary migration lane")
@@ -458,7 +458,10 @@ def run_local_ci(
         if exit_code:
             print("local-db-ci: canonical CI failed", file=sys.stderr)
         if exit_code == 0 and migration_part in {"all", "core", "acceptance"}:
+            records = clean_env.get("CARR_CI_PROGRAM_RECORDS")
+            acceptance_rows = []
             acceptance_env = dict(clean_env)
+            acceptance_env.pop("CARR_CI_PROGRAM_RECORDS", None)
             acceptance_env["PATH"] = f"{binaries.psql.parent}{os.pathsep}{clean_env.get('PATH', '')}"
             acceptance_env["CARR_LOCAL_PG_DSN"] = dsn
             for program in programs:
@@ -466,6 +469,7 @@ def run_local_ci(
                 env = dict(acceptance_env)
                 if program.kind == "node":
                     env = dict(ci_env)
+                    env.pop("CARR_CI_PROGRAM_RECORDS", None)
                     if program.id == "leads":
                         env["LEAD_WORKSPACE_TEST_DATABASE_URL"] = dsn
                     else:
@@ -490,11 +494,20 @@ def run_local_ci(
                         # Raw exception text can include DSNs, parameters or
                         # identity data. It is never printed.
                         result = CommandResult(78, "", "acceptance subprocess raised an exception")
+                acceptance_rows.append(f"migration\tacceptance-{program.id}\t{result.returncode}"
+                                       f"\t{before}\t{time.monotonic()}\n")
                 if result.returncode:
                     print(f"local-db-ci: {program.id} failed: {_failure_detail(result)}", file=sys.stderr)
                     exit_code = result.returncode
                     break
                 print(f"local-db-ci: {program.id} acceptance passed ({time.monotonic() - before:.0f}s)")
+            if records:
+                # WR-000542: extends the per-program record ci.sh wrote above.
+                rows = root / "acceptance-programs.tsv"
+                rows.write_text("".join(acceptance_rows))
+                if fixture.run([sys.executable, repo / "ops/ci-evidence.py", "programs", "--rows", rows,
+                                "--output", records], env=clean_env, cwd=repo, capture=True).returncode:
+                    print(f"ci-program-records: NOT WRITTEN to {records}", file=sys.stderr)
             if exit_code == 0 and integration_base is not None:
                 if validate_candidate(repo, integration_base) != integration_source:
                     raise LocalPGRefusal("integration source changed during canonical candidate proof")
@@ -533,7 +546,7 @@ def main() -> int:
         default="migration",
         help="migration is the fast DB lane; strict runs every canonical class locally",
     )
-    parser.add_argument("--migration-part", choices=("all", "core", "proofs", "gates", "gates-serial", "gates-isolated", "acceptance"), default="all",
+    parser.add_argument("--migration-part", choices=("all", "core", "proofs", "gates", "acceptance"), default="all",
                         help="partitioned runs require all sibling verdicts in the hosted aggregate")
     parser.add_argument("--port", type=int, default=55432)
     parser.add_argument("--integration-base", help="exact current-main SHA for restore/forward/consumer union proof")

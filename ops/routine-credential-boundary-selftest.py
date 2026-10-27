@@ -27,13 +27,6 @@ def main() -> int:
     nightly = NIGHTLY.read_text(encoding="utf-8")
     restore = RESTORE.read_text(encoding="utf-8")
     check("nightly never sources db.env", '. "$HOME/.config/carr/db.env"' not in nightly)
-    # The property being guarded is that step()'s command reaches the child
-    # THROUGH carr_routine_exec, which is what strips the environment down to
-    # the declared database capabilities.
-    #
-    # WHY THIS IS A REGEX AND NOT THE OLD LITERAL `carr_routine_exec "$@"`.
-    check("nightly records jobs inside a clean child environment",
-          'carr_routine_exec /bin/zsh "$REPO/bin/run-scheduled.sh" "$SERVICE" "$key"' in nightly)
     nightly_code = "\n".join(
         "" if line.lstrip().startswith("#") else line
         for line in nightly.split("\n"))

@@ -1,3 +1,4 @@
+// Tests capture claims, transitions, and candidate handling.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -42,6 +43,7 @@ class CaptureFake {
     this.queryCount += 1;
     const sql = text.replace(/\s+/g, " ").trim();
     if (sql === "select pg_advisory_xact_lock(hashtextextended($1, 0))") return { rows: [] };
+    if (sql.includes("call-outcome:resolve-session-lock") || sql.includes("call-outcome:resolve-undo-check")) return { rows: [] };
     if (sql.includes("dealroom:field-lock")) return { rows: [] };
     if (sql === "select next_date::text as next_date from deal where id=$1")
       return { rows: [{ next_date: this.nextDate ?? null }] };
@@ -109,6 +111,7 @@ class CaptureFake {
     }
     if (sql.includes("capture:post-call-phase-base"))
       return { rows: this.phaseBase ? [{ event_id: this.phaseBase }] : [] };
+    if (sql.includes("capture:post-call-next-step-base")) return { rows: [] };
     if (sql.includes("dealroom:base-event")) return { rows: [{ id: params[0] }] };
     if (sql.includes("dealroom:latest-field-event"))
       return { rows: this.phaseBase !== params[2] ? [{ event_id: this.phaseBase,
@@ -183,7 +186,8 @@ class CaptureFake {
     if (sql.includes("capture:resolve-read")) {
       const row = this.candidates.find(candidate => candidate.id === params[0]);
       return { rows: row ? [{ id: row.id, kind: row.kind, payload: row.payload,
-        status: row.status, resulting_ref: row.resulting_ref }] : [] };
+        status: row.status, resulting_ref: row.resulting_ref,
+        evidence_quote: row.evidence_quote, post_call: row.post_call ?? false }] : [] };
     }
     if (sql.includes("capture:resolve-skip")) {
       const row = this.candidates.find(candidate => candidate.id === params[0]);
@@ -433,7 +437,8 @@ test("post-call next-step proposals stay pending, validate exact deals, and repl
   });
   assert.equal(changed.status, 409);
   const queue = await TOOLS["capture-queue"].handler(db, joe, {});
-  assert.deepEqual(queue.candidates[0].payload, item.payload);
+  assert.deepEqual(queue.candidates[0].payload, { ...item.payload,
+    plan_base: { next_step: null, next_date: null } });
   const session = await r.handler.fetch(new Request("https://worker.test/capture/session",
     { headers: { authorization: `Bearer ${token}` } }), {});
   assert.equal((await session.json()).candidate_statuses[0].status, "pending");
@@ -448,6 +453,7 @@ test("post-call next-step proposals stay pending, validate exact deals, and repl
     { ...item.payload, next_date: "2027-02-29" },
     { ...item.payload, next_date: "tomorrow" }, { ...item.payload, next_date: true },
     { ...item.payload, ref: ids.deal },
+    { ...item.payload, plan_base: { next_step: null, next_date: null } },
     { deal: ids.deal, text: "Call landlord" },
   ];
   for (const [index, payload] of invalid.entries()) {
@@ -476,7 +482,8 @@ test("post-call phase proposals pin the server phase base and preserve it on rep
   assert.equal(submitted.status, 200);
   const receipt = await submitted.json();
   const queue = await TOOLS["capture-queue"].handler(db, joe, {});
-  assert.deepEqual(queue.candidates[0].payload, { ...item.payload, base_event_id: db.phaseBase });
+  assert.deepEqual(queue.candidates[0].payload, { ...item.payload, base_event_id: db.phaseBase,
+    plan_base: { next_step: null, next_date: null } });
   db.phaseBase = "50000000-0000-0000-0000-000000000002";
   const replay = await post(r.handler, "/capture/candidates", batch);
   assert.deepEqual(await replay.json(), receipt);
@@ -502,6 +509,7 @@ test("post-call phase proposals pin the server phase base and preserve it on rep
     { ...item.payload, value: "closed" }, { ...item.payload, value: "invoiced" },
     { ...item.payload, value: "not-a-phase" }, { ...item.payload, field: "owner" },
     { ...item.payload, base_event_id: null }, { ...item.payload, value: true },
+    { ...item.payload, plan_base: { next_step: null, next_date: null } },
     { ...item.payload, human_quote: "Joe said move it" },
     { ...item.payload, started_on: "2026-13-40" }, { ...item.payload, started_on: "October 20" },
   ];
@@ -527,6 +535,17 @@ test("post-call phase proposals pin the server phase base and preserve it on rep
   await assert.rejects(() => TOOLS["resolve-candidate"].handler(db, joe, {
     idempotency_key: "phase-automatic-refused", candidate_id: db.candidates[2].id, accept: true, automatic: true,
   }), error => error instanceof ToolError && error.payload.error === "automatic_apply_not_allowed");
+});
+
+test("a call change below the confidence bar stays a pending card when auto-apply is requested", async () => {
+  const db = new CaptureFake();
+  db.candidates.push({ id: "60000000-0000-0000-0000-000000000009", kind: "phase_move", status: "pending",
+    post_call: true, evidence_quote: "move it", payload: { deal: ids.deal, field: "phase", value: "legal" } });
+  await assert.rejects(() => TOOLS["resolve-candidate"].handler(db, joe, {
+    idempotency_key: "below-bar", candidate_id: db.candidates[0].id, accept: true, automatic: true,
+  }), error => error instanceof ToolError && error.payload.error === "below_confidence_bar");
+  assert.equal(db.candidates[0].status, "pending");
+  assert.equal(db.events.length, 0);
 });
 
 test("resolve accept executes once as confirmer; reject only skips; double resolve is inert", async () => {

@@ -1,3 +1,4 @@
+// Tests confirm-merge against the current PostgreSQL activity schema.
 import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
 import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import test from "node:test";
@@ -161,9 +162,9 @@ test("confirm-merge executes against the current activity schema", async t => {
           ...options, idempotency_key: "synthetic-reverse-merge",
           survivor_party: loser, merged_party: survivor,
         }).then(result => ({ result }), error => ({ error })).then(outcome => { settled = true; return outcome; });
-        const deadline = Date.now() + 3000;
+        const deadline = performance.now() + 3000;
         let waiting = false;
-        while (!settled && Date.now() < deadline) {
+        while (!settled && performance.now() < deadline) {
           waiting = (await db.query("select wait_event_type from pg_stat_activity where pid=$1", [pid]))
             .rows[0]?.wait_event_type === "Lock";
           if (waiting) break;

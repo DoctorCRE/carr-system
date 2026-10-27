@@ -1,3 +1,4 @@
+# Test progress board publication size boundaries.
 import copy
 import json
 import tempfile

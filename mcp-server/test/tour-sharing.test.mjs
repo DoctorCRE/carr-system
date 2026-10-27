@@ -1,3 +1,4 @@
+// Tests Tour share authority, browser access, and sanitized projections.
 import assert from "node:assert/strict";
 import test from "node:test";
 import {

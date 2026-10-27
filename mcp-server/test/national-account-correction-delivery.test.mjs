@@ -1,3 +1,4 @@
+// Tests delivery and database proof of the national account correction.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';

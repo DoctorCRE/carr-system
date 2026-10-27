@@ -1,3 +1,4 @@
+// Tests Tour domain validation, actor authority, and route state transitions.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { tourDomainTools } from "../src/tour-domain.js";

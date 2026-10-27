@@ -72,6 +72,14 @@ trap 'rm -f "$TALLY"' EXIT
 tally_reset() { : > "$TALLY"; }
 tally_count() { wc -l < "$TALLY" | tr -d ' '; }
 
+# Coordinate each writer with its curl stub so runner scheduling cannot decide
+# whether the config reaches a reader. The stub signals before draining stdin.
+SYNC_DIR="$(mktemp -d "${TMPDIR:-/tmp}/smoke-transport-sync.XXXXXX")" || exit 1
+mkfifo "$SYNC_DIR/ready" || exit 1
+trap 'rm -f "$TALLY" "$SYNC_DIR/ready"; rmdir "$SYNC_DIR"' EXIT
+printf() { local ready; read -r ready < "$SYNC_DIR/ready"; builtin printf "$@"; }
+curl_ready() { print -r -- ready > "$SYNC_DIR/ready"; }
+
 print -r -- "call() transport handling -> $SRC"
 print -r --
 
@@ -79,7 +87,7 @@ print -r --
 #    RESULT must never be left empty, and must carry the '"error"' key that
 #    every call site in the suite greps for before it looks at content.
 tally_reset
-curl() { cat >/dev/null; print -r -- x >> "$TALLY"; return 28; }
+curl() { curl_ready; cat >/dev/null; print -r -- x >> "$TALLY"; return 28; }
 call find '{"query":"anything"}'
 CURL_CALLS="$(tally_count)"
 check "an empty response becomes an error envelope, not an empty string" \
@@ -97,7 +105,7 @@ check "a failing call is retried CALL_ATTEMPTS times" \
 #    NOT retried — a suite that silently re-called a write verb would be worse
 #    than the bug it replaced.
 tally_reset
-curl() { cat >/dev/null; print -r -- x >> "$TALLY"; print -r -- '{"result":{"content":[{"text":"real answer"}]}}'; return 0; }
+curl() { curl_ready; cat >/dev/null; print -r -- x >> "$TALLY"; print -r -- '{"result":{"content":[{"text":"real answer"}]}}'; return 0; }
 call find '{"query":"anything"}'
 CURL_CALLS="$(tally_count)"
 check "a successful call returns its body verbatim" \
@@ -109,6 +117,7 @@ check "a successful call is issued exactly once" \
 #    back empty, attempt 2 answers, and the caller sees the answer.
 tally_reset
 curl() {
+  curl_ready
   cat >/dev/null
   print -r -- x >> "$TALLY"
   [ "$(wc -l < "$TALLY" | tr -d ' ')" -eq 1 ] && return 28
@@ -124,7 +133,7 @@ check "…and it stopped as soon as it got a body" \
 # 4. A 200 WITH AN EMPTY BODY is the case curl's own --retry would not catch,
 #    which is why the retry is tested on the body rather than on the exit code.
 tally_reset
-curl() { cat >/dev/null; print -r -- x >> "$TALLY"; return 0; }
+curl() { curl_ready; cat >/dev/null; print -r -- x >> "$TALLY"; return 0; }
 call find '{"query":"anything"}'
 CURL_CALLS="$(tally_count)"
 check "an exit-0 call with no body is treated as a transport failure" \

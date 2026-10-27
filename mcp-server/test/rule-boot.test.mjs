@@ -1,3 +1,4 @@
+// Test rule boot digest and sponsor visibility.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { executeRegisteredTool } from "../src/tools.js";

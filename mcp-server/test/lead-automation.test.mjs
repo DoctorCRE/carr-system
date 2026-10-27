@@ -1,3 +1,4 @@
+// Test lead automation evidence, lifecycle decisions and proposals.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import { createHash } from "node:crypto";
 import test from "node:test";
@@ -110,10 +111,11 @@ test("existing applied evidence is not returned as a newly applied move",async()
   assert.deepEqual(result.moves,[]);assert.deepEqual(db.events,[]);assert.equal(db.l.stage,'new');
 });
 test("draft approval requires partner authority, makes no stage move and cannot send",async()=>{
-  const db=new Fake();db.drafts=[{id:"draft-example",lead_id:lead.id}];
-  await assert.rejects(()=>tools["approve-lead-draft"].handler(db,{...human,human:false},{draft_id:"draft-example"}),/human_approval/);
-  const r=await tools["approve-lead-draft"].handler(db,human,{draft_id:"draft-example"});assert.equal(r.sent,false);assert.equal(db.l.stage,"new");
-  await assert.rejects(()=>tools["approve-lead-draft"].handler(db,human,{draft_id:"draft-example"}),/not_pending/);
+  const db=new Fake();db.drafts=[{id:"draft-example",lead_id:lead.id,revision:1}];
+  await assert.rejects(()=>tools["approve-lead-draft"].handler(db,{...human,human:false},{draft_id:"draft-example",revision:1}),/human_approval/);
+  await assert.rejects(()=>tools["approve-lead-draft"].handler(db,human,{draft_id:"draft-example",revision:2}),/stale_draft_revision/);
+  const r=await tools["approve-lead-draft"].handler(db,human,{draft_id:"draft-example",revision:1});assert.equal(r.sent,false);assert.equal(db.l.stage,"new");
+  await assert.rejects(()=>tools["approve-lead-draft"].handler(db,human,{draft_id:"draft-example",revision:1}),/not_pending/);
 });
 test("proposal approval rejects stale state/version and records its original reference",async()=>{
   const db=new Fake();db.proposal={id:"move-example",lead_id:lead.id,from_stage:"engaged",to_stage:"nurture_drip",version:4,stage:"engaged",activity_id:contact.id,evidence_ref:"local-mail:synthetic-002"};

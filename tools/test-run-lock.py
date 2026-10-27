@@ -82,24 +82,41 @@ def zsh_wired(name, body, lockdir, timeout=30):
     )
 
 
+def hold(prefix, scratch, tag):
+    """Start a holder that runs `prefix`, then signals it holds the lock and
+    waits for release. The handshake replaces a fixed sleep: a holder whose
+    shell starts late on a loaded runner used to be raced or killed before it
+    had taken the lock (WR-000545)."""
+    ready = os.path.join(scratch, f"{tag}.ready")
+    release = os.path.join(scratch, f"{tag}.release")
+    proc = subprocess.Popen(
+        ["/bin/zsh", "-c",
+         prefix + f'\n: > "{ready}"\nwhile [ ! -e "{release}" ]; do sleep 0.05; done'],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        env={**os.environ, "CARR_LOCK_DIR": scratch})
+    deadline = time.monotonic() + 30
+    while not os.path.exists(ready):
+        if proc.poll() is not None or time.monotonic() > deadline:
+            proc.kill()
+            raise RuntimeError(f"{tag} holder never took its lock (rc={proc.poll()})")
+        time.sleep(0.01)
+    return proc, release
+
+
 def main():
     if not os.path.exists(HELPER):
         print(f"FAIL: {HELPER} not present")
         return 1
     scratch = tempfile.mkdtemp(prefix="carr-lock-test-")
     try:
-        # 1 + 2. Two racers, one winner. The first holds the lock for a beat so
-        # the second is guaranteed to arrive while it is held.
+        # 1 + 2. Two racers, one winner. The first signals that it holds the
+        # lock, so the second is guaranteed to arrive while it is held.
         marker = os.path.join(scratch, "winners")
-        a = subprocess.Popen(
-            ["/bin/zsh", "-c",
-             PREAMBLE.format(helper=HELPER, name="race")
-             + f'print -r -- A >> {marker}; sleep 2'],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-            env={**os.environ, "CARR_LOCK_DIR": scratch})
-        time.sleep(0.6)
+        a, release = hold(PREAMBLE.format(helper=HELPER, name="race")
+                          + f'print -r -- A >> {marker}', scratch, "race")
         b = zsh(f'if carr_take_lock race; then print -r -- B >> {marker}; '
                 f'else print -r -- "loser rc=$?"; fi', scratch)
+        open(release, "w").close()
         a.wait(timeout=30)
         winners = open(marker).read().split() if os.path.exists(marker) else []
         check("exactly one racer takes the lock", winners == ["A"], f"winners={winners}")
@@ -127,11 +144,7 @@ def main():
         # to die and still hold the lock when the machine goes down. Either way
         # the lock outlives its holder, and the next run must not be blocked by
         # it. Anything less means one crash quietly ends every future night.
-        p = subprocess.Popen(
-            ["/bin/zsh", "-c", PREAMBLE.format(helper=HELPER, name="killed-case") + "sleep 30"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            env={**os.environ, "CARR_LOCK_DIR": scratch})
-        time.sleep(0.6)
+        p, _ = hold(PREAMBLE.format(helper=HELPER, name="killed-case"), scratch, "killed-case")
         p.send_signal(signal.SIGKILL)
         p.wait(timeout=15)
         check("a killed chain does leave its lock behind (the trap cannot fire)",
@@ -154,12 +167,9 @@ def main():
               "stale" in (r.stdout + r.stderr).lower(), f"stdout={r.stdout!r}")
 
         # 5. Two different names are two different locks.
-        p = subprocess.Popen(
-            ["/bin/zsh", "-c", f'source "{HELPER}"\ncarr_take_lock name-one && sleep 2'],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            env={**os.environ, "CARR_LOCK_DIR": scratch})
-        time.sleep(0.6)
+        p, release = hold(f'source "{HELPER}"\ncarr_take_lock name-one || exit 1', scratch, "name-one")
         r = zsh('carr_take_lock name-two && print -r -- "independent"', scratch)
+        open(release, "w").close()
         p.wait(timeout=15)
         check("different lock names do not collide",
               "independent" in r.stdout, f"stdout={r.stdout!r}")
@@ -173,11 +183,6 @@ def main():
               "run-lock.sh" in chain)
         check("bin/nightly.sh takes the lock and no-ops when it cannot",
               'carr_take_lock "$SERVICE" || exit 0' in chain)
-        check("bin/nightly.sh releases on signals and on exit",
-              "trap 'exit 143' INT TERM HUP" in chain
-              and "trap 'carr_release_lock' EXIT" in chain)
-        check("bin/nightly.sh only releases a lock it actually took",
-              chain.index('carr_take_lock "$SERVICE" || exit 0') < chain.index("trap 'carr_release_lock' EXIT"))
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

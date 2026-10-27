@@ -19,6 +19,7 @@ const WARNINGS = {
   time_changed: n => `${n} ${plural(n, "meeting has", "meetings have")} more than one stored time. Check Outlook for the current time.`,
   recurring_unverified: () => "Recurring meetings show only the occurrences Outlook stored; some may be missing.",
   canceled_hidden: n => `${n} cancelled ${plural(n, "meeting was", "meetings were")} left out.`,
+  follow_up_trimmed: n => `${n} meeting outcome ${plural(n, "review was", "reviews were")} left out to keep the brief small.`,
   trimmed: n => `${n} later ${plural(n, "meeting was", "meetings were")} left out to keep the brief small.`,
 };
 
@@ -50,6 +51,15 @@ export function calendarSection(snapshot, now = new Date()) {
       conflict: row.conflict === true });
   }
   items.sort((a, b) => a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
+  for (const item of items) item.schedule_conflict = false;
+  for (let i = 0; i < items.length; i++) {
+    const a = items[i];
+    if (a.all_day || a.end <= a.start) continue;
+    for (let j = i + 1; j < items.length && items[j].start < a.end; j++) {
+      const b = items[j];
+      if (!b.all_day && b.end > b.start) a.schedule_conflict = b.schedule_conflict = true;
+    }
+  }
   const notes = [];
   for (const warning of Array.isArray(snapshot.warnings) ? snapshot.warnings : []) {
     const count = Number.isSafeInteger(warning?.count) && warning.count > 0 ? warning.count : 1;
@@ -59,6 +69,25 @@ export function calendarSection(snapshot, now = new Date()) {
   if (malformed) notes.push(`${malformed} stored ${plural(malformed, "meeting", "meetings")} could not be shown.`);
   if (items.length > LIMIT) notes.push(`Only the first ${LIMIT} meetings are shown.`);
   const stale = nowMs - observed > STALE_MS;
+  const future = observed > nowMs;
+  const reviews = [];
+  let malformedReviews = 0;
+  if (snapshot.follow_up_reviews !== undefined && !Array.isArray(snapshot.follow_up_reviews)) malformedReviews++;
+  for (const row of Array.isArray(snapshot.follow_up_reviews) ? snapshot.follow_up_reviews : []) {
+    const start = instant(row?.start), end = instant(row?.end);
+    if (row?.state !== "needs_review" || typeof row?.key !== "string" || !/^[a-f0-9]{16}$/.test(row.key)
+        || !text(row?.title) || !text(row?.prompt) || start === null || end === null || end <= start) {
+      malformedReviews++; continue;
+    }
+    if (stale || future || end > observed || end > nowMs || end <= nowMs - 86_400_000) continue;
+    reviews.push({ key: row.key, title: text(row.title), start: new Date(start).toISOString(),
+      end: new Date(end).toISOString(), state: "needs_review", prompt: text(row.prompt) });
+  }
+  reviews.sort((a, b) => b.end.localeCompare(a.end) || a.key.localeCompare(b.key));
+  if (reviews.length) notes.push("These are scheduled meetings, not confirmed attendance. Confirm each happened before recording an outcome or next step.");
+  if (malformedReviews) notes.push(`${malformedReviews} stored meeting outcome ${plural(malformedReviews, "review", "reviews")} could not be shown.`);
+  if (reviews.length > LIMIT) notes.push(`Only the first ${LIMIT} meeting outcome reviews are shown.`);
+  if (future) notes.push("This calendar's observation time is in the future. Refresh Outlook before reviewing meetings.");
   if (stale) notes.push("This calendar was last read from Outlook more than 18 hours ago.");
   return {
     state: notes.length ? "partial" : items.length ? "ready" : "empty",
@@ -67,5 +96,88 @@ export function calendarSection(snapshot, now = new Date()) {
     sources: { outlook_calendar: { state: stale ? "stale" : notes.length ? "partial" : "ready" } },
     ...(malformed ? { malformed_items: malformed } : {}),
     items: items.slice(0, LIMIT),
+    ...(snapshot.follow_up_reviews !== undefined ? { follow_up_reviews: reviews.slice(0, LIMIT) } : {}),
   };
+}
+
+// Match only exact addresses already present in the partner's visible meetings.
+export async function addCalendarContacts(c, section) {
+  const addresses = [...new Set(section.items.flatMap(item =>
+    [item.organizer, ...item.attendees].map(person => person.email).filter(Boolean)))];
+  for (const item of section.items) item.contacts = [];
+  if (!addresses.length) return;
+  if (c.inTransaction) await c.query("savepoint calendar_contacts");
+  try {
+    const { rows } = await c.query(`
+      select * from (
+        select lower(trim("Email")) as email, 'client' as kind, "Client ID" as ref, "Name" as name from v_export_clients
+        union all
+        select lower(trim("Email")), 'lead', "Lead ID", "Contact Name" from v_export_leads
+        union all
+        select lower(trim("Email")), 'vendor', "ID", "Name" from v_export_vendors
+      ) calendar_contacts where email = any($1::text[]) and ref is not null
+      order by email, kind, ref limit 1001`, [addresses]);
+    if (c.inTransaction) await c.query("release savepoint calendar_contacts");
+    const truncated = rows.length > 1000;
+    for (const item of section.items) {
+      const emails = new Set([item.organizer, ...item.attendees].map(person => person.email).filter(Boolean));
+      const seen = new Set();
+      item.contacts = rows.slice(0, 1000).filter(row => emails.has(row.email)).flatMap(row => {
+        const key = `${row.kind}:${row.ref}`;
+        if (seen.has(key)) return [];
+        seen.add(key);
+        return [{ kind: row.kind, ref: row.ref, name: row.name }];
+      });
+    }
+    section.sources.record_contacts = { state: truncated ? "partial" : "ready" };
+    if (truncated) {
+      section.state = "partial";
+      section.notes.push("Some matching record contacts were omitted. Search the record for more.");
+    }
+  } catch {
+    if (c.inTransaction) await c.query("rollback to savepoint calendar_contacts");
+    if (c.inTransaction) await c.query("release savepoint calendar_contacts");
+    section.state = "partial";
+    section.sources.record_contacts = { state: "unavailable" };
+    section.notes.push("Record contacts could not be checked for these meetings.");
+  }
+}
+
+export async function addCalendarDealSuggestions(c, section, sponsor) {
+  const people = item => [item.organizer, ...item.attendees].map(p => p.email).filter(Boolean);
+  const addresses = [...new Set(section.items.flatMap(people))];
+  for (const item of section.items) item.possible_deals = [];
+  if (!addresses.length) return;
+  if (c.inTransaction) await c.query("savepoint calendar_deals");
+  try {
+    const { rows } = await c.query(`
+      select lower(trim(c."Email")) as email, d.id::text as id, d.name, d.client_ref
+      from v_export_clients c join v_export_deals d on d.client_ref = c."Client ID"
+      where lower(trim(c."Email")) = any($1::text[]) and d.outcome is null
+        and lower(d.owner) = $2
+      order by email, d.id limit 1001 /* calendar_deal_matches */`, [addresses, sponsor]);
+    if (c.inTransaction) await c.query("release savepoint calendar_deals");
+    for (const item of section.items) {
+      const emails = new Set(people(item));
+      const seen = new Set();
+      item.possible_deals = rows.slice(0, 1000).filter(row => emails.has(row.email)).flatMap(row => {
+        if (seen.has(row.id)) return [];
+        seen.add(row.id);
+        return [{ id: row.id, name: row.name, client_ref: row.client_ref }];
+      });
+    }
+    section.sources.deal_suggestions = { state: rows.length > 1000 ? "partial" : "ready" };
+    if (rows.length > 1000) {
+      section.state = "partial";
+      section.notes.push("Some possible meeting deals were omitted. Search the record for more.");
+    }
+  } catch {
+    if (c.inTransaction) {
+      await c.query("rollback to savepoint calendar_deals");
+      await c.query("release savepoint calendar_deals");
+    }
+    section.state = "partial";
+    section.sources.deal_suggestions = { state: "unavailable" };
+    section.notes.push("Possible meeting deals could not be checked.");
+  }
 }

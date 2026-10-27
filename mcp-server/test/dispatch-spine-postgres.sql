@@ -100,6 +100,16 @@ begin
   insert into public.actor(slug, kind, display_name, active)
   values ('wr119-intruder', 'automation', 'WR119 intruder', true)
   on conflict (slug) do nothing;
+  -- WR-000528: the session the dispatches go to belongs to a THIRD actor, by
+  -- the continuity leaf that records it, and only that ownership lets an
+  -- identity speak for the acting session.
+  insert into public.actor(slug, kind, display_name, active)
+  values ('wr119-session-owner', 'automation', 'WR119 session owner', true)
+  on conflict (slug) do nothing;
+  insert into public.claude_continuity_leaf(organization_tenant_id, surface_principal_actor_id,
+    owner_actor_id, session_id, transcript_path_digest, project_affinity)
+  select 'carr-internal', a.id, a.id, v_session, repeat('a', 64), 'wr119 fixture'
+    from public.actor a where a.slug = 'wr119-session-owner';
 
   -- The acting identity is the SERVER CONTEXT and nothing else. hermes-pilot
   -- already exists (0169); the intruder above is the second actor every
@@ -217,14 +227,49 @@ begin
     raise exception 'WR-000119: an unknown stage reached the relation: %', r;
   end if;
 
+  -- WR-000528: ONLY THE DISPATCH'S OWN PARTIES MAY ACKNOWLEDGE IT, and the
+  -- refusal comes BEFORE the insert and before deduplication. The intruder is
+  -- authenticated, holds execute on the door and knows the dispatch_ref, and
+  -- still writes nothing and is never handed another party's receipt.
+  perform set_config('carr.acting_actor_slug', 'wr119-intruder', true);
+  r := ops.acknowledge_dispatch(v_ref_beta, 'received', 'reserving the desk stage');
+  if r->>'ok' <> 'false' or r->>'reason_id' <> 'dispatch_ack_not_authorized' then
+    raise exception 'WR-000528: an unrelated identity reserved the received stage: %', r;
+  end if;
+  r := ops.acknowledge_dispatch(v_ref_alpha, 'received', 'restating the desk stage');
+  if r->>'ok' <> 'false' or r->>'reason_id' <> 'dispatch_ack_not_authorized' or r ? 'by_actor' then
+    raise exception 'WR-000528: deduplication answered an unrelated identity with a receipt: %', r;
+  end if;
+  r := ops.acknowledge_dispatch(v_ref_alpha, 'acknowledged', 'claiming the session took it up');
+  if r->>'ok' <> 'false' or r->>'reason_id' <> 'dispatch_ack_not_authorized' then
+    raise exception 'WR-000528: an unrelated identity wrote the session stage: %', r;
+  end if;
+  if exists (select 1 from public.room_dispatch_ack
+              where dispatch_ref in (v_ref_alpha, v_ref_beta) and by_actor = 'wr119-intruder') then
+    raise exception 'WR-000528: a refused acknowledgement still wrote a row';
+  end if;
+
+  -- The bridge delivers into the desk; it does not speak for the session.
+  perform set_config('carr.acting_actor_slug', 'hermes-pilot', true);
+  r := ops.acknowledge_dispatch(v_ref_alpha, 'acknowledged', 'the bridge claiming the session stage');
+  if r->>'ok' <> 'false' or r->>'reason_id' <> 'dispatch_ack_not_authorized' then
+    raise exception 'WR-000528: the bridge wrote the acting session''s stage: %', r;
+  end if;
+
   -- The acting session's own acknowledgement, from a DIFFERENT derived
   -- identity, which is what makes by_actor first-hand rather than decorative.
-  perform set_config('carr.acting_actor_slug', 'wr119-intruder', true);
+  -- The session's ownership is a recorded fact: its continuity leaf.
+  perform set_config('carr.acting_actor_slug', 'wr119-session-owner', true);
   r := ops.acknowledge_dispatch(v_ref_alpha, 'acknowledged', 'took the turn up');
-  if r->>'ok' <> 'true' or r->>'by_actor' <> 'wr119-intruder' then
+  if r->>'ok' <> 'true' or r->>'by_actor' <> 'wr119-session-owner' then
     raise exception 'WR-000119: the acknowledged ack did not stamp its own caller: %', r;
   end if;
+  -- An authorized restatement still deduplicates to the first row and its author.
   perform set_config('carr.acting_actor_slug', 'hermes-pilot', true);
+  r := ops.acknowledge_dispatch(v_ref_alpha, 'received', 'the bridge restating it');
+  if r->>'deduplicated' <> 'true' or r->>'by_actor' <> 'hermes-pilot' then
+    raise exception 'WR-000528: an authorized restatement did not return the first receipt: %', r;
+  end if;
 
   -- THE ACTED STAGE, unchanged from 0529 and seeded here only so the four
   -- stages can be asserted together in ONE answer.

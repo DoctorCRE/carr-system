@@ -1,3 +1,4 @@
+// Test map architecture source and machine contract reads.
 import assert from "node:assert/strict";
 import test from "node:test";
 

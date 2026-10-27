@@ -1,3 +1,5 @@
+import { NOW } from "./helpers/fixed-clock.mjs";
+// Test shared OAuth authorization and consent flows.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -36,11 +38,11 @@ class MemoryKV {
   values = new Map();
   async put(key, value, options = {}) {
     this.values.set(key, { value, expires: options.expiration ??
-      (options.expirationTtl ? Date.now() / 1000 + options.expirationTtl : Infinity) });
+      (options.expirationTtl ? NOW / 1000 + options.expirationTtl : Infinity) });
   }
   async get(key, options) {
     const item = this.values.get(key);
-    if (!item || item.expires <= Date.now() / 1000) return null;
+    if (!item || item.expires <= NOW / 1000) return null;
     return (options === "json" || options?.type === "json") ? JSON.parse(item.value) : item.value;
   }
   async delete(key) { this.values.delete(key); }
@@ -94,7 +96,7 @@ async function signedIdentity(email = "partner@example.invalid") {
   const pair = await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048,
     publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
   const encode = data => Buffer.from(JSON.stringify(data)).toString("base64url");
-  const now = Math.floor(Date.now() / 1000);
+  const now = Math.floor(NOW / 1000);
   const message = `${encode({ alg: "RS256", kid: "synthetic" })}.${encode({ iss: "https://accounts.google.com",
     aud: "synthetic-config", exp: now + 3600, iat: now, email, email_verified: true, sub: "synthetic-subject" })}`;
   const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", pair.privateKey, new TextEncoder().encode(message));

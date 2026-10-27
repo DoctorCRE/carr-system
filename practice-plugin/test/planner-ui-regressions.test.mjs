@@ -1,3 +1,4 @@
+// Test planner UI state, host interactions, and rendering regressions.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

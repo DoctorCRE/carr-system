@@ -1,3 +1,4 @@
+// Test Doc suggestion contracts and stale decision handling.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { docSuggestionTools } from '../src/doc-suggestions.js';

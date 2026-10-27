@@ -1,3 +1,4 @@
+// Test safe doctrine version handling across reads and writes.
 import test from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
@@ -131,4 +132,41 @@ test("read-doctrine names an unsafe version in a synthetic refinement-plan snaps
   assert.equal(payload.error, "doctrine_version_invalid");
   assert.match(payload.hint, /version.*safely/i);
   assert.equal(payload.correlation_id, "d170d000-0000-4000-8000-000000000031");
+});
+
+test("read-doctrine names a missing document and explains how to find a current reference", async t => {
+  t.mock.method(console, "error", () => {});
+  const db = { async query() { return { rows: [] }; } };
+  await assert.rejects(() => TOOLS["read-doctrine"].handler(db, actor, {
+    document: "synthetic-missing-refinement-plan",
+  }), failure => {
+    assert.ok(failure instanceof ToolError);
+    const payload = publicError(failure, {
+      env: { CORRELATION_ID: "d170d000-0000-4000-8000-000000000031" },
+      inputSchema: TOOLS["read-doctrine"].inputSchema,
+    });
+    assert.equal(payload.error, "doctrine_doc_not_found");
+    assert.match(payload.hint, /document/);
+    assert.match(payload.hint, /doctrine-index/);
+    assert.equal(payload.correlation_id, "d170d000-0000-4000-8000-000000000031");
+    assert.deepEqual(Object.keys(payload).sort(), ["correlation_id", "error", "hint"]);
+    return true;
+  });
+});
+
+test("read-doctrine keeps current slugs and aliases readable", async () => {
+  const doc = { id, slug: "synthetic-current-plan", title: "Synthetic plan", content_class: "reference", visibility: "shared" };
+  const db = { async query(sql, params = []) {
+    if (sql.includes("from doctrine_document") && params[0] === doc.slug ||
+        sql.includes("from doctrine_slug_alias") && params[0] === "synthetic-old-plan")
+      return { rows: [doc] };
+    if (sql.includes("from doctrine_meta")) return { rows: [{ generation: "3" }] };
+    return { rows: [] };
+  } };
+  for (const document of [doc.slug, "synthetic-old-plan"]) {
+    const read = await TOOLS["read-doctrine"].handler(db, actor, { document });
+    assert.equal(read.ok, true);
+    assert.deepEqual(read.document, doc);
+    assert.deepEqual(read.sections, []);
+  }
 });

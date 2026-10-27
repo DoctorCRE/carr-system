@@ -1,3 +1,4 @@
+// Tests Work Shape decisions, dispositions, and revisions.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";

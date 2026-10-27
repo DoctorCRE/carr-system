@@ -7,7 +7,7 @@
 //! bytes exist. Bytes are never read here; the caller resolves the path against
 //! its own private copy of the profile's Files folder.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::folder::{envelopes, message_key};
 
@@ -29,6 +29,7 @@ pub struct Attachment {
     pub name_verified: bool,
     /// The sender's declared MIME type, as stored; not a detected type.
     pub content_type: Option<String>,
+    pub content_id: Option<String>,
     pub size: u64,
     /// Profile-relative cache path; None when cached revisions disagree.
     pub path: Option<String>,
@@ -38,6 +39,7 @@ pub struct Attachment {
 pub struct Index {
     pub attachments: BTreeMap<u64, Attachment>,
     pub objects: usize,
+    conflicting_metadata: BTreeSet<u64>,
 }
 
 fn u64_at(data: &[u8], at: usize) -> Option<u64> {
@@ -131,13 +133,20 @@ pub(crate) fn parse(object: &[u8]) -> Option<Attachment> {
     let name = display_name(path.rsplit('/').next()?)?;
     let mut needle = utf16_bytes(&name);
     needle.extend([0, 0]);
-    let name_verified = memchr::memmem::find_iter(object, &needle).any(|at| at % 2 == path_at % 2 && at != path_at);
+    let path_end = path_at + 2 * (path.encode_utf16().count() + 1);
+    let name_at = memchr::memmem::find_iter(object, &needle)
+        .find(|&at| at >= path_end && at >= 5 && object[at - 5..at] == [1, 1, 1, 1, 0]);
+    let name_verified = name_at.is_some();
+    let content_id = name_at
+        .and_then(|at| utf16z(object, at + needle.len()))
+        .filter(|s| !s.chars().any(char::is_whitespace));
     Some(Attachment {
         id,
         message_key,
         name,
         name_verified,
         content_type: declared_type(object, path_at),
+        content_id,
         size: u64_at(object, SIZE_AT)?,
         path: Some(path),
     })
@@ -148,6 +157,14 @@ impl Index {
         for (_, object) in envelopes(data, ATTACHMENT) {
             self.objects += 1;
             let Some(a) = parse(object) else { continue };
+            if self.conflicting_metadata.contains(&a.id) {
+                continue;
+            }
+            if self.attachments.get(&a.id).is_some_and(|prev| prev.message_key != a.message_key || prev.name != a.name) {
+                self.attachments.remove(&a.id);
+                self.conflicting_metadata.insert(a.id);
+                continue;
+            }
             match self.attachments.get_mut(&a.id) {
                 None => {
                     self.attachments.insert(a.id, a);
@@ -155,11 +172,14 @@ impl Index {
                 Some(prev) => {
                     // Revisions agree on the message; anything else is
                     // taken conservatively rather than by block order.
-                    if prev.message_key != a.message_key || prev.path != a.path {
+                    if prev.path != a.path {
                         prev.path = None;
                     }
                     prev.size = prev.size.max(a.size);
                     prev.name_verified &= a.name_verified;
+                    if prev.content_id != a.content_id {
+                        prev.content_id = None;
+                    }
                     if prev.content_type != a.content_type {
                         prev.content_type = None;
                     }
@@ -201,7 +221,7 @@ mod tests {
         b.extend(text(mime));
         b.extend([1, 0]);
         b.extend(text(&format!("~/Files/S0/42/Attachments/0/{file}")));
-        b.extend([9, 9, 1, 1]);
+        b.extend([1, 1, 1, 1, 0]);
         b.extend(text(name));
         b
     }
@@ -224,6 +244,60 @@ mod tests {
         assert!(a.name_verified);
         assert_eq!(a.content_type.as_deref(), Some("application/pdf"));
         assert_eq!(a.path.as_deref(), Some("~/Files/S0/42/Attachments/0/Lease draft[123].pdf"));
+    }
+
+    #[test]
+    fn content_id_follows_the_standalone_filename() {
+        let mut object = object(7, 70, 4096, "image[123].png", "image.png", "image/png");
+        object.extend(text("part-1@example.test"));
+        let mut index = Index::default();
+        index.observe(&envelope(&object));
+        assert_eq!(index.attachments[&7].content_id.as_deref(), Some("part-1@example.test"));
+    }
+
+    #[test]
+    fn absent_truncated_and_conflicting_content_ids_stay_unknown() {
+        let base = object(7, 70, 1, "a[1].pdf", "a.pdf", "application/pdf");
+        assert_eq!(parse(&base).unwrap().content_id, None);
+        let mut truncated = base.clone();
+        truncated.extend(utf16_bytes("part@example.test"));
+        assert_eq!(parse(&truncated).unwrap().content_id, None);
+        let mut index = Index::default();
+        for cid in ["one@example.test", "two@example.test", "one@example.test"] {
+            let mut revision = base.clone();
+            revision.extend(text(cid));
+            index.observe(&envelope(&revision));
+        }
+        assert_eq!(index.attachments[&7].content_id, None);
+    }
+
+    #[test]
+    fn filename_suffix_is_not_a_content_id_field_boundary() {
+        let mut object = object(7, 70, 1, "a[1].pdf", "prefixa.pdf", "application/pdf");
+        object.extend(text("part@example.test"));
+        assert_eq!(parse(&object).unwrap().content_id, None);
+    }
+
+    #[test]
+    fn conflicting_message_owners_never_receive_attachment_metadata() {
+        for owners in [[70, 71, 70], [71, 70, 71]] {
+            let mut index = Index::default();
+            for owner in owners {
+                index.observe(&envelope(&object(7, owner, 1, "a[1].pdf", "a.pdf", "application/pdf")));
+            }
+            assert!(index.attachments.is_empty());
+        }
+    }
+
+    #[test]
+    fn conflicting_display_names_are_not_selected_by_observation_order() {
+        for names in [["before.pdf", "after.pdf"], ["after.pdf", "before.pdf"]] {
+            let mut index = Index::default();
+            for name in names {
+                index.observe(&envelope(&object(7, 70, 1, &name.replace(".pdf", "[1].pdf"), name, "application/pdf")));
+            }
+            assert!(index.attachments.is_empty());
+        }
     }
 
     #[test]

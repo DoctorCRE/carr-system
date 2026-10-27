@@ -1,3 +1,4 @@
+// Define the system health audit workflow.
 export const meta = {
   name: 'health-audit',
   description: 'Monthly system health audit: 12 report-card categories graded in parallel, fresh-context verified, merged',

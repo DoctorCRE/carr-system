@@ -34,8 +34,8 @@ function pauseAfter(c,match) {
   return {reached:reached.promise,resume:()=>resume.resolve(),restore:()=>{c.query=query;}};
 }
 async function blockedOrFinished(pid,finished) {
-  const deadline=Date.now()+3000;
-  while(!finished()&&Date.now()<deadline) {
+  const deadline=performance.now()+3000;
+  while(!finished()&&performance.now()<deadline) {
     if((await observer.query('select cardinality(pg_blocking_pids($1))>0 as blocked',[pid])).rows[0].blocked)return true;
     await new Promise(r=>setTimeout(r,10));
   }
@@ -48,7 +48,7 @@ try {
     const f=await fixture(mode==='draft'||mode==='approve-draft'?'qualified':'new',mode!=='approve-move');
     let verb='advance-leads',args={},match=sql=>sql.includes('select l.*, (p.merged_into');
     if(mode==='draft')match=sql=>sql.includes('select l.id,l.party_id,l.owner_id');
-    if(mode==='approve-draft'){const d=await draft(f);verb='approve-lead-draft';args={draft_id:d.id};match=sql=>sql.includes('select d.* from lead_contact_draft d join lead');}
+    if(mode==='approve-draft'){const d=await draft(f);verb='approve-lead-draft';args={draft_id:d.id,revision:1};match=sql=>sql.includes('select d.* from lead_contact_draft d join lead');}
     if(mode==='approve-move') {
       const m=(await observer.query(`insert into lead_stage_move(lead_id,from_stage,to_stage,activity_id,evidence_ref,strength,status,created_by,reason)
         values($1,'new','qualified',$2,'local-mail:synthetic','weak','proposed',$3,'Synthetic reply received') returning id`,[f.lead,f.activity,actor.id])).rows[0];
@@ -66,7 +66,7 @@ try {
   for(const verb of ['approve-lead-draft','approve-lead-move','record-lead-contact','advance-leads']) {
     const f=await fixture(verb==='approve-lead-draft'?'qualified':'new',verb!=='approve-lead-move');
     let args={idempotency_key:randomUUID()};
-    if(verb==='approve-lead-draft')args.draft_id=(await draft(f)).id;
+    if(verb==='approve-lead-draft'){args.draft_id=(await draft(f)).id;args.revision=1;}
     if(verb==='approve-lead-move') {
       args.move_id=(await observer.query(`insert into lead_stage_move(lead_id,from_stage,to_stage,activity_id,evidence_ref,strength,status,created_by,reason)
         values($1,'new','qualified',$2,'local-mail:synthetic','weak','proposed',$3,'Synthetic reply received') returning id`,[f.lead,f.activity,actor.id])).rows[0].id;

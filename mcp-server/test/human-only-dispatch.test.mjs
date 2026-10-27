@@ -77,7 +77,10 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
 
     "answer-board-question",
     "answer-work-request-for-joe",
+    // WR-000529: a human entrance verification, previously authorityOnly alone.
+    "append-tour-entrance-verification-receipt",
     "approve-lead-draft",
+    "approve-lead-drafts",
     "approve-lead-move",
     "approve-retrieval-proposals",
     "backfill-deal-items",
@@ -90,6 +93,8 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "confirm-merge",
     "decide-doc-suggestion",
     "dismiss-email-proposal",
+    "drop-action",
+    "edit-lead-draft",
     "instruct-deal-item",
     "link-lead-client",
     "propose-doc-correction",
@@ -102,12 +107,16 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "record-correspondence-adapter-consent",
     "record-deal-closing",
     "record-deal-item",
+    // WR-000529: J102 partner statements the store already refuses to machines.
+    "record-evidence-subject-link",
     // V5-J102: a lifecycle correction rewrites recorded history, so it is a
     // partner act on the authority connection.
     "record-lifecycle-correction",
+    "record-partner-lifecycle-fact",
     "record-tour-map-promotion-receipt",
     "record-tour-pdf-human-review",
     "register-record-source-authority-policy",
+    "resolve-critical-date",
     "resolve-post-call-candidate",
     "retire-retrieval-curation",
     "review-and-triage",
@@ -115,6 +124,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     // V5-RW02: only a verified partner revokes Dell's Salesforce read consent.
     "revoke-salesforce-read-consent",
     "set-prospect-engagement-status",
+    "undo-call",
     "undo-invoice-close",
     "undo-lead-move",
   ]);

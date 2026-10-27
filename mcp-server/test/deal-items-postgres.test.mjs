@@ -1,6 +1,7 @@
+// Test persisted deal items, board projections, and item-level writes in PostgreSQL.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
@@ -42,6 +43,7 @@ before(async () => {
   const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
   if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
   else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
+  await c.query(readFileSync(new URL('../../migrations/1003_notification_morning_midnight.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic physician',$1,$1) returning id", [actor.id])).rows[0].id;
   await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
@@ -263,9 +265,27 @@ test('accepting an ordinary captured next step creates structured sourced items'
 });
 
 
+test('morning release includes the previous day window at 00:30 Chicago', async () => {
+  await c.query('begin');
+  try {
+    await c.query(`insert into ops.notification_preference(actor, timezone, quiet_hours_start, quiet_hours_end)
+      values($1, 'America/Chicago', '04:30', '23:30')`, [actor.id]);
+    const definition = (await c.query("select pg_get_functiondef('ops.notification_morning_release_at(uuid)'::regprocedure) as definition")).rows[0].definition;
+    await c.query(definition.replaceAll('now()', "'2026-10-27 05:30:00+00'::timestamptz"));
+    const result = (await c.query('select ops.notification_morning_release_at($1) as release', [actor.id])).rows[0];
+    assert.equal(result.release.toISOString(), '2026-10-27T05:30:00.000Z');
+  } finally { await c.query('rollback'); }
+});
+
 test('due checklist pings reach only the owner feed and replay without duplicate delivery', async () => {
   await c.query('begin');
   try {
+    const definitions = (await c.query(`select pg_get_functiondef(p.oid) as definition
+      from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='ops' and p.proname in
+        ('notification_morning_release_at','notification_quiet_now','mint_notification','notification_feed_facts')`)).rows;
+    for (const { definition } of definitions)
+      await c.query(definition.replaceAll('now()', "'2026-10-27 17:00:00+00'::timestamptz"));
     const document = (await c.query("insert into doctrine_document(slug,title,content_class) values('synthetic-checklist','Synthetic checklist','reference') returning id")).rows[0].id;
     for (const source of CHECKLIST_SOURCES) {
       await c.query("insert into doctrine_section(id,document_id,section_key,body_hash) values($1::uuid,$2,$1::text,$3)", [source.section_id, document, source.content_hash]);
@@ -291,8 +311,7 @@ test('due checklist pings reach only the owner feed and replay without duplicate
     });
     await c.query('reset role');
     await c.query(`insert into ops.notification_preference(actor, timezone, quiet_hours_start, quiet_hours_end)
-      values($1,'America/Chicago',((now() at time zone 'America/Chicago') + interval '4 hours')::time,
-        ((now() at time zone 'America/Chicago') - interval '1 hour')::time)`, [actor.id]);
+      values($1,'America/Chicago','16:00','11:00')`, [actor.id]);
     await c.query('set local role carr_writer');
     const key = randomUUID();
     const ping = key => executeRegisteredTool(c, actor, 'ping-deal-checklist', { deal, idempotency_key: key });
@@ -341,8 +360,7 @@ test('due checklist pings reach only the owner feed and replay without duplicate
     assert.equal(event.subject_id, deal);
     assert.deepEqual(event.new_value, { checklist_item_id: `critical-date:${date}`, due_on: '2000-01-01', recipient: 'joe' });
     await c.query(`update ops.notification_preference set device_opt_in=true,
-      quiet_hours_start=((now() at time zone 'America/Chicago') - interval '1 hour')::time,
-      quiet_hours_end=((now() at time zone 'America/Chicago') + interval '1 hour')::time
+      quiet_hours_start='11:00', quiet_hours_end='13:00'
       where actor=$1`, [actor.id]);
     await c.query("update critical_date set due_on='2000-01-02' where id=$1", [date]);
     await c.query("select set_config('carr.acting_actor_slug','joe',true), set_config('carr.verified_human_actor_slug','joe',true)");
@@ -351,7 +369,7 @@ test('due checklist pings reach only the owner feed and replay without duplicate
     assert.equal(held.queued, 1);
     assert.equal((await ping(randomUUID())).deduplicated, 1);
     await c.query('reset role');
-    const delivery = (await c.query(`select channel,state,held_until > now() as future_hold,settled_at
+    const delivery = (await c.query(`select channel,state,held_until > '2026-10-27 17:00:00+00'::timestamptz as future_hold,settled_at
       from ops.notification_delivery where notification_id=$1 order by channel`, [held.notifications[0].notification_id])).rows;
     assert.deepEqual(delivery, ['device','in_app'].map(channel =>
       ({ channel, state: 'held_until_morning', future_hold: true, settled_at: null })));

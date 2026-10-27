@@ -1,3 +1,4 @@
+# Test lead stage job execution and scheduling.
 import importlib.util
 from pathlib import Path
 import unittest
@@ -76,11 +77,11 @@ class LeadStageJobTests(unittest.TestCase):
 
 
 class ScheduleTest(unittest.TestCase):
-    def test_job_follows_local_mail_capture(self):
+    def test_job_follows_calendar_archive(self):
         chain=(Path(__file__).resolve().parents[1]/"bin/nightly.sh").read_text()
-        capture=chain.index('step "mail capture"')
+        calendar=chain.index('step "calendar archive"')
         job=chain.index('step "lead stages"')
-        self.assertGreater(job,capture)
+        self.assertGreater(job,calendar)
         self.assertIn('bin/lead-stage-job.py',chain[job:job+140])
 
 

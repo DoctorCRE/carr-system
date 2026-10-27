@@ -1,3 +1,4 @@
+// Tests sponsor-scoped connections for memory reads.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { TOOLS } from "../src/tools.js";

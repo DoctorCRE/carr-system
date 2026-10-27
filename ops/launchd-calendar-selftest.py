@@ -197,8 +197,8 @@ pull = plistlib.loads((REPO / "ops/launchd/com.carr.checkout-pull.plist").read_b
 check("checkout-pull fast-forwards every five minutes and at load",
       pull["StartCalendarInterval"] == [{"Minute": m} for m in range(0, 60, 5)]
       and pull.get("RunAtLoad") is True, pull)
-check("checkout-pull runs git directly, with no wrapper",
-      pull["ProgramArguments"] == ["/usr/bin/git", "-C", "{{REPO}}", "pull", "--ff-only", "--quiet"],
+check("checkout-pull runs the retrying pull script",
+      pull["ProgramArguments"] == ["/usr/bin/python3", "{{REPO}}/ops/checkout-pull.py", "{{REPO}}"],
       pull["ProgramArguments"])
 
 by_name: dict[str, list[Path]] = {}

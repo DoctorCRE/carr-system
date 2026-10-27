@@ -1,3 +1,4 @@
+// Tests scoped property search and versioned selection cart behavior.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { projectTourPropertySearch, TOUR_SEARCH_COUNTIES, tourPropertySearchTools } from "../src/tour-property-search.js";

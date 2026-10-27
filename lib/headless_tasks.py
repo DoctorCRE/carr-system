@@ -583,6 +583,8 @@ def main(argv=None) -> int:
         parser.error('task id must contain lowercase letters, digits and hyphens')
     repo = args.repo.resolve()
     settings = config(repo)
+    if args.task_id not in settings['tasks']:
+        parser.error('task is not registered in the headless manifest')
     task = settings['tasks'][args.task_id]
     timeout = args.timeout_seconds if args.timeout_seconds is not None else task.get('timeout_seconds', 5400)
     if timeout <= 0 or timeout != timeout or timeout == float('inf'):

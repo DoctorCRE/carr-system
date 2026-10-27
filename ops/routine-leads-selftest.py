@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test routine lead processing with fixtures.
 import copy
 import csv
 import io
@@ -187,49 +188,65 @@ class LeadTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             leads.weekly_files(link.replace('href="', 'href="https://wrong.example/'), NOW.date())
 
-    def test_expired_weekly_files_are_counted_and_skipped_but_fresh_404_fails(self):
+    def test_listed_older_404s_are_skipped_and_named_in_the_handoff(self):
+        # WR-000512 AC-SKIP-404: three listed weekly zips, the older two 404.
         import urllib.error
         base = "https://download.cms.gov/nppes/NPPES_Data_Dissemination_%s_Weekly_V2.zip"
-        old, fresh = base % "101226_101826", base % "101926_102526"
-        def fetch(url):
-            if url == old:
-                raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
-            return b"payload"
-        with patch.object(leads, "_today", return_value=date(2026, 10, 26)), \
-                patch("sys.stderr", new_callable=io.StringIO) as errors:
-            self.assertEqual(leads.fetch_weekly_files([old, fresh], fetch), [(b"payload", fresh)])
-            self.assertEqual(leads.fetch_weekly_files([old], fetch), [])
-        self.assertIn(json.dumps({"expired_weekly_file": 1}), errors.getvalue())
-        with patch.object(leads, "_today", return_value=date(2026, 10, 26)):
-            with self.assertRaises(urllib.error.HTTPError):
-                leads.fetch_weekly_files([fresh], lambda url: (_ for _ in ()).throw(
-                    urllib.error.HTTPError(url, 404, "Not Found", {}, None)))
-            with self.assertRaises(urllib.error.HTTPError):
-                leads.fetch_weekly_files([old], lambda url: (_ for _ in ()).throw(
-                    urllib.error.HTTPError(url, 500, "Server Error", {}, None)))
-
-    def test_synthetic_listing_skips_expired_404_and_keeps_live_archive(self):
-        import urllib.error
-        old = "https://download.cms.gov/nppes/NPPES_Data_Dissemination_101226_101826_Weekly_V2.zip"
-        live = "https://download.cms.gov/nppes/NPPES_Data_Dissemination_101926_102526_Weekly_V2.zip"
-        listing = f'<a href="{old}">old</a><a href="{live}">live</a>'
+        oldest, older, newest = base % "100626_101226", base % "101326_101926", base % "102026_102626"
+        listing = "".join(f'<a href="{url}">weekly</a>' for url in (oldest, older, newest))
+        header = ["NPI", "Entity Type Code", "Provider Organization Name (Legal Business Name)",
+                  "Provider Enumeration Date", "Provider Business Practice Location Address City Name",
+                  "Provider Business Practice Location Address State Name",
+                  "Provider Business Practice Location Address Postal Code",
+                  "Healthcare Provider Taxonomy Code_1"]
+        rows = io.StringIO()
+        csv.writer(rows).writerows([header, ["1234567893", "2", "Example Dental", "10/20/2026",
+                                             "PENSACOLA", "FL", "32501", "1223G0001X"]])
         archive = io.BytesIO()
         with zipfile.ZipFile(archive, "w") as output:
-            output.writestr("npidata_pfile_weekly.csv", "NPI,Entity Type Code,Provider Enumeration Date,Provider Business Practice Location Address Postal Code\n")
+            output.writestr("npidata_pfile_weekly.csv", rows.getvalue())
 
         def fetch(url):
-            if url == old:
+            if url == leads.INDEX_URL:
+                return listing.encode()
+            if url in (oldest, older):
                 raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
             return archive.getvalue()
 
-        with patch.object(leads, "_today", return_value=date(2026, 10, 26)), \
+        ctx = runtime.Context("lead-signals-weekly", dry_run=True,
+                              now=datetime.fromisoformat("2026-10-26T07:00:00-05:00"))
+        ctx.read = lambda verb, args: {}
+        with tempfile.TemporaryDirectory() as root, \
+                patch.object(leads, "_fetch", side_effect=fetch), \
+                patch.object(leads, "ROOT", Path(root)), \
                 patch("sys.stderr", new_callable=io.StringIO) as errors:
-            urls = leads.weekly_files(listing, date(2026, 10, 26))
-            payloads = leads.fetch_weekly_files(urls, fetch)
+            plan = leads.prepare(ctx)
+        self.assertEqual([row["npi"] for row in plan["candidates"]], ["1234567893"])
+        self.assertEqual(plan["skipped_weekly_files"], [
+            {"url": oldest, "status": 404}, {"url": older, "status": 404}])
+        self.assertIn(older, errors.getvalue())
+        ctx = context(dict(FIXTURE), dry_run=False)
+        handoff = leads.execute(ctx, dict(leads.prepare(ctx), skipped_weekly_files=plan["skipped_weekly_files"]))
+        self.assertEqual(handoff["skipped_weekly_files"], plan["skipped_weekly_files"])
+        self.assertEqual(json.loads(ctx.calls[-1][1]["body"])["skipped_weekly_files"], plan["skipped_weekly_files"])
 
-        self.assertEqual(payloads, [(archive.getvalue(), live)])
-        self.assertIn("expired_weekly_file", errors.getvalue())
-        self.assertEqual(leads.parse_weekly_zip(payloads[0][0], as_of=date(2026, 10, 26), source=live), [])
+    def test_newest_weekly_file_and_other_errors_fail_naming_url_and_status(self):
+        # WR-000512 AC-NEWEST-REQUIRED, and a non-404 on an older file is still a real failure.
+        import urllib.error
+        base = "https://download.cms.gov/nppes/NPPES_Data_Dissemination_%s_Weekly_V2.zip"
+        older, newest = base % "101226_101826", base % "101926_102526"
+        def failing(code, bad):
+            def fetch(url):
+                if url == bad:
+                    raise urllib.error.HTTPError(url, code, "fixture", {}, None)
+                return b"payload"
+            return fetch
+        for code, bad in ((404, newest), (500, newest), (500, older), (403, older)):
+            with self.subTest(code=code, bad=bad):
+                with self.assertRaises(RuntimeError) as raised:
+                    leads.fetch_weekly_files([older, newest], failing(code, bad))
+                self.assertIn(bad, str(raised.exception))
+                self.assertIn(f"HTTP {code}", str(raised.exception))
 
     def test_main_records_failure_loop_after_synthetic_source_abort(self):
         import urllib.error
@@ -264,14 +281,16 @@ class LeadTests(unittest.TestCase):
                 patch.object(runtime, "due", return_value=True), \
                 patch.object(runtime, "call_verb", side_effect=transport), \
                 patch.object(leads, "_fetch", side_effect=fetch), \
-                patch.object(leads, "_today", return_value=abort_time.date()), \
                 patch("sys.argv", ["runtime.py", "lead-signals-weekly"]), \
                 patch("sys.stderr", new_callable=io.StringIO) as errors:
             self.assertEqual(runtime.main(), 1)
 
-        self.assertIn("HTTPError", errors.getvalue())
+        newest = "https://download.cms.gov/nppes/NPPES_Data_Dissemination_101926_102526_Weekly_V2.zip"
+        self.assertIn(newest, errors.getvalue())
         self.assertEqual([verb for verb, _ in calls], ["loop-board", "add-loop"])
-        self.assertIn("HTTP Error 404", calls[1][1]["body"])
+        self.assertIn(newest + " is unavailable: HTTP 404", calls[1][1]["body"])
+        self.assertEqual(calls[1][1]["title"], "lead-signals-weekly: investigate failed routine")
+        self.assertNotIn("Repair code or integration", calls[1][1]["body"])
 
     def test_secondary_practice_location_archive_parser(self):
         raw = copy.deepcopy(FIXTURE["nppes_rows"][2])

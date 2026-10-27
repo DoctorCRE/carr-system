@@ -1,3 +1,4 @@
+# Test CI noise incident classification and issue handling.
 import importlib.util
 import contextlib
 import io
@@ -45,7 +46,7 @@ class Issues:
 class IncidentTests(unittest.TestCase):
     def test_outage_updates_once_recovers_and_reopens_without_comments(self):
         api = Issues()
-        publish = lambda code: incident.publish('owner/repo', code, 'probe evidence', 'https://example.test/run', api)
+        publish = lambda code: incident.publish('owner/repo', code, [], 'https://example.test/run', api)
         self.assertEqual(publish(0), {'state': 'healthy', 'issue': None, 'probe_exit': 0})
         for _ in range(24):
             self.assertEqual(publish(1)['probe_exit'], 1)
@@ -68,17 +69,17 @@ class IncidentTests(unittest.TestCase):
         def unavailable(*args):
             raise RuntimeError('GitHub unavailable')
         with self.assertRaisesRegex(RuntimeError, 'GitHub unavailable'):
-            incident.publish('owner/repo', 1, '', '', unavailable)
+            incident.publish('owner/repo', 1, [], '', unavailable)
         with self.assertRaises(ValueError):
-            incident.publish('owner/repo', 2, '', '', Issues())
+            incident.publish('owner/repo', 2, [], '', Issues())
 
     def test_duplicate_markers_refuse_silent_selection(self):
         api = Issues()
-        incident.publish('owner/repo', 1, '', '', api)
+        incident.publish('owner/repo', 1, [], '', api)
         api.rows.append({**api.rows[0], 'number': 2})
         api.mutations.clear()
         with self.assertRaisesRegex(RuntimeError, 'duplicate'):
-            incident.publish('owner/repo', 1, '', '', api)
+            incident.publish('owner/repo', 1, [], '', api)
         self.assertEqual(api.mutations, [])
 
     def test_foreign_issue_text_and_label_cannot_claim_incident(self):
@@ -90,18 +91,19 @@ class IncidentTests(unittest.TestCase):
                            'labels': [{'name': 'ci-edge-liveness'}],
                            'user': {'id': 123, 'login': 'someone', 'type': 'User'}}
                 api.rows.append(foreign.copy())
-                result = incident.publish('owner/repo', code, '', '', api)
+                result = incident.publish('owner/repo', code, [], '', api)
                 self.assertEqual(api.rows[0], foreign)
                 self.assertNotEqual(result['issue'], 99)
 
     def test_trusted_issue_assignment_is_restored(self):
         api = Issues()
-        incident.publish('owner/repo', 1, '', '', api)
+        incident.publish('owner/repo', 1, [], '', api)
         api.rows[0]['assignees'] = []
-        incident.publish('owner/repo', 1, '', '', api)
+        incident.publish('owner/repo', 1, [], '', api)
         self.assertEqual(api.mutations[-1][1]['assignees'], ['jbookout'])
 
-    def run_main(self, probe):
+    def run_main(self, probe, api=None):
+        publish_impl = incident.publish
         with tempfile.TemporaryDirectory() as directory:
             previous = Path.cwd()
             try:
@@ -114,6 +116,7 @@ class IncidentTests(unittest.TestCase):
                                   side_effect=probe if isinstance(probe, Exception) else None), \
                      patch.object(incident, 'publish') as publish, \
                      contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    publish.side_effect = (lambda *args: publish_impl(*args, api=api)) if api else None
                     publish.return_value = {'issue': 1}
                     code = incident.main()
                 artifact = json.loads(Path('edge-liveness-probe.json').read_text())
@@ -128,6 +131,50 @@ class IncidentTests(unittest.TestCase):
         self.assertEqual(artifact['status'], 'ERROR')
         self.assertNotIn('secret-dsn', json.dumps(artifact))
         publish.assert_not_called()
+
+    def test_alarm_issue_shows_only_registered_service_facts(self):
+        api = Issues()
+        secret = 'ghp_SYNTHETIC_SECRET_NOT_FOR_PUBLICATION'
+        facts = [
+            {'service_key': 'backup-nightly-cloud', 'hours_since_observed': 24.5,
+             'classification': 'stale', 'stderr': secret},
+            {'service_key': 'carr-mcp', 'hours_since_observed': 0.5,
+             'classification': 'failed'},
+            {'service_key': 'job-watchdog', 'hours_since_observed': None,
+             'classification': 'never started'},
+            {'service_key': secret, 'hours_since_observed': 1, 'classification': 'failed'},
+            {'service_key': 'private-client-business', 'hours_since_observed': 1,
+             'classification': 'failed'},
+            {'service_key': 'backup-nightly-cloud', 'hours_since_observed': secret,
+             'classification': 'failed'},
+            {'service_key': 'backup-nightly-cloud', 'hours_since_observed': 1,
+             'classification': secret},
+        ]
+        for age in (-1, True, float('nan'), float('inf'), 10**1000):
+            facts.append({'service_key': 'backup-nightly-cloud',
+                          'hours_since_observed': age, 'classification': 'failed'})
+        verdict = {'schema': 'edge-liveness-verdict/v1', 'probe_exit': 1,
+                   'status': 'ALARM', 'affected_services': facts, 'diagnostic': secret}
+        code, artifact, _ = self.run_main(subprocess.CompletedProcess(
+            [], 1, json.dumps(verdict), secret), api)
+        self.assertEqual(code, 0)
+        body = api.rows[0]['body']
+        self.assertIn('backup-nightly-cloud', body)
+        self.assertIn('24.5h', body)
+        self.assertIn('stale', body)
+        self.assertIn('carr-mcp', body)
+        self.assertIn('failed', body)
+        self.assertIn('job-watchdog', body)
+        self.assertIn('never started', body)
+        self.assertIn('no completion observed', body)
+        self.assertIn('https://github.com/owner/repo/actions/runs/123', body)
+        self.assertIn('tools/ops-record.py health', body)
+        self.assertEqual(artifact['affected_services'], [
+            {key: value for key, value in row.items() if key != 'stderr'}
+            for row in facts[:3]])
+        for excluded in (secret, 'private-client-business', 'stderr', 'NaN', 'Infinity'):
+            self.assertNotIn(excluded, body)
+            self.assertNotIn(excluded, json.dumps(artifact))
 
     def test_main_normalizes_only_a_completed_alarm(self):
         verdict = {'schema': 'edge-liveness-verdict/v1', 'probe_exit': 1, 'status': 'ALARM'}
@@ -156,21 +203,21 @@ class IncidentTests(unittest.TestCase):
 
     def test_pagination_finds_trusted_issue_on_later_page(self):
         api = Issues()
-        incident.publish('owner/repo', 1, '', '', api)
+        incident.publish('owner/repo', 1, [], '', api)
         paths = []
         def paginated(path, payload=None):
             paths.append(path)
             if payload is None and '/issues?' in path and path.endswith('page=1'):
                 return [{'user': {'id': 123}} for _ in range(100)]
             return api(path, payload)
-        self.assertEqual(incident.publish('owner/repo', 1, '', '', paginated)['issue'], 1)
+        self.assertEqual(incident.publish('owner/repo', 1, [], '', paginated)['issue'], 1)
         self.assertTrue(any(path.endswith('page=2') for path in paths))
         self.assertEqual(len(api.rows), 1)
 
     def test_malformed_issue_response_fails_delivery(self):
         for response in ({'message': 'not a list'}, [None]):
             with self.subTest(response=response), self.assertRaisesRegex(RuntimeError, 'malformed'):
-                incident.publish('owner/repo', 1, '', '', lambda path: response)
+                incident.publish('owner/repo', 1, [], '', lambda path: response)
 
     def test_real_probe_process_distinguishes_query_crash_and_completed_alarm(self):
         runner = Path(__file__).parents[1] / 'ops/ci-noise-probe.py'
@@ -192,7 +239,7 @@ class IncidentTests(unittest.TestCase):
                 if query == 'pass':
                     self.assertEqual(json.loads(result.stdout), {
                         'schema': 'edge-liveness-verdict/v1', 'probe_exit': 1, 'status': 'ALARM',
-                        'affected_services': [{'service_key': 'service', 'hours_since_observed': 24.0}]})
+                        'affected_services': [{'service_key': 'service', 'hours_since_observed': 24.0, 'classification': 'stale'}]})
                 else:
                     self.assertEqual(result.stdout, '')
                     self.assertIn('Traceback', result.stderr)
@@ -207,9 +254,9 @@ class IncidentTests(unittest.TestCase):
                 ' def cursor(self): return self\n'
                 ' def execute(self, *args): pass\n'
                 ' def fetchall(self): return [('
-                '"stopped-critical-service", "production", "high", "launchd", '
+                '"carr-mcp", "production", "high", "launchd", '
                 '"stale", "private-health-diagnostic", "observed", 24, 3600, True), ('
-                '"stopped-backup", "production", "critical", "launchd", '
+                '"backup-nightly-cloud", "production", "critical", "launchd", '
                 '"stale", "private-health-diagnostic", "observed", 36, 3600, True)]\n'
                 'def connect(*args, **kwargs): return Connection()\n')
             result = subprocess.run([sys.executable, str(runner)], capture_output=True, text=True,
@@ -220,8 +267,8 @@ class IncidentTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(artifact['status'], 'ALARM')
         self.assertEqual(artifact['affected_services'], [
-            {'service_key': 'stopped-critical-service', 'hours_since_observed': 24.0},
-            {'service_key': 'stopped-backup', 'hours_since_observed': 36.0},
+            {'service_key': 'carr-mcp', 'hours_since_observed': 24.0, 'classification': 'stale'},
+            {'service_key': 'backup-nightly-cloud', 'hours_since_observed': 36.0, 'classification': 'stale'},
         ])
         self.assertNotIn('private-health-diagnostic', json.dumps(artifact))
         self.assertNotIn('private-credential', json.dumps(artifact))
@@ -230,9 +277,9 @@ class IncidentTests(unittest.TestCase):
     def test_real_probe_retains_fresh_failed_and_missing_first_reports(self):
         runner = Path(__file__).parents[1] / 'ops/ci-noise-probe.py'
         rows = [
-            ("fresh-failed", "production", "high", "cloudflare-worker", "fresh",
+            ("carr-mcp", "production", "high", "cloudflare-worker", "fresh",
              "unavailable", "observed", 0.5, None, False),
-            ("required-missing", "production", "critical", "launchd", "missing",
+            ("job-watchdog", "production", "critical", "launchd", "missing",
              "unknown", None, None, 3600, True),
             ("not-due", "production", "critical", "launchd", "missing",
              "unknown", None, None, 3600, False),
@@ -262,8 +309,8 @@ class IncidentTests(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout), {
             'schema': 'edge-liveness-verdict/v1', 'probe_exit': 1, 'status': 'ALARM',
             'affected_services': [
-                {'service_key': 'fresh-failed', 'hours_since_observed': 0.5},
-                {'service_key': 'required-missing', 'hours_since_observed': None},
+                {'service_key': 'carr-mcp', 'hours_since_observed': 0.5, 'classification': 'failed'},
+                {'service_key': 'job-watchdog', 'hours_since_observed': None, 'classification': 'never started'},
             ]})
         code, artifact, publish = self.run_main(result)
         self.assertEqual(code, 0)

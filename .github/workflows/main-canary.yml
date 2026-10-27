@@ -42,17 +42,30 @@ jobs:
   classes:
     needs: evidence
     if: ${{ always() && (needs.evidence.result != 'success' || needs.evidence.outputs.reused != 'true') }}
-    name: ops/ci.sh --strict --only ${{ matrix.classes }}
+    name: ${{ matrix.gate_shard == 2 && matrix.job_names.gates_shard_2.name || matrix.job_names[matrix.classes].name }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
+        gate_shard: [1, 2]
         classes:
           - "pushfloor unit types contract secret binding artifact freshness"
           - "gates"
           - "migration"
           - "hxprobe"
           - "dependency"
+        job_names:
+          - migration: {name: "ops/ci.sh --strict --only migration", classes: "migration"}
+            "pushfloor unit types contract secret binding artifact freshness": {name: "ops/ci.sh --strict --only pushfloor unit types contract secret binding artifact freshness", classes: "pushfloor unit types contract secret binding artifact freshness"}
+            gates: {name: "ops/ci.sh --strict --only gates", classes: "gates"}
+            gates_shard_2: {name: "Gates selftests shard 2 of 2", classes: "gates"}
+            hxprobe: {name: "ops/ci.sh --strict --only hxprobe", classes: "hxprobe"}
+            dependency: {name: "ops/ci.sh --strict --only dependency", classes: "dependency"}
+        exclude:
+          - {classes: "dependency", gate_shard: 2}
+          - {classes: "pushfloor unit types contract secret binding artifact freshness", gate_shard: 2}
+          - {classes: "migration", gate_shard: 2}
+          - {classes: "hxprobe", gate_shard: 2}
     timeout-minutes: ${{ matrix.classes == 'migration' && 45 || 20 }}
 
     services:
@@ -124,37 +137,16 @@ jobs:
           ZSH_ARCHIVE_DIR: ${{ runner.temp }}/zsh-debs
         run: ops/ci-zsh.sh
 
-      - name: Install PostgreSQL 17
-        if: contains(matrix.classes, 'unit') || contains(matrix.classes, 'gates') || matrix.classes == 'migration'
-        run: |
-          set -euo pipefail
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-            "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-17 postgresql-17-pgvector
-          /usr/lib/postgresql/17/bin/initdb --version
-          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
-
-      - name: Install PostgreSQL 18 server for the migration shadow
-        # ops/migration-shadow.py builds its own loopback cluster on production's
-        # major (18) from the base branch's db/schema.sql and applies this
-        # change's migrations to it. No main cluster is created, so nothing
-        # competes with the service container's port.
+      - name: Disable automatic PostgreSQL clusters for migration fixtures
         if: contains(matrix.classes, 'migration')
         run: |
-          set -euo pipefail
-          sudo install -d /usr/share/postgresql-common/pgdg /etc/postgresql-common/createcluster.d
+          sudo install -d /etc/postgresql-common/createcluster.d
           echo "create_main_cluster = false" | sudo tee /etc/postgresql-common/createcluster.d/no-main-cluster.conf > /dev/null
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-            "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-18 postgresql-18-pgvector
-          /usr/lib/postgresql/18/bin/initdb --version
+
+      - name: Install PostgreSQL 17
+        if: contains(matrix.classes, 'unit') || contains(matrix.classes, 'gates') || matrix.classes == 'migration'
+        timeout-minutes: 5
+        run: bash ops/ci-postgres.sh
 
       - name: Create the Neon admin role the migrations expect
         # Migration 0005 grants the privilege bundles to neondb_owner, which
@@ -173,7 +165,7 @@ jobs:
              end \$\$;"
 
       - name: Verify edge incident delivery
-        if: matrix.classes == 'gates'
+        if: matrix.classes == 'gates' && matrix.gate_shard == 1
         run: python3 test/ci-noise-incident-test.py
 
       - name: Run this group's check classes
@@ -191,7 +183,13 @@ jobs:
           # next step uploads it when the class fails, so a stale snapshot is
           # one download and one commit away from fixed.
           CARR_SHADOW_ARTIFACT_DIR: ${{ runner.temp }}/migration-shadow
-        run: ops/ci.sh --strict --only "${{ matrix.classes }}"
+          CARR_CI_PROGRAM_RECORDS: ${{ runner.temp }}/ci-programs.json
+        run: |
+          if [ "${{ matrix.classes }}" = gates ]; then
+            ops/ci.sh --strict --only gates --gate-shard "${{ matrix.gate_shard }}/2"
+          else
+            ops/ci.sh --strict --only "${{ matrix.classes }}"
+          fi
       - name: Upload the migration shadow's regenerated db/schema.sql
         if: ${{ failure() && contains(matrix.classes, 'migration') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -201,12 +199,14 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Retain failed CI logs
-        if: ${{ failure() }}
+      - name: Retain per-program records and failed CI logs
+        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: failed-ci-canary-${{ strategy.job-index }}
-          path: ${{ runner.temp }}/carr-ci.*/*.log.redacted
+          name: ci-canary-${{ strategy.job-index }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/carr-ci.*/*.log.redacted
+            ${{ runner.temp }}/ci-programs.json
           if-no-files-found: ignore
           retention-days: 14
 

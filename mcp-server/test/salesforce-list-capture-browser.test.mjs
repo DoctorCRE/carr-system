@@ -1,3 +1,4 @@
+// Test synthetic Salesforce list capture in a browser.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -63,9 +64,9 @@ test('synthetic Salesforce list capture proves complete rows and fails closed', 
     await page.evaluate(setup);
     await page.evaluate(script);
     return page.evaluate(`new Promise((resolve, reject) => {
-      const started = Date.now(); const timer = setInterval(() => {
+      const started = performance.now(); const timer = setInterval(() => {
         if (window.__carrSalesforceRefresh.state !== 'running') { clearInterval(timer); resolve(window.__carrSalesforceRefresh); }
-        else if (Date.now() - started > 15000) { clearInterval(timer); reject(new Error('capture timed out')); }
+        else if (performance.now() - started > 15000) { clearInterval(timer); reject(new Error('capture timed out')); }
       }, 10);
     })`);
   };

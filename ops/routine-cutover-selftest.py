@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test routine cutover configuration.
 import json
 import plistlib
 import sys
@@ -35,7 +36,7 @@ class CutoverTests(unittest.TestCase):
         self.assertIn('npi-sweep-weekly', keys)
         self.assertIn('radar-weekly', keys)
         tasks = json.loads((ROOT / 'ops/headless-tasks/tasks.json').read_text())['tasks']
-        self.assertEqual(set(tasks), {'deal-history-research-weekly', 'restore-rehearse-weekly'})
+        self.assertEqual(set(tasks), set())
 
 
 if __name__ == '__main__':

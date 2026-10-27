@@ -1,3 +1,5 @@
+import { NOW } from "./helpers/fixed-clock.mjs";
+// Tests current work item selection and reporting.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -112,7 +114,7 @@ test("per-executor counting resolves the responsible party exactly as the trigge
   const base = { acceptance_criteria: [], project_context: {},
     blocker_code: null, blocker_detail: null,
     program_key: null, program_ordinal: null,
-    claimed_at: null, started_at: null, updated_at: new Date().toISOString(),
+    claimed_at: null, started_at: null, updated_at: new Date(NOW).toISOString(),
     hours_since_change: 1 };
 
   const unowned = new Fake([

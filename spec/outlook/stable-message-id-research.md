@@ -282,6 +282,22 @@ the existing intake ID, use it to split rows such as W1 and W2, and keep undo,
 deduplication and proposal links on the existing behavior until a controlled
 move and delete pass.
 
+## B2 decoder split
+
+The decoder partitions all three message joins by the linked local-key set.
+Distinct keyed items remain separate even when sender, send time, subject and
+opening match. Revisions with the same key keep the existing sender/time,
+copy-window and preview-to-full joins. Unkeyed rows retain those joins in a
+separate partition, so an unkeyed revision cannot bridge two keyed items.
+A keyed preview therefore cannot borrow an unkeyed full body.
+
+The exported copy key and send time keep their existing meanings. Intake still
+uses its existing content-based deduplication, intake IDs and proposal links;
+two exported rows do not promise two activities. No lifecycle identity claim
+or undo contract changes. The real-decoder regression suite uses generated
+synthetic bytes reproducing the TEST-account W1/W2 collision described above.
+It establishes decoder behavior, not controlled move, delete or rebuild safety.
+
 ## Still open
 
 The snapshot helper works as of 2026-10-26. Each item below needs a capture

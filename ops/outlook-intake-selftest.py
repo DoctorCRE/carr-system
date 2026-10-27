@@ -256,6 +256,41 @@ class IntakeTest(unittest.TestCase):
     def report_text(self):
         return '\n'.join(p.read_text() for p in sorted(self.out().glob('report-*.md')))
 
+    def test_mail_intake_processes_only_the_configured_account(self):
+        personal = mail('lee@example.test', -timedelta(hours=1),
+                        subject='Foreign mailbox', recipients='personal@example.test')
+        business = mail('lee@example.test', -timedelta(hours=1), subject='Configured mailbox')
+        result = self.run_intake([personal, business])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['mail_other_accounts'], 1)
+        [(_, activity)] = self.fake.writes('log-activity')
+        self.assertEqual(activity['summary'], 'Email from lee@example.test: Configured mailbox')
+
+    def test_receipt_counts_header_exclusions_without_claiming_mail_was_processed(self):
+        excluded = [mail('lee@example.test', -timedelta(hours=1),
+                         subject='Synthetic BCC or alias delivery', recipients=recipient)
+                    for recipient in ('undisclosed-recipients:;', 'alias@example.test', 'list@example.test')]
+        result = self.run_intake(excluded)
+        self.assertEqual((result.state, result.reason), ('succeeded', 'nothing_new'))
+        self.assertEqual(result.counts['mail_other_accounts'], 3)
+        self.assertEqual(self.fake.writes('log-activity'), [])
+        quiet = self.run_intake(excluded, touch=False)
+        self.assertEqual(quiet.reason, 'store_unchanged')
+        self.assertEqual(quiet.counts['mail_other_accounts'], 3)
+        accepted = self.run_intake([mail('lee@example.test', -timedelta(hours=1))])
+        self.assertEqual(accepted.counts['mail_other_accounts'], 0)
+
+    def test_first_run_after_upgrade_measures_exclusions_even_when_store_is_unchanged(self):
+        excluded = [mail('lee@example.test', -timedelta(hours=1), recipients='alias@example.test')]
+        self.run_intake(excluded)
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        state.pop('mail_other_accounts')
+        path.write_text(json.dumps(state))
+        result = self.run_intake(excluded, touch=False)
+        self.assertEqual(result.counts['mail_other_accounts'], 1)
+        self.assertEqual(self.fake.decodes, 2)
+
     def test_transient_backoff_and_blocked_requests_preserve_frozen_payloads(self):
         m = mail('pat@example.test', -timedelta(hours=1))
         self.fake.fail_verbs.add('log-activity')
@@ -312,14 +347,45 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(quiet.counts['calendar_lifecycle_unsupported'], 1)
         self.assertEqual(self.fake.decodes, 2)
 
-    def test_calendar_schedule_never_becomes_attendance_as_time_passes(self):
+    def test_calendar_schedule_offers_review_when_unchanged_store_passes_its_end(self):
         events = [event('elapsed', timedelta(hours=1), attendees=[('Pat', 'pat@example.test')])]
         self.run_intake(events=events)
-        self.fake.now += timedelta(hours=3)
+        self.assertEqual(self.fake.agenda['follow_up_reviews'], [])
+        self.fake.now += timedelta(minutes=30)
+        self.assertEqual(self.run_intake(events=events, touch=False).reason, 'store_unchanged')
+        self.fake.now += timedelta(minutes=90)
         result = self.run_intake(events=events, touch=False)
-        self.assertEqual(result.reason, 'store_unchanged')
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(len(self.fake.agenda['follow_up_reviews']), 1)
         self.assertEqual(self.fake.writes(), [])
-        self.assertEqual(self.fake.decodes, 1)
+        self.assertEqual(self.fake.decodes, 2)
+        self.assertEqual(self.run_intake(events=events, touch=False).reason, 'store_unchanged')
+        self.assertEqual(self.fake.decodes, 2)
+
+    def test_unchanged_store_proposes_review_for_meetings_beyond_the_agenda_window(self):
+        events = [event('later', timedelta(days=15, hours=1))]
+        self.run_intake(events=events)
+        self.assertEqual(self.fake.agenda['items'], [])
+        self.fake.now += timedelta(days=15, hours=3)
+        self.run_intake(events=events, touch=False)
+        self.assertEqual(len(self.fake.agenda['follow_up_reviews']), 1)
+        self.assertEqual(self.fake.writes(), [])
+
+    def test_review_upgrade_initializes_an_unchanged_store_and_failed_publish_retries(self):
+        events = [event('elapsed', -timedelta(hours=2))]
+        self.run_intake(events=events)
+        state = json.loads((self.out() / intake.STATE).read_text())
+        state.pop('calendar_review_at', None)
+        (self.out() / intake.STATE).write_text(json.dumps(state))
+        self.fake.fail_verbs.add('publish-board-snapshot')
+        failed = self.run_intake(events=events, touch=False)
+        self.assertEqual(failed.state, 'succeeded', 'display failure must not fail mail')
+        self.assertEqual(failed.counts['calendar_agenda_failed'], 1)
+        self.fake.fail_verbs.clear()
+        result = self.run_intake(events=events, touch=False)
+        self.assertEqual(result.counts['calendar_agenda_published'], 1)
+        self.assertEqual(len(self.fake.agenda['follow_up_reviews']), 1)
+        self.assertEqual(self.fake.writes(), [])
 
     def test_orphan_calendar_requests_are_quarantined_before_replay(self):
         self.out().mkdir(parents=True)
@@ -1597,6 +1663,67 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(outcome.counts['calendar_agenda_published'], 1)
         self.assertEqual(self.fake.writes(), [], 'the agenda never becomes a reminder or an activity')
 
+    def test_recent_meetings_offer_review_without_recording_an_outcome(self):
+        meeting = event(self.gid(71), -timedelta(hours=2), subject='Synthetic completed schedule')
+        self.run_intake(events=[meeting, dict(meeting),
+                                event(self.gid(72), timedelta(hours=2)),
+                                event(self.gid(73), -timedelta(hours=25))])
+        [review] = self.fake.agenda['follow_up_reviews']
+        self.assertEqual((review['title'], review['start'], review['end'], review['state']),
+                         ('Synthetic completed schedule', '2026-10-20T13:00:00+00:00',
+                          '2026-10-20T14:00:00+00:00', 'needs_review'))
+        self.assertRegex(review['key'], r'^[a-f0-9]{16}$')
+        self.assertIn('Confirm whether this meeting happened', review['prompt'])
+        self.assertEqual(self.fake.writes(), [], 'a scheduled end is not proof of attendance or a next action')
+        self.assertNotIn('Agenda', json.dumps(review))
+
+    def test_follow_up_reviews_require_an_unambiguous_recent_timed_meeting(self):
+        local = NOW.astimezone(load_settings(self.home).timezone)
+        midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
+        events = [event(self.gid(80), -timedelta(hours=1), subject='Synthetic ends now'),
+                  event(self.gid(81), -timedelta(hours=13), subject='Synthetic before midnight'),
+                  event(self.gid(82), -timedelta(hours=25)),
+                  event(self.gid(83), -timedelta(minutes=30)),
+                  event(self.gid(84), -timedelta(hours=2), minutes=0),
+                  event(self.gid(85), -timedelta(hours=2), minutes=-30),
+                  event(self.gid(86), midnight - NOW - timedelta(days=1), minutes=24 * 60),
+                  event(self.gid(87), -timedelta(hours=2), subject='Canceled: Synthetic review'),
+                  event(self.gid(88), -timedelta(hours=2), organizer=('Partner', PARTNER)),
+                  event(self.gid(89), -timedelta(hours=2)),
+                  event(self.gid(89), -timedelta(hours=2), organizer=('Partner', PARTNER)),
+                  event(self.gid(90), -timedelta(hours=2)),
+                  event(self.gid(90), timedelta(hours=3)),
+                  event(self.gid(91), -timedelta(hours=2)),
+                  event(self.gid(91), -timedelta(hours=2), minutes=90)]
+        self.run_intake(events=events)
+        self.assertEqual([r['title'] for r in self.fake.agenda['follow_up_reviews']],
+                         ['Synthetic ends now', 'Synthetic before midnight'])
+        self.assertEqual(self.fake.writes(), [])
+
+    def test_daylight_saving_all_day_events_never_propose_outcome_reviews(self):
+        settings = load_settings(self.home)
+        for start, end in [('2026-03-08T06:00:00+00:00', '2026-03-09T05:00:00+00:00'),
+                           ('2026-11-01T05:00:00+00:00', '2026-11-02T06:00:00+00:00')]:
+            start, end = datetime.fromisoformat(start), datetime.fromisoformat(end)
+            all_day = event('all-day', start - NOW, minutes=int((end - start).total_seconds() / 60))
+            timed = event('timed', end + timedelta(hours=1) - NOW, subject='Synthetic timed review')
+            upcoming, _ = intake.agenda([all_day], {}, settings, start + timedelta(hours=1))
+            self.assertTrue(upcoming['items'][0]['all_day'])
+            finished, _ = intake.agenda([all_day, timed], {}, settings, end + timedelta(hours=12))
+            self.assertEqual([r['title'] for r in finished['follow_up_reviews']], ['Synthetic timed review'])
+
+    def test_review_trimming_preserves_upcoming_meetings_and_reports_the_gap(self):
+        events = [event(self.gid(n), -timedelta(hours=2), subject='Synthetic ' + 'x' * 2000)
+                  for n in range(120)]
+        events.append(event(self.gid(999), timedelta(hours=2), subject='Synthetic upcoming'))
+        outcome = self.run_intake(events=events)
+        self.assertLessEqual(len(json.dumps(self.fake.agenda)), intake.AGENDA_MAX_BYTES)
+        self.assertEqual([i['title'] for i in self.fake.agenda['items'] if i['end'] > NOW.isoformat()],
+                         ['Synthetic upcoming'])
+        self.assertGreater(outcome.counts['calendar_follow_up_trimmed'], 0)
+        self.assertIn('follow_up_trimmed', self.codes())
+        self.assertLessEqual(len(self.fake.agenda['follow_up_reviews']), 100)
+
     def test_a_copy_without_joe_keeps_the_meeting_out(self):
         self.run_intake(events=[event(self.gid(1), timedelta(days=1), attendees=[('Owner', OWNER)], organizer=('Partner', PARTNER)),
                                 event(self.gid(1), timedelta(days=1), organizer=('Partner', PARTNER))])
@@ -1701,6 +1828,99 @@ class IntakeTest(unittest.TestCase):
         self.fake.board_conflicts = 2
         self.fake.now += timedelta(minutes=30)
         self.assertEqual(self.run_intake(events=[event(self.gid(3), timedelta(hours=6))]).counts['calendar_agenda_failed'], 1)
+class AttachmentMetadataTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.path = Path(tmp.name) / 'store.db'
+        write_db(self.path, [mail('pat@example.test', -timedelta(hours=1), subject=f'm{i}',
+                                  copy_key=f'k{i}', local_keys=str(70 + i)) for i in range(3)])
+
+    def test_messages_carry_only_their_linked_attachment_metadata(self):
+        con = sqlite3.connect(self.path)
+        con.executescript('''
+            CREATE TABLE message_keys (message_id INTEGER, local_key INTEGER);
+            CREATE TABLE attachments (id INTEGER, message_key INTEGER, name TEXT, size INTEGER,
+              content_type TEXT, content_id TEXT, path TEXT);
+            INSERT INTO message_keys VALUES (1,70),(1,71),(2,72),(3,73);
+            INSERT INTO attachments VALUES
+              (9,71,'Lease.pdf',4096,'application/pdf',NULL,'private-cache-path'),
+              (8,70,'Logo.png',128,'image/png','logo@example.test','another-private-path'),
+              (10,72,'Plan.docx',8192,'application/vnd.openxmlformats-officedocument.wordprocessingml.document',NULL,NULL),
+              (11,999,'Unlinked.pdf',99,'application/pdf',NULL,NULL);
+        ''')
+        con.close()
+        _, mails, _ = intake._load(self.path)
+        self.assertEqual([m['attachments'] for m in mails], [
+            [{'id': 8, 'name': 'Logo.png', 'size': 128, 'content_type': 'image/png',
+              'content_id': 'logo@example.test'},
+             {'id': 9, 'name': 'Lease.pdf', 'size': 4096, 'content_type': 'application/pdf',
+              'content_id': None}],
+            [{'id': 10, 'name': 'Plan.docx', 'size': 8192,
+              'content_type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+              'content_id': None}], []])
+
+    def test_ambiguous_message_keys_do_not_attribute_attachments(self):
+        con = sqlite3.connect(self.path)
+        con.executescript('''
+            CREATE TABLE message_keys (message_id INTEGER, local_key INTEGER);
+            CREATE TABLE attachments (id INTEGER, message_key INTEGER, name TEXT, size INTEGER,
+              content_type TEXT, content_id TEXT);
+            INSERT INTO message_keys VALUES (1,70),(2,70),(3,73);
+            INSERT INTO attachments VALUES
+              (8,70,'Ambiguous.pdf',128,'application/pdf',NULL),
+              (9,73,'Certain.pdf',256,'application/pdf',NULL);
+        ''')
+        con.close()
+        _, mails, _ = intake._load(self.path)
+        self.assertEqual([m['attachments'] for m in mails], [[], [], [
+            {'id': 9, 'name': 'Certain.pdf', 'size': 256,
+             'content_type': 'application/pdf', 'content_id': None}]])
+
+    def test_configured_account_excludes_foreign_and_substring_addresses(self):
+        con = sqlite3.connect(self.path)
+        con.execute('UPDATE messages SET sender=?, recipients=? WHERE id=1',
+                    ('BUSINESS@example.test', 'other@example.test'))
+        con.execute('UPDATE messages SET recipients=? WHERE id=2',
+                    ('Other <other@example.test>, Business <BUSINESS@example.test>',))
+        con.execute('UPDATE messages SET recipients=? WHERE id=3',
+                    ('notbusiness@example.test, business@example.test.invalid',))
+        con.commit()
+        con.close()
+        _, mails, _ = intake._load(self.path, account='business@example.test')
+        self.assertEqual([m['subject'] for m in mails], ['m0', 'm1'])
+        _, foreign, _ = intake._load(self.path, account='personal@example.test')
+        self.assertEqual(foreign, [])
+
+    def test_collapsed_copies_keep_each_attachment_when_the_full_body_wins(self):
+        logo = {'id': 8, 'name': 'Logo.png', 'size': 128, 'content_type': 'image/png',
+                'content_id': 'logo@example.test'}
+        lease = {'id': 9, 'name': 'Lease.pdf', 'size': 4096, 'content_type': 'application/pdf',
+                 'content_id': None}
+        rows = [dict(mail('pat@example.test', -timedelta(hours=1), kind='preview', copy_key='same'),
+                     attachments=[lease, logo]),
+                dict(mail('pat@example.test', -timedelta(hours=1) + timedelta(seconds=5), copy_key='same'),
+                     attachments=[lease])]
+        [best] = intake._best_copies(rows)
+        self.assertTrue(best['full'])
+        self.assertEqual(best['attachments'], [logo, lease])
+
+    def test_older_decoders_supply_empty_metadata_or_unknown_content_id(self):
+        _, mails, _ = intake._load(self.path)
+        self.assertEqual([m['attachments'] for m in mails], [[], [], []])
+        con = sqlite3.connect(self.path)
+        con.executescript('''
+            CREATE TABLE message_keys (message_id INTEGER, local_key INTEGER);
+            CREATE TABLE attachments (id INTEGER, message_key INTEGER, name TEXT, size INTEGER, content_type TEXT);
+            INSERT INTO message_keys VALUES (1,70);
+            INSERT INTO attachments VALUES (9,70,'Lease.pdf',4096,'application/pdf');
+        ''')
+        con.close()
+        _, mails, _ = intake._load(self.path)
+        self.assertEqual(mails[0]['attachments'], [{'id': 9, 'name': 'Lease.pdf', 'size': 4096,
+                                                   'content_type': 'application/pdf', 'content_id': None}])
+
+
 class FolderTest(unittest.TestCase):
     FOLDERS = """
     CREATE TABLE folders (id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, name TEXT,

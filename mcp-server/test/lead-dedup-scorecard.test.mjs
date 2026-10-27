@@ -1,3 +1,4 @@
+// Test lead deduplication against labeled identity matching cases.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -76,7 +77,7 @@ test('same-name leads at different locations keep their own verify result (WR-00
     signal: `Synthetic observation ${index}`, sourceUrl: `https://example.invalid/same-name/${index}`,
   }));
   const result = await runInNewContext(
-    `(async () => { ${source.replace(/^export const meta =/, 'const meta =')} })()`, {
+    `(async () => { ${source.replace(/^export const meta =/m, 'const meta =')} })()`, {
       args: { today: 'SYNTHETIC', lanes: ['one', 'two'], regions: ['fixture'], cap: 2 },
       phase() {}, log() {},
       parallel: jobs => Promise.all(jobs.map(job => job())),
@@ -89,5 +90,32 @@ test('same-name leads at different locations keep their own verify result (WR-00
   assert.deepEqual(JSON.parse(JSON.stringify(result.leads.map(lead => [lead.location, lead.check?.note, lead.tier]))), [
     ['Example City', 'first', 'CORROBORATED'],
     ['Other Example City', 'second', 'UNVERIFIED (present anyway, flag)'],
+  ]);
+});
+
+test('an ambiguous or mismatched verify claim is refused, never guessed (WR-000513)', async () => {
+  const source = readFileSync(new URL('workflows/lead-sweep.workflow.js', `file://${root}`), 'utf8');
+  const leads = ['Example City', 'Other Example City'].map((location, index) => ({
+    name: index ? 'Other Dental' : 'Example Dental', location, vertical: 'dental', confidence: 'LOW',
+    signal: `Synthetic observation ${index}`, sourceUrl: `https://example.invalid/refuse/${index}`,
+  }));
+  const result = await runInNewContext(
+    `(async () => { ${source.replace(/^export const meta =/m, 'const meta =')} })()`, {
+      args: { today: 'SYNTHETIC', lanes: ['one', 'two'], regions: ['fixture'], cap: 2 },
+      phase() {}, log() {},
+      parallel: jobs => Promise.all(jobs.map(job => job())),
+      agent: async (_prompt, options) => options.phase === 'Sweep'
+        ? { leads: [leads[Number(options.label.split(':')[1]) - 1]] }
+        : { checks: [
+          { item: 1, name: 'Example Dental', exists: true, note: 'first', corroboration: 'license' },
+          { item: 1, name: 'Example Dental', exists: false, note: 'conflicting repeat' },
+          { item: 2, name: 'Example Dental', exists: true, note: 'echoed the wrong lead' }] },
+    }, { timeout: 1000 });
+  assert.deepEqual(JSON.parse(JSON.stringify(result.leads.map(lead => [lead.name, lead.check, lead.tier]))), [
+    ['Example Dental', null, 'UNVERIFIED (present anyway, flag)'],
+    ['Other Dental', null, 'UNVERIFIED (present anyway, flag)'],
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.leads.map(lead => lead.checkRefused))), [
+    'verifier returned claim 1 more than once', 'verifier echoed "Example Dental" for claim 2',
   ]);
 });

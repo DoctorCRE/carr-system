@@ -1,3 +1,4 @@
+// Test staging fixture preparation and failure cleanup.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { prepareStagingLoopFixtures } from "../src/staging-loop-fixtures.js";

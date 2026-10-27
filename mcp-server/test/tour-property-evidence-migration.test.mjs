@@ -1,3 +1,4 @@
+// Tests the tenant-scoped, rights-filtered property evidence migration.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 

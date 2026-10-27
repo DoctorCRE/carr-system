@@ -228,7 +228,7 @@ check("core partition remains strict and runs the full acceptance manifest",
       result == 0 and any(event[-3:] == ("--strict", "--migration-part", "core") for event in core_events)
       and any(event[-1].endswith("mcp-server/test/codex-continuity.test.mjs") for event in core_events)
       and any("--verify-only" in event for event in core_events))
-for part in ("proofs", "gates", "gates-serial", "gates-isolated", "acceptance"):
+for part in ("proofs", "gates", "acceptance"):
     start = len(events)
     try:
         with patch.object(mod, "find_postgres_binaries", return_value=fake_bins), \
@@ -290,11 +290,11 @@ check(
 )
 
 
-class FailingCalendarRunner(FakeRunner):
+class FailingRenewalRunner(FakeRunner):
     def run(self, command, *, env=None, cwd=None, capture=False):
         result = super().run(command, env=env, cwd=cwd, capture=capture)
-        if str(command[-1]).endswith("ops/calendar-canary-local-pg-acceptance.py"):
-            return mod.CommandResult(23, "", "CALENDAR_STAGE_MISMATCH: exact causal fixture")
+        if str(command[-1]).endswith("ops/renewal-signed-ingress-local-pg-acceptance.py"):
+            return mod.CommandResult(23, "", "RENEWAL_STAGE_MISMATCH: exact causal fixture")
         return result
 
 
@@ -306,19 +306,19 @@ with (
     patch.object(Path, "mkdir"),
     patch.object(mod.shutil, "rmtree"),
 ):
-    calendar_stderr = io.StringIO()
-    with redirect_stderr(calendar_stderr):
-        calendar_failure = mod.run_local_ci(
-            repo=REPO, ci_class="migration", port=55432, runner=FailingCalendarRunner()
+    renewal_stderr = io.StringIO()
+    with redirect_stderr(renewal_stderr):
+        renewal_failure = mod.run_local_ci(
+            repo=REPO, ci_class="migration", port=55432, runner=FailingRenewalRunner()
         )
-check("calendar gate failure code is preserved", calendar_failure == 23)
+check("renewal gate failure code is preserved", renewal_failure == 23)
 check(
-    "calendar gate exact child stderr is surfaced",
-    "CALENDAR_STAGE_MISMATCH: exact causal fixture" in calendar_stderr.getvalue(),
+    "renewal gate exact child stderr is surfaced",
+    "RENEWAL_STAGE_MISMATCH: exact causal fixture" in renewal_stderr.getvalue(),
 )
 check(
-    "later local gates do not run after calendar failure",
-    not any(event[-1].endswith("ops/renewal-signed-ingress-local-pg-acceptance.py") for event in events),
+    "later local gates do not run after renewal failure",
+    not any(event[-1].endswith("ops/incident-recovery-local-pg-acceptance.py") for event in events),
 )
 
 

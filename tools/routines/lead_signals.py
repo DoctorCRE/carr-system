@@ -1,3 +1,4 @@
+# Prepare and classify healthcare lead signals from NPPES data.
 from __future__ import annotations
 
 import csv
@@ -10,7 +11,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -84,36 +85,27 @@ def weekly_files(html, as_of):
     return [url for _, url in selected]
 
 
-# CMS keeps listing weekly files on the index after it deletes them. A listed
-# file that ended more than this many days ago and now answers 404 has expired.
-EXPIRY_GRACE_DAYS = 7
-
-
-def _today():
-    return datetime.now(timezone.utc).date()
-
-
-def weekly_end(url):
-    match = re.search(r"_(\d{6})_Weekly_V2\.zip$", url, re.I)
-    return datetime.strptime(match[1], "%m%d%y").date() if match else None
-
-
 def fetch_weekly_files(urls, fetch=None):
-    """Return (payload, url) pairs; an expired file is counted and skipped, anything else raises."""
+    """Fetch listed weekly files, oldest first; return (payloads, skipped).
+
+    CMS keeps listing weekly files after it deletes them, so a 404 on an older
+    file is skipped and named. The newest file is required, and any other error
+    is a real failure; both raise naming the URL and status.
+    """
     fetch = fetch or _fetch
-    payloads, skipped = [], Counter()
+    payloads, skipped = [], []
     for url in urls:
         try:
             payloads.append((fetch(url), url))
         except urllib.error.HTTPError as exc:
-            end = weekly_end(url)
-            if exc.code == 404 and end is not None and (_today() - end).days > EXPIRY_GRACE_DAYS:
-                skipped["expired_weekly_file"] += 1
+            exc.close()
+            if exc.code == 404 and url != urls[-1]:
+                skipped.append({"url": url, "status": exc.code})
                 continue
-            raise
+            raise RuntimeError(f"NPPES weekly file {url} is unavailable: HTTP {exc.code}") from None
     if skipped:
-        print("NPPES skipped weekly files: " + json.dumps(skipped, sort_keys=True), file=sys.stderr)
-    return payloads
+        print("NPPES skipped listed weekly files: " + json.dumps(skipped), file=sys.stderr)
+    return payloads, skipped
 
 
 def parse_nppes(rows, *, as_of, source, practice_locations=None):
@@ -241,10 +233,12 @@ def prepare(ctx):
     fixture = ctx.fixture
     if fixture is not None:
         rows = parse_nppes(fixture.get("nppes_rows", []), as_of=ctx.now.date(), source=INDEX_URL)
+        skipped = []
     else:
         urls = weekly_files(_fetch(INDEX_URL).decode("utf-8"), ctx.now.date())
         rows = []
-        for payload, url in fetch_weekly_files(urls):
+        payloads, skipped = fetch_weekly_files(urls)
+        for payload, url in payloads:
             rows.extend(parse_weekly_zip(payload, as_of=ctx.now.date(), source=url))
     consumed_path = ROOT / "out/routines/lead-signals-weekly/consumed-candidates.json"
     consumed = set(fixture.get("consumed_keys", [])) if fixture is not None else set(json.loads(consumed_path.read_text()) if consumed_path.exists() else [])
@@ -272,7 +266,8 @@ def prepare(ctx):
             exact = (len(possible) == 1 and _text(match.get("name")).casefold() == row["name"].casefold()
                      and _text(match.get("city")).casefold() == row["city"].casefold())
             row["route"] = {"client": "client-intel", "vendor": "vendor-intel", "lead": "prospect-intel"}.get(match.get("kind"), "identity-review") if exact else "identity-review"
-    return {"work": bool(proposed), "candidates": proposed, "consumed_keys": sorted(consumed)}
+    return {"work": bool(proposed), "candidates": proposed, "consumed_keys": sorted(consumed),
+            "skipped_weekly_files": skipped}
 
 
 def execute(ctx, plan):
@@ -312,6 +307,7 @@ def execute(ctx, plan):
             temporary.write_text(json.dumps(sorted(consumed)))
             temporary.replace(path)
     output = {"status": "prepared", "proposed": proposed, "holds": holds, "signals": signals, "candidate_count": len(plan["candidates"]), "model_calls": 0,
+              "skipped_weekly_files": plan.get("skipped_weekly_files", []),
               "ranked": [], "ranking_status": "PENDING npi-sweep-weekly research and radar rubric"}
     ctx.write("add-loop", {"kind": "team_loop", "owner": "claude", "domain": "prospecting",
               "title": "NPPES preparation " + ctx.now.date().isoformat(),

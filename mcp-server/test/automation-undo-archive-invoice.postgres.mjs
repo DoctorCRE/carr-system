@@ -1,3 +1,4 @@
+// Test automation undo, archive, and invoice behavior in disposable PostgreSQL.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import pg from 'pg';

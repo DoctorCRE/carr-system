@@ -1,3 +1,4 @@
+// Test that retired engineering writer preflight makes no database query.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { TOOLS, executeRegisteredTool } from "../src/tools.js";

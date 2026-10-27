@@ -109,9 +109,9 @@ Run these commands from the recovered canonical checkout. `set-role primary`
 immediately installs jobs, so do not use it as a preflight. The Outlook installer
 requires primary role, Xcode command-line tools, and Cargo/Rust. Follow
 `bin/install-outlook-intake.sh` for helper build and permission steps. A task
-definition alone is not scheduler registration. The retained headless option is
-`ops/headless-tasks/install.sh install restore-rehearse-weekly`; disable any
-duplicate registration and verify the reviewed host timezone first.
+definition alone is not scheduler registration. Run `bin/restore-rehearse.sh`
+on demand. Disable any duplicate registration and verify the reviewed host
+timezone first.
 
 The failover inventory includes intake and refresh state requirements and an
 explicit Outlook permission and outbound reconciliation prerequisite. Triage

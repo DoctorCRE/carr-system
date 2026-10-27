@@ -1,3 +1,4 @@
+// Apply deal progress proposed from email.
 import { sha256 } from './sha256.ts';
 import { ToolError } from './tool-error.ts';
 import type { Actor, Db, DelegatedHandler, LockDealField, ResolveEmailProposal, VerbInputs, WithEnvelope, WriteEvent } from './verb-contract.ts';
@@ -5,7 +6,7 @@ import type { Actor, Db, DelegatedHandler, LockDealField, ResolveEmailProposal, 
 type ProgressRule = { instrument: RegExp; excludedInstrument?: RegExp; dealTypes?: string[]; additionalEvidence: RegExp[] };
 
 const CONTRACT = 'email-deal-progress.v1';
-const loi = /\b(?:LOI|letter of intent)\b/i;
+const loi = /\b(?:L\.?O\.?I\b\.?|letter of intent\b)/i;
 const leaseTypes = ['startup', 'relocation', 'expansion', 'additional_office', 'lease', 'renewal'];
 const transitions = new Map<string, { toPhase: string; rules: ProgressRule[] }>([
   ['research', { toPhase: 'site_selection', rules: [{ instrument: /\btours?\b/i,

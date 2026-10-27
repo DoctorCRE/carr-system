@@ -33,6 +33,8 @@
 //     verb; record-meeting-action-outcome then reconciles it against the
 //     canonical envelope ledger. Proposed is never reported as done.
 
+import { calendarMeetingPrepTool } from "./calendar-meeting-prep.js";
+
 import {
   V5_J201_EXPLICIT_ACTIVATION_INTENT,
   V5_J201_PLATFORMS,
@@ -248,6 +250,7 @@ export function meetingModeTools({ withEnvelope, writeEvent, ToolError, lookupTo
   const instance = { type: "string", description: "The calling device or app session; attribution only, never authority." };
 
   return {
+    "calendar-meeting-prep": calendarMeetingPrepTool(ToolError),
     "start-meeting": {
       write: true,
       writerConnection: true,

@@ -21,7 +21,7 @@ def utf16(text):
 
 
 def message(key, sender='pat@example.test', sent=1_793_000_000, anchor_at=600,
-            preview='Synthetic local key study preview text for one message'):
+            preview='Synthetic local key study preview text for one message', subject=None, html=None):
     """An expanded 00ca message header: the key repeated at +10, +30 and +38, a folder reference at +408,
     ItemClass after +454."""
     obj = bytearray(anchor_at)
@@ -34,7 +34,11 @@ def message(key, sender='pat@example.test', sent=1_793_000_000, anchor_at=600,
         struct.pack_into('<QIQQQ', obj, 418, 50, 2, 7, 50, 7)
     obj += utf16('IPM.Note') + utf16(sender)
     obj += struct.pack('<Q', sent * 10_000_000 + EPOCH_TICKS)
+    if subject:
+        obj += utf16(subject) * 2
     obj += utf16(preview)
+    if html:
+        obj += html.encode('utf-8')
     return bytes(obj)
 
 
@@ -43,7 +47,7 @@ class LocalKeyExportTests(unittest.TestCase):
     def setUpClass(cls):
         subprocess.run(['cargo', 'build', '--locked'], cwd=CRATE, check=True, timeout=180)
 
-    def export(self, *objects):
+    def export(self, *objects, columns='sender, sent_unix, copies, local_keys'):
         with tempfile.TemporaryDirectory() as tmp:
             source, target = Path(tmp) / 'synthetic.hxd', Path(tmp) / 'synthetic.db'
             source.write_bytes(STORE(b''.join(objects)))
@@ -51,7 +55,7 @@ class LocalKeyExportTests(unittest.TestCase):
                                     capture_output=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
             with sqlite3.connect(target) as db:
-                rows = db.execute('SELECT sender, sent_unix, copies, local_keys FROM messages ORDER BY sent_unix').fetchall()
+                rows = db.execute(f'SELECT {columns} FROM messages ORDER BY sent_unix').fetchall()
                 meta = dict(db.execute('SELECT key, value FROM meta'))
             return rows, meta
 
@@ -67,18 +71,53 @@ class LocalKeyExportTests(unittest.TestCase):
                               message(0x3003, preview='A different synthetic opening for the second'))
         self.assertEqual([r[3] for r in rows], [str(0x3003), str(0x2002)])
 
-    def test_identical_template_twins_collapse_and_export_both_keys(self):
-        # The WR-000502 twins: same sender and opening five minutes apart. The
-        # existing copy join still merges them; the two keys surface it.
+    def test_identical_template_twins_export_separately(self):
+        # Synthetic reproduction of the TEST-account W1/W2 observation.
+        # Their sender and opening match, but their store-local keys differ.
         rows, meta = self.export(message(0x2002, sent=1_793_000_300), message(0x3003))
-        self.assertEqual([r[2:] for r in rows], [(2, f'{0x2002},{0x3003}')])
-        self.assertEqual(meta['local_key_conflicts'], 1)
+        self.assertEqual(rows, [('pat@example.test', 1_793_000_000, 1, str(0x3003)),
+                                ('pat@example.test', 1_793_000_300, 1, str(0x2002))])
+        self.assertEqual((meta['messages_with_key'], meta['local_key_conflicts']), (2, 0))
 
-    def test_merged_rows_with_disagreeing_keys_export_every_key(self):
+    def test_identical_sender_and_time_do_not_merge_distinct_keys(self):
         # Sender plus send time joins these; the keys say they are two store items.
         rows, meta = self.export(message(0x2002), message(0x3003))
-        self.assertEqual(rows, [('pat@example.test', 1_793_000_000, 2, f'{0x2002},{0x3003}')])
-        self.assertEqual((meta['messages_with_key'], meta['local_key_conflicts']), (1, 1))
+        self.assertEqual(sorted(rows), [('pat@example.test', 1_793_000_000, 1, str(0x3003)),
+                                        ('pat@example.test', 1_793_000_000, 1, str(0x2002))])
+        self.assertEqual((meta['messages_with_key'], meta['local_key_conflicts']), (2, 0))
+
+    def test_preview_does_not_join_another_keys_full_body(self):
+        preview = 'Synthetic local key study preview text for one message'
+        rows, _ = self.export(
+            message(0x2002, sent=1_793_000_300, subject='Full subject',
+                    html=f'<html><body>{preview}</body></html>'),
+            message(0x3003, subject='Preview subject'),
+            columns='subject, body_kind, copies, local_keys')
+        self.assertEqual(rows, [('Preview subject', 'preview', 1, str(0x3003)),
+                                ('Full subject', 'full', 1, str(0x2002))])
+
+    def test_same_key_and_unkeyed_copies_keep_existing_merge_behavior(self):
+        for key in (0x2002, 0):
+            with self.subTest(key=key):
+                rows, _ = self.export(message(key, sent=1_793_000_300), message(key))
+                self.assertEqual(rows, [('pat@example.test', 1_793_000_000, 2, str(key) if key else None)])
+
+    def test_same_key_and_unkeyed_previews_still_join_their_full_body(self):
+        preview = 'Synthetic local key study preview text for one message'
+        for key in (0x2002, 0):
+            with self.subTest(key=key):
+                rows, _ = self.export(
+                    message(key, sent=1_793_000_300, subject='Full subject',
+                            html=f'<html><body>{preview}</body></html>'),
+                    message(key, subject='Preview subject'),
+                    columns='subject, body_kind, copies, local_keys')
+                self.assertEqual(rows, [('Full subject', 'full', 2, str(key) if key else None)])
+
+    def test_unkeyed_rows_cannot_bridge_distinct_keyed_items(self):
+        rows, meta = self.export(message(0x2002, sent=1_793_000_300), message(0), message(0x3003))
+        self.assertEqual(len(rows), 3)
+        self.assertCountEqual([r[2:] for r in rows], [(1, str(0x2002)), (1, None), (1, str(0x3003))])
+        self.assertEqual(meta['local_key_conflicts'], 0)
 
     def test_an_anchor_inside_the_fixed_header_or_without_a_header_gets_no_key(self):
         bare = bytearray(message(0x4004, preview='Another synthetic opening without any header'))

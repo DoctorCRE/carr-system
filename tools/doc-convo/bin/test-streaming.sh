@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Test streaming sentence handling for speech output.
 set -euo pipefail
 
 BIN="$(cd "$(dirname "$0")" && pwd)"

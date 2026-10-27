@@ -389,39 +389,6 @@ DERIVED_DIRS = {
     "Graph/": "./run.sh graph",
 }
 
-# The same problem one level down, where a whole directory is the wrong unit.
-# `social-batch-weekly` (ops/config/services.json, cron 0 8 * * 5) writes next
-# week's drafts into the vault every Friday morning. That is the other half of
-# the 4 UNEXPECTED findings that failed the chain on 2026-08-14 — the two above
-# were lead notes, these two were that morning's batch — and six weekly folders
-# had accumulated by then without a writer between them, so the chain went red
-# every Friday on the marketing lane's most ordinary scheduled work.
-#
-# WHY A PATTERN AND NOT A PREFIX. "Marketing/Social Media/" cannot go in
-# DERIVED_DIRS: that folder also holds the playbooks, strategies, SOPs and
-# handoffs, every one of them hand-authored and exactly what this watch is for.
-# A blanket prefix would trust the whole tree wholesale and blind the alarm to a
-# foreign writer parking content beside them — the same trade the
-# Backups/portability-mirror note below talks itself out of, for the same
-# reason. What the Friday run owns is narrower than the folder: a dated run
-# directory, and a dated batch file at the folder root.
-#
-# The date is load-bearing, not decoration. Without \d{4}-\d{2}-\d{2} in both
-# shapes, "week-" and "x-batch-" degrade into prefixes anything could hide
-# behind; the selftest asserts an undated path in the same namespace still
-# reads UNEXPECTED.
-#
-# Coverage knowingly given up: an edit to an ALREADY-WRITTEN batch stops being
-# reported. That is not a hazard this watch exists for — nothing in the nightly
-# chain regenerates these files, so there is no export about to overwrite an
-# edit, which is the loss SALVAGE-THEN-HEAL is built around.
-DERIVED_PATTERNS = {
-    re.compile(r"^Marketing/Social Media/week-\d{4}-\d{2}-\d{2}/"):
-        "the Friday social-batch-weekly run",
-    re.compile(r"^Marketing/Social Media/x-batch-\d{4}-\d{2}-\d{2}-week\.md$"):
-        "the Friday social-batch-weekly run",
-}
-
 # A FOURTH legitimate writer. Backups/portability-mirror/ is also a
 # wholesale nightly regeneration (pipelines/doctrine_mirror.py, invoked by
 # bin/nightly.sh's "portability mirror" step) — 224 files (222 doc snapshots
@@ -545,9 +512,6 @@ def classify(relpath, expected, corpus_mirror, current_sha=None, mirror_manifest
         return tag
     for prefix, writer in DERIVED_DIRS.items():
         if relpath.startswith(prefix):
-            return f"expected-writer: derived (see {writer})"
-    for pattern, writer in DERIVED_PATTERNS.items():
-        if pattern.match(relpath):
             return f"expected-writer: derived (see {writer})"
     return "UNEXPECTED"
 

@@ -1,3 +1,4 @@
+// Tests validation and atomic ordering for doctrine section changes.
 import assert from "node:assert/strict";
 import test from "node:test";
 

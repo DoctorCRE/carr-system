@@ -1,3 +1,4 @@
+// Tests paging and ordering of due actions and critical dates in triage.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';

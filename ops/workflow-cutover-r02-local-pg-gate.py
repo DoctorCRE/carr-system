@@ -18,31 +18,24 @@ of three logins holding exactly one runtime bundle each, as production does:
 
 The gate checks those memberships before it starts and refuses to run if
 carr_authority_joe also holds carr_writer or carr_jobs. The superuser session
-only writes FIXTURE rows the doors read (job definitions, acceptance rows,
-legacy surfaces and disable receipts) and probes the append-only triggers as
-table owner; it never calls a door.
+only writes FIXTURE rows the doors read, including job definitions and
+acceptance rows, and probes the append-only triggers as table owner. It
+never calls a door.
 
 Covered:
-  P1-a  an open plan never stops an already-live workflow: live and canary
-        enqueue keep working at read_legacy..shadow_compare; from
-        single_write_authority only LIVE is gated, and only on disabled legacy
-        surfaces; canary never is. Canary freshness is checked once, by
-        advance into single_write_authority and cutover; monitor and
-        recovery_ready need no new canary and never halt live scheduling.
-        Cancel ends the gating at once.
-        open / supersede / advance / cancel / retire are authority-only.
+  P1-a  live and canary enqueue continue through every cutover stage.
+        Canary freshness is checked by advance into single_write_authority
+        and cutover. Monitor and recovery_ready need no new canary.
+        Open, supersede, advance, and cancel remain authority-only.
   P1-b  slice completion is reachable in production: register and complete
         on the authority login, progress on the writer login; each refused
         on the other login.
   P1-c  criteria cannot be beaten: [A, A] never satisfies {A, B}; evidence
         resolves only against each criterion's registered workflow, evidence
         type and mode/stage.
-  P3    retire derives the census itself: no caller argument exists for it,
-        and a fully valid plan + receipt is refused for the census, last.
-  and the earlier review items: 'retired' is terminal for advance (the
-  array_position NULL guard), retire's receipt checks (version, predates
-  cutover, one-use, every legacy surface), record_workflow_caller's
-  registered-workflow check and append-only history.
+  and the earlier review items: 'retired' is terminal for advance,
+  record_workflow_caller checks registered workflows, and history stays
+  append-only.
 """
 
 from __future__ import annotations
@@ -140,16 +133,6 @@ def insert_acceptance(cur: Any, key: str, mode: str, ref: str, *, backdate: bool
     ).fetchone()[0]
 
 
-def insert_disable_receipt(cur: Any, key: str, ref: str, *, version: int = 1, surface: str = "no-surface",
-                           locator: str = "no-locator", approved_at: str = "now()") -> str:
-    return cur.execute(
-        f"""insert into ops.legacy_schedule_disable_receipt
-              (receipt_ref,idempotency_key,workflow_key,workflow_version,surface_id,locator,reason,approved_by,approved_at)
-            values (%s,%s,%s,%s,%s,%s,'fixture','joe',{approved_at}) returning id::text""",
-        (ref, f"{ref}-idem", key, version, surface, locator),
-    ).fetchone()[0]
-
-
 def set_transition_clock(cur: Any, plan_id: str, to_stage: str, minutes_ago: int) -> None:
     """Fixture clock. The whole gate runs in ONE rollback-only transaction, so
     now() never moves and every door-written timestamp is identical -- which
@@ -206,14 +189,6 @@ def enqueue(cur: Any, slots: Slots, key: str, mode: str) -> str:
         ).fetchone()[0]
 
 
-def expect_enqueue_refused(cur: Any, slots: Slots, key: str, mode: str, label: str, match: str) -> None:
-    with as_login(cur, JOBS):
-        expect_refusal(
-            cur, "select ops.enqueue_job(%s,1,now()+make_interval(hours => %s),'{}'::jsonb,%s,%s)",
-            (key, slots.next(), f"{key}-{uuid.uuid4().hex}", mode), label, match=match,
-        )
-
-
 def provision_logins(cur: Any) -> None:
     cur.execute(f"""do $$ begin
       if not exists (select 1 from pg_roles where rolname='{AUTHORITY}') then create role {AUTHORITY} login; end if;
@@ -261,8 +236,6 @@ def main() -> int:
                     ("writer advance", "select ops.advance_workflow_cutover_stage(%s,'build_projection',null,'r',%s)",
                      (plan_a, uuid.uuid4())),
                     ("writer cancel", "select ops.cancel_workflow_cutover_plan(%s,'r',%s)", (plan_a, uuid.uuid4())),
-                    ("writer retire", "select ops.retire_workflow_cutover_plan(%s,gen_random_uuid(),'r',%s)",
-                     (plan_a, uuid.uuid4())),
                     ("writer register", "select ops.register_slice_checkable_done('s','[]'::jsonb,%s)", (uuid.uuid4(),)),
                     ("writer complete", "select ops.mark_slice_completion('s','[]'::jsonb,'r',%s)", (uuid.uuid4(),)),
                 ]:
@@ -272,14 +245,6 @@ def main() -> int:
                     cur, "select ops.mark_slice_progress('s','in_progress','[]'::jsonb,'r',%s,'joe')", (uuid.uuid4(),),
                     "authority login on the writer-only progress door", match="permission denied",
                 )
-            # No census argument exists for a caller to supply (P3).
-            retire_args = cur.execute(
-                """select array_to_string(proargnames, ',') from pg_proc
-                    where oid = 'ops.retire_workflow_cutover_plan'::regproc"""
-            ).fetchone()[0]
-            if "census" in retire_args or "actor" in retire_args:
-                return fail(f"retire still takes a caller-supplied census or actor: {retire_args}")
-
             # ================================================================
             # P1-a: an open plan never stops an already-live workflow.
             # ================================================================
@@ -319,7 +284,7 @@ def main() -> int:
             set_transition_clock(cur, plan_l, "single_write_authority", 30)
             for mode in ("live", "canary"):
                 if enqueue(cur, slots, key_l, mode) != mode:
-                    return fail(f"P1-a: {mode} enqueue refused at single_write_authority with legacy disabled")
+                    return fail(f"P1-a: {mode} enqueue refused at single_write_authority without legacy schedule contracts")
             with as_login(cur, AUTHORITY):
                 expect_refusal(
                     cur, "select ops.advance_workflow_cutover_stage(%s,'cutover',%s,'r',%s)",
@@ -351,15 +316,6 @@ def main() -> int:
             ).fetchone()[0]
             if canary_rows_now != canary_rows_at_cutover:
                 return fail("P1-a fixture: a canary receipt was added after cutover; the case proves nothing")
-            cur.execute(
-                """insert into ops.legacy_schedule_surface_registry (workflow_key,workflow_version,surface_id,locator,scheduler_kind)
-                   values (%s,1,'launchd-live','com.carr.r02gate-live.plist','launchd')""",
-                (key_l,),
-            )
-            expect_enqueue_refused(cur, slots, key_l, "live",
-                                   "live enqueue at recovery_ready with an undisabled legacy surface",
-                                   "legacy surface(s) still undisabled")
-            # Cancel is the recovery door: the plan stops governing enqueue.
             with as_login(cur, AUTHORITY):
                 cancelled = cur.execute(
                     "select status from ops.cancel_workflow_cutover_plan(%s,'recover the workflow',%s)",
@@ -423,71 +379,6 @@ def main() -> int:
                     cur, "select ops.open_workflow_cutover_plan(%s,1,'r',%s)", (key_s, uuid.uuid4()),
                     "superseding a plan at stage=retired", match="workflow_cutover_plan_supersede_refused_retired_plan",
                 )
-
-            # ================================================================
-            # Retire: receipt checks in order, then the derived census (P3).
-            # ================================================================
-            key_r = f"r02gate-{token}-retire"
-            insert_job_definition(cur, key_r)
-            cur.execute(
-                """insert into ops.job_definition
-                     (key,version,enabled,risk,execution_kind,execution_contract,
-                      recurrence,retry_policy,deduplication,completion_contract,legacy_schedule)
-                   select key,2,false,risk,execution_kind,execution_contract,recurrence,retry_policy,
-                          '{"key_template":"r02-gate-fixture-v2"}'::jsonb,completion_contract,legacy_schedule
-                     from ops.job_definition where key=%s and version=1""",
-                (key_r,),
-            )
-            plan_r = walk_to(cur, key_r, "recovery_ready")
-            wrong_version = insert_disable_receipt(cur, key_r, f"{key_r}-v2", version=2)
-            stale = insert_disable_receipt(cur, key_r, f"{key_r}-stale", approved_at="now() - interval '1 year'")
-            cur.execute(
-                """insert into ops.legacy_schedule_surface_registry (workflow_key,workflow_version,surface_id,locator,scheduler_kind)
-                   values (%s,1,'launchd-r','com.carr.r02gate-r.plist','launchd')""",
-                (key_r,),
-            )
-            # (workflow, version, surface, locator) is unique per receipt, so
-            # the consumed one names its own surface; one-use is checked
-            # before surface coverage, so that does not change what refuses it.
-            consumed = insert_disable_receipt(cur, key_r, f"{key_r}-consumed", surface="consumed-surface",
-                                              locator="consumed-locator", approved_at="now() + interval '1 day'")
-            other_plan = open_plan(cur, f"{key_n}")
-            cur.execute("insert into ops.workflow_cutover_retire_receipt_use (receipt_id, plan_id) values (%s,%s)",
-                        (consumed, other_plan))
-            valid = insert_disable_receipt(cur, key_r, f"{key_r}-valid", surface="launchd-r",
-                                           locator="com.carr.r02gate-r.plist", approved_at="now() + interval '1 day'")
-            with as_login(cur, AUTHORITY):
-                for label, receipt, match in [
-                    ("a receipt that does not exist", "00000000-0000-0000-0000-000000000000",
-                     "legacy_schedule_disable_receipt_not_found"),
-                    ("a receipt for another workflow_version", wrong_version,
-                     "legacy_schedule_disable_receipt_workflow_mismatch"),
-                    ("a receipt approved before the cutover transition", stale,
-                     "legacy_schedule_disable_receipt_predates_cutover_transition"),
-                    ("a receipt already used to retire a plan", consumed, "legacy_schedule_disable_receipt_already_used"),
-                    # Every earlier check passes for this one, so the
-                    # derived census is what refuses it.
-                    ("a fully valid plan and receipt", valid, "workflow_cutover_retire_refused_census_unknown"),
-                ]:
-                    expect_refusal(cur, "select ops.retire_workflow_cutover_plan(%s,%s,'r',%s)",
-                                   (plan_r, receipt, uuid.uuid4()), label, match=match)
-            if cur.execute("select stage, status from ops.workflow_cutover_plan where id=%s",
-                           (plan_r,)).fetchone() != ("recovery_ready", "active"):
-                return fail("a refused retire changed the plan")
-            key_m = f"r02gate-{token}-surface"
-            insert_job_definition(cur, key_m)
-            plan_m = walk_to(cur, key_m, "recovery_ready")
-            cur.execute(
-                """insert into ops.legacy_schedule_surface_registry (workflow_key,workflow_version,surface_id,locator,scheduler_kind)
-                   values (%s,1,'launchd-m','com.carr.r02gate-m.plist','launchd')""",
-                (key_m,),
-            )
-            not_covering = insert_disable_receipt(cur, key_m, f"{key_m}-other", approved_at="now() + interval '1 day'")
-            with as_login(cur, AUTHORITY):
-                expect_refusal(cur, "select ops.retire_workflow_cutover_plan(%s,%s,'r',%s)",
-                               (plan_m, not_covering, uuid.uuid4()),
-                               "a receipt that does not cover the registered legacy surface",
-                               match="legacy_schedule_disable_receipt_missing_for_")
 
             # ================================================================
             # P1-b / P1-c: slice criteria and completion.
@@ -661,8 +552,8 @@ def main() -> int:
             )
 
         print("PASS: V5-R02 SQL doors hold under production-shaped logins (authority, writer, jobs, reader): "
-              "an open plan never halts a live workflow, cancel recovers it, slice completion is reachable and "
-              "unbeatable, retire derives its census")
+              "enqueue stays available across plan stages, cancellation records its state, slice completion is reachable and "
+              "unbeatable, caller history stays append-only")
         return 0
     except Exception as exc:
         return fail(str(exc))

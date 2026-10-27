@@ -21,6 +21,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 import { closedCallable } from "./closed-callable.js";
+import { bearerCredential } from "./bearer.ts";
 
 /** Google identities permitted to be issued a token. Everything else is refused. */
 export const ALLOW_LIST = Object.freeze({
@@ -343,7 +344,7 @@ const LOCAL_SPONSOR = Object.freeze({ "joe-local": "joe", "dell-local": "dell" }
  * that matches nothing, or a slug that is not a known actor.
  */
 export function agentActorForToken(authorizationHeader, agentTokensRaw, viaLabel = "agent-token") {
-  const token = String(authorizationHeader || "").replace(/^Bearer\s+/i, "");
+  const token = bearerCredential(authorizationHeader);
   if (!token) return null;
   let tokens;
   try {
@@ -372,7 +373,7 @@ export function agentActorForToken(authorizationHeader, agentTokensRaw, viaLabel
 
 /** Match a bearer to one known sponsor in the isolated Codex continuity map. */
 export function continuityActorForTokenMaps(authorizationHeader, codexTokensRaw) {
-  const token = String(authorizationHeader || "").replace(/^Bearer\s+/i, "");
+  const token = bearerCredential(authorizationHeader);
   if (!token) return null;
   let tokens;
   try { tokens = JSON.parse(codexTokensRaw || "{}"); }
@@ -433,7 +434,7 @@ const UNATTENDED_ACTOR = Object.freeze({ joe: "joe-local" });
 const UNATTENDED_RUNNER = /^[a-z0-9][a-z0-9._-]{0,47}$/;
 
 export const unattendedActorForToken = closedCallable((authorizationHeader, unattendedTokensRaw) => {
-  const token = String(authorizationHeader || "").replace(/^Bearer\s+/i, "");
+  const token = bearerCredential(authorizationHeader);
   if (!token) return null;
   let tokens;
   try { tokens = JSON.parse(unattendedTokensRaw || "{}"); }
@@ -523,7 +524,7 @@ export const unattendedActorForToken = closedCallable((authorizationHeader, unat
 const HERMES_SPONSOR = Object.freeze({ "hermes-pilot": "joe" });
 
 export function hermesActorForToken(authorizationHeader, hermesTokensRaw) {
-  const token = String(authorizationHeader || "").replace(/^Bearer\s+/i, "");
+  const token = bearerCredential(authorizationHeader);
   if (!token) return null;
   let tokens;
   try {
@@ -557,7 +558,7 @@ export function hermesActorForTokenMaps(authorizationHeader, ...tokenMaps) {
  * marker is server-created and is the only selector for the CoS profile.
  */
 export function hermesCosActorForToken(authorizationHeader, hermesCosTokensRaw) {
-  const token = String(authorizationHeader || "").replace(/^Bearer\s+/i, "");
+  const token = bearerCredential(authorizationHeader);
   if (!token) return null;
   let tokens;
   try {
@@ -905,7 +906,7 @@ function parsedTokenMap(raw) {
  */
 function reviewActorForToken(authorizationHeader) {
   if (SERVER_REVIEW_TOKENS === null) return null;
-  const token = String(authorizationHeader || "").replace(/^Bearer\s+/i, "");
+  const token = bearerCredential(authorizationHeader);
   if (!token) return null;
   const slug = Object.keys(SERVER_REVIEW_TOKENS).find(s => SERVER_REVIEW_TOKENS[s] === token);
   if (!slug) return null;

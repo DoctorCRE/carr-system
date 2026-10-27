@@ -1,3 +1,4 @@
+import { NOW } from "./helpers/fixed-clock.mjs";
 // morning-brief.test.mjs — safe record-native morning delivery.
 //
 // This is deliberately a fake-client suite.  It proves the handler's source
@@ -13,8 +14,8 @@ const DELL = { slug: "dell", display: "Dell", human: true, via: "oauth-google", 
 const UNSPONSORED = { slug: "codex", display: "Codex", human: false, via: "agent-token" };
 
 function costFixture() {
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-  return { schema: "carr-system-costs.v1", observed_at: new Date().toISOString(),
+  const yesterday = new Date(NOW - 86400000).toISOString().slice(0, 10);
+  return { schema: "carr-system-costs.v1", observed_at: new Date(NOW).toISOString(),
     month: yesterday.slice(0, 7), through: yesterday, state: "ready",
     providers: [{ provider: "github", label: "GitHub", plan: "Usage", mtd_usd: 2.5,
       projection_usd: 10, budget_usd: 50, state: "ready", reason: null,
@@ -23,13 +24,16 @@ function costFixture() {
     alerts: [], action: "Finance Ops: inspect provider and driver; verify the next complete day; auto-clear when thresholds pass." };
 }
 
-function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture(), todayRows = null, dealRows = null, governanceQueue = null, localUpdatedAt = new Date().toISOString(), calendar = null } = {}) {
+function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture(), todayRows = null, dealRows = null, governanceQueue = null, localUpdatedAt = new Date(NOW).toISOString(), calendar = null, calendarContacts = [], calendarDeals = [], meetingPrep = [] } = {}) {
   const queries = [];
   return {
     queries,
     query: async (sql, params = []) => {
       queries.push({ sql, params });
+      if (/^(savepoint|rollback to savepoint|release savepoint) calendar_contacts/.test(sql)) return { rows: [] };
       if (unavailable && sql.includes(unavailable)) throw new Error("fixture source unavailable");
+      if (sql.includes("calendar_deal_matches")) return { rows: calendarDeals };
+      if (sql.includes("/* calendar_meeting_prep */")) return { rows: meetingPrep };
       if (sql.includes("from v_today_triage")) return { rows: todayRows || [
         { item_kind: "next_action", owner: "joe", what: "Call the client", subject_name: "Example Practice" },
       ] };
@@ -56,6 +60,7 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
         { display_name: "Renewal Safe", city: "Pensacola", est_lease_event: "2027-01-01",
           tier_status: "t1", flag_status: "clear", has_channel: true },
       ] };
+      if (sql.includes("from v_export_clients") && sql.includes("calendar_contacts")) return { rows: calendarContacts };
       if (sql.includes("from board_snapshot") && params[2] === "calendar-agenda")
         return { rows: calendar === null ? [] : [{ snapshot_json: calendar }] };
       if (sql.includes("from board_snapshot") && params[2] === "system-costs")
@@ -222,7 +227,7 @@ test("an empty partial Needs Joe list remains unavailable and names the failed s
 
 test("stale local Needs Joe evidence stays partial in the section and coverage", async () => {
   const result = await executeRegisteredTool(client({
-    localUpdatedAt: new Date(Date.now() - 3 * 3600000).toISOString(),
+    localUpdatedAt: new Date(NOW - 3 * 3600000).toISOString(),
   }), JOE, "morning-brief", {});
   assert.equal(result.sections.needs_joe.state, "partial");
   assert.equal(result.state, "partial");
@@ -365,9 +370,9 @@ test("partial cost coverage remains partial with unavailable providers visible",
 
 test("missing, stale, future, and malformed cost evidence is unavailable with a bound recovery action", async () => {
   const stale = costFixture();
-  stale.observed_at = new Date(Date.now() - 37 * 3600000).toISOString();
+  stale.observed_at = new Date(NOW - 37 * 3600000).toISOString();
   const future = costFixture();
-  future.observed_at = new Date(Date.now() + 3600000).toISOString();
+  future.observed_at = new Date(NOW + 3600000).toISOString();
   const malformed = costFixture();
   malformed.providers[0].mtd_usd = -1;
   const raw = { schema: "carr-system-costs.v1", card_number: "never-return-fixture" };
@@ -387,7 +392,7 @@ test("a failed cost board read never exposes driver error details", async () => 
   assert.doesNotMatch(JSON.stringify(result), /fixture source unavailable/);
 });
 
-function calendarFixture(now = Date.now(), observedAt = new Date(now).toISOString(), warnings = []) {
+function calendarFixture(now = NOW, observedAt = new Date(now).toISOString(), warnings = []) {
   const at = (hours) => new Date(now + hours * 3600000).toISOString();
   return { schema: "carr-calendar-agenda.v1", source: "outlook_hxstore", lifecycle: "unverified",
     observed_at: observedAt, warnings, items: [
@@ -420,11 +425,73 @@ test("morning-brief shows the partner's own published calendar for the next seve
   assert.ok(result.coverage.required_sections.some((row) => row.key === "calendar" && row.counts.items === 2));
 });
 
+test("morning-brief flags overlapping timed meetings without treating all-day entries as conflicts", async () => {
+  const now = NOW;
+  const at = hours => new Date(now + hours * 3600000).toISOString();
+  const calendar = calendarFixture(now);
+  calendar.items = [
+    { start: at(1), end: at(3), title: "Synthetic first" },
+    { start: at(2), end: at(4), title: "Synthetic overlapping" },
+    { start: at(4), end: at(5), title: "Synthetic adjacent" },
+    { start: at(0), end: at(24), title: "Synthetic all day", all_day: true },
+  ];
+  const result = await executeRegisteredTool(client({ calendar }), JOE, "morning-brief", {});
+  const overlaps = Object.fromEntries(result.sections.calendar.items.map(item => [item.title, item.schedule_conflict]));
+  assert.deepEqual(overlaps, { "Synthetic all day": false, "Synthetic first": true,
+    "Synthetic overlapping": true, "Synthetic adjacent": false });
+});
+
+test("morning-brief offers recent meeting outcomes for review without creating records", async () => {
+  const now = NOW;
+  const at = hours => new Date(now + hours * 3600000).toISOString();
+  const calendar = calendarFixture(now);
+  calendar.items = [];
+  calendar.follow_up_reviews = [{ key: "0000000000000000", title: "Synthetic outcome review",
+    start: at(-2), end: at(-1), state: "needs_review",
+    prompt: "Confirm whether this meeting happened. If it did, record the outcome and decide the next step." }];
+  const c = client({ calendar });
+  const result = await executeRegisteredTool(c, JOE, "morning-brief", {});
+  const [review] = result.sections.calendar.follow_up_reviews;
+  assert.equal(review.title, "Synthetic outcome review");
+  assert.equal(review.state, "needs_review");
+  assert.match(review.prompt, /Confirm whether this meeting happened/);
+  assert.equal(result.sections.calendar.state, "partial", "scheduled end does not verify attendance");
+  assert.ok(result.sections.calendar.notes.some(note => /not confirmed attendance/.test(note)));
+  assert.equal(result.coverage.required_sections.find(row => row.key === "calendar").counts.follow_up_reviews, 1);
+  assert.ok(c.queries.every(({ sql }) => !/\b(insert|update|delete)\b/i.test(sql)));
+});
+
+test("meeting outcome reviews expire and stale or malformed snapshots never become confirmed attendance", async () => {
+  const now = NOW;
+  const at = hours => new Date(now + hours * 3600000).toISOString();
+  const review = { key: "0000000000000000", title: "Synthetic review", start: at(-2), end: at(-1),
+    state: "needs_review", prompt: "Confirm whether this meeting happened." };
+  for (const observed of [at(-19), at(1)]) {
+    const calendar = calendarFixture(now, observed);
+    calendar.follow_up_reviews = [review];
+    const result = await executeRegisteredTool(client({ calendar }), JOE, "morning-brief", {});
+    assert.deepEqual(result.sections.calendar.follow_up_reviews, []);
+    assert.equal(result.sections.calendar.state, "partial");
+  }
+  const calendar = calendarFixture(now);
+  calendar.follow_up_reviews = [{ ...review, start: at(-26), end: at(-24) },
+    { ...review, start: at(1), end: at(2) }, { ...review, end: "invalid" },
+    { ...review, state: "completed" }, review, { ...review, key: 1234567890123456 }];
+  const result = await executeRegisteredTool(client({ calendar }), JOE, "morning-brief", {});
+  assert.equal(result.sections.calendar.follow_up_reviews.length, 1);
+  assert.ok(result.sections.calendar.notes.some(note => /3 stored meeting outcome reviews could not be shown/.test(note)));
+  calendar.follow_up_reviews = {};
+  const malformed = await executeRegisteredTool(client({ calendar }), JOE, "morning-brief", {});
+  assert.deepEqual(malformed.sections.calendar.follow_up_reviews, []);
+  assert.equal(malformed.sections.calendar.state, "partial");
+});
+
 test("every known gap becomes a plain sentence and the section is partial, never ready", async () => {
   const warnings = [{ code: "responses_unverified" }, { code: "group_invites_not_shown" },
     { code: "undecoded", count: 3 }, { code: "time_changed", count: 1 }, { code: "recurring_unverified", count: 2 },
-    { code: "trimmed", count: 4 }, { code: "canceled_hidden", count: 2 }, { code: "something_new" }];
-  const result = await executeRegisteredTool(client({ calendar: calendarFixture(Date.now(), undefined, warnings) }), JOE, "morning-brief", {});
+    { code: "follow_up_trimmed", count: 2 }, { code: "trimmed", count: 4 },
+    { code: "canceled_hidden", count: 2 }, { code: "something_new" }];
+  const result = await executeRegisteredTool(client({ calendar: calendarFixture(NOW, undefined, warnings) }), JOE, "morning-brief", {});
   const calendar = result.sections.calendar;
   assert.equal(calendar.state, "partial");
   assert.equal(result.state, "partial");
@@ -434,13 +501,14 @@ test("every known gap becomes a plain sentence and the section is partial, never
     "3 calendar items in Outlook couldn't be read, so meetings may be missing.",
     "1 meeting has more than one stored time. Check Outlook for the current time.",
     "Recurring meetings show only the occurrences Outlook stored; some may be missing.",
+    "2 meeting outcome reviews were left out to keep the brief small.",
     "4 later meetings were left out to keep the brief small.",
     "2 cancelled meetings were left out.",
     "This calendar has a gap the brief cannot describe. Check Outlook.",
   ]);
   assert.ok(result.coverage.required_sections.some((row) => row.key === "calendar"
     && row.incomplete_sources.some((source) => source.key === "outlook_calendar")));
-  const empty = calendarFixture(Date.now(), undefined, [{ code: "recurring_unverified" }]);
+  const empty = calendarFixture(NOW, undefined, [{ code: "recurring_unverified" }]);
   empty.items = [];
   const none = await executeRegisteredTool(client({ calendar: empty }), JOE, "morning-brief", {});
   assert.equal(none.sections.calendar.state, "partial", "an empty day with unexpanded series is not empty");
@@ -454,9 +522,9 @@ test("morning-brief omits the calendar for a partner with no published calendar,
 
 test("a stale, malformed or unreadable calendar is partial or unavailable, never ready", async () => {
   const day = 86400000;
-  const stale = await executeRegisteredTool(client({ calendar: calendarFixture(Date.now(), new Date(Date.now() - day).toISOString()) }), JOE, "morning-brief", {});
+  const stale = await executeRegisteredTool(client({ calendar: calendarFixture(NOW, new Date(NOW - day).toISOString()) }), JOE, "morning-brief", {});
   assert.equal(stale.sections.calendar.state, "partial");
-  assert.deepEqual(stale.sections.calendar.sources, { outlook_calendar: { state: "stale" } });
+  assert.equal(stale.sections.calendar.sources.outlook_calendar.state, "stale");
   const broken = calendarFixture();
   broken.items.push({ start: "not a time", end: null, title: "" });
   const malformed = await executeRegisteredTool(client({ calendar: broken }), JOE, "morning-brief", {});
@@ -469,4 +537,96 @@ test("a stale, malformed or unreadable calendar is partial or unavailable, never
   }
   const failed = await executeRegisteredTool(client({ unavailable: "board_id=$3" }), JOE, "morning-brief", {});
   assert.equal(failed.sections.calendar.state, "unavailable");
+});
+
+
+test("morning-brief connects meetings to all exact matching record contacts", async () => {
+  const c = client({ calendar: calendarFixture(), calendarContacts: [
+    { email: "bo@example.test", kind: "client", ref: "C-101", name: "Bo Example" },
+    { email: "bo@example.test", kind: "lead", ref: "L-102", name: "Bo Example" },
+    { email: "ada@example.test", kind: "vendor", ref: "V-103", name: "Ada Example" },
+  ] });
+  const result = await executeRegisteredTool(c, JOE, "morning-brief", {});
+  assert.deepEqual(result.sections.calendar.items[1].contacts, [
+    { kind: "client", ref: "C-101", name: "Bo Example" },
+    { kind: "lead", ref: "L-102", name: "Bo Example" },
+    { kind: "vendor", ref: "V-103", name: "Ada Example" },
+  ]);
+  assert.deepEqual(result.sections.calendar.items[0].contacts, []);
+});
+
+test("morning-brief keeps meetings and reports unavailable contact context", async () => {
+  const c = client({ calendar: calendarFixture(), unavailable: "calendar_contacts" });
+  const result = await executeRegisteredTool(c, JOE, "morning-brief", {});
+  assert.equal(result.sections.calendar.state, "partial");
+  assert.equal(result.sections.calendar.items.length, 2);
+  assert.equal(result.sections.calendar.sources.record_contacts.state, "unavailable");
+});
+
+test("morning-brief suggests open deals for meetings with an exact client email", async () => {
+  const c = client({ calendar: calendarFixture() });
+  const query = c.query;
+  c.query = async (sql, params) => sql.includes('calendar_deal_matches')
+    ? (c.queries.push({ sql, params }), { rows: [
+      { email: 'bo@example.test', id: 'deal-1', name: 'Synthetic Deal', client_ref: 'C-101' },
+      { email: 'bo@example.test', id: 'deal-2', name: 'Another Deal', client_ref: 'C-101' },
+    ] }) : query(sql, params);
+  const result = await executeRegisteredTool(c, JOE, 'morning-brief', {});
+  assert.deepEqual(result.sections.calendar.items[1].possible_deals, [
+    { id: 'deal-1', name: 'Synthetic Deal', client_ref: 'C-101', prep: { state: 'unavailable' } },
+    { id: 'deal-2', name: 'Another Deal', client_ref: 'C-101', prep: { state: 'unavailable' } },
+  ]);
+  assert.deepEqual(result.sections.calendar.items[0].possible_deals, []);
+  assert.equal(result.sections.calendar.sources.meeting_prep.state, 'partial');
+  const lookup = c.queries.find(({ sql }) => sql.includes('calendar_deal_matches'));
+  assert.equal(lookup.params[1], 'joe');
+});
+
+test("morning-brief keeps meetings visible when deal suggestions cannot be read", async () => {
+  const result = await executeRegisteredTool(client({ calendar: calendarFixture(), unavailable: "calendar_deal_matches" }), JOE, "morning-brief", {});
+  assert.equal(result.sections.calendar.items.length, 2);
+  assert.equal(result.sections.calendar.state, "partial");
+  assert.equal(result.sections.calendar.sources.deal_suggestions.state, "unavailable");
+});
+
+
+test("morning-brief prepares possible meeting deals in the authenticated partner's calendar", async () => {
+  const deal = "11111111-1111-4111-8111-111111111111";
+  const c = client({ calendar: calendarFixture(),
+    calendarDeals: [{ email: "bo@example.test", id: deal, name: "Synthetic lease", client_ref: "C-TEST" }],
+    meetingPrep: [{ id: deal, phase: "negotiation", next_step: "Review counteroffer",
+      next_date: "2026-11-02", last_touch: "2026-10-25", market: "Test City" }] });
+  const result = await executeRegisteredTool(c, { slug: "codex", human: false, via: "oauth-google",
+    sponsoring_human_slug: "joe" }, "morning-brief", {});
+  const calendar = result.sections.calendar;
+  assert.deepEqual(calendar.items[1].possible_deals[0].prep, { state: "ready", phase: "negotiation",
+    next_step: "Review counteroffer", next_date: "2026-11-02", last_touch: "2026-10-25", market: "Test City" });
+  assert.equal(calendar.sources.meeting_prep.state, "ready");
+  assert.equal(calendar.match_basis, "attendee_email_possible_match");
+  assert.deepEqual(c.queries.find(({ sql }) => sql.includes("/* calendar_meeting_prep */")).params, [[deal], "joe"]);
+});
+
+
+test("morning-brief keeps meetings and reports failed preparation without losing source warnings", async () => {
+  const c = client({ calendar: calendarFixture(NOW, undefined, [{ code: "responses_unverified" }]),
+    calendarDeals: [{ email: "bo@example.test", id: "11111111-1111-4111-8111-111111111111",
+      name: "Synthetic lease", client_ref: "C-TEST" }], unavailable: "/* calendar_meeting_prep */" });
+  const result = await executeRegisteredTool(c, JOE, "morning-brief", {});
+  const calendar = result.sections.calendar;
+  assert.equal(calendar.state, "partial");
+  assert.equal(calendar.items.length, 2);
+  assert.deepEqual(calendar.items[1].possible_deals[0].prep, { state: "unavailable" });
+  assert.equal(calendar.sources.meeting_prep.state, "unavailable");
+  assert.ok(calendar.notes.some(note => note.includes("cancelled")));
+  assert.ok(calendar.notes.some(note => note.includes("preparation could not be checked")));
+  assert.doesNotMatch(JSON.stringify(result), /fixture source unavailable/);
+  assert.equal(result.coverage.required_sections.find(row => row.key === "calendar").state, "partial");
+});
+
+test("morning-brief skips preparation reads when no meeting has a possible deal", async () => {
+  const c = client({ calendar: calendarFixture() });
+  const result = await executeRegisteredTool(c, JOE, "morning-brief", {});
+  assert.equal(result.sections.calendar.state, "ready");
+  assert.ok(result.sections.calendar.items.every(item => item.possible_deals.length === 0));
+  assert.equal(c.queries.some(({ sql }) => sql.includes("/* calendar_meeting_prep */")), false);
 });

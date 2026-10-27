@@ -186,20 +186,11 @@ function preferences(harnessed) {
 const prefRows = async client =>
   Number((await client.query("select count(*) n from ops.notification_preference")).rows[0].n);
 
-/**
- * The zone in which the CURRENT instant is inside the given local window,
- * computed in the test's OWN SQL. A hard-coded zone name passes for eight
- * months and fails in one; this one is deterministic at any wall-clock hour.
- */
-async function zoneWhereLocalTimeIsIn(client, from, to) {
-  const row = (await client.query(
-    `select name from pg_timezone_names
-      where (now() at time zone name)::time >= $1::time
-        and (now() at time zone name)::time <  $2::time
-        and name like '%/%'
-      order by name limit 1`, [from, to])).rows[0];
-  assert.ok(row, `no timezone currently sits between ${from} and ${to}`);
-  return row.name;
+async function fixedQuietClock(client) {
+  const { definition } = (await client.query(
+    "select pg_get_functiondef('ops.notification_quiet_now(uuid)'::regprocedure) as definition")).rows[0];
+  await client.query(definition.replaceAll('now()', "'2026-10-27 07:00:00+00'::timestamptz"));
+  return () => client.query(definition);
 }
 
 test("AC-PREF-READ: the schema accepts no property at all", () => {
@@ -435,9 +426,7 @@ test("AC-PREF-WRITE: exactly one of start/end is refused by name before any writ
 // AC-PREF-FEED. The shaper half is pure and runs in every class; the live half
 // (the promoted production Worker) is release-time and is not claimed here.
 //
-// CLOCK CONTROL IS THE TRAP. now() is constant inside a transaction, which
-// makes one call deterministic, but a test cannot wait for 02:00. These cases
-// move the TIMEZONE, not the clock, and pick it in SQL.
+// These cases pin the database clock while comparing two real timezones.
 // ---------------------------------------------------------------------------
 
 const feedFacts = (delivery = []) => ({
@@ -490,10 +479,13 @@ test("AC-PREF-FEED wrap-around: quiet hours 22:00-07:00 in a zone where it is 02
     const pg = await skipUnlessDatabase(t);
     if (!pg) return;
     const client = await connect(pg);
-    t.after(() => client.end().catch(() => {}));
+    const restoreClock = await fixedQuietClock(client);
+    t.after(async () => {
+      try { await restoreClock(); } finally { await client.end(); }
+    });
     const c = wrap(client);
     const { joe } = await fixtureActors(client);
-    const night = await zoneWhereLocalTimeIsIn(client, "02:00", "03:00");
+    const night = "America/Chicago";
     await client.query("delete from ops.notification_preference where actor=$1", [joe.id]);
     await client.query(
       `insert into ops.notification_preference(actor, device_opt_in, quiet_hours_start,
@@ -523,10 +515,13 @@ test("AC-PREF-FEED daytime: quiet hours 09:00-17:00 in a zone where it is 12:00 
     const pg = await skipUnlessDatabase(t);
     if (!pg) return;
     const client = await connect(pg);
-    t.after(() => client.end().catch(() => {}));
+    const restoreClock = await fixedQuietClock(client);
+    t.after(async () => {
+      try { await restoreClock(); } finally { await client.end(); }
+    });
     const c = wrap(client);
     const { joe } = await fixtureActors(client);
-    const day = await zoneWhereLocalTimeIsIn(client, "12:00", "13:00");
+    const day = "Asia/Karachi";
     await client.query("delete from ops.notification_preference where actor=$1", [joe.id]);
     await client.query(
       `insert into ops.notification_preference(actor, device_opt_in, quiet_hours_start,
@@ -543,11 +538,14 @@ test("AC-PREF-FEED: two zones, one instant, one stored window, opposite answers"
     const pg = await skipUnlessDatabase(t);
     if (!pg) return;
     const client = await connect(pg);
-    t.after(() => client.end().catch(() => {}));
+    const restoreClock = await fixedQuietClock(client);
+    t.after(async () => {
+      try { await restoreClock(); } finally { await client.end(); }
+    });
     const c = wrap(client);
     const { joe } = await fixtureActors(client);
-    const night = await zoneWhereLocalTimeIsIn(client, "02:00", "03:00");
-    const day = await zoneWhereLocalTimeIsIn(client, "12:00", "13:00");
+    const night = "America/Chicago";
+    const day = "Asia/Karachi";
     const read = async zone => {
       await client.query(
         `insert into ops.notification_preference(actor, device_opt_in, quiet_hours_start,

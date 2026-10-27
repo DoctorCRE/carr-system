@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test Cloudflare token validation and management.
 import importlib.util
 import json
 import sys

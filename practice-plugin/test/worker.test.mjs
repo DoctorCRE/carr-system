@@ -1,3 +1,4 @@
+// Test MCP worker transport, tools, and request isolation.
 import test from 'node:test';
 import { PUBLIC_TOOLS } from '../src/modern.mjs';
 import assert from 'node:assert/strict';

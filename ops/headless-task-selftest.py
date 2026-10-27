@@ -131,6 +131,15 @@ print(sys.argv[sys.argv.index('--correlation')+1]+' aa000000-0000-4000-8000-0000
             settings['tasks'][task_id].update(cron=f'0 9 {days} * *', monthly=True)
         path.write_text(json.dumps(settings))
 
+    def test_retired_source_tasks_refuse_execution_before_model(self):
+        source = REPO/'ops/headless-tasks/tasks.json'
+        (self.repo/'ops/headless-tasks/tasks.json').write_bytes(source.read_bytes())
+        for task_id in ('deal-history-research-weekly', 'restore-rehearse-weekly'):
+            with self.subTest(task_id=task_id):
+                result = self.run_task(task_id=task_id)
+                self.assertEqual(result.returncode, 2, result.stdout+result.stderr)
+                self.assertFalse((self.home/'args.json').exists())
+
     def test_step0_stops_weekly_completion_before_model(self):
         self.configure_task('radar-weekly')
         folder = self.repo/'out/headless/radar-weekly'

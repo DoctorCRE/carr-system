@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Run database gates and SQL proofs with isolated fixtures and execution records."""
 # doctrine: engineering-workflow-sop
 from __future__ import annotations
 
@@ -211,18 +212,6 @@ def run_isolated(gate, image, log, env):
         fixture.close()
 
 
-def partition_gates(gates, partition, *, rollback_only=ROLLBACK_ONLY_GATES):
-    if partition == 'all':
-        return gates
-    if partition == 'serial':
-        serial = [g for g in gates if g.name not in rollback_only]
-        head = [g for g in serial if needed_by_isolated(g)]
-        return head + [g for g in serial if g not in head]
-    if partition == 'isolated':
-        return [g for g in gates if g.name in rollback_only or needed_by_isolated(g)]
-    raise ValueError('unknown gate partition')
-
-
 def run_gates(dsn, gates, logdir, *, rollback_only=ROLLBACK_ONLY_GATES):
     parsed = urlsplit(dsn)
     if parsed.scheme not in ('postgres', 'postgresql') or parsed.hostname not in ('localhost', '127.0.0.1'):
@@ -277,6 +266,7 @@ def run_gates(dsn, gates, logdir, *, rollback_only=ROLLBACK_ONLY_GATES):
         if rc:
             failures.append(gate.name)
             print('\n'.join(lines[-20:]), file=sys.stderr)
+    record_programs(logdir, [(f'db-gate-{g.name}', rc, s) for g, rc, s, _ in results])
     print('db-gate-timing:' + ' '.join(f'{g.stem}={s}s' for g, _, s, _ in sorted(results, key=lambda r: -r[2])))
     wall = int(time.monotonic() - started)
     summed = sum(s for _, _, s, _ in results) + sum(sum(v) - max(v) for v in SHARD_SECONDS.values())
@@ -287,6 +277,12 @@ def run_gates(dsn, gates, logdir, *, rollback_only=ROLLBACK_ONLY_GATES):
     if failures:
         print('db-gate-failed: ' + ' '.join(failures), file=sys.stderr)
     return int(bool(failures))
+
+
+def record_programs(logdir, rows):
+    """Append (name, exit, seconds) rows to ops/ci.sh's per-program record (WR-000542)."""
+    with (logdir / 'programs.tsv').open('a') as out:
+        out.writelines(f'migration\t{name}\t{rc}\t0\t{seconds}\n' for name, rc, seconds in rows)
 
 
 def clone_dsn(dsn, database):
@@ -366,6 +362,8 @@ def run_sql_proofs(dsn, proofs, logdir, psql='psql'):
         timings.append(f'{path.stem}={max(seconds)}s' + (f'[{"/".join(f"{s}s" for s in seconds)}]' if len(seconds) > 1 else ''))
         if len(runs) > 1:
             (logdir / f'{path.stem}.log').write_text('\n'.join(texts))
+    record_programs(logdir, [(path.name + (f'.shard{k}' if shards > 1 else ''), rc, seconds)
+                             for path, k, shards, rc, seconds, _ in outcomes])
     wall = int(time.monotonic() - started)
     summed = sum(s for *_, s, _ in outcomes)
     print(f'sql-proof-timing: {" ".join(timings)} clone-setup={setup_seconds}s wall={wall}s '
@@ -382,12 +380,11 @@ def main():
     parser.add_argument('--sql-proof', action='append', default=[], metavar='FILE[:SHARDS]',
                         help='run a rollback-only SQL proof (split into SHARDS sessions) instead of Python gates')
     parser.add_argument('--psql', default='psql')
-    parser.add_argument('--partition', choices=('all', 'serial', 'isolated'), default='all')
     parser.add_argument('gates', nargs='*', type=Path)
     args = parser.parse_args()
     if args.sql_proof:
-        if args.gates or args.partition != 'all':
-            parser.error('--sql-proof and partitioned gate files are separate runs')
+        if args.gates:
+            parser.error('--sql-proof and gate files are separate runs')
         proofs = []
         for spec in args.sql_proof:
             path, _, shards = spec.partition(':')
@@ -395,7 +392,7 @@ def main():
         return run_sql_proofs(os.environ['DATABASE_URL'], proofs, args.logdir, args.psql)
     if not args.gates:
         parser.error('no gates given')
-    return run_gates(os.environ['DATABASE_URL'], partition_gates(args.gates, args.partition), args.logdir)
+    return run_gates(os.environ['DATABASE_URL'], args.gates, args.logdir)
 
 
 if __name__ == '__main__':
