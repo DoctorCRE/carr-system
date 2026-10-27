@@ -1,14 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { executeRegisteredTool } from "../src/tools.js";
+import { NOW } from "./helpers/fixed-clock.mjs";
 
 const JOE = { slug: "joe", human: true, via: "oauth-google" };
-const base = Date.now() + 3_600_000;
+const base = NOW + 3_600_000;
 const at = minutes => new Date(base + minutes * 60_000).toISOString();
 const meeting = (title, start, end, extra = {}) => ({ title, start: at(start), end: at(end), ...extra });
 
 async function read(items, extra = {}) {
-  const snapshot = { schema: "carr-calendar-agenda.v1", observed_at: new Date().toISOString(),
+  const snapshot = { schema: "carr-calendar-agenda.v1", observed_at: new Date(NOW).toISOString(),
     warnings: [], items, ...extra };
   const c = { query: async sql => {
     if (sql.includes("from board_snapshot")) return { rows: [{ snapshot_json: snapshot }] };
@@ -71,7 +72,7 @@ test("a visible meeting explains a conflict with a meeting beyond the agenda dis
 
 test("conflict details preserve stale-source and attendance uncertainty warnings", async () => {
   const result = await read([meeting("Synthetic review", 0, 60), meeting("Synthetic call", 30, 90)],
-    { observed_at: new Date(Date.now() - 19 * 3_600_000).toISOString(),
+    { observed_at: new Date(NOW - 19 * 3_600_000).toISOString(),
       warnings: [{ code: "responses_unverified" }, { code: "time_changed" }] });
   assert.equal(result.state, "partial");
   assert.equal(result.sources.outlook_calendar.state, "stale");
