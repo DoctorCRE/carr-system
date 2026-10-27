@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 
 const root = new URL("../../", import.meta.url);
-const launchers = new Set(["mcp-server/test/helpers/chrome-launch.mjs", "practice-plugin/test/browser.mjs", "deliverables/instagram-grid-reset-2026-08-11/render.mjs"]);
+const launchers = new Set(["mcp-server/test/helpers/chrome-launch.mjs", "practice-plugin/test/browser.mjs", "deliverables/instagram-grid-reset-2026-08-11/render.mjs", "mcp-server/portal-parity/browser.mjs"]);
 const ignored = new Set([".git", "node_modules", ".venv", "__pycache__", "out"]);
 
 async function* sources(directory = "") {

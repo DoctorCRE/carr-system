@@ -1,0 +1,6257 @@
+{
+ "schema": "carr.portal-parity-probes.v1",
+ "note": "One probe per inventory row of docs/client-portal/standard-site-design.md. Structural selectors, field paths and kinds only; no client values.",
+ "aliases": {
+  "brand-link": "client-brand-link",
+  "logo-asset": "client-logo-asset",
+  "logo-fallback": "client-logo-fallback",
+  "overlay-label": "overlay-map-label",
+  "csrf-header": "X-CSRF-Token",
+  "slug": "example-health",
+  "retired-photo-1": "files/retired-photo-1",
+  "retired-photo-2": "files/retired-photo-2",
+  "retired-photo-3": "files/retired-photo-3",
+  "retired-photo-4": "files/retired-photo-4",
+  "project-anchors-file": "files/project-anchors.geojson",
+  "asset-manifest-file": "files/asset-manifest.json",
+  "location-illustration-file": "files/location-illustration.svg",
+  "water-layer-match": "water[^/]*\\.geojson$",
+  "roads-layer-match": "roads[^/]*\\.geojson$",
+  "anchors-layer-match": "context-anchors[^/]*\\.geojson$"
+ },
+ "probes": [
+  {
+   "id": "A-G01",
+   "td": "T+D",
+   "kind": "http",
+   "retired": "AD8"
+  },
+  {
+   "id": "A-G02",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "@bare"
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G03",
+   "td": "T+D",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": ""
+    }
+   ],
+   "stage0": true,
+   "fields": [
+    "/client/display_name",
+    "/client/wordmark/line1"
+   ]
+  },
+  {
+   "id": "A-G04",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "POST",
+     "path": "",
+     "sign_in": true
+    }
+   ],
+   "stage0": true,
+   "allowed": [
+    "AD2"
+   ]
+  },
+  {
+   "id": "A-G05",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "POST",
+     "path": "",
+     "headers": {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Origin": "@origin"
+     },
+     "body": "password=parity-probe-wrong-password"
+    }
+   ],
+   "stage0": true,
+   "allowed": [
+    "AD2"
+   ]
+  },
+  {
+   "id": "A-G06",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "",
+     "session": true
+    },
+    {
+     "method": "GET",
+     "path": "styles.css",
+     "session": true
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G07",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "auth/status",
+     "session": true
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G08",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "POST",
+     "path": "auth/logout",
+     "session": true,
+     "csrf": true,
+     "headers": {
+      "Origin": "@origin"
+     }
+    }
+   ]
+  },
+  {
+   "id": "A-G09",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "api/selection",
+     "session": true
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G10",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "PUT",
+     "path": "api/selection",
+     "session": true,
+     "csrf": true,
+     "headers": {
+      "Origin": "@origin",
+      "Content-Type": "application/json"
+     },
+     "body": {
+      "json": {
+       "version": -1,
+       "selected_ids": []
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "A-G11",
+   "td": "T+D",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "api/selection",
+     "session": true
+    }
+   ],
+   "stage0": true,
+   "fields": [
+    "/properties/*/id"
+   ],
+   "allowed": [
+    "AD2"
+   ]
+  },
+  {
+   "id": "A-G12",
+   "td": "T+D",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "PUT",
+     "path": "api/selection",
+     "session": true,
+     "csrf": true,
+     "headers": {
+      "Origin": "@origin",
+      "Content-Type": "application/json"
+     },
+     "body": {
+      "json": {
+       "version": 0,
+       "selected_ids": [
+        "parity-probe-unknown-id"
+       ]
+      }
+     }
+    }
+   ],
+   "fields": [
+    "/properties/*/id"
+   ]
+  },
+  {
+   "id": "A-G13",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "a//b"
+    },
+    {
+     "method": "GET",
+     "path": "%5C"
+    },
+    {
+     "method": "GET",
+     "path": "",
+     "session": true
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G14",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "parity-probe-missing.txt"
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G15",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": ""
+    }
+   ],
+   "fault": "secrets-unconfigured"
+  },
+  {
+   "id": "A-G16",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "DELETE",
+     "path": ""
+    },
+    {
+     "method": "POST",
+     "path": "styles.css",
+     "headers": {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Origin": "@origin"
+     },
+     "body": "password=x"
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G17",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "POST",
+     "path": "",
+     "headers": {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Origin": "@cross-origin"
+     },
+     "body": "password=x"
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G18",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "POST",
+     "path": "",
+     "headers": {
+      "Content-Type": "text/plain",
+      "Origin": "@origin"
+     },
+     "body": "password=x"
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G19",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "POST",
+     "path": "",
+     "headers": {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Origin": "@origin"
+     },
+     "body": {
+      "repeat": {
+       "text": "a",
+       "times": 3000
+      }
+     }
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G20",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "POST",
+     "path": "",
+     "headers": {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Origin": "@origin"
+     },
+     "body": {
+      "bytes": [
+       112,
+       61,
+       255
+      ]
+     }
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G21",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "HEAD",
+     "path": ""
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G22",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "styles.css",
+     "session": true
+    }
+   ],
+   "fault": "asset-unreadable"
+  },
+  {
+   "id": "A-G23",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "DELETE",
+     "path": "api/selection",
+     "session": true
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G24",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "api/selection"
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G25",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "PUT",
+     "path": "api/selection",
+     "session": true,
+     "headers": {
+      "Origin": "@cross-origin",
+      "Content-Type": "application/json"
+     },
+     "body": {
+      "json": {}
+     }
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G26",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "PUT",
+     "path": "api/selection",
+     "session": true,
+     "csrf": true,
+     "headers": {
+      "Origin": "@origin",
+      "Content-Type": "text/plain"
+     },
+     "body": "x"
+    }
+   ]
+  },
+  {
+   "id": "A-G27",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "PUT",
+     "path": "api/selection",
+     "session": true,
+     "csrf": true,
+     "headers": {
+      "Origin": "@origin",
+      "Content-Type": "application/json"
+     },
+     "body": {
+      "repeat": {
+       "text": " ",
+       "times": 100000
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "A-G28",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "PUT",
+     "path": "api/selection",
+     "session": true,
+     "csrf": true,
+     "headers": {
+      "Origin": "@origin",
+      "Content-Type": "application/json"
+     },
+     "body": {
+      "json": {
+       "version": "invalid"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "A-G29",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "api/selection",
+     "session": true
+    }
+   ],
+   "fault": "storage-unavailable"
+  },
+  {
+   "id": "A-G30",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "POST",
+     "path": "auth/status",
+     "headers": {
+      "Origin": "@origin"
+     }
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G31",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "auth/status"
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G32",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "auth/logout"
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G33",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "POST",
+     "path": "auth/logout",
+     "headers": {
+      "Origin": "@origin"
+     }
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G34",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "POST",
+     "path": "auth/logout",
+     "session": true,
+     "headers": {
+      "Origin": "@cross-origin"
+     }
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "A-G35",
+   "td": "T",
+   "kind": "http",
+   "retired": "AD8"
+  },
+  {
+   "id": "A-G36",
+   "td": "T",
+   "kind": "http",
+   "retired": "AD8"
+  },
+  {
+   "id": "A-G37",
+   "td": "T",
+   "kind": "http",
+   "retired": "AD8"
+  },
+  {
+   "id": "A-G38",
+   "td": "T",
+   "kind": "http",
+   "retired": "AD8"
+  },
+  {
+   "id": "A-G39",
+   "td": "T",
+   "kind": "http",
+   "retired": "AD8"
+  },
+  {
+   "id": "A-S01",
+   "td": "T",
+   "kind": "dom",
+   "view": "home",
+   "steps": [
+    {
+     "scroll": 600
+    },
+    {
+     "wait": 250
+    }
+   ],
+   "target": ".scroll-progress",
+   "motion": true
+  },
+  {
+   "id": "A-S02",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "home",
+   "target": ".site-header",
+   "fields": [
+    "/client/display_name",
+    "/client/wordmark/line1",
+    "/client/logo"
+   ]
+  },
+  {
+   "id": "A-S03",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "home",
+   "target": "#sticky-page-title",
+   "fields": [
+    "/market/home_title"
+   ]
+  },
+  {
+   "id": "A-S04",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "home",
+   "target": ".site-footer",
+   "fields": [
+    "/client/display_name",
+    "/prepared/on",
+    "/market/footer_note"
+   ]
+  },
+  {
+   "id": "A-S05",
+   "td": "T",
+   "kind": "dom",
+   "view": "home",
+   "target": "#home"
+  },
+  {
+   "id": "A-S06",
+   "td": "D",
+   "kind": "dom",
+   "view": "home",
+   "target": ".home-market-intro",
+   "fields": [
+    "/client/logo",
+    "/prepared/for",
+    "/prepared/on",
+    "/market/headline",
+    "/market/intro"
+   ]
+  },
+  {
+   "id": "A-S07",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "home",
+   "target": ".home-mini-map",
+   "fields": [
+    "/market/mini_map_caption"
+   ]
+  },
+  {
+   "id": "A-S08",
+   "td": "D",
+   "kind": "dom",
+   "view": "home",
+   "target": ".home-market-snapshot",
+   "fields": [
+    "/market/snapshot/*/value",
+    "/market/snapshot/*/label"
+   ]
+  },
+  {
+   "id": "A-S09",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "home",
+   "target": ".development-section",
+   "fields": [
+    "/developments/*/title",
+    "/developments/*/status",
+    "/developments/*/summary"
+   ]
+  },
+  {
+   "id": "A-S10",
+   "td": "T",
+   "kind": "dom",
+   "view": "home",
+   "target": "#home > .home-actions"
+  },
+  {
+   "id": "A-S11",
+   "td": "T",
+   "kind": "dom",
+   "view": "purchases",
+   "target": "#purchases"
+  },
+  {
+   "id": "A-S12",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "purchases",
+   "target": ".selection-intro",
+   "fields": [
+    "/purchases/intro",
+    "/purchases/screening_factors/*/title"
+   ]
+  },
+  {
+   "id": "A-S13",
+   "td": "T",
+   "kind": "dom",
+   "view": "purchases",
+   "target": "#purchase-map"
+  },
+  {
+   "id": "A-S14",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "purchases",
+   "target": "#property-directory",
+   "fields": [
+    "/properties/*/address",
+    "/properties/*/photo",
+    "/properties/*/status"
+   ]
+  },
+  {
+   "id": "A-S15",
+   "td": "T",
+   "kind": "dom",
+   "view": "purchases",
+   "target": "#purchases .purchase-tour-cta"
+  },
+  {
+   "id": "A-S16",
+   "td": "T",
+   "kind": "dom",
+   "view": "strategy",
+   "target": "#strategy"
+  },
+  {
+   "id": "A-S17",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "strategy",
+   "target": "#strategy > p:first-child",
+   "fields": [
+    "/ownership/copy/intro"
+   ]
+  },
+  {
+   "id": "A-S18",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "strategy",
+   "target": ".strategy-benefits",
+   "fields": [
+    "/ownership/copy/benefits/*/title",
+    "/ownership/program/min_share",
+    "/ownership/program/min_sf"
+   ]
+  },
+  {
+   "id": "A-S19",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "strategy",
+   "target": "#strategy .ownership-assumptions, #shared-assumption-note",
+   "fields": [
+    "/ownership/defaults/financed_pct",
+    "/ownership/defaults/rate",
+    "/properties/*/ownership/current_income_annual"
+   ]
+  },
+  {
+   "id": "A-S20",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "strategy",
+   "target": ".allocation-card",
+   "fields": [
+    "/properties/*/ownership/total_sf",
+    "/ownership/program/min_share"
+   ]
+  },
+  {
+   "id": "A-S21",
+   "td": "T",
+   "kind": "dom",
+   "view": "strategy",
+   "target": ".visual-card:has(#coverage-chart)"
+  },
+  {
+   "id": "A-S22",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "strategy",
+   "target": "#strategy .presentation-stage:has(#ownership-comparison)",
+   "fields": [
+    "/properties/*/ownership/asking_price",
+    "/properties/*/summary"
+   ]
+  },
+  {
+   "id": "A-S23",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "strategy",
+   "target": "#strategy .presentation-stage:has(#ownership-carry-table)",
+   "fields": [
+    "/ownership/defaults/ti_options",
+    "/properties/*/ownership/current_income_annual"
+   ]
+  },
+  {
+   "id": "A-S24",
+   "td": "T",
+   "kind": "dom",
+   "view": "strategy",
+   "target": "#strategy .presentation-stage:has(#equity-chart)"
+  },
+  {
+   "id": "A-S25",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "strategy",
+   "target": ".strategy-disclosures",
+   "fields": [
+    "/ownership/copy/methods"
+   ]
+  },
+  {
+   "id": "A-S26",
+   "td": "T",
+   "kind": "dom",
+   "view": "tour",
+   "target": "#tour"
+  },
+  {
+   "id": "A-S27",
+   "td": "T",
+   "kind": "dom",
+   "view": "demographics",
+   "target": "#demographics"
+  },
+  {
+   "id": "A-S28",
+   "td": "D",
+   "kind": "dom",
+   "view": "demographics",
+   "target": ".regional-growth",
+   "fields": [
+    "/demographics/growth/tiles/*/value",
+    "/demographics/growth/reach_note"
+   ]
+  },
+  {
+   "id": "A-S29",
+   "td": "T",
+   "kind": "dom",
+   "view": "demographics",
+   "target": "#demographics > h2"
+  },
+  {
+   "id": "A-S30",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "demographics",
+   "target": ".demo-compare",
+   "fields": [
+    "/demographics/median_income/geographies/*/value"
+   ]
+  },
+  {
+   "id": "A-S31",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "demographics",
+   "target": "#demographics > .regional-context:not(.micro-zone-section):not(#competition-context)",
+   "fields": [
+    "/demographics/income_bands/areas/*/households",
+    "/demographics/income_bands/notes"
+   ]
+  },
+  {
+   "id": "A-S32",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "demographics",
+   "target": "#micro-zone-context",
+   "fields": [
+    "/demographics/micro_zones/zones/*/name",
+    "/demographics/micro_zones/zones/*/study_pdf"
+   ]
+  },
+  {
+   "id": "A-S33",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "demographics",
+   "target": "#competition-context",
+   "fields": [
+    "/demographics/competition/offices/*/name",
+    "/demographics/competition/markets",
+    "/demographics/competition/scope_note"
+   ]
+  },
+  {
+   "id": "A-S34",
+   "td": "D",
+   "kind": "dom",
+   "view": "demographics",
+   "target": "#demographics > details.demo-method",
+   "fields": [
+    "/demographics/methodology"
+   ]
+  },
+  {
+   "id": "A-S35",
+   "td": "D",
+   "kind": "dom",
+   "view": "sources",
+   "target": "#sources > h3:nth-of-type(1), #sources > h3:nth-of-type(1) + p, #sources > h3:nth-of-type(1) + p + p",
+   "fields": [
+    "/client/website",
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "A-S36",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "sources",
+   "target": "#sources > h3:nth-of-type(2), #property-source-list",
+   "fields": [
+    "/properties/*/sources/*/label"
+   ]
+  },
+  {
+   "id": "A-S37",
+   "td": "D",
+   "kind": "dom",
+   "view": "sources",
+   "target": "#sources > h3:nth-of-type(3), #sources > h3:nth-of-type(3) + ul",
+   "fields": [
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "A-S38",
+   "td": "D",
+   "kind": "dom",
+   "view": "sources",
+   "target": "#sources > h3:nth-of-type(4), #sources > h3:nth-of-type(4) + p, #sources > h3:nth-of-type(4) + p + p",
+   "fields": [
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "A-S39",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "sources",
+   "target": "#sources > h3:nth-of-type(5), #demographic-source-list, #demographic-source-list + p",
+   "fields": [
+    "/demographics/growth/geographies/*/source_url",
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "A-S40",
+   "td": "D",
+   "kind": "dom",
+   "view": "sources",
+   "target": "#demographic-source-list + p + p, #demographic-source-list + p + p + p",
+   "fields": [
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "A-S41",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "sources",
+   "target": "#sources > h3:nth-of-type(6), #sources > h3:nth-of-type(6) + p, #competition-source-list",
+   "fields": [
+    "/demographics/competition/offices/*/source_url"
+   ]
+  },
+  {
+   "id": "A-S42",
+   "td": "D",
+   "kind": "dom",
+   "view": "sources",
+   "target": "#sources > h3:nth-of-type(7), #sources > h3:nth-of-type(7) + p",
+   "fields": [
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "A-S43",
+   "td": "D",
+   "kind": "dom",
+   "view": "sources",
+   "target": "#sources > h3:nth-of-type(8), #sources > h3:nth-of-type(8) + p",
+   "fields": [
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "A-S44",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "purchases",
+   "steps": [
+    {
+     "click": "#property-directory .property-jump:nth-child(1)"
+    }
+   ],
+   "target": "#property-dialog",
+   "fields": [
+    "/properties/*/facts/*/label",
+    "/properties/*/photo",
+    "/properties/*/summary"
+   ]
+  },
+  {
+   "id": "A-S45",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(1)"
+    }
+   ],
+   "target": "#project-dialog",
+   "fields": [
+    "/developments/*/overlay_note",
+    "/developments/*/image/credit",
+    "/developments/*/copy",
+    "/developments/*/relevance",
+    "/developments/*/sources/*/label"
+   ]
+  },
+  {
+   "id": "A-S46",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#competition-offices .competition-office-card:nth-child(1)"
+    }
+   ],
+   "target": "#provider-dialog",
+   "fields": [
+    "/demographics/competition/offices/*/name",
+    "/demographics/competition/offices/*/service_type",
+    "/demographics/competition/offices/*/logo",
+    "/demographics/competition/offices/*/address",
+    "/demographics/competition/offices/*/services",
+    "/demographics/competition/offices/*/source_url"
+   ]
+  },
+  {
+   "id": "A-S47",
+   "td": "D",
+   "kind": "dom",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-map .map-practice",
+     "force": true
+    }
+   ],
+   "target": "#project-dialog",
+   "fields": [
+    "/client/current_practice/address",
+    "/client/current_practice/source_note"
+   ]
+  },
+  {
+   "id": "A-T01",
+   "td": "T",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "click": ".site-nav a[href=\"#purchases\"]"
+    }
+   ],
+   "observe": [
+    {
+     "selector": ".site-view",
+     "text": false
+    },
+    ".site-nav a",
+    "#sticky-page-title"
+   ]
+  },
+  {
+   "id": "A-T02",
+   "td": "T",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "scroll": 600
+    },
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "html",
+    ".development-tile"
+   ],
+   "motion": true
+  },
+  {
+   "id": "A-T03",
+   "td": "T",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "html"
+   ]
+  },
+  {
+   "id": "A-T04",
+   "td": "T",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    ".site-header .@{logo-asset}",
+    ".home-market-intro .@{logo-asset}"
+   ]
+  },
+  {
+   "id": "A-T05",
+   "td": "T",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "#development-map"
+   ],
+   "allowed": [
+    "AD1"
+   ]
+  },
+  {
+   "id": "A-T06",
+   "td": "T",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "#development-map .maplibregl-ctrl-attrib"
+   ]
+  },
+  {
+   "id": "A-T07",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "hover": "#development-map .development-pin:nth-child(1 of .development-pin)"
+    },
+    {
+     "click": "#development-map .development-pin:nth-child(1 of .development-pin)",
+     "force": true
+    }
+   ],
+   "observe": [
+    "#property-preview",
+    "#project-dialog"
+   ],
+   "fields": [
+    "/developments/*/locator/lon"
+   ]
+  },
+  {
+   "id": "A-T08",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-map .@{overlay-label}",
+     "force": true
+    }
+   ],
+   "observe": [
+    "#project-dialog"
+   ],
+   "fields": [
+    "/developments/*/overlay"
+   ]
+  },
+  {
+   "id": "A-T09",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "purchases",
+   "steps": [
+    {
+     "hover": "#purchase-map .locator-pin:nth-child(1 of .locator-pin)"
+    },
+    {
+     "click": "#purchase-map .locator-pin:nth-child(1 of .locator-pin)",
+     "force": true
+    }
+   ],
+   "observe": [
+    "#property-preview",
+    "#property-dialog"
+   ],
+   "fields": [
+    "/properties/*/locator/lon"
+   ]
+  },
+  {
+   "id": "A-T10",
+   "td": "D",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-map .map-practice",
+     "force": true
+    }
+   ],
+   "observe": [
+    "#project-dialog"
+   ],
+   "fields": [
+    "/client/current_practice/locator/lon",
+    "/client/current_practice/marker_letter"
+   ]
+  },
+  {
+   "id": "A-T11",
+   "td": "T",
+   "kind": "interaction",
+   "view": "purchases",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "#purchase-map .pin-stem"
+   ]
+  },
+  {
+   "id": "A-T12",
+   "td": "T",
+   "kind": "interaction",
+   "view": "purchases",
+   "steps": [
+    {
+     "hover": "#property-directory .property-jump:nth-child(1)"
+    }
+   ],
+   "observe": [
+    "#purchase-map .locator-pin"
+   ]
+  },
+  {
+   "id": "A-T13",
+   "td": "T",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "hover": "#development-directory .development-tile:nth-child(1)"
+    }
+   ],
+   "observe": [
+    "#property-preview"
+   ]
+  },
+  {
+   "id": "A-T14",
+   "td": "T",
+   "kind": "interaction",
+   "view": "purchases",
+   "steps": [
+    {
+     "click": "#property-directory .property-jump:nth-child(1)"
+    },
+    {
+     "click": "#property-dialog-close"
+    }
+   ],
+   "observe": [
+    "#property-dialog"
+   ]
+  },
+  {
+   "id": "A-T15",
+   "td": "T",
+   "kind": "interaction",
+   "view": "purchases",
+   "steps": [
+    {
+     "click": "#property-directory .property-jump:nth-child(1)"
+    },
+    {
+     "click": "#property-dialog [data-toggle]"
+    }
+   ],
+   "observe": [
+    "#property-dialog [data-toggle]",
+    "#tour-selected"
+   ]
+  },
+  {
+   "id": "A-T16",
+   "td": "T",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(1)"
+    }
+   ],
+   "observe": [
+    "#project-dialog"
+   ]
+  },
+  {
+   "id": "A-T17",
+   "td": "T",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(1)"
+    },
+    {
+     "click": "#project-dialog [data-close-for-source]"
+    }
+   ],
+   "observe": [
+    "#project-dialog",
+    {
+     "selector": ".site-view",
+     "text": false
+    }
+   ]
+  },
+  {
+   "id": "A-T18",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": ".regional-growth .demo-switch button:nth-child(2)"
+    }
+   ],
+   "observe": [
+    ".regional-growth .demo-switch button",
+    "#regional-growth-chart"
+   ],
+   "fields": [
+    "/demographics/growth/geographies/*/series/*/value"
+   ]
+  },
+  {
+   "id": "A-T19",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#demographics > .demo-switch button:nth-child(2)"
+    }
+   ],
+   "observe": [
+    "#demographics > .demo-switch button",
+    "#demo-dashboard"
+   ],
+   "fields": [
+    "/demographics/age/geographies/*/under_18_pct"
+   ]
+  },
+  {
+   "id": "A-T20",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#demographics > .demo-switch button:nth-child(2)"
+    }
+   ],
+   "observe": [
+    "#demo-comparisons"
+   ],
+   "fields": [
+    "/demographics/median_income/geographies/*/value"
+   ]
+  },
+  {
+   "id": "A-T21",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": ".income-tier-switch button:nth-child(2)"
+    }
+   ],
+   "observe": [
+    ".income-tier-switch button",
+    "#regional-income-context"
+   ],
+   "fields": [
+    "/demographics/income_bands/areas/*/counts"
+   ]
+  },
+  {
+   "id": "A-T22",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#micro-zone-switch button:nth-child(2)"
+    }
+   ],
+   "observe": [
+    "#micro-zone-switch button"
+   ],
+   "fields": [
+    "/demographics/micro_zones/zones/*/name"
+   ]
+  },
+  {
+   "id": "A-T23",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#micro-zone-map .study-area-pin:nth-child(2 of .study-area-pin)",
+     "force": true
+    }
+   ],
+   "observe": [
+    "#micro-zone-map .study-area-pin",
+    "#micro-zone-summary"
+   ],
+   "fields": [
+    "/demographics/micro_zones/zones/*/geography/center",
+    "/demographics/micro_zones/zones/*/geography/radius_miles"
+   ]
+  },
+  {
+   "id": "A-T24",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#micro-zone-switch button:nth-child(3)"
+    }
+   ],
+   "observe": [
+    "#micro-zone-summary"
+   ],
+   "fields": [
+    "/demographics/micro_zones/zones/*/population/by_year",
+    "/demographics/micro_zones/zones/*/study_pdf"
+   ]
+  },
+  {
+   "id": "A-T25",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#micro-zone-context .demo-switch:not(#micro-zone-switch) button:nth-child(2)"
+    }
+   ],
+   "observe": [
+    "#micro-zone-context .demo-switch:not(#micro-zone-switch) button",
+    "#micro-zone-profile"
+   ],
+   "fields": [
+    "/demographics/micro_zones/zones/*/age/groups",
+    "/demographics/micro_zones/zones/*/household_income/thresholds"
+   ]
+  },
+  {
+   "id": "A-T26",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "demographics",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "#competition-counts"
+   ],
+   "fields": [
+    "/demographics/competition/offices/*/market",
+    "/demographics/competition/markets"
+   ]
+  },
+  {
+   "id": "A-T27",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#competition-context .demo-switch button:nth-child(2)"
+    }
+   ],
+   "observe": [
+    "#competition-context .demo-switch button",
+    "#competition-status",
+    "#competition-offices"
+   ],
+   "fields": [
+    "/demographics/competition/markets"
+   ]
+  },
+  {
+   "id": "A-T28",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#competition-context .demo-switch button:nth-child(2)"
+    }
+   ],
+   "observe": [
+    "#competition-map .competition-map-circle"
+   ],
+   "fields": [
+    "/demographics/competition/offices/*/locator/lon"
+   ]
+  },
+  {
+   "id": "A-T29",
+   "td": "T",
+   "kind": "interaction",
+   "view": "demographics",
+   "steps": [
+    {
+     "hover": "#competition-map .competition-map-circle:nth-child(1 of .competition-map-circle)"
+    }
+   ],
+   "observe": [
+    "#property-preview"
+   ]
+  },
+  {
+   "id": "A-T30",
+   "td": "T",
+   "kind": "interaction",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#competition-offices .competition-office-card:nth-child(1)"
+    }
+   ],
+   "observe": [
+    "#provider-dialog"
+   ]
+  },
+  {
+   "id": "A-T31",
+   "td": "T",
+   "kind": "interaction",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#competition-offices .competition-office-card:nth-child(1)"
+    },
+    {
+     "click": "#provider-dialog-close"
+    }
+   ],
+   "observe": [
+    "#provider-dialog"
+   ]
+  },
+  {
+   "id": "A-T32",
+   "td": "T",
+   "kind": "interaction",
+   "view": "tour",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "#tour-available"
+   ]
+  },
+  {
+   "id": "A-T33",
+   "td": "T",
+   "kind": "interaction",
+   "view": "tour",
+   "steps": [
+    {
+     "click": "#tour-available [data-add]"
+    },
+    {
+     "fill": "#tour-selected textarea",
+     "value": "Parity probe note"
+    }
+   ],
+   "observe": [
+    "#tour-selected",
+    "#tour-save-status"
+   ]
+  },
+  {
+   "id": "A-T34",
+   "td": "T",
+   "kind": "interaction",
+   "view": "tour",
+   "steps": [
+    {
+     "drag": "#tour-available .tour-option:nth-child(1)",
+     "to": "#tour-selected"
+    }
+   ],
+   "observe": [
+    "#tour-selected"
+   ]
+  },
+  {
+   "id": "A-T35",
+   "td": "T",
+   "kind": "interaction",
+   "view": "tour",
+   "steps": [
+    {
+     "click": "#tour-available [data-add]"
+    },
+    {
+     "click": "#tour-save",
+     "force": true
+    }
+   ],
+   "observe": [
+    "#tour-save",
+    "#tour-save-status"
+   ]
+  },
+  {
+   "id": "A-T36",
+   "td": "T",
+   "kind": "interaction",
+   "view": "tour",
+   "steps": [
+    {
+     "click": "#tour-available [data-add]"
+    },
+    {
+     "click": "#tour-reload"
+    }
+   ],
+   "observe": [
+    "#tour-save-status",
+    "#tour-selected"
+   ]
+  },
+  {
+   "id": "A-T37",
+   "td": "T",
+   "kind": "interaction",
+   "view": "tour",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "#tour-save-status"
+   ]
+  },
+  {
+   "id": "A-T38",
+   "td": "T",
+   "kind": "interaction",
+   "view": "tour",
+   "steps": [
+    {
+     "click": "#sign-out"
+    }
+   ],
+   "observe": [
+    "#tour-save-status"
+   ]
+  },
+  {
+   "id": "A-T39",
+   "td": "T",
+   "kind": "interaction",
+   "view": "tour",
+   "steps": [
+    {
+     "click": "#tour-available [data-add]"
+    },
+    {
+     "dialog": "dismiss"
+    },
+    {
+     "click": "#sign-out"
+    }
+   ],
+   "observe": [
+    "#tour-save-status",
+    "#tour-selected"
+   ]
+  },
+  {
+   "id": "A-T40",
+   "td": "T",
+   "kind": "interaction",
+   "view": "strategy",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "#ownership-property option",
+    "#ownership-allocation .allocation-space-row"
+   ]
+  },
+  {
+   "id": "A-T41",
+   "td": "T",
+   "kind": "interaction",
+   "view": "strategy",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "#ownership-comparison",
+    "#ownership-outcome-table"
+   ]
+  },
+  {
+   "id": "A-T42",
+   "td": "T",
+   "kind": "interaction",
+   "view": "strategy",
+   "steps": [
+    {
+     "fill": "#assumption-rate",
+     "value": "7"
+    }
+   ],
+   "observe": [
+    "#ownership-form input[name=\"rate\"]",
+    "#ownership-comparison"
+   ]
+  },
+  {
+   "id": "A-T43",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "strategy",
+   "steps": [
+    {
+     "select": "#ownership-property",
+     "index": 1
+    }
+   ],
+   "observe": [
+    "#ownership-form",
+    "#ownership-message"
+   ],
+   "fields": [
+    "/ownership/default_property",
+    "/properties/*/ownership/asking_price"
+   ]
+  },
+  {
+   "id": "A-T44",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "strategy",
+   "steps": [
+    {
+     "fill": "#ownership-form input[name=\"price\"]",
+     "value": "1000000"
+    },
+    {
+     "click": "#ownership-form button[type=\"submit\"]"
+    }
+   ],
+   "observe": [
+    "#ownership-message",
+    "#ownership-comparison"
+   ],
+   "fields": [
+    "/ownership/defaults/buildout_psf",
+    "/ownership/defaults/rent_psf"
+   ]
+  },
+  {
+   "id": "A-T45",
+   "td": "T",
+   "kind": "interaction",
+   "view": "strategy",
+   "steps": [
+    {
+     "fill": "#ownership-allocation [data-property-occupancy]",
+     "value": "40"
+    }
+   ],
+   "observe": [
+    "#ownership-allocation"
+   ]
+  },
+  {
+   "id": "A-T46",
+   "td": "T",
+   "kind": "interaction",
+   "view": "strategy",
+   "steps": [
+    {
+     "click": "#coverage-chart .coverage-row:nth-child(1)"
+    }
+   ],
+   "observe": [
+    "#property-dialog"
+   ]
+  },
+  {
+   "id": "A-T47",
+   "td": "T",
+   "kind": "interaction",
+   "view": "strategy",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "#ownership-comparison"
+   ]
+  },
+  {
+   "id": "A-T48",
+   "td": "T",
+   "kind": "interaction",
+   "view": "strategy",
+   "steps": [
+    {
+     "click": ".strategy-highlights .strategy-property:nth-child(1)"
+    }
+   ],
+   "observe": [
+    "#property-dialog"
+   ]
+  },
+  {
+   "id": "A-T49",
+   "td": "T",
+   "kind": "interaction",
+   "view": "strategy",
+   "steps": [
+    {
+     "click": ".ti-toggle input[value=\"50\"]"
+    }
+   ],
+   "observe": [
+    ".ti-toggle input",
+    "#tenant-ti",
+    "#ti-budget"
+   ]
+  },
+  {
+   "id": "A-T50",
+   "td": "T",
+   "kind": "interaction",
+   "view": "strategy",
+   "steps": [
+    {
+     "fill": "#practice-lease-rate",
+     "value": "30"
+    }
+   ],
+   "observe": [
+    "#ownership-lease-table"
+   ]
+  },
+  {
+   "id": "A-T51",
+   "td": "T",
+   "kind": "interaction",
+   "view": "strategy",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "#ownership-carry-table"
+   ]
+  },
+  {
+   "id": "A-T52",
+   "td": "T",
+   "kind": "interaction",
+   "view": "strategy",
+   "steps": [
+    {
+     "select": "#line-view",
+     "index": 1
+    }
+   ],
+   "observe": [
+    "#ownership-line-chart",
+    "#ownership-line-legend",
+    "#line-summary",
+    "#line-property"
+   ]
+  },
+  {
+   "id": "A-T53",
+   "td": "T",
+   "kind": "interaction",
+   "view": "strategy",
+   "steps": [
+    {
+     "fill": "#equity-year",
+     "value": "5"
+    }
+   ],
+   "observe": [
+    "#equity-chart",
+    "#equity-year-label"
+   ]
+  },
+  {
+   "id": "A-T54",
+   "td": "T",
+   "kind": "interaction",
+   "view": "strategy",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "#ownership-outcome-table"
+   ]
+  },
+  {
+   "id": "A-T55",
+   "td": "T",
+   "kind": "interaction",
+   "view": "strategy",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "#ownership-lease-table"
+   ]
+  },
+  {
+   "id": "A-T56",
+   "td": "T",
+   "kind": "interaction",
+   "view": "strategy",
+   "steps": [
+    {
+     "fill": "#tenant-ti",
+     "value": "30"
+    },
+    {
+     "press": "Tab"
+    }
+   ],
+   "observe": [
+    "#tenant-ti"
+   ]
+  },
+  {
+   "id": "A-L01",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".skip-link"
+  },
+  {
+   "id": "A-L02",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".site-header .carr-link"
+  },
+  {
+   "id": "A-L03",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".site-header .@{brand-link}"
+  },
+  {
+   "id": "A-L04",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".site-nav a[href=\"#home\"]"
+  },
+  {
+   "id": "A-L05",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".site-nav a[href=\"#purchases\"]"
+  },
+  {
+   "id": "A-L06",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".site-nav a[href=\"#strategy\"]"
+  },
+  {
+   "id": "A-L07",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".site-nav a[href=\"#tour\"]"
+  },
+  {
+   "id": "A-L08",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".site-nav a[href=\"#demographics\"]"
+  },
+  {
+   "id": "A-L09",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".site-nav a[href=\"#sources\"]"
+  },
+  {
+   "id": "A-L10",
+   "td": "T+D",
+   "kind": "link",
+   "view": "home",
+   "target": ".home-market-snapshot a:nth-child(1)",
+   "fields": [
+    "/market/snapshot/0/label"
+   ]
+  },
+  {
+   "id": "A-L11",
+   "td": "T+D",
+   "kind": "link",
+   "view": "home",
+   "target": ".home-market-snapshot a:nth-child(2)",
+   "fields": [
+    "/market/snapshot/1/label"
+   ]
+  },
+  {
+   "id": "A-L12",
+   "td": "T+D",
+   "kind": "link",
+   "view": "home",
+   "target": ".home-market-snapshot a:nth-child(3)",
+   "fields": [
+    "/market/snapshot/2/label"
+   ]
+  },
+  {
+   "id": "A-L13",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".home-demo-link a"
+  },
+  {
+   "id": "A-L14",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": "#home > .home-actions a"
+  },
+  {
+   "id": "A-L15",
+   "td": "T",
+   "kind": "link",
+   "view": "purchases",
+   "target": "#purchases .purchase-tour-cta a"
+  },
+  {
+   "id": "A-L16",
+   "td": "T",
+   "kind": "link",
+   "view": "demographics",
+   "target": "#demographics > .regional-context:not(.micro-zone-section):not(#competition-context) details a"
+  },
+  {
+   "id": "A-L17",
+   "td": "T",
+   "kind": "link",
+   "view": "demographics",
+   "target": "#competition-context details a"
+  },
+  {
+   "id": "A-L18",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#sources > h3:nth-of-type(1) + p + p a",
+   "fields": [
+    "/client/website"
+   ]
+  },
+  {
+   "id": "A-L19",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#sources > h3:nth-of-type(3) + ul li:nth-child(1) a",
+   "fields": [
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "A-L20",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#sources > h3:nth-of-type(3) + ul li:nth-child(2) a",
+   "fields": [
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "A-L21",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#sources > h3:nth-of-type(3) + ul li:nth-child(3) a",
+   "fields": [
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "A-L22",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#sources > h3:nth-of-type(4) + p a:nth-of-type(1)",
+   "fields": [
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "A-L23",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#sources > h3:nth-of-type(4) + p a:nth-of-type(2)",
+   "fields": [
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "A-L24",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#sources > h3:nth-of-type(4) + p + p a",
+   "fields": [
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "A-L25",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#demographic-source-list + p + p + p a:nth-of-type(1)",
+   "fields": [
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "A-L26",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#demographic-source-list + p + p + p a:nth-of-type(2)",
+   "fields": [
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "A-L27",
+   "td": "T",
+   "kind": "link",
+   "view": "sources",
+   "target": "#sources > h3:nth-of-type(7) + p a"
+  },
+  {
+   "id": "A-L28",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".site-footer a"
+  },
+  {
+   "id": "A-L29",
+   "td": "T",
+   "kind": "link",
+   "view": "purchases",
+   "steps": [
+    {
+     "click": "#property-directory .property-jump:nth-child(1)"
+    }
+   ],
+   "target": "#property-dialog .carr-link"
+  },
+  {
+   "id": "A-L30",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-map .map-practice",
+     "force": true
+    }
+   ],
+   "target": "#project-dialog [data-close-for-source]"
+  },
+  {
+   "id": "A-L31",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#property-source-list li:nth-child(1) a:nth-of-type(1)",
+   "fields": [
+    "/properties/0/sources/0/url"
+   ]
+  },
+  {
+   "id": "A-L32",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#property-source-list li:nth-child(1) a:nth-of-type(2)",
+   "fields": [
+    "/properties/0/sources/1/url"
+   ]
+  },
+  {
+   "id": "A-L33",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#property-source-list li:nth-child(2) a:nth-of-type(1)",
+   "fields": [
+    "/properties/1/sources/0/url"
+   ]
+  },
+  {
+   "id": "A-L34",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#property-source-list li:nth-child(3) a:nth-of-type(1)",
+   "fields": [
+    "/properties/2/sources/0/url"
+   ]
+  },
+  {
+   "id": "A-L35",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#property-source-list li:nth-child(3) a:nth-of-type(2)",
+   "fields": [
+    "/properties/2/sources/1/url"
+   ]
+  },
+  {
+   "id": "A-L36",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#property-source-list li:nth-child(4) a:nth-of-type(1)",
+   "fields": [
+    "/properties/3/sources/0/url"
+   ]
+  },
+  {
+   "id": "A-L37",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#property-source-list li:nth-child(5) a:nth-of-type(1)",
+   "fields": [
+    "/properties/4/sources/0/url"
+   ]
+  },
+  {
+   "id": "A-L38",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#property-source-list li:nth-child(6) a:nth-of-type(1)",
+   "fields": [
+    "/properties/5/sources/0/url"
+   ]
+  },
+  {
+   "id": "A-L39",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#property-source-list li:nth-child(7) a:nth-of-type(1)",
+   "fields": [
+    "/properties/6/sources/0/url"
+   ]
+  },
+  {
+   "id": "A-L40",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#property-source-list li:nth-child(8) a:nth-of-type(1)",
+   "fields": [
+    "/properties/7/sources/0/url"
+   ]
+  },
+  {
+   "id": "A-L41",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#demographic-source-list li:nth-child(1) a",
+   "fields": [
+    "/demographics/growth/geographies/0/source_url"
+   ]
+  },
+  {
+   "id": "A-L42",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#demographic-source-list li:nth-child(2) a",
+   "fields": [
+    "/demographics/growth/geographies/1/source_url"
+   ]
+  },
+  {
+   "id": "A-L43",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#demographic-source-list li:nth-child(3) a",
+   "fields": [
+    "/demographics/growth/geographies/2/source_url"
+   ]
+  },
+  {
+   "id": "A-L44",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#demographic-source-list li:nth-child(4) a",
+   "fields": [
+    "/demographics/growth/geographies/3/source_url"
+   ]
+  },
+  {
+   "id": "A-L45",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#demographic-source-list li:nth-child(5) a",
+   "fields": [
+    "/demographics/growth/geographies/4/source_url"
+   ]
+  },
+  {
+   "id": "A-L46",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": ".regional-growth .demo-switch button:nth-child(1)"
+    }
+   ],
+   "target": "#regional-growth-chart a.chart-source",
+   "fields": [
+    "/demographics/growth/geographies/0/source_url"
+   ]
+  },
+  {
+   "id": "A-L47",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": ".regional-growth .demo-switch button:nth-child(2)"
+    }
+   ],
+   "target": "#regional-growth-chart a.chart-source",
+   "fields": [
+    "/demographics/growth/geographies/1/source_url"
+   ]
+  },
+  {
+   "id": "A-L48",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": ".regional-growth .demo-switch button:nth-child(3)"
+    }
+   ],
+   "target": "#regional-growth-chart a.chart-source",
+   "fields": [
+    "/demographics/growth/geographies/2/source_url"
+   ]
+  },
+  {
+   "id": "A-L49",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": ".regional-growth .demo-switch button:nth-child(4)"
+    }
+   ],
+   "target": "#regional-growth-chart a.chart-source",
+   "fields": [
+    "/demographics/growth/geographies/3/source_url"
+   ]
+  },
+  {
+   "id": "A-L50",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": ".regional-growth .demo-switch button:nth-child(5)"
+    }
+   ],
+   "target": "#regional-growth-chart a.chart-source",
+   "fields": [
+    "/demographics/growth/geographies/4/source_url"
+   ]
+  },
+  {
+   "id": "A-L51",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#demographics > .demo-switch button:nth-child(1)"
+    }
+   ],
+   "target": "#demo-dashboard a.chart-source",
+   "fields": [
+    "/demographics/age/geographies/0/source_url"
+   ]
+  },
+  {
+   "id": "A-L52",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#demographics > .demo-switch button:nth-child(2)"
+    }
+   ],
+   "target": "#demo-dashboard a.chart-source",
+   "fields": [
+    "/demographics/age/geographies/1/source_url"
+   ]
+  },
+  {
+   "id": "A-L53",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#demographics > .demo-switch button:nth-child(3)"
+    }
+   ],
+   "target": "#demo-dashboard a.chart-source",
+   "fields": [
+    "/demographics/age/geographies/2/source_url"
+   ]
+  },
+  {
+   "id": "A-L54",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#demographics > .demo-switch button:nth-child(4)"
+    }
+   ],
+   "target": "#demo-dashboard a.chart-source",
+   "fields": [
+    "/demographics/age/geographies/3/source_url"
+   ]
+  },
+  {
+   "id": "A-L55",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#demographics > .demo-switch button:nth-child(5)"
+    }
+   ],
+   "target": "#demo-dashboard a.chart-source",
+   "fields": [
+    "/demographics/age/geographies/4/source_url"
+   ]
+  },
+  {
+   "id": "A-L56",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#micro-zone-switch button:nth-child(1)"
+    }
+   ],
+   "target": "#micro-zone-summary a.button",
+   "fields": [
+    "/demographics/micro_zones/zones/0/study_pdf"
+   ]
+  },
+  {
+   "id": "A-L57",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#micro-zone-switch button:nth-child(2)"
+    }
+   ],
+   "target": "#micro-zone-summary a.button",
+   "fields": [
+    "/demographics/micro_zones/zones/1/study_pdf"
+   ]
+  },
+  {
+   "id": "A-L58",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#micro-zone-switch button:nth-child(3)"
+    }
+   ],
+   "target": "#micro-zone-summary a.button",
+   "fields": [
+    "/demographics/micro_zones/zones/2/study_pdf"
+   ]
+  },
+  {
+   "id": "A-L59",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "target": "#micro-zone-report-links a:nth-child(1)",
+   "fields": [
+    "/demographics/micro_zones/zones/0/study_pdf"
+   ]
+  },
+  {
+   "id": "A-L60",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "target": "#micro-zone-report-links a:nth-child(2)",
+   "fields": [
+    "/demographics/micro_zones/zones/1/study_pdf"
+   ]
+  },
+  {
+   "id": "A-L61",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "target": "#micro-zone-report-links a:nth-child(3)",
+   "fields": [
+    "/demographics/micro_zones/zones/2/study_pdf"
+   ]
+  },
+  {
+   "id": "A-L62",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#competition-source-list li:nth-child(1) a",
+   "fields": [
+    "/demographics/competition/offices/0/source_url"
+   ]
+  },
+  {
+   "id": "A-L63",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#competition-source-list li:nth-child(2) a",
+   "fields": [
+    "/demographics/competition/offices/1/source_url"
+   ]
+  },
+  {
+   "id": "A-L64",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#competition-source-list li:nth-child(3) a",
+   "fields": [
+    "/demographics/competition/offices/2/source_url"
+   ]
+  },
+  {
+   "id": "A-L65",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#competition-source-list li:nth-child(4) a",
+   "fields": [
+    "/demographics/competition/offices/3/source_url"
+   ]
+  },
+  {
+   "id": "A-L66",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#competition-source-list li:nth-child(5) a",
+   "fields": [
+    "/demographics/competition/offices/4/source_url"
+   ]
+  },
+  {
+   "id": "A-L67",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#competition-source-list li:nth-child(6) a",
+   "fields": [
+    "/demographics/competition/offices/5/source_url"
+   ]
+  },
+  {
+   "id": "A-L68",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#competition-source-list li:nth-child(7) a",
+   "fields": [
+    "/demographics/competition/offices/6/source_url"
+   ]
+  },
+  {
+   "id": "A-L69",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#competition-offices .competition-office-card:nth-child(1)"
+    }
+   ],
+   "target": "#provider-dialog a.chart-source",
+   "fields": [
+    "/demographics/competition/offices/0/source_url"
+   ]
+  },
+  {
+   "id": "A-L70",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#competition-offices .competition-office-card:nth-child(2)"
+    }
+   ],
+   "target": "#provider-dialog a.chart-source",
+   "fields": [
+    "/demographics/competition/offices/1/source_url"
+   ]
+  },
+  {
+   "id": "A-L71",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#competition-offices .competition-office-card:nth-child(3)"
+    }
+   ],
+   "target": "#provider-dialog a.chart-source",
+   "fields": [
+    "/demographics/competition/offices/2/source_url"
+   ]
+  },
+  {
+   "id": "A-L72",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#competition-offices .competition-office-card:nth-child(4)"
+    }
+   ],
+   "target": "#provider-dialog a.chart-source",
+   "fields": [
+    "/demographics/competition/offices/3/source_url"
+   ]
+  },
+  {
+   "id": "A-L73",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#competition-offices .competition-office-card:nth-child(5)"
+    }
+   ],
+   "target": "#provider-dialog a.chart-source",
+   "fields": [
+    "/demographics/competition/offices/4/source_url"
+   ]
+  },
+  {
+   "id": "A-L74",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#competition-offices .competition-office-card:nth-child(6)"
+    }
+   ],
+   "target": "#provider-dialog a.chart-source",
+   "fields": [
+    "/demographics/competition/offices/5/source_url"
+   ]
+  },
+  {
+   "id": "A-L75",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#competition-offices .competition-office-card:nth-child(7)"
+    }
+   ],
+   "target": "#provider-dialog a.chart-source",
+   "fields": [
+    "/demographics/competition/offices/6/source_url"
+   ]
+  },
+  {
+   "id": "A-L76",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(1)"
+    }
+   ],
+   "target": "#project-dialog [data-close-for-source]"
+  },
+  {
+   "id": "A-L77",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(2)"
+    }
+   ],
+   "target": "#project-dialog [data-close-for-source]"
+  },
+  {
+   "id": "A-L78",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(3)"
+    }
+   ],
+   "target": "#project-dialog [data-close-for-source]"
+  },
+  {
+   "id": "A-L79",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(4)"
+    }
+   ],
+   "target": "#project-dialog [data-close-for-source]"
+  },
+  {
+   "id": "A-L80",
+   "td": "T+D",
+   "kind": "link",
+   "view": "strategy",
+   "target": "#coverage-chart .coverage-row:nth-child(1)",
+   "fields": [
+    "/properties/*/ownership/total_sf",
+    "/properties/*/address"
+   ]
+  },
+  {
+   "id": "A-L81",
+   "td": "T+D",
+   "kind": "link",
+   "view": "strategy",
+   "target": "#coverage-chart .coverage-row:nth-child(2)",
+   "fields": [
+    "/properties/*/ownership/total_sf",
+    "/properties/*/address"
+   ]
+  },
+  {
+   "id": "A-L82",
+   "td": "T+D",
+   "kind": "link",
+   "view": "strategy",
+   "target": "#coverage-chart .coverage-row:nth-child(3)",
+   "fields": [
+    "/properties/*/ownership/total_sf",
+    "/properties/*/address"
+   ]
+  },
+  {
+   "id": "A-L83",
+   "td": "T+D",
+   "kind": "link",
+   "view": "strategy",
+   "target": "#ownership-comparison thead th:nth-child(2) a",
+   "fields": [
+    "/properties/*/ownership/total_sf",
+    "/properties/*/address"
+   ]
+  },
+  {
+   "id": "A-L84",
+   "td": "T+D",
+   "kind": "link",
+   "view": "strategy",
+   "target": "#ownership-comparison thead th:nth-child(3) a",
+   "fields": [
+    "/properties/*/ownership/total_sf",
+    "/properties/*/address"
+   ]
+  },
+  {
+   "id": "A-L85",
+   "td": "T+D",
+   "kind": "link",
+   "view": "strategy",
+   "target": "#ownership-comparison thead th:nth-child(4) a",
+   "fields": [
+    "/properties/*/ownership/total_sf",
+    "/properties/*/address"
+   ]
+  },
+  {
+   "id": "A-L86",
+   "td": "T+D",
+   "kind": "link",
+   "view": "strategy",
+   "target": "#ownership-carry-table thead th:nth-child(2) a",
+   "fields": [
+    "/properties/*/ownership/total_sf",
+    "/properties/*/address"
+   ]
+  },
+  {
+   "id": "A-L87",
+   "td": "T+D",
+   "kind": "link",
+   "view": "strategy",
+   "target": "#ownership-carry-table thead th:nth-child(3) a",
+   "fields": [
+    "/properties/*/ownership/total_sf",
+    "/properties/*/address"
+   ]
+  },
+  {
+   "id": "A-L88",
+   "td": "T+D",
+   "kind": "link",
+   "view": "strategy",
+   "target": "#ownership-carry-table thead th:nth-child(4) a",
+   "fields": [
+    "/properties/*/ownership/total_sf",
+    "/properties/*/address"
+   ]
+  },
+  {
+   "id": "A-L89",
+   "td": "T+D",
+   "kind": "link",
+   "view": "strategy",
+   "target": "#ownership-outcome-table thead th:nth-child(2) a",
+   "fields": [
+    "/properties/*/ownership/total_sf",
+    "/properties/*/address"
+   ]
+  },
+  {
+   "id": "A-L90",
+   "td": "T+D",
+   "kind": "link",
+   "view": "strategy",
+   "target": "#ownership-outcome-table thead th:nth-child(3) a",
+   "fields": [
+    "/properties/*/ownership/total_sf",
+    "/properties/*/address"
+   ]
+  },
+  {
+   "id": "A-L91",
+   "td": "T+D",
+   "kind": "link",
+   "view": "strategy",
+   "target": "#ownership-outcome-table thead th:nth-child(4) a",
+   "fields": [
+    "/properties/*/ownership/total_sf",
+    "/properties/*/address"
+   ]
+  },
+  {
+   "id": "A-L92",
+   "td": "T+D",
+   "kind": "link",
+   "view": "strategy",
+   "target": "#ownership-lease-table thead th:nth-child(2) a",
+   "fields": [
+    "/properties/*/ownership/total_sf",
+    "/properties/*/address"
+   ]
+  },
+  {
+   "id": "A-L93",
+   "td": "T+D",
+   "kind": "link",
+   "view": "strategy",
+   "target": "#ownership-lease-table thead th:nth-child(3) a",
+   "fields": [
+    "/properties/*/ownership/total_sf",
+    "/properties/*/address"
+   ]
+  },
+  {
+   "id": "A-L94",
+   "td": "T+D",
+   "kind": "link",
+   "view": "strategy",
+   "target": "#ownership-lease-table thead th:nth-child(4) a",
+   "fields": [
+    "/properties/*/ownership/total_sf",
+    "/properties/*/address"
+   ]
+  },
+  {
+   "id": "A-L95",
+   "td": "T",
+   "kind": "link",
+   "navigate": "demographics.html",
+   "allowed": [
+    "AD3"
+   ]
+  },
+  {
+   "id": "A-L96",
+   "td": "T",
+   "kind": "link",
+   "navigate": "ownership.html",
+   "allowed": [
+    "AD3"
+   ]
+  },
+  {
+   "id": "A-L97",
+   "td": "T",
+   "kind": "link",
+   "navigate": "purchases.html",
+   "allowed": [
+    "AD3"
+   ]
+  },
+  {
+   "id": "A-L98",
+   "td": "T",
+   "kind": "link",
+   "navigate": "sources.html",
+   "allowed": [
+    "AD3"
+   ]
+  },
+  {
+   "id": "A-L99",
+   "td": "T",
+   "kind": "link",
+   "navigate": "tour.html",
+   "allowed": [
+    "AD3"
+   ]
+  },
+  {
+   "id": "A-A01",
+   "td": "T+D",
+   "kind": "replaced",
+   "feeds": [
+    "A-S01",
+    "A-S02",
+    "A-S03",
+    "A-S04",
+    "A-S05",
+    "A-S06",
+    "A-S07",
+    "A-S08",
+    "A-S09",
+    "A-S10",
+    "A-S11",
+    "A-S12",
+    "A-S13",
+    "A-S14",
+    "A-S15",
+    "A-S16",
+    "A-S17",
+    "A-S18",
+    "A-S19",
+    "A-S20",
+    "A-S21",
+    "A-S22",
+    "A-S23",
+    "A-S24",
+    "A-S25",
+    "A-S26",
+    "A-S27",
+    "A-S28",
+    "A-S29",
+    "A-S30",
+    "A-S31",
+    "A-S32",
+    "A-S33",
+    "A-S34",
+    "A-S35",
+    "A-S36",
+    "A-S37",
+    "A-S38",
+    "A-S39",
+    "A-S40",
+    "A-S41",
+    "A-S42",
+    "A-S43",
+    "A-S44",
+    "A-S45",
+    "A-S46",
+    "A-S47"
+   ],
+   "fields": [
+    "/market/headline",
+    "/client/display_name",
+    "/sources/sections/*/heading"
+   ],
+   "allowed": [
+    "AD6"
+   ]
+  },
+  {
+   "id": "A-A02",
+   "td": "T",
+   "kind": "replaced",
+   "feeds": [
+    "A-S01",
+    "A-S02",
+    "A-S03",
+    "A-S04",
+    "A-S05",
+    "A-S06",
+    "A-S07",
+    "A-S08",
+    "A-S09",
+    "A-S10",
+    "A-S11",
+    "A-S12",
+    "A-S13",
+    "A-S14",
+    "A-S15",
+    "A-S16",
+    "A-S17",
+    "A-S18",
+    "A-S19",
+    "A-S20",
+    "A-S21",
+    "A-S22",
+    "A-S23",
+    "A-S24",
+    "A-S25",
+    "A-S26",
+    "A-S27",
+    "A-S28",
+    "A-S29",
+    "A-S30",
+    "A-S31",
+    "A-S32",
+    "A-S33",
+    "A-S34",
+    "A-S35",
+    "A-S36",
+    "A-S37",
+    "A-S38",
+    "A-S39",
+    "A-S40",
+    "A-S41",
+    "A-S42",
+    "A-S43",
+    "A-S44",
+    "A-S45",
+    "A-S46",
+    "A-S47"
+   ],
+   "allowed": [
+    "AD6"
+   ]
+  },
+  {
+   "id": "A-A03",
+   "td": "T+D",
+   "kind": "replaced",
+   "feeds": [
+    "A-T01",
+    "A-T02",
+    "A-T03",
+    "A-T04",
+    "A-T05",
+    "A-T06",
+    "A-T07",
+    "A-T08",
+    "A-T09",
+    "A-T10",
+    "A-T11",
+    "A-T12",
+    "A-T13",
+    "A-T14",
+    "A-T15",
+    "A-T16",
+    "A-T17",
+    "A-T18",
+    "A-T19",
+    "A-T20",
+    "A-T21",
+    "A-T22",
+    "A-T23",
+    "A-T24",
+    "A-T25",
+    "A-T26",
+    "A-T27",
+    "A-T28",
+    "A-T29",
+    "A-T30",
+    "A-T31",
+    "A-T32",
+    "A-T33",
+    "A-T34",
+    "A-T35",
+    "A-T36",
+    "A-T37",
+    "A-T38",
+    "A-T39",
+    "A-T40",
+    "A-T41",
+    "A-T42",
+    "A-T43",
+    "A-T44",
+    "A-T45",
+    "A-T46",
+    "A-T47",
+    "A-T48",
+    "A-T49",
+    "A-T50",
+    "A-T51",
+    "A-T52",
+    "A-T53",
+    "A-T54",
+    "A-T55",
+    "A-T56"
+   ],
+   "fields": [
+    "/map/center",
+    "/map/zoom",
+    "/properties/*/locator/preferred_offset",
+    "/ownership/default_property"
+   ],
+   "allowed": [
+    "AD6"
+   ]
+  },
+  {
+   "id": "A-A04",
+   "td": "D",
+   "kind": "replaced",
+   "feeds": [
+    "A-S14",
+    "A-S30",
+    "A-S31",
+    "A-S32",
+    "A-S33",
+    "A-L31",
+    "A-L32",
+    "A-L33",
+    "A-L34",
+    "A-L35",
+    "A-L36",
+    "A-L37",
+    "A-L38",
+    "A-L39",
+    "A-L40",
+    "A-L41",
+    "A-L42",
+    "A-L43",
+    "A-L44",
+    "A-L45",
+    "A-L46",
+    "A-L47",
+    "A-L48",
+    "A-L49",
+    "A-L50",
+    "A-L51",
+    "A-L52",
+    "A-L53",
+    "A-L54",
+    "A-L55",
+    "A-L56",
+    "A-L57",
+    "A-L58",
+    "A-L59",
+    "A-L60",
+    "A-L61",
+    "A-L62",
+    "A-L63",
+    "A-L64",
+    "A-L65",
+    "A-L66",
+    "A-L67",
+    "A-L68",
+    "A-L69",
+    "A-L70",
+    "A-L71",
+    "A-L72",
+    "A-L73",
+    "A-L74",
+    "A-L75"
+   ],
+   "fields": [
+    "/properties/*/id",
+    "/demographics/growth/geographies/*/name",
+    "/demographics/micro_zones/zones/*/id",
+    "/demographics/competition/offices/*/name",
+    "/developments/*/id"
+   ],
+   "allowed": [
+    "AD6"
+   ]
+  },
+  {
+   "id": "A-A05",
+   "td": "D",
+   "kind": "media",
+   "path": "properties.json",
+   "fields": [
+    "/properties/*/id"
+   ],
+   "allowed": [
+    "AD4"
+   ]
+  },
+  {
+   "id": "A-A06",
+   "td": "T",
+   "kind": "media",
+   "path": "demographics.html",
+   "allowed": [
+    "AD3"
+   ]
+  },
+  {
+   "id": "A-A07",
+   "td": "T",
+   "kind": "media",
+   "path": "ownership.html",
+   "allowed": [
+    "AD3"
+   ]
+  },
+  {
+   "id": "A-A08",
+   "td": "T",
+   "kind": "media",
+   "path": "purchases.html",
+   "allowed": [
+    "AD3"
+   ]
+  },
+  {
+   "id": "A-A09",
+   "td": "T",
+   "kind": "media",
+   "path": "sources.html",
+   "allowed": [
+    "AD3"
+   ]
+  },
+  {
+   "id": "A-A10",
+   "td": "T",
+   "kind": "media",
+   "path": "tour.html",
+   "allowed": [
+    "AD3"
+   ]
+  },
+  {
+   "id": "A-A11",
+   "td": "T",
+   "kind": "media",
+   "view": "home",
+   "target": ".site-header .brand-logo",
+   "attr": "src"
+  },
+  {
+   "id": "A-A12",
+   "td": "D",
+   "kind": "media",
+   "view": "home",
+   "target": ".site-header img.@{logo-asset}",
+   "attr": "src",
+   "fields": [
+    "/client/logo"
+   ]
+  },
+  {
+   "id": "A-A13",
+   "td": "T",
+   "kind": "media",
+   "view": "home",
+   "font_face": 1
+  },
+  {
+   "id": "A-A14",
+   "td": "T",
+   "kind": "media",
+   "view": "home",
+   "font_face": 2
+  },
+  {
+   "id": "A-A15",
+   "td": "D",
+   "kind": "media",
+   "view": "purchases",
+   "target": "#property-directory .property-jump:nth-child(1) img",
+   "attr": "src",
+   "fields": [
+    "/properties/0/photo"
+   ]
+  },
+  {
+   "id": "A-A16",
+   "td": "D",
+   "kind": "media",
+   "view": "purchases",
+   "target": "#property-directory .property-jump:nth-child(2) img",
+   "attr": "src",
+   "fields": [
+    "/properties/1/photo"
+   ]
+  },
+  {
+   "id": "A-A17",
+   "td": "D",
+   "kind": "media",
+   "view": "purchases",
+   "target": "#property-directory .property-jump:nth-child(3) img",
+   "attr": "src",
+   "fields": [
+    "/properties/2/photo"
+   ]
+  },
+  {
+   "id": "A-A18",
+   "td": "D",
+   "kind": "media",
+   "view": "purchases",
+   "target": "#property-directory .property-jump:nth-child(4) img",
+   "attr": "src",
+   "fields": [
+    "/properties/3/photo"
+   ]
+  },
+  {
+   "id": "A-A19",
+   "td": "D",
+   "kind": "media",
+   "view": "purchases",
+   "target": "#property-directory .property-jump:nth-child(5) img",
+   "attr": "src",
+   "fields": [
+    "/properties/4/photo"
+   ]
+  },
+  {
+   "id": "A-A20",
+   "td": "D",
+   "kind": "media",
+   "view": "purchases",
+   "target": "#property-directory .property-jump:nth-child(6) img",
+   "attr": "src",
+   "fields": [
+    "/properties/5/photo"
+   ]
+  },
+  {
+   "id": "A-A21",
+   "td": "D",
+   "kind": "media",
+   "view": "purchases",
+   "target": "#property-directory .property-jump:nth-child(7) img",
+   "attr": "src",
+   "fields": [
+    "/properties/6/photo"
+   ]
+  },
+  {
+   "id": "A-A22",
+   "td": "D",
+   "kind": "media",
+   "view": "purchases",
+   "target": "#property-directory .property-jump:nth-child(8) img",
+   "attr": "src",
+   "fields": [
+    "/properties/7/photo"
+   ]
+  },
+  {
+   "id": "A-A23",
+   "td": "D",
+   "kind": "media",
+   "view": "home",
+   "target": "#development-directory .development-tile:nth-child(1) img",
+   "attr": "src",
+   "fields": [
+    "/developments/0/image/asset"
+   ]
+  },
+  {
+   "id": "A-A24",
+   "td": "D",
+   "kind": "media",
+   "view": "home",
+   "target": "#development-directory .development-tile:nth-child(2) img",
+   "attr": "src",
+   "fields": [
+    "/developments/1/image/asset"
+   ]
+  },
+  {
+   "id": "A-A25",
+   "td": "D",
+   "kind": "media",
+   "view": "home",
+   "target": "#development-directory .development-tile:nth-child(3) img",
+   "attr": "src",
+   "fields": [
+    "/developments/2/image/asset"
+   ]
+  },
+  {
+   "id": "A-A26",
+   "td": "D",
+   "kind": "media",
+   "view": "home",
+   "target": "#development-directory .development-tile:nth-child(4) img",
+   "attr": "src",
+   "fields": [
+    "/developments/3/image/asset"
+   ]
+  },
+  {
+   "id": "A-A27",
+   "td": "D",
+   "kind": "media",
+   "view": "demographics",
+   "target": "#competition-offices .competition-office-card:nth-child(1) img",
+   "attr": "src",
+   "fields": [
+    "/demographics/competition/offices/0/logo"
+   ]
+  },
+  {
+   "id": "A-A28",
+   "td": "D",
+   "kind": "media",
+   "view": "demographics",
+   "target": "#competition-offices .competition-office-card:nth-child(2) img",
+   "attr": "src",
+   "fields": [
+    "/demographics/competition/offices/1/logo"
+   ]
+  },
+  {
+   "id": "A-A29",
+   "td": "D",
+   "kind": "media",
+   "view": "demographics",
+   "target": "#competition-offices .competition-office-card:nth-child(3) img",
+   "attr": "src",
+   "fields": [
+    "/demographics/competition/offices/2/logo"
+   ]
+  },
+  {
+   "id": "A-A30",
+   "td": "D",
+   "kind": "media",
+   "view": "demographics",
+   "target": "#competition-offices .competition-office-card:nth-child(4) img",
+   "attr": "src",
+   "fields": [
+    "/demographics/competition/offices/3/logo"
+   ]
+  },
+  {
+   "id": "A-A31",
+   "td": "D",
+   "kind": "media",
+   "view": "demographics",
+   "target": "#competition-offices .competition-office-card:nth-child(5) img",
+   "attr": "src",
+   "fields": [
+    "/demographics/competition/offices/4/logo"
+   ]
+  },
+  {
+   "id": "A-A32",
+   "td": "D",
+   "kind": "media",
+   "view": "demographics",
+   "target": "#competition-offices .competition-office-card:nth-child(6) img",
+   "attr": "src",
+   "fields": [
+    "/demographics/competition/offices/5/logo"
+   ]
+  },
+  {
+   "id": "A-A33",
+   "td": "D",
+   "kind": "media",
+   "view": "demographics",
+   "target": "#competition-offices .competition-office-card:nth-child(7) img",
+   "attr": "src",
+   "fields": [
+    "/demographics/competition/offices/6/logo"
+   ]
+  },
+  {
+   "id": "A-A34",
+   "td": "T",
+   "kind": "media",
+   "path": "@{location-illustration-file}"
+  },
+  {
+   "id": "A-A35",
+   "td": "D",
+   "kind": "media",
+   "view": "demographics",
+   "target": "#micro-zone-report-links a:nth-child(1)",
+   "attr": "href",
+   "fields": [
+    "/demographics/micro_zones/zones/0/study_pdf"
+   ]
+  },
+  {
+   "id": "A-A36",
+   "td": "D",
+   "kind": "media",
+   "view": "demographics",
+   "target": "#micro-zone-report-links a:nth-child(2)",
+   "attr": "href",
+   "fields": [
+    "/demographics/micro_zones/zones/1/study_pdf"
+   ]
+  },
+  {
+   "id": "A-A37",
+   "td": "D",
+   "kind": "media",
+   "view": "demographics",
+   "target": "#micro-zone-report-links a:nth-child(3)",
+   "attr": "href",
+   "fields": [
+    "/demographics/micro_zones/zones/2/study_pdf"
+   ]
+  },
+  {
+   "id": "A-A38",
+   "td": "T",
+   "kind": "media",
+   "view": "home",
+   "target": "link[rel=\"stylesheet\"][href*=\"maplibre-gl\"]",
+   "attr": "href",
+   "allowed": [
+    "AD1"
+   ]
+  },
+  {
+   "id": "A-A39",
+   "td": "T",
+   "kind": "media",
+   "view": "home",
+   "request_match": "maplibre-gl[^/]*\\.m?js(\\?|$)",
+   "allowed": [
+    "AD1"
+   ]
+  },
+  {
+   "id": "A-A40",
+   "td": "T",
+   "kind": "media",
+   "view": "home",
+   "request_match": "/styles/[a-z-]+$"
+  },
+  {
+   "id": "V-G01",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "@bare"
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "V-G02",
+   "td": "T+D",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": ""
+    }
+   ],
+   "stage0": true,
+   "fields": [
+    "/client/display_name",
+    "/client/wordmark/line1"
+   ],
+   "allowed": [
+    "AD7"
+   ]
+  },
+  {
+   "id": "V-G03",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "POST",
+     "path": "",
+     "sign_in": true
+    }
+   ],
+   "stage0": true,
+   "allowed": [
+    "AD2"
+   ]
+  },
+  {
+   "id": "V-G04",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "POST",
+     "path": "",
+     "headers": {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Origin": "@origin"
+     },
+     "body": "password=parity-probe-wrong-password"
+    }
+   ],
+   "stage0": true,
+   "allowed": [
+    "AD2",
+    "AD7"
+   ]
+  },
+  {
+   "id": "V-G05",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "",
+     "session": true
+    },
+    {
+     "method": "GET",
+     "path": "styles.css",
+     "session": true
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "V-G06",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "api/selection",
+     "session": true
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "V-G07",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "PUT",
+     "path": "api/selection",
+     "session": true,
+     "csrf": true,
+     "headers": {
+      "Origin": "@origin",
+      "Content-Type": "application/json"
+     },
+     "body": {
+      "json": {
+       "version": -1,
+       "selected_ids": []
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "V-G08",
+   "td": "T+D",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "api/selection",
+     "session": true
+    }
+   ],
+   "stage0": true,
+   "fields": [
+    "/properties/*/id"
+   ],
+   "allowed": [
+    "AD2"
+   ]
+  },
+  {
+   "id": "V-G09",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "a//b"
+    },
+    {
+     "method": "GET",
+     "path": "%5C"
+    },
+    {
+     "method": "GET",
+     "path": "",
+     "session": true
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "V-G10",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "parity-probe-missing.txt"
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "V-G11",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": ""
+    }
+   ],
+   "fault": "secrets-unconfigured"
+  },
+  {
+   "id": "V-G12",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "DELETE",
+     "path": ""
+    },
+    {
+     "method": "POST",
+     "path": "styles.css",
+     "headers": {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Origin": "@origin"
+     },
+     "body": "password=x"
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "V-G13",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "POST",
+     "path": "",
+     "headers": {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Origin": "@cross-origin"
+     },
+     "body": "password=x"
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "V-G14",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "POST",
+     "path": "",
+     "headers": {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Origin": "@origin"
+     },
+     "body": {
+      "repeat": {
+       "text": "a",
+       "times": 3000
+      }
+     }
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "V-G15",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "POST",
+     "path": "",
+     "headers": {
+      "Content-Type": "text/plain",
+      "Origin": "@origin"
+     },
+     "body": "password=x"
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "V-G16",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "HEAD",
+     "path": ""
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "V-G17",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "styles.css",
+     "session": true
+    }
+   ],
+   "fault": "asset-unreadable"
+  },
+  {
+   "id": "V-G18",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "api/selection"
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "V-G19",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "DELETE",
+     "path": "api/selection",
+     "session": true
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "V-G20",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "PUT",
+     "path": "api/selection",
+     "session": true,
+     "headers": {
+      "Origin": "@cross-origin",
+      "Content-Type": "application/json"
+     },
+     "body": {
+      "json": {}
+     }
+    }
+   ],
+   "stage0": true
+  },
+  {
+   "id": "V-G21",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "PUT",
+     "path": "api/selection",
+     "session": true,
+     "csrf": true,
+     "headers": {
+      "Origin": "@origin",
+      "Content-Type": "application/json"
+     },
+     "body": {
+      "repeat": {
+       "text": " ",
+       "times": 100000
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "V-G22",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "PUT",
+     "path": "api/selection",
+     "session": true,
+     "csrf": true,
+     "headers": {
+      "Origin": "@origin",
+      "Content-Type": "text/plain"
+     },
+     "body": "x"
+    }
+   ]
+  },
+  {
+   "id": "V-G23",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "PUT",
+     "path": "api/selection",
+     "session": true,
+     "csrf": true,
+     "headers": {
+      "Origin": "@origin",
+      "Content-Type": "application/json"
+     },
+     "body": {
+      "json": {
+       "version": "invalid"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "V-G24",
+   "td": "T",
+   "kind": "http",
+   "requests": [
+    {
+     "method": "GET",
+     "path": "api/selection",
+     "session": true
+    }
+   ],
+   "fault": "storage-unavailable"
+  },
+  {
+   "id": "V-S01",
+   "td": "T",
+   "kind": "dom",
+   "view": "home",
+   "steps": [
+    {
+     "scroll": 600
+    },
+    {
+     "wait": 250
+    }
+   ],
+   "target": ".scroll-progress",
+   "motion": true
+  },
+  {
+   "id": "V-S02",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "home",
+   "target": ".site-header",
+   "fields": [
+    "/client/display_name",
+    "/client/wordmark/line1",
+    "/client/logo"
+   ],
+   "allowed": [
+    "AD5"
+   ]
+  },
+  {
+   "id": "V-S03",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "home",
+   "target": "#sticky-page-title",
+   "fields": [
+    "/market/home_title"
+   ]
+  },
+  {
+   "id": "V-S04",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "home",
+   "target": ".site-footer",
+   "fields": [
+    "/client/display_name",
+    "/prepared/on",
+    "/market/footer_note"
+   ]
+  },
+  {
+   "id": "V-S05",
+   "td": "T",
+   "kind": "dom",
+   "view": "home",
+   "target": "#home"
+  },
+  {
+   "id": "V-S06",
+   "td": "D",
+   "kind": "dom",
+   "view": "home",
+   "target": ".home-market-intro",
+   "fields": [
+    "/client/wordmark/line1",
+    "/prepared/for",
+    "/prepared/on",
+    "/market/headline",
+    "/market/intro"
+   ]
+  },
+  {
+   "id": "V-S07",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "home",
+   "target": ".home-mini-map",
+   "fields": [
+    "/market/mini_map_caption"
+   ]
+  },
+  {
+   "id": "V-S08",
+   "td": "D",
+   "kind": "dom",
+   "view": "home",
+   "target": ".home-market-snapshot",
+   "fields": [
+    "/market/snapshot/*/value",
+    "/market/snapshot/*/label"
+   ]
+  },
+  {
+   "id": "V-S09",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "home",
+   "target": ".development-section",
+   "fields": [
+    "/developments/*/title",
+    "/developments/*/stage"
+   ]
+  },
+  {
+   "id": "V-S10",
+   "td": "T",
+   "kind": "dom",
+   "view": "home",
+   "target": "#home > .home-actions"
+  },
+  {
+   "id": "V-S11",
+   "td": "T",
+   "kind": "dom",
+   "view": "purchases",
+   "target": "#purchases"
+  },
+  {
+   "id": "V-S12",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "purchases",
+   "target": ".selection-intro",
+   "fields": [
+    "/purchases/intro",
+    "/purchases/screening_factors/*/title"
+   ]
+  },
+  {
+   "id": "V-S13",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "purchases",
+   "target": "#purchases .table-wrap",
+   "fields": [
+    "/purchases/table/locator_note",
+    "/purchases/table/parking_note",
+    "/properties/*/review_point",
+    "/properties/*/facts/*/value"
+   ]
+  },
+  {
+   "id": "V-S14",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "purchases",
+   "target": "#property-directory",
+   "fields": [
+    "/properties/*/address",
+    "/properties/*/photo",
+    "/properties/*/review_point"
+   ]
+  },
+  {
+   "id": "V-S15",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "purchases",
+   "target": "#market-context",
+   "fields": [
+    "/purchases/market_context_note",
+    "/properties/*/role"
+   ]
+  },
+  {
+   "id": "V-S16",
+   "td": "T",
+   "kind": "dom",
+   "view": "purchases",
+   "target": "#purchases .purchase-tour-cta"
+  },
+  {
+   "id": "V-S17",
+   "td": "T",
+   "kind": "dom",
+   "view": "demographics",
+   "target": "#demographics"
+  },
+  {
+   "id": "V-S18",
+   "td": "D",
+   "kind": "dom",
+   "view": "demographics",
+   "target": ".regional-growth",
+   "fields": [
+    "/demographics/growth/area_label",
+    "/demographics/growth/tiles/*/value",
+    "/demographics/growth/reach_note",
+    "/demographics/growth/source"
+   ]
+  },
+  {
+   "id": "V-S19",
+   "td": "T",
+   "kind": "dom",
+   "view": "demographics",
+   "target": "#demographics > h2"
+  },
+  {
+   "id": "V-S20",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "demographics",
+   "target": ".demo-compare",
+   "fields": [
+    "/demographics/median_income/geographies/*/value",
+    "/demographics/median_income/households_note"
+   ]
+  },
+  {
+   "id": "V-S21",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "demographics",
+   "target": "#demographics .regional-context",
+   "fields": [
+    "/demographics/income_bands/areas/*/counts",
+    "/demographics/income_bands/combined",
+    "/demographics/income_bands/notes"
+   ]
+  },
+  {
+   "id": "V-S22",
+   "td": "D",
+   "kind": "dom",
+   "view": "demographics",
+   "target": "#demographics > details.demo-method",
+   "fields": [
+    "/demographics/methodology"
+   ]
+  },
+  {
+   "id": "V-S23",
+   "td": "D",
+   "kind": "dom",
+   "view": "demographics",
+   "target": "#demographics > p.note",
+   "fields": [
+    "/demographics/methodology"
+   ]
+  },
+  {
+   "id": "V-S24",
+   "td": "T",
+   "kind": "dom",
+   "view": "tour",
+   "target": "#tour"
+  },
+  {
+   "id": "V-S25",
+   "td": "D",
+   "kind": "dom",
+   "view": "sources",
+   "target": "#sources > h3:nth-of-type(1), #sources > h3:nth-of-type(1) + p",
+   "fields": [
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "V-S26",
+   "td": "D",
+   "kind": "dom",
+   "view": "sources",
+   "target": "#sources > h3:nth-of-type(2), #sources > ul",
+   "fields": [
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "V-S27",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "sources",
+   "target": "#sources > h3:nth-of-type(3), #sources > h3:nth-of-type(3) + p, #sources > p.note",
+   "fields": [
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "V-S28",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "purchases",
+   "steps": [
+    {
+     "click": "#property-directory .property-jump:nth-child(1)"
+    }
+   ],
+   "target": "#property-dialog",
+   "fields": [
+    "/properties/*/facts/*/value",
+    "/properties/*/review_point",
+    "/properties/*/notes/plan",
+    "/properties/*/source_caption"
+   ]
+  },
+  {
+   "id": "V-S29",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "purchases",
+   "steps": [
+    {
+     "click": "#market-context-open"
+    }
+   ],
+   "target": "#property-dialog",
+   "fields": [
+    "/properties/*/role",
+    "/purchases/market_context_note"
+   ]
+  },
+  {
+   "id": "V-S30",
+   "td": "D",
+   "kind": "dom",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-map .map-practice",
+     "force": true
+    }
+   ],
+   "target": "#property-dialog",
+   "fields": [
+    "/client/current_practice/address",
+    "/client/current_practice/size_note",
+    "/client/website"
+   ]
+  },
+  {
+   "id": "V-S31",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(1)"
+    }
+   ],
+   "target": "#project-dialog",
+   "fields": [
+    "/developments/*/image/credit",
+    "/developments/*/concept_note",
+    "/developments/*/latest_update",
+    "/developments/*/scale",
+    "/developments/*/relevance",
+    "/developments/*/sources/*/label"
+   ]
+  },
+  {
+   "id": "V-S32",
+   "td": "T+D",
+   "kind": "dom",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-map .map-context:nth-child(1 of .map-context)",
+     "force": true
+    }
+   ],
+   "target": "#project-dialog",
+   "fields": [
+    "/context_anchors/*/name",
+    "/context_anchors/*/address",
+    "/context_anchors/*/category",
+    "/context_anchors/*/locator/precision"
+   ]
+  },
+  {
+   "id": "V-T01",
+   "td": "T",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "click": ".site-nav a[href=\"#purchases\"]"
+    }
+   ],
+   "observe": [
+    {
+     "selector": ".site-view",
+     "text": false
+    },
+    ".site-nav a",
+    "#sticky-page-title"
+   ]
+  },
+  {
+   "id": "V-T02",
+   "td": "T",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "scroll": 600
+    },
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "html",
+    ".development-tile"
+   ],
+   "motion": true
+  },
+  {
+   "id": "V-T03",
+   "td": "T",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "html"
+   ]
+  },
+  {
+   "id": "V-T04",
+   "td": "T",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    ".site-header .@{logo-asset}",
+    ".site-header .@{logo-fallback}"
+   ]
+  },
+  {
+   "id": "V-T05",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "#development-map",
+    "#development-map .maplibregl-ctrl"
+   ],
+   "fields": [
+    "/map/center",
+    "/map/zoom",
+    "/map/basemap/kind"
+   ]
+  },
+  {
+   "id": "V-T06",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "hover": "#development-map .development-pin:nth-child(1 of .development-pin)"
+    },
+    {
+     "click": "#development-map .development-pin:nth-child(1 of .development-pin)",
+     "force": true
+    }
+   ],
+   "observe": [
+    "#property-preview",
+    "#project-dialog"
+   ],
+   "fields": [
+    "/developments/*/locator/lon"
+   ]
+  },
+  {
+   "id": "V-T07",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "hover": "#development-map .map-context:nth-child(1 of .map-context)"
+    },
+    {
+     "click": "#development-map .map-context:nth-child(1 of .map-context)",
+     "force": true
+    }
+   ],
+   "observe": [
+    "#property-preview",
+    "#project-dialog"
+   ],
+   "fields": [
+    "/context_anchors/*/locator/lon",
+    "/context_anchors/*/category"
+   ]
+  },
+  {
+   "id": "V-T08",
+   "td": "D",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-map .map-practice",
+     "force": true
+    }
+   ],
+   "observe": [
+    "#property-dialog"
+   ],
+   "fields": [
+    "/client/current_practice/locator/lon",
+    "/client/current_practice/marker_letter"
+   ]
+  },
+  {
+   "id": "V-T09",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "purchases",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "#purchase-map .pin-stem"
+   ],
+   "fields": [
+    "/properties/*/locator/preferred_offset"
+   ]
+  },
+  {
+   "id": "V-T10",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "purchases",
+   "steps": [
+    {
+     "hover": "#purchase-map .locator-pin:nth-child(1 of .locator-pin)"
+    },
+    {
+     "click": "#purchase-map .locator-pin:nth-child(1 of .locator-pin)",
+     "force": true
+    }
+   ],
+   "observe": [
+    "#property-preview",
+    "#property-dialog"
+   ],
+   "fields": [
+    "/properties/*/locator/lon"
+   ]
+  },
+  {
+   "id": "V-T11",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "purchases",
+   "steps": [
+    {
+     "click": "#purchase-table tbody tr:nth-child(1) button"
+    }
+   ],
+   "observe": [
+    "#purchase-table tbody",
+    "#property-dialog"
+   ],
+   "fields": [
+    "/properties/*/facts/*/value",
+    "/properties/*/review_point"
+   ]
+  },
+  {
+   "id": "V-T12",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "purchases",
+   "steps": [
+    {
+     "hover": "#property-directory .property-jump:nth-child(1)"
+    },
+    {
+     "click": "#property-directory .property-jump:nth-child(1)"
+    }
+   ],
+   "observe": [
+    "#property-preview",
+    "#property-dialog"
+   ],
+   "fields": [
+    "/properties/*/photo"
+   ]
+  },
+  {
+   "id": "V-T13",
+   "td": "T",
+   "kind": "interaction",
+   "view": "purchases",
+   "steps": [
+    {
+     "hover": "#property-directory .property-jump:nth-child(1)"
+    }
+   ],
+   "observe": [
+    "#property-preview"
+   ]
+  },
+  {
+   "id": "V-T14",
+   "td": "T",
+   "kind": "interaction",
+   "view": "purchases",
+   "steps": [
+    {
+     "click": "#property-directory .property-jump:nth-child(1)"
+    },
+    {
+     "click": "#property-dialog-close"
+    }
+   ],
+   "observe": [
+    "#property-dialog"
+   ]
+  },
+  {
+   "id": "V-T15",
+   "td": "T",
+   "kind": "interaction",
+   "view": "purchases",
+   "steps": [
+    {
+     "click": "#property-directory .property-jump:nth-child(1)"
+    },
+    {
+     "click": "#property-dialog [data-toggle]"
+    }
+   ],
+   "observe": [
+    "#property-dialog [data-toggle]",
+    "#tour-selected"
+   ]
+  },
+  {
+   "id": "V-T16",
+   "td": "T",
+   "kind": "interaction",
+   "view": "purchases",
+   "steps": [
+    {
+     "click": "#market-context-open"
+    }
+   ],
+   "observe": [
+    "#property-dialog"
+   ]
+  },
+  {
+   "id": "V-T17",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(1)"
+    }
+   ],
+   "observe": [
+    "#project-dialog"
+   ],
+   "fields": [
+    "/developments/*/stage",
+    "/developments/*/summary"
+   ]
+  },
+  {
+   "id": "V-T18",
+   "td": "T",
+   "kind": "interaction",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(1)"
+    },
+    {
+     "click": "#project-dialog-close"
+    }
+   ],
+   "observe": [
+    "#project-dialog"
+   ]
+  },
+  {
+   "id": "V-T19",
+   "td": "D",
+   "kind": "interaction",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": ".regional-growth .demo-switch button:nth-child(2)"
+    }
+   ],
+   "observe": [
+    ".regional-growth .demo-switch button",
+    "#regional-growth-chart"
+   ],
+   "fields": [
+    "/demographics/growth/geographies/*/series/*/value"
+   ]
+  },
+  {
+   "id": "V-T20",
+   "td": "D",
+   "kind": "interaction",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#demographics > .demo-switch button:nth-child(2)"
+    }
+   ],
+   "observe": [
+    "#demographics > .demo-switch button",
+    "#demo-dashboard"
+   ],
+   "fields": [
+    "/demographics/age/geographies/*/under_18_pct"
+   ]
+  },
+  {
+   "id": "V-T21",
+   "td": "D",
+   "kind": "interaction",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#demographics > .demo-switch button:nth-child(2)"
+    }
+   ],
+   "observe": [
+    "#demo-comparisons"
+   ],
+   "fields": [
+    "/demographics/median_income/geographies/*/value"
+   ]
+  },
+  {
+   "id": "V-T22",
+   "td": "T+D",
+   "kind": "interaction",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": ".income-tier-switch button:nth-child(2)"
+    }
+   ],
+   "observe": [
+    ".income-tier-switch button",
+    "#regional-income-context"
+   ],
+   "fields": [
+    "/demographics/income_bands/areas/*/counts",
+    "/demographics/income_bands/combined"
+   ]
+  },
+  {
+   "id": "V-T23",
+   "td": "T",
+   "kind": "interaction",
+   "view": "tour",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "#tour-available"
+   ]
+  },
+  {
+   "id": "V-T24",
+   "td": "T",
+   "kind": "interaction",
+   "view": "tour",
+   "steps": [
+    {
+     "click": "#tour-available [data-add]"
+    },
+    {
+     "fill": "#tour-selected textarea",
+     "value": "Parity probe note"
+    }
+   ],
+   "observe": [
+    "#tour-selected",
+    "#tour-save-status"
+   ]
+  },
+  {
+   "id": "V-T25",
+   "td": "T",
+   "kind": "interaction",
+   "view": "tour",
+   "steps": [
+    {
+     "drag": "#tour-available .tour-option:nth-child(1)",
+     "to": "#tour-selected"
+    }
+   ],
+   "observe": [
+    "#tour-selected"
+   ]
+  },
+  {
+   "id": "V-T26",
+   "td": "T",
+   "kind": "interaction",
+   "view": "tour",
+   "steps": [
+    {
+     "click": "#tour-available [data-add]"
+    },
+    {
+     "click": "#tour-save",
+     "force": true
+    }
+   ],
+   "observe": [
+    "#tour-save",
+    "#tour-save-status"
+   ]
+  },
+  {
+   "id": "V-T27",
+   "td": "T",
+   "kind": "interaction",
+   "view": "tour",
+   "steps": [
+    {
+     "click": "#tour-available [data-add]"
+    },
+    {
+     "click": "#tour-reload"
+    }
+   ],
+   "observe": [
+    "#tour-save-status",
+    "#tour-selected"
+   ]
+  },
+  {
+   "id": "V-T28",
+   "td": "T",
+   "kind": "interaction",
+   "view": "tour",
+   "steps": [
+    {
+     "wait": 250
+    }
+   ],
+   "observe": [
+    "#tour-save-status"
+   ]
+  },
+  {
+   "id": "V-L01",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".skip-link"
+  },
+  {
+   "id": "V-L02",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".site-header .carr-link"
+  },
+  {
+   "id": "V-L03",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".site-header .@{brand-link}"
+  },
+  {
+   "id": "V-L04",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".site-nav a[href=\"#home\"]"
+  },
+  {
+   "id": "V-L05",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".site-nav a[href=\"#purchases\"]"
+  },
+  {
+   "id": "V-L06",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".site-nav a[href=\"#tour\"]"
+  },
+  {
+   "id": "V-L07",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".site-nav a[href=\"#demographics\"]"
+  },
+  {
+   "id": "V-L08",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".site-nav a[href=\"#sources\"]"
+  },
+  {
+   "id": "V-L09",
+   "td": "T+D",
+   "kind": "link",
+   "view": "home",
+   "target": ".home-market-snapshot a:nth-child(1)",
+   "fields": [
+    "/market/snapshot/0/label"
+   ]
+  },
+  {
+   "id": "V-L10",
+   "td": "T+D",
+   "kind": "link",
+   "view": "home",
+   "target": ".home-market-snapshot a:nth-child(2)",
+   "fields": [
+    "/market/snapshot/1/label"
+   ]
+  },
+  {
+   "id": "V-L11",
+   "td": "T+D",
+   "kind": "link",
+   "view": "home",
+   "target": ".home-market-snapshot a:nth-child(3)",
+   "fields": [
+    "/market/snapshot/2/label"
+   ]
+  },
+  {
+   "id": "V-L12",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".home-demo-link a"
+  },
+  {
+   "id": "V-L13",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": "#home > .home-actions a"
+  },
+  {
+   "id": "V-L14",
+   "td": "T",
+   "kind": "link",
+   "view": "purchases",
+   "target": "#purchases .purchase-tour-cta a"
+  },
+  {
+   "id": "V-L15",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "target": ".regional-growth > a.chart-source",
+   "fields": [
+    "/demographics/growth/source"
+   ]
+  },
+  {
+   "id": "V-L16",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "target": "#demographics .regional-context details a",
+   "fields": [
+    "/demographics/income_bands/notes"
+   ]
+  },
+  {
+   "id": "V-L17",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "target": "#demographics > p.note a:nth-of-type(1)",
+   "fields": [
+    "/demographics/methodology"
+   ]
+  },
+  {
+   "id": "V-L18",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "target": "#demographics > p.note a:nth-of-type(2)",
+   "fields": [
+    "/demographics/methodology"
+   ]
+  },
+  {
+   "id": "V-L19",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "target": "#demographics > p.note a:nth-of-type(3)",
+   "fields": [
+    "/demographics/methodology"
+   ]
+  },
+  {
+   "id": "V-L20",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#sources > ul li:nth-child(1) a",
+   "fields": [
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "V-L21",
+   "td": "D",
+   "kind": "link",
+   "view": "sources",
+   "target": "#sources > ul li:nth-child(2) a",
+   "fields": [
+    "/sources/sections/*/body"
+   ]
+  },
+  {
+   "id": "V-L22",
+   "td": "T",
+   "kind": "link",
+   "view": "home",
+   "target": ".site-footer a"
+  },
+  {
+   "id": "V-L23",
+   "td": "T",
+   "kind": "link",
+   "view": "purchases",
+   "steps": [
+    {
+     "click": "#property-directory .property-jump:nth-child(1)"
+    }
+   ],
+   "target": "#property-dialog .carr-link"
+  },
+  {
+   "id": "V-L24",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "target": "#regional-growth-chart a.chart-source",
+   "fields": [
+    "/demographics/growth/geographies/*/source_url"
+   ]
+  },
+  {
+   "id": "V-L25",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#demographics > .demo-switch button:nth-child(1)"
+    }
+   ],
+   "target": "#demo-dashboard a.chart-source",
+   "fields": [
+    "/demographics/age/geographies/0/source_url"
+   ]
+  },
+  {
+   "id": "V-L26",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#demographics > .demo-switch button:nth-child(2)"
+    }
+   ],
+   "target": "#demo-dashboard a.chart-source",
+   "fields": [
+    "/demographics/age/geographies/1/source_url"
+   ]
+  },
+  {
+   "id": "V-L27",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#demographics > .demo-switch button:nth-child(1)"
+    }
+   ],
+   "target": "#demo-comparisons a",
+   "fields": [
+    "/demographics/age/geographies/0/source_url"
+   ]
+  },
+  {
+   "id": "V-L28",
+   "td": "D",
+   "kind": "link",
+   "view": "demographics",
+   "steps": [
+    {
+     "click": "#demographics > .demo-switch button:nth-child(2)"
+    }
+   ],
+   "target": "#demo-comparisons a",
+   "fields": [
+    "/demographics/age/geographies/1/source_url"
+   ]
+  },
+  {
+   "id": "V-L29",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-map .map-practice",
+     "force": true
+    }
+   ],
+   "target": "#property-dialog a[target=\"_blank\"]:not(.carr-link)",
+   "fields": [
+    "/client/website"
+   ]
+  },
+  {
+   "id": "V-L30",
+   "td": "T+D",
+   "kind": "link",
+   "view": "purchases",
+   "steps": [
+    {
+     "click": "#property-directory .property-jump:nth-child(2)"
+    }
+   ],
+   "target": "#property-dialog .property-links a",
+   "fields": [
+    "/properties/*/floorplan"
+   ]
+  },
+  {
+   "id": "V-L31",
+   "td": "T+D",
+   "kind": "link",
+   "view": "purchases",
+   "steps": [
+    {
+     "click": "#property-directory .property-jump:nth-child(3)"
+    }
+   ],
+   "target": "#property-dialog .property-links a",
+   "fields": [
+    "/properties/*/floorplan"
+   ]
+  },
+  {
+   "id": "V-L32",
+   "td": "T+D",
+   "kind": "link",
+   "view": "purchases",
+   "steps": [
+    {
+     "click": "#property-directory .property-jump:nth-child(4)"
+    }
+   ],
+   "target": "#property-dialog .property-links a",
+   "fields": [
+    "/properties/*/floorplan"
+   ]
+  },
+  {
+   "id": "V-L33",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(1)"
+    }
+   ],
+   "target": "#project-dialog-content ul li:nth-child(1) a",
+   "fields": [
+    "/developments/0/sources/0/url"
+   ]
+  },
+  {
+   "id": "V-L34",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(1)"
+    }
+   ],
+   "target": "#project-dialog-content ul li:nth-child(2) a",
+   "fields": [
+    "/developments/0/sources/1/url"
+   ]
+  },
+  {
+   "id": "V-L35",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(1)"
+    }
+   ],
+   "target": "#project-dialog-content ul li:nth-child(3) a",
+   "fields": [
+    "/developments/0/sources/2/url"
+   ]
+  },
+  {
+   "id": "V-L36",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(2)"
+    }
+   ],
+   "target": "#project-dialog-content ul li:nth-child(1) a",
+   "fields": [
+    "/developments/1/sources/0/url"
+   ]
+  },
+  {
+   "id": "V-L37",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(2)"
+    }
+   ],
+   "target": "#project-dialog-content ul li:nth-child(2) a",
+   "fields": [
+    "/developments/1/sources/1/url"
+   ]
+  },
+  {
+   "id": "V-L38",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(3)"
+    }
+   ],
+   "target": "#project-dialog-content ul li:nth-child(1) a",
+   "fields": [
+    "/developments/2/sources/0/url"
+   ]
+  },
+  {
+   "id": "V-L39",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(3)"
+    }
+   ],
+   "target": "#project-dialog-content ul li:nth-child(2) a",
+   "fields": [
+    "/developments/2/sources/1/url"
+   ]
+  },
+  {
+   "id": "V-L40",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(3)"
+    }
+   ],
+   "target": "#project-dialog-content ul li:nth-child(3) a",
+   "fields": [
+    "/developments/2/sources/2/url"
+   ]
+  },
+  {
+   "id": "V-L41",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(3)"
+    }
+   ],
+   "target": "#project-dialog-content ul li:nth-child(4) a",
+   "fields": [
+    "/developments/2/sources/3/url"
+   ]
+  },
+  {
+   "id": "V-L42",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(4)"
+    }
+   ],
+   "target": "#project-dialog-content ul li:nth-child(1) a",
+   "fields": [
+    "/developments/3/sources/0/url"
+   ]
+  },
+  {
+   "id": "V-L43",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(4)"
+    }
+   ],
+   "target": "#project-dialog-content ul li:nth-child(2) a",
+   "fields": [
+    "/developments/3/sources/1/url"
+   ]
+  },
+  {
+   "id": "V-L44",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(4)"
+    }
+   ],
+   "target": "#project-dialog-content ul li:nth-child(3) a",
+   "fields": [
+    "/developments/3/sources/2/url"
+   ]
+  },
+  {
+   "id": "V-L45",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-directory .development-tile:nth-child(4)"
+    }
+   ],
+   "target": "#project-dialog-content ul li:nth-child(4) a",
+   "fields": [
+    "/developments/3/sources/3/url"
+   ]
+  },
+  {
+   "id": "V-L46",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-map .map-context:nth-child(1 of .map-context)",
+     "force": true
+    }
+   ],
+   "target": "#project-dialog-content p:last-of-type a:nth-of-type(1)",
+   "fields": [
+    "/context_anchors/0/address_source_url"
+   ]
+  },
+  {
+   "id": "V-L47",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-map .map-context:nth-child(1 of .map-context)",
+     "force": true
+    }
+   ],
+   "target": "#project-dialog-content p:last-of-type a:nth-of-type(2)",
+   "fields": [
+    "/context_anchors/0/locator_source_url"
+   ]
+  },
+  {
+   "id": "V-L48",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-map .map-context:nth-child(2 of .map-context)",
+     "force": true
+    }
+   ],
+   "target": "#project-dialog-content p:last-of-type a:nth-of-type(1)",
+   "fields": [
+    "/context_anchors/1/address_source_url"
+   ]
+  },
+  {
+   "id": "V-L49",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-map .map-context:nth-child(2 of .map-context)",
+     "force": true
+    }
+   ],
+   "target": "#project-dialog-content p:last-of-type a:nth-of-type(2)",
+   "fields": [
+    "/context_anchors/1/locator_source_url"
+   ]
+  },
+  {
+   "id": "V-L50",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-map .map-context:nth-child(3 of .map-context)",
+     "force": true
+    }
+   ],
+   "target": "#project-dialog-content p:last-of-type a:nth-of-type(1)",
+   "fields": [
+    "/context_anchors/2/address_source_url"
+   ]
+  },
+  {
+   "id": "V-L51",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-map .map-context:nth-child(3 of .map-context)",
+     "force": true
+    }
+   ],
+   "target": "#project-dialog-content p:last-of-type a:nth-of-type(2)",
+   "fields": [
+    "/context_anchors/2/locator_source_url"
+   ]
+  },
+  {
+   "id": "V-L52",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-map .map-context:nth-child(4 of .map-context)",
+     "force": true
+    }
+   ],
+   "target": "#project-dialog-content p:last-of-type a:nth-of-type(1)",
+   "fields": [
+    "/context_anchors/3/address_source_url"
+   ]
+  },
+  {
+   "id": "V-L53",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-map .map-context:nth-child(4 of .map-context)",
+     "force": true
+    }
+   ],
+   "target": "#project-dialog-content p:last-of-type a:nth-of-type(2)",
+   "fields": [
+    "/context_anchors/3/locator_source_url"
+   ]
+  },
+  {
+   "id": "V-L54",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-map .map-context:nth-child(5 of .map-context)",
+     "force": true
+    }
+   ],
+   "target": "#project-dialog-content p:last-of-type a:nth-of-type(1)",
+   "fields": [
+    "/context_anchors/4/address_source_url"
+   ]
+  },
+  {
+   "id": "V-L55",
+   "td": "D",
+   "kind": "link",
+   "view": "home",
+   "steps": [
+    {
+     "click": "#development-map .map-context:nth-child(5 of .map-context)",
+     "force": true
+    }
+   ],
+   "target": "#project-dialog-content p:last-of-type a:nth-of-type(2)",
+   "fields": [
+    "/context_anchors/4/locator_source_url"
+   ]
+  },
+  {
+   "id": "V-A01",
+   "td": "T+D",
+   "kind": "replaced",
+   "feeds": [
+    "V-S01",
+    "V-S02",
+    "V-S03",
+    "V-S04",
+    "V-S05",
+    "V-S06",
+    "V-S07",
+    "V-S08",
+    "V-S09",
+    "V-S10",
+    "V-S11",
+    "V-S12",
+    "V-S13",
+    "V-S14",
+    "V-S15",
+    "V-S16",
+    "V-S17",
+    "V-S18",
+    "V-S19",
+    "V-S20",
+    "V-S21",
+    "V-S22",
+    "V-S23",
+    "V-S24",
+    "V-S25",
+    "V-S26",
+    "V-S27",
+    "V-S28",
+    "V-S29",
+    "V-S30",
+    "V-S31",
+    "V-S32"
+   ],
+   "fields": [
+    "/market/headline",
+    "/client/display_name",
+    "/sources/sections/*/heading"
+   ],
+   "allowed": [
+    "AD6"
+   ]
+  },
+  {
+   "id": "V-A02",
+   "td": "T",
+   "kind": "replaced",
+   "feeds": [
+    "V-S01",
+    "V-S02",
+    "V-S03",
+    "V-S04",
+    "V-S05",
+    "V-S06",
+    "V-S07",
+    "V-S08",
+    "V-S09",
+    "V-S10",
+    "V-S11",
+    "V-S12",
+    "V-S13",
+    "V-S14",
+    "V-S15",
+    "V-S16",
+    "V-S17",
+    "V-S18",
+    "V-S19",
+    "V-S20",
+    "V-S21",
+    "V-S22",
+    "V-S23",
+    "V-S24",
+    "V-S25",
+    "V-S26",
+    "V-S27",
+    "V-S28",
+    "V-S29",
+    "V-S30",
+    "V-S31",
+    "V-S32"
+   ],
+   "allowed": [
+    "AD6"
+   ]
+  },
+  {
+   "id": "V-A03",
+   "td": "T+D",
+   "kind": "replaced",
+   "feeds": [
+    "V-T01",
+    "V-T02",
+    "V-T03",
+    "V-T04",
+    "V-T05",
+    "V-T06",
+    "V-T07",
+    "V-T08",
+    "V-T09",
+    "V-T10",
+    "V-T11",
+    "V-T12",
+    "V-T13",
+    "V-T14",
+    "V-T15",
+    "V-T16",
+    "V-T17",
+    "V-T18",
+    "V-T19",
+    "V-T20",
+    "V-T21",
+    "V-T22",
+    "V-T23",
+    "V-T24",
+    "V-T25",
+    "V-T26",
+    "V-T27",
+    "V-T28"
+   ],
+   "fields": [
+    "/map/center",
+    "/map/zoom",
+    "/properties/*/review_point",
+    "/client/current_practice/address"
+   ],
+   "allowed": [
+    "AD6"
+   ]
+  },
+  {
+   "id": "V-A04",
+   "td": "D",
+   "kind": "replaced",
+   "feeds": [
+    "V-S13",
+    "V-S14",
+    "V-S28",
+    "V-L30",
+    "V-L31",
+    "V-L32"
+   ],
+   "fields": [
+    "/properties/*/id",
+    "/properties/*/sources/*/url",
+    "/properties/*/floorplan"
+   ],
+   "allowed": [
+    "AD6"
+   ]
+  },
+  {
+   "id": "V-A05",
+   "td": "D",
+   "kind": "replaced",
+   "feeds": [
+    "V-T08",
+    "V-T10"
+   ],
+   "fields": [
+    "/properties/*/locator/lon",
+    "/client/current_practice/locator/lon"
+   ],
+   "allowed": [
+    "AD6"
+   ]
+  },
+  {
+   "id": "V-A06",
+   "td": "D",
+   "kind": "replaced",
+   "feeds": [
+    "V-T06"
+   ],
+   "fields": [
+    "/developments/*/locator/lon"
+   ],
+   "allowed": [
+    "AD6"
+   ]
+  },
+  {
+   "id": "V-A07",
+   "td": "D",
+   "kind": "replaced",
+   "feeds": [
+    "V-S18",
+    "V-S31",
+    "V-L33",
+    "V-L34",
+    "V-L35",
+    "V-L36",
+    "V-L37",
+    "V-L38",
+    "V-L39",
+    "V-L40",
+    "V-L41",
+    "V-L42",
+    "V-L43",
+    "V-L44",
+    "V-L45"
+   ],
+   "fields": [
+    "/demographics/growth/tiles/*/value",
+    "/developments/*/sources/*/url"
+   ],
+   "allowed": [
+    "AD6"
+   ]
+  },
+  {
+   "id": "V-A08",
+   "td": "D",
+   "kind": "replaced",
+   "feeds": [
+    "V-S21",
+    "V-T22"
+   ],
+   "fields": [
+    "/demographics/income_bands/areas/*/counts"
+   ],
+   "allowed": [
+    "AD6"
+   ]
+  },
+  {
+   "id": "V-A09",
+   "td": "T+D",
+   "kind": "replaced",
+   "feeds": [
+    "V-T26",
+    "V-T28"
+   ],
+   "fields": [
+    "/client/display_name"
+   ],
+   "allowed": [
+    "AD6"
+   ]
+  },
+  {
+   "id": "V-A10",
+   "td": "T",
+   "kind": "media",
+   "view": "home",
+   "target": ".site-header .brand-logo",
+   "attr": "src"
+  },
+  {
+   "id": "V-A11",
+   "td": "D",
+   "kind": "media",
+   "view": "home",
+   "target": ".site-header img.@{logo-asset}",
+   "attr": "src",
+   "fields": [
+    "/client/logo"
+   ]
+  },
+  {
+   "id": "V-A12",
+   "td": "T",
+   "kind": "media",
+   "view": "home",
+   "font_face": 1
+  },
+  {
+   "id": "V-A13",
+   "td": "T",
+   "kind": "media",
+   "view": "home",
+   "font_face": 2
+  },
+  {
+   "id": "V-A14",
+   "td": "D",
+   "kind": "media",
+   "view": "purchases",
+   "target": "#property-directory .property-jump:nth-child(1) img",
+   "attr": "src",
+   "fields": [
+    "/properties/1/photo"
+   ]
+  },
+  {
+   "id": "V-A15",
+   "td": "D",
+   "kind": "media",
+   "view": "purchases",
+   "target": "#property-directory .property-jump:nth-child(2) img",
+   "attr": "src",
+   "fields": [
+    "/properties/2/photo"
+   ]
+  },
+  {
+   "id": "V-A16",
+   "td": "D",
+   "kind": "media",
+   "view": "purchases",
+   "target": "#property-directory .property-jump:nth-child(3) img",
+   "attr": "src",
+   "fields": [
+    "/properties/3/photo"
+   ]
+  },
+  {
+   "id": "V-A17",
+   "td": "D",
+   "kind": "media",
+   "view": "purchases",
+   "target": "#property-directory .property-jump:nth-child(4) img",
+   "attr": "src",
+   "fields": [
+    "/properties/4/photo"
+   ]
+  },
+  {
+   "id": "V-A18",
+   "td": "D",
+   "kind": "media",
+   "view": "purchases",
+   "target": "#market-context img",
+   "attr": "src",
+   "fields": [
+    "/properties/*/photo"
+   ]
+  },
+  {
+   "id": "V-A19",
+   "td": "D",
+   "kind": "media",
+   "path": "@{retired-photo-1}",
+   "fields": [
+    "/properties/*/photo"
+   ],
+   "allowed": [
+    "AD4"
+   ]
+  },
+  {
+   "id": "V-A20",
+   "td": "D",
+   "kind": "media",
+   "path": "@{retired-photo-2}",
+   "fields": [
+    "/properties/*/photo"
+   ],
+   "allowed": [
+    "AD4"
+   ]
+  },
+  {
+   "id": "V-A21",
+   "td": "D",
+   "kind": "media",
+   "path": "@{retired-photo-3}",
+   "fields": [
+    "/properties/*/photo"
+   ],
+   "allowed": [
+    "AD4"
+   ]
+  },
+  {
+   "id": "V-A22",
+   "td": "D",
+   "kind": "media",
+   "path": "@{retired-photo-4}",
+   "fields": [
+    "/properties/*/photo"
+   ],
+   "allowed": [
+    "AD4"
+   ]
+  },
+  {
+   "id": "V-A23",
+   "td": "D",
+   "kind": "media",
+   "view": "purchases",
+   "steps": [
+    {
+     "click": "#property-directory .property-jump:nth-child(2)"
+    }
+   ],
+   "target": "#property-dialog .property-links a",
+   "attr": "href",
+   "fields": [
+    "/properties/*/floorplan"
+   ]
+  },
+  {
+   "id": "V-A24",
+   "td": "D",
+   "kind": "media",
+   "view": "purchases",
+   "steps": [
+    {
+     "click": "#property-directory .property-jump:nth-child(3)"
+    }
+   ],
+   "target": "#property-dialog .property-links a",
+   "attr": "href",
+   "fields": [
+    "/properties/*/floorplan"
+   ]
+  },
+  {
+   "id": "V-A25",
+   "td": "D",
+   "kind": "media",
+   "view": "purchases",
+   "steps": [
+    {
+     "click": "#property-directory .property-jump:nth-child(4)"
+    }
+   ],
+   "target": "#property-dialog .property-links a",
+   "attr": "href",
+   "fields": [
+    "/properties/*/floorplan"
+   ]
+  },
+  {
+   "id": "V-A26",
+   "td": "D",
+   "kind": "media",
+   "view": "home",
+   "target": "#development-directory .development-tile:nth-child(1) img",
+   "attr": "src",
+   "fields": [
+    "/developments/0/image/asset"
+   ]
+  },
+  {
+   "id": "V-A27",
+   "td": "D",
+   "kind": "media",
+   "view": "home",
+   "target": "#development-directory .development-tile:nth-child(2) img",
+   "attr": "src",
+   "fields": [
+    "/developments/1/image/asset"
+   ]
+  },
+  {
+   "id": "V-A28",
+   "td": "D",
+   "kind": "media",
+   "view": "home",
+   "target": "#development-directory .development-tile:nth-child(3) img",
+   "attr": "src",
+   "fields": [
+    "/developments/2/image/asset"
+   ]
+  },
+  {
+   "id": "V-A29",
+   "td": "D",
+   "kind": "media",
+   "view": "home",
+   "target": "#development-directory .development-tile:nth-child(4) img",
+   "attr": "src",
+   "fields": [
+    "/developments/3/image/asset"
+   ]
+  },
+  {
+   "id": "V-A30",
+   "td": "D",
+   "kind": "media",
+   "view": "home",
+   "request_match": "@{water-layer-match}",
+   "fields": [
+    "/map/basemap"
+   ]
+  },
+  {
+   "id": "V-A31",
+   "td": "D",
+   "kind": "media",
+   "view": "home",
+   "request_match": "@{roads-layer-match}",
+   "fields": [
+    "/map/basemap"
+   ]
+  },
+  {
+   "id": "V-A32",
+   "td": "D",
+   "kind": "media",
+   "view": "home",
+   "request_match": "@{anchors-layer-match}",
+   "fields": [
+    "/context_anchors/*/locator"
+   ]
+  },
+  {
+   "id": "V-A33",
+   "td": "D",
+   "kind": "media",
+   "path": "@{project-anchors-file}",
+   "fields": [
+    "/developments/*/locator"
+   ],
+   "allowed": [
+    "AD4"
+   ]
+  },
+  {
+   "id": "V-A34",
+   "td": "D",
+   "kind": "media",
+   "path": "@{asset-manifest-file}",
+   "fields": [
+    "/developments/*/image/credit"
+   ],
+   "allowed": [
+    "AD4"
+   ]
+  },
+  {
+   "id": "V-A35",
+   "td": "T",
+   "kind": "media",
+   "view": "home",
+   "target": "link[rel=\"stylesheet\"][href*=\"maplibre-gl\"]",
+   "attr": "href",
+   "allowed": [
+    "AD1"
+   ]
+  },
+  {
+   "id": "V-A36",
+   "td": "T",
+   "kind": "media",
+   "view": "home",
+   "target": "script[src*=\"maplibre-gl\"]",
+   "attr": "src",
+   "allowed": [
+    "AD1"
+   ]
+  }
+ ]
+}
