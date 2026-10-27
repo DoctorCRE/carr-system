@@ -1,3 +1,4 @@
+// Test Chicago calendar time calculations across daylight saving transitions.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { chicagoThirtyDayDeadline, DEADLINE_PLAIN, DEADLINE_GAP_SHIFTED,

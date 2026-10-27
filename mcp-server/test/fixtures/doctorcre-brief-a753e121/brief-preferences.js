@@ -1,4 +1,3 @@
-// Store and retrieve sponsor-specific brief preferences.
 export function briefPreferences(storage, sponsor) {
   const key = `doctorcre:morning:${sponsor}`;
   let value = {};

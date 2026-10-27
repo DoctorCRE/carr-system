@@ -1,3 +1,4 @@
+// Test authenticated Deal Room APIs, paging, attribution, and queue contracts.
 
 import test from "node:test";
 import assert from "node:assert/strict";

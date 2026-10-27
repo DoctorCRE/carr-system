@@ -1,3 +1,4 @@
+// Expose progress board summaries and answer tools.
 import { observeBoardLinkage } from './work-linkage.js';
 import { ToolError } from "./tool-error.ts";
 import { organizationTenantForActor } from "./identity.js";

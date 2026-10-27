@@ -1,3 +1,4 @@
+// Test disposable PostgreSQL cluster cleanup across lifecycle modes.
 import test, { before, after } from 'node:test';
 import { once } from 'node:events';
 import assert from 'node:assert/strict';

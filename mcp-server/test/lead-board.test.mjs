@@ -1,3 +1,4 @@
+// Test safe, versioned lead board reads and funnel metrics.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS } from "../src/tools.js";

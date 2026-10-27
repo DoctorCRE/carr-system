@@ -1,3 +1,4 @@
+// Test invoice lifecycle reads and versioned paid-date updates.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';

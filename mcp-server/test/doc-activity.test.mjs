@@ -1,3 +1,4 @@
+// Test Doc activity feed contracts, validation, and database routing.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { docActivityEntry, docActivityTools } from '../src/doc-activity.js';

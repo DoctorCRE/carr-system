@@ -1,3 +1,4 @@
+// Test the rule enforcement reader.
 
 import test from "node:test";
 import assert from "node:assert/strict";

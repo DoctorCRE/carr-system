@@ -1,3 +1,4 @@
+// Expose the bundled practice planner as an MCP resource.
 import { plannerHtml } from '../.build/planner-resource.mjs';
 import { PLANNER_URI } from './planner.mjs';
 export const RESOURCES = [
