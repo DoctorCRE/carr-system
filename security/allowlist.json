@@ -328,6 +328,24 @@
       "sha256": "3ea854a4192faab8ca31795f12e99dfdeef9ec23912d2e809ab34f9ebb994c23",
       "rule": "pii-email",
       "reason": "Historical synthetic account-exclusion fixture introduced by b5ce2848 in PR #2390. The invented longer-domain recipient tests exact-address matching in an offline SQLite fixture, not a real contact. Commit 2ed36da6 replaces it with a reserved .invalid domain. Qualification binds only these exact historical file bytes and this detector because pushed history is retained without force-push."
+    },
+    {
+      "path": "mcp-server/src/work-queue.js",
+      "sha256": "496e3dd60730bf4944d27b676264276351b38156c0e06fb985d3e1349ca9ed3c",
+      "rule": "pii-phone",
+      "reason": "Historical int32 maximum is a numeric schema limit, not phone data; rewritten as a hexadecimal limit in 578227931."
+    },
+    {
+      "path": "mcp-server/test/work-queue-postgres.test.mjs",
+      "sha256": "c9479ec38c9545cac579db69f2ee0c9a8b245d367fc2d7e195da4e5a9a6aaa2d",
+      "rule": "pii-phone",
+      "reason": "Historical int32 overflow fixtures are numeric bounds, not phone data; rewritten as exponent expressions in 578227931."
+    },
+    {
+      "path": "mcp-server/test/work-queue-postgres.test.mjs",
+      "sha256": "c9479ec38c9545cac579db69f2ee0c9a8b245d367fc2d7e195da4e5a9a6aaa2d",
+      "rule": "generic-api-key",
+      "reason": "Historical synthetic UUID tests idempotency only and is not a credential; replaced by randomUUID in 578227931."
     }
   ]
 }
