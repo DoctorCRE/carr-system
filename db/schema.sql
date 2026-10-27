@@ -113058,6 +113058,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 1001_retire_scheduler_contracts.sql	2b14240e8b93c30d5dc16c4dfd6a746b365e736895a516be3d769d9b10d27186	1970-01-01 00:00:00+00
 1003_notification_morning_midnight.sql	7b3eb4a20aeed80ce5c01bd17a4b2fe02c43184e5903957ac4edee459b80d050	1970-01-01 00:00:00+00
 1004_phase_start_undo.sql	921899f7e36a786c3570d2da68645051b710c7fd51ec7fbe6c8b74488bd93e52	1970-01-01 00:00:00+00
+1005_calendar_intake_retained_control_ref.sql	2d1910179c7f719c91b55416062725031a447a0ce711621dace61e3049488751	1970-01-01 00:00:00+00
 \.
 
 
@@ -113558,7 +113559,7 @@ COPY public.vendor_relationship_level (level, label, note) FROM stdin;
 -- immediately before this block was written. The following safely quoted rows
 -- preserve the source verification and update timestamps.
 -- never dump arbitrary ops.enforcement_control_catalog rows.
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('calendar_intake','tools/calendar-intake-gate.py; bin/calendar-eventkit-capture.sh','ops/calendar-intake-gate-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
+insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('calendar_intake','tools/calendar-intake-gate.py','ops/calendar-intake-gate-selftest.py','deny_gate','t','2026-10-27T11:59:18.242597Z'::timestamptz,'2026-10-27T11:59:18.242597Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('candidate_match','pipelines/import_candidate_pool.py','ops/candidate-match-threshold-selftest.py','judgment_ambient','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('ci_gates','ops/ci.sh','ops/ci-selftest.py','surfacing','t','2026-08-19T03:38:59.844809Z'::timestamptz,'2026-10-26T21:40:44.079675Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('client_asset_packet','lib/client_asset_controls.py; pipelines/build-space-search.py','ops/client-asset-controls-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;

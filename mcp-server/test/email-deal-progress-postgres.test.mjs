@@ -174,9 +174,9 @@ test('uppercase deal confirmation waits without blocking an independent human ed
     await locker.query('begin');
     await locker.query("select pg_advisory_xact_lock(hashtextextended($1 || ':phase',0))", [deal]);
     pending = confirm(proposal, { deal: deal.toUpperCase() }).then(value => ({ value }), error => ({ error }));
-    const deadline = Date.now() + 5000;
+    const deadline = performance.now() + 5000;
     let waiting = false;
-    while (Date.now() < deadline) {
+    while (performance.now() < deadline) {
       waiting = (await editor.query('select exists(select 1 from pg_locks where pid=$1 and not granted) as waiting', [pid])).rows[0].waiting;
       if (waiting) break;
       await new Promise(resolve => setImmediate(resolve));

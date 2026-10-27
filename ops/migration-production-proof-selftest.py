@@ -8,6 +8,7 @@ import hashlib
 import shutil
 import tempfile
 import os
+import runpy
 from pathlib import Path
 import subprocess
 import sys
@@ -71,6 +72,32 @@ def snapshot_repository():
 
 
 class ProofTests(unittest.TestCase):
+    def setUp(self):
+        if self._testMethodName not in {
+            'test_committed_snapshot_schema_only_round_trip_with_zero_pending',
+            'test_compacted_runner_is_read_only_and_preserves_original_ledger_timestamps',
+            'test_live_proof_accepts_production_owner_with_zero_pending',
+            'test_live_proof_rejects_explicit_select_drift',
+        }:
+            return
+        parse_snapshot = runpy.run_path(str(ROOT / 'ops/migration-safety-gate.py'))['ledger_rows']
+        ledger = parse_snapshot((ROOT / 'db/schema.sql').read_text())
+        directory = tempfile.TemporaryDirectory(prefix='snapshot-proof-repository-')
+        self.addCleanup(directory.cleanup)
+        repo = Path(directory.name)
+        for folder in ('tools', 'db', 'migrations'):
+            (repo / folder).mkdir()
+        for name in ('migrate.py', 'migration_baseline.py', 'migration_number_contract.py'):
+            shutil.copyfile(ROOT / 'tools' / name, repo / 'tools' / name)
+        shutil.copyfile(ROOT / 'db/migration-baseline.json', repo / 'db/migration-baseline.json')
+        baseline = dict(proof.MigrationBaseline.load(ROOT).migrations)
+        for name in ledger.keys() - baseline.keys():
+            shutil.copyfile(ROOT / 'migrations' / name, repo / 'migrations' / name)
+        build_schema = proof.build_schema
+        self.enterContext(patch.object(proof, 'repository_ledger', return_value=ledger))
+        self.enterContext(patch.object(proof, 'build_schema',
+            side_effect=lambda *args, **kwargs: build_schema(*args, **dict({'repo': repo}, **kwargs))))
+
     def test_baseline_requires_every_original_row_before_pending_suffix(self):
         baseline = proof.MigrationBaseline.load(ROOT)
         covered = dict(baseline.migrations)

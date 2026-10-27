@@ -333,8 +333,7 @@
     "calendar_intake": {
       "failure_mode": "calendar intake refuses completion without mail, research and record receipts",
       "implementation": [
-        "tools/calendar-intake-gate.py",
-        "bin/calendar-eventkit-capture.sh"
+        "tools/calendar-intake-gate.py"
       ],
       "test": [
         "ops/calendar-intake-gate-selftest.py"
