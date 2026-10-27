@@ -108,7 +108,9 @@ while True: time.sleep(1)
         link.symlink_to(target, target_is_directory=True)
         old = time.time() - 3 * 24 * 60 * 60
         for workspace in (stale, active, sibling, unrelated, target):
-            os.utime(workspace, (old, old))
+            for path in (workspace, workspace / 'checkout'):
+                if path.exists():
+                    os.utime(path, (old, old))
         ready = self.root / 'ready'
         self.codex = self.root / 'bin space' / 'codex'
         self.codex.parent.mkdir()
@@ -137,24 +139,33 @@ while True: time.sleep(1)
             live.wait(timeout=5)
 
     def test_startup_preserves_retained_workspace_with_recent_activity(self):
-        workspace = self.root / 'codex-job-edited'
-        checkout = workspace / 'checkout'
-        index = checkout / '.git' / 'index'
-        index.parent.mkdir(parents=True)
-        index.touch()
-        old = time.time() - 3 * 24 * 60 * 60
-        for path in (workspace, checkout):
-            os.utime(path, (old, old))
-        job = self.launch('')
-        _, errors = job.communicate(timeout=10)
-        self.assertEqual(job.returncode, 0, errors.decode())
-        self.assertTrue(index.exists(), 'recent Git activity must preserve an old workspace')
+        for recent in ('', 'checkout', 'checkout/.git/index',
+                       'checkout/.git/logs/HEAD', 'result.md'):
+            with self.subTest(recent=recent):
+                workspace = self.root / 'codex-job-edited'
+                checkout = workspace / 'checkout'
+                index = checkout / '.git' / 'index'
+                head = checkout / '.git' / 'logs' / 'HEAD'
+                head.parent.mkdir(parents=True)
+                for path in (index, head, workspace / 'result.md'):
+                    path.touch()
+                old = time.time() - 3 * 24 * 60 * 60
+                for path in workspace.rglob('*'):
+                    os.utime(path, (old, old))
+                os.utime(workspace, (old, old))
+                os.utime(workspace / recent, None)
+                job = self.launch('')
+                _, errors = job.communicate(timeout=10)
+                self.assertEqual(job.returncode, 0, errors.decode())
+                self.assertTrue(index.exists(), 'recent activity must preserve an old workspace')
+                shutil.rmtree(workspace)
 
     def test_relative_live_checkout_prevents_unsafe_pruning(self):
         active = self.root / 'codex-job-active'
         (active / 'checkout' / '.git').mkdir(parents=True)
         old = time.time() - 3 * 24 * 60 * 60
-        os.utime(active, (old, old))
+        for path in (active, active / 'checkout'):
+            os.utime(path, (old, old))
         ready = self.root / 'ready'
         self.codex.write_text(f'#!{sys.executable}\n' +
                               f'import pathlib, time\npathlib.Path({str(ready)!r}).touch()\ntime.sleep(30)\n')

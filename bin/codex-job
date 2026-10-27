@@ -33,7 +33,11 @@ def main():
         cutoff = time.time() - 2 * 24 * 60 * 60
         retained = [path for path in Path(tempfile.gettempdir()).glob('codex-job-*')
                     if not path.is_symlink() and (path / 'checkout' / '.git').is_dir()
-                    and path.stat().st_mtime < cutoff]
+                    and max(marker.stat().st_mtime
+                            for marker in (path, path / 'checkout',
+                                           path / 'checkout/.git/index',
+                                           path / 'checkout/.git/logs/HEAD', path / 'result.md')
+                            if marker.exists()) < cutoff]
         if retained:
             processes = subprocess.run(['ps', '-ww', '-axo', 'args='], check=True,
                                        capture_output=True, text=True, timeout=5).stdout
