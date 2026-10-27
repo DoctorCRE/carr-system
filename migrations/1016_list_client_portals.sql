@@ -11,7 +11,10 @@ begin
   return new;
 end $$;
 create trigger client_portal_updated before update on ops.client_portal
-for each row execute function ops.touch_client_portal();
+for each row
+when ((old.slug, old.client_id, old.deal_id, old.password_hash, old.disabled_at)
+  is distinct from (new.slug, new.client_id, new.deal_id, new.password_hash, new.disabled_at))
+execute function ops.touch_client_portal();
 
 create view public.v_client_portal_list as
 select p.slug, p.client_id, party.name as client_name, p.deal_id, d.name as deal_name,
