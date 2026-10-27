@@ -72,6 +72,7 @@ NON_READ_RE = re.compile(r'\b(?:ls|find|stat|shasum|sha256sum|wc|du)\b')
 def cited_paths(bundle):
     """Every evidence path named in the bundle's own artifacts."""
     out = {}
+    artifacts = 0
     for root, dirs, files in os.walk(bundle):
         dirs[:] = [d for d in dirs if d != "__pycache__"]
         for name in files:
@@ -82,10 +83,11 @@ def cited_paths(bundle):
                 text = open(fp, encoding="utf-8", errors="replace").read()
             except OSError:
                 continue
+            artifacts += 1
             for m in PATH_RE.finditer(text):
                 out.setdefault(m.group(1), set()).add(
                     os.path.relpath(fp, bundle))
-    return out
+    return out, artifacts
 
 
 def opened_paths(trace):
@@ -139,7 +141,10 @@ def main(argv):
         print("not a file: " + trace, file=sys.stderr)
         return 2
 
-    cited = cited_paths(bundle)
+    cited, artifacts = cited_paths(bundle)
+    if not artifacts:
+        print("no qualifying artifacts in bundle: " + bundle, file=sys.stderr)
+        return 2
     opened = opened_paths(trace)
     # A path the bundle produced is its own output, never a citation it owed
     # a read for.

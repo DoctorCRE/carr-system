@@ -69,6 +69,15 @@ class CitationTraceTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 2)
                 self.assertNotIn("UNOPENED:", result.stdout)
 
+    def test_bundle_without_qualifying_artifacts_is_not_a_pass(self):
+        (self.bundle / "findings.md").unlink(missing_ok=True)
+        result = subprocess.run(
+            [sys.executable, str(CHECK), str(self.bundle), str(self.trace)],
+            cwd=self.root, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("no qualifying artifacts", result.stderr)
+        self.assertNotIn("OK —", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
