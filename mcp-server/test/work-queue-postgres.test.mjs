@@ -82,8 +82,9 @@ test('dispatch mints a stable ID under implicit S1 and retries without another j
   const queue = await command('work-queue', {});
   assert.deepEqual(queue.jobs.map(row => row.card_id), ['WR14.S1.J1']);
   assert.equal(queue.jobs[0].card_title, 'Queue work');
-  assert.equal(queue.jobs[0].stage, undefined);
-  assert.equal(queue.jobs[0].pr, undefined);
+  assert.equal(queue.jobs[0].work_request_title, 'Synthetic queue work');
+  assert.deepEqual([queue.jobs[0].stage, queue.jobs[0].stale, queue.jobs[0].prs], ['queued', false, []]);
+  assert.deepEqual(queue.github.map(source => source.reason), ['no_github_reader', 'no_github_reader', 'no_github_reader']);
 });
 
 test('ordered plans are repeatable and allocate independent J numbers per slice', async () => {

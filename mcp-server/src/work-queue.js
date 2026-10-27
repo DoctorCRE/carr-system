@@ -13,6 +13,73 @@ export function queueCardId(ref, ordinal, number) {
     .replace('{work_request}', work_request).replace('{slice}', ordinal).replace('{job}', number);
 }
 
+// Stage and PR links are never stored: a PR belongs to a job through a "Card: WRn.Sm.Jk" line in its body.
+export const PULL_REQUEST_TTL_MS = 60_000;
+// Building and queued are the only stages a job can stall in without anyone else holding it. Codex jobs run in
+// hours, so a full day with no dispatch pickup or push means stalled; review and merge wait on others, never stale.
+export const STALE_AFTER_MS = 24 * 3_600_000;
+const CARD_LINE = /^Card:[ \t]*(WR\d+\.S\d+\.J\d+)\b/gmu;
+const unavailablePullRequests = async repos => repos.map(repo => ({ repo, state: 'unavailable', reason: 'no_github_reader', prs: [] }));
+
+// One GitHub search per repository per TTL, shared by every caller in this isolate; failures are cached too.
+export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...a), now = Date.now, ttlMs = PULL_REQUEST_TTL_MS }) {
+  const memo = new Map();
+  async function search(repo) {
+    if (!token) return { repo, state: 'unavailable', reason: 'credential_not_configured', prs: [] };
+    const query = new URLSearchParams({ q: `repo:${repo} is:pr in:body "Card: WR"`, sort: 'updated', order: 'desc', per_page: '100' });
+    try {
+      const response = await fetchImpl(`https://api.github.com/search/issues?${query}`, { headers: {
+        accept: 'application/vnd.github+json', authorization: `Bearer ${token}`, 'user-agent': 'carr-mcp-work-queue', 'x-github-api-version': '2022-11-28' } });
+      if (!response.ok) return { repo, state: 'unavailable', reason: `github_http_${response.status}`, prs: [] };
+      const body = await response.json();
+      const prs = body.items.flatMap(item => {
+        const cards = [...new Set([...String(item.body ?? '').matchAll(CARD_LINE)].map(match => match[1]))];
+        return cards.length ? [{ repo, number: item.number, url: item.html_url, title: item.title, draft: item.draft === true, updated_at: item.updated_at,
+          state: item.pull_request?.merged_at ? 'merged' : item.state === 'open' ? 'open' : 'closed', cards }] : [];
+      });
+      return { repo, state: 'ok', observed_at: new Date(now()).toISOString(), truncated: body.total_count > body.items.length, prs };
+    } catch { return { repo, state: 'unavailable', reason: 'github_unreachable', prs: [] }; }
+  }
+  return repos => Promise.all(repos.map(repo => {
+    const hit = memo.get(repo);
+    if (hit && now() - hit.at < ttlMs) return hit.value;
+    const value = search(repo);
+    memo.set(repo, { at: now(), value });
+    return value;
+  }));
+}
+
+let isolateSource;
+export function isolatePullRequests(token) {
+  if (!isolateSource || isolateSource.token !== token) isolateSource = { token, read: createPullRequestSource({ token }) };
+  return isolateSource.read;
+}
+
+export function jobStage(prs) {
+  const open = prs.filter(pr => pr.state === 'open');
+  if (open.some(pr => !pr.draft)) return 'review';
+  if (open.length) return 'build';
+  if (prs.some(pr => pr.state === 'merged')) return 'merged';
+  return prs.length ? 'closed' : 'queued';
+}
+
+export function queueView(rows, sources, at) {
+  const byCard = new Map();
+  for (const pr of sources.flatMap(source => source.prs)) for (const card of pr.cards) {
+    const { cards, ...fact } = pr;
+    byCard.set(card, [...(byCard.get(card) ?? []), { ...fact, card_id: `${card}.${addressFormat.repositories[pr.repo]}#${pr.number}` }]);
+  }
+  const jobs = rows.map(({ work_request_id, created_at, ...row }) => {
+    const card_id = queueCardId(row.work_request, row.slice_ordinal, row.j_number);
+    const prs = byCard.get(card_id) ?? [];
+    const stage = jobStage(prs);
+    const since = stage === 'queued' ? new Date(created_at).getTime()
+      : stage === 'build' ? Math.max(...prs.filter(pr => pr.state === 'open').map(pr => Date.parse(pr.updated_at))) : NaN;
+    return { ...row, card_id, created_at: new Date(created_at).toISOString(), stage, stale: at - since >= STALE_AFTER_MS, prs };
+  });
+  return { jobs, github: sources.map(({ prs, ...source }) => source) };
+}
+
 export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
   const refuse = error => { throw new ToolError({ error }); };
   const validate = (args, properties, required) => {
@@ -31,7 +98,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
     if (!row) refuse('work_request_not_found');
     return row;
   };
-  const ordered = async (c, actor) => (await c.query(`select j.*,w.ref as work_request from ops.work_request_job j
+  const ordered = async (c, actor) => (await c.query(`select j.*,w.ref as work_request,w.title as work_request_title from ops.work_request_job j
     join ops.work_request w on w.id=j.work_request_id where w.organization_tenant_id=$1
     and ${readableWorkRequestSql('w')} order by j.priority,w.ref,j.slice_ordinal,j.j_number`, [organizationTenantForActor(actor)])).rows;
   const command = (name, description, extra, required, run) => {
@@ -92,12 +159,12 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         }
         return { card_id: queueCardId(wr.ref, args.slice || 1, args.job), priority: slots[args.position - 1] };
       }),
-    'work-queue': { write: false, description: 'Read all visible job facts in priority order with stable card IDs. The board resolves PRs and stages live.',
+    'work-queue': { write: false, description: 'Read all visible jobs in priority order with stable card IDs, Work Request titles, and stage, PRs, and staleness derived from Card lines on GitHub pull requests.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       handler: async (c, actor, args) => {
         validate(args, {}, []);
-        return { ok: true, jobs: (await ordered(c, actor)).map(({ work_request_id, ...row }) => ({ ...row,
-          card_id: queueCardId(row.work_request, row.slice_ordinal, row.j_number) })) };
+        const sources = await (c.pullRequests ?? unavailablePullRequests)(Object.keys(addressFormat.repositories));
+        return { ok: true, stale_after_hours: STALE_AFTER_MS / 3_600_000, ...queueView(await ordered(c, actor), sources, Date.now()) };
       } },
   };
 }
