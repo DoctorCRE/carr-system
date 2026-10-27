@@ -2,22 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Keep THIS Mac's checkout on main. Every five minutes and at load, git
-         fast-forwards the checkout and nothing else: no script, no wrapper, no
-         config reinstall. git refuses a dirty or diverged tree on its own and
-         exits nonzero; job-watchdog and scheduled-jobs-check report that exit.
-         Replaces bin/fleet-sync.sh, deleted in #2150, after which the Studio
-         checkout sat 11 hours behind main (2026-10-25/26). -->
     <key>Label</key>
     <string>com.carr.checkout-pull</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/git</string>
-        <string>-C</string>
+        <string>/usr/bin/python3</string>
+        <string>{{REPO}}/ops/checkout-pull.py</string>
         <string>{{REPO}}</string>
-        <string>pull</string>
-        <string>--ff-only</string>
-        <string>--quiet</string>
     </array>
     <key>RunAtLoad</key>
     <true/>

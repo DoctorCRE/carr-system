@@ -37,7 +37,7 @@ class CorpusSyncTest(unittest.TestCase):
 
     def run_sync(self, mode, expected=0):
         result = subprocess.run(
-            [sys.executable, str(self.root / "tools/corpus-sync.py"), mode],
+            [sys.executable, str(self.root / "tools/corpus-sync.py")] + ([mode] if mode else []),
             env={"HOME": str(self.home), "CARR_VAULT": str(self.root / "vault")},
             capture_output=True, text=True, timeout=10,
         )
@@ -74,8 +74,11 @@ class CorpusSyncTest(unittest.TestCase):
         self.mirror.write_text("updated\n")
         self.run_sync("--push")
         self.assertEqual(self.source.read_text(), "updated\n")
-        self.assertNotEqual(json.loads(self.manifest.read_text())["files"][0]["sha256"],
-                            json.loads(self.before)["files"][0]["sha256"])
+        self.assertEqual(self.manifest.read_bytes(), self.before)
+        self.assertIn("1 clean", self.run_sync(""))
+        self.mirror.write_text("updated again\n")
+        self.run_sync("--push")
+        self.assertEqual(self.source.read_text(), "updated again\n")
 
     def test_sync_records_metadata_change(self):
         self.set_file.write_text("home:notes.md\tdoctrine\tnew reason\n")
