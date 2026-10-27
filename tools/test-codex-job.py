@@ -39,7 +39,7 @@ class CodexJobTests(unittest.TestCase):
 
     def launch(self, body, repo=None):
         self.codex.write_text(f'#!{sys.executable}\n' + body)
-        job_env = dict(self.git_env, PATH=str(self.root) + os.pathsep + os.defpath,
+        job_env = dict(self.git_env, PATH=str(self.codex.parent) + os.pathsep + os.defpath,
                        TMPDIR=str(self.root))
         return subprocess.Popen([sys.executable, '-c', WRAPPER, str(ROOT / 'bin/codex-job'),
                                  str(ROOT / '.venv'), str(repo or self.origin), 'test/job', 'brief'],
@@ -94,6 +94,70 @@ while True: time.sleep(1)
                                 os.kill(int(leaked), signal.SIGKILL)
                             except ProcessLookupError:
                                 pass
+
+    def test_startup_prunes_only_old_idle_retained_workspaces(self):
+        stale, recent, active, sibling = [self.root / f'codex-job-{name}'
+                                        for name in ('stale', 'recent', 'active space', 'active space-extra')]
+        for workspace in (stale, recent, active, sibling):
+            (workspace / 'checkout' / '.git').mkdir(parents=True)
+        unrelated = self.root / 'other-workspace'
+        unrelated.mkdir()
+        target = self.root / 'outside'
+        (target / 'checkout' / '.git').mkdir(parents=True)
+        link = self.root / 'codex-job-link'
+        link.symlink_to(target, target_is_directory=True)
+        old = time.time() - 3 * 24 * 60 * 60
+        for workspace in (stale, active, sibling, unrelated, target):
+            os.utime(workspace, (old, old))
+        ready = self.root / 'ready'
+        self.codex = self.root / 'bin space' / 'codex'
+        self.codex.parent.mkdir()
+        self.codex.write_text(f'#!{sys.executable}\n' +
+                              f'import pathlib, time\npathlib.Path({str(ready)!r}).touch()\ntime.sleep(30)\n')
+        self.codex.chmod(0o755)
+        alias = self.root / 'checkout alias'
+        alias.symlink_to(active / 'checkout', target_is_directory=True)
+        live = subprocess.Popen([str(self.codex), 'exec', '-C', str(alias)])
+        try:
+            deadline = time.monotonic() + 5
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(.01)
+            self.assertTrue(ready.exists(), 'live Codex fixture must be running')
+            job = self.launch('import sys; sys.exit(7)')
+            _, errors = job.communicate(timeout=10)
+            self.assertEqual(job.returncode, 7, errors.decode())
+            self.assertFalse(stale.exists(), 'old idle retained checkout must be pruned')
+            self.assertFalse(sibling.exists(), 'a shared path prefix does not mean in use')
+            for workspace in (recent, active, unrelated, target, link):
+                self.assertTrue(workspace.exists(), f'{workspace.name} must be preserved')
+            self.assertIsNone(live.poll(), 'active Codex process must survive cleanup')
+        finally:
+            live.terminate()
+            live.wait(timeout=5)
+
+    def test_relative_live_checkout_prevents_unsafe_pruning(self):
+        active = self.root / 'codex-job-active'
+        (active / 'checkout' / '.git').mkdir(parents=True)
+        old = time.time() - 3 * 24 * 60 * 60
+        os.utime(active, (old, old))
+        ready = self.root / 'ready'
+        self.codex.write_text(f'#!{sys.executable}\n' +
+                              f'import pathlib, time\npathlib.Path({str(ready)!r}).touch()\ntime.sleep(30)\n')
+        live = subprocess.Popen([str(self.codex), 'exec', '-C', 'checkout'], cwd=active)
+        try:
+            deadline = time.monotonic() + 5
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(.01)
+            self.assertTrue(ready.exists(), 'relative live Codex fixture must be running')
+            job = self.launch('')
+            _, errors = job.communicate(timeout=10)
+            self.assertEqual(job.returncode, 0, errors.decode())
+            self.assertTrue(active.exists(), 'relative live checkout must be preserved')
+            self.assertIsNone(live.poll())
+        finally:
+            if live.poll() is None:
+                live.terminate()
+            live.wait(timeout=5)
 
     def test_closed_stdout_preserves_success_and_cleanup(self):
         job = self.launch("import pathlib, sys\npathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_text('x' * 1000000)\n")
