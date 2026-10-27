@@ -15,14 +15,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=os.environ.get("CARR_WATCHDOG_CONFIG", str(SOURCE / "ops/config/job-watchdog.json")))
     parser.add_argument("--root", default=os.environ.get("CARR_JOB_ROOT"))
-    parser.add_argument("mode", choices=["scan", "digest", "social-batch-result"])
-    parser.add_argument("--week-start")
-    parser.add_argument("--queue-count", type=int)
-    parser.add_argument("--queue-complete", action="store_true")
-    parser.add_argument("--failure", choices=sorted(watchdog.SOCIAL_BATCH_FAILURES - {"zero_drafts"}))
+    parser.add_argument("mode", choices=["scan", "digest"])
     args = parser.parse_args()
     hold = read_holds().get("com.carr.job-watchdog")
-    if hold and args.mode != "social-batch-result":
+    if hold:
         print(hold.describe())
         return 0
     config = watchdog.load_config(args.config)
@@ -30,22 +26,6 @@ def main():
         ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], config, SOURCE).strip()).parent
     if args.mode == "digest":
         print(watchdog.digest(root, config))
-        return 0
-    if args.mode == "social-batch-result":
-        try:
-            result = watchdog.report_social_batch(
-                root, config, week_start=args.week_start, queue_count=args.queue_count,
-                queue_complete=args.queue_complete, failure=args.failure)
-        except ValueError as exc:
-            parser.error(str(exc))
-        count = result["queue_count"] if result["queue_count"] is not None else "unknown"
-        failure = result["failure_class"] or "none"
-        print(f"SOCIAL_BATCH_RESULT state={result['state']} week_start={result['week_start']} "
-              f"queue_count={count} complete={str(result['queue_complete']).lower()} "
-              f"failure_class={failure}")
-        if result["state"] == "failed":
-            print(watchdog.digest(root, config))
-            return 1
         return 0
     return watchdog.scan(root, config)
 
