@@ -1,3 +1,4 @@
+// Tests CRE deal authority admission and dispatch.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';

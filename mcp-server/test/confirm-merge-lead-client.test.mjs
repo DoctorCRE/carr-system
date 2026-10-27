@@ -1,3 +1,4 @@
+// Tests lead and client merge safeguards and evidence.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

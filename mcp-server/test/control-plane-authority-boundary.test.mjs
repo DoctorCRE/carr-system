@@ -1,3 +1,4 @@
+// Tests partner authority boundaries and authenticated routing.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ToolError, canExercisePartnerAuthority } from "../src/tools.js";

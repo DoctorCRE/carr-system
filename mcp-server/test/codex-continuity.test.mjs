@@ -1,3 +1,4 @@
+// Tests authenticated Codex continuity tools and checkpoint handling.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
