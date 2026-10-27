@@ -1024,6 +1024,18 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual(receipts[1]['status'], 'sent')
         self.assertEqual(len(self.sent), 1)
 
+    def test_tampered_and_malformed_rows_fail_without_sending(self):
+        for change, reason in ((dict(body='tampered'), 'submission_hash_mismatch'),
+                               (dict(subject=''), 'invalid_submission'),
+                               (dict(to=[42]), 'invalid_submission')):
+            with self.subTest(change=change):
+                original = self.draft
+                self.draft = dict(original, **change)
+                self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
+                self.assertEqual(self.calls[-1][1]['reason'], reason)
+                self.draft = original
+        self.assertEqual(self.sent, [])
+
     def test_aborted_press_records_failure(self):
         original = self.ports.open_form
         def open_form(item):
