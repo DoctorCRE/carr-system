@@ -1,6 +1,7 @@
-# Test doctrine mirror rendering and atomic publication.
+# Test the doctrine mirror: file hashing, excluded tables and atomic tree swaps.
 import hashlib
 import json
+import tempfile
 from datetime import date, datetime, timezone
 from pathlib import Path
 from uuid import UUID
@@ -107,7 +108,58 @@ def test_atomic_swap_replaces_entire_prior_tree(tmp_path: Path):
 
     assert (target / "nested" / "current.txt").read_text(encoding="utf-8") == "new"
     assert not (target / "obsolete.txt").exists()
-    assert not (tmp_path / "mirror.prev").exists()
+    assert not list(tmp_path.glob("mirror.prev*"))
+
+
+@pytest.mark.parametrize("stale_previous", [False, True])
+def test_provider_cleanup_refusal_does_not_block_publication(
+    tmp_path: Path, monkeypatch, capsys, stale_previous
+):
+    import errno
+    import shutil
+
+    target = tmp_path / "mirror"
+    target.mkdir()
+    (target / "snapshot.txt").write_text("old")
+    if stale_previous:
+        previous = tmp_path / "mirror.prev"
+        previous.mkdir()
+        (previous / "snapshot.txt").write_text("older")
+    remove = shutil.rmtree
+
+    def provider_refuses(path, *args, **kwargs):
+        if Path(path).name.startswith("mirror.prev"):
+            raise OSError(errno.EDEADLK, "Resource deadlock avoided", str(path))
+        return remove(path, *args, **kwargs)
+
+    with monkeypatch.context() as provider:
+        provider.setattr(shutil, "rmtree", provider_refuses)
+        build_and_swap(target, lambda fresh: (fresh / "snapshot.txt").write_text("new"))
+
+    assert (target / "snapshot.txt").read_text() == "new"
+    assert "cleanup deferred" in capsys.readouterr().err
+    build_and_swap(target, lambda fresh: (fresh / "snapshot.txt").write_text("newest"))
+    assert (target / "snapshot.txt").read_text() == "newest"
+    assert not list(tmp_path.glob("mirror.prev*"))
+
+
+def test_publication_rename_failure_restores_original(tmp_path: Path, monkeypatch):
+    import errno
+
+    target = tmp_path / "mirror"
+    target.mkdir()
+    (target / "snapshot.txt").write_text("safe")
+    rename = Path.rename
+
+    def refuse_publication(path, destination):
+        if path.name.startswith(".mirror.tmp-"):
+            raise OSError(errno.EDEADLK, "publication refused")
+        return rename(path, destination)
+
+    monkeypatch.setattr(Path, "rename", refuse_publication)
+    with pytest.raises(OSError, match="publication refused"):
+        build_and_swap(target, lambda fresh: (fresh / "snapshot.txt").write_text("new"))
+    assert (target / "snapshot.txt").read_text() == "safe"
 
 
 def test_builder_crash_leaves_original_target_intact(tmp_path: Path):
@@ -202,3 +254,38 @@ def test_write_output_manifest_covers_every_prior_output_including_manifest_md(t
     # moment its own contents are computed) — that must never regress into a
     # self-referential entry.
     assert "manifest.json" not in data["files"]
+
+
+def test_cleanup_permission_error_remains_a_failure(tmp_path: Path, monkeypatch):
+    import errno
+    import shutil
+
+    target = tmp_path / "mirror"
+    target.mkdir()
+    (target / "snapshot.txt").write_text("old")
+
+    def denied(path, *args, **kwargs):
+        raise PermissionError(errno.EACCES, "cleanup permission denied", str(path))
+
+    monkeypatch.setattr(shutil, "rmtree", denied)
+    with pytest.raises(PermissionError, match="cleanup permission denied"):
+        build_and_swap(target, lambda fresh: (fresh / "snapshot.txt").write_text("new"))
+    assert (target / "snapshot.txt").read_text() == "new"
+
+
+def test_cleanup_does_not_remove_unrelated_previous_paths(tmp_path: Path):
+    unrelated = tmp_path / "mirror.prev-not-owned"
+    unrelated.mkdir()
+    (unrelated / "evidence.txt").write_text("keep")
+    target = tmp_path / "mirror"
+
+    build_and_swap(target, lambda fresh: (fresh / "snapshot.txt").write_text("new"))
+
+    assert (unrelated / "evidence.txt").read_text() == "keep"
+    assert (target / "snapshot.txt").read_text() == "new"
+
+
+if __name__ == "__main__":
+    with tempfile.TemporaryDirectory() as directory:
+        result = pytest.main([__file__, f"--basetemp={directory}/pytest"])
+    raise SystemExit(result)

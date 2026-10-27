@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import subprocess
 import sys
 import time
@@ -46,6 +45,7 @@ from pathlib import Path
 from typing import Any
 
 import post_call
+from post_call import call_verb
 
 # --- constants -------------------------------------------------------------
 
@@ -53,11 +53,6 @@ CONFIG_PATH = Path(os.environ.get("CARR_CAPTURE_CONFIG") or Path.home() / ".conf
 LOG_PATH = Path(os.environ.get("CARR_CAPTURE_LOG") or Path.home() / "Library" / "Logs" / "capture-bridge.log")
 
 HTTP_TIMEOUT_SECONDS = 10
-VERB_TIMEOUT_SECONDS = 60
-# The partner's own record-layer door on this Mac (joe-local or dell-local):
-# the same identity `./run.sh call` uses, so automatic changes need no new
-# authority. The rehearsal points this at a disposable record layer.
-REPO_ROOT = Path(__file__).resolve().parents[3]
 CALL_CONTEXT_WAIT_SECONDS = 8
 
 
@@ -468,26 +463,6 @@ def publish_cmd(cfg: dict[str, str], session_dir: Path) -> int:
     return 0 if apply_automatic(session_dir) else 1
 
 
-def call_verb(verb: str, args: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
-    command = os.environ.get("CARR_POST_CALL_VERB_COMMAND")
-    argv = shlex.split(command) if command else [sys.executable, str(REPO_ROOT / "tools" / "call-verb.py")]
-    try:
-        done = subprocess.run(argv + [verb, json.dumps(args)], capture_output=True, text=True,
-                              timeout=VERB_TIMEOUT_SECONDS, check=False)
-    except (OSError, subprocess.SubprocessError) as exc:
-        return False, {"error": type(exc).__name__}
-    reply: dict[str, Any] = {}
-    for line in reversed(done.stdout.strip().splitlines()):
-        try:
-            parsed = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            reply = parsed
-            break
-    return done.returncode == 0 and reply.get("ok") is True, reply
-
-
 def apply_automatic(session_dir: Path) -> bool:
     """Apply the call's plainly stated next steps and phases (Joe, 2026-10-26).
 
@@ -586,6 +561,18 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
     if not session_token:
         log_line(f"ERROR poll capture-marker-missing-token session={name}")
         return Outcome.UNAVAILABLE
+
+    metadata = read_json(session_dir / post_call.CONTEXT_FILE) or {}
+    if (metadata.get("mode") == "weekly_deal_call" and (session_dir / "transcript.json").exists()
+            and not (session_dir / post_call.REPORT_FILE).exists()):
+        try:
+            worker_status = post_call.run_session(session_dir, publish=False)
+        except (RuntimeError, OSError, subprocess.SubprocessError, ValueError) as exc:
+            log_line(f"ERROR poll local post-call worker session={name}: {type(exc).__name__}")
+            return Outcome.UNAVAILABLE
+        if worker_status.get("state") != "ready_review":
+            log_line(f"POLL session={name} post_call={worker_status.get('state')} — holding recordings")
+            return Outcome.UNAVAILABLE
 
     # Candidate filing must win this race. Filing a zero-count aggregate report
     # before local proposals have their remote IDs would lock the session and
