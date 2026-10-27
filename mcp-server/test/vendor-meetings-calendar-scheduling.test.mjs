@@ -85,6 +85,7 @@ test('a fresh empty calendar offers the rolling window while a full calendar has
 test('known lifecycle and group gaps retain candidate openings and their uncertainty', async () => {
   const result = await read(client(snapshot([], { warnings: [
     { code: 'responses_unverified' }, { code: 'group_invites_not_shown' }, { code: 'recurring_unverified' },
+    { code: 'canceled_hidden', count: 2 },
   ] })));
   assert.equal(result.calendar.state, 'partial');
   assert.equal(result.calendar.scheduling.state, 'partial');
