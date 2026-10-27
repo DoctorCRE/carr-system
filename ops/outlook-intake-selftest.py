@@ -2031,6 +2031,22 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(outcome.counts['calendar_agenda_canceled'], 1)
         self.assertIn('time_changed', self.codes())
 
+    def test_cancelled_meetings_are_left_out_and_the_snapshot_says_how_many(self):
+        events = [event(self.gid(1), timedelta(days=2), subject='Synthetic kept'),
+                  event(self.gid(2), timedelta(days=3), subject='Cancelled: Synthetic budget'),
+                  event(self.gid(3), timedelta(days=4), subject='Synthetic cut'),
+                  event(self.gid(3), timedelta(days=4), subject='Canceled: Synthetic cut'),
+                  event(self.gid(4), timedelta(days=40), subject='Canceled: Synthetic outside the window'),
+                  event(self.gid(5), timedelta(days=5), subject='Canceled: Synthetic partner call',
+                        organizer=('Partner', PARTNER))]
+        self.run_intake(events=events)
+        self.assertEqual([i['title'] for i in self.fake.agenda['items']], ['Synthetic kept'])
+        self.assertIn({'code': 'canceled_hidden', 'count': 2}, self.fake.agenda['warnings'])
+
+    def test_no_cancelled_warning_when_nothing_was_cancelled(self):
+        self.run_intake(events=[event(self.gid(1), timedelta(days=2))])
+        self.assertNotIn('canceled_hidden', self.codes())
+
     def test_recurring_occurrences_show_without_their_series_master(self):
         master = self.gid(9)
         events = [event(master, -timedelta(days=30), subject='Synthetic weekly'),

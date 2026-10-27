@@ -1157,6 +1157,8 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
     warnings: list[dict] = [{'code': 'responses_unverified'}, {'code': 'group_invites_not_shown'}]
     if undecoded:
         warnings.append({'code': 'undecoded', 'count': undecoded})
+    if counts['calendar_agenda_canceled']:
+        warnings.append({'code': 'canceled_hidden', 'count': counts['calendar_agenda_canceled']})
     if counts['calendar_agenda_time_changed']:
         warnings.append({'code': 'time_changed', 'count': counts['calendar_agenda_time_changed']})
     if with_occurrences:
