@@ -28029,8 +28029,9 @@ begin
                  then v_pref.quiet_hours_end else time '07:00' end;
   v_local := now() at time zone v_tz;
   v_today_open := date_trunc('day', v_local) + v_open;
-  if v_local >= v_today_open and v_local < v_today_open + interval '4 hours' then
-    return now(); -- inside the morning window: nothing to hold.
+  if (v_local >= v_today_open and v_local < v_today_open + interval '4 hours')
+     or (v_local >= v_today_open - interval '1 day' and v_local < v_today_open - interval '20 hours') then
+    return now();
   end if;
   if v_local < v_today_open then
     return v_today_open at time zone v_tz;
@@ -113030,6 +113031,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0998_deal_client_read_index.sql	8346163dd6b9dbf53132ae93aae4448d17e8d9486c911478c7f868b9a54f336b	1970-01-01 00:00:00+00
 1000_lead_draft_revision.sql	6d720b78fceeb29e4a3e195c10effe4edf548055ef1f7aa1ea36871df8eb525b	1970-01-01 00:00:00+00
 1001_retire_scheduler_contracts.sql	2b14240e8b93c30d5dc16c4dfd6a746b365e736895a516be3d769d9b10d27186	1970-01-01 00:00:00+00
+1003_notification_morning_midnight.sql	7b3eb4a20aeed80ce5c01bd17a4b2fe02c43184e5903957ac4edee459b80d050	1970-01-01 00:00:00+00
 \.
 
 

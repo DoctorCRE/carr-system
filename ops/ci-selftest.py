@@ -1108,8 +1108,8 @@ def _hosted_workflow(filename="ci.yml"):
 def test_hosted_draft_lifecycle():
     """Execute YAML conditions and verdict commands against same-head event fixtures.
 
-    This models the scheduler inputs, not GitHub's remote check selection. In
-    particular, CI readiness metadata must not schedule a new run at the same SHA.
+    This models scheduler inputs, not GitHub's remote check selection.
+    Ready transitions must schedule a full run even when the SHA is unchanged.
     """
     def evaluate(expression, context):
         expression = str(expression)
@@ -1131,9 +1131,7 @@ def test_hosted_draft_lifecycle():
             ("doc-drift.yml", ("check",), "verdict", "drift-verdict")):
         wf = _hosted_workflow(filename)
         events = wf["on"]
-        expected_actions = {"opened", "synchronize", "reopened", "converted_to_draft"}
-        if filename != "ci.yml":
-            expected_actions.add("ready_for_review")
+        expected_actions = {"opened", "synchronize", "reopened", "converted_to_draft", "ready_for_review"}
         check(f"{filename}: only intended PR lifecycle events schedule runs",
               set(events["pull_request"]["types"]) == expected_actions)
         check(f"{filename}: all non-PR full-suite triggers survive",

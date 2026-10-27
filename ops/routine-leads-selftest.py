@@ -289,6 +289,8 @@ class LeadTests(unittest.TestCase):
         self.assertIn(newest, errors.getvalue())
         self.assertEqual([verb for verb, _ in calls], ["loop-board", "add-loop"])
         self.assertIn(newest + " is unavailable: HTTP 404", calls[1][1]["body"])
+        self.assertEqual(calls[1][1]["title"], "lead-signals-weekly: investigate failed routine")
+        self.assertNotIn("Repair code or integration", calls[1][1]["body"])
 
     def test_secondary_practice_location_archive_parser(self):
         raw = copy.deepcopy(FIXTURE["nppes_rows"][2])
