@@ -165,7 +165,7 @@ def retired_machine_config_regressions():
         'blocked EventKit capture must not be installed'
     name = 'com.carr.outlook-research-copy.plist'
     source = Path(mod.launchd_repo_path(name))
-    assert source == Path(REPO) / 'spec/outlook' / name, 'reuse the Outlook installer template'
+    assert source == Path(mod.REPO) / 'spec/outlook' / name, 'reuse the Outlook installer template'
     with tempfile.TemporaryDirectory() as directory:
         agents = Path(directory)
         expected = plistlib.loads(source.read_bytes().replace(b'{{HOME}}', b'/synthetic/home'))

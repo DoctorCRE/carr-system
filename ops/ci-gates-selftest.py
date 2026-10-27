@@ -119,12 +119,12 @@ class GatesTest(unittest.TestCase):
         self.assertFalse((self.root / 'shell-ran').exists())
 
     def test_signaled_invariant_keeps_shell_exit_status(self):
-        self.suite('ops/stale-count-check.py',
+        self.suite('ops/rule-load-layer-check.py',
                    'import os,signal\nos.kill(os.getpid(), signal.SIGTERM)')
         rc, output = self.run_ci()
         self.assertEqual(rc, 1, output)
         directory = Path(re.search(r'ci-retained-logs: (.+)', output)[1])
-        self.assertEqual((directory / 'gate-stale-count-check.log.rc').read_text(), '143\n')
+        self.assertEqual((directory / 'gate-rule-load-layer-check.log.rc').read_text(), '143\n')
 
     def test_clock_scan_checks_changed_tests(self):
         self.suite('mcp-server/test-clock.mjs', 'Date.now()')
