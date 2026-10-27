@@ -68,7 +68,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'list-email-proposals': {
       write: false,
-      description: 'List email proposals for Home across deals, or only the optional deal UUID, oldest first. Status defaults to pending; select confirmed or dismissed to read resolved proposals. Every item includes its status, kind, deal, confidence, source email sender, subject, quote, activity_id and suspected_instruction warning. Pending items have a fresh preview and confirm_verb; confirm with the preview fields or dismiss with dismiss-email-proposal and the version. A stale pending item has preview null and preview_error. Resolved items have resolution (resolved_at, resolved_by actor slug, reason), the stored proposed_next_step when applicable, and null confirm_verb, preview and preview_error. Phase history retains the quote; exact phase changes remain in deal history. Without limit, refuses above 200 matching proposals. For pagination, pass limit and then next_cursor until more is false; a cursor remains valid after resolution, but must belong to the selected deal when deal is supplied.',
+      description: 'List email proposals for Home across deals, or only the optional deal UUID, oldest first. Status defaults to pending; select confirmed or dismissed to read resolved proposals. Every item includes its status, kind, deal, confidence, source email sender, subject, quote, activity_id and suspected_instruction warning. Pending items have a fresh preview and confirm_verb; confirm with the preview fields or dismiss with dismiss-email-proposal and the version. A stale pending item has preview null and preview_error. Resolved items have resolution (resolved_at, resolved_by actor ID, reason), the stored proposed_next_step when applicable, and null confirm_verb, preview and preview_error. Phase history retains the quote; exact phase changes remain in deal history. Without limit, refuses above 200 matching proposals. For pagination, pass limit and then next_cursor until more is false; a cursor remains valid after resolution, but must belong to the selected deal when deal is supplied.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         deal: { type: 'string', format: 'uuid' },
         status: { type: 'string', enum: ['pending', 'confirmed', 'dismissed'], default: 'pending' },
@@ -80,12 +80,11 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           where id=$1 and ($2::uuid is null or deal_id=$2)`, [args.cursor, args.deal ?? null])).rows.length)
           fail('email_proposals_cursor_invalid');
         const limit = args.limit ?? LIMIT;
-        const { rows } = await c.query(`select p.id,p.version,p.kind,p.status,p.resolved_at,r.slug as resolved_by,
+        const { rows } = await c.query(`select p.id,p.version,p.kind,p.status,p.resolved_at,p.resolved_by,
             p.resolution_reason,p.deal_id,d.name as deal_name,
             p.activity_id,p.evidence_quote,p.task_text,p.next_date::text as next_date,p.owner,
             p.confidence::float8 as confidence,a.summary,a.occurred_at
           from email_proposal p join deal d on d.id=p.deal_id join activity a on a.id=p.activity_id
-          left join actor r on r.id=p.resolved_by
           where p.status=$4 and ($3::uuid is null or p.deal_id=$3) and ($1::uuid is null or (p.created_at,p.id) >
             (select created_at,id from email_proposal where id=$1))
           order by p.created_at,p.id limit $2`, [args.cursor ?? null, limit + 1, args.deal ?? null, args.status ?? 'pending']);

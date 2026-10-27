@@ -912,7 +912,7 @@ test('email proposal history retains confirmed and dismissed evidence without co
     const [item] = result.proposals;
     assert.equal(item.status, status);
     assert.equal(item.source.evidence_quote, evidence);
-    assert.equal(item.resolution.resolved_by, 'joe');
+    assert.equal(item.resolution.resolved_by, actor.id);
     assert.equal(item.resolution.reason, reason);
     assert.equal(new Date(item.resolution.resolved_at).toISOString(), item.resolution.resolved_at);
     assert.equal(item.confirm_verb, null);
