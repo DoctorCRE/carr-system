@@ -75,8 +75,8 @@
 import { TOOLS } from "./tools.js";
 import { publicError } from "./public-errors.ts";
 import { mutationManifestIdentity } from "./mutation-registry.js";
-import { program6ActionPosture } from "./program6-feature-flag.js";
-import { workspaceCommandCenterPosture } from "./workspace-feature-flag.js";
+import { program6ActionPosture } from "./program6-feature-flag.ts";
+import { workspaceCommandCenterPosture } from "./workspace-feature-flag.ts";
 
 export async function buildRelease({ env, sql, verbCount, now = () => new Date() }) {
   const sha = (env && env.GIT_SHA) || null;

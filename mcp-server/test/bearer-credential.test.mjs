@@ -15,7 +15,7 @@ import path from "node:path";
 import { bearerCredential } from "../src/bearer.ts";
 import { createCaptureHandler } from "../src/capture.js";
 import { createDealroomHandler } from "../src/dealroom-web.js";
-import { sharedOAuthFetch } from "../src/oauth-policy.js";
+import { sharedOAuthFetch } from "../src/oauth-policy.ts";
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
 const SECRET = "synthetic-machine-secret-0527";

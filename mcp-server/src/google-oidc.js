@@ -13,7 +13,7 @@
 // Google identity and downstream-client consent are separate gates.
 
 import { slugForEmail, propsForSlug, agentSlugForClient, verifiedAgentSlugForClient } from "./identity.js";
-import { validateAuthorizationRequest, requireApprovedClient } from "./oauth-policy.js";
+import { validateAuthorizationRequest, requireApprovedClient } from "./oauth-policy.ts";
 import { consentState } from "./oauth-consent-state.ts";
 
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";

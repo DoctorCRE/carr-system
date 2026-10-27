@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """CI-declared Python checkers must run outside their fixture selftests."""
+import ast
 import json
 from pathlib import Path
 import re
@@ -17,7 +18,7 @@ def declared_checks(catalog):
             if path.startswith('ops/') and path.endswith('.py')]
 
 
-def unwired_checks(catalog, ci):
+def unwired_checks(catalog, ci, runners=None):
     order = re.search(r'^CLASS_ORDER="([^"]+)"', ci, re.M)
     active = set(order[1].split()) if order else set()
     calls = set()
@@ -35,6 +36,14 @@ def unwired_checks(catalog, ci):
                 r'for (\w+) in ([^;]+); do\n(.*?)^  done', body, re.M | re.S):
             if f'ops/${variable}.py' in checker_calls(loop):
                 calls.update(f'ops/{value}.py' for value in shlex.split(values, comments=True))
+    for runner, source in (runners or {}).items():
+        if runner not in calls:
+            continue
+        for node in ast.walk(ast.parse(source)):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == 'py' and len(node.args) >= 2
+                    and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str)):
+                calls.add(node.args[1].value)
     return sorted(
         f'{name}: {path}'
         for name, path in declared_checks(catalog) if path not in calls
@@ -51,7 +60,8 @@ class EnforcementWiringTest(unittest.TestCase):
     def test_current_map_has_no_unwired_ci_checkers(self):
         mapping = json.loads((REPO / 'ops/config/rule-enforcement-map.json').read_text())
         self.assertEqual([], unwired_checks(mapping['control_catalog'],
-                                           (REPO / 'ops/ci.sh').read_text()))
+                                           (REPO / 'ops/ci.sh').read_text(),
+                                           {'ops/ci-migration.py': (REPO / 'ops/ci-migration.py').read_text()}))
         for name, path in declared_checks(mapping['control_catalog']):
             self.assertTrue((REPO / path).is_file(), f'{name}: missing {path}')
 
@@ -66,6 +76,15 @@ class EnforcementWiringTest(unittest.TestCase):
         self.assertEqual([], unwired_checks(self.catalog, ci))
         self.assertEqual(['example: ops/example-check.py'],
                          unwired_checks(self.catalog, ci.replace('"gates"', '"unit"')))
+
+    def test_python_runner_must_be_called_and_execute_checker(self):
+        ci = self.ci('  "$PY" ops/ci-migration.py')
+        runner = {'ops/ci-migration.py': 'self.py("log", "ops/example-check.py", "failure")'}
+        self.assertEqual([], unwired_checks(self.catalog, ci, runner))
+        self.assertEqual(['example: ops/example-check.py'],
+                         unwired_checks(self.catalog, ci.replace('"gates"', '"unit"'), runner))
+        self.assertEqual(['example: ops/example-check.py'], unwired_checks(
+            self.catalog, ci, {'ops/ci-migration.py': '"ops/example-check.py"'}))
 
     def test_inventory_requires_execution(self):
         ci = self.ci('  for inv in example-check; do\n'

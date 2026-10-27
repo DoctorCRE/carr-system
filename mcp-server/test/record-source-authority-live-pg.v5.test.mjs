@@ -673,8 +673,8 @@ test("F01 on real PostgreSQL: migration, SQL fixtures and the registered verbs",
 });
 
 test("the live proof is wired into the migration class", () => {
-  const ci = resolve(HERE, "../../ops/ci.sh");
+  const ci = resolve(HERE, "../../ops/ci-migration.py");
   assert.ok(existsSync(ci));
   const text = execFileSync("grep", ["-c", "record-source-authority-live-pg.v5.test.mjs", ci]).toString();
-  assert.ok(Number(text.trim()) >= 1, "ops/ci.sh must run this proof in the migration class");
+  assert.ok(Number(text.trim()) >= 1, "ops/ci-migration.py must run this proof in the migration class");
 });

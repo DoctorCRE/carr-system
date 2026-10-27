@@ -1,10 +1,13 @@
 // Prepare bounded Jev deal-reading advice.
+type CriticalDate = { due_on?: string; status?: string; note?: string; kind?: string };
+type Negotiation = { note?: string; round_no?: number; side?: string; proposed_on?: string; expires_on?: string };
+type DealRecord = { critical_dates?: CriticalDate[]; next_actions?: { status?: string; description?: string }[]; negotiation_rounds?: Negotiation[]; activities?: { summary?: string; detail?: string }[]; thread?: { text?: string }[]; next_step?: string; last_touch?: string; premises?: unknown[]; documents?: { sent_status?: string }[]; phase?: string; type?: string };
 import { TypeSafeClient, TypeSafeError } from "@typesafe-ai/sdk";
 // Bounded, read-only Jev advisory for one authenticated Deal Room record.
 // The record is fetched by the caller through the existing get-deal-room verb.
 // No model answer changes a deal, its ordering, or a partner's next action.
 export const JEV_DEAL_EVIDENCE_FLOOR = 200;
-const LEVELS = [
+const LEVELS: [string, string, string, string, string] = [
   "A client and space requirement are recorded, but no specific property is identified.",
   "Specific properties are being researched, toured, or compared; no offer is recorded.",
   "An offer or proposal was sent; the other side's response is outstanding.",
@@ -21,46 +24,46 @@ const WAITING = {
   not_recorded: "The record does not establish who owes the next move.",
 };
 
-function clip(value, max = 1200) {
+function clip(value: unknown, max = 1200) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
-function items(value) {
+function items<T>(value: T[] | undefined): T[] {
   return Array.isArray(value) ? value : [];
 }
 
-function usefulText(value) {
+function usefulText(value: unknown) {
   const words = clip(value).toLowerCase().match(/[a-z0-9]{3,}/g) || [];
   return new Set(words).size >= 5;
 }
 
 // Record deadlines are DATE fields, interpreted on the CARR business calendar.
-function calendarDate(value) {
+function calendarDate(value: unknown) {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const parsed = new Date(`${value}T00:00:00Z`);
   return Number.isFinite(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value ? value : null;
 }
 
-function businessToday(now) {
+function businessToday(now: Date) {
   return new Intl.DateTimeFormat("en-CA", {timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit"}).format(now);
 }
 
-function activeCriticalDates(record, now) {
+function activeCriticalDates(record: DealRecord, now: Date) {
   const current = now.valueOf();
-  const distance = date => {
+  const distance = (date: CriticalDate) => {
     const parsed = Date.parse(date?.due_on || "");
     return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : Math.abs(parsed - current);
   };
   return items(record.critical_dates)
-    .filter(d => !["completed", "cancelled", "canceled", "satisfied"].includes(d.status))
+    .filter(d => !(["completed", "cancelled", "canceled", "satisfied"] as readonly unknown[]).includes(d.status))
     .sort((a, b) => distance(a) - distance(b))
     .slice(0, 4);
 }
 
 // Keep current operational facts ahead of older narrative. A single long note
 // cannot fill the input or establish enough evidence for all three judgments.
-function evidenceLines(record, now) {
-  const sources = [
+function evidenceLines(record: DealRecord, now: Date) {
+  const sources: [string, string[]][] = [
     ["next_action", items(record.next_actions).filter(a => a.status === "open" || !a.status)
       .slice(0, 4).map(a => clip(a.description, 500))],
     ["negotiation", items(record.negotiation_rounds).slice(0, 3).map(n => clip(n.note, 500))],
@@ -69,8 +72,8 @@ function evidenceLines(record, now) {
       .map(a => [clip(a.summary, 250), clip(a.detail, 350)].filter(Boolean).join(" "))],
     ["note", items(record.thread).slice(0, 8).map(n => clip(n.text, 500))],
   ];
-  const lines = [];
-  const kinds = new Set();
+  const lines: string[] = [];
+  const kinds = new Set<string>();
   for (const [kind, values] of sources) {
     for (const value of values) {
       if (!value || lines.join("\n").length + value.length > 6000) continue;
@@ -81,9 +84,10 @@ function evidenceLines(record, now) {
   return { lines, kinds };
 }
 
-export function dealReadingState(record, now = new Date()) {
+export function dealReadingState(record: DealRecord, now = new Date()) {
   const today = businessToday(now);
-  const expired = value => calendarDate(value) === null ? null : value < today;
+  // calendarDate validates the optional value before the comparison.
+  const expired = (value: string | undefined) => calendarDate(value) === null ? null : value! < today;
   const { lines, kinds } = evidenceLines(record, now);
   const nextStep = clip(record.next_step);
   if (usefulText(nextStep)) kinds.add("next_step");
@@ -119,7 +123,8 @@ export function dealReadingState(record, now = new Date()) {
         premises_recorded: premises.length,
         negotiation_rounds_recorded: negotiations.length,
         latest_negotiation: negotiations.length ? {
-          round_no: Number.isInteger(negotiations[0].round_no) ? negotiations[0].round_no : null,
+          // Number.isInteger establishes the optional round number.
+          round_no: Number.isInteger(negotiations[0].round_no) ? negotiations[0].round_no! : null,
           side: clip(negotiations[0].side, 40) || null,
           proposed_on: clip(negotiations[0].proposed_on, 24) || null,
           expired: expired(negotiations[0].expires_on),
@@ -138,17 +143,17 @@ export function dealReadingState(record, now = new Date()) {
 
 export function dealReadingQuestions() {
   return {
-    movement: { type: "score", instructions: "Judge how far this commercial real estate transaction has actually moved toward a signed agreement from the recorded evidence. Do not infer movement from the hand-maintained phase label alone.", criteria: LEVELS },
-    waiting_on: { type: "choice", instructions: "Who or what owes the very next move according to the recorded evidence? Choose not_recorded if the record does not establish this.", criteria: WAITING },
-    silence_is_bad: { type: "noul", instructions: "Given the recorded next step and the days since last touch, is the silence evidence that the transaction is in trouble? An unknown last touch is not evidence of trouble.", criteria: { true: "The wait exceeds what the recorded step normally takes and nothing explains the gap.", false: "The wait fits the recorded step, a future date, or the client's planned timeline." } },
+    movement: { type: "score" as const, instructions: "Judge how far this commercial real estate transaction has actually moved toward a signed agreement from the recorded evidence. Do not infer movement from the hand-maintained phase label alone.", criteria: LEVELS },
+    waiting_on: { type: "choice" as const, instructions: "Who or what owes the very next move according to the recorded evidence? Choose not_recorded if the record does not establish this.", criteria: WAITING },
+    silence_is_bad: { type: "noul" as const, instructions: "Given the recorded next step and the days since last touch, is the silence evidence that the transaction is in trouble? An unknown last touch is not evidence of trouble.", criteria: { true: "The wait exceeds what the recorded step normally takes and nothing explains the gap.", false: "The wait fits the recorded step, a future date, or the client's planned timeline." } },
   };
 }
 
-function probability(value) {
+function probability(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
-export async function readDealWithJev(record, { apiKey, client, now = new Date() } = {}) {
+export async function readDealWithJev(record: DealRecord, { apiKey, client, now = new Date() }: { apiKey?: string; client?: Pick<TypeSafeClient, "systemOne">; now?: Date } = {}) {
   const { evidenceChars, sufficient, state } = dealReadingState(record, now);
   const base = { schema: "carr.jev-deal-reading.v1", advisory_only: true,
     evidence_chars: evidenceChars, evidence_floor: JEV_DEAL_EVIDENCE_FLOOR };
@@ -161,8 +166,9 @@ export async function readDealWithJev(record, { apiKey, client, now = new Date()
     const movement = answers?.movement?.score;
     const waiting = answers?.waiting_on?.choice;
     const silence = answers?.silence_is_bad?.noul;
+    // An absent choice remains a nonmatching property key in the existing refusal check.
     if (typeof movement !== "number" || !Number.isFinite(movement) || movement < 0 || movement > 4 ||
-        !Object.hasOwn(WAITING, waiting) || !probability(silence))
+        !Object.hasOwn(WAITING, waiting!) || !probability(silence))
       return { ...base, judged: false, reason: "invalid_jev_answer" };
     const rung = Math.round(movement);
     return { ...base, judged: true, reason: null, model: result.model || "unknown",

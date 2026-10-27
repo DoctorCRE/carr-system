@@ -44,6 +44,24 @@ class SettingsTest(unittest.TestCase):
                          ('other-owner', 'other@other.test', 'other.test', 'Europe/London'))
         self.assertEqual(settings.profile, self.home / 'Other Profile')
 
+    def test_dell_shaped_settings_render_jobs_without_studio_paths(self):
+        profile = self.home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Profile'
+        write_settings(self.home, self.repo, owner='dell', account='second.partner@example.test',
+                       profile=str(profile), services=['intake', 'refresh'], full_screen_height=956,
+                       executable_path=f'{self.home}/.cargo/bin:{self.home}/.local/bin:/usr/bin:/bin')
+        settings = load_settings(self.home)
+        self.assertEqual((settings.owner, settings.account, settings.profile, settings.full_screen_height),
+                         ('dell', 'second.partner@example.test', profile, 956))
+        for service in ('intake', 'refresh'):
+            settings.require_service(service)
+            rendered = plistlib.loads(settings.render_plist(ROOT / f'ops/launchd/com.carr.outlook-{service}.plist'))
+            self.assertEqual(rendered['WorkingDirectory'], str(self.repo))
+            self.assertEqual(rendered['EnvironmentVariables']['PATH'], settings.executable_path)
+            self.assertNotIn('/Users/booko', str(rendered))
+            self.assertNotIn('{{', str(rendered))
+        self.assertFalse(settings.mcp_credentials.exists())
+        self.assertFalse(settings.database_credentials.exists())
+
     def test_missing_and_invalid_fields_name_file_and_field(self):
         values = json.loads(self.path.read_text())
         for field, value in [('owner', ''), ('account', 'bad'), ('timezone', 'No/Such_Zone'),

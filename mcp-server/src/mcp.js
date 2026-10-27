@@ -13,7 +13,7 @@
 
 import { neon, Pool } from "@neondatabase/serverless";
 import { publicError } from "./public-errors.ts";
-import { mcpOriginRefusal } from "./oauth-policy.js";
+import { mcpOriginRefusal } from "./oauth-policy.ts";
 import { DOC_TOOL_NAMES, DOC_INSTRUCTIONS, docToolAnnotations } from "./doc-profile.ts";
 import { TOOLS, ToolError, executeRegisteredTool, assertRegisteredToolInput, UNATTENDED_AUTHORITY_VERBS,
   auditIdentity, assertNoCallerAuthorityFields, coerceArgsToSchema,
@@ -25,7 +25,7 @@ import { deriveTrustedPrincipalBinding,
   ExactEffectRefusal, SCAC_TRUSTED_PRINCIPAL_READBACK_SQL } from "./scac-exact-effects.js";
 import { scheduleFailureRecord, rpcInternalErrorFailureClass, actorUnresolvedFailureClass, RPC_INTERNAL_ERROR_CODE } from "./trace.js";
 import { parksADecision, classifyLoopText, needsDecider, loopRowText,
-         ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.js";
+         ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.ts";
 
 const JSON_HEADERS = { "content-type": "application/json" };
 const json = (body, status = 200) =>
@@ -737,7 +737,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
   // executeRegisteredTool() directly and never reaches this function, so a
   // check placed only here missed that door. executeRegisteredTool() is the
   // one function every path (callTool read, callTool write, break-glass)
-  // calls — see its own comment there, and verb-gate-checks.js's header, for
+  // calls — see its own comment there, and verb-gate-checks.ts's header, for
   // the full parity note.
   //
   // The pure gate is ALSO run here, same pattern as assertNoCallerAuthorityFields
