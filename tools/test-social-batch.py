@@ -122,8 +122,14 @@ def doctrine_sections(changed=None):
 
 class SocialBatchTest(unittest.TestCase):
     def setUp(self):
-        # Acceptance 7: any real socket connection fails the suite.
-        guard = patch.object(socket.socket, 'connect', side_effect=AssertionError('network call in test'))
+        # Acceptance 7: any socket connection off this machine fails the suite.
+        real_connect = socket.socket.connect
+
+        def loopback_only(sock, address):
+            if isinstance(address, tuple) and address[0] in ('127.0.0.1', 'localhost'):
+                return real_connect(sock, address)
+            raise AssertionError(f'network call in test: {address}')
+        guard = patch.object(socket.socket, 'connect', loopback_only)
         guard.start()
         self.addCleanup(guard.stop)
         self.tmp = tempfile.TemporaryDirectory()
@@ -412,17 +418,101 @@ class SocialBatchTest(unittest.TestCase):
                       'Edit(out/social-batch/*/ledger.jsonl)', 'Edit(out/social-batch/*/batch.json)'):
             self.assertIn(entry, denied)
 
-    def test_render_writes_only_inside_a_work_folder(self):
-        html = self.media / 'card.html'
-        html.write_text('<p>x</p>')
+    def work_card(self, body='<p>x</p>', name='card.html'):
+        html = self.ctx.out / '2026-11-02/work' / name
+        html.parent.mkdir(parents=True, exist_ok=True)
+        html.write_text(body)
+        return html
+
+    def test_render_reads_and_writes_only_inside_a_work_folder(self):
+        html = self.work_card()
         for target in (REPO / 'tools/social_batch.png', self.ctx.out / '2026-11-02/ledger.png',
                        self.ctx.out / '2026-11-02/work/../batch.png'):
             with self.subTest(target=target), self.assertRaises(sb.Stop):
                 sb.render(html, target, 10, 10, chrome='/nonexistent/chrome', out=self.ctx.out)
+        outside = self.media / 'card.html'
+        outside.write_text('<p>x</p>')
+        with self.assertRaises(sb.Stop):
+            sb.render(outside, self.ctx.out / '2026-11-02/work/x.png', 10, 10, chrome='/nonexistent/chrome', out=self.ctx.out)
 
-    def test_render_creates_the_work_folder_and_checks_the_size(self):
-        html = self.media / 'card.html'
-        html.write_text('<p>x</p>')
+    def test_card_server_serves_one_origin_from_the_work_folder_and_fonts(self):
+        import http.client
+        work = self.work_card().parent
+        (self.media / 'secret.txt').write_text('MARKER-OUTSIDE')
+        with sb.card_server(work) as port:
+            def get(url, method='GET'):
+                connection = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+                connection.request(method, url)
+                response = connection.getresponse()
+                return response.status, response.read()
+            self.assertEqual(get(f'http://{sb.CARD_HOST}/card.html'), (200, b'<p>x</p>'))
+            self.assertEqual(get(f'http://{sb.CARD_HOST}/fonts/Oswald.ttf')[0], 200)
+            for url in (f'http://{sb.CARD_HOST}/../../../media/secret.txt',
+                        f'http://{sb.CARD_HOST}/%2e%2e/%2e%2e/%2e%2e/media/secret.txt',
+                        f'http://{sb.CARD_HOST}/fonts/../social_batch.py',
+                        'http://example.com/', f'http://127.0.0.1:{port}/card.html', '/card.html'):
+                status, body = get(url)
+                self.assertGreaterEqual(status, 400, url)
+                self.assertNotIn(b'MARKER-OUTSIDE', body)
+            self.assertGreaterEqual(get(f'http://{sb.CARD_HOST}/card.html', 'POST')[0], 400)
+
+    def test_chrome_gets_an_http_origin_and_no_other_network(self):
+        args = sb.chrome_args('/x/chrome', '/tmp/profile', 4242, 10, 20, '--screenshot=/tmp/a.png')
+        self.assertFalse([a for a in args if 'file://' in a])
+        self.assertIn(f'http://{sb.CARD_HOST}/', args[-1])
+        self.assertIn('--proxy-server=http://127.0.0.1:4242', args)
+        self.assertIn('--proxy-bypass-list=<-loopback>', args)
+        self.assertIn('--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1', args)
+
+    @unittest.skipUnless(Path(sb.CHROME).exists(), 'Chrome is not installed here')
+    def test_real_chrome_card_cannot_reach_outside_files_or_hosts(self):
+        import http.server
+        import threading
+        (self.media / 'secret.txt').write_text('MARKER-FILE-7f3a')
+        hits = []
+
+        class Other(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                hits.append(self.path)
+                self.send_response(200)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(b'MARKER-HOST-9c1e')
+
+            def log_message(self, *args):
+                pass
+        other = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Other)
+        threading.Thread(target=other.serve_forever, daemon=True).start()
+        self.addCleanup(other.server_close)
+        self.addCleanup(other.shutdown)
+        secret, port = (self.media / 'secret.txt').resolve().as_uri(), other.server_address[1]
+        targets = [secret, f'http://127.0.0.1:{port}/', f'http://localhost:{port}/', 'http://example.com/',
+                   f'http://{sb.CARD_HOST}/../../../media/secret.txt']
+        script = ''.join(f"fetch({u!r}).then(r=>r.text()).then(t=>{{o.textContent+='|'+t}})"
+                         f".catch(()=>{{o.textContent+='|blocked'}});" for u in targets)
+        html = self.work_card(
+            f'<div id="o">start</div><iframe src="{secret}"></iframe><iframe src="http://127.0.0.1:{port}/"></iframe>'
+            f'<script>const o=document.getElementById("o");{script}'
+            "fetch('/fonts/Oswald.ttf').then(r=>{o.textContent+='|font'+r.status});</script>")
+        dom = sb.browse(html, '--dump-dom', 400, 300, out=self.ctx.out).stdout
+        self.assertIn('start', dom)
+        self.assertIn('font200', dom)
+        self.assertNotIn('MARKER-FILE-7f3a', dom)
+        self.assertNotIn('MARKER-HOST-9c1e', dom)
+        self.assertEqual(hits, [])
+        # A framed file never reaches the DOM, so compare pixels: framing the marker file
+        # must look exactly like framing a file that does not exist.
+        shots = []
+        for name, frame in (('a', secret), ('b', (self.media / 'missing.txt').resolve().as_uri())):
+            card = self.work_card(f'<body style="margin:0;background:#fff"><iframe src="{frame}" '
+                                  'style="width:380px;height:120px;border:0"></iframe></body>', f'{name}.html')
+            png = card.with_suffix('.png')
+            sb.render(card, png, 400, 140, out=self.ctx.out)
+            shots.append(png.read_bytes())
+        self.assertEqual(shots[0], shots[1], 'the framed file drew differently from a missing file')
+
+    def test_render_creates_the_output_folder_and_checks_the_size(self):
+        html = self.work_card()
         chrome = self.media / 'chrome'
         # Like Chrome, the fake writes the screenshot and fails when the folder is missing.
         chrome.write_text('#!/usr/bin/env python3\nimport struct, sys, zlib\n'

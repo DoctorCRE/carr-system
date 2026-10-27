@@ -15,12 +15,12 @@
     "4. Grok pass: not run here until WR561.S3 binds the grok CLI to read-only tools. Record grok.status skipped, reason 'grok not yet bound for headless runs', and find trends with WebSearch and the banks.",
     "5. Verify every figure at its primary source with WebFetch. If a source cannot be read, drop the figure or the post. A thin week Joe tops up beats a wrong batch.",
     "6. Draft into the open slots from plan, never past them. Follow the specs for voice, cadence, format rotation and the quality bar. Pick Central wall-clock times; the script converts them to UTC.",
-    "7. Cards: you may write files only under out/social-batch/<week_start>/work/. Write card HTML there with the brand fonts, then `./run.sh social-batch render <card.html> out/social-batch/<week_start>/work/<card>.png --size WIDTHxHEIGHT`. Open every PNG with Read and look at it before you use it. Static cards only in this run: no animated cards or GIFs.",
+    "7. Cards: you may write files only under out/social-batch/<week_start>/work/. Write card HTML there; it loads nothing from outside that folder except the brand fonts at /fonts/Oswald.ttf and /fonts/Montserrat.ttf. Then `./run.sh social-batch render <card.html> out/social-batch/<week_start>/work/<card>.png --size WIDTHxHEIGHT`. Open every PNG with Read and look at it before you use it. Static cards only in this run: no animated cards or GIFs.",
     "8. Write out/social-batch/<week_start>/work/drafts.json in the carr-social-batch-drafts/v1 shape (design doc section 5, plus alt_text on Instagram posts with media). Copy plan_digest from step 1. Record skipped slots with a reason.",
     "9. Run an independent claims reviewer with the Agent tool (model sonnet) over every post and card. Apply its corrections, then set run_notes.claims_review.",
     "10. Run `./run.sh social-batch check out/social-batch/<week_start>/work/drafts.json`. Fix the drafts, never the rules, and run it again until it prints no findings. A REVIEW lint hit you keep needs a lint_review_clearances entry with a real reason.",
     "11. Run `./run.sh social-batch submit out/social-batch/<week_start>/work/drafts.json`. It re-plans, re-checks, uploads, schedules, reads back, writes the batch log, the feedback-log section and the review loop, then writes the artifact next to the receipt. If it refuses or stops, report why and write no receipt.",
-    "12. Report: posts per platform with Central times, what Grok surfaced, how this batch improves on the last one, skipped slots, and the submit summary line."
+    "12. Report: posts per platform with Central times, the Grok skip reason, how this batch improves on the last one, skipped slots, and the submit summary line."
   ],
   "acceptance_contract": {
     "criteria": [

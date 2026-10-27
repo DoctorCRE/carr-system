@@ -278,10 +278,15 @@ vision check becomes a required `check` input.
   The deny list covers `tools/`, `lib/`, `ops/`, `bin/`, `run.sh`, the batch ledger and
   `batch.json`, the Blotato hosts, `~/.zprofile`, curl and wget. `submit` calls the store
   write verbs from its own subprocess, so the model needs no write verb.
-- Headless Chrome runs only through `./run.sh social-batch render`, which writes only into
-  that work folder. It uses a throwaway profile and `--use-mock-keychain`, which avoids the
-  keychain prompts that hung securityd on 2026-10-24 and keeps the Chrome binary off the
-  allowlist.
+- Headless Chrome runs only through `./run.sh social-batch render`. Both the card HTML and
+  the PNG must sit in that work folder. Render serves the folder from a throwaway
+  `127.0.0.1` server as `http://card.test/`, and the same server is Chrome's only proxy
+  (`--proxy-bypass-list=<-loopback>`, with `--host-resolver-rules` mapping every name to
+  NOTFOUND). It answers GET for that origin only: the work folder plus the tracked brand
+  fonts at `/fonts/`. So a card cannot frame `file://` URLs, other local files, other local
+  services or outside hosts, and cannot leak them into a PNG the model reads (#2538 round 2).
+  Render also uses a throwaway profile and `--use-mock-keychain`, which avoids the keychain
+  prompts that hung securityd on 2026-10-24, and keeps the Chrome binary off the allowlist.
 - Two capabilities are left out until S3:
   - **ffmpeg and the animated-static builder.** A permission rule cannot bind their output
     paths. Until S3 the batch ships static cards only.

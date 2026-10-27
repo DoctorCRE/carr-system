@@ -14,10 +14,13 @@ Week boundaries are America/Chicago. Prints one JSON object; never prints the ke
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import hashlib
+import http.server
 import importlib.util
 import json
+import mimetypes
 import os
 from pathlib import Path
 import re
@@ -25,6 +28,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -41,6 +45,9 @@ CADENCE = REPO / 'ops/social/cadence.v1.json'
 ACCOUNTS = REPO / 'claude-tree/skills/social-media-manager/config/blotato-accounts.json'
 OUT = REPO / 'out/social-batch'
 CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+CARD_HOST = 'card.test'
+FONTS = REPO / 'claude-tree/skills/write-content/graphics/fonts'
+FONT_TYPES = {'.ttf': 'font/ttf', '.otf': 'font/otf', '.woff': 'font/woff', '.woff2': 'font/woff2'}
 SCHEMA = 'carr-social-batch-drafts/v1'
 BANK = 'content-inspiration-bank'
 
@@ -683,25 +690,87 @@ def _section(posts, notes, current) -> str:
 
 
 # ---------------------------------------------------------------- render
-def render(html: Path, png: Path, width: int, height: int, chrome: str = CHROME, out: Path = OUT) -> dict:
-    """Headless Chrome screenshot with a throwaway profile and no keychain access.
-
-    The PNG may land only in out/social-batch/<week>/work/, the one folder the
-    unattended model may write, so render can never overwrite the guard or its ledger.
-    """
+def _work_folder(path: Path, out: Path) -> Path:
+    """The out/social-batch/<week>/work folder holding path, or Stop."""
     try:
-        place = png.resolve().relative_to(out.resolve()).parts
+        place = path.resolve().relative_to(out.resolve()).parts
     except ValueError:
         place = ()
-    if len(place) < 3 or place[1] != 'work' or png.suffix != '.png':
-        raise Stop('render_failed', 'cards render only to out/social-batch/<week>/work/*.png')
+    if len(place) < 3 or place[1] != 'work':
+        raise Stop('render_failed', 'cards are read from and written to out/social-batch/<week>/work/ only')
+    return out.resolve() / place[0] / 'work'
+
+
+@contextlib.contextmanager
+def card_server(work: Path, fonts: Path = FONTS):
+    """A throwaway 127.0.0.1 server that is also Chrome's only proxy.
+
+    It answers GET for exactly http://card.test/: files under the work folder, and
+    the tracked brand fonts under /fonts/. Every other host, path or method gets an
+    error, so a card can reach no file:// URL (an http page may not), no other local
+    file, no other local service and no outside host.
+    """
+    roots = (work.resolve(), fonts.resolve())
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            url = urllib.parse.urlsplit(self.path)
+            path = urllib.parse.unquote(url.path)
+            root, name = (roots[1], path[len('/fonts/'):]) if path.startswith('/fonts/') else (roots[0], path.lstrip('/'))
+            target = (root / name).resolve()
+            if (url.scheme, url.netloc) != ('http', CARD_HOST) or not target.is_relative_to(root) \
+                    or not target.is_file() or (root == roots[1] and target.suffix not in FONT_TYPES):
+                self.send_error(403)
+                return
+            body = target.read_bytes()
+            self.send_response(200)
+            self.send_header('Content-Type', FONT_TYPES.get(target.suffix) or
+                             mimetypes.guess_type(target.name)[0] or 'application/octet-stream')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server.server_address[1]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def chrome_args(chrome: str, profile: str, port: int, width: int, height: int, output: str, page: str = '') -> list[str]:
+    return [chrome, '--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run',
+            '--no-default-browser-check', '--use-mock-keychain', '--password-store=basic',
+            f'--user-data-dir={profile}', f'--window-size={width},{height}',
+            f'--proxy-server=http://127.0.0.1:{port}', '--proxy-bypass-list=<-loopback>',
+            '--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1',
+            '--virtual-time-budget=5000', output, f'http://{CARD_HOST}/{urllib.parse.quote(page)}']
+
+
+def browse(html: Path, output: str, width: int, height: int, chrome: str = CHROME, out: Path = OUT):
+    """Load one work-folder card in sealed headless Chrome; output is --screenshot=... or --dump-dom."""
+    work = _work_folder(html, out)
+    with card_server(work) as port, tempfile.TemporaryDirectory() as profile:
+        return subprocess.run(chrome_args(chrome, profile, port, width, height, output,
+                                          str(html.resolve().relative_to(work))),
+                              check=True, capture_output=True, text=True, timeout=90, stdin=subprocess.DEVNULL)
+
+
+def render(html: Path, png: Path, width: int, height: int, chrome: str = CHROME, out: Path = OUT) -> dict:
+    """Screenshot a card. The HTML and the PNG both live in out/social-batch/<week>/work/,
+    the one folder the unattended model may write, so render can neither overwrite the
+    guard nor show the model a file outside that folder."""
+    _work_folder(html, out)
+    _work_folder(png, out)
+    if png.suffix != '.png':
+        raise Stop('render_failed', 'cards render to .png')
     png.parent.mkdir(parents=True, exist_ok=True)  # Chrome will not create it
-    with tempfile.TemporaryDirectory() as profile:
-        subprocess.run([chrome, '--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run',
-                        '--no-default-browser-check', '--use-mock-keychain', '--password-store=basic',
-                        f'--user-data-dir={profile}', f'--window-size={width},{height}',
-                        f'--screenshot={png}', html.resolve().as_uri()],
-                       check=True, capture_output=True, timeout=90, stdin=subprocess.DEVNULL)
+    browse(html, f'--screenshot={png.resolve()}', width, height, chrome, out)
     kind = media_kind(png) if png.is_file() else None
     if not kind or kind[1:] != (width, height):
         raise Stop('render_failed', f'{png.name} is not a {width}x{height} PNG')
