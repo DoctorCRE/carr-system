@@ -4,6 +4,7 @@ import { TypeSafeClient, TypeSafeError } from "@typesafe-ai/sdk";
 // The record is fetched by the caller through the existing get-deal-room verb.
 // No model answer changes a deal, its ordering, or a partner's next action.
 export const JEV_DEAL_EVIDENCE_FLOOR = 200;
+const MIN_MOVEMENT_CONFIDENCE = 0.55;
 const LEVELS = [
   "A client and space requirement are recorded, but no specific property is identified.",
   "Specific properties are being researched, toured, or compared; no offer is recorded.",
@@ -164,9 +165,12 @@ export async function readDealWithJev(record, { apiKey, client, now = new Date()
     if (typeof movement !== "number" || !Number.isFinite(movement) || movement < 0 || movement > 4 ||
         !Object.hasOwn(WAITING, waiting) || !probability(silence))
       return { ...base, judged: false, reason: "invalid_jev_answer" };
+    const movementConfidence = probability(answers.movement.confidence) ? answers.movement.confidence : null;
+    if (movementConfidence !== null && movementConfidence < MIN_MOVEMENT_CONFIDENCE)
+      return { ...base, judged: false, reason: "low_movement_confidence" };
     const rung = Math.round(movement);
     return { ...base, judged: true, reason: null, model: result.model || "unknown",
-      movement_score: movement, movement_rung: rung + 1, movement_rungs: LEVELS.length,
+      movement_score: movement, movement_confidence: movementConfidence, movement_rung: rung + 1, movement_rungs: LEVELS.length,
       movement_label: LEVELS[rung], waiting_on: waiting,
       waiting_on_confidence: probability(answers.waiting_on.confidence) ? answers.waiting_on.confidence : null,
       silence_is_bad: silence };

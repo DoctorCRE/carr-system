@@ -1871,33 +1871,105 @@ class PostCallJevChecksTests(unittest.TestCase):
 
     @staticmethod
     def fake_client(*, deal_choice: str = "deal-a", deal_confidence: float = 0.9,
-                 speaker_probability: float = 0.9, details_probability: float = 0.9):
+                 speaker_probability: float = 0.9, details_probability: float = 0.9,
+                 deal_in_candidates: float = 0.9):
         def _ask(*, state: object, questions: dict[str, object]) -> SimpleNamespace:
             body = {
                 "deal_match": {"type": "choice", "choice": deal_choice, "confidence": deal_confidence},
+                "deal_in_candidates": {"type": "noul", "noul": deal_in_candidates},
                 "speaker_right": {"type": "noul", "noul": speaker_probability},
                 "details_supported": {"type": "noul", "noul": details_probability},
             }
-            return SimpleNamespace(answers={key: SimpleNamespace(**body[key.split(":")[-1]]) for key in questions})
+            return SimpleNamespace(answers={key: SimpleNamespace(**body[key]) for key in questions})
         return Mock(system_one=_ask)
 
-    def test_pack_uses_one_official_sdk_call_for_all_items(self) -> None:
+    def test_each_item_gets_its_own_call_with_its_own_state(self) -> None:
+        def answers(choice: str) -> SimpleNamespace:
+            return SimpleNamespace(answers={
+                "deal_match": SimpleNamespace(choice=choice, confidence=0.9),
+                "deal_in_candidates": SimpleNamespace(noul=0.9),
+                "speaker_right": SimpleNamespace(noul=0.9),
+                "details_supported": SimpleNamespace(noul=0.9),
+            })
         client = Mock()
-        client.system_one.return_value = SimpleNamespace(answers={
-            "i0:deal_match": SimpleNamespace(choice="deal-a", confidence=0.2),
-            "i0:speaker_right": SimpleNamespace(noul=0.9),
-            "i0:details_supported": SimpleNamespace(noul=0.9),
-            "i1:deal_match": SimpleNamespace(choice="deal-b", confidence=0.2),
-            "i1:speaker_right": SimpleNamespace(noul=0.9),
-            "i1:details_supported": SimpleNamespace(noul=0.9),
-        })
+        client.system_one.side_effect = lambda *, state, questions: answers(
+            "deal-a" if "Acme" in state["item"]["fields"]["title"] else "deal-b")
         result = post_call_jev.check_distillation(self.result(dell_tasks=[{
             "title": "Send the revised LOI", "deal_id": "deal-b", "evidence": "Dell will send the revised LOI",
         }]), self.context, self.transcript, client=client)
         self.assertTrue(result["joe_tasks"][0]["checks"]["deal"]["pass"])
         self.assertTrue(result["dell_tasks"][0]["checks"]["deal"]["pass"])
-        self.assertEqual(client.system_one.call_count, 1)
-        self.assertEqual(len(client.system_one.call_args.kwargs["questions"]), 6)
+        self.assertEqual(client.system_one.call_count, 2)
+        for call in client.system_one.call_args_list:
+            self.assertEqual(set(call.kwargs["questions"]),
+                             {"deal_match", "deal_in_candidates", "speaker_right", "details_supported"})
+            self.assertNotIn("checks", call.kwargs["state"])
+
+    def test_deal_choice_has_no_none_option_and_a_companion_question_covers_it(self) -> None:
+        client = self.fake_client()
+        client.system_one = Mock(wraps=client.system_one)
+        post_call_jev.check_distillation(self.result(), self.context, self.transcript, client=client)
+        questions = client.system_one.call_args.kwargs["questions"]
+        self.assertNotIn("none", questions["deal_match"].criteria)
+        self.assertNotIn("none", questions["deal_match"].instructions.lower())
+        self.assertEqual(questions["deal_in_candidates"].type, "noul")
+
+    def test_a_low_confidence_deal_choice_is_flagged_even_when_it_names_the_right_deal(self) -> None:
+        result = post_call_jev.check_distillation(
+            self.result(), self.context, self.transcript,
+            client=self.fake_client(deal_confidence=0.4),
+        )
+        checks = result["joe_tasks"][0]["checks"]
+        self.assertFalse(checks["deal"]["pass"])
+        self.assertTrue(checks["flagged"])
+        self.assertTrue(any("not confident" in reason for reason in checks["reasons"]))
+
+    def test_no_candidate_matching_flags_the_deal_even_at_high_confidence(self) -> None:
+        result = post_call_jev.check_distillation(
+            self.result(), self.context, self.transcript,
+            client=self.fake_client(deal_in_candidates=0.1),
+        )
+        checks = result["joe_tasks"][0]["checks"]
+        self.assertFalse(checks["deal"]["pass"])
+        self.assertTrue(any("no candidate" in reason for reason in checks["reasons"]))
+
+    def test_calls_run_concurrently_capped_at_six(self) -> None:
+        import threading
+        lock, state = threading.Lock(), {"now": 0, "peak": 0}
+        gate = threading.Event()
+        inner = self.fake_client()
+
+        def slow(*, state: object, questions: dict[str, object]) -> SimpleNamespace:
+            with lock:
+                state_["now"] += 1
+                state_["peak"] = max(state_["peak"], state_["now"])
+                if state_["now"] >= 6:
+                    gate.set()
+            gate.wait(2)
+            with lock:
+                state_["now"] -= 1
+            return inner.system_one(state=state, questions=questions)
+        state_ = state
+        tasks = [{"title": f"Task {n}", "deal_id": "deal-a", "evidence": "I will call the Acme Clinic vendor"}
+                 for n in range(9)]
+        post_call_jev.check_distillation(self.result(joe_tasks=tasks), self.context, self.transcript,
+                                         client=Mock(system_one=slow))
+        self.assertEqual(state["peak"], 6)
+
+    def test_one_failed_item_call_leaves_the_others_checked(self) -> None:
+        inner = self.fake_client()
+
+        def flaky(*, state: object, questions: dict[str, object]) -> SimpleNamespace:
+            if state["item"]["fields"]["title"] == "Bad":
+                raise TypeSafeError("refused")
+            return inner.system_one(state=state, questions=questions)
+        tasks = [{"title": "Bad", "deal_id": "deal-a", "evidence": "I will call the Acme Clinic vendor"},
+                 {"title": "Good", "deal_id": "deal-a", "evidence": "I will call the Acme Clinic vendor"}]
+        result = post_call_jev.check_distillation(self.result(joe_tasks=tasks), self.context,
+                                                  self.transcript, client=Mock(system_one=flaky))
+        self.assertEqual(result["joe_tasks"][0]["checks"], {"unavailable": True})
+        self.assertFalse(result["joe_tasks"][1]["checks"]["flagged"])
+        self.assertEqual(len(result["review_questions"]), 1)
 
     def test_an_accurate_item_passes_all_three_checks_and_is_not_flagged(self) -> None:
         result = post_call_jev.check_distillation(
