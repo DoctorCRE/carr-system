@@ -245,35 +245,12 @@ gate_programs() {
 }
 
 check_secret() {
-  local leak_args="--staged"
-  if [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ]; then
-    leak_args="--ci"
-  elif [ -n "${CARR_CI_RANGE:-}" ]; then
-    leak_args="--range $CARR_CI_RANGE"
-  fi
-  for t in security/test_*.py; do
-    if ! run_quiet "$LOGDIR/leak-guard-tests.log" "$PY" "$t"; then
-      cat "$LOGDIR/leak-guard-tests.log" >&2
-      bad secret "leak guard qualification failed"
-      return
-    fi
-  done
-  if ! run_quiet "$LOGDIR/leak-guard.log" "$PY" security/leak_guard.py $leak_args \
-      ${CARR_PUSH_RECEIVER:+--remote "$CARR_PUSH_RECEIVER"}; then
-    cat "$LOGDIR/leak-guard.log" >&2
-    bad secret "secret or client data in introduced Git blobs"
-    return
-  fi
-  local scope_args="" scope_words="tracked files"
-  if [ -n "${CARR_CI_RANGE:-}" ]; then
-    scope_args="--range $CARR_CI_RANGE"
-    scope_words="blobs pushed in $CARR_CI_RANGE"
-  fi
-  if run_quiet "$LOGDIR/secret.log" "$PY" ops/ci-secret-scan.py $scope_args; then
-    ok secret "no shaped credential in $scope_words"
+  local verdict rc=0
+  verdict="$("$PY" ops/ci-secret.py --logdir "$LOGDIR" --python "$PY")" || rc=$?
+  if [ "$rc" -eq 0 ] && [ -n "$verdict" ]; then
+    ok secret "$verdict"
   else
-    cat "$LOGDIR/secret.log" >&2
-    bad secret "credential-shaped content found in $scope_words"
+    bad secret "${verdict:-secret runner exited $rc without a verdict}"
   fi
 }
 
