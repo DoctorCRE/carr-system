@@ -9,7 +9,8 @@ import { runParity } from './harness.mjs';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const USAGE = `usage: ./run.sh portal-parity --site <REF-A|REF-V> --stage <0|1|2> --reference <url> --candidate <url>
   [--probes <file>] [--rows <ids>] [--aliases <file>] [--candidate-aliases <file>] [--package <file>]
-  [--source <dir>] [--baseline <file>] [--baseline-out <file>] [--report <file>] [--artifacts <dir>] [--sign-in | --password-stdin] [--headed]
+  [--source <dir>] [--manifest <file>] [--baseline <file>] [--baseline-out <file>] [--report <file>] [--artifacts <dir>] [--sign-in | --password-stdin] [--headed]
+Stage 0 hashes every path in --manifest (the reference Worker's generated route manifest) against --source.
 Stage 0 and --sign-in read the password at a hidden prompt (or as one line on stdin with --password-stdin); never pass one as an argument.
 The browser is headless; --headed opens a visible window for debugging only.
 Alias files, baselines, reports and artifacts hold run data: keep them outside the repository.`;
@@ -47,7 +48,7 @@ function outsideRepo(file, flag) {
 async function main() {
   const { values } = parseArgs({
     options: Object.fromEntries(['site', 'stage', 'reference', 'candidate', 'probes', 'rows', 'aliases', 'candidate-aliases', 'package',
-      'source', 'baseline', 'baseline-out', 'report', 'artifacts'].map(name => [name, { type: 'string' }])
+      'source', 'manifest', 'baseline', 'baseline-out', 'report', 'artifacts'].map(name => [name, { type: 'string' }])
       .concat([['password-stdin', { type: 'boolean' }], ['sign-in', { type: 'boolean' }], ['headed', { type: 'boolean' }], ['help', { type: 'boolean' }]])),
   });
   if (values.help || !values.stage) { console.log(USAGE); return values.help ? 0 : 2; }
@@ -60,7 +61,7 @@ async function main() {
     stage: values.stage, site: values.site, reference: values.reference, candidate: values.candidate,
     probesFile: values.probes ?? path.join(REPO, 'client-portal/parity/probes.v1.json'), rows: values.rows,
     aliases: await readAliases(values.aliases), candidateAliases: await readAliases(values['candidate-aliases']),
-    packageFile: values.package, sourceDir: values.source, baselineFile: values.baseline,
+    packageFile: values.package, sourceDir: values.source, manifest: values.manifest, baselineFile: values.baseline,
     baselineOut: outsideRepo(values['baseline-out'], '--baseline-out'), report: outsideRepo(values.report, '--report'),
     artifacts: outsideRepo(values.artifacts, '--artifacts'), password: password || undefined, headed: values.headed,
   });

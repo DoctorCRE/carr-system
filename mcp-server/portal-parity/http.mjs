@@ -81,31 +81,63 @@ export async function observeHttp(base, probe, aliases, { cookie, password } = {
   return { facts };
 }
 
-async function* files(root, dir = '') {
+async function* sourceFiles(root, dir = '') {
   for (const entry of await readdir(path.join(root, dir), { withFileTypes: true })) {
     const name = path.posix.join(dir, entry.name);
     if (entry.name.startsWith('.')) continue;
-    if (entry.isDirectory()) yield* files(root, name);
+    if (entry.isDirectory()) yield* sourceFiles(root, name);
     else if (entry.isFile()) yield name;
   }
 }
 
-// Stage 0: every file in the read-only source copy, fetched from the live site
-// through a session, must hash equal. Lines carry ordinals and hashes only.
-export async function sourceFidelity(base, sourceDir, cookie) {
-  const lines = [];
-  let ordinal = 0, failed = 0, unserved = 0;
-  for await (const name of files(sourceDir)) {
-    ordinal++;
-    const local = digest(await readFile(path.join(sourceDir, name)));
-    const response = await fetch(new URL(name.split('/').map(encodeURIComponent).join('/'), base), { headers: { Cookie: cookie }, redirect: 'manual' });
-    const live = response.status === 200 ? digest(Buffer.from(await response.arrayBuffer())) : `status-${response.status}`;
-    // A source file the site never serves (a 404) is not a manifest path; it
-    // is counted so the partner can match it against the inventory (V-A34).
-    const verdict = live === local ? 'PASS' : response.status === 404 ? 'UNSERVED' : 'FAIL';
-    if (verdict === 'FAIL') failed++;
-    if (verdict === 'UNSERVED') unserved++;
-    lines.push(`FILE ${String(ordinal).padStart(3, '0')} ${verdict} source=${local.slice(0, 16)} live=${live.slice(0, 16)}`);
+// The reference Worker's generated route manifest (`export default new Map([...])`
+// mapping each served path to its encrypted blob), read as data and never imported.
+// The live router releases a file only when its path is a key of this map.
+export function routeManifestPaths(text) {
+  const match = /export default new Map\((\[[\s\S]*\])\);?\s*$/.exec(text);
+  const entries = match ? JSON.parse(match[1]) : null;
+  if (!Array.isArray(entries) || !entries.every(entry => Array.isArray(entry) && typeof entry[0] === 'string')) {
+    throw new Error('--manifest is not a route manifest');
   }
-  return { lines, total: ordinal, failed, unserved };
+  return entries.map(([served]) => served);
+}
+
+async function liveDigest(url, cookie) {
+  const response = await fetch(url, { headers: { Cookie: cookie }, redirect: 'manual' });
+  return { status: response.status, live: response.status === 200 ? digest(Buffer.from(await response.arrayBuffer())) : `status-${response.status}` };
+}
+
+const encodePath = served => served.split('/').map(encodeURIComponent).join('/');
+
+// Stage 0: every manifest path, fetched from the live site through a session,
+// must hash equal to its file in the read-only source copy (a directory route
+// releases its index.html). A source file outside the manifest must not be
+// served: a 404 is UNSERVED, counted so the partner can match it against the
+// inventory (V-A34). Entries carry ordinals, verdicts and hashes only.
+export async function sourceFidelity(base, sourceDir, cookie, manifestPaths) {
+  const root = new URL(base).pathname;
+  const entries = [], covered = new Set();
+  for (const [index, served] of manifestPaths.entries()) {
+    if (!served.startsWith(root)) throw new Error(`manifest path ${index + 1} is outside the reference`);
+    const rel = served.slice(root.length);
+    const name = rel === '' || rel.endsWith('/') ? `${rel}index.html` : rel;
+    covered.add(name);
+    const source = await readFile(path.join(sourceDir, name)).then(digest, () => 'missing');
+    const { live } = await liveDigest(new URL(encodePath(served), base), cookie);
+    entries.push({ verdict: live === source ? 'PASS' : 'FAIL', source, live });
+  }
+  for await (const name of sourceFiles(sourceDir)) {
+    if (covered.has(name)) continue;
+    const source = digest(await readFile(path.join(sourceDir, name)));
+    const { status, live } = await liveDigest(new URL(encodePath(name), base), cookie);
+    entries.push({ verdict: status === 404 ? 'UNSERVED' : 'FAIL', source, live });
+  }
+  const files = entries.map((entry, index) => ({ ordinal: index + 1, ...entry }));
+  return {
+    files,
+    lines: files.map(f => `FILE ${String(f.ordinal).padStart(3, '0')} ${f.verdict} source=${f.source.slice(0, 16)} live=${f.live.slice(0, 16)}`),
+    total: files.length,
+    failed: files.filter(f => f.verdict === 'FAIL').length,
+    unserved: files.filter(f => f.verdict === 'UNSERVED').length,
+  };
 }

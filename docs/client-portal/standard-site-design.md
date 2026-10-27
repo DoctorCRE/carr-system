@@ -116,7 +116,9 @@ OpenAI Sites projects, one behind a proxy) is that it cannot read
 `ops.client_portal`, R2 or the deal record without storing a CARR credential at
 a third party. Rejected: keeping Sites and calling the CARR API from it (two
 hosts, a stored credential, two deploy paths). Reopen if the Worker cannot take
-the custom domain.
+the custom domain. Since 2026-10-27 the host is the partners' own `carr-share`
+Worker; D6 still holds, because that is still a second Worker and deploy path
+with no access to the record layer.
 
 **D7. The portal adapter copies the `reports-web.js` shape.** One host adapter
 module (`portal-web.js`) with injected record-layer seams, an opaque session
@@ -189,13 +191,25 @@ packed by a script that AES-GCM-encrypts each file and writes a route manifest.
 A Worker releases a file only after a password form sets a signed
 `__Host-` session cookie (7 days). Each site has a D1 table for its Tour List.
 
-- **REF-V** is served directly by the share.doctorcre.com Worker (an OpenAI
-  Sites project) at `/<slug-v>/`. Code `VS` in the tables.
-- **REF-A** is a second OpenAI Sites project. The share.doctorcre.com Worker
-  proxies `/<slug-a>/` to it with a service token. Code `AS` in the tables.
-- The content keys and passwords are Sites secrets that cannot be read back, so
-  the deployed ciphertext cannot be decrypted locally. The read-only source
-  copies are the reference; acceptance stage 0 proves they match what is live.
+- **Hosting since 2026-10-27.** share.doctorcre.com is served by one Cloudflare
+  Worker, `carr-share`, in the partners' own Cloudflare account; it replaced the
+  two OpenAI Sites projects described when this inventory was taken. Its source
+  folder on the Studio (outside this repo, read-only for this work) holds each
+  site's files and the Worker modules. Each site's pack writes a route manifest
+  module mapping every served path (including the directory route that releases
+  `index.html`) to its encrypted blob; the router releases a file only for a
+  path in that manifest.
+- **REF-V** is the Worker's REF-V module at `/<slug-v>/`. Code `VS` in the tables.
+- **REF-A** is the Worker's REF-A portal module at `/<slug-a>/`, served directly:
+  the edge proxy and its rows (A-G01, A-G35 to A-G39) no longer exist live and
+  are retired under AD8. Code `AS` in the tables.
+- The content keys and passwords are Worker secrets that are never read for
+  this work, so the deployed ciphertext is not decrypted locally. The read-only
+  source copies are the reference; acceptance stage 0 proves they match what is
+  live.
+- Non-GET requests (sign-ins, saves and every probe that posts) count against a
+  per-visitor write limit per site, about 20 a minute; past it the Worker answers
+  429. A zone rule also answers 429 to a burst of requests for ten seconds.
 - The share Worker's router sends every path that is not REF-A, REF-V or LEG-1
   to the LEG-2 handler, which also serves the bare-domain landing page.
 
@@ -927,18 +941,26 @@ so each template slice runs only its own rows; a full run omits it.
 is built against the copies).** A partner supplies each site password at run time
 through the terminal prompt; it is never stored, logged or committed. The harness:
 
-- signs in to the live site, requests every manifest path, and compares the
-  SHA-256 of each released body with the matching file in the read-only source
-  copy. Pass: every hash matches. This proves the copies are what clients see,
-  because the content keys cannot be read back. The successful sign-in also proves
-  the password the partner will register in the migration is the live one.
+- signs in to the live site, requests every path in the site's route manifest
+  (`--manifest`, read as data and never imported), and compares the SHA-256 of
+  each released body with the matching file in the read-only source copy (a
+  directory route with its `index.html`). It then requests each source file the
+  manifest omits, which must answer 404 (reported UNSERVED, matched against the
+  inventory, today only V-A34). Pass: every hash matches, no manifest path lacks
+  its source file, and nothing outside the manifest is served. This proves the
+  copies are what clients see, because the content keys are not read back. The
+  successful sign-in also proves the password the partner will register in the
+  migration is the live one.
 - runs every gate probe that needs no write and no induced fault against the live
   site and records the observed status, headers and redirect per gate row: the
   redirects, the sign-in page, a wrong password, every 404, 405, 403, 413, 415 and
   400 path, HEAD without a session, and the Tour List API's read-side errors. This
   recorded baseline is the reference for those gate rows. A wrong-password probe
   counts toward nothing today (no lockout exists on the live sites) and the run
-  sends fewer than five.
+  sends fewer than five (a test counts them in the probe file). A run sends about
+  14 non-GET requests to REF-A and 10 to REF-V, under the write limit; a 429 is
+  never recorded as the baseline: the row reports `FAIL rate-limited`, and the
+  partner runs again after a minute.
 
 **Stage 1, extraction.** The reference extractor turns each source copy into a
 data package and its files. Pass: both packages validate against
@@ -946,7 +968,7 @@ data package and its files. Pass: both packages validate against
 package field (the probe file lists the field path per row).
 
 **Stage 2, item parity.** The reference is the reference sites' own Worker modules
-(the REF-V module and the REF-A origin module, copied from the read-only sources
+(the `carr-share` REF-V and REF-A modules, copied from the read-only sources
 into a scratch directory), run under Miniflare with a test content key and test
 password over the source files re-packed with that key. This is the real gate
 code, not a mimic, and Stage 0 proved the files equal what is live. The candidate
@@ -1018,7 +1040,7 @@ Steps:
    as legacy bundles: their plaintext files served unchanged behind the same portal
    gate, after a Stage 0 hash check of each file against the live site. LEG-2's
    top-level `/recovery/` PDF paths become aliases inside the LEG-2 portal.
-3. **Copy each Tour List.** Preferred: export each D1 row from the Sites projects,
+3. **Copy each Tour List.** Preferred: export each D1 row from the `carr-share` D1 database,
    including REF-V's retired-listing entries and legacy notes column. Fallback: a
    partner signs in and the harness reads `GET /api/selection`, which omits the
    retired entries no viewer sees today. Either way, the imported row keeps the
@@ -1028,11 +1050,11 @@ Steps:
    (address resolves, password opens, each file releases).
 5. **Cut over.** Freeze Tour List saves on the old host (read-only flag in the
    share Worker), re-copy any Tour List whose version moved since step 3, move the
-   `share.doctorcre.com` custom domain from the Sites project to the carr-mcp
-   Worker route, and run the smoke set: every slug, its password, one file each,
-   one Tour List read. Rollback is re-attaching the domain to the Sites project,
+   `share.doctorcre.com` route from the `carr-share` Worker to the carr-mcp
+   Worker, and run the smoke set: every slug, its password, one file each,
+   one Tour List read. Rollback is re-attaching the route to `carr-share`,
    which stays deployed untouched for 14 days.
-6. **Retire** the two Sites projects after 14 days with no rollback, as a removal,
+6. **Retire** the `carr-share` Worker after 14 days with no rollback, as a removal,
    and delete the reference extractor in the same removal.
 
 What changes for clients: nothing in the address or password. Each client signs
@@ -1126,6 +1148,14 @@ released file hashes equal to the source copy; the live gate baseline is recorde
 for every gate row Stage 0 can reach without writes or induced faults. Check: the
 harness report (IDs, verdicts, hashes only) posted to the Work Request.
 
+*Recorded (WR227.S6).* Stage 0 is driven by the route manifest (`--manifest`), as
+this section always said; S5 had walked the source folder instead, which misses
+a manifest path whose source file is gone and never requests the directory
+routes. Against the current sources the manifests give REF-A 38 paths over its
+37 files and REF-V 34 paths over 33 of its 34 files, the other being V-A34. The
+code half of S6 ships in CI against a gated test server; the live half is the
+partner run, the only step that needs the passwords.
+
 **S7. Reference extractor.** A one-off migration tool that reads a site folder
 (today's data files plus the hard-coded app.js values the inventory marks) and
 writes a package and files to a private directory outside the repo. Acceptance:
@@ -1199,10 +1229,10 @@ PR.
 
 - That the deployed ciphertext equals the read-only source copies. The content
   keys are not readable; Stage 0 in S6 proves it before anything is built.
-- How the `share.doctorcre.com` custom domain is wired in DNS today (Sites-managed
-  or a record in the Cloudflare zone). S22 checks it before cutover.
-- Whether the Sites projects allow a D1 export. S21 tries it; the fallback is
-  stated in migration step 3.
+- How the `share.doctorcre.com` route is attached to `carr-share` since the
+  2026-10-27 move (custom domain or zone route). S22 checks it before cutover.
+- That a `carr-share` D1 export carries REF-V's retired-listing entries. S21
+  tries it; the fallback is stated in migration step 3.
 - Runtime behaviour of the live sites. This inventory comes from reading the code
   and data, not from clicking through the signed-in sites; S6 records the live
   gate behaviour.

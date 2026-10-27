@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { validateMarketStudyPackage } from '../src/market-study-package.js';
 import { launchParityBrowser } from './browser.mjs';
-import { observeHttp, signIn, sourceFidelity } from './http.mjs';
+import { observeHttp, routeManifestPaths, signIn, sourceFidelity } from './http.mjs';
 import { compareScreenshots, observeBrowserProbe } from './observe.mjs';
 import { expand, loadProbes, resolveField, sideAliases, siteOf } from './probes.mjs';
 import { selectRows } from './rows.mjs';
@@ -76,21 +76,29 @@ async function stageOne(doc, probes, options) {
   });
 }
 
+// A 429 from the live site's per-visitor limits is the limiter talking, not the
+// gate: it is never recorded as the baseline. Wait a minute and run again.
+const rateLimited = observed => Object.entries(observed.facts ?? {}).some(([key, value]) => key.endsWith('.status') && value === 429);
+
 async function stageZero(doc, probes, options) {
-  if (!options.reference || !options.password || !options.sourceDir) throw new Error('stage 0 needs --reference, --source and a password at the prompt');
+  if (!options.reference || !options.password || !options.sourceDir || !options.manifest) {
+    throw new Error('stage 0 needs --reference, --source, --manifest and a password at the prompt');
+  }
   const base = slash(options.reference);
   const aliases = sideAliases(doc, options.site, options.aliases);
+  const manifestPaths = routeManifestPaths(await readFile(options.manifest, 'utf8'));
   const cookie = await signIn(base, options.password);
-  const fidelity = await sourceFidelity(base, options.sourceDir, cookie);
+  const fidelity = await sourceFidelity(base, options.sourceDir, cookie, manifestPaths);
   const baseline = {}, results = [];
   for (const probe of probes.filter(p => p.kind === 'http')) {
     if (!probe.stage0 || probe.retired || probe.fault) { results.push({ id: probe.id, verdict: 'UNRUN', reason: probe.retired ? 'retired' : 'not-a-stage-0-probe' }); continue; }
     const observed = await observeHttp(base, probe, aliases, { cookie, password: options.password });
+    if (rateLimited(observed)) { results.push({ id: probe.id, verdict: 'FAIL', reason: 'rate-limited' }); continue; }
     baseline[probe.id] = observed;
     results.push({ id: probe.id, verdict: observed.unrun ? 'UNRUN' : 'PASS', reason: observed.unrun ? 'needs-session' : 'recorded' });
   }
   if (options.baselineOut) await writeFile(options.baselineOut, `${JSON.stringify(baseline, null, 1)}\n`);
-  return { results, prefix: [...fidelity.lines, `files=${fidelity.total} FAIL=${fidelity.failed} UNSERVED=${fidelity.unserved}`], fidelityOk: fidelity.failed === 0 };
+  return { results, files: fidelity.files, prefix: [...fidelity.lines, `files=${fidelity.total} FAIL=${fidelity.failed} UNSERVED=${fidelity.unserved}`], fidelityOk: fidelity.failed === 0 };
 }
 
 async function stageTwo(doc, probes, options) {
@@ -157,12 +165,12 @@ export async function runParity(options) {
   const doc = await loadProbes(options.probesFile);
   const probes = selected(doc, options);
   const stage = Number(options.stage);
-  let results, prefix = [], extraOk = true;
-  if (stage === 0) ({ results, prefix, fidelityOk: extraOk } = await stageZero(doc, probes, options));
+  let results, files, prefix = [], extraOk = true;
+  if (stage === 0) ({ results, files, prefix, fidelityOk: extraOk } = await stageZero(doc, probes, options));
   else if (stage === 1) results = await stageOne(doc, probes, options);
   else if (stage === 2) results = await stageTwo(doc, probes, options);
   else throw new Error('--stage must be 0, 1 or 2');
   const { lines, summary, ok } = summarize(results, stage, { slice: options.rows !== undefined });
-  if (options.report) await writeFile(options.report, `${JSON.stringify({ stage, site: options.site ?? 'both', results, summary }, null, 1)}\n`);
+  if (options.report) await writeFile(options.report, `${JSON.stringify({ stage, site: options.site ?? 'both', files, results, summary }, null, 1)}\n`);
   return { lines: [...prefix, ...lines], results, summary, ok: ok && extraOk };
 }
