@@ -10,35 +10,35 @@
   "decode_hypotheses": [],
   "sources": {
     "vendor/hxprobe/src/block.rs": {
-      "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+      "revision": "b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d",
       "sha256": "093617bc8e5aaa9f3597b873dc93539850c202b4531209db69a39de9c8a316d6"
     },
     "vendor/hxprobe/src/header.rs": {
-      "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+      "revision": "b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d",
       "sha256": "6e774497fed3d077d89437525e0106d2975954675f4db763079991a0556eb3a3"
     },
     "vendor/hxprobe/src/folder.rs": {
-      "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+      "revision": "b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d",
       "sha256": "af4abd79a95f36a325e0d12e9994df80add60851e9c54bc88cd7a4c6e1c9b6d8"
     },
     "vendor/hxprobe/src/calendar.rs": {
-      "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+      "revision": "b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d",
       "sha256": "28f9a5f9fb11701369e8c4a161195ad4a709f181975e07f6c092ce085bb1362f"
     },
     "vendor/hxprobe/src/record.rs": {
-      "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+      "revision": "b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d",
       "sha256": "327cfc0658b26279fc33385e72f01e3f65ae036a35e2822f34a87f30f5968d41"
     },
     "vendor/hxprobe/src/schema.rs": {
-      "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+      "revision": "b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d",
       "sha256": "a76bd8449dd21c14f987f5d303ec0932e70dcc084c4e672c76721ecc4d963102"
     },
     "vendor/hxprobe/src/body.rs": {
-      "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+      "revision": "b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d",
       "sha256": "ac7130b31bc06e000598c5acfe019942316900010d8ccb4f95a9be4a651bc499"
     },
     "vendor/hxprobe/src/attachment.rs": {
-      "revision": "a32d8b6cfb325055455201995e406e07094d217e",
+      "revision": "bc8538ac6845ddd716efa18791361ab04e9c5694",
       "sha256": "796850d32e1169eecd7e70094072b438ccb0530a4b7fa7d5dd70c65edee3461b"
     }
   },
