@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """CI-declared Python checkers must run outside their fixture selftests."""
+import ast
 import json
 from pathlib import Path
 import re
@@ -17,7 +18,7 @@ def declared_checks(catalog):
             if path.startswith('ops/') and path.endswith('.py')]
 
 
-def unwired_checks(catalog, ci):
+def unwired_checks(catalog, ci, gates_source=""):
     order = re.search(r'^CLASS_ORDER="([^"]+)"', ci, re.M)
     active = set(order[1].split()) if order else set()
     calls = set()
@@ -31,6 +32,19 @@ def unwired_checks(catalog, ci):
                 r'(?:run_quiet\s+"[^"]+"\s+)?'
                 r'"\$PY"\s+(?:"(ops/[^"]+)"|(ops/[\w./-]+))', text, re.M)}
         calls.update(checker_calls(body))
+        if 'ops/ci-gates.py' in checker_calls(body) and gates_source:
+            module = ast.parse(gates_source)
+            inventories = [ast.literal_eval(node.value) for node in module.body
+                           if isinstance(node, ast.Assign)
+                           and any(isinstance(t, ast.Name) and t.id == 'INVARIANTS' for t in node.targets)]
+            executes = any(isinstance(node, ast.For) and isinstance(node.iter, ast.Name)
+                and node.iter.id == 'INVARIANTS'
+                and any(isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                        and call.func.attr == 'execute' and len(call.args) >= 3
+                        and ast.unparse(call.args[2]) == "f'ops/{inv}.py'"
+                        for call in ast.walk(node)) for node in ast.walk(module))
+            if inventories and executes:
+                calls.update(f'ops/{name}.py' for name in inventories[0])
         for variable, values, loop in re.findall(
                 r'for (\w+) in ([^;]+); do\n(.*?)^  done', body, re.M | re.S):
             if f'ops/${variable}.py' in checker_calls(loop):
@@ -51,9 +65,23 @@ class EnforcementWiringTest(unittest.TestCase):
     def test_current_map_has_no_unwired_ci_checkers(self):
         mapping = json.loads((REPO / 'ops/config/rule-enforcement-map.json').read_text())
         self.assertEqual([], unwired_checks(mapping['control_catalog'],
-                                           (REPO / 'ops/ci.sh').read_text()))
+                                           (REPO / 'ops/ci.sh').read_text(),
+                                           (REPO / 'ops/ci-gates.py').read_text()))
         for name, path in declared_checks(mapping['control_catalog']):
             self.assertTrue((REPO / path).is_file(), f'{name}: missing {path}')
+
+    def test_python_inventory_requires_live_runner_and_execution(self):
+        source = (REPO / 'ops/ci-gates.py').read_text()
+        catalog = {'order': {'failure_mode': 'CI failure',
+                             'implementation': ['ops/migration-order-gate.py']}}
+        ci = self.ci('  "$PY" ops/ci-gates.py --logdir "$LOGDIR"')
+        self.assertEqual([], unwired_checks(catalog, ci, source))
+        for broken_ci, broken_source in (
+                (ci.replace('"$PY"', 'echo'), source),
+                (ci.replace('"gates"', '"unit"'), source),
+                (ci, source.replace('self.execute(', 'self.describe('))):
+            self.assertEqual(['order: ops/migration-order-gate.py'],
+                             unwired_checks(catalog, broken_ci, broken_source))
 
     def test_selftest_comment_and_echo_are_not_checker_calls(self):
         ci = self.ci('  "$PY" ops/example-selftest.py\n'

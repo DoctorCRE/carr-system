@@ -38,7 +38,7 @@ def ci_fixture():
     with tempfile.TemporaryDirectory(prefix="carr-ci-fixture-") as directory:
         root = pathlib.Path(directory)
         for rel in (
-            "ops/ci.sh", "ops/ci-pushfloor.py", "ops/node_test_summary.py", "tools/codemap.py",
+            "ops/ci.sh", "ops/ci-gates.py", "ops/ci-pushfloor.py", "ops/node_test_summary.py", "tools/codemap.py",
             "ops/ci-secret-scan.py", "ops/pii_guard.py", "ops/ci-dep-check.py",
             "ops/git_env.py", "ops/no-client-deliverables-gate.py",
             "ops/hook-deletion-check.py", "ops/githooks/path-hygiene-check.py",
@@ -221,7 +221,7 @@ def test_gates_build_hxprobe_before_parallel_selftests():
         (root / "bin").mkdir()
         (root / "tools").mkdir()
         shutil.copy2(REPO / "tools/codemap.py", root / "tools/codemap.py")
-        for name in ("ci.sh", "node_test_summary.py", "git_env.py",
+        for name in ("ci.sh", "ci-gates.py", "node_test_summary.py", "git_env.py",
                      "ci-secret-scan.py", "pii_guard.py"):
             shutil.copy2(REPO / "ops" / name, root / "ops" / name)
         shutil.copy2(REPO / "bin/with-timeout.py", root / "bin/with-timeout.py")
@@ -477,29 +477,23 @@ def test_gate_shards_execute_a_disjoint_complete_inventory():
             "path=sys.argv[-1]\n"
             "with open(os.environ['CALLS'],'a') as out: out.write(path+'\\n')\n"
             "sys.exit(7 if path==os.environ.get('FAIL_TEST') else 0)\n")
-        prefix = "\n".join(("set -uo pipefail", f"PY={shlex.quote(sys.executable)}",
-                              f"LOGDIR={shlex.quote(str(root / 'logs'))}", "FAILED=0",
-                              "CI_SELFTEST_TIMEOUT_SECONDS=1", f"CI_TIMEOUT_HELPER={shlex.quote(str(root / 'timeout.py'))}",
-                              "tree_fingerprint() { echo static; }", "ok() { :; }",
-                              "bad() { FAILED=1; }",
-                              'run_quiet() { local log="$1"; shift; "$@" >"$log" 2>&1; }',
-                              "fail_tail() { :; }"))
-        body = _ci_function_body("check_gates", "check_secret")
+        shutil.copy2(REPO / "ops/ci-gates.py", root / "ops/ci-gates.py")
         seen = []
+        def invoke(shard, calls, failed=""):
+            return subprocess.run([sys.executable, "ops/ci-gates.py", "--logdir", str(root / "logs"),
+                                   "--result", str(root / "result"), "--python", sys.executable,
+                                   "--timeout-helper", str(root / "timeout.py"),
+                                   "--shard", str(shard), "--shards", "2"], cwd=root,
+                                  env={**fixture_env(), "CALLS": str(calls), "FAIL_TEST": failed},
+                                  capture_output=True, text=True)
         for shard in (1, 2):
             calls = root / f"calls-{shard}"
-            result = subprocess.run(["bash", "-c", prefix + f"\nGATE_SHARD={shard}\nGATE_SHARDS=2\n" + body +
-                                     '\ncheck_gates; exit "$FAILED"'], cwd=root,
-                                    env={**scrubbed_env(), "CALLS": str(calls)}, capture_output=True, text=True)
+            result = invoke(shard, calls)
             check(f"gate shard {shard} executes successfully", result.returncode == 0, result.stderr)
             seen.append(set(calls.read_text().splitlines()))
         check("gate shard union executes every Python and shell suite", seen[0] | seen[1] == inventory, seen)
         check("gate shards never execute the same suite twice", not seen[0] & seen[1], seen)
-        failed = next(iter(seen[1]))
-        result = subprocess.run(["bash", "-c", prefix + "\nGATE_SHARD=2\nGATE_SHARDS=2\n" + body +
-                                 '\ncheck_gates; exit "$FAILED"'], cwd=root,
-                                env={**scrubbed_env(), "CALLS": str(root / "failed"), "FAIL_TEST": failed},
-                                capture_output=True, text=True)
+        result = invoke(2, root / "failed", next(iter(seen[1])))
         check("a failing second-shard suite fails its job", result.returncode == 1, result.stderr)
 
 
@@ -654,18 +648,14 @@ def test_every_test_file_in_the_tree_is_collected():
     missing = sorted(path for path in guarded if not (REPO / path).is_file())
     check("every conditional migration proof names an existing file", not missing,
           f"absent files provide no coverage: {', '.join(missing)}")
-    patterns: list[str] = []
+    listed = subprocess.run(["bash", str(CI), "--gate-programs"], cwd=REPO,
+                            env=fixture_env(), text=True, capture_output=True)
+    check("canonical gate inventory is readable", listed.returncode == 0, listed.stderr)
+    collected = set(listed.stdout.splitlines())
     for m in re.finditer(r"for t in ([^;]+); do", ci):
-        patterns += [tok for tok in m.group(1).split()
-                     if re.fullmatch(r"[A-Za-z0-9_./*?\[\]-]+", tok)]
-    check("ci.sh's selftest collection globs are readable from source",
-          len(patterns) >= 2, f"found: {patterns}")
-    if not patterns:
-        return
-
-    collected = set()
-    for pat in patterns:
-        collected |= {p.relative_to(REPO).as_posix() for p in REPO.glob(pat)}
+        for pat in m.group(1).split():
+            if re.fullmatch(r"[A-Za-z0-9_./*?\[\]-]+", pat):
+                collected.update(p.relative_to(REPO).as_posix() for p in REPO.glob(pat))
 
     on_disk = _test_shaped_files()
     check("the tree still contains test files to collect", on_disk,
