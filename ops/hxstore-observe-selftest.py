@@ -2,6 +2,7 @@
 """Exercise the real count-only CLI with synthetic bytes, never a private store."""
 import json
 from pathlib import Path
+import sqlite3
 import struct
 import subprocess
 import tempfile
@@ -51,6 +52,58 @@ class ObservationTests(unittest.TestCase):
             self.assertNotIn(str(path).encode(), result.stdout + result.stderr)
             self.assertEqual(path.read_bytes(), data)
             return result
+
+    def test_db_exports_folder_membership_and_attachment_metadata_read_only(self):
+        def text(value):
+            return value.encode('utf-16le') + b'\0\0'
+
+        def typed(kind, key, owner, size, reference_kind=0):
+            data = bytearray(size)
+            struct.pack_into('<H', data, 0, kind)
+            struct.pack_into('<QIQQQ', data, 10, key, reference_kind, owner, key, owner)
+            return data
+
+        def wrapped(tag, obj):
+            return struct.pack('<HHIH', 5, tag, len(obj) + 10, 0) + obj
+
+        def folder(key, name, parent=None):
+            obj = typed(0x4d, key, 7, 840, 2)
+            if parent is not None:
+                obj[792:838] = typed(0x4d, parent, 7, 46, 2)
+            obj.extend(b'\1\1\1\1\0' + text(name))
+            return wrapped(0x04d8, obj)
+
+        message = typed(0xca, 70, 70, 500)
+        message[408:454] = typed(0x4d, 51, 7, 46, 2)
+        message.extend(text('sender@example.test') + text('Synthetic Sender'))
+        message.extend(text('IPM.Note') + text('<message@example.test>'))
+        message.extend(b'<html><body>Synthetic message carries a document attachment.</body></html>')
+        attachment = typed(0x16a, 80, 99, 600)
+        attachment[360:406] = typed(0xca, 70, 70, 46)
+        struct.pack_into('<Q', attachment, 558, 4096)
+        attachment.extend(text('application/pdf') + b'\1\0')
+        attachment.extend(text('~/Files/S0/42/Attachments/0/Lease[123].pdf'))
+        attachment.extend(b'\1\1\1\1\0' + text('Lease.pdf') + text('part-1@example.test'))
+        data = store(folder(50, 'Active Deals') + folder(51, 'Deal A', 50)
+                     + wrapped(0x074e, message) + wrapped(0x0318, attachment))
+        with tempfile.TemporaryDirectory() as tmp:
+            source, db = Path(tmp) / 'store.hxd', Path(tmp) / 'decoded.db'
+            source.write_bytes(data)
+            result = subprocess.run([str(BINARY), 'db', str(source), str(db)],
+                                    capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(source.read_bytes(), data)
+            with sqlite3.connect(db) as con:
+                self.assertEqual(con.execute(
+                    'SELECT id,name,parent_status,parent_id FROM folders ORDER BY id').fetchall(),
+                    [(50, 'Active Deals', 'top', None), (51, 'Deal A', 'folder', 50)])
+                self.assertEqual(con.execute(
+                    'SELECT f.folder_id,k.local_key FROM message_folders f '
+                    'JOIN message_keys k ON k.message_id=f.message_id').fetchall(), [(51, 70)])
+                self.assertEqual(con.execute(
+                    'SELECT a.name,a.size,a.content_type,a.content_id FROM attachments a '
+                    'JOIN message_keys k ON k.local_key=a.message_key').fetchall(),
+                    [('Lease.pdf', 4096, 'application/pdf', 'part-1@example.test')])
 
     def test_counts_and_coverage_are_content_independent(self):
         data = envelope(77) * 2 + envelope(999, SECRET * 2)

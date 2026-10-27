@@ -1,3 +1,4 @@
+// Check workspace UI copy for prohibited phrases.
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
