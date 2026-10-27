@@ -436,6 +436,51 @@ test("morning-brief flags overlapping timed meetings without treating all-day en
     "Synthetic overlapping": true, "Synthetic adjacent": false });
 });
 
+test("morning-brief offers recent meeting outcomes for review without creating records", async () => {
+  const now = Date.now();
+  const at = hours => new Date(now + hours * 3600000).toISOString();
+  const calendar = calendarFixture(now);
+  calendar.items = [];
+  calendar.follow_up_reviews = [{ key: "0123456789abcdef", title: "Synthetic outcome review",
+    start: at(-2), end: at(-1), state: "needs_review",
+    prompt: "Confirm whether this meeting happened. If it did, record the outcome and decide the next step." }];
+  const c = client({ calendar });
+  const result = await executeRegisteredTool(c, JOE, "morning-brief", {});
+  const [review] = result.sections.calendar.follow_up_reviews;
+  assert.equal(review.title, "Synthetic outcome review");
+  assert.equal(review.state, "needs_review");
+  assert.match(review.prompt, /Confirm whether this meeting happened/);
+  assert.equal(result.sections.calendar.state, "partial", "scheduled end does not verify attendance");
+  assert.ok(result.sections.calendar.notes.some(note => /not confirmed attendance/.test(note)));
+  assert.equal(result.coverage.required_sections.find(row => row.key === "calendar").counts.follow_up_reviews, 1);
+  assert.ok(c.queries.every(({ sql }) => !/\b(insert|update|delete)\b/i.test(sql)));
+});
+
+test("meeting outcome reviews expire and stale or malformed snapshots never become confirmed attendance", async () => {
+  const now = Date.now();
+  const at = hours => new Date(now + hours * 3600000).toISOString();
+  const review = { key: "0123456789abcdef", title: "Synthetic review", start: at(-2), end: at(-1),
+    state: "needs_review", prompt: "Confirm whether this meeting happened." };
+  for (const observed of [at(-19), at(1)]) {
+    const calendar = calendarFixture(now, observed);
+    calendar.follow_up_reviews = [review];
+    const result = await executeRegisteredTool(client({ calendar }), JOE, "morning-brief", {});
+    assert.deepEqual(result.sections.calendar.follow_up_reviews, []);
+    assert.equal(result.sections.calendar.state, "partial");
+  }
+  const calendar = calendarFixture(now);
+  calendar.follow_up_reviews = [{ ...review, start: at(-26), end: at(-24) },
+    { ...review, start: at(1), end: at(2) }, { ...review, end: "invalid" },
+    { ...review, state: "completed" }, review];
+  const result = await executeRegisteredTool(client({ calendar }), JOE, "morning-brief", {});
+  assert.equal(result.sections.calendar.follow_up_reviews.length, 1);
+  assert.ok(result.sections.calendar.notes.some(note => /2 stored meeting outcome reviews could not be shown/.test(note)));
+  calendar.follow_up_reviews = {};
+  const malformed = await executeRegisteredTool(client({ calendar }), JOE, "morning-brief", {});
+  assert.deepEqual(malformed.sections.calendar.follow_up_reviews, []);
+  assert.equal(malformed.sections.calendar.state, "partial");
+});
+
 test("every known gap becomes a plain sentence and the section is partial, never ready", async () => {
   const warnings = [{ code: "responses_unverified" }, { code: "group_invites_not_shown" },
     { code: "undecoded", count: 3 }, { code: "time_changed", count: 1 }, { code: "recurring_unverified", count: 2 },

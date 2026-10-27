@@ -18,6 +18,7 @@ const WARNINGS = {
   undecoded: n => `${n} calendar ${plural(n, "item", "items")} in Outlook couldn't be read, so meetings may be missing.`,
   time_changed: n => `${n} ${plural(n, "meeting has", "meetings have")} more than one stored time. Check Outlook for the current time.`,
   recurring_unverified: () => "Recurring meetings show only the occurrences Outlook stored; some may be missing.",
+  follow_up_trimmed: n => `${n} meeting outcome ${plural(n, "review was", "reviews were")} left out to keep the brief small.`,
   trimmed: n => `${n} later ${plural(n, "meeting was", "meetings were")} left out to keep the brief small.`,
 };
 
@@ -67,6 +68,25 @@ export function calendarSection(snapshot, now = new Date()) {
   if (malformed) notes.push(`${malformed} stored ${plural(malformed, "meeting", "meetings")} could not be shown.`);
   if (items.length > LIMIT) notes.push(`Only the first ${LIMIT} meetings are shown.`);
   const stale = nowMs - observed > STALE_MS;
+  const future = observed > nowMs;
+  const reviews = [];
+  let malformedReviews = 0;
+  if (snapshot.follow_up_reviews !== undefined && !Array.isArray(snapshot.follow_up_reviews)) malformedReviews++;
+  for (const row of Array.isArray(snapshot.follow_up_reviews) ? snapshot.follow_up_reviews : []) {
+    const start = instant(row?.start), end = instant(row?.end);
+    if (row?.state !== "needs_review" || !/^[a-f0-9]{16}$/.test(row?.key ?? "")
+        || !text(row?.title) || !text(row?.prompt) || start === null || end === null || end <= start) {
+      malformedReviews++; continue;
+    }
+    if (stale || future || end > observed || end > nowMs || end <= nowMs - 86_400_000) continue;
+    reviews.push({ key: row.key, title: text(row.title), start: new Date(start).toISOString(),
+      end: new Date(end).toISOString(), state: "needs_review", prompt: text(row.prompt) });
+  }
+  reviews.sort((a, b) => b.end.localeCompare(a.end) || a.key.localeCompare(b.key));
+  if (reviews.length) notes.push("These are scheduled meetings, not confirmed attendance. Confirm each happened before recording an outcome or next step.");
+  if (malformedReviews) notes.push(`${malformedReviews} stored meeting outcome ${plural(malformedReviews, "review", "reviews")} could not be shown.`);
+  if (reviews.length > LIMIT) notes.push(`Only the first ${LIMIT} meeting outcome reviews are shown.`);
+  if (future) notes.push("This calendar's observation time is in the future. Refresh Outlook before reviewing meetings.");
   if (stale) notes.push("This calendar was last read from Outlook more than 18 hours ago.");
   return {
     state: notes.length ? "partial" : items.length ? "ready" : "empty",
@@ -75,5 +95,6 @@ export function calendarSection(snapshot, now = new Date()) {
     sources: { outlook_calendar: { state: stale ? "stale" : notes.length ? "partial" : "ready" } },
     ...(malformed ? { malformed_items: malformed } : {}),
     items: items.slice(0, LIMIT),
+    ...(snapshot.follow_up_reviews !== undefined ? { follow_up_reviews: reviews.slice(0, LIMIT) } : {}),
   };
 }
