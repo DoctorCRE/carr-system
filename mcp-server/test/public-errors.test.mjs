@@ -133,6 +133,7 @@ test("MCP names every client portal refusal instead of collapsing it to a server
     const payload = await failure(t, new ToolError({ error: code, hint: privateText }));
     assert.equal(payload.error, code);
     assert.notEqual(payload.hint, "The operation failed. Quote the correlation_id when reporting it.");
+    if (code === "portal_password_differs") assert.doesNotMatch(payload.hint, /choose another portal name/i);
     assert.doesNotMatch(payload.hint, /password:|hash|\$2[aby]\$/i);
   }
 });

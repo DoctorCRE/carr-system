@@ -75,7 +75,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["portal_password_invalid", "Supply a portal password of 1 to 1024 characters."],
   ["portal_deal_not_found", "The deal was not found or its client was merged. Re-read the deal before retrying."],
   ["portal_slug_taken", "Choose another portal name. This one is already in use."],
-  ["portal_password_differs", "This deal already has that portal name with a different password. Use the original password or choose another portal name."],
+  ["portal_password_differs", "This deal already has that portal name with a different password. Use the original password to retry."],
   ["portal_deal_already_registered", "This deal already has an active client portal. Open its link instead of registering another."],
   ["tour_share_scope_invalid", "Choose one or more documented tour share scopes, each once."],
   ["database_refused_the_statement", "The operation could not be completed. Quote the correlation_id when reporting it."],
