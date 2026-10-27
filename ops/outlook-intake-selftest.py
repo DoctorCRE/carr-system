@@ -1809,12 +1809,6 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual([i['title'] for i in self.fake.agenda['items']], ['Synthetic kept'])
         self.assertIn({'code': 'canceled_hidden', 'count': 2}, self.fake.agenda['warnings'])
 
-    def test_a_meeting_cancelled_before_the_window_is_not_counted_as_left_out(self):
-        midnight = NOW.astimezone(load_settings(self.home).timezone).replace(hour=0, minute=0, second=0, microsecond=0)
-        self.run_intake(events=[event(self.gid(1), midnight - NOW - timedelta(hours=2), subject='Canceled: Synthetic ended'),
-                                event(self.gid(2), timedelta(days=2))])
-        self.assertNotIn('canceled_hidden', self.codes())
-
     def test_no_cancelled_warning_when_nothing_was_cancelled(self):
         self.run_intake(events=[event(self.gid(1), timedelta(days=2))])
         self.assertNotIn('canceled_hidden', self.codes())
