@@ -50,7 +50,7 @@ async function fixture(t) {
   function pause(match){const reached=deferred(),resume=deferred(),query=a.query.bind(a);let used=false;a.query=async(sql,...args)=>{const r=await query(sql,...args);if(!used&&match(sql)){used=true;reached.resolve();await resume.promise;}return r;};return {reached:reached.promise,resume:()=>resume.resolve()};}
   return {a,b,o,actor,party,client,deal,building,space,premises,call,capture,run,pause,addDeal};
 }
-async function blocked(f,finished){const deadline=Date.now()+3000;while(!finished()&&Date.now()<deadline){if((await f.o.query('select cardinality(pg_blocking_pids($1))>0 blocked',[f.b.processID])).rows[0].blocked)return true;await new Promise(r=>setTimeout(r,10));}return false;}
+async function blocked(f,finished){const deadline=performance.now()+3000;while(!finished()&&performance.now()<deadline){if((await f.o.query('select cardinality(pg_blocking_pids($1))>0 blocked',[f.b.processID])).rows[0].blocked)return true;await new Promise(r=>setTimeout(r,10));}return false;}
 test('review 1: newly matching deal between snapshots prevents an ambiguous close',async t=>{
   const f=await fixture(t),i=await f.capture(),p=f.pause(sql=>sql.startsWith('select d.id,d.name')&&!sql.includes('for update'));
   const work=f.run();work.catch(()=>{});await p.reached;

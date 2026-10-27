@@ -17,10 +17,8 @@
 --     verb handler's own envelope would otherwise answer from its cache.
 --   * that quiet_now is TRUE inside a MIDNIGHT WRAP-AROUND. A 22:00-07:00
 --     window under a naive `start <= now < end` comparison is false at every
---     hour of the night and green in every daytime test. The hour is reached by
---     choosing the TIMEZONE in which the current instant is inside the window,
---     computed in this file's own SQL -- never by hard-coding a zone name that
---     passes for eight months and fails in one.
+--     hour of the night and green in every daytime test. A fixed instant
+--     reaches 02:00 in Chicago and 12:00 in Karachi regardless of the host clock.
 --   * that both functions reach carr_writer and carr_authority on the exact
 --     argument types and reach neither carr_reader, nor carr_jobs, nor public.
 --     A stale arity would name a different function and prove nothing.
@@ -189,23 +187,14 @@ begin
 end $wr116_write$;
 
 do $wr116_quiet$
-declare v_actor uuid; v_night text; v_day text; r jsonb; v_version integer;
+declare v_actor uuid; v_night text; v_day text; r jsonb; v_version integer; v_definition text;
 begin
   select id into v_actor from public.actor where slug = 'joe' and kind = 'human' and active;
 
-  -- THE ZONE IS CHOSEN HERE, IN SQL, so the case is deterministic at any
-  -- wall-clock hour the suite runs. A hard-coded name passes for eight months.
-  select name into v_night from pg_timezone_names
-   where (now() at time zone name)::time >= time '02:00'
-     and (now() at time zone name)::time <  time '03:00'
-     and name like '%/%' order by name limit 1;
-  select name into v_day from pg_timezone_names
-   where (now() at time zone name)::time >= time '12:00'
-     and (now() at time zone name)::time <  time '13:00'
-     and name like '%/%' order by name limit 1;
-  if v_night is null or v_day is null then
-    raise exception 'WR-000116: no timezone currently sits at 02:00 or at 12:00 local';
-  end if;
+  v_definition := pg_get_functiondef('ops.notification_quiet_now(uuid)'::regprocedure);
+  execute replace(v_definition, 'now()', '''2026-10-27 07:00:00+00''::timestamptz');
+  v_night := 'America/Chicago';
+  v_day := 'Asia/Karachi';
 
   select version into v_version from ops.notification_preference where actor = v_actor;
 
@@ -249,6 +238,7 @@ begin
 
   delete from ops.notification_preference_write where actor = v_actor;
   delete from ops.notification_preference where actor = v_actor;
+  execute v_definition;
 end $wr116_quiet$;
 
 \echo 'WR-000116 notification preferences: defaults without an insert, the compare-and-swap, the first save, the replay, the named refusals, and quiet hours across a midnight wrap-around'

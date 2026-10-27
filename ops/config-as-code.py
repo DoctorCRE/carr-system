@@ -153,6 +153,9 @@ LAUNCHD_QUARANTINE = os.path.join(
 LAUNCHD_SRC = os.path.join(HOME, "Library", "LaunchAgents")
 LAUNCHD_REPO = os.path.join(REPO, "ops", "launchd")
 LAUNCHD_ALT_REPO = {
+    "com.carr.outlook-research-copy.plist": os.path.join(
+        REPO, "spec", "outlook", "com.carr.outlook-research-copy.plist"
+    ),
     "com.carr.call-mode.plist": os.path.join(
         REPO, "tools", "dictation-rig", "launchd", "com.carr.call-mode.plist"
     ),

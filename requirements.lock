@@ -4,7 +4,7 @@
 # human-facing declaration with its environment markers; this is its
 # resolved output. Regenerate after changing requirements.txt:
 #     ops/ci-dep-check.py --write-lock
-# requirements.txt sha256: 4c3be56e80c1b71c62e5e12f84814412d2a012e3ac2e35fabcd4924e24a62e6b
+# requirements.txt sha256: 5c632ab1c618192ecc4ed1921427b2afbe85fe3259829471538c1ed7f10da9ef
 
 PyJWT==2.15.1
 PyYAML==6.0.3
@@ -36,9 +36,6 @@ pycparser==3.0
 pydantic==2.14.1
 pydantic_core==2.50.1
 pymupdf==1.28.2
-pyobjc-core==12.2.2 ; sys_platform == "darwin"
-pyobjc-framework-Cocoa==12.2.2 ; sys_platform == "darwin"
-pyobjc-framework-EventKit==12.2.2 ; sys_platform == "darwin"
 pytest==9.1.1
 python-docx==1.2.0
 tenacity==9.2.1
