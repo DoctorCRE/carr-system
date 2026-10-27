@@ -22,14 +22,13 @@ spec.loader.exec_module(mod)
 
 failures: list[str] = []
 
-# A bounded read-only desk cannot enter the CLI reaper through the hook front door.
+# A legacy Grok marker cannot bypass the session hook's normal dispatcher.
 from unittest.mock import patch
 with patch.dict(os.environ, {"CARR_GROK_RUN_READ_ONLY": "1"}), \
-        patch("hooks.grok_invocation.bounded_grok_read_only", return_value=True), \
         patch.object(sys, "argv", [HOOK, "--reap"]), \
-        patch.object(mod, "run") as hook_run:
-    if mod.main() != 0 or hook_run.called:
-        failures.append("bounded read-only hook dispatched the hook")
+        patch.object(mod, "run", return_value=0) as hook_run:
+    if mod.main() != 0 or not hook_run.called:
+        failures.append("legacy Grok marker skipped normal hook dispatch")
 
 
 # Fresh carr-system sessions receive the same product-first policy Codex reads
