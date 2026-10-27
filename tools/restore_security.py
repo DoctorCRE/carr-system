@@ -63,9 +63,13 @@ def apply_grants(conn, declared):
                 conn.execute(statement)
 
 
+# Every branch's identity is text. The first branch once returned nspname as
+# `name`, and UNION ALL resolves the column to the first branch's type, so every
+# identity past 63 bytes was truncated and no longer matched its declared revoke
+# (WR-000560: 160 ops functions read as "should be executable").
 PRIVILEGES_SQL = """
 with ns as (select oid,nspname from pg_namespace where nspname in ('public','ops'))
-select 'schema', nspname, p||s, has_schema_privilege(current_user,oid,p||s)
+select 'schema'::text, nspname::text, p||s, has_schema_privilege(current_user,oid,p||s)
 from ns cross join unnest(array['usage','create']) p cross join unnest(array['',' with grant option']) s
 union all
 select 'table',n.nspname||'.'||c.relname,p||s,has_table_privilege(current_user,c.oid,p||s)
@@ -91,7 +95,26 @@ cross join unnest(array['',' with grant option']) s
 """
 
 
-def expected(declared, role, kind, identity, privilege):
+# Functions an extension installed and the restore admin cannot alter. On Neon
+# the provider's superuser (cloud_admin) runs CREATE EXTENSION, in production
+# and on the restore branch alike, so the admin's declared `revoke ... from
+# public` on them is a no-op and they keep Postgres' PUBLIC execute default.
+# Production holds exactly that (read 2026-10-27: all 118 pgvector functions
+# owner=cloud_admin with PUBLIC execute, while db/schema.sql, regenerated from a
+# shadow database whose admin did own them, declares 95 of them revoked).
+# The restore therefore matches production, and the declaration's revoke for
+# THESE functions only cannot be carried; every other declared fact still binds.
+UNCARRIED_EXTENSION_REVOKES_SQL = """
+select n.nspname||'.'||p.proname||'('||oidvectortypes(p.proargtypes)||')'
+from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+where n.nspname in ('public','ops')
+  and exists (select 1 from pg_depend d where d.classid='pg_proc'::regclass
+              and d.objid=p.oid and d.deptype='e')
+  and not pg_has_role(current_user, p.proowner, 'USAGE')
+"""
+
+
+def expected(declared, role, kind, identity, privilege, uncarried=frozenset()):
     if privilege.endswith(' with grant option'):
         return False
     fact = (kind, identity, privilege, False)
@@ -99,11 +122,13 @@ def expected(declared, role, kind, identity, privilege):
     if fact in facts:
         return True
     if kind == 'column':
-        return ('table', identity.rsplit('(', 1)[0], privilege, False) in facts
+        # A relation name is an unquoted identifier; the column name may itself
+        # hold parentheses (public.v_export_leads "Source Detail (V-ID / ...)").
+        return ('table', identity.split('(', 1)[0], privilege, False) in facts
     if kind == 'schema':
         return identity == 'public' and privilege == 'usage'
     if kind == 'function':
-        return fact not in declared['revoked']
+        return identity in uncarried or fact not in declared['revoked']
     return False
 
 
@@ -113,6 +138,7 @@ def check_parity(conn, declared):
     from psycopg.errors import InsufficientPrivilege
 
     mismatches, roles = [], {}
+    uncarried = frozenset(row[0] for row in conn.execute(UNCARRIED_EXTENSION_REVOKES_SQL).fetchall())
     for role in ROLE_BUNDLES:
         counts = {'positive': 0, 'negative': 0, 'operations': 0}
         with conn.transaction():
@@ -134,7 +160,7 @@ def check_parity(conn, declared):
             """).fetchall()}
             probes = set()
             for kind, identity, privilege, observed in rows:
-                wanted = expected(declared, role, kind, identity, privilege)
+                wanted = expected(declared, role, kind, identity, privilege, uncarried)
                 counts['positive' if wanted else 'negative'] += 1
                 if observed != wanted:
                     mismatches.append(f'{role}:{kind}:{identity}:{privilege}')
@@ -145,7 +171,7 @@ def check_parity(conn, declared):
                     continue
                 if privilege in ('insert', 'update') and identity not in writable_columns:
                     continue
-                relation, column = identity[:-1].rsplit('(', 1)
+                relation, column = identity[:-1].split('(', 1)
                 if relation not in probe_tables:
                     continue
                 schema, table = relation.split('.', 1)
@@ -177,7 +203,8 @@ def check_parity(conn, declared):
             mismatches.append(f'{role}:incomplete_probes')
     return {'verdict': 'FAIL' if mismatches else 'PASS',
             'schema_revision': declared['schema_revision'], 'schema_blob': declared['schema_blob'],
-            'roles': roles, 'mismatches': mismatches}
+            'roles': roles, 'mismatches': mismatches,
+            'uncarried_extension_revokes': len(uncarried & {fact[1] for fact in declared['revoked']})}
 
 
 def allow_set_role(conn):
