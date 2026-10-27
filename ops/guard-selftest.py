@@ -812,6 +812,15 @@ for _cmd in (
     case(f"GitHub polling is refused: {_cmd[:60]!r}", bash(_cmd), DENY)
 case("Codex GitHub polling loop is refused", direct_exec(_SEQ40), DENY)
 for _cmd in (
+    "while true; do gh api graphql -f query='{ repository(owner:\"o\",name:\"r\") { pullRequest(number:1) { commits(last:1) { nodes { commit { statusCheckRollup { state } } } } } } }'; sleep 30; done",
+    "for i in $(seq 1 40); do curl -s HTTPS://API.GITHUB.COM/repos/o/r/pulls/1; sleep 60; done",
+):
+    case(f"GitHub polling is refused: {_cmd[:60]!r}", bash(_cmd), DENY)
+for _cmd in (
+    "for i in 1 2; do gh api graphql -f query='mutation { addComment(input:{subjectId:\"x\",body:\"y\"}) { clientMutationId } }'; done",
+):
+    case(f"no GitHub polling: {_cmd[:60]!r} is allowed", bash(_cmd), ALLOW)
+for _cmd in (
     "gh pr checks 2538",
     "gh run view 36015363917 --log-failed",
     "gh api repos/o/r/pulls/1",

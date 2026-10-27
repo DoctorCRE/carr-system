@@ -1900,6 +1900,9 @@ def _gh_status_read(args):
     if not args:
         return False
     if args[0] == "api":
+        if len(args) > 1 and args[1] == "graphql":
+            # GraphQL always sends a body; only a mutation writes.
+            return not re.search(r"\bmutation\b", " ".join(args[2:]))
         method = None
         for k, word in enumerate(args):
             if word in ("-X", "--method") and k + 1 < len(args):
@@ -1914,11 +1917,14 @@ def _gh_status_read(args):
     return len(args) > 1 and args[1] in _GH_STATUS_READS.get(args[0], ())
 
 
+_GITHUB_API_URL = re.compile(r"(?:https?://)?api\.github\.com(?:[:/?#]|$)", re.I)
+
+
 def _github_read(program, args):
     if program == "gh":
         return _gh_status_read(args)
     return program in READ_ONLY_FETCHERS | {"http", "https"} and any(
-        "api.github.com" in word for word in args)
+        _GITHUB_API_URL.match(word.strip("'\"")) for word in args)
 
 
 def _bind_gh_aliases(text):
