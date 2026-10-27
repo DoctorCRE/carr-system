@@ -96,7 +96,7 @@ async function stageTwo(doc, probes, options) {
     side.cookie = options.password ? await signIn(side.base, options.password) : undefined;
   }
   const baseline = options.baselineFile ? JSON.parse(await readFile(options.baselineFile, 'utf8')) : null;
-  const browser = probes.some(p => BROWSER_KINDS.has(p.kind) && !p.retired) ? await (options.launch ?? launchParityBrowser)() : null;
+  const browser = probes.some(p => BROWSER_KINDS.has(p.kind) && !p.retired) ? await launchParityBrowser({ headed: Boolean(options.headed) }) : null;
   const results = new Map();
   try {
     for (const probe of probes) {

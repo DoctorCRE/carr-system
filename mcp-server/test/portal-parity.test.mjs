@@ -5,6 +5,7 @@ import { createServer } from 'node:http';
 import { mkdtemp, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { parityLaunchOptions } from '../portal-parity/browser.mjs';
 import { runParity } from '../portal-parity/harness.mjs';
 import { loadProbes, schemaHasField } from '../portal-parity/probes.mjs';
 import { selectRows } from '../portal-parity/rows.mjs';
@@ -24,6 +25,16 @@ function expandIds(text) {
     return INVENTORY.map(row => row.id).filter(id => id.slice(0, 3) === from.slice(0, 3) && id >= from && id <= to);
   });
 }
+
+test('the harness browser is headless and off the login keychain unless --headed is passed', () => {
+  const defaults = parityLaunchOptions('/chrome');
+  assert.equal(defaults.headless, true);
+  assert.ok(defaults.args.includes('--use-mock-keychain'));
+  assert.ok(defaults.args.includes('--password-store=basic'));
+  const headed = parityLaunchOptions('/chrome', { headed: true });
+  assert.equal(headed.headless, false);
+  assert.deepEqual(headed.args, defaults.args);
+});
 
 test('the inventory in the design doc has 456 rows: 281 REF-A and 175 REF-V', () => {
   assert.equal(INVENTORY.length, 456);
