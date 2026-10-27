@@ -69,6 +69,32 @@ for (const [code, extra] of [
   if (code === "value_not_in_declared_vocabulary") assert.deepEqual(payload.fields, ["filter"]);
 });
 
+test("MCP read-doctrine names a missing document through the real reader path", async t => {
+  const { neonConfig } = await import("@neondatabase/serverless");
+  t.mock.method(console, "error", () => {});
+  const previous = neonConfig.fetchFunction;
+  t.after(() => { neonConfig.fetchFunction = previous; });
+  neonConfig.fetchFunction = async () => Response.json({
+    fields: [], rows: [], rowCount: 0, command: "SELECT", rowAsArray: true,
+  });
+  const request = new Request("https://synthetic.example/mcp", { method: "POST",
+    body: JSON.stringify({ jsonrpc: "2.0", id: 31, method: "tools/call", params: {
+      name: "read-doctrine", arguments: { document: "synthetic-missing-refinement-plan" },
+    } }),
+  });
+  const response = await dispatch(request, { CORRELATION_ID: correlationId,
+    DATABASE_URL_READER: "postgres://fixture@synthetic.invalid/fixture" }, {},
+  { slug: "joe", human: true });
+  const body = await response.json();
+  assert.equal(body.result.isError, true);
+  const payload = JSON.parse(body.result.content[0].text);
+  assert.equal(payload.error, "doctrine_doc_not_found");
+  assert.equal(payload.correlation_id, correlationId);
+  assert.match(payload.hint, /doctrine-index/);
+  assert.deepEqual(Object.keys(payload).sort(), ["correlation_id", "error", "hint"]);
+  assert.doesNotMatch(JSON.stringify(body), /synthetic-missing-refinement-plan|stack|SELECT|doctrine_slug_alias/);
+});
+
 test("MCP next-action conflicts explain how to review the current action", async t => {
   const payload = await failure(t, new ToolError({ error: "next_action_conflict",
     hint: privateText, detail: privateText, nested: { stack: privateText } }));
@@ -77,6 +103,14 @@ test("MCP next-action conflicts explain how to review the current action", async
   assert.match(payload.hint, /ref and owner/);
   assert.match(payload.hint, /review/i);
   assert.match(payload.hint, /expected_action/);
+  assert.deepEqual(Object.keys(payload).sort(), ["correlation_id", "error", "hint"]);
+});
+
+test("MCP routes decline completion claims to complete-work-request", async t => {
+  const payload = await failure(t, new ToolError({ error: "decline_claims_completion",
+    hint: privateText, detail: privateText }));
+  assert.equal(payload.error, "decline_claims_completion");
+  assert.match(payload.hint, /complete-work-request/);
   assert.deepEqual(Object.keys(payload).sort(), ["correlation_id", "error", "hint"]);
 });
 

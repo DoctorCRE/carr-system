@@ -179,7 +179,7 @@ tree:
 ```
 git push origin HEAD:refs/heads/<name>
 gh pr create --base main --head <name> --title "..." --body "..."
-gh pr merge <n> --squash --delete-branch
+gh pr merge <n> --auto   # the merge queue sets the strategy; --squash is refused
 ```
 
 PR branches are never rebased or force-pushed, `--force-with-lease` included.
