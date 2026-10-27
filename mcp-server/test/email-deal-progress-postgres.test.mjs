@@ -1273,6 +1273,7 @@ test('new matter confirmation files to a created deal and respects the activity 
     assert.equal((await c.query("select role from deal_participant where deal_id=$1 and party_id=$2 and to_at is null", [target,party])).rows[0].role, 'lender');
   }
   const missing = await makeProposal();
+  await assert.rejects(command('confirm-email-filing', missing.args), e => e.payload?.error === 'email_new_deal_not_found');
   await assert.rejects(command('confirm-email-filing', { ...missing.args, deal: randomUUID() }), e => e.payload?.error === 'email_new_deal_not_found');
   const mismatch = await makeProposal();
   const other = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Other physician',$1,$1) returning id", [actor.id])).rows[0].id;
