@@ -1,3 +1,4 @@
+// Validate and calculate practice financial runway scenarios.
 import { z } from 'zod';
 import Decimal from 'decimal.js';
 import { envelope, PlanningInputError } from './evidence.mjs';

@@ -1,3 +1,4 @@
+// Prepare bounded Jev deal-reading advice.
 import { TypeSafeClient, TypeSafeError } from "@typesafe-ai/sdk";
 // Bounded, read-only Jev advisory for one authenticated Deal Room record.
 // The record is fetched by the caller through the existing get-deal-room verb.

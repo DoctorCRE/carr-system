@@ -1,4 +1,5 @@
 #!/bin/bash
+# Run the repository's canonical CI classes and report their verified results.
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /bin/bash "$0" "$@"
 fi
@@ -39,14 +40,14 @@ while [ "$#" -gt 0 ]; do
       shift ;;
     --migration-part) MIGRATION_PART="${2:-}"; shift ;;
     --list)   LIST=1 ;;
-    -h|--help) echo "Usage: ops/ci.sh [--strict] [--only classes] [--migration-part all|core|proofs|gates|gates-serial|gates-isolated|acceptance|fixtures|reconstruction|equivalence|shadow] [--gate-shard 1/2|2/2] [--list]"; exit 0 ;;
+    -h|--help) echo "Usage: ops/ci.sh [--strict] [--only classes] [--migration-part all|core|proofs|gates|acceptance|fixtures|reconstruction|equivalence|shadow] [--gate-shard 1/2|2/2] [--list]"; exit 0 ;;
     *) echo "ci.sh: unknown argument: $1" >&2; exit 64 ;;
   esac
   shift
 done
 
 case "$MIGRATION_PART" in
-  all|core|proofs|gates|gates-serial|gates-isolated|acceptance|fixtures|reconstruction|equivalence|shadow) ;;
+  all|core|proofs|gates|acceptance|fixtures|reconstruction|equivalence|shadow) ;;
   *) echo "ci.sh: unknown migration part" >&2; exit 64 ;;
 esac
 
@@ -59,7 +60,7 @@ class_desc() {
     pushfloor)  echo "seeded defect that must not leave the machine (local pre-push floor)" ;;
     unit)       echo "seeded failing unit test" ;;
     types)      echo "seeded shape mistake in a data hand-off" ;;
-    contract)   echo "seeded auth/schema contract break" ;;
+    contract)   echo "seeded PostgreSQL path outside the disposable fixture resolver" ;;
     gates)      echo "seeded enforcement-layer regression" ;;
     secret)     echo "seeded credential in the tree" ;;
     dependency) echo "seeded unpinned or vulnerable dependency" ;;
@@ -196,26 +197,16 @@ check_types() {
 }
 
 check_contract() {
-  local failures=""
+  # The unit class owns the Node contract suites (control-room tests and
+  # workspace/contracts/validate.mjs through workspace/test). This class owns
+  # only the PostgreSQL-path boundary.
   local pg_paths rc=0
   pg_paths="$(git grep -n -F '/opt/homebrew/opt/postgresql@17' -- '*.py' ':!lib/disposable_pg_fixture.py')" || rc=$?
   if [ "$rc" -ne 1 ]; then
-    failures="$failures PostgreSQL-paths"
     printf '%s\n' "PostgreSQL paths must use lib/disposable_pg_fixture.py (grep exit $rc)" "$pg_paths" >&2
-  fi
-  if [ -f workspace/contracts/validate.mjs ]; then
-    run_quiet "$LOGDIR/contract-workspace.log" node workspace/contracts/validate.mjs \
-      || { failures="$failures workspace/contracts"; tail -20 "$LOGDIR/contract-workspace.log" >&2; }
-  fi
-  for t in control-room/test/contracts.test.mjs control-room/test/work-request-projection.test.mjs; do
-    [ -f "$t" ] || continue
-    run_quiet "$LOGDIR/contract-$(basename "$t").log" node --test "$t" \
-      || { failures="$failures $t"; tail -20 "$LOGDIR/contract-$(basename "$t").log" >&2; }
-  done
-  if [ -n "$failures" ]; then
-    bad contract "contract checks failed:$failures"
+    bad contract "PostgreSQL paths bypass lib/disposable_pg_fixture.py"
   else
-    ok contract "workspace + control-room contracts validate"
+    ok contract "PostgreSQL paths resolve through lib/disposable_pg_fixture.py"
   fi
 }
 
@@ -229,17 +220,9 @@ check_gates() {
   local failures="" count=0 skiplist="" gates_timed_out=0 gate_index=0
   export CARR_HOOK_FIXTURE=1
 
-  # Flip this warning to a failure after the machinery purge finishes.
-  local codemap_rc=0 codemap_count
-  "$PY" tools/codemap.py --missing >"$LOGDIR/codemap-missing.log" \
-    2>"$LOGDIR/codemap-error.log" || codemap_rc=$?
-  if [ "$codemap_rc" -le 1 ]; then
-    codemap_count="$(wc -l < "$LOGDIR/codemap-missing.log" | tr -d '[:space:]')"
-    printf '        WARN codemap: %s scripts lack opening descriptions (warning only during machinery purge)\n' "$codemap_count"
-    cat "$LOGDIR/codemap-missing.log"
-  else
-    printf '        WARN codemap: missing-description count unavailable (tool exited %s; warning only)\n' "$codemap_rc"
-    cat "$LOGDIR/codemap-error.log" >&2
+  if ! run_quiet "$LOGDIR/codemap.log" "$PY" tools/codemap.py --check; then
+    failures="$failures codemap"
+    fail_tail "$LOGDIR/codemap.log"
   fi
 
   # rustup installs the pinned toolchain before concurrent HxStore builds.
@@ -260,6 +243,9 @@ check_gates() {
 import json, os, sys
 scope, name, portable = sys.argv[1], sys.argv[2], sys.argv[3] == "1" or os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
 d = json.load(open(scope))
+for e in d.get("run_by", []):
+    if e["check"] == name and os.path.isfile(os.path.join("ops", e["owner"])):
+        print("RUN BY " + e["owner"] + ": " + e["reason"]); sys.exit(0)
 if portable:
     for e in d.get("local_only", []):
         if e["check"] == name:
@@ -277,6 +263,10 @@ PYEOF
     [ -f "$t" ] || continue
     local base; base="$(basename "$t")"
     local why; why="$(excluded_reason "$base")"
+    case "$why" in "RUN BY "*)
+      printf '        owned    %s — %s\n' "$base" "$why" >&2
+      continue ;;
+    esac
     if [ -n "$why" ]; then
       skiplist="$skiplist $base"
       printf '        \033[33mnot run\033[0m  %s — %s\n' "$base" "$why" >&2
@@ -289,11 +279,20 @@ PYEOF
   done
   local pooled_timeout=$(( CI_SELFTEST_TIMEOUT_SECONDS * ${CARR_CI_GATE_JOBS:-4} ))
   export CI_TIMEOUT_HELPER CI_SELFTEST_TIMEOUT_SECONDS LOGDIR PY pooled_timeout
+  # Each suite gets its own TMPDIR; a passing suite that leaves anything in it
+  # fails (exit 75). This runner is the one owner of fixture-cleanup proof.
   printf '%s\n' $eligible | xargs -P "${CARR_CI_GATE_JOBS:-4}" -n1 bash -c '
-    b="$(basename "$1")"
-    "$PY" "$CI_TIMEOUT_HELPER" "$pooled_timeout" "$PY" "$1" \
+    b="$(basename "$1")"; tmp="$LOGDIR/tmp-$b"; mkdir -p "$tmp"
+    TMPDIR="$tmp" TMP="$tmp" TEMP="$tmp" \
+      "$PY" "$CI_TIMEOUT_HELPER" "$pooled_timeout" "$PY" "$1" \
       >"$LOGDIR/gate-$b.log" 2>&1
-    echo $? >"$LOGDIR/gate-$b.rc"
+    rc=$?
+    if [ "$rc" -eq 0 ] && [ -n "$(ls -A "$tmp")" ]; then
+      echo "leaked temporary fixtures: $(ls -A "$tmp" | head -5 | tr "\n" " ")" >>"$LOGDIR/gate-$b.log"
+      rc=75
+    fi
+    rm -rf "$tmp"
+    echo "$rc" >"$LOGDIR/gate-$b.rc"
   ' _
   local grc
   for t in $eligible; do
@@ -340,16 +339,19 @@ PYEOF
       failures="$failures $sbase"; fail_tail "$LOGDIR/gate-$sbase.log"
     fi
   done; fi
-  run_quiet "$LOGDIR/safety-hooks.log" "$PY" hooks/gate-integrity.py --strict \
-    || { failures="$failures gate-integrity"; tail -12 "$LOGDIR/safety-hooks.log" >&2; }
+  # Shard 1 owns the repository-wide invariants; shard 2 used to rerun them.
+  if [ "$GATE_SHARD" -eq 1 ]; then
+    run_quiet "$LOGDIR/safety-hooks.log" "$PY" hooks/gate-integrity.py --strict \
+      || { failures="$failures gate-integrity"; tail -12 "$LOGDIR/safety-hooks.log" >&2; }
+  fi
 
-  for inv in audit-queue-freshness-check \
-             stale-count-check \
+  for inv in stale-count-check \
              rule-load-layer-check rule-classification-parity-check \
              selftest-git-isolation-check \
              sync-core-rule-ids rule-route-coverage \
              migration-order-gate \
              migration-safety-gate; do
+    [ "$GATE_SHARD" -eq 1 ] || break
     [ -f "ops/$inv.py" ] || continue
     local inv_args=()
     case "$inv" in
@@ -498,7 +500,10 @@ check_migration() {
     bad migration "an earlier PR or main owns a migration slot; choose a forward filename and update its references"
     return
   fi
-  if ! run_quiet "$LOGDIR/migration-baseline.log" "$PY" -m unittest discover -s tools -p 'test_migr*.py'; then
+  # The proofs partition (inside all/core) owns the static migration tests;
+  # gates-* and acceptance partitions used to rediscover them each.
+  if [[ "$MIGRATION_PART" = all || "$MIGRATION_PART" = core || "$MIGRATION_PART" = proofs ]] \
+     && ! run_quiet "$LOGDIR/migration-baseline.log" "$PY" -m unittest discover -s tools -p 'test_migr*.py'; then
     tail -30 "$LOGDIR/migration-baseline.log" >&2
     bad migration "migration baseline identity or historical source checks failed before database work"
     return
@@ -554,7 +559,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
     return
   fi
 
-  if [[ "$MIGRATION_PART" != gates* && "$MIGRATION_PART" != acceptance ]]; then
+  if [[ "$MIGRATION_PART" != gates && "$MIGRATION_PART" != acceptance ]]; then
     if ! CARR_RULE_TEST_DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-rule-supersession.log" \
         node --test mcp-server/test/find-rule-supersedes.test.mjs; then
       tail -30 "$LOGDIR/migration-rule-supersession.log" >&2
@@ -694,7 +699,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       fi
     fi
 
-    for proof in doc-conversation notifications session-identity dispatch-spine meeting-mode amend-closed-loop-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres; do
+    for proof in doc-conversation notifications session-identity dispatch-spine governed-correspondence-thread-postgres meeting-mode amend-closed-loop-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres; do
       if [ -f "mcp-server/test/$proof.test.mjs" ]; then
         if ! DATABASE_URL="$dsn" \
              CARR_DOC_CONVERSATION_DB_REQUIRED=1 CARR_R03_DB_REQUIRED=1 \
@@ -704,6 +709,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
              CARR_A02_RULE_COVERAGE_DB_REQUIRED=1 \
              CARR_RW02_DB_REQUIRED=1 \
              CARR_VENDOR_DIRECTORY_DB_REQUIRED=1 CARR_RELATIONSHIP_DB_REQUIRED=1 \
+             CARR_CORRESPONDENCE_DB_REQUIRED=1 \
              run_quiet "$LOGDIR/$proof-db.log" \
              node --test "mcp-server/test/$proof.test.mjs"; then
           tail -30 "$LOGDIR/$proof-db.log" >&2
@@ -879,9 +885,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
           db_gate_declared="$db_gate_declared\n            $(basename "$g"): $(sed -n 's/^# ci: runs-outside-ci *— *//p' "$g" | head -1)"
         fi
       done
-      local gate_partition=all
-      case "$MIGRATION_PART" in gates-*) gate_partition="${MIGRATION_PART#gates-}" ;; esac
-      if ! DATABASE_URL="$dsn" "$PY" ops/ci-migration-gates.py --logdir "$LOGDIR" --partition "$gate_partition" $db_gates; then
+      if ! DATABASE_URL="$dsn" "$PY" ops/ci-migration-gates.py --logdir "$LOGDIR" $db_gates; then
         db_gate_failures="isolated/serial DB gate runner (see named failures above)"
       fi
       _mstep gates
@@ -996,6 +1000,8 @@ echo "ci-timing:${CLASS_TIMINGS}"
 [ -n "$SKIPPED_CLASSES" ] && echo "ci-skipped-classes:${SKIPPED_CLASSES}"
 
 if [ -n "$FAILED_CLASSES" ]; then
+  # Classes the local push path covers: the floor, and the secret class's scans,
+  # which the pre-push hook runs itself once per push.
   FLOOR_CLASSES="pushfloor secret"
   _floor=""; _relocated=""
   for f in $FAILED_CLASSES; do

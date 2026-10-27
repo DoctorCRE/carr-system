@@ -4,6 +4,8 @@ Codex and kin look for this filename by convention. Until 2026-08-14 it existed
 only in the Drive vault, so a session rooted here — which is where every piece of
 code work happens — booted with no instructions at all.
 
+To find a script and its purpose, run `./run.sh map` for a fresh path-and-description map.
+
 ## Always-on rules
 
 <!-- Generated from ops/config/rule-cards.v1.json by ops/sync-core-rule-cards.py. -->

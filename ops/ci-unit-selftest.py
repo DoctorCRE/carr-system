@@ -29,7 +29,8 @@ class UnitClassTests(unittest.TestCase):
         (self.root / 'ops/config/ci-check-scope.json').write_text('{}')
         shutil.copy2(ROOT / 'ops/config/public-source-identities.v1.json',
                      self.root / 'ops/config/public-source-identities.v1.json')
-        self.env = fixture_env()
+        # npm enables Node's compile cache under TMPDIR, which outlives the fixture.
+        self.env = dict(fixture_env(), NODE_DISABLE_COMPILE_CACHE='1')
         subprocess.run(['git', 'init', '-q', str(self.root)], env=self.env, check=True)
         subprocess.run(['git', 'add', 'ops/ci.sh'], cwd=self.root, env=self.env, check=True)
         subprocess.run(['git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',

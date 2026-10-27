@@ -1,3 +1,4 @@
+// Generate TypeScript declarations for MCP verb schemas.
 import { mkdir, writeFile } from "node:fs/promises";
 import { compile } from "json-schema-to-typescript";
 import { TOOLS } from "./src/tools.js";

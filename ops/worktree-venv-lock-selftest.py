@@ -48,7 +48,8 @@ from git_env import fixture_env  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 ZSH = shutil.which("zsh")
 assert ZSH, "zsh is required (hosted CI installs it before gate suites)"
-FIXTURE_ENV = fixture_env()
+# npm enables Node's compile cache under TMPDIR, which outlives the fixture.
+FIXTURE_ENV = dict(fixture_env(), NODE_DISABLE_COMPILE_CACHE="1")
 
 # The lock the fixture worktree tracks. Deliberately small, and deliberately
 # carries one marker-bearing entry: the guard must treat an entry whose marker

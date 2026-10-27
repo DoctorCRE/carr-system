@@ -264,6 +264,21 @@ class PushFloorTests(RepositoryFixture):
         self.assertNotIn("active registry changed", result.stderr)
         self.assertRegex(self.verdict(result)[1], r"^failed: scac-atlas \(\d+s\)$")
 
+    def test_detector_change_runs_its_qualification_once(self):
+        self.stub("security/test_example_guard.py", "qualify", status=4)
+        self.write("security/allowlist.json", "{}\n")
+        result = self.run_floor("security/allowlist.json")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(self.calls(), ["qualify"])
+        self.assertIn("fails its qualification", result.stderr)
+        self.assertRegex(self.verdict(result)[1], r"^failed: secret-test_example_guard \(\d+s\)$")
+
+    def test_unrelated_change_skips_detector_qualification(self):
+        self.stub("security/test_example_guard.py", "qualify", status=4)
+        result = self.run_floor("hooks/example.py")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.calls(), ["paired"])
+
     def test_new_test_file_runs_collection_check(self):
         self.stub("ops/ci-selftest.py", "collection")
         self.write("notes/test_fixture.mjs", "export {};\n")

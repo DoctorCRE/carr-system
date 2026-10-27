@@ -70,7 +70,7 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
           any(st.get('run') == 'ops/ci.sh --strict --only "${{ matrix.classes }}"' for st in main_steps)
           and any('--migration-part proofs' in st.get('run', '') for st in pr_steps)
           and set(pr['jobs']['migration-fixtures']['strategy']['matrix']['part'])
-          == {'reconstruction', 'equivalence', 'shadow', 'gates-serial', 'gates-isolated', 'acceptance'})
+          == {'reconstruction', 'equivalence', 'shadow', 'gates', 'acceptance'})
     check('main retains its service and PR limits the shared fixture to unit checks',
           classes['services']['postgres']['image'] in pr['jobs']['classes']['services']['postgres']['image']
           and "contains(matrix.classes, 'unit')" in pr['jobs']['classes']['services']['postgres']['image'])
@@ -126,7 +126,8 @@ def test_evidence_failure_runs_checks_and_uses_their_verdict():
 def test_main_retains_migration_shadow_coverage():
     y = CANARY.read_text()
     check('main installs PG18 for the migration shadow',
-          'Install PostgreSQL 18 server for the migration shadow' in y)
+          'run: bash ops/ci-postgres.sh' in y
+          and 'postgresql-18-pgvector' in (REPO / 'ops/ci-postgres.sh').read_text())
     check('main collects migration shadow artifacts',
           'CARR_SHADOW_ARTIFACT_DIR:' in y and 'shadow-schema' in y)
 

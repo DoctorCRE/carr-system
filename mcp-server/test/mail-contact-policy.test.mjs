@@ -1,3 +1,4 @@
+// Test recipient suppression and contact policy decisions.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TOOLS } from '../src/tools.js';

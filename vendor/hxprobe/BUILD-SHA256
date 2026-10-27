@@ -1,4 +1,5 @@
 883de452f93604d0f44dc7a7140fdc22523799bb77a2c530bfaab45142570b7e  target/release/hxprobe
+Source digest: c9ee6ed0fb8540cfe8c679cfe3e647a37f25c770846680800162c743986a660c
 
 Command: cargo build --release --locked
 Target: aarch64-apple-darwin
@@ -15,3 +16,5 @@ This records one local build. Other targets and linkers produce different hashes
 Registry source paths under /Users/booko/.cargo are embedded, so another CARGO_HOME
 does too. The checkout and target directory do not change it.
 bin/install-outlook-intake.sh installs the decoder only when its build matches line 1.
+After refreshing line 1, run `python3 ops/hxprobe-source-digest.py --write`; CI fails a
+source change whose Source digest line is stale.

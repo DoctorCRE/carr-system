@@ -1,3 +1,4 @@
+// Expose candidate duplicate party records.
 import { ToolError } from './tool-error.ts';
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;

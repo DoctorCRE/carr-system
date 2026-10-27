@@ -877,8 +877,7 @@ def main():
          launchd_dir_created),
         # THE PLIST PARSE CHECK MOVED OUT, to ops/launchd-plist-portable-selftest.py.
         # It lived here and could not catch the bug it was written for: this
-        # file is declared local_only in ops/config/ci-check-scope.json — for a
-        # true and evidenced reason about the LIVE settings comparison below —
+        # file was then declared local_only in ops/config/ci-check-scope.json,
         # so on every hosted run the parse check was skipped along with it, and
         # the room-bridge job merged unparseable on 2026-08-22. An exemption is
         # declared per FILE and earned per ASSERTION, so a portable check must
