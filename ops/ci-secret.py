@@ -12,6 +12,10 @@ import sys
 import time
 
 
+def qualification_programs():
+    return sorted(glob.glob('security/test_*.py'))
+
+
 def check(logdir, python):
     diff_range = os.environ.get('CARR_CI_RANGE', '')
     range_args = ['--range', *re.findall(r'[^ \t\n]+', diff_range)] if diff_range else []
@@ -22,7 +26,7 @@ def check(logdir, python):
     scope = 'blobs pushed in ' + diff_range if diff_range else 'tracked files'
     checks = [
         ('leak-guard-tests', [python, test], 'leak guard qualification failed')
-        for test in sorted(glob.glob('security/test_*.py')) or ['security/test_*.py']
+        for test in qualification_programs() or ['security/test_*.py']
     ]
     checks.extend((
         ('leak-guard', [python, 'security/leak_guard.py', *leak_args],

@@ -3,6 +3,7 @@
 
 import contextlib
 import hashlib
+import importlib.util
 import inspect
 import json
 import os
@@ -592,10 +593,11 @@ def test_every_test_file_in_the_tree_is_collected():
                             env=fixture_env(), text=True, capture_output=True)
     check("canonical gate inventory is readable", listed.returncode == 0, listed.stderr)
     collected = set(listed.stdout.splitlines())
-    for m in re.finditer(r"for t in ([^;]+); do", ci):
-        for pat in m.group(1).split():
-            if re.fullmatch(r"[A-Za-z0-9_./*?\[\]-]+", pat):
-                collected.update(p.relative_to(REPO).as_posix() for p in REPO.glob(pat))
+    spec = importlib.util.spec_from_file_location('ci_secret', REPO / 'ops/ci-secret.py')
+    assert spec is not None and spec.loader is not None
+    secret = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(secret)
+    collected.update(secret.qualification_programs())
 
     on_disk = _test_shaped_files()
     check("the tree still contains test files to collect", on_disk,
