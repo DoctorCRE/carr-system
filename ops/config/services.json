@@ -444,7 +444,7 @@
       "criticality": "high",
       "owner_actor": "joe",
       "repo_path": "bin/restore-rehearse.sh",
-      "runtime": "on-demand-script",
+      "runtime": "operator-invoked",
       "environments": [
         {
           "environment": "production",
