@@ -30,6 +30,7 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
     query: async (sql, params = []) => {
       queries.push({ sql, params });
       if (unavailable && sql.includes(unavailable)) throw new Error("fixture source unavailable");
+      if (sql.includes("calendar_deal_matches")) return { rows: [] };
       if (sql.includes("from v_today_triage")) return { rows: todayRows || [
         { item_kind: "next_action", owner: "joe", what: "Call the client", subject_name: "Example Practice" },
       ] };
@@ -420,6 +421,22 @@ test("morning-brief shows the partner's own published calendar for the next seve
   assert.ok(result.coverage.required_sections.some((row) => row.key === "calendar" && row.counts.items === 2));
 });
 
+test("morning-brief flags overlapping timed meetings without treating all-day entries as conflicts", async () => {
+  const now = Date.now();
+  const at = hours => new Date(now + hours * 3600000).toISOString();
+  const calendar = calendarFixture(now);
+  calendar.items = [
+    { start: at(1), end: at(3), title: "Synthetic first" },
+    { start: at(2), end: at(4), title: "Synthetic overlapping" },
+    { start: at(4), end: at(5), title: "Synthetic adjacent" },
+    { start: at(0), end: at(24), title: "Synthetic all day", all_day: true },
+  ];
+  const result = await executeRegisteredTool(client({ calendar }), JOE, "morning-brief", {});
+  const overlaps = Object.fromEntries(result.sections.calendar.items.map(item => [item.title, item.schedule_conflict]));
+  assert.deepEqual(overlaps, { "Synthetic all day": false, "Synthetic first": true,
+    "Synthetic overlapping": true, "Synthetic adjacent": false });
+});
+
 test("every known gap becomes a plain sentence and the section is partial, never ready", async () => {
   const warnings = [{ code: "responses_unverified" }, { code: "group_invites_not_shown" },
     { code: "undecoded", count: 3 }, { code: "time_changed", count: 1 }, { code: "recurring_unverified", count: 2 },
@@ -455,7 +472,7 @@ test("a stale, malformed or unreadable calendar is partial or unavailable, never
   const day = 86400000;
   const stale = await executeRegisteredTool(client({ calendar: calendarFixture(Date.now(), new Date(Date.now() - day).toISOString()) }), JOE, "morning-brief", {});
   assert.equal(stale.sections.calendar.state, "partial");
-  assert.deepEqual(stale.sections.calendar.sources, { outlook_calendar: { state: "stale" } });
+  assert.equal(stale.sections.calendar.sources.outlook_calendar.state, "stale");
   const broken = calendarFixture();
   broken.items.push({ start: "not a time", end: null, title: "" });
   const malformed = await executeRegisteredTool(client({ calendar: broken }), JOE, "morning-brief", {});
@@ -468,4 +485,29 @@ test("a stale, malformed or unreadable calendar is partial or unavailable, never
   }
   const failed = await executeRegisteredTool(client({ unavailable: "board_id=$3" }), JOE, "morning-brief", {});
   assert.equal(failed.sections.calendar.state, "unavailable");
+});
+
+test("morning-brief suggests open deals for meetings with an exact client email", async () => {
+  const c = client({ calendar: calendarFixture() });
+  const query = c.query;
+  c.query = async (sql, params) => sql.includes('calendar_deal_matches')
+    ? (c.queries.push({ sql, params }), { rows: [
+      { email: 'bo@example.test', id: 'deal-1', name: 'Synthetic Deal', client_ref: 'C-101' },
+      { email: 'bo@example.test', id: 'deal-2', name: 'Another Deal', client_ref: 'C-101' },
+    ] }) : query(sql, params);
+  const result = await executeRegisteredTool(c, JOE, 'morning-brief', {});
+  assert.deepEqual(result.sections.calendar.items[1].possible_deals, [
+    { id: 'deal-1', name: 'Synthetic Deal', client_ref: 'C-101' },
+    { id: 'deal-2', name: 'Another Deal', client_ref: 'C-101' },
+  ]);
+  assert.deepEqual(result.sections.calendar.items[0].possible_deals, []);
+  const lookup = c.queries.find(({ sql }) => sql.includes('calendar_deal_matches'));
+  assert.equal(lookup.params[1], 'joe');
+});
+
+test("morning-brief keeps meetings visible when deal suggestions cannot be read", async () => {
+  const result = await executeRegisteredTool(client({ calendar: calendarFixture(), unavailable: "calendar_deal_matches" }), JOE, "morning-brief", {});
+  assert.equal(result.sections.calendar.items.length, 2);
+  assert.equal(result.sections.calendar.state, "partial");
+  assert.equal(result.sections.calendar.sources.deal_suggestions.state, "unavailable");
 });

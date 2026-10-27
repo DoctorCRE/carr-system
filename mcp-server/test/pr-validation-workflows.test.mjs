@@ -59,8 +59,8 @@ for (const file of files) {
   });
   test(`${file}: readiness respects workflow subscriptions and drafts run only the sentinel`, () => {
     const ready = policy(workflow, context("pull_request", "ready_for_review"));
-    assert.equal(ready.triggers, file !== "ci.yml");
-    assert.deepEqual(ready.runnable, file === "ci.yml" ? [] : validationJobs);
+    assert.equal(ready.triggers, true);
+    assert.deepEqual(ready.runnable, validationJobs);
     const event = context("pull_request", "converted_to_draft");
     event.event.pull_request.draft = true;
     const draft = policy(workflow, event);
