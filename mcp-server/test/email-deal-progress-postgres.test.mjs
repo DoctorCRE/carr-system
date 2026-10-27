@@ -922,3 +922,32 @@ test('a proposal the deal has outgrown stays listed with its refusal so a partne
   assert.equal(item.preview, null);
   assert.equal(item.preview_error, 'email_deal_phase_not_eligible');
 });
+
+test('the quality report counts proposal outcomes by kind and lists Joe\'s corrections', async () => {
+  await c.query('delete from email_proposal');
+  const report = days => command('email-proposal-quality', days ? { days } : {}, actor, 'carr_reader');
+  const empty = await report();
+  assert.deepEqual(empty.kinds.map(k => [k.kind, k.proposed, k.dismiss_rate, k.over_threshold]),
+    [['phase_move', 0, null, false], ['next_step', 0, null, false]]);
+  const loi = await email();
+  const ask = await email(askQuote);
+  await record({ kind: 'phase_move', activity_id: loi.activity_id, evidence_quote: quote, confidence: 0.9 });
+  const step = await record({ kind: 'next_step', activity_id: ask.activity_id, evidence_quote: askQuote,
+    text: 'Send the floor plan', next_date: '2027-01-08', confidence: 0.5 });
+  let [move, next] = (await report()).kinds;
+  assert.deepEqual([move.proposed, move.pending, next.proposed, next.pending], [1, 1, 1, 1]);
+  await command('dismiss-email-proposal', { idempotency_key: randomUUID(), proposal_id: step.proposal_id,
+    base_version: 1, reason: 'Dell already sent it' }, { ...actor, slug: 'dell' }, 'carr_writer');
+  const [card] = await listed();
+  await confirm(card.preview, {}, actor, 'carr_writer');
+  const after = await report();
+  [move, next] = after.kinds;
+  assert.deepEqual([move.pending, move.confirmed, move.dismissed, move.dismiss_rate, move.confirmed_confidence], [0, 1, 0, 0, 0.9]);
+  assert.deepEqual([next.pending, next.confirmed, next.dismissed, next.dismiss_rate, next.dismissed_confidence], [0, 0, 1, 1, 0.5]);
+  assert.equal(next.over_threshold, false, 'one resolved proposal is too few to trip the threshold');
+  assert.deepEqual(after.corrections.map(row => [row.kind, row.deal_name, row.reason]),
+    [['next_step', 'Synthetic coastal purchase', 'Dell already sent it']]);
+  await c.query("update email_proposal set created_at=now()-interval '10 days'");
+  assert.equal((await report()).kinds.every(k => k.proposed === 0), true);
+  assert.equal((await report(30)).kinds[0].proposed, 1);
+});
