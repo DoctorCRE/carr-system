@@ -361,8 +361,7 @@ PYEOF
       || { failures="$failures gate-integrity"; tail -12 "$LOGDIR/safety-hooks.log" >&2; }
   fi
 
-  for inv in stale-count-check \
-             rule-load-layer-check rule-classification-parity-check \
+  for inv in rule-load-layer-check rule-classification-parity-check \
              selftest-git-isolation-check \
              sync-core-rule-ids rule-route-coverage \
              migration-order-gate \

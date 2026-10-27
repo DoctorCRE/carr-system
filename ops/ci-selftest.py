@@ -806,6 +806,29 @@ def test_fail_tail_withholds_the_window_when_it_cannot_redact():
     check("and where the captured log actually is",
           str(log) in out, out)
 
+def test_gates_exclude_prose_counts_but_enforce_rule_consistency():
+    with ci_fixture() as root:
+        (root / "hooks/gate-integrity.py").write_text("raise SystemExit(0)\n")
+        (root / "ops/stale-count-check.py").write_text(
+            "from pathlib import Path\nPath('prose-check-ran').touch()\nraise SystemExit(9)\n")
+        (root / "ops/stale-count-selftest.py").write_text("print('prose checker selftest ran')\n")
+        rule_marker = root / "rule-check-ran"
+        for status in (0, 7):
+            rule_marker.unlink(missing_ok=True)
+            (root / "ops/rule-load-layer-check.py").write_text(
+                "from pathlib import Path\nPath('rule-check-ran').touch()\n"
+                f"raise SystemExit({status})\n")
+            rc, out = run(["--strict", "--only", "gates"], root=root)
+            check(f"strict gates never invoke the prose count checker (rule exit={status})",
+                  not (root / "prose-check-ran").exists(), out)
+            check(f"strict gates retain the prose checker selftest (rule exit={status})",
+                  "prose checker selftest ran" in out, out)
+            check(f"strict gates invoke the rule consistency checker (rule exit={status})",
+                  rule_marker.exists(), out)
+            check(f"strict gates propagate rule consistency failures (rule exit={status})",
+                  rc == (1 if status else 0), out)
+
+
 def test_gates_never_run_the_production_diagnostic():
     with ci_fixture() as root:
         (root / "hooks/gate-integrity.py").write_text("raise SystemExit(0)\n")
@@ -1566,6 +1589,7 @@ def main(argv=None):
                test_a_failing_gates_output_is_printed_whole_when_it_is_short,
                test_a_long_failing_gate_log_is_tailed_and_still_redacted,
                test_fail_tail_withholds_the_window_when_it_cannot_redact,
+               test_gates_exclude_prose_counts_but_enforce_rule_consistency,
                test_gates_never_run_the_production_diagnostic,
                test_gates_report_every_completed_result_after_a_timeout,
                test_gates_selftests_have_a_process_group_watchdog,
