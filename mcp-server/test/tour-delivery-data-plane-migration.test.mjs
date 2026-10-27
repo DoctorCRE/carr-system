@@ -7,7 +7,7 @@ import test from "node:test";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const migration = readMigration(path.join(root, "migrations/0430_tour_delivery_data_plane.sql"));
-const ci = fs.readFileSync(path.join(root, "ops/ci.sh"), "utf8");
+const ci = fs.readFileSync(path.join(root, "ops/ci-migration.py"), "utf8");
 
 test("Tour delivery data plane implements every registered SQL seam", () => {
   for (const name of [

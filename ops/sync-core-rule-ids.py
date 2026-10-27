@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""sync-core-rule-ids.py — regenerate mcp-server/src/core-rule-ids.js from
+"""sync-core-rule-ids.py — regenerate mcp-server/src/core-rule-ids.ts from
 ops/config/rule-triage.v1.json (WR-000019 slice S11, boot diet).
 
 WHY A GENERATED JS MODULE INSTEAD OF A RUNTIME JSON READ. doctrine.js's
@@ -15,7 +15,7 @@ ops/config-as-code.py already uses for machine config (Joe, 2026-08-03:
 "shouldnt all code be in the repo? .json is code").
 
 THIS SCRIPT IS THE ONLY WAY THAT MODULE IS MEANT TO BE PRODUCED. Hand edits to
-mcp-server/src/core-rule-ids.js will be overwritten the next time this script runs.
+mcp-server/src/core-rule-ids.ts will be overwritten the next time this script runs.
 
 Usage:
     ./.venv/bin/python ops/sync-core-rule-ids.py            # regenerate
@@ -28,7 +28,7 @@ import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TRIAGE_PATH = os.path.join(REPO, "ops", "config", "rule-triage.v1.json")
-OUT_PATH = os.path.join(REPO, "mcp-server", "src", "core-rule-ids.js")
+OUT_PATH = os.path.join(REPO, "mcp-server", "src", "core-rule-ids.ts")
 
 
 def render(triage):
@@ -68,7 +68,7 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--check", action="store_true",
-                     help="exit 1 if mcp-server/src/core-rule-ids.js is stale")
+                     help="exit 1 if mcp-server/src/core-rule-ids.ts is stale")
     ap.add_argument("--triage", default=TRIAGE_PATH)
     ap.add_argument("--out", default=OUT_PATH)
     args = ap.parse_args(argv)

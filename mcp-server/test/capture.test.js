@@ -609,7 +609,7 @@ test("inner failure remains pending and meeting record appears only after a real
 test("capture SQL casts every temporal response and the contract has no transcript field", async () => {
   const source = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/capture.js", import.meta.url), "utf8"));
   assert.match(source, /to_jsonb\(state_at\)#>>'\{\}' as state_at/g);
-  const dealroom = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/dealroom.js", import.meta.url), "utf8"));
+  const dealroom = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/dealroom.ts", import.meta.url), "utf8"));
   assert.match(dealroom, /to_jsonb\(started_at\)#>>'\{\}' as started_at/);
   assert.match(dealroom, /to_jsonb\(state_at\)#>>'\{\}' as state_at/);
   const tools = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/tools.js", import.meta.url), "utf8"));

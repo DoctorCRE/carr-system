@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import { randomUUID } from 'node:crypto';
 import { TOOLS } from '../src/tools.js';
-import { networkStatement, projectNetwork } from '../src/relationship-network.js';
+import { networkStatement, projectNetwork } from '../src/relationship-network.ts';
 import { readBusinessRecord } from '../src/workspace-business-read.js';
 
 function loopback(t,flag){
