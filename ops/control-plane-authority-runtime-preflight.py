@@ -53,7 +53,6 @@ REQUIRED_AUTHORITY_FUNCTIONS = (
     "ops.accept_sourced_work_request_plan(text,integer,text,uuid)",
     "ops.accept_sourced_work_request_outcome_feedback(text,integer,text,uuid)",
     "ops.redeem_program6_browser_action_challenge(text,text,text,text,uuid)",
-    "ops.disable_legacy_schedule(text,text,text,text,text,text,text,text,text,text,text)",
 )
 BROAD_CREDENTIAL_KEYS = {
     "DATABASE_URL",

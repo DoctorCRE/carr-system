@@ -18,6 +18,21 @@ spec.loader.exec_module(shadow)
 
 
 class CurrentGrantCatalogTests(unittest.TestCase):
+    def test_retired_relation_grants_preserve_the_seal_and_refuse_reinstalled_grants(self):
+        sys.path.insert(0, str(ROOT / 'ops'))
+        from scac_mutation_db_inventory import digest, validate_registered_grants
+        grant = {'ingress_key': 'db-relation-acl:ops.provider_route:carr_writer:insert',
+                 'ingress_kind': 'db_relation_acl', 'relation': 'ops.provider_route',
+                 'relation_kind': 'r', 'grantee': 'carr_writer', 'privilege': 'insert', 'grantable': False}
+        projection = {name: [] for name in ('secdef_execute', 'relation_dml', 'column_dml')}
+        baseline = {name: {'count': len(rows), 'digest': digest(rows)}
+                    for name, rows in {**projection, 'relation_dml': [grant]}.items()}
+        contract = {'retired_relation_dml': [grant]}
+        validate_registered_grants(projection, baseline, contract)
+        for rows in ([grant], [{**grant, 'grantable': True}]):
+            with self.subTest(rows=rows), self.assertRaisesRegex(RuntimeError, 'retired grant is still installed'):
+                validate_registered_grants({**projection, 'relation_dml': rows}, baseline, contract)
+
     def test_exact_new_relation_grant_is_accounted_for_against_the_sealed_baseline(self):
         sys.path.insert(0, str(ROOT / 'ops'))
         from scac_mutation_db_inventory import validate_registered_grants
