@@ -858,6 +858,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "drop-action": {
+    "ingress_key": "mcp-tool:drop-action",
+    "source_locator": "mcp-server/src/action-closure.ts",
+    "schema_digest": "37bdfaed2e83c1ff6dea605289fad775ce558d9e9b0e8a3b052844576bbba880",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "dry-run-doctrine-gates": {
     "ingress_key": "mcp-tool:dry-run-doctrine-gates",
     "source_locator": "mcp-server/src/doctrine.js",
@@ -2653,6 +2663,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "40671356b4a627e0efe4b56dfe3ed6e18e8cfe823601c8a7e6ac20e798530771",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "resolve-critical-date": {
+    "ingress_key": "mcp-tool:resolve-critical-date",
+    "source_locator": "mcp-server/src/action-closure.ts",
+    "schema_digest": "41bc49bd69fc88114bbfd298dfd0ea096ec1ebecdeedaaa5502cda463b495cf2",
+    "write": true,
+    "human_only": true,
     "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
