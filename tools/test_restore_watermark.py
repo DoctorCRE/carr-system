@@ -1280,15 +1280,111 @@ class PinnedGh(unittest.TestCase):
         with mock.patch.object(rw, "_trusted_binary", lambda name: f"/pinned/{name}"):
             module = rw._status_module()
         calls = []
-        with mock.patch.object(rw.subprocess, "run", lambda argv, *a, **k: calls.append(argv)):
-            module.subprocess.run(["gh", "api", "/x"], capture_output=True)
+        with mock.patch.object(rw.subprocess, "run",
+                               lambda argv, *a, **k: calls.append(argv) or subprocess.CompletedProcess(argv, 0, "", "")):
+            module.subprocess.run(["gh", "api", "/x"], capture_output=True, text=True)
             module.subprocess.run(["git", "status"])
-        self.assertEqual(calls, [["/pinned/gh", "api", "/x"], ["git", "status"]])
+        self.assertEqual(calls, [["/pinned/gh", "api", "--include", "/x"],["git", "status"]])
         self.assertIs(module.subprocess.TimeoutExpired, subprocess.TimeoutExpired)
         # with no trusted gh installed, the module cannot be loaded at all
         with mock.patch.object(rw, "TRUSTED_BIN_DIRS", ("/nonexistent-carr-bin",)):
             with self.assertRaisesRegex(ValueError, "gh is not installed"):
                 rw._status_module()
+
+
+SECONDARY_LIMIT_STDERR = ("gh: You have exceeded a secondary rate limit. Please wait a few minutes "
+                          "before you try again. (HTTP 403)\n")
+
+
+def _gh_reply(status: str, body: str, *, retry_after: str | None = None, returncode: int = 0, stderr: str = ""):
+    headers = [f"HTTP/2.0 {status}", "Content-Type: application/json"]
+    if retry_after is not None:
+        headers.append(f"Retry-After: {retry_after}")
+    return subprocess.CompletedProcess([], returncode, "\n".join(headers) + "\n\n" + body, stderr)
+
+
+class GhRateLimit(unittest.TestCase):
+    """WR-000560: a rehearsal's GitHub reads wait out a rate limit instead of failing hard."""
+
+    def setUp(self):
+        with mock.patch.object(rw, "_trusted_binary", lambda name: f"/pinned/{name}"):
+            self.module = rw._status_module()
+        self.waits: list[float] = []
+        patcher = mock.patch.object(rw, "_rate_limit_sleep", self.waits.append)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def drive(self, replies):
+        calls = []
+
+        def run(argv, *a, **k):
+            calls.append(argv)
+            return replies.pop(0)
+        with mock.patch.object(rw.subprocess, "run", run):
+            got = self.module.subprocess.run(["gh", "api", "/x"], capture_output=True, text=True)
+        return got, calls
+
+    def test_secondary_limit_honours_retry_after_then_returns_the_body_alone(self):
+        got, calls = self.drive([
+            _gh_reply("403 Forbidden", '{"message":"secondary"}', retry_after="7", returncode=1,
+                      stderr=SECONDARY_LIMIT_STDERR),
+            _gh_reply("200 OK", '{"ok":true}'),
+        ])
+        self.assertEqual(self.waits, [7])
+        self.assertEqual(got.returncode, 0)
+        self.assertEqual(got.stdout, '{"ok":true}')
+        self.assertEqual(calls, [["/pinned/gh", "api", "--include", "/x"]] * 2)
+
+    def test_429_without_retry_after_waits_60_seconds(self):
+        got, _ = self.drive([
+            _gh_reply("429 Too Many Requests", "{}", returncode=1, stderr="gh: Too Many Requests (HTTP 429)\n"),
+            _gh_reply("200 OK", "[]"),
+        ])
+        self.assertEqual(self.waits, [60])
+        self.assertEqual(got.stdout, "[]")
+
+    def test_at_most_three_retries_then_the_403_surfaces(self):
+        limited = [_gh_reply("403 Forbidden", "{}", returncode=1, stderr=SECONDARY_LIMIT_STDERR) for _ in range(5)]
+        got, calls = self.drive(limited)
+        self.assertEqual(len(calls), 4)
+        self.assertEqual(self.waits, [60, 60, 60])
+        self.assertEqual(got.returncode, 1)
+        self.assertIn("secondary rate limit", got.stderr)
+
+    def test_a_plain_403_is_not_retried(self):
+        got, calls = self.drive([_gh_reply("403 Forbidden", "{}", returncode=1,
+                                           stderr="gh: Resource not accessible by integration (HTTP 403)\n")])
+        self.assertEqual((len(calls), self.waits, got.returncode), (1, [], 1))
+
+    def test_the_status_module_api_reads_through_a_secondary_limit(self):
+        replies = [_gh_reply("403 Forbidden", "{}", retry_after="2", returncode=1, stderr=SECONDARY_LIMIT_STDERR),
+                   _gh_reply("200 OK", '{"id": 5}')]
+        with mock.patch.object(rw.subprocess, "run", lambda argv, *a, **k: replies.pop(0)), \
+                mock.patch.object(self.module.shutil, "which", return_value="/pinned/gh"):
+            self.assertEqual(self.module.api("/repos/o/r/actions/runs/5"), {"id": 5})
+        self.assertEqual(self.waits, [2])
+
+    def test_the_artifact_download_retries_a_secondary_limit(self):
+        import io
+        import zipfile as zf
+        buf = io.BytesIO()
+        with zf.ZipFile(buf, "w") as z:
+            z.writestr("carr-20261025.sql.age", b"age")
+        attempts = []
+
+        def run(argv, *a, stdout=None, **k):
+            attempts.append(argv)
+            if len(attempts) == 1:
+                stdout.write(b"partial")
+                return subprocess.CompletedProcess(argv, 1, None, SECONDARY_LIMIT_STDERR.encode())
+            stdout.write(buf.getvalue())
+            return subprocess.CompletedProcess(argv, 0, None, b"")
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(rw, "_trusted_binary", lambda name: f"/pinned/{name}"), \
+                mock.patch.object(rw.subprocess, "run", run):
+            archive, dump = rw.download_copy("o/r", 9, Path(tmp))
+            self.assertEqual(dump.read_bytes(), b"age")
+        self.assertEqual((len(attempts), self.waits), (2, [60]))
 
 
 def _script_function(name: str) -> str:
