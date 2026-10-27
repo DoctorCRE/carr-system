@@ -1,3 +1,4 @@
+// Tests recording and reading Joe answers on Work Requests.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";

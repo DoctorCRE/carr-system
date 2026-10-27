@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Smoke test the conversation server and its turn lifecycle.
 set -euo pipefail
 
 BIN="$(cd "$(dirname "$0")" && pwd)"

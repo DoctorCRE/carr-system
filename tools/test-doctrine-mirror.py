@@ -1,6 +1,7 @@
 # Test the doctrine mirror: file hashing, excluded tables and atomic tree swaps.
 import hashlib
 import json
+import tempfile
 from datetime import date, datetime, timezone
 from pathlib import Path
 from uuid import UUID
@@ -285,4 +286,6 @@ def test_cleanup_does_not_remove_unrelated_previous_paths(tmp_path: Path):
 
 
 if __name__ == "__main__":
-    raise SystemExit(pytest.main([__file__]))
+    with tempfile.TemporaryDirectory() as directory:
+        result = pytest.main([__file__, f"--basetemp={directory}/pytest"])
+    raise SystemExit(result)

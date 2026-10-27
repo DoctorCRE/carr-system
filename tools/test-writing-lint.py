@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test writing lint attribution checks.
 import importlib.util
 from pathlib import Path
 import subprocess

@@ -1,3 +1,4 @@
+// Launch a disposable Chrome instance for room bridge CDP tests.
 import { launchChrome } from "../../mcp-server/test/helpers/chrome-launch.mjs";
 
 const disconnected = new Promise(resolve => {

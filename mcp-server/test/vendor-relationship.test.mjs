@@ -1,3 +1,4 @@
+// Tests vendor relationship trust, evidence, overrides, and merging.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { computedTrust, enrichRelationship, trustedOverride, dealEvidenceEntries, mergeRelationshipFields } from '../src/vendor-relationship.js';

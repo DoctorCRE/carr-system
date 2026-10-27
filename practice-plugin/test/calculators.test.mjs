@@ -1,3 +1,4 @@
+// Test runway, conversion, and sale readiness calculations.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Ajv from 'ajv';
