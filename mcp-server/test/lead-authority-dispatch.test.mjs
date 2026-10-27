@@ -15,7 +15,7 @@ function syntheticClient({ undo = false, version = 2, latestMove = moveId, appro
   const writes = [];
   return { writes, query: async (sql, params = []) => {
     if (/select d\.\* from lead_contact_draft/.test(sql))
-      return { rows: [{ id: draftId, lead_id: leadId, approved_at: approved ? '2026-10-01T12:00:00Z' : null }] };
+      return { rows: [{ id: draftId, lead_id: leadId, revision: 1, approved_at: approved ? '2026-10-01T12:00:00Z' : null }] };
     if (/select m\.\*,l\.(version|stage)/.test(sql))
       return { rows: [{ id: moveId, lead_id: leadId, version, status: undo ? 'applied' : 'proposed',
         stage: undo ? 'engaged' : 'qualified', from_stage: 'qualified', to_stage: 'engaged',
@@ -38,8 +38,8 @@ function syntheticClient({ undo = false, version = 2, latestMove = moveId, appro
 test('verified sponsored draft approval completes without sending or moving the lead', async () => {
   const db = syntheticClient();
   const result = await executeRegisteredTool(db, sponsored(), 'approve-lead-draft',
-    { idempotency_key: key, draft_id: draftId });
-  assert.deepEqual(result, { ok: true, draft_id: draftId, approved: true, sent: false });
+    { idempotency_key: key, draft_id: draftId, revision: 1 });
+  assert.deepEqual(result, { ok: true, draft_id: draftId, revision: 1, approved: true, sent: false });
   assert.equal(db.writes.filter(({ sql }) => /^update lead set/.test(sql)).length, 0);
   assert.equal(db.writes.find(({ sql }) => /^update lead_contact_draft/.test(sql)).params[1], actorId);
 });
@@ -57,7 +57,7 @@ test('verified sponsored undo restores the latest move', async () => {
 });
 
 const cases = [
-  ['approve-lead-draft', { draft_id: draftId }, { ok: true, draft_id: draftId, approved: true, sent: false }],
+  ['approve-lead-draft', { draft_id: draftId, revision: 1 }, { ok: true, draft_id: draftId, revision: 1, approved: true, sent: false }],
   ['approve-lead-move', { move_id: moveId, base_version: 2 }, { ok: true, stage: 'engaged', evidence_ref: 'fixture:lead-contact' }],
   ['undo-lead-move', { move_id: moveId, base_version: 2 }, { ok: true, stage: 'qualified', undone_move_id: moveId, undone_by: actorId }],
 ];
@@ -119,6 +119,6 @@ test('sponsored undo refuses a newer stage event without mutation', async () => 
 test('sponsored draft approval still refuses an already approved draft without mutation', async () => {
   const db = syntheticClient({ approved: true });
   await assert.rejects(executeRegisteredTool(db, sponsored(), 'approve-lead-draft',
-    { idempotency_key: key, draft_id: draftId }), error => error.payload?.error === 'draft_not_pending');
+    { idempotency_key: key, draft_id: draftId, revision: 1 }), error => error.payload?.error === 'draft_not_pending');
   assert.deepEqual(db.writes, []);
 });

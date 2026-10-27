@@ -5,6 +5,7 @@ import { canExercisePartnerAuthority } from "./partner-authority.js";
 import { isCalendarDate } from "./calendar-date.ts";
 export const LEAD_AUTOMATION_CONTRACT = "lead-automation.v1";
 const bodyDigest = body => createHash("sha256").update(body).digest("hex");
+const DRAFT_SUBJECT_MAX = 200, DRAFT_BODY_MAX = 5000, DRAFT_BATCH_MAX = 50;
 const ACTIVE = ["new", "qualified", "outreach_active", "engaged"];
 const ARCHIVABLE = [...ACTIVE, "nurture_drip", "opportunity"];
 const ARCHIVE_REASONS = { retired: "Retired", sold_to_platform: "Practice sold to a platform", another_broker: "Signed with another broker" };
@@ -116,6 +117,15 @@ const DRAFTS_SQL = `select * from lead_contact_draft order by created_at,id`;
 export function leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoices }) {
   const fail = error => { throw new ToolError({ error }); };
   const schema = properties => ({ type: "object", additionalProperties: false, properties });
+  // Locks the lead, party and draft rows in id order so concurrent edits and batches serialise.
+  const lockPendingDrafts = async (c, ids) => (await c.query(`select d.* from lead_contact_draft d join lead l on l.id=d.lead_id
+    join party p on p.id=l.party_id where d.id=any($1::uuid[]) and d.party_id=l.party_id
+    and l.stage='qualified' and not l.suppressed and p.merged_into is null and p.deleted_at is null and p.contact_state='active'
+    order by d.id for update of l,p,d`, [ids])).rows;
+  const approveDraft = async (c, actor, d) => {
+    await c.query("update lead_contact_draft set approved_at=now(),approved_by=$2 where id=$1",[d.id,actor.id]);
+    await writeEvent(c,actor,"approve-lead-draft","lead",d.lead_id,{ new: { draft_id: d.id, revision: d.revision, approved: true, sent: false } });
+  };
   async function snapshot(c, lock = false) {
     const now = (await c.query("select now() as now")).rows[0].now;
     const leads = (await c.query(LEADS_SQL + (lock ? " for update of l,p" : ""))).rows;
@@ -244,18 +254,53 @@ export function leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoi
           join lead l on l.id=m.lead_id join party p on p.id=l.party_id
           where m.status='proposed' and m.from_stage=l.stage and not l.suppressed and p.merged_into is null and p.deleted_at is null and p.contact_state='active' order by m.created_at,m.id`)).rows }),
     },
+    "edit-lead-draft": {
+      write: true, humanOnly: true, description: "Edit the subject or body of one pending first-contact draft at the revision the partner read. The edit increments the revision and clears any approval; it sends nothing and does not move the lead.",
+      inputSchema: { ...schema({ idempotency_key: { type: "string" }, draft_id: { type: "string", format: "uuid" }, base_revision: { type: "integer", minimum: 1 },
+        subject: { type: "string", maxLength: DRAFT_SUBJECT_MAX }, body: { type: "string", maxLength: DRAFT_BODY_MAX } }), required: ["idempotency_key","draft_id","base_revision"] },
+      handler: (c,actor,args) => withEnvelope(c,actor,"edit-lead-draft",args,async () => {
+        if (!canExercisePartnerAuthority(actor)) fail("human_approval_required");
+        const [d] = await lockPendingDrafts(c,[args.draft_id]);
+        if (!d) fail("draft_not_pending");
+        if (d.revision !== args.base_revision) fail("stale_draft_revision");
+        const next = { subject: args.subject ?? d.subject, body: args.body ?? d.body };
+        for (const [field, max] of [["subject", DRAFT_SUBJECT_MAX], ["body", DRAFT_BODY_MAX]])
+          if (typeof next[field] !== "string" || !next[field].trim() || next[field].length > max) fail("invalid_draft_content");
+        if (next.subject === d.subject && next.body === d.body) fail("draft_unchanged");
+        await c.query("update lead_contact_draft set subject=$2,body=$3,revision=revision+1,approved_at=null,approved_by=null where id=$1",[d.id,next.subject,next.body]);
+        await writeEvent(c,actor,"edit-lead-draft","lead",d.lead_id,{ old: { draft_id: d.id, revision: d.revision, subject: d.subject, body: d.body },
+          new: { draft_id: d.id, revision: d.revision + 1, subject: next.subject, body: next.body, approved: false, sent: false } });
+        return { ok: true, draft_id: d.id, revision: d.revision + 1, ...next, approved: false, sent: false };
+      }),
+    },
     "approve-lead-draft": {
-      write: true, humanOnly: true, description: "One-tap approval of the displayed first-contact draft. It remains a draft; this verb sends nothing and does not move the lead.",
-      inputSchema: { ...schema({ idempotency_key: { type: "string" }, draft_id: { type: "string", format: "uuid" } }), required: ["idempotency_key","draft_id"] },
+      write: true, humanOnly: true, description: "One-tap approval of the displayed first-contact draft at the revision the partner read. It remains a draft; this verb sends nothing and does not move the lead.",
+      inputSchema: { ...schema({ idempotency_key: { type: "string" }, draft_id: { type: "string", format: "uuid" }, revision: { type: "integer", minimum: 1 } }), required: ["idempotency_key","draft_id","revision"] },
       handler: (c,actor,args) => withEnvelope(c,actor,"approve-lead-draft",args,async () => {
         if (!canExercisePartnerAuthority(actor)) fail("human_approval_required");
-        const d = (await c.query(`select d.* from lead_contact_draft d join lead l on l.id=d.lead_id
-          join party p on p.id=l.party_id where d.id=$1 and d.party_id=l.party_id
-          and l.stage='qualified' and not l.suppressed and p.merged_into is null and p.deleted_at is null and p.contact_state='active' for update of l,p,d`, [args.draft_id])).rows[0];
+        const [d] = await lockPendingDrafts(c,[args.draft_id]);
         if (!d || d.approved_at) fail("draft_not_pending");
-        await c.query("update lead_contact_draft set approved_at=now(),approved_by=$2 where id=$1",[d.id,actor.id]);
-        await writeEvent(c,actor,"approve-lead-draft","lead",d.lead_id,{ new: { draft_id: d.id, approved: true, sent: false } });
-        return { ok: true, draft_id: d.id, approved: true, sent: false };
+        if (d.revision !== args.revision) fail("stale_draft_revision");
+        await approveDraft(c,actor,d);
+        return { ok: true, draft_id: d.id, revision: d.revision, approved: true, sent: false };
+      }),
+    },
+    "approve-lead-drafts": {
+      write: true, humanOnly: true, description: "Approve exactly the displayed batch of first-contact drafts, each at the revision the partner read. All or none: any draft that is missing, already approved, or edited since fails the whole batch. Nothing is sent.",
+      inputSchema: { ...schema({ idempotency_key: { type: "string" }, drafts: { type: "array", minItems: 1, maxItems: DRAFT_BATCH_MAX,
+        items: { type: "object", additionalProperties: false, properties: { draft_id: { type: "string", format: "uuid" }, revision: { type: "integer", minimum: 1 } }, required: ["draft_id","revision"] } } }), required: ["idempotency_key","drafts"] },
+      handler: (c,actor,args) => withEnvelope(c,actor,"approve-lead-drafts",args,async () => {
+        if (!canExercisePartnerAuthority(actor)) fail("human_approval_required");
+        const ids = args.drafts.map(d => d.draft_id);
+        if (new Set(ids).size !== ids.length) fail("duplicate_draft");
+        const locked = new Map((await lockPendingDrafts(c,ids)).map(d => [d.id,d]));
+        const stale = args.drafts.filter(({ draft_id, revision }) => {
+          const d = locked.get(draft_id);
+          return !d || d.approved_at || d.revision !== revision;
+        }).map(d => d.draft_id);
+        if (stale.length) throw new ToolError({ error: "stale_draft_batch", stale_draft_ids: stale });
+        for (const { draft_id } of args.drafts) await approveDraft(c,actor,locked.get(draft_id));
+        return { ok: true, approved: args.drafts.map(({ draft_id, revision }) => ({ draft_id, revision })), sent: false };
       }),
     },
     "approve-lead-move": {
