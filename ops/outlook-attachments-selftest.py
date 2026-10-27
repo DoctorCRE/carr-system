@@ -18,6 +18,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib import outlook_attachments as att
+from lib.outlook_research_cache import select_paths
 
 PDF = b'%PDF-1.7\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n'
 OLE = b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1' + b'\0' * 504
@@ -215,6 +216,30 @@ class ExtractTest(unittest.TestCase):
         subprocess.run([sys.executable, '-m', 'lib.outlook_attachments', str(self.db), str(self.files),
                         str(self.root / 'out'), '1'], cwd=ROOT, capture_output=True, text=True, check=True)
         self.assertEqual(len(list((self.root / 'out').iterdir())), 1)
+
+
+class CacheSelectionTest(unittest.TestCase):
+    def test_only_unambiguous_account_owned_paths_are_selected(self):
+        db = sqlite3.connect(':memory:')
+        db.executescript('''
+        CREATE TABLE message_keys(message_id INTEGER, local_key INTEGER);
+        CREATE TABLE message_folders(message_id INTEGER, folder_id INTEGER);
+        CREATE TABLE folders(id INTEGER, account_id INTEGER);
+        CREATE TABLE attachments(id INTEGER, message_key INTEGER, path TEXT);
+        INSERT INTO folders VALUES (1, 10), (2, 20);
+        INSERT INTO message_keys VALUES (1, 101), (2, 102), (3, 103), (4, 104), (5, 105), (6, 106), (7, 107), (8, 107);
+        INSERT INTO message_folders VALUES (1, 1), (2, 2), (3, 1), (3, 2), (5, 1), (6, 2), (7, 1), (8, 1);
+        INSERT INTO attachments VALUES
+          (1, 101, '~/Files/S0/1/Attachments/1/test.pdf'),
+          (2, 102, '~/Files/S0/1/Attachments/1/other.pdf'),
+          (3, 103, '~/Files/S0/1/Attachments/1/mixed.pdf'),
+          (4, 104, '~/Files/S0/1/Attachments/1/unknown.pdf'),
+          (5, 105, '~/Files/S0/1/Attachments/1/shared.pdf'),
+          (6, 106, '~/Files/S0/1/Attachments/1/shared.pdf'),
+          (7, 107, '~/Files/S0/1/Attachments/1/ambiguous.pdf'),
+          (8, 101, '~/Files/S0/1/Attachments/1/../../escape.pdf');
+        ''')
+        self.assertEqual(select_paths(db, 10), {'~/Files/S0/1/Attachments/1/test.pdf'})
 
 
 if __name__ == '__main__':
