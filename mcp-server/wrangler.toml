@@ -166,9 +166,9 @@ fallthrough = true
 # /release reports the production identity stamped by the deployment workflow.
 [vars]
 CARR_ENV = "production"
-AI_DAILY_NEURON_BUDGET = "8000"
 APP_HOST = "app.doctorcre.com"
 LEGACY_DEALROOM_HOST = "dealroom.doctorcre.com"
+AI_DAILY_NEURON_BUDGET = "8000"
 # A reviewed, public deployment setting. Program 6 is enabled only through the
 # immutable release that fingerprints this exact config value; the shared
 # parser still fails closed for a missing or non-literal value.
@@ -268,9 +268,9 @@ routes = []
 # be repeated here when staging needs it.
 [env.staging.vars]
 CARR_ENV = "staging"
-AI_DAILY_NEURON_BUDGET = "8000"
 APP_HOST = "carr-mcp-staging.joe-bookout-carr-us.workers.dev"
 DOCTORCRE_APP_HOST = "doctorcre-app-staging.joe-bookout-carr-us.workers.dev"
+AI_DAILY_NEURON_BUDGET = "8000"
 CARR_MCP_ALLOWED_ORIGINS = '["https://carr-mcp-staging.joe-bookout-carr-us.workers.dev","https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev"]'
 DEALROOM_PROGRAM6_ACTIONS_ENABLED = "true"
 WORKSPACE_COMMAND_CENTER_READ_ENABLED = "true"
