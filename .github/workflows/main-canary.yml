@@ -42,17 +42,30 @@ jobs:
   classes:
     needs: evidence
     if: ${{ always() && (needs.evidence.result != 'success' || needs.evidence.outputs.reused != 'true') }}
-    name: ops/ci.sh --strict --only ${{ matrix.classes }}
+    name: ${{ matrix.gate_shard == 2 && matrix.job_names.gates_shard_2.name || matrix.job_names[matrix.classes].name }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
+        gate_shard: [1, 2]
         classes:
           - "pushfloor unit types contract secret binding artifact freshness"
           - "gates"
           - "migration"
           - "hxprobe"
           - "dependency"
+        job_names:
+          - migration: {name: "ops/ci.sh --strict --only migration", classes: "migration"}
+            "pushfloor unit types contract secret binding artifact freshness": {name: "ops/ci.sh --strict --only pushfloor unit types contract secret binding artifact freshness", classes: "pushfloor unit types contract secret binding artifact freshness"}
+            gates: {name: "ops/ci.sh --strict --only gates", classes: "gates"}
+            gates_shard_2: {name: "Gates selftests shard 2 of 2", classes: "gates"}
+            hxprobe: {name: "ops/ci.sh --strict --only hxprobe", classes: "hxprobe"}
+            dependency: {name: "ops/ci.sh --strict --only dependency", classes: "dependency"}
+        exclude:
+          - {classes: "dependency", gate_shard: 2}
+          - {classes: "pushfloor unit types contract secret binding artifact freshness", gate_shard: 2}
+          - {classes: "migration", gate_shard: 2}
+          - {classes: "hxprobe", gate_shard: 2}
     timeout-minutes: ${{ matrix.classes == 'migration' && 45 || 20 }}
 
     services:
@@ -152,7 +165,7 @@ jobs:
              end \$\$;"
 
       - name: Verify edge incident delivery
-        if: matrix.classes == 'gates'
+        if: matrix.classes == 'gates' && matrix.gate_shard == 1
         run: python3 test/ci-noise-incident-test.py
 
       - name: Run this group's check classes
@@ -171,7 +184,12 @@ jobs:
           # one download and one commit away from fixed.
           CARR_SHADOW_ARTIFACT_DIR: ${{ runner.temp }}/migration-shadow
           CARR_CI_PROGRAM_RECORDS: ${{ runner.temp }}/ci-programs.json
-        run: ops/ci.sh --strict --only "${{ matrix.classes }}"
+        run: |
+          if [ "${{ matrix.classes }}" = gates ]; then
+            ops/ci.sh --strict --only gates --gate-shard "${{ matrix.gate_shard }}/2"
+          else
+            ops/ci.sh --strict --only "${{ matrix.classes }}"
+          fi
       - name: Upload the migration shadow's regenerated db/schema.sql
         if: ${{ failure() && contains(matrix.classes, 'migration') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

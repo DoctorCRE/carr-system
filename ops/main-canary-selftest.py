@@ -61,13 +61,22 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
     classes = main['jobs']['classes']
     check('main has the identical parallel class set as PR CI',
           sorted(classes['strategy']['matrix']['classes']) == sorted(pr['jobs']['classes']['strategy']['matrix']['classes'])
-          and 'exclude' not in classes['strategy']['matrix'])
+          and classes['strategy']['matrix']['gate_shard'] == [1, 2]
+          and classes['strategy']['matrix']['exclude'] == pr['jobs']['classes']['strategy']['matrix']['exclude'])
+    check('main uses the same distinct gate shard job names as PR CI',
+          classes['name'] == pr['jobs']['classes']['name']
+          and classes['strategy']['matrix']['job_names'] == pr['jobs']['classes']['strategy']['matrix']['job_names'])
     check('all classes run unless exact-tree proof succeeded',
           classes.get('if') == "${{ always() && (needs.evidence.result != 'success' || needs.evidence.outputs.reused != 'true') }}")
     main_steps = classes['steps']
     pr_steps = pr['jobs']['classes']['steps']
+    check('main partitions gates with the same shard interface as PR CI',
+          all(any('ops/ci.sh --strict --only gates --gate-shard "${{ matrix.gate_shard }}/2"' in st.get('run', '') for st in steps)
+              for steps in (main_steps, pr_steps))
+          and any(st.get('if') == "matrix.classes == 'gates' && matrix.gate_shard == 1"
+                  and st.get('run') == 'python3 test/ci-noise-incident-test.py' for st in main_steps))
     check('main retains the full default class while PR partitions the same proof',
-          any(st.get('run') == 'ops/ci.sh --strict --only "${{ matrix.classes }}"' for st in main_steps)
+          any('ops/ci.sh --strict --only "${{ matrix.classes }}"' in st.get('run', '') for st in main_steps)
           and any('--migration-part proofs' in st.get('run', '') for st in pr_steps)
           and set(pr['jobs']['migration-fixtures']['strategy']['matrix']['part'])
           == {'reconstruction', 'equivalence', 'shadow', 'gates', 'acceptance'})
@@ -153,7 +162,7 @@ def test_role_migration_fixtures_have_postgresql_17_server_binaries():
         check(f"{path.name} exposes PG17 binaries to the shared discovery helper",
               'echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"' in install_text)
         check(f"{path.name} provisions PG17 before check execution",
-              0 <= install < y.find("run: ops/ci.sh --strict"))
+              0 <= install < y.find("- name: Run this group's check classes"))
 
 
 def test_a_red_canary_stays_red_and_names_main():

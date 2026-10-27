@@ -86,13 +86,14 @@ audio. This is channel attribution, not biometric speaker recognition, and no
 third-party voiceprint is created or retained.
 
 The post-call extraction/report/draft layer is specified in
-`specs/post-call-workflow-2026-08-10.md`. For a weekly call the Deal Room
-supplies the exact, short-lived deal context index (`POST /api/call-context`)
-from the record layer's `get-call-context` verb; without it the local report
-waits in `awaiting_context`. The Deal Room sends it at start and again whenever
-it sees a weekly session still waiting, so a context that arrives after the
-transcript still produces the review pack. Nothing from the pack is written to
-the record, and no Outlook draft is created, until a partner approves that item.
+`specs/post-call-workflow-2026-08-10.md`. When a weekly transcript is ready,
+the post-call worker fetches missing context through the existing local verb
+route. It reads active deal IDs from `deal-room-board`, then their exact index
+from `get-call-context`. A failed fetch leaves a reason in `post-call.json` and
+the existing capture-poll sweep retries it. Deal Room can still supply context
+through `POST /api/call-context`; the first stored index wins and processing
+runs once. Confident next-step and phase changes follow the existing automatic
+apply checks. Other proposals require review, and Outlook emails remain drafts.
 
 ## Phase B — quill-dictate (system-wide dictation to the active text box)
 
