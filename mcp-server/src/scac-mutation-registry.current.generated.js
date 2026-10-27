@@ -349,7 +349,17 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "approve-lead-draft": {
     "ingress_key": "mcp-tool:approve-lead-draft",
     "source_locator": "mcp-server/src/lead-automation.js",
-    "schema_digest": "3636826f538688e10c81b7489e650371125a33ae7a1f42a643f753cf2eb889a5",
+    "schema_digest": "d1ac3f56428f038a8c2d05c0c37c7ff3aaeab73008c623f88af0f38d94d4f04a",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "approve-lead-drafts": {
+    "ingress_key": "mcp-tool:approve-lead-drafts",
+    "source_locator": "mcp-server/src/lead-automation.js",
+    "schema_digest": "f0e0740d13b71866fad80e7dc88c28529b2295b62eac64b8be4c59c7c7ff0cfc",
     "write": true,
     "human_only": true,
     "human_caller_only": false,
@@ -884,6 +894,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "b28351739140bb7b2f367ef0765a89a16e2146a6495e9c5136cd3ee9b2fa6c40",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "edit-lead-draft": {
+    "ingress_key": "mcp-tool:edit-lead-draft",
+    "source_locator": "mcp-server/src/lead-automation.js",
+    "schema_digest": "6126dde63ec6ace85b61c6441c4bbc1e27f198c611d881312f0924c9dbc1dbe3",
+    "write": true,
+    "human_only": true,
     "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []

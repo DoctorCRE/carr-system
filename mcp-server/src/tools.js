@@ -63,6 +63,7 @@ import { tourArtifactTools } from "./tour-artifacts.js";
 import { DEAL_ROOM_FIELDS, assertDealRoomField, stripDealPlaceholders } from "./dealroom.js";
 import { authenticatedIdentity, authorizationClassForActor, organizationTenantForActor,
          permittedActionOwnerSlugs, personalScopeForActor } from "./identity.js";
+import { automaticApplyHold } from "./call-auto-apply.js";
 import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
 import { isPersonalRecordOwner } from "./personal-record-ownership.ts";
 import { assertRegisteredOperation, mutationManifestIdentity, MutationRegistryRefusal } from "./mutation-registry.js";
@@ -9738,6 +9739,9 @@ registerTools({
           !["next_step", "phase_move"].includes(candidate.kind)))
         throw new ToolError({ error: "automatic_apply_not_allowed", kind: candidate.kind,
           hint: "only a partner's own Call Mode may apply a post-call next step or phase automatically" });
+      const hold = automatic ? automaticApplyHold(candidate) : null;
+      if (hold) throw new ToolError({ error: "below_confidence_bar", kind: candidate.kind, reason: hold,
+        hint: "leave it as a card for Joe or Dell; nothing was changed" });
 
       const verbByKind = {
         phase_move: "patch-deal-field",
