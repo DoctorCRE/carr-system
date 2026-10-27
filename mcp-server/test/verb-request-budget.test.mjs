@@ -13,6 +13,7 @@ function request(name = "list-verbs", args = {}, query = "") {
 
 test("exhausted verb budget returns 429 before any application database or AI access", async () => {
   const environment = {
+    VERB_REQUEST_BUDGET_HUMAN: { limit: async () => ({ success: true }) },
     VERB_REQUEST_BUDGET: {
       idFromName: name => name,
       get: () => ({ fetch: async () => Response.json({ allowed: false, retryAfter: 17 }) }),
@@ -33,6 +34,7 @@ test("limiter binding failures refuse without reaching application dependencies"
     get: () => ({ fetch: async () => { throw new Error("unavailable"); } }),
   }]) {
     const response = await dispatch(request("standing-context"), {
+      VERB_REQUEST_BUDGET_AGENT: { limit: async () => ({ success: true }) },
       VERB_REQUEST_BUDGET: binding,
       get DATABASE_URL_READER() { assert.fail("unavailable limiter reached database"); },
       get DATABASE_URL_WRITER() { assert.fail("unavailable limiter reached tracing database"); },
@@ -42,7 +44,6 @@ test("limiter binding failures refuse without reaching application dependencies"
     assert.equal((await response.json()).error, "verb_request_budget_unavailable");
   }
 });
-
 
 test("edge binding refusal makes no billed Durable Object request or application call", async () => {
   let objectRequests = 0;

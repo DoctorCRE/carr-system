@@ -1,3 +1,4 @@
+// Bound authenticated verb work before application database or AI access.
 import { isKnownPartner, organizationTenantForActor } from "./identity.js";
 
 const PERIOD_MS = 60_000;
@@ -40,14 +41,18 @@ function refused(error, retryAfter) {
 }
 
 export async function verbRequestBudgetRefusal(env, actor, sessionKey) {
-  const kind = actor?.human === true && isKnownPartner(actor.slug) ? "human" : "agent";
-  const principal = kind === "human" ? [actor.slug, sessionKey || "oauth"]
+  const kind = sessionKey && actor?.human === true && isKnownPartner(actor.slug) ? "human" : "agent";
+  const principal = kind === "human" ? [actor.slug, sessionKey]
     : [actor?.slug, actor?.sponsoring_human_slug || null];
   try {
     if (typeof actor?.slug !== "string" || !actor.slug) throw new Error("Missing authenticated principal");
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(
       JSON.stringify([organizationTenantForActor(actor), kind, principal])));
     const key = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+    const edge = kind === "human" ? env.VERB_REQUEST_BUDGET_HUMAN : env.VERB_REQUEST_BUDGET_AGENT;
+    const { success } = await edge.limit({ key });
+    if (success === false) return refused("verb_request_budget_exceeded", 60);
+    if (success !== true) throw new Error("Invalid edge budget response");
     const binding = env.VERB_REQUEST_BUDGET;
     const response = await binding.get(binding.idFromName(key)).fetch(new Request("https://budget.internal/consume", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind }),

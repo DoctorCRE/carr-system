@@ -304,3 +304,23 @@ binding = "AI"
 [[env.staging.durable_objects.bindings]]
 name = "VERB_REQUEST_BUDGET"
 class_name = "VerbRequestBudget"
+
+[[ratelimits]]
+name = "VERB_REQUEST_BUDGET_HUMAN"
+namespace_id = "56401"
+simple = { limit = 120, period = 60 }
+
+[[ratelimits]]
+name = "VERB_REQUEST_BUDGET_AGENT"
+namespace_id = "56402"
+simple = { limit = 2400, period = 60 }
+
+[[env.staging.ratelimits]]
+name = "VERB_REQUEST_BUDGET_HUMAN"
+namespace_id = "56403"
+simple = { limit = 120, period = 60 }
+
+[[env.staging.ratelimits]]
+name = "VERB_REQUEST_BUDGET_AGENT"
+namespace_id = "56404"
+simple = { limit = 2400, period = 60 }

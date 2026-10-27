@@ -31,7 +31,11 @@ async function runtime(persist, alarmFixture = false) {
       name: "budget-test",
       compatibilityDate: "2026-07-01", compatibilityFlags: ["nodejs_compat"],
       manifest: { mainModule: "budget.js", modules: { "budget.js": { type: "esm", contents: "Date.now = () => 1800000000000;\n" + built.outputFiles[0].text + fixture } } },
-      env: { VERB_REQUEST_BUDGET: { type: "durable-object", worker: "budget-test", exportName: className } },
+      env: {
+        VERB_REQUEST_BUDGET: { type: "durable-object", worker: "budget-test", exportName: className },
+        VERB_REQUEST_BUDGET_HUMAN: { type: "rate-limit", namespace: "56401", simple: { limit: 120, period: 60 } },
+        VERB_REQUEST_BUDGET_AGENT: { type: "rate-limit", namespace: "56402", simple: { limit: 2400, period: 60 } },
+      },
       exports: { [className]: { type: "durable-object", storage: "sqlite" } },
     } }],
   });
@@ -95,7 +99,6 @@ test("workerd alarm cleans an expired window and the next request receives a fre
   assert.equal((await stub.fetch("https://budget.internal/advance")).status, 204);
   assert.equal((await (await consume()).json()).allowed, true);
 });
-
 
 test("workerd admits the supplied 500 per minute OAuth connector peak", async t => {
   t.mock.method(console, "error", () => {});

@@ -305,7 +305,7 @@ test("recordWorkerFailure: a new recurrence invalidates monitoring evidence but 
 // ────────────────────────────────────────────────────────────────────────
 // INCIDENT NUMBERING — the day prefix and the sequence must come from ONE
 // clock. This writer used to count against to_char(now(), ...) (the SERVER's
-// timezone) and then stamp the ref from `new Date()` (the CLIENT's). The two
+// timezone) and then stamp the ref from the client's clock. The two
 // agree only on a UTC server, and a Worker talking to Neon is UTC on both
 // ends, so nothing here could ever have caught the split — which is precisely
 // why these fakes now hand back a server day that is NOT today's.

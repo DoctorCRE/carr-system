@@ -139,6 +139,11 @@ test("Deal Room host is explicit per environment and request matching fails clos
 
 test("Jev deal read requires a partner session and same-origin one-deal request", async () => {
   const environment = env();
+  environment.VERB_REQUEST_BUDGET_HUMAN = { limit: async () => ({ success: true }) };
+  environment.VERB_REQUEST_BUDGET = {
+    idFromName: key => key,
+    get: () => ({ fetch: async () => Response.json({ allowed: true }) }),
+  };
   environment.TYPESAFE_API_KEY = "synthetic";
   let readCount = 0;
   const handler = createDealroomHandler({
@@ -167,7 +172,7 @@ test("Jev deal read requires a partner session and same-origin one-deal request"
 
 test("Jev refuses an exhausted browser budget before record or external AI work", async () => {
   const environment = env();
-  environment.VERB_REQUEST_HUMAN_FILTER = { limit: async () => ({ success: true }) };
+  environment.VERB_REQUEST_BUDGET_HUMAN = { limit: async () => ({ success: true }) };
   environment.VERB_REQUEST_BUDGET = {
     idFromName: key => key,
     get: () => ({ fetch: async () => Response.json({ allowed: false, retryAfter: 23 }) }),
