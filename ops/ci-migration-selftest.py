@@ -129,11 +129,11 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(digest, BASELINES["shadow"], json.dumps(trace))
 
     def test_explicit_shadow_artifact_directory_reaches_runner(self):
-        artifact_dir = str(self.root.resolve() / "artifacts")
+        artifact_dir = "artifacts"
         result, trace = self.run_ci("shadow", CARR_SHADOW_ARTIFACT_DIR=artifact_dir)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         shadow = next(row for row in trace if "ops/migration-shadow.py" in row["argv"])
-        self.assertEqual(shadow["argv"], ["python3", "ops/migration-shadow.py", "--artifact-dir", "<root>/artifacts"])
+        self.assertEqual(shadow["argv"], ["python3", "ops/migration-shadow.py", "--artifact-dir", artifact_dir])
 
     def test_failure_stops_before_next_proof_and_retains_log(self):
         result, trace = self.run_ci("proofs", FAIL_PROGRAM="find-rule-supersedes.test.mjs")
