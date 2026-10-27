@@ -24,7 +24,7 @@ function costFixture() {
     alerts: [], action: "Finance Ops: inspect provider and driver; verify the next complete day; auto-clear when thresholds pass." };
 }
 
-function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture(), todayRows = null, dealRows = null, governanceQueue = null, localUpdatedAt = new Date(NOW).toISOString(), calendar = null, calendarContacts = [] } = {}) {
+function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture(), todayRows = null, dealRows = null, governanceQueue = null, localUpdatedAt = new Date(NOW).toISOString(), calendar = null, calendarContacts = [], calendarDeals = [], meetingPrep = [] } = {}) {
   const queries = [];
   return {
     queries,
@@ -32,7 +32,8 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
       queries.push({ sql, params });
       if (/^(savepoint|rollback to savepoint|release savepoint) calendar_contacts/.test(sql)) return { rows: [] };
       if (unavailable && sql.includes(unavailable)) throw new Error("fixture source unavailable");
-      if (sql.includes("calendar_deal_matches")) return { rows: [] };
+      if (sql.includes("calendar_deal_matches")) return { rows: calendarDeals };
+      if (sql.includes("/* calendar_meeting_prep */")) return { rows: meetingPrep };
       if (sql.includes("from v_today_triage")) return { rows: todayRows || [
         { item_kind: "next_action", owner: "joe", what: "Call the client", subject_name: "Example Practice" },
       ] };
@@ -569,10 +570,11 @@ test("morning-brief suggests open deals for meetings with an exact client email"
     ] }) : query(sql, params);
   const result = await executeRegisteredTool(c, JOE, 'morning-brief', {});
   assert.deepEqual(result.sections.calendar.items[1].possible_deals, [
-    { id: 'deal-1', name: 'Synthetic Deal', client_ref: 'C-101' },
-    { id: 'deal-2', name: 'Another Deal', client_ref: 'C-101' },
+    { id: 'deal-1', name: 'Synthetic Deal', client_ref: 'C-101', prep: { state: 'unavailable' } },
+    { id: 'deal-2', name: 'Another Deal', client_ref: 'C-101', prep: { state: 'unavailable' } },
   ]);
   assert.deepEqual(result.sections.calendar.items[0].possible_deals, []);
+  assert.equal(result.sections.calendar.sources.meeting_prep.state, 'partial');
   const lookup = c.queries.find(({ sql }) => sql.includes('calendar_deal_matches'));
   assert.equal(lookup.params[1], 'joe');
 });
@@ -582,4 +584,46 @@ test("morning-brief keeps meetings visible when deal suggestions cannot be read"
   assert.equal(result.sections.calendar.items.length, 2);
   assert.equal(result.sections.calendar.state, "partial");
   assert.equal(result.sections.calendar.sources.deal_suggestions.state, "unavailable");
+});
+
+
+test("morning-brief prepares possible meeting deals in the authenticated partner's calendar", async () => {
+  const deal = "11111111-1111-4111-8111-111111111111";
+  const c = client({ calendar: calendarFixture(),
+    calendarDeals: [{ email: "bo@example.test", id: deal, name: "Synthetic lease", client_ref: "C-TEST" }],
+    meetingPrep: [{ id: deal, phase: "negotiation", next_step: "Review counteroffer",
+      next_date: "2026-11-02", last_touch: "2026-10-25", market: "Test City" }] });
+  const result = await executeRegisteredTool(c, { slug: "codex", human: false, via: "oauth-google",
+    sponsoring_human_slug: "joe" }, "morning-brief", {});
+  const calendar = result.sections.calendar;
+  assert.deepEqual(calendar.items[1].possible_deals[0].prep, { state: "ready", phase: "negotiation",
+    next_step: "Review counteroffer", next_date: "2026-11-02", last_touch: "2026-10-25", market: "Test City" });
+  assert.equal(calendar.sources.meeting_prep.state, "ready");
+  assert.equal(calendar.match_basis, "attendee_email_possible_match");
+  assert.deepEqual(c.queries.find(({ sql }) => sql.includes("/* calendar_meeting_prep */")).params, [[deal], "joe"]);
+});
+
+
+test("morning-brief keeps meetings and reports failed preparation without losing source warnings", async () => {
+  const c = client({ calendar: calendarFixture(NOW, undefined, [{ code: "responses_unverified" }]),
+    calendarDeals: [{ email: "bo@example.test", id: "11111111-1111-4111-8111-111111111111",
+      name: "Synthetic lease", client_ref: "C-TEST" }], unavailable: "/* calendar_meeting_prep */" });
+  const result = await executeRegisteredTool(c, JOE, "morning-brief", {});
+  const calendar = result.sections.calendar;
+  assert.equal(calendar.state, "partial");
+  assert.equal(calendar.items.length, 2);
+  assert.deepEqual(calendar.items[1].possible_deals[0].prep, { state: "unavailable" });
+  assert.equal(calendar.sources.meeting_prep.state, "unavailable");
+  assert.ok(calendar.notes.some(note => note.includes("cancelled")));
+  assert.ok(calendar.notes.some(note => note.includes("preparation could not be checked")));
+  assert.doesNotMatch(JSON.stringify(result), /fixture source unavailable/);
+  assert.equal(result.coverage.required_sections.find(row => row.key === "calendar").state, "partial");
+});
+
+test("morning-brief skips preparation reads when no meeting has a possible deal", async () => {
+  const c = client({ calendar: calendarFixture() });
+  const result = await executeRegisteredTool(c, JOE, "morning-brief", {});
+  assert.equal(result.sections.calendar.state, "ready");
+  assert.ok(result.sections.calendar.items.every(item => item.possible_deals.length === 0));
+  assert.equal(c.queries.some(({ sql }) => sql.includes("/* calendar_meeting_prep */")), false);
 });
