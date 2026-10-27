@@ -1,17 +1,6 @@
 {
   "schema": "carr-headless-tasks/v1",
-  "source": "Reviewed recurrence from ops/config/control-plane-workflows.v1.json; portable prompts under ops/scheduled-tasks",
+  "source": "Custom headless recurrences retired; portable instructions remain available on demand under ops/scheduled-tasks",
   "timezone": "America/Chicago",
-  "tasks": {
-    "deal-history-research-weekly": {
-      "cron": "0 10 * * 5",
-      "timeout_seconds": 5400,
-      "grace_seconds": 3600
-    },
-    "restore-rehearse-weekly": {
-      "cron": "40 7 * * 2",
-      "timeout_seconds": 5400,
-      "grace_seconds": 3600
-    }
-  }
+  "tasks": {}
 }
