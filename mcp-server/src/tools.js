@@ -11,9 +11,9 @@ import { factObservationTools } from "./fact-observations.ts";
 import { actionClosureTools } from "./action-closure.ts";
 import { dealFileTools } from "./deal-files.js";
 import { dealItemTools, readDealItems, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.ts";
-import { bindReferralDeal } from "./relationship-network.js";
-import { trustedOverride, dealEvidenceEntries, requireRelationshipPartner, mergeRelationshipFields } from "./vendor-relationship.js";
-import { readLeadWorkspace, LEAD_WORKSPACE_SCHEMA, validateStageReview, lockLeadLifecycle } from "./lead-workspace.js";
+import { bindReferralDeal } from "./relationship-network.ts";
+import { trustedOverride, dealEvidenceEntries, requireRelationshipPartner, mergeRelationshipFields } from "./vendor-relationship.ts";
+import { readLeadWorkspace, LEAD_WORKSPACE_SCHEMA, validateStageReview, lockLeadLifecycle } from "./lead-workspace.ts";
 // CARR MCP tool registry — Wave 1 verbs (tool-contracts-2026-07-30.md §2).
 // Every write runs the envelope: idempotency replay via tool_call, actor from
 // the verified token (never the payload), base_version conflicts ask and never
@@ -61,7 +61,7 @@ import { tourPropertySearchTools } from "./tour-property-search.js";
 import { tourSharingTools } from "./tour-sharing.js";
 import { tourMapPromotionTools } from "./tour-map-promotion.js";
 import { tourArtifactTools } from "./tour-artifacts.js";
-import { DEAL_ROOM_FIELDS, assertDealRoomField, stripDealPlaceholders } from "./dealroom.js";
+import { DEAL_ROOM_FIELDS, assertDealRoomField, stripDealPlaceholders } from "./dealroom.ts";
 import { authenticatedIdentity, authorizationClassForActor, organizationTenantForActor,
          permittedActionOwnerSlugs, personalScopeForActor } from "./identity.js";
 import { automaticApplyHold } from "./call-auto-apply.js";
@@ -104,7 +104,7 @@ export { canExercisePartnerAuthority, partnerAuthoritySlugForActor };
 import { ToolError } from "./tool-error.ts";
 export { ToolError };
 import { parksADecision, classifyLoopText, needsDecider, loopRowText,
-         ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.js";
+         ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.ts";
 
 // DEFECT 2, HALF (b) (found 2026-08-13, decision 7026246b): a write whose bad
 // input reaches the database raw (an enum this file never learned to validate,
@@ -2632,7 +2632,7 @@ async function applyDealRoomField(c, actor, dealId, field, value, idempotencyKey
   // advance that cell's base immediately, from the record's own word for it.
   //
   // recorded_at is serialized exactly as the changes feed serializes it
-  // (dealroom.js), so the two are directly comparable on the client: a base is
+  // (dealroom.ts), so the two are directly comparable on the client: a base is
   // only ever moved forward, never back onto an older event.
   const committed = (await c.query(
     `select id, to_jsonb(recorded_at)#>>'{}' as recorded_at from event
@@ -4261,6 +4261,18 @@ export const TOOLS = {
             required: ['email', 'kind', 'internal'], properties: { email: { type: 'string' },
               name: { type: ['string', 'null'] }, kind: { enum: ['to', 'cc'] }, internal: { type: 'boolean' } } } },
         } },
+      email_context: { type: 'object', additionalProperties: false,
+        required: ['subject', 'conversation_id', 'sender', 'recipients'], properties: {
+          subject: { type: 'string' }, conversation_id: { type: ['string', 'null'] },
+          sender: { type: 'object', additionalProperties: false, required: ['email', 'internal'],
+            properties: { email: { type: 'string' }, name: { type: ['string', 'null'] }, internal: { type: 'boolean' } } },
+          recipients: { type: 'array', items: { type: 'object', additionalProperties: false,
+            required: ['email', 'kind', 'internal'], properties: { email: { type: 'string' },
+              name: { type: ['string', 'null'] }, kind: { enum: ['to', 'cc'] }, internal: { type: 'boolean' } } } },
+        } },
+      email_source: { type: "object", additionalProperties: false, required: ["sender_email", "mailbox_owner"],
+        properties: { sender_email: { type: "string", format: "email", maxLength: 254 },
+          mailbox_owner: { type: "string", enum: ["joe", "dell"] } } },
       occurred_at: { type: "string", description: "ISO timestamp; omit for now" },
       owed: { type: "string", description: "what is missing (a figure, a name) — recorded as owed" },
       human_quote: { type: "string", description: "the human's literal words, if dictated" },
@@ -4308,6 +4320,9 @@ export const TOOLS = {
                   "touch yet: set-next-action carries the ball you owe, and add-critical-date " +
                   "carries a dated obligation on a deal." });
       }
+      if (args.email_source !== undefined && (args.kind !== 'email_in' ||
+          args.email_source.mailbox_owner !== partnerAuthoritySlugForActor(actor)))
+        throw new ToolError({ error: 'email_source_owner_mismatch' });
       const s = await resolveSubject(c, args.ref);
       const assignments = [];
       if (args.vendor_assignments !== undefined) {
@@ -4334,11 +4349,15 @@ export const TOOLS = {
         for (const vendorId of versions.keys())
           await c.query('update vendor set updated_by=$1 where id=$2',[actor.id,vendorId]);
       }
+      if (args.email_source !== undefined && (args.kind !== 'email_in' ||
+          args.email_source.mailbox_owner !== partnerAuthoritySlugForActor(actor)))
+        throw new ToolError({ error: 'email_source_owner_mismatch' });
       const r = await c.query(
-        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, email_context, source)
-         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, $8::jsonb, 'stated') returning id, occurred_at`,
+        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_context, email_source)
+         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb, $9::jsonb) returning id, occurred_at`,
         [args.occurred_at || null, actor.id, args.kind, args.summary, args.detail || null, args.owed || null, s.id,
-          args.email_context ? JSON.stringify(args.email_context) : null]);
+          args.email_context ? JSON.stringify(args.email_context) : null,
+          args.email_source ? JSON.stringify(args.email_source) : null]);
       await writeEvent(c, actor, "log-activity", s.type, s.id,
         { new: { activity: r.rows[0].id, kind: args.kind }, human_quote: args.human_quote, idempotency_key: args.idempotency_key });
       const links = args.links && args.links.length

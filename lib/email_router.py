@@ -11,8 +11,8 @@ emails already logged by the intake, filed or unfiled, oldest first, minus
 the ones this router already handled. It starts no new email after BUDGET (20
 minutes). Unfiled email goes through lib.email_matching: thread continuity files
 automatically; otherwise one pinned Jev call proposes a deal, a possible new matter,
-or contact-only logging. Filed email retains the isolated phase-move and next-step
-model call (lib/model_call.py, model from settings), each proposal with a
+or contact-only logging. Filed email retains the isolated phase-move, next-step and
+reply-draft model call (lib/model_call.py, model from settings), each proposal with a
 literal evidence quote (capped at 2000 characters) and a confidence. Every surviving
 proposal is stored through `record-email-proposal`, which re-checks the evidence
 against the stored email and the deal, and flags a quote that reads like an injected
@@ -48,7 +48,7 @@ import uuid
 from lib import email_matching, model_call
 
 VERBS = frozenset({'email-router-queue', 'record-email-proposal', 'inherit-email-thread'})
-KINDS = frozenset({'phase_move', 'next_step'})
+KINDS = frozenset({'phase_move', 'next_step', 'reply_draft'})
 OWNERS = frozenset({'joe', 'dell'})
 REFUSAL = re.compile(r'^(?:email_proposal|email_deal|email_next_step)_[a-z_]+$')
 MIN_CONFIDENCE = 0.6
@@ -70,6 +70,8 @@ REPLY_SCHEMA = {
             'evidence_quote': {'type': 'string'},
             'confidence': {'type': 'number', 'minimum': 0, 'maximum': 1},
             'text': {'type': ['string', 'null']},
+            'subject': {'type': ['string', 'null'], 'maxLength': 998},
+            'body': {'type': ['string', 'null'], 'maxLength': 20000},
             'next_date': {'type': ['string', 'null'], 'pattern': r'^\d{4}-\d{2}-\d{2}$'},
             'owner': {'type': ['string', 'null'], 'enum': ['joe', 'dell', None]}}}}},
 }
@@ -81,7 +83,11 @@ SYSTEM_PROMPT = (
     'itself reports a milestone (a tour scheduled or confirmed, an LOI received, an LOI signed or executed, '
     'a lease sent for review, a lease signed or executed). Propose next_step only for a concrete ask of the '
     'broker or a commitment the broker owes, with a short imperative task, a due date (YYYY-MM-DD) and owner '
-    'joe unless the email names Dell. evidence_quote must be copied exactly, character for character, from '
+    'joe unless the email names Dell. When the broker owes a reply, also propose reply_draft with a subject '
+    'and body for that receiving partner to review and edit. Draft only a grounded reply to the original '
+    'sender, without inventing facts or commitments. Do not draft a reply for newsletters or notifications '
+    'that need no response. The server assigns the draft owner from the receiving mailbox; do not supply '
+    'owner on reply_draft. evidence_quote must be copied exactly, character for character, from '
     'the email. confidence is your probability that the proposal is right. Return an empty list when nothing '
     'applies.')
 
@@ -125,6 +131,12 @@ def proposals(reply: dict, email: dict, today: date) -> list[dict]:
             if not text:
                 continue
             args.update(text=text[:500], next_date=due, owner=item['owner'] if item.get('owner') in OWNERS else 'joe')
+        elif item['kind'] == 'reply_draft':
+            subject, body = item.get('subject'), item.get('body')
+            if (not isinstance(subject, str) or not subject.strip() or len(subject) > 998 or
+                    not isinstance(body, str) or not body.strip() or len(body) > 20000):
+                continue
+            args.update(subject=subject, body=body)
         seen.add(item['kind'])
         kept.append(args)
     return kept

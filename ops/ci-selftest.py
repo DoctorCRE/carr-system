@@ -38,7 +38,8 @@ def ci_fixture():
     with tempfile.TemporaryDirectory(prefix="carr-ci-fixture-") as directory:
         root = pathlib.Path(directory)
         for rel in (
-            "ops/ci.sh", "ops/ci-pushfloor.py", "ops/node_test_summary.py", "tools/codemap.py",
+            "ops/ci.sh", "ops/ci-gates.py", "ops/ci-pushfloor.py", "ops/ci-migration.py",
+            "ops/node_test_summary.py", "tools/codemap.py",
             "ops/ci-secret-scan.py", "ops/pii_guard.py", "ops/ci-dep-check.py",
             "ops/git_env.py", "ops/no-client-deliverables-gate.py",
             "ops/hook-deletion-check.py", "ops/githooks/path-hygiene-check.py",
@@ -221,7 +222,7 @@ def test_gates_build_hxprobe_before_parallel_selftests():
         (root / "bin").mkdir()
         (root / "tools").mkdir()
         shutil.copy2(REPO / "tools/codemap.py", root / "tools/codemap.py")
-        for name in ("ci.sh", "node_test_summary.py", "git_env.py",
+        for name in ("ci.sh", "ci-gates.py", "node_test_summary.py", "git_env.py",
                      "ci-secret-scan.py", "pii_guard.py"):
             shutil.copy2(REPO / "ops" / name, root / "ops" / name)
         shutil.copy2(REPO / "bin/with-timeout.py", root / "bin/with-timeout.py")
@@ -395,67 +396,6 @@ def test_contract_rejects_platform_postgres_defaults():
               rc == 1 and 'PostgreSQL paths must use lib/disposable_pg_fixture.py' in output)
 
 
-def test_migration_partitions_execute_complete_inventory():
-    import shlex
-    with tempfile.TemporaryDirectory() as directory:
-        root = pathlib.Path(directory)
-        shim = root / "program"
-        shim.write_text('#!/bin/bash\necho "$*" >> "$CALLS"\n'
-                        '[[ "${FAIL_PROGRAM:-}" != "" && "$*" == *"$FAIL_PROGRAM"* ]] && exit 9\n'
-                        'if [[ "$*" == *"ci-migration-gates.py"* && "$*" != *"--sql-proof"* '
-                        '&& ! -f "$SERVICE_CATALOG" ]]; then exit 9; fi\nexit 0\n')
-        shim.chmod(0o755)
-        (root / "psql").symlink_to(shim)
-        body = _ci_function_body("check_migration_fixtures", "check_binding")
-        prefix = "\n".join(("set -uo pipefail", f"PY={shlex.quote(str(shim))}",
-            f"LOGDIR={shlex.quote(str(root))}", "STRICT=1", "FAILED=0",
-            "bad() { FAILED=1; }", "ok() { :; }", "skip() { FAILED=1; }",
-            'run_quiet() { local log="$1"; shift; echo "$*" >> "$CALLS"; '
-            '[[ "${FAIL_PROGRAM:-}" != "" && "$*" == *"$FAIL_PROGRAM"* ]] && return 9; '
-            '[[ "$*" == *"tools/ops-record.py sync-registry"* ]] && touch "$SERVICE_CATALOG"; '
-            'printf "r03_recovered_health\\njoe,3,3,3,0,0,0,0,1,0,0,0,0,0,No open\\n'
-            'r03_actor_mismatch_health\\njoe,4,3,3,0,1,1,1,1,0,0,0,0,0,On missing\\n" > "$log"; }'))
-        def run(part, fail=""):
-            calls = root / "calls"
-            calls.write_text("")
-            (root / "service-catalog").unlink(missing_ok=True)
-            result = subprocess.run(["bash", "-c", prefix + f"\nMIGRATION_PART={part}\n" + body +
-                                     '\ncheck_migration; exit "$FAILED"'], cwd=REPO,
-                env={**scrubbed_env(), "PATH": directory + os.pathsep + os.environ["PATH"],
-                     "CALLS": str(calls), "CARR_CI_DATABASE_URL": "postgres://ci@127.0.0.1:55432/ci",
-                     "SERVICE_CATALOG": str(root / "service-catalog"),
-                     "FAIL_PROGRAM": fail}, capture_output=True, text=True)
-            return result.returncode, set(calls.read_text().splitlines())
-        fixtures = {}
-        for part in ("reconstruction", "equivalence", "shadow", "fixtures", "proofs", "gates", "acceptance", "core"):
-            rc, fixtures[part] = run(part)
-            check(f"migration {part} partition executes", rc == 0)
-        check("fixture partition union retains the complete canonical fixture inventory",
-              fixtures["reconstruction"] | fixtures["equivalence"] | fixtures["shadow"] == fixtures["fixtures"])
-        check("PR fixture partitions execute restore security parity", any(
-              "restore-rehearse-record-selftest.py --postgres" in call
-              for part in ("reconstruction", "equivalence", "shadow") for call in fixtures[part]))
-        check("restore security failure fails the PR fixture verdict",
-              run("equivalence", "restore-rehearse-record-selftest.py")[0] == 1)
-        check("core partition union retains every canonical database command",
-              fixtures["proofs"] | fixtures["gates"] == fixtures["core"])
-        check("consumer partition excludes DB gate commands", not any(
-              "ci-migration-gates.py --logdir" in call and "--sql-proof" not in call
-              for call in fixtures["proofs"]))
-        check("DB gate partition excludes consumer proofs", not any(
-              "node --test" in call for call in fixtures["gates"]))
-        check("the gate partition runs every DB gate in one runner", any(
-              "ci-migration-gates.py --logdir" in call and "--partition" not in call
-              for call in fixtures["gates"]))
-        check("acceptance bootstrap excludes consumer and gate programs", not any(
-              "node --test" in call or "ci-migration-gates.py --logdir" in call
-              for call in fixtures["acceptance"]))
-        check("a failing partition fails the migration verdict", run("reconstruction", "schema-reconstruction-selftest.py")[0] == 1)
-        rc, calls = run("gates", "tools/ops-record.py sync-registry")
-        check("service-catalog bootstrap failure stops database gates", rc == 1 and not any(
-              "ci-migration-gates.py --logdir" in call for call in calls))
-
-
 def test_gate_shards_execute_a_disjoint_complete_inventory():
     with tempfile.TemporaryDirectory() as directory:
         root = pathlib.Path(directory)
@@ -477,29 +417,23 @@ def test_gate_shards_execute_a_disjoint_complete_inventory():
             "path=sys.argv[-1]\n"
             "with open(os.environ['CALLS'],'a') as out: out.write(path+'\\n')\n"
             "sys.exit(7 if path==os.environ.get('FAIL_TEST') else 0)\n")
-        prefix = "\n".join(("set -uo pipefail", f"PY={shlex.quote(sys.executable)}",
-                              f"LOGDIR={shlex.quote(str(root / 'logs'))}", "FAILED=0",
-                              "CI_SELFTEST_TIMEOUT_SECONDS=1", f"CI_TIMEOUT_HELPER={shlex.quote(str(root / 'timeout.py'))}",
-                              "tree_fingerprint() { echo static; }", "ok() { :; }",
-                              "bad() { FAILED=1; }",
-                              'run_quiet() { local log="$1"; shift; "$@" >"$log" 2>&1; }',
-                              "fail_tail() { :; }"))
-        body = _ci_function_body("check_gates", "check_secret")
+        shutil.copy2(REPO / "ops/ci-gates.py", root / "ops/ci-gates.py")
         seen = []
+        def invoke(shard, calls, failed=""):
+            return subprocess.run([sys.executable, "ops/ci-gates.py", "--logdir", str(root / "logs"),
+                                   "--result", str(root / "result"), "--python", sys.executable,
+                                   "--timeout-helper", str(root / "timeout.py"),
+                                   "--shard", str(shard), "--shards", "2"], cwd=root,
+                                  env={**fixture_env(), "CALLS": str(calls), "FAIL_TEST": failed},
+                                  capture_output=True, text=True)
         for shard in (1, 2):
             calls = root / f"calls-{shard}"
-            result = subprocess.run(["bash", "-c", prefix + f"\nGATE_SHARD={shard}\nGATE_SHARDS=2\n" + body +
-                                     '\ncheck_gates; exit "$FAILED"'], cwd=root,
-                                    env={**scrubbed_env(), "CALLS": str(calls)}, capture_output=True, text=True)
+            result = invoke(shard, calls)
             check(f"gate shard {shard} executes successfully", result.returncode == 0, result.stderr)
             seen.append(set(calls.read_text().splitlines()))
         check("gate shard union executes every Python and shell suite", seen[0] | seen[1] == inventory, seen)
         check("gate shards never execute the same suite twice", not seen[0] & seen[1], seen)
-        failed = next(iter(seen[1]))
-        result = subprocess.run(["bash", "-c", prefix + "\nGATE_SHARD=2\nGATE_SHARDS=2\n" + body +
-                                 '\ncheck_gates; exit "$FAILED"'], cwd=root,
-                                env={**scrubbed_env(), "CALLS": str(root / "failed"), "FAIL_TEST": failed},
-                                capture_output=True, text=True)
+        result = invoke(2, root / "failed", next(iter(seen[1])))
         check("a failing second-shard suite fails its job", result.returncode == 1, result.stderr)
 
 
@@ -654,18 +588,14 @@ def test_every_test_file_in_the_tree_is_collected():
     missing = sorted(path for path in guarded if not (REPO / path).is_file())
     check("every conditional migration proof names an existing file", not missing,
           f"absent files provide no coverage: {', '.join(missing)}")
-    patterns: list[str] = []
+    listed = subprocess.run(["bash", str(CI), "--gate-programs"], cwd=REPO,
+                            env=fixture_env(), text=True, capture_output=True)
+    check("canonical gate inventory is readable", listed.returncode == 0, listed.stderr)
+    collected = set(listed.stdout.splitlines())
     for m in re.finditer(r"for t in ([^;]+); do", ci):
-        patterns += [tok for tok in m.group(1).split()
-                     if re.fullmatch(r"[A-Za-z0-9_./*?\[\]-]+", tok)]
-    check("ci.sh's selftest collection globs are readable from source",
-          len(patterns) >= 2, f"found: {patterns}")
-    if not patterns:
-        return
-
-    collected = set()
-    for pat in patterns:
-        collected |= {p.relative_to(REPO).as_posix() for p in REPO.glob(pat)}
+        for pat in m.group(1).split():
+            if re.fullmatch(r"[A-Za-z0-9_./*?\[\]-]+", pat):
+                collected.update(p.relative_to(REPO).as_posix() for p in REPO.glob(pat))
 
     on_disk = _test_shaped_files()
     check("the tree still contains test files to collect", on_disk,
@@ -1550,7 +1480,6 @@ def main(argv=None):
                test_hxprobe_runs_locked_checks_and_propagates_failures,
                test_gates_build_hxprobe_before_parallel_selftests,
                test_gate_shards_execute_a_disjoint_complete_inventory,
-               test_migration_partitions_execute_complete_inventory,
                test_contract_rejects_platform_postgres_defaults,
                test_hosted_migration_ownership,
                test_hosted_draft_lifecycle,

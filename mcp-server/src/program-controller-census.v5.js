@@ -51,7 +51,7 @@ import {
   evaluateProgramWidth, evaluateSliceAdmission, evaluateCheckpointResume,
   evaluateReleaseEligibility,
 } from "./engineering-program-controller.v5.js";
-import { installReleaseReceiptSnapshot } from "./program-controller-release-state-holder.v5.js";
+import { installReleaseReceiptSnapshot } from "./program-controller-release-state-holder.v5.ts";
 
 export const PROGRAM_CONTROLLER_PATH = "/api/v1/program-controller";
 

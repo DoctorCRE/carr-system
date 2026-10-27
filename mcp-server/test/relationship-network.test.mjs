@@ -1,7 +1,7 @@
 // Tests relationship network snapshots, offers, and authorization.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectNetwork,bindReferralDeal,networkStatement } from '../src/relationship-network.js';
+import { projectNetwork,bindReferralDeal,networkStatement } from '../src/relationship-network.ts';
 import { isBusinessApiPath, readRelationshipNetwork } from '../src/workspace-business-read.js';
 const fixture=()=>({nodes:[{id:'a',name:'Demo vendor',contact_state:'active'},{id:'b',name:'Demo client',contact_state:'active'},{id:'c',name:'Demo broker',contact_state:'active'}],edges:[{id:'demo',from:'a',to:'b',via:'c',kind:'can_introduce',when:'2026-10-01',summary:'Demo offered access',detail:'Original demo entry'}],referrals:[{node_id:'a',deals:3,won:1,lost:1}]});
 const now='2026-10-02T12:00:00Z';

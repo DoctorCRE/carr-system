@@ -11,6 +11,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from git_env import fixture_env
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('ci_evidence', ROOT / 'ops/ci-evidence.py')
 assert spec is not None and spec.loader is not None
@@ -253,19 +255,20 @@ class ProgramRecords(unittest.TestCase):
             (root / 'hooks').mkdir()
             (root / 'hooks/gate-integrity.py').write_text('')
             (root / 'logs').mkdir()
+            subprocess.run(['git', 'init', '-q', str(root)], check=True,
+                           env=fixture_env())
+            subprocess.run(['git', '-c', 'user.name=Fixture', '-c',
+                            'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'fixture'],
+                           cwd=root, check=True, env=fixture_env())
+            subprocess.run(['git', 'update-ref', 'refs/remotes/origin/main', 'HEAD'],
+                           cwd=root, check=True, env=fixture_env())
             (root / 'timeout.py').write_text(
                 "import sys\nsys.exit({'ops/a-selftest.py': 124, 'tools/test-c.sh': 3}.get(sys.argv[-1], 0))\n")
-            source = (ROOT / 'ops/ci.sh').read_text()
-            body = source[source.index('\nrecord_program() {'):source.index('\nLOGDIR=')]
-            body += source[source.index('\ncheck_gates() {'):source.index('\ncheck_secret() {')]
-            prefix = '\n'.join(('set -uo pipefail', f'PY={sys.executable}', f'LOGDIR={root / "logs"}',
-                                'CI_SELFTEST_TIMEOUT_SECONDS=1', f'CI_TIMEOUT_HELPER={root / "timeout.py"}',
-                                'GATE_SHARD=1', 'GATE_SHARDS=1', '_class_name=gates',
-                                'tree_fingerprint() { echo static; }', 'ok() { :; }', 'bad() { :; }',
-                                'fail_tail() { :; }'))
-            result = subprocess.run(['bash', '-c', prefix + body + '\ncheck_gates'], cwd=root,
-                                    capture_output=True, text=True, timeout=60,
-                                    env={'PATH': os.environ['PATH']})
+            result = subprocess.run([sys.executable, str(ROOT / 'ops/ci-gates.py'),
+                '--logdir', str(root / 'logs'), '--result', str(root / 'result'),
+                '--python', sys.executable, '--timeout-helper', str(root / 'timeout.py')], cwd=root,
+                capture_output=True, text=True, timeout=60,
+                env=fixture_env())
             records = root / 'logs/programs.tsv'
             self.assertTrue(records.is_file(), result.stderr)
             rows = {line.split('\t')[1]: line.split('\t')[2] for line in records.read_text().splitlines()}

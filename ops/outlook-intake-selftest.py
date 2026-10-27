@@ -600,7 +600,7 @@ class IntakeTest(unittest.TestCase):
                 result = self.run_intake([m])
                 self.assertEqual(result.state, 'failed')
                 state = json.loads((self.out() / intake.STATE).read_text())
-                request = state['requests'][intake.key('log-activity', 'C-901', ident(m))]
+                request = state['requests'][intake.key('log-activity', 'C-901', f'joe|{ident(m)}')]
                 self.assertEqual(request['error_code'], expected)
                 self.assertEqual(result.counts['error_' + expected], 1)
                 self.assertEqual(request['attempts'], 1)
@@ -651,9 +651,52 @@ class IntakeTest(unittest.TestCase):
         self.assertIn('Suite question', args['summary'])
         self.assertIn('Pat Example', args['summary'])
         self.assertEqual(args['detail'], 'Can we meet Thursday?')
+        self.assertEqual(args['email_source'], {'sender_email': 'pat@example.test', 'mailbox_owner': 'joe'})
         self.assertEqual(args['occurred_at'], (NOW - timedelta(hours=1)).isoformat())
         self.assertEqual(args['idempotency_key'],
-                         str(uuid.uuid5(uuid.NAMESPACE_URL, f'log-activity|C-901|{ident(m)}')))
+                         str(uuid.uuid5(uuid.NAMESPACE_URL, f'log-activity|C-901|joe|{ident(m)}')))
+
+    def test_shared_inbound_message_has_a_separate_activity_key_for_each_mailbox(self):
+        m = mail('pat@example.test', -timedelta(hours=1))
+        captured = []
+        for owner in ('joe', 'dell'):
+            shutil.rmtree(self.out(), ignore_errors=True)
+            self.fake.calls.clear()
+            write_settings(self.home, self.repo, owner=owner)
+            self.assertEqual(self.run_intake([m]).state, 'succeeded')
+            [(_, args)] = self.fake.writes('log-activity')
+            captured.append(args)
+            self.assertEqual(self.run_intake([m]).state, 'succeeded')
+            self.assertEqual(self.fake.writes('log-activity'), [('log-activity', args)])
+        self.assertNotEqual(captured[0]['idempotency_key'], captured[1]['idempotency_key'])
+        self.assertEqual([a['email_source']['mailbox_owner'] for a in captured], ['joe', 'dell'])
+
+    def test_legacy_pending_mail_write_replays_its_original_key_and_payload(self):
+        m = mail('pat@example.test', -timedelta(hours=1))
+        self.fake.fail_verbs.add('log-activity')
+        self.assertEqual(self.run_intake([m]).state, 'failed')
+        state_path = self.out() / intake.STATE
+        state = json.loads(state_path.read_text())
+        [new_key] = state['requests']
+        request = state['requests'].pop(new_key)
+        legacy = intake.key('log-activity', 'C-901', ident(m))
+        payload = json.loads(request['payload'])
+        payload['idempotency_key'] = legacy
+        payload.pop('email_source')
+        request['payload'] = json.dumps(payload)
+        state['requests'][legacy] = request
+        for step in state.get('steps', {}).values():
+            step['activity_keys'] = [legacy if item == new_key else item for item in step['activity_keys']]
+        state_path.write_text(json.dumps(state))
+        self.fake.calls.clear()
+        self.fake.fail_verbs.clear()
+        self.fake.now += timedelta(seconds=60)
+        result = self.run_intake([m], touch=False)
+        self.assertEqual(result.state, 'succeeded', result)
+        self.assertEqual(self.fake.writes('log-activity'), [('log-activity', payload)])
+        self.fake.calls.clear()
+        self.assertEqual(self.run_intake([m]).state, 'succeeded')
+        self.assertEqual(self.fake.writes('log-activity'), [])
 
     def test_logged_mail_preserves_all_recipient_evidence(self):
         m = mail('pat@example.test', -timedelta(hours=1), name='Pat Example',
@@ -686,6 +729,13 @@ class IntakeTest(unittest.TestCase):
         self.run_intake([mail(OWNER, -timedelta(hours=1), recipients='lee@example.test')])
         [(_, args)] = self.fake.writes('log-activity')
         self.assertEqual((args['ref'], args['kind']), ('L-902', 'email_out'))
+        self.assertNotIn('email_source', args)
+
+    def test_inbound_provenance_uses_the_configured_partner_and_original_address(self):
+        write_settings(self.home, self.repo, owner='dell')
+        self.run_intake([mail('PAT@example.test', -timedelta(hours=1), name='A display name')])
+        [(_, args)] = self.fake.writes('log-activity')
+        self.assertEqual(args['email_source'], {'sender_email': 'pat@example.test', 'mailbox_owner': 'dell'})
 
     def test_internal_addresses_are_never_matched_or_listed(self):
         self.fake.contacts_rows.append(intake.Contact(PARTNER, 'V-903', 'Internal Row'))
@@ -753,7 +803,7 @@ class IntakeTest(unittest.TestCase):
         [(_, args)] = self.fake.writes('log-activity')
         self.assertEqual((args['ref'], args['detail']), ('L-908', m['body']))
         self.assertEqual(args['idempotency_key'],
-                         str(uuid.uuid5(uuid.NAMESPACE_URL, f'log-activity|L-908|{ident(m)}')))
+                         str(uuid.uuid5(uuid.NAMESPACE_URL, f'log-activity|L-908|joe|{ident(m)}')))
         self.run_intake([m])
         self.assertEqual(len(self.fake.writes('log-activity')), 1)
 
@@ -768,7 +818,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(len(activities), 1)
         args = activities[0][1]
         self.assertEqual(args['idempotency_key'],
-                         str(uuid.uuid5(uuid.NAMESPACE_URL, f'log-activity|L-908|{ident(m)}')))
+                         str(uuid.uuid5(uuid.NAMESPACE_URL, f'log-activity|L-908|joe|{ident(m)}')))
         self.assertEqual(args['occurred_at'], (NOW - timedelta(hours=1)).isoformat())
         self.assertEqual(json.loads((self.out() / intake.STATE).read_text())['mail_unresolved'], {})
 
@@ -1030,7 +1080,7 @@ class IntakeTest(unittest.TestCase):
         notes = [a for _, a in self.fake.writes('log-activity') if a['kind'] == 'note']
         self.assertEqual([n['detail'] for n in notes], ['Can we meet Thursday? Full text.'])
         self.assertEqual(notes[0]['idempotency_key'],
-                         str(uuid.uuid5(uuid.NAMESPACE_URL, f'log-activity|C-901|fullbody|{ident(preview)}')))
+                         str(uuid.uuid5(uuid.NAMESPACE_URL, f'log-activity|C-901|joe|fullbody|{ident(preview)}')))
         self.assertEqual(len(self.fake.writes('log-activity')), 2, 'the email itself is not logged twice')
 
     def test_lost_preview_ack_replays_original_payload_after_full_body_arrives(self):

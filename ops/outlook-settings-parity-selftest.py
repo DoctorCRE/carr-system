@@ -96,22 +96,30 @@ class ParityTest(unittest.TestCase):
         artifacts = {path.name: path.read_bytes() for path in sorted(out.glob('*')) if path.is_file()}
         return result, fake.calls, artifacts, module.status_line(result).encode()
 
-    def test_mail_record_calls_preserve_baseline_and_add_captured_email_context(self):
+    def test_mail_record_payloads_preserve_baseline_except_provenance_and_partner_keys(self):
         before = self.exercise(baseline_module())
         after = self.exercise()
         calendar_activity = current.key('log-activity', 'C-901',
                                         f'past-visit|{self.fixtures.ts(-timedelta(hours=5))}')
         before_calls = [(verb, args) for verb, args in before[1]
                         if args.get('idempotency_key') != calendar_activity]
-        after_calls = [(verb, {k: v for k, v in args.items() if k != 'email_context'})
-                       for verb, args in after[1]]
-        self.assertEqual(json.dumps(before_calls).encode(), json.dumps(after_calls).encode())
+        self.assertEqual(len(before_calls), len(after[1]))
         captured = [args['email_context'] for verb, args in after[1]
-                    if verb == 'log-activity' and args.get('kind') in ('email_in', 'email_out')]
+                    if verb == 'log-activity' and args.get('kind') == 'email_in']
         self.assertEqual([context['sender']['email'] for context in captured],
-                         ['pat@example.test', self.settings.account, 'pat@example.test'])
-        self.assertEqual([[p['email'] for p in context['recipients']] for context in captured],
-                         [[self.settings.account], ['lee@example.test'], [self.settings.account]])
+                         ['pat@example.test', 'pat@example.test'])
+        for (old_verb, old_args), (verb, args) in zip(before_calls, after[1], strict=True):
+            self.assertEqual(verb, old_verb)
+            expected, actual = dict(old_args), dict(args)
+            if verb == 'log-activity':
+                self.assertNotEqual(actual.pop('idempotency_key'), expected.pop('idempotency_key'))
+                if args['kind'] == 'email_in':
+                    self.assertEqual(actual.pop('email_source'),
+                                     {'sender_email': 'pat@example.test', 'mailbox_owner': 'joe'})
+                    actual.pop('email_context')
+                else:
+                    self.assertNotIn('email_source', actual)
+            self.assertEqual(json.dumps(expected).encode(), json.dumps(actual).encode())
 
     def test_studio_settings_preserve_mail_artifacts_and_quarantine_calendar(self):
         result, calls, artifacts, status = self.exercise()
@@ -129,10 +137,10 @@ class ParityTest(unittest.TestCase):
         self.assertTrue(all(row['status'] == 'unsupported' for row in state['calendar_evidence'].values()))
         self.assertIn(b'calendar_lifecycle_unsupported', status)
 
-    def test_second_person_uses_other_profile_owner_and_outbound_address(self):
-        other = self.home / 'Other Profile'
+    def test_dell_uses_main_profile_owner_and_outbound_address(self):
+        other = self.home / 'Main Profile'
         self.settings.profile.rename(other)
-        self.settings_path = write_settings(self.home, self.repo, owner='other-person',
+        self.settings_path = write_settings(self.home, self.repo, owner='dell',
                                             account='broker@other.test', internal_domain='other.test', profile=str(other))
         self.settings = load_settings(self.home)
         self.store = other / 'HxStore.hxd'
@@ -141,7 +149,7 @@ class ParityTest(unittest.TestCase):
         self.assertEqual(result.state, 'succeeded')
         writes = [args for verb, args in calls if verb == 'set-next-action']
         self.assertTrue(writes)
-        self.assertEqual({args['owner'] for args in writes}, {'other-person'})
+        self.assertEqual({args['owner'] for args in writes}, {'dell'})
         outgoing = [args for verb, args in calls if verb == 'log-activity' and args['kind'] == 'email_out']
         self.assertEqual(len(outgoing), 1)
         self.assertEqual(outgoing[0]['ref'], 'L-902')

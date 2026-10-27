@@ -5,13 +5,15 @@ alter table public.activity add constraint activity_email_context_object check (
 alter table public.email_proposal add column sender_role text check (sender_role in ('client','landlord_side','lender','attorney','other_vendor'));
 alter table public.email_proposal alter column deal_id drop not null;
 alter table public.email_proposal drop constraint email_proposal_kind_check;
-alter table public.email_proposal add constraint email_proposal_kind_check check (kind in ('phase_move','next_step','file_to_deal','possible_new_deal'));
-alter table public.email_proposal drop constraint email_proposal_check;
-alter table public.email_proposal add constraint email_proposal_check check (
+alter table public.email_proposal add constraint email_proposal_kind_check check (kind in ('phase_move','next_step','reply_draft','file_to_deal','possible_new_deal'));
+alter table public.email_proposal drop constraint email_proposal_shape;
+alter table public.email_proposal add constraint email_proposal_shape check (
   (kind='phase_move' and deal_id is not null and task_text is null and next_date is null and owner is null and sender_role is null)
   or (kind='next_step' and deal_id is not null and task_text is not null and next_date is not null and owner is not null and sender_role is null)
-  or (kind='file_to_deal' and deal_id is not null and task_text is null and next_date is null and owner is null and sender_role is not null)
-  or (kind='possible_new_deal' and deal_id is null and next_date is null and owner is null and sender_role is not null));
+  or (kind='reply_draft' and task_text is null and next_date is null and owner is not null and
+    length(draft_subject) between 1 and 998 and length(btrim(draft_body)) between 1 and 20000 and sender_role is null)
+  or (kind='file_to_deal' and deal_id is not null and task_text is null and next_date is null and owner is null and sender_role is not null and draft_subject is null and draft_body is null)
+  or (kind='possible_new_deal' and deal_id is null and next_date is null and owner is null and sender_role is not null and draft_subject is null and draft_body is null));
 alter table public.email_proposal drop constraint email_proposal_kind_deal_id_activity_id_key;
 alter table public.email_proposal add constraint email_proposal_kind_deal_id_activity_id_key unique nulls not distinct (kind,deal_id,activity_id);
 insert into public.participant_role(slug,label,side) values

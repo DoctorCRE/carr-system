@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createDealroomHandler, isDealroomRequest } from "../src/dealroom-web.js";
-import { mcpOriginRefusal } from "../src/oauth-policy.js";
+import { mcpOriginRefusal } from "../src/oauth-policy.ts";
 
 const CARR_HOST = "carr-mcp-staging.joe-bookout-carr-us.workers.dev";
 const APP_HOST = "doctorcre-app-staging.joe-bookout-carr-us.workers.dev";

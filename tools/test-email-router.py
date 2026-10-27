@@ -78,6 +78,23 @@ def route(server, classify, state=None, clock=None):
 
 
 class RouterTests(unittest.TestCase):
+    def test_one_model_answer_records_reply_draft_with_other_proposals(self):
+        source = email('reply1', f'{LOI} {ASK}')
+        source['mailbox_owner'] = 'dell'
+        server = Server([source])
+        draft = {'kind': 'reply_draft', 'evidence_quote': ASK, 'confidence': 0.95,
+                 'subject': 'Re: Floor plan', 'body': 'Thanks. I will send the floor plan by Friday.'}
+        with patch.object(email_router.model_call, 'ask', return_value={
+                'proposals': [*BOTH['proposals'], draft]}) as model:
+            counts = route(server, lambda e, d: email_router.ask_model(e, d, 'synthetic-model'))
+        model.assert_called_once()
+        self.assertEqual((counts['recorded'], counts['routed']), (3, 1))
+        recorded = server.recorded()[-1]
+        self.assertEqual({key: value for key, value in recorded.items() if key != 'idempotency_key'}, {
+            'kind': 'reply_draft', 'deal': DEAL, 'activity_id': 'reply1', 'evidence_quote': ASK,
+            'confidence': 0.95, 'subject': 'Re: Floor plan',
+            'body': 'Thanks. I will send the floor plan by Friday.'})
+
     def test_honest_email_becomes_sourced_proposals_with_confidence(self):
         server = Server([email('a1', f'{LOI} {ASK}')])
         counts = route(server, lambda e, d: BOTH)
@@ -86,6 +103,34 @@ class RouterTests(unittest.TestCase):
         self.assertEqual((phase['kind'], phase['deal'], phase['activity_id'], phase['confidence']),
                          ('phase_move', DEAL, 'a1', 0.92))
         self.assertEqual((step['text'], step['next_date'], step['owner']), ('Send the floor plan', '2026-10-30', 'joe'))
+
+    def test_reply_drafts_require_grounded_confident_nonempty_bounded_text(self):
+        valid = {'kind': 'reply_draft', 'evidence_quote': ASK, 'confidence': 0.9,
+                 'subject': 'Re: Floor plan', 'body': 'I will send the plan by Friday.'}
+        invalid = [{'subject': ''}, {'subject': ' '}, {'subject': 'x' * 999}, {'subject': None},
+                   {'body': ''}, {'body': '\n\t'}, {'body': 'x' * 20001}, {'body': 5},
+                   {'confidence': 0.2}, {'evidence_quote': 'An invented request to send a plan.'}]
+        for change in invalid:
+            with self.subTest(change=list(change)):
+                server = Server([email('reply2', ASK)])
+                counts = route(server, lambda e, d: {'proposals': [{**valid, **change}]})
+                self.assertEqual((counts['recorded'], counts['dropped']), (0, 1))
+                self.assertEqual(server.recorded(), [])
+
+    def test_reply_draft_write_retry_reuses_key_without_duplicating_the_proposal(self):
+        failures = ['offline']
+
+        def flaky(args):
+            if failures:
+                raise RuntimeError(failures.pop())
+        server, state = Server([email('reply3', ASK)], decide=flaky), {}
+        draft = {'proposals': [{'kind': 'reply_draft', 'evidence_quote': ASK, 'confidence': 0.9,
+                               'subject': 'Re: Floor plan', 'body': 'I will send the plan by Friday.'}]}
+        self.assertEqual(route(server, lambda e, d: draft, state)['write_failed'], 1)
+        self.assertEqual(route(server, lambda e, d: draft, state)['recorded'], 1)
+        self.assertEqual(route(server, lambda e, d: draft, state)['recorded'], 0)
+        self.assertEqual(len(server.stored), 1)
+        self.assertEqual(len({args['idempotency_key'] for args in server.recorded()}), 1)
 
     def test_injected_instructions_are_forwarded_literally_for_the_server_to_flag(self):
         quotes = FIXTURE['attacks'] + FIXTURE['commands'] + FIXTURE['benign']

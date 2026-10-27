@@ -20,8 +20,8 @@ test('financial lifecycle callers share one strict calendar-date rule', async ()
 });
 
 test('registered receipt transaction proof is required by the migration check', () => {
-  const ci = readFileSync(new URL('../../ops/ci.sh', import.meta.url), 'utf8');
-  assert.ok(/CARR_INVOICE_TEST_DATABASE_URL="\$dsn"/.test(ci));
-  assert.ok(/CARR_INVOICE_TEST_REQUIRED=1/.test(ci));
-  assert.ok(/node --test mcp-server\/test\/invoice-tracker-transaction\.test\.mjs/.test(ci));
+  const ci = readFileSync(new URL('../../ops/ci-migration.py', import.meta.url), 'utf8');
+  assert.ok(/"CARR_INVOICE_TEST_DATABASE_URL": "\{dsn\}"/.test(ci));
+  assert.ok(/"CARR_INVOICE_TEST_REQUIRED": "1"/.test(ci));
+  assert.ok(/mcp-server\/test\/invoice-tracker-transaction\.test\.mjs/.test(ci));
 });

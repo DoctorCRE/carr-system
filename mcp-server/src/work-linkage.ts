@@ -1,14 +1,20 @@
 // Project and observe task and board linkage.
+import type { Db } from './verb-contract.ts';
+// Board snapshots are external JSON; the projector checks association fields before using them.
+type SnapshotRecord = Record<string, any>;
+type LinkSubject = { board_id: string; task_id: string; version: number };
+type LinkReference = { relation: string; ref: string; title: string; state: string; target: { board_id?: string; task_id?: string; url?: string; work_request?: string } | null };
 import { readableWorkRequestSql } from './work-request-read.ts';
-const text=value=>typeof value==='string' && !!value.trim() && !/[\u0000-\u001f]/.test(value);
-const record=value=>value && typeof value==='object' && !Array.isArray(value);
-const pullRequestUrl=value=>typeof value==='string'&&/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9][0-9]*$/.test(value);
-export function unavailableLinkage(subject, reason = 'source_linkage_not_observed', references = []) {
+const text=(value: unknown): value is string=>typeof value==='string' && !!value.trim() && !/[\u0000-\u001f]/.test(value);
+// Preserve the original falsy return values while describing its object narrowing.
+const record=(value: unknown): value is SnapshotRecord=>(value && typeof value==='object' && !Array.isArray(value)) as boolean;
+const pullRequestUrl=(value: unknown): value is string=>typeof value==='string'&&/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9][0-9]*$/.test(value);
+export function unavailableLinkage(subject: LinkSubject, reason = 'source_linkage_not_observed', references: LinkReference[] = []) {
  return {schema:'work-linkage.v1',state:'unavailable',subject,references,reason};
 }
-export function projectTaskLinkage(row,id) {
+export function projectTaskLinkage(row: SnapshotRecord,id: string) {
  const subject={board_id:row.board_id,task_id:id,version:Number(row.version)};
- const tasks=row.snapshot_json?.tasks,task=tasks?.[id],references=[],seen=new Set();
+ const tasks=row.snapshot_json?.tasks,task=tasks?.[id],references: LinkReference[]=[],seen=new Set();
  if(!record(task) || !text(row.board_id) || !Number.isSafeInteger(subject.version) || subject.version<1)
   return unavailableLinkage(subject,'source_binding_invalid');
  if(task.linkage_metadata_unavailable!=null || ['dependency_refs','depends_on','blocked_by','blocker_ref','blocker_task_id','parent_refs','related_refs','dependencies'].some(key=>task[key]!=null) || task.held?.blocker!=null)
@@ -18,13 +24,13 @@ export function projectTaskLinkage(row,id) {
  if(task.blocked_by_task_ids!=null && (!Array.isArray(task.blocked_by_task_ids)||!task.blocked_by_task_ids.every(text))
   || task.parent_task_id!=null && !text(task.parent_task_id)
   || fields.some(key=>task[key]!=null && !text(task[key]))
-  || task.related!=null && (!Array.isArray(task.related)||!task.related.every(ref=>record(ref)&&text(ref.id)&&text(ref.kind))))
+  || task.related!=null && (!Array.isArray(task.related)||!task.related.every((ref: SnapshotRecord)=>record(ref)&&text(ref.id)&&text(ref.kind))))
   return unavailableLinkage(subject,'reference_structure_invalid');
- const add=(relation,ref,title,state,target)=>{
+ const add=(relation: string,ref: string,title: string,state: string,target: LinkReference["target"])=>{
   const key=JSON.stringify([relation,ref]);if(seen.has(key))return;seen.add(key);
   references.push({relation,ref,title,state,target});
  };
- for(const [relation,refs] of [['blocked_by',task.blocked_by_task_ids||[]],['parent',task.parent_task_id?[task.parent_task_id]:[]]]) {
+ for(const [relation,refs] of [['blocked_by',task.blocked_by_task_ids||[]],['parent',task.parent_task_id?[task.parent_task_id]:[]]] as [string, string[]][]) {
   for(const ref of refs) {
    const target=ref!==id && Object.hasOwn(tasks,ref) && record(tasks[ref]) ? tasks[ref]:null;
    add(relation,ref,target?.title||ref,target?'resolved':'unresolved',target?{board_id:row.board_id,task_id:ref}:null);
@@ -52,16 +58,16 @@ export function projectTaskLinkage(row,id) {
   return unavailableLinkage(subject);
  return {schema:'work-linkage.v1',state:'complete',subject,references,reason:null};
 }
-export function projectBoardLinkage(row) {
+export function projectBoardLinkage(row: SnapshotRecord) {
  if (!record(row?.snapshot_json?.tasks)) return row;
  const tasks=Object.fromEntries(Object.entries(row.snapshot_json.tasks).map(([id,task])=>[id,record(task)?{...task,linkage:projectTaskLinkage(row,id)}:task]));
  return {...row,snapshot_json:{...row.snapshot_json,tasks}};
 }
 
-export async function observeBoardLinkage(client,rows,tenant,sponsor) {
+export async function observeBoardLinkage(client: Db,rows: SnapshotRecord[],tenant: string,sponsor: string) {
  const projected=rows.map(projectBoardLinkage);
- const references=projected.flatMap(row=>Object.values(row?.snapshot_json?.tasks||{}).flatMap(task=>task?.linkage?.references||[]));
- const refs=[...new Set(references.filter(ref=>ref.relation==='work_request'&&/^WR-[0-9]{1,12}$/.test(ref.ref)).map(ref=>ref.ref))];
+ const references=projected.flatMap(row=>Object.values<SnapshotRecord>(row?.snapshot_json?.tasks||{}).flatMap(task=>task?.linkage?.references||[]));
+ const refs=[...new Set(references.filter((ref: LinkReference)=>ref.relation==='work_request'&&/^WR-[0-9]{1,12}$/.test(ref.ref)).map((ref: LinkReference)=>ref.ref))];
  const readable=refs.length ? await client.query(`select w.ref,w.title from ops.work_request w
   where w.organization_tenant_id=$1 and $2::text is not null and w.ref=any($3::text[]) and ${readableWorkRequestSql('w')}`,
  [tenant,sponsor,refs]).catch(()=>({rows:[]})) : {rows:[]};
