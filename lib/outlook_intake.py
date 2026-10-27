@@ -750,6 +750,13 @@ class Run:
         prepared: list[tuple[str, dict, dict, bytes]] = []
         done = self.state.setdefault('attachments_done', {})
         self.state['attachments_pending'] = False
+        uncached = self.state.setdefault('attachments_uncached', {})
+        cutoff = (self.now - UNRESOLVED_DAYS).timestamp()
+        expired = [source for source, sent in uncached.items() if sent < cutoff]
+        if expired:
+            self.counts['attachments_uncached_refused'] = len(expired)
+            for source in expired:
+                del uncached[source]
         candidates = []
         for mail in mails:
             if not mail.get('attachments') or not (self.now - UNRESOLVED_DAYS).timestamp() <= mail['sent_unix'] <= self.now.timestamp() + 300:
@@ -782,25 +789,34 @@ class Run:
                     selected[row_id] = (mail, matches[0])
             pending_ids = {a['id'] for mail, _ in selected.values() for a in mail['attachments']
                            if f"{mail['ident']}/{a['id']}" not in done}
-            paths = sorted({a['path'] for a in att.rows(db) if a['message'] in selected and a['attachment'] in pending_ids
-                            and att.CACHE_PATH.fullmatch(a['path'] or '')
+            rows = [a for a in att.rows(db) if a['message'] in selected and a['attachment'] in pending_ids]
+            for row in rows:
+                if not row['path']:
+                    mail, _ = selected[row['message']]
+                    uncached[f"{mail['ident']}/{row['attachment']}"] = mail['sent_unix']
+                    self.counts['attachments_uncached'] = self.counts.get('attachments_uncached', 0) + 1
+            paths = sorted({a['path'] for a in rows if a['path'] and att.CACHE_PATH.fullmatch(a['path'])
                             and not any(ord(c) < 32 or ord(c) == 127 for c in a['path'])})
-            if not paths:
-                self.state['attachments_pending'] |= bool(selected)
-                return prepared
-            if self.ports.copy_attachments:
-                self.ports.copy_attachments(files, paths)
-            else:
-                copied = subprocess.run([str(self.settings.copy_helper), '--attachments'],
-                    input=''.join(path + '\n' for path in paths), cwd=files.parent,
-                    capture_output=True, text=True, timeout=900)
-                if copied.returncode:
-                    raise OSError('attachment copy failed')
+            if paths:
+                if self.ports.copy_attachments:
+                    self.ports.copy_attachments(files, paths)
+                else:
+                    copied = subprocess.run([str(self.settings.copy_helper), '--attachments'],
+                        input=''.join(path + '\n' for path in paths), cwd=files.parent,
+                        capture_output=True, text=True, timeout=900)
+                    if copied.returncode:
+                        raise OSError('attachment copy failed')
+            pending_ids -= {a['attachment'] for a in rows if not a['path']}
             for result in att.extract(db, files, files.parent / 'extracted', messages=set(selected), attachments=pending_ids):
                 mail, deal = selected[result['message']]
                 source = f"{mail['ident']}/{result['attachment']}"
                 if source in done:
                     continue
+                if result['status'] == 'not_cached':
+                    uncached[source] = mail['sent_unix']
+                    self.counts['attachments_uncached'] = self.counts.get('attachments_uncached', 0) + 1
+                    continue
+                uncached.pop(source, None)
                 if result['status'] != 'stored':
                     self.counts['attachments_' + result['status']] = self.counts.get('attachments_' + result['status'], 0) + 1
                 if result['status'] in ('type_refused', 'too_large', 'empty'):
@@ -1255,7 +1271,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     hydration_due = bool(state.get('pending_full')) and now.timestamp() >= state.get('hydration_check_at', 0)
     review_due = 'calendar_review_at' not in state or (state['calendar_review_at'] is not None
                                                       and now.timestamp() >= state['calendar_review_at'])
-    if 'mail_other_accounts' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and not state.get('steps') and state.get('attachment_policy') == 1 and not state.get('attachments_pending') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY:
+    if 'mail_other_accounts' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and not state.get('steps') and state.get('attachment_policy') == 1 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY:
         if state.get('pending_full'):
             Run(ports, state, now, out, settings).full_text([])
             _refresh_list(out, state['pending_full'])

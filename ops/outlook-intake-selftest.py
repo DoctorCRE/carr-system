@@ -333,6 +333,51 @@ class IntakeTest(unittest.TestCase):
                 self.assertTrue(state['store'])
                 self.assertEqual(self.copied, [])
 
+    def test_uncached_attachment_retries_then_expires(self):
+        ports = self.attachment_fixture()
+        with sqlite3.connect(self.fake.fixture) as con:
+            con.execute('UPDATE attachments SET path = NULL WHERE id = 7')
+        for _ in range(2):
+            result = intake.run(self.repo, self.home, ports)
+            self.assertEqual(result.state, 'succeeded')
+            self.assertEqual(result.counts['attachments_uncached'], 1)
+        self.fake.now = NOW + timedelta(days=31)
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['attachments_uncached_refused'], 1)
+
+    def test_uncached_attachment_is_filed_when_cached(self):
+        ports = self.attachment_fixture()
+        with sqlite3.connect(self.fake.fixture) as con:
+            con.execute('UPDATE attachments SET path = NULL WHERE id = 7')
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.counts['attachments_uncached'], 1)
+        with sqlite3.connect(self.fake.fixture) as con:
+            con.execute('UPDATE attachments SET path = ? WHERE id = 7', (self.cache_path,))
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(len(self.filed), 1)
+        self.assertEqual(self.copied, [self.cache_path])
+
+    def test_uncached_attachment_does_not_block_cached_sibling(self):
+        ports = self.attachment_fixture()
+        with sqlite3.connect(self.fake.fixture) as con:
+            con.execute('INSERT INTO attachments VALUES(8,100,?,1,?,?,NULL)',
+                        ('pending.pdf', 'application/pdf', 100))
+        for _ in range(2):
+            result = intake.run(self.repo, self.home, ports)
+            self.assertEqual(result.state, 'succeeded')
+            self.assertEqual(result.counts['attachments_uncached'], 1)
+        self.assertEqual(len(self.filed), 1)
+
+    def test_missing_cached_file_is_retried(self):
+        ports = self.attachment_fixture()
+        ports.copy_attachments = lambda files, paths: None
+        for _ in range(2):
+            result = intake.run(self.repo, self.home, ports)
+            self.assertEqual(result.state, 'succeeded')
+            self.assertEqual(result.counts['attachments_uncached'], 1)
+
     def test_attachment_status_controls_run_outcome(self):
         from lib import outlook_attachments, outlook_deal_files
         for status in ('too_large', 'empty', 'type_refused', 'batch_cap', 'error', 'quota_refused', 'verb_failed'):
