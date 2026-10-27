@@ -29,6 +29,18 @@ class ReviewGate(unittest.TestCase):
             with self.subTest(path=path, status=status):
                 self.assertEqual(gate.approved(pr, [{"filename": path, "status": status}], []), expected)
 
+    def test_docs_only_needs_no_review(self):
+        pr = {"changed_files": 2, "additions": 900, "deletions": 0, "head": {"sha": "abc"}}
+        changes = [{"body": "VERDICT: CHANGES\nReviewed-SHA: abc"}]
+        for files, comments, expected in [
+                ([{"filename": "docs/plan.md", "status": "added"}, {"filename": "docs/outlook/notes.md"}], [], True),
+                ([{"filename": "docs/plan.md"}, {"filename": "lib/x.py"}], [], False),
+                ([{"filename": "docs/plan.md"}, {"filename": "docs/new.md", "previous_filename": "lib/x.py"}], [], False),
+                ([{"filename": "docs/plan.md"}], [], False),
+                ([{"filename": "docs/plan.md"}, {"filename": "README.md"}], changes, False)]:
+            with self.subTest(files=files, comments=comments):
+                self.assertEqual(gate.approved(pr, files, comments), expected)
+
     def test_sha_bound_comment_format(self):
         pr = {"changed_files": 0, "additions": 151, "deletions": 0, "head": {"sha": "abc"}}
         for body, expected in [("VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok", True), ("VERDICT: APPROVE\r\nReviewed-SHA: abc\r\nReviewer: grok", True), ("VERDICT: CHANGES\nReviewed-SHA: abc", False), ("VERDICT: APPROVE\nReviewed-SHA: old\nReviewer: grok", False), ("prefix\nReviewed-SHA: abc\nReviewer: grok\nVERDICT: APPROVE", False), ("VERDICT: APPROVE\nReviewed-SHA: abcd\nReviewer: grok", False)]:
