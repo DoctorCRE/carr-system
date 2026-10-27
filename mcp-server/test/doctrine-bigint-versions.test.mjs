@@ -133,3 +133,23 @@ test("read-doctrine names an unsafe version in a synthetic refinement-plan snaps
   assert.match(payload.hint, /version.*safely/i);
   assert.equal(payload.correlation_id, "d170d000-0000-4000-8000-000000000031");
 });
+
+test("read-doctrine names a missing document and explains how to find a current reference", async t => {
+  t.mock.method(console, "error", () => {});
+  const db = { async query() { return { rows: [] }; } };
+  await assert.rejects(() => TOOLS["read-doctrine"].handler(db, actor, {
+    document: "synthetic-missing-refinement-plan",
+  }), failure => {
+    assert.ok(failure instanceof ToolError);
+    const payload = publicError(failure, {
+      env: { CORRELATION_ID: "d170d000-0000-4000-8000-000000000031" },
+      inputSchema: TOOLS["read-doctrine"].inputSchema,
+    });
+    assert.equal(payload.error, "doctrine_doc_not_found");
+    assert.match(payload.hint, /document/);
+    assert.match(payload.hint, /doctrine-index/);
+    assert.equal(payload.correlation_id, "d170d000-0000-4000-8000-000000000031");
+    assert.deepEqual(Object.keys(payload).sort(), ["correlation_id", "error", "hint"]);
+    return true;
+  });
+});
