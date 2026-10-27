@@ -14,7 +14,6 @@ ALLOW = {
     'salesforce-read-run-store-rw02-postgres.test.mjs': 'Asserts agreement between host and database clocks.',
     'program-controller-census-role-boundary.v5.test.mjs': 'Database census records require live freshness.',
     'shared-oauth-worker.test.mjs': 'Token expiry runs in a separate Workerd clock.',
-    'relationship-network-postgres.test.mjs': 'Network hold fixtures are relative to the database clock.',
 }
 # Acorn supplies JavaScript syntax; Python owns the clock policy and reporting.
 PARSER = r"""
