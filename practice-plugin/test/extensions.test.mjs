@@ -1,3 +1,4 @@
+// Test MCP app extensions, form metadata, and protocol handling.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Ajv from 'ajv';

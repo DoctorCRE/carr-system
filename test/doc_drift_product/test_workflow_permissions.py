@@ -1,3 +1,4 @@
+# Test permissions for the scheduled document drift workflow.
 from pathlib import Path
 import unittest
 import yaml

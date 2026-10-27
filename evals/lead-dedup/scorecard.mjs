@@ -19,7 +19,7 @@ export async function scorecard(fixture) {
       vertical: 'dental', sourceUrl: `https://example.invalid/${pair.id}/${index}`,
     }));
     const result = await runInNewContext(
-      `(async () => { ${source.replace(/^export const meta =/, 'const meta =')} })()`, {
+      `(async () => { ${source.replace(/^export const meta =/m, 'const meta =')} })()`, {
         args: { today: 'SYNTHETIC', lanes: ['one', 'two'], regions: ['fixture'], cap: 2 },
         phase() {}, log() {},
         parallel: jobs => Promise.all(jobs.map(job => job())),

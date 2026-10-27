@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Test sentence streaming from the conversation brain.
 set -euo pipefail
 
 BIN="$(cd "$(dirname "$0")" && pwd)"

@@ -1,3 +1,4 @@
+// Assess sale readiness and buyer coverage from lease evidence.
 import { z } from 'zod';
 import { envelope } from './evidence.mjs';
 import { id, usd } from './runway.mjs';

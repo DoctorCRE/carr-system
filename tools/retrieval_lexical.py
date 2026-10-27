@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Load and rank retrieval index rows by lexical query matches.
 
 from __future__ import annotations
 

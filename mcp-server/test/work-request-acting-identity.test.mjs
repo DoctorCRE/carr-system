@@ -1,3 +1,4 @@
+// Tests acting identity and authority for Work Request operations.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { actingIdentityProjection } from "../src/work-request-intake.js";

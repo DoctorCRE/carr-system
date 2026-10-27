@@ -1,3 +1,4 @@
+// Define and dispatch practice planning tools and their input schemas.
 import { z } from 'zod';
 import rates from '../data/rates.json' with { type: 'json' };
 import { NOTICE, envelope, envelopeShape, publicSource, allowanceSource, PlanningInputError } from './evidence.mjs';

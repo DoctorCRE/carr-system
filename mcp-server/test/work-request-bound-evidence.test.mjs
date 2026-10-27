@@ -1,3 +1,4 @@
+// Tests evidence binding for Work Request transitions.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, executeRegisteredTool } from "../src/tools.js";

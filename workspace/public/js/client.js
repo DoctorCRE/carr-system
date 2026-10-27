@@ -1,3 +1,4 @@
+// Load workspace fixtures and expose authored states.
 const knownSurfaces = new Set([
   "command-center",
   "market-map",

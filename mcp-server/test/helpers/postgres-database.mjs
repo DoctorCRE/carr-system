@@ -1,3 +1,4 @@
+// Create and clean up a disposable PostgreSQL database for tests.
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';

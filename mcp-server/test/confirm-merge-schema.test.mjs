@@ -1,3 +1,4 @@
+// Tests confirm-merge against the current PostgreSQL activity schema.
 import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
 import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import test from "node:test";

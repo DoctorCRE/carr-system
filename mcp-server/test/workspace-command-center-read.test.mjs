@@ -1,3 +1,4 @@
+// Tests Command Center summary reads and actor scoping.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readCommandCenterSummary } from "../src/workspace-command-center.js";

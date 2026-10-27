@@ -1,3 +1,4 @@
+// Register workspace requirement and test checks.
 function requireCondition(condition, message) {
   if (!condition) throw new Error(message);
 }

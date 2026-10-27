@@ -1,3 +1,4 @@
+// Tests retry and concurrent write reconciliation for room and business writes.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { roomMessageId } from '../src/dealroom-web.js';

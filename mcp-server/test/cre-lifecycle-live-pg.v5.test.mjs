@@ -1,3 +1,4 @@
+// Tests CRE lifecycle transitions against disposable PostgreSQL.
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";

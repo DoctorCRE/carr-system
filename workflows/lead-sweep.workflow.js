@@ -1,3 +1,4 @@
+// Define the lead sourcing sweep workflow.
 export const meta = {
   name: 'lead-sweep',
   description: 'Multi-modal lead-sourcing sweep: parallel finders per signal lane, dedupe barrier, fresh-context verify, ALL leads presented',

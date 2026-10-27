@@ -1,3 +1,4 @@
+// Reports whether a Node test file registered tests.
 import { tracingChannel } from 'node:diagnostics_channel';
 
 if (process.env.NODE_TEST_CONTEXT === 'child-v8') {

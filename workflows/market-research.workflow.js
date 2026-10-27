@@ -1,3 +1,4 @@
+// Define the market research workflow.
 export const meta = {
   name: 'market-research',
   description: 'Cited market-research graph: decompose question, parallel source sweep, adversarial verify, synthesize a DNA/Research-format report',

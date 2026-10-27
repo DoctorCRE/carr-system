@@ -1,3 +1,4 @@
+// Tests catch-up reads, partner watermarks, and acknowledgement replay.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test activation reliability evidence and control plane contracts.
 
 from __future__ import annotations
 

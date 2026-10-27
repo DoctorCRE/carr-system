@@ -1,3 +1,4 @@
+// Tests typed guidance precedents and legacy precedent lookup.
 import assert from "node:assert/strict";
 import test from "node:test";
 

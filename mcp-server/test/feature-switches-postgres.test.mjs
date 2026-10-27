@@ -1,3 +1,4 @@
+// Test feature switch reads and scheduled health on PostgreSQL.
 import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
 import test from 'node:test';
