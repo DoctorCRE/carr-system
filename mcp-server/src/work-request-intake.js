@@ -199,6 +199,11 @@ function validateDecline(args, ToolError) {
       !Number.isInteger(args.base_version) || args.base_version < 1 ||
       !text(args.exit_reason) || text(args.exit_reason).length > 500)
     throw new ToolError({ error: "invalid_decline_work_request" });
+  const reason = text(args.exit_reason);
+  if (/^(done|shipped|fixed)\b/i.test(reason) ||
+      (/(?:^|\W)(?:app)?#[0-9]+\b/i.test(reason) && /\b(done|merged|shipped|fixed|landed)\b/i.test(reason)))
+    throw new ToolError({ error: "decline_claims_completion",
+      hint: "Use complete-work-request to close built work. Decline only work that will not be built." });
 }
 
 function validateSupersede(args, ToolError) {
