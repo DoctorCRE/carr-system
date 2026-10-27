@@ -121,10 +121,10 @@ class ParityTest(unittest.TestCase):
         self.assertTrue(all(row['status'] == 'unsupported' for row in state['calendar_evidence'].values()))
         self.assertIn(b'calendar_lifecycle_unsupported', status)
 
-    def test_second_person_uses_other_profile_owner_and_outbound_address(self):
-        other = self.home / 'Other Profile'
+    def test_dell_uses_main_profile_owner_and_outbound_address(self):
+        other = self.home / 'Main Profile'
         self.settings.profile.rename(other)
-        self.settings_path = write_settings(self.home, self.repo, owner='other-person',
+        self.settings_path = write_settings(self.home, self.repo, owner='dell',
                                             account='broker@other.test', internal_domain='other.test', profile=str(other))
         self.settings = load_settings(self.home)
         self.store = other / 'HxStore.hxd'
@@ -133,7 +133,7 @@ class ParityTest(unittest.TestCase):
         self.assertEqual(result.state, 'succeeded')
         writes = [args for verb, args in calls if verb == 'set-next-action']
         self.assertTrue(writes)
-        self.assertEqual({args['owner'] for args in writes}, {'other-person'})
+        self.assertEqual({args['owner'] for args in writes}, {'dell'})
         outgoing = [args for verb, args in calls if verb == 'log-activity' and args['kind'] == 'email_out']
         self.assertEqual(len(outgoing), 1)
         self.assertEqual(outgoing[0]['ref'], 'L-902')
