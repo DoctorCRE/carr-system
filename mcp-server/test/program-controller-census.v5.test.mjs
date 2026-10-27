@@ -1,3 +1,4 @@
+import { NOW } from "./helpers/fixed-clock.mjs";
 // Tests program controller census evidence and width decisions.
 import { readMigration } from "./migration-source.testhelper.mjs";
 // WR-000110 — the program-controller census reader, one test per acceptance
@@ -67,7 +68,7 @@ function fakeClient(rows = {}, { raise = null } = {}) {
   };
 }
 
-const headRow = (observedAt = new Date()) => ([{
+const headRow = (observedAt = new Date(NOW)) => ([{
   repository_root: ROOT, origin_main_sha: HEAD, observed_at: observedAt,
 }]);
 
@@ -93,7 +94,7 @@ const widthStateRow = (current, requested) =>
 const evidenceRows = (state = "accepted", baseSha = HEAD, classes = V5_WIDTH_EVIDENCE_CLASSES) =>
   classes.map(evidence_class => ({
     evidence_class, state, evidence_ref: `evidence:${evidence_class}`,
-    bound_base_sha: baseSha, observed_at: new Date(),
+    bound_base_sha: baseSha, observed_at: new Date(NOW),
   }));
 
 // The six receipt bodies that satisfy all six predicates. Built once here and
@@ -249,7 +250,7 @@ test("the head comes from the newest recorded observation, never from a lease's 
 });
 
 test("an observation older than the permitted age is refused as unknown freshness", async () => {
-  const stale = new Date(Date.now() - (V5_MAX_CENSUS_AGE_SECONDS + 60) * 1000);
+  const stale = new Date(NOW - (V5_MAX_CENSUS_AGE_SECONDS + 60) * 1000);
   const client = fakeClient({ head: headRow(stale) });
   await rejectsWith(readOriginHead({ client, repositoryRoot: ROOT }), "FRESHNESS_UNKNOWN");
 });
@@ -272,7 +273,7 @@ test("the observation instant comes from the runtime clock, not from the databas
 // ---------------------------------------------------------------------------
 
 const checkpointRow = (overrides = {}) => ({
-  checkpoint_ref: "checkpoint:wr110-1", recorded_at: new Date(), base_commit_sha: HEAD,
+  checkpoint_ref: "checkpoint:wr110-1", recorded_at: new Date(NOW), base_commit_sha: HEAD,
   worktree_ref: "worktree:wr110-a", completed_step_refs: ["step:one"],
   next_step_ref: "step:two", record_evidence_refs: ["record:one"],
   reconstruction_source: "durable_records", inherited_transcript_used: false, ...overrides,

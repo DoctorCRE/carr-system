@@ -1,7 +1,7 @@
 // Test bounded pagination of the rule boot digest.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ruleBootPage } from "../src/rule-boot.js";
+import { ruleBootPage } from "../src/rule-boot.ts";
 
 test("boot is one bounded digest page even for a large corpus", async () => {
   const rows = Array.from({ length: 1000 }, (_, i) => ({

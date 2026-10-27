@@ -57,10 +57,13 @@ test("MCP projects translated database validation errors without schema diagnost
 for (const [code, extra] of [
   ["version_conflict", { current_version: 3 }], ["needs_confirm", {}],
   ["missing_plan_base", {}], ["newer_change_exists", {}],
-  ["not_found", {}], ["doctrine_doc_not_found", { ref: privateText }], ["unauthorized", {}], ["loop_not_open", {}],
+  ["not_found", {}], ["doctrine_doc_not_found", { ref: privateText }], ["unauthorized", {}], ["loop_not_open", {}], ["action_not_open", {}], ["critical_date_not_open", {}],
   ["value_not_in_declared_vocabulary", { field: "filter" }],
   ["AUTHORIZATION_REFUSED", {}], ["vendor_meetings_query_invalid", {}], ["vendor_meetings_unavailable", {}],
   ["tour_share_scope_invalid", {}], ["personal_doc_not_owner", {}], ["personal_loop_not_owner", {}],
+  ["work_request_not_found", {}], ["work_request_terminal_state", {}], ["work_request_not_completable", {}],
+  ["invalid_completion", {}], ["missing_criterion_evidence", {}], ["missing_change_ref", {}],
+  ["missing_user_journey_ref", {}], ["completion_capsule_refused", {}], ["sponsored_actor_required", {}],
 ]) test(`MCP preserves the public ${code} contract`, async t => {
   const payload = await failure(t, new ToolError({ error: code, ...extra,
     detail: privateText, hint: privateText, nested: { stack: privateText } }));

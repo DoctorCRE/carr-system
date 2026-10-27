@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { executeRegisteredTool } from "../src/tools.js";
-import { ruleBootPage } from "../src/rule-boot.js";
+import { ruleBootPage } from "../src/rule-boot.ts";
 
 const JOE = { id: "11111111-1111-4111-8111-111111111111", slug: "joe", human: true, via: "oauth-google" };
 const rows = [

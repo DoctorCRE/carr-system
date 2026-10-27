@@ -1,3 +1,4 @@
+import { NOW } from "./helpers/fixed-clock.mjs";
 // loop-version-and-marker.test.mjs — coverage for the two Phase 1 defects
 // found live 2026-08-13 (decision 7026246b):
 //
@@ -138,7 +139,7 @@ class CloseLoopFake {
       this.events.push({ actor: "joe", verb: params[2], field: params[5] || null,
         old_value: params[6] ? JSON.parse(params[6]) : null,
         new_value: params[7] ? JSON.parse(params[7]) : null,
-        recorded_at: new Date(Date.now() + 60_000).toISOString() }); // strictly after creation
+        recorded_at: new Date(NOW + 60_000).toISOString() }); // strictly after creation
       return { rows: [] };
     }
     if (sql.startsWith("insert into tool_call")) {

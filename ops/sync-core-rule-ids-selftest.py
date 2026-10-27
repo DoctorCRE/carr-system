@@ -7,7 +7,7 @@ established split: this measures the CHECK, never the real repository's
 actual triage/generated-file pair). Proves: a freshly-regenerated file
 matches and passes; a hand-edited or stale file is caught and fails; the
 real repository pair (ops/config/rule-triage.v1.json and
-mcp-server/src/core-rule-ids.js) is ALSO checked directly, since that is the
+mcp-server/src/core-rule-ids.ts) is ALSO checked directly, since that is the
 one thing that actually protects doctrine.js from reading a stale list.
 """
 import importlib.util
@@ -63,7 +63,7 @@ def test_fresh_generation_passes_its_own_check():
     tmp = tempfile.mkdtemp(prefix="core-rule-ids-fresh-")
     try:
         triage_path = os.path.join(tmp, "rule-triage.v1.json")
-        out_path = os.path.join(tmp, "core-rule-ids.js")
+        out_path = os.path.join(tmp, "core-rule-ids.ts")
         with open(triage_path, "w") as fh:
             json.dump(SYNTHETIC_TRIAGE, fh)
         rc_write = sync_core_rule_ids.main(["--triage", triage_path, "--out", out_path])
@@ -87,7 +87,7 @@ def test_stale_generated_file_is_caught():
     tmp = tempfile.mkdtemp(prefix="core-rule-ids-stale-")
     try:
         triage_path = os.path.join(tmp, "rule-triage.v1.json")
-        out_path = os.path.join(tmp, "core-rule-ids.js")
+        out_path = os.path.join(tmp, "core-rule-ids.ts")
         with open(triage_path, "w") as fh:
             json.dump(SYNTHETIC_TRIAGE, fh)
         sync_core_rule_ids.main(["--triage", triage_path, "--out", out_path])
@@ -107,7 +107,7 @@ def test_hand_edit_is_caught():
     tmp = tempfile.mkdtemp(prefix="core-rule-ids-handedit-")
     try:
         triage_path = os.path.join(tmp, "rule-triage.v1.json")
-        out_path = os.path.join(tmp, "core-rule-ids.js")
+        out_path = os.path.join(tmp, "core-rule-ids.ts")
         with open(triage_path, "w") as fh:
             json.dump(SYNTHETIC_TRIAGE, fh)
         sync_core_rule_ids.main(["--triage", triage_path, "--out", out_path])
@@ -123,7 +123,7 @@ def test_missing_out_file_is_caught():
     tmp = tempfile.mkdtemp(prefix="core-rule-ids-missing-")
     try:
         triage_path = os.path.join(tmp, "rule-triage.v1.json")
-        out_path = os.path.join(tmp, "core-rule-ids.js")  # never written
+        out_path = os.path.join(tmp, "core-rule-ids.ts")  # never written
         with open(triage_path, "w") as fh:
             json.dump(SYNTHETIC_TRIAGE, fh)
         rc = sync_core_rule_ids.main(["--check", "--triage", triage_path, "--out", out_path])
@@ -137,7 +137,7 @@ def test_real_repository_pair_is_currently_in_sync():
     pair passes right now. ops/ci.sh invokes the generator with --check."""
     rc = sync_core_rule_ids.main(["--check"])
     check("the real ops/config/rule-triage.v1.json and "
-          "mcp-server/src/core-rule-ids.js are in sync right now", rc == 0)
+          "mcp-server/src/core-rule-ids.ts are in sync right now", rc == 0)
 
 
 if __name__ == "__main__":

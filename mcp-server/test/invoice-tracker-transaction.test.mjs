@@ -75,8 +75,8 @@ async function assertUntouched(c, f) {
   assert.equal(state.envelope.length, 0);
 }
 async function waitForLock(observer, pid) {
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
+  const deadline = performance.now() + 5000;
+  while (performance.now() < deadline) {
     const row = (await observer.query('select wait_event_type from pg_stat_activity where pid=$1', [pid])).rows[0];
     if (row?.wait_event_type === 'Lock') return;
     await new Promise(resolve => setTimeout(resolve, 10));

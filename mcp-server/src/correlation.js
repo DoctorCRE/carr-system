@@ -54,7 +54,7 @@
 //
 // WHAT THIS FILE DELIBERATELY DOES NOT DO: it does not write to
 // ops.run, ops.deployment, ops.incident, or ops.work_request. Checked by
-// reading tools.js, mcp.js, dealroom.js, dealroom-web.js and capture.js in
+// reading tools.js, mcp.js, dealroom.ts, dealroom-web.js and capture.js in
 // full: this Worker writes to none of those tables today (zero hits for
 // "ops.run", "ops.deployment", "ops.incident", "ops.work_request" anywhere
 // under mcp-server/src/), so there is no existing write to thread a

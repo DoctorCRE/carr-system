@@ -34,8 +34,8 @@ function pauseAfter(c,match) {
   return {reached:reached.promise,resume:()=>resume.resolve(),restore:()=>{c.query=query;}};
 }
 async function blockedOrFinished(pid,finished) {
-  const deadline=Date.now()+3000;
-  while(!finished()&&Date.now()<deadline) {
+  const deadline=performance.now()+3000;
+  while(!finished()&&performance.now()<deadline) {
     if((await observer.query('select cardinality(pg_blocking_pids($1))>0 as blocked',[pid])).rows[0].blocked)return true;
     await new Promise(r=>setTimeout(r,10));
   }
