@@ -3139,6 +3139,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "undo-call": {
+    "ingress_key": "mcp-tool:undo-call",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "190f9debf0677c0a8d1d9ce011c963b284ee22e4f35a25b999fced09262c2f6a",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "undo-call-change": {
     "ingress_key": "mcp-tool:undo-call-change",
     "source_locator": "mcp-server/src/tools.js",
