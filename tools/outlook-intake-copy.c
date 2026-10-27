@@ -153,12 +153,13 @@ static void copy_sidecars(int profile, int work) {
 
 extern char **environ;
 
-/* launchd starts this granted binary with "--run-intake", so macOS charges the
-   whole job's file access to it (a grant on a child process is ignored). The
-   command is fixed here; the grant never extends to anything else. */
-static int run_intake(void) {
-    char *command[] = {"/bin/zsh", OUTLOOK_REPO "/bin/run-scheduled.sh", "outlook-intake",
-                       "outlook.intake", OUTLOOK_REPO "/.venv/bin/python", "-c",
+/* launchd starts this granted binary directly, so macOS charges the
+   whole job's file access to it (a grant on a child process is ignored). Both
+   commands are fixed here; callers cannot supply a program or arguments. */
+static int run_job(int outbox) {
+    char *command[] = {"/bin/zsh", OUTLOOK_REPO "/bin/run-scheduled.sh", outbox ? "outlook-outbox" : "outlook-intake",
+                       outbox ? "outlook.outbox" : "outlook.intake", OUTLOOK_REPO "/.venv/bin/python",
+                       outbox ? "-m" : "-c", outbox ? "lib.outlook_outbox" :
                        "from lib.outlook_intake import main; raise SystemExit(main())", NULL};
     pid_t child;
     errno = posix_spawn(&child, command[0], NULL, NULL, command, environ);
@@ -174,7 +175,8 @@ int main(int argc, char **argv) {
         printf("%s\n%s\n%s\n", OUTLOOK_PROFILE, OUTLOOK_WORK_ROOT, OUTLOOK_REPO);
         return 0;
     }
-    if (argc == 2 && strcmp(argv[1], "--run-intake") == 0) return run_intake();
+    if (argc == 2 && strcmp(argv[1], "--run-intake") == 0) return run_job(0);
+    if (argc == 2 && strcmp(argv[1], "--run-outbox") == 0) return run_job(1);
     require(argc == 1);
     umask(0077);
     char cwd[PATH_MAX];
