@@ -81,7 +81,7 @@ sort above every migration on main. When main moves under an open migration PR, 
 
 1. Merge `origin/main` and keep its `db/schema.sql`.
 2. If the migration-open-pr check names a new slot, rename the migration and update its references.
-3. Run `python ops/migration-shadow.py --base origin/main --write` to rebuild `db/schema.sql` with the pending migrations on PostgreSQL 18; `tools/test_migration_baseline.py` fails until the snapshot ledger lists every migration file.
+3. Run `python ops/migration-shadow.py --base origin/main` to verify the pending migrations on PostgreSQL 18. Keep the snapshot from main; the scheduled refresh updates it separately.
 
 Briefs give the rule ("next number above main"), never a fixed number.
 

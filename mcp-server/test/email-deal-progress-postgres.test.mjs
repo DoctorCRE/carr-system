@@ -766,6 +766,29 @@ test('the router records sourced phase and next-step proposals that Home lists a
   assert.equal((await command('get-deal-room', { deal })).phase, 'site_selection');
 });
 
+test('pending email proposals can be read in stable pages after earlier items are dismissed', async () => {
+  await c.query('delete from email_proposal');
+  const first = await email(askQuote);
+  const second = await email(askQuote);
+  const a = await record({ kind: 'next_step', activity_id: first.activity_id, evidence_quote: askQuote,
+    text: 'Send the floor plan', next_date: '2027-01-08' });
+  const b = await record({ kind: 'next_step', activity_id: second.activity_id, evidence_quote: askQuote,
+    text: 'Send the floor plan', next_date: '2027-01-08' });
+  const page = await command('list-email-proposals', { limit: 1 }, actor, 'carr_reader');
+  assert.equal(page.proposals.length, 1);
+  assert.equal(page.more, true);
+  assert.equal(page.next_cursor, page.proposals[0].id);
+  await command('dismiss-email-proposal', { idempotency_key: randomUUID(), proposal_id: page.next_cursor,
+    base_version: 1, reason: 'Already handled' }, actor, 'carr_writer');
+  const next = await command('list-email-proposals', { limit: 1, cursor: page.next_cursor }, actor, 'carr_reader');
+  assert.equal(next.proposals.length, 1);
+  assert.deepEqual(new Set([page.proposals[0].id, next.proposals[0].id]), new Set([a.proposal_id, b.proposal_id]));
+  assert.equal(next.more, false);
+  assert.equal(next.next_cursor, null);
+  await assert.rejects(command('list-email-proposals', { limit: 1, cursor: randomUUID() }, actor, 'carr_reader'),
+    error => error.payload?.error === 'email_proposals_cursor_invalid');
+});
+
 test('confirming through the existing verbs resolves the stored proposal', async () => {
   await c.query('delete from email_proposal');
   const source = await email();

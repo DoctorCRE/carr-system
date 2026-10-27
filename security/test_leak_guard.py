@@ -165,6 +165,39 @@ class LeakGuardTest(unittest.TestCase):
                                  text=True)
         self.assertEqual(new_ref.returncode, 0, new_ref.stdout + new_ref.stderr)
 
+    def test_worktree_push_and_up_to_date_push(self):
+        self.write_commit('sample.txt', 'safe\n')
+        receiver = self.receiver('worktree')
+        self.git('push', '-q', str(receiver), 'HEAD:refs/heads/claude/feature')
+        worktree = self.root.with_name(self.root.name + '-worktree')
+        self.git('worktree', 'add', '-qb', 'feature', str(worktree))
+        hooks = self.root / '.git' / 'fixture-hooks'
+        hooks.mkdir()
+        hook = hooks / 'pre-push'
+        hook.write_text('#!/bin/sh\nrefs="$(cat)"\nprintf "%s\\n" "$refs" | python3 "' + str(SCRIPT) +
+                        '" --root "' + str(worktree) + '" --pre-push --generic-only --remote "$2"\n')
+        hook.chmod(0o700)
+        self.git('config', 'core.hooksPath', str(hooks))
+        def push():
+            return subprocess.run(['git', '-C', str(worktree), 'push', str(receiver),
+                                   'HEAD:refs/heads/claude/feature'], capture_output=True, text=True)
+        result = push()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        (worktree / 'sample.txt').write_text('clean change\n')
+        subprocess.run(['git', '-C', str(worktree), 'add', 'sample.txt'], check=True)
+        subprocess.run(['git', '-C', str(worktree), '-c', 'user.name=Synthetic', '-c',
+                        'user.email=synthetic@example.invalid', 'commit', '-qm', 'clean'], check=True)
+        result = push()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_malformed_push_ref_names_the_bad_line(self):
+        bad = 'refs/heads/feature not-an-object refs/heads/feature ' + '0' * 40
+        result = subprocess.run(['python3', str(SCRIPT), '--root', str(self.root),
+                                 '--pre-push', '--generic-only'], input=bad + '\n',
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(bad, result.stderr)
+
     def test_pre_push_merge_with_receiver_commit_missing_locally(self):
         base = self.write_commit('sample.txt', 'safe\n')
         self.git('branch', '-M', 'main')
