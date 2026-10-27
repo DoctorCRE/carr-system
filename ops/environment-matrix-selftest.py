@@ -37,6 +37,9 @@ THE ASSERTIONS.
      by keyword against intentional_differences, which is deliberately a loose
      match: the point is that a human wrote a sentence about it, not that the
      sentence has a particular shape.
+  6. BOTH WORKERS CARRY A CPU CAP. Workers Paid has no spend ceiling, so the
+     top-level `[limits] cpu_ms` is what bounds one invocation's CPU; staging
+     inherits it, and a staging override may only lower it.
 """
 
 import json
@@ -187,6 +190,14 @@ def main() -> int:
     check("5d. every intentional difference states a reason",
           all(d.get("why") for d in differences),
           "an entry names a difference with no why")
+
+    # ── 6 ────────────────────────────────────────────────────────────────────
+    cpu_cap = wrangler.get("limits", {}).get("cpu_ms")
+    stg_cap = stg_cfg.get("limits", {}).get("cpu_ms", cpu_cap)
+    check("6. a CPU cap bounds both Workers, and staging's is no looser",
+          isinstance(cpu_cap, int) and 0 < cpu_cap < 30_000
+          and isinstance(stg_cap, int) and 0 < stg_cap <= cpu_cap,
+          f"[limits] cpu_ms={cpu_cap!r}, [env.staging.limits] cpu_ms={stg_cap!r}")
 
     print()
     if FAILURES:
