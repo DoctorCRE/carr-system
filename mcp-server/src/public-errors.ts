@@ -16,6 +16,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["version_conflict", "Re-read the record and ask the human before retrying."],
   ["needs_confirm", "Ask the human to confirm before resubmitting with confirm:true."],
   ["not_found", "The requested record was not found."],
+  ["doctrine_doc_not_found", "The document was not found. Use doctrine-index to choose a current document id or slug for the document argument."],
   ["needs_disambiguation", "Choose an exact record reference from the candidates before retrying."],
   ["loop_not_open", "Re-read the loop before choosing another action."],
   ["personal_doc_not_owner", "This personal doctrine belongs to another owner."],
