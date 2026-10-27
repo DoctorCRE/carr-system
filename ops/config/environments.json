@@ -90,7 +90,6 @@
         "config": "mcp-server/wrangler.toml [top level]"
       },
       "domains": [
-        "api.practicecre.com",
         "api.doctorcre.com",
         "dealroom.doctorcre.com",
         "reports.doctorcre.com"
