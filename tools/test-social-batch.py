@@ -457,12 +457,19 @@ class SocialBatchTest(unittest.TestCase):
             self.assertGreaterEqual(get(f'http://{sb.CARD_HOST}/card.html', 'POST')[0], 400)
 
     def test_chrome_gets_an_http_origin_and_no_other_network(self):
-        args = sb.chrome_args('/x/chrome', '/tmp/profile', 4242, 10, 20, '--screenshot=/tmp/a.png')
+        args = sb.chrome_args('/x/chrome', 4242, 10, 20, '--screenshot=/tmp/a.png', 'cards/x 1.html')
         self.assertFalse([a for a in args if 'file://' in a])
-        self.assertIn(f'http://{sb.CARD_HOST}/', args[-1])
-        self.assertIn('--proxy-server=http://127.0.0.1:4242', args)
-        self.assertIn('--proxy-bypass-list=<-loopback>', args)
-        self.assertIn('--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1', args)
+        self.assertEqual(args[-1], f'http://{sb.CARD_HOST}/cards/x%201.html')
+        for flag in ('--proxy-server=http://127.0.0.1:4242', '--proxy-bypass-list=<-loopback>',
+                     '--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1',
+                     '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'):
+            self.assertIn(flag, args)
+
+    def test_chrome_runs_headless_with_the_shared_keychain_safety_flags(self):
+        args = sb.chrome_args('/x/chrome', 4242, 10, 20, '--dump-dom')
+        self.assertEqual(args[:2], ['--use-mock-keychain', '--password-store=basic'])  # CHROMIUM_SAFETY_ARGS
+        self.assertIn('--headless=new', args)
+        self.assertEqual([a for a in args if a.startswith('--user-data-dir=')], ['--user-data-dir=<profile>'])
 
     @unittest.skipUnless(Path(sb.CHROME).exists(), 'Chrome is not installed here')
     def test_real_chrome_card_cannot_reach_outside_files_or_hosts(self):

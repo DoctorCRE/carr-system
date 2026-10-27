@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Headless Friday social batch: plan open slots, check drafts, submit future review drafts to Blotato.
+"""Headless Friday social batch: plan, check and submit future review drafts to Blotato.
 
     ./run.sh social-batch plan
     ./run.sh social-batch check <drafts.json>
@@ -27,7 +27,6 @@ import re
 import struct
 import subprocess
 import sys
-import tempfile
 import threading
 import urllib.error
 import urllib.parse
@@ -45,7 +44,8 @@ CADENCE = REPO / 'ops/social/cadence.v1.json'
 ACCOUNTS = REPO / 'claude-tree/skills/social-media-manager/config/blotato-accounts.json'
 OUT = REPO / 'out/social-batch'
 CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-CARD_HOST = 'card.test'
+CARD_HOST = 'card.test'  # also in tools/card-chrome.mjs
+CARD_LAUNCHER = REPO / 'tools/card-chrome.mjs'
 FONTS = REPO / 'claude-tree/skills/write-content/graphics/fonts'
 FONT_TYPES = {'.ttf': 'font/ttf', '.otf': 'font/otf', '.woff': 'font/woff', '.woff2': 'font/woff2'}
 SCHEMA = 'carr-social-batch-drafts/v1'
@@ -743,25 +743,26 @@ def card_server(work: Path, fonts: Path = FONTS):
         server.server_close()
 
 
-def chrome_args(chrome: str, profile: str, port: int, width: int, height: int, output: str, page: str = '') -> list[str]:
-    return [chrome, '--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run',
-            '--no-default-browser-check', '--use-mock-keychain', '--password-store=basic',
-            f'--user-data-dir={profile}', f'--window-size={width},{height}',
-            f'--proxy-server=http://127.0.0.1:{port}', '--proxy-bypass-list=<-loopback>',
-            '--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1',
-            '--virtual-time-budget=5000', output, f'http://{CARD_HOST}/{urllib.parse.quote(page)}']
+def _launcher(mode: str, chrome: str | None, port: int, width: int, height: int, output: str, page: str):
+    """tools/card-chrome.mjs owns the Chrome flags and launch (the shared-launcher policy)."""
+    binary = chrome or CHROME
+    return subprocess.run(['node', str(CARD_LAUNCHER), mode, binary, str(port), str(width), str(height), output, page],
+                          check=True, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
 
 
-def browse(html: Path, output: str, width: int, height: int, chrome: str = CHROME, out: Path = OUT):
+def chrome_args(chrome: str, port: int, width: int, height: int, output: str, page: str = '') -> list[str]:
+    """The exact Chrome argv the launcher would use, for pinning in tests."""
+    return json.loads(_launcher('print', chrome, port, width, height, output, page).stdout)
+
+
+def browse(html: Path, output: str, width: int, height: int, chrome: str | None = None, out: Path = OUT):
     """Load one work-folder card in sealed headless Chrome; output is --screenshot=... or --dump-dom."""
     work = _work_folder(html, out)
-    with card_server(work) as port, tempfile.TemporaryDirectory() as profile:
-        return subprocess.run(chrome_args(chrome, profile, port, width, height, output,
-                                          str(html.resolve().relative_to(work))),
-                              check=True, capture_output=True, text=True, timeout=90, stdin=subprocess.DEVNULL)
+    with card_server(work) as port:
+        return _launcher('run', chrome, port, width, height, output, str(html.resolve().relative_to(work)))
 
 
-def render(html: Path, png: Path, width: int, height: int, chrome: str = CHROME, out: Path = OUT) -> dict:
+def render(html: Path, png: Path, width: int, height: int, chrome: str | None = None, out: Path = OUT) -> dict:
     """Screenshot a card. The HTML and the PNG both live in out/social-batch/<week>/work/,
     the one folder the unattended model may write, so render can neither overwrite the
     guard nor show the model a file outside that folder."""
