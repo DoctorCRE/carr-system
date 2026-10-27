@@ -36,7 +36,7 @@ from lib.outlook_send import EventRow, Ports, SentRow, Snapshot, State
 
 ACCOUNT = 'sender@example.test'
 NOW = 1_800_000_000.0
-MAIN = {'window_id': 1, 'title': f'Inbox • {ACCOUNT}', 'on_current_space': True,
+MAIN = {'window_id': 1, 'title': f'Inbox • {ACCOUNT}', 'on_current_space': True, 'is_on_screen': True,
         'bounds': {'x': 0, 'y': 33, 'width': 1230, 'height': 768}}
 
 
@@ -87,7 +87,7 @@ class FakeOutlook:
         wid = self.next_id
         self.next_id += 1
         self.forms[wid] = form
-        self.windows[wid] = {'window_id': wid, 'title': f'{form["subject"]} • {ACCOUNT}', 'on_current_space': True,
+        self.windows[wid] = {'window_id': wid, 'title': f'{form["subject"]} • {ACCOUNT}', 'on_current_space': True, 'is_on_screen': True,
                              'bounds': {'x': 298, 'y': 52, 'width': 917, 'height': 911}}
 
     def elements(self, wid: int) -> list[dict]:
@@ -168,7 +168,7 @@ class FakeOutlook:
                 self.next_id += 1
                 self.forms[wid] = {k: '' for k in ('subject', 'start', 'end', 'location', 'body', 'attendees')}
                 self.windows[wid] = {'window_id': wid, 'title': f'New Event • {ACCOUNT}',
-                                    'on_current_space': True, 'bounds': {'width': 900, 'height': 800}}
+                                    'on_current_space': True, 'is_on_screen': True, 'bounds': {'width': 900, 'height': 800}}
                 return {'ok': True}
             if args['path'] == ['Draft', 'Send']:
                 self.press(args['window_id'])

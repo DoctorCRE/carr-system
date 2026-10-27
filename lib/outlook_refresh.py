@@ -78,5 +78,6 @@ def run(repo: Path, now: datetime, waits: Waits = Waits(),
 def main() -> int:
     repo = Path(__file__).resolve().parents[1]
     outcome = run(repo, datetime.now(timezone.utc))
-    print(f'outlook-refresh {outcome.state} {outcome.reason}')
+    print(f'outlook-refresh {outcome.state} {outcome.reason}'
+          + (f' {outcome.detail}' if outcome.detail else ''))
     return triage.EXIT[outcome.state]

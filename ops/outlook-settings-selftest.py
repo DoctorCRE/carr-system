@@ -216,12 +216,15 @@ class SettingsTest(unittest.TestCase):
         self.assertFalse(settings.database_credentials.exists())
         self.assertFalse((repo / 'out').exists())
 
-    def test_window_guard_uses_the_configured_display_height(self):
+    def test_window_guard_uses_visible_window_size(self):
         from lib import outlook_ui as ui
-        window = {'title': 'Inbox • owner@example.test', 'on_current_space': True,
-                  'bounds': {'height': 949}}
-        self.assertFalse(ui.is_ordinary_main_window(window, 949))
-        self.assertTrue(ui.is_ordinary_main_window(window, 1200))
+        window = {'title': 'Inbox • owner@example.test', 'is_on_screen': True,
+                  'bounds': {'x': -1329, 'width': 1329, 'height': 1002}}
+        self.assertTrue(ui.is_ordinary_main_window(window))
+        for width, height in ((1920, 30), (64, 64), (0, 1002)):
+            self.assertFalse(ui.is_ordinary_main_window(
+                window | {'bounds': {'width': width, 'height': height}}))
+        self.assertFalse(ui.is_ordinary_main_window(window | {'is_on_screen': False}))
 
     def test_private_pointers_reject_aliases_into_checkout_or_settings(self):
         self.repo.mkdir()
