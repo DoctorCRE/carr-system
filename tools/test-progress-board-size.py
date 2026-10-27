@@ -281,86 +281,24 @@ class PagedPublicationTests(unittest.TestCase):
         self.writes.append(key)
         return {"ok": True, "snapshot": copy.deepcopy(self.store[key])}
 
-    def test_huge_unicode_note_is_lossless_and_repeat_tick_reuses_pages(self):
-        text = 'Unicode evidence 😀 "quoted"\\\n' * 30000
-        state = {"project": "carr-v5", "tasks": {}, "notes": [{"text": text}]}
+    def test_system_board_publishes_costs_and_inventory_but_no_hand_kept_cards(self):
+        # WR-000557 S4: the app reads system-board cards live from the work queue.
+        state = {"project": "carr-v5", "title": "System board",
+                 "tasks": {str(i): {"title": f"Work {i}", "status": "review", "updated_at": "2026-01-01T00:00:00Z"} for i in range(1000)},
+                 "notes": [{"text": "Unicode evidence 😀 " * 30000}], "deliverables": [{"title": "Old deliverable"}],
+                 "questions": {"q-old": {"question": "Old question?", "default": "No", "status": "Sent"}}}
         self.path.write_text(json.dumps(state))
-        board.publish_board("carr-v5", costs={})
-        first = copy.deepcopy(self.store["carr-v5"])
+        board.publish_board("carr-v5", costs={"state": "partial"})
+        published = self.store["carr-v5"]["snapshot_json"]
+        self.assertEqual(published["tasks"], {})
+        self.assertEqual(published["history"], {})
+        self.assertEqual(published["costs"], {"state": "partial"})
+        self.assertIn("external_inventory", published)
+        for retired in ("notes", "deliverables", "decisions", "ledger", "task_counts", "milestones", "github_sync", "pagination"):
+            self.assertNotIn(retired, published)
         writes = len(self.writes)
-        board.publish_board("carr-v5", costs={})
-        self.assertEqual(self.store["carr-v5"], first)
-        self.assertEqual(self.writes[writes:], ["orchestrator"])
-        manifest = first["snapshot_json"]
-        restored = json.loads("".join(self.store[p["board_id"]]["snapshot_json"]["content"]
-                                     for p in manifest["pagination"]["pages"]))
-        self.assertEqual(restored["notes"], [{"text": text}])
-        self.assertEqual(manifest["pagination"]["omitted"]["notes"], 1)
-        self.assertIn('"notes": 1', manifest["notes"][0]["text"])
-
-    def test_page_outage_never_replaces_previous_manifest_or_its_pages(self):
-        state = {"project": "carr-v5", "tasks": {}, "notes": [{"text": "Original evidence " * 30000}]}
-        self.path.write_text(json.dumps(state))
-        board.publish_board("carr-v5", costs={})
-        previous = copy.deepcopy(self.store)
-        state["notes"][0]["text"] = "Replacement evidence " * 30000
-        self.path.write_text(json.dumps(state))
-        calls = 0
-        def outage(verb, args):
-            nonlocal calls
-            if verb == "publish-board-snapshot" and "-snapshot-" in args["board_id"]:
-                calls += 1
-                if calls == 2:
-                    raise RuntimeError("page outage")
-            return self.call(verb, args)
-        with patch.object(board, "call_verb", side_effect=outage):
-            with self.assertRaisesRegex(RuntimeError, "page outage"):
-                board.publish_board("carr-v5", costs={})
-        self.assertEqual(self.store["carr-v5"], previous["carr-v5"])
-        for page in previous["carr-v5"]["snapshot_json"]["pagination"]["pages"]:
-            self.assertEqual(self.store[page["board_id"]], previous[page["board_id"]])
-        board.publish_board("carr-v5", costs={})
-        current = self.store["carr-v5"]["snapshot_json"]
-        restored = json.loads("".join(self.store[p["board_id"]]["snapshot_json"]["content"]
-                                     for p in current["pagination"]["pages"]))
-        self.assertEqual(restored["notes"], state["notes"])
-
-    def test_unverified_page_cannot_publish_a_manifest(self):
-        self.path.write_text(json.dumps({"project": "carr-v5", "tasks": {},
-                                         "notes": [{"text": "Evidence " * 40000}]}))
-        def no_readback(verb, args):
-            result = self.call(verb, args)
-            if verb == "read-progress-board" and "-snapshot-" in args["board_id"]:
-                result["snapshot"] = None
-            return result
-        with patch.object(board, "call_verb", side_effect=no_readback):
-            with self.assertRaisesRegex(RuntimeError, "page did not read back"):
-                board.publish_board("carr-v5", costs={})
-        self.assertNotIn("carr-v5", self.store)
-
-    def test_small_board_keeps_its_existing_reader_contract(self):
-        state = {"project": "carr-v5", "tasks": {"open": {"title": "Open work", "status": "running"}}}
-        self.path.write_text(json.dumps(state))
-        expected = board.board_snapshot(state, costs={})
-        expected['external_inventory'] = board.publish_external_inventory(self.inventory)
-        board.publish_board("carr-v5", costs={})
-        self.assertEqual(self.store["carr-v5"]["snapshot_json"], expected)
-        self.assertNotIn("pagination", expected)
-
-    def test_growing_open_tasks_keep_true_totals_and_complete_page_access(self):
-        state = {"project": "carr-v5", "tasks": {
-            f"task-{i}": {"title": f"Open task {i} " + "details " * 150, "status": "running"}
-            for i in range(700)}}
-        self.path.write_text(json.dumps(state))
-        board.publish_board("carr-v5", costs={})
-        manifest = self.store["carr-v5"]["snapshot_json"]
-        restored = json.loads("".join(self.store[p["board_id"]]["snapshot_json"]["content"]
-                                     for p in manifest["pagination"]["pages"]))
-        self.assertEqual(set(restored["tasks"]), set(state["tasks"]))
-        self.assertEqual(manifest["task_counts"]["running"], 700)
-        self.assertEqual(manifest["pagination"]["omitted"]["tasks"], 700 - len(manifest["tasks"]))
-        self.assertIn('"tasks":', manifest["notes"][-1]["text"])
-        self.assertEqual(json.loads(self.path.read_text()), state)
+        board.publish_board("carr-v5", costs={"state": "partial"})
+        self.assertNotIn("carr-v5", self.writes[writes:], "an unchanged system board is not republished")
 
 
 if __name__ == "__main__":
