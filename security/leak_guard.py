@@ -512,10 +512,10 @@ def upstream(root, receiver):
 def pushed(root, stream, receiver):
     revisions = []
     zero = '0' * 40
-    for line in stream.splitlines():
+    for line in ([] if stream == '\n' else stream.splitlines()):
         fields = line.split()
         if len(fields) != 4 or not all(re.fullmatch(r'[0-9a-f]{40}', fields[i]) for i in (1, 3)):
-            raise Refusal('invalid push refs')
+            raise Refusal(f'invalid push refs: {line!r}')
         _, local, _, remote = fields
         if local == zero:
             continue
