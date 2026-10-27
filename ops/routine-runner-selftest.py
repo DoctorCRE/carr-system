@@ -78,6 +78,16 @@ class RunnerTests(unittest.TestCase):
                 self.assertEqual([verb for verb, _ in calls], {
                     'read': ['find'], 'write': ['add-loop'], 'failure': ['loop-board']}[operation])
 
+    def test_existing_failure_loop_prevents_duplicate_report(self):
+        for title in ('lead-signals-weekly: repair failed code routine',
+                      'lead-signals-weekly: investigate failed routine'):
+            with self.subTest(title=title):
+                ctx = runtime.Context('lead-signals-weekly', now=NOW)
+                with patch.object(ctx, 'read', return_value={'loops': [{'title': title}]}), \
+                     patch.object(ctx, 'write') as write:
+                    ctx.failure('fixture failure')
+                write.assert_not_called()
+
     def test_due_respects_chicago_schedule_and_completion(self):
         self.assertFalse(runtime.due('lead-signals-weekly', NOW.replace(hour=6, minute=59), False))
         self.assertTrue(runtime.due('lead-signals-weekly', NOW, False))
