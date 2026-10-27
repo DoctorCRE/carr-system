@@ -1,3 +1,5 @@
+-- rollback: forward-only — restore the previous function body with a new migration if needed.
+-- Replaces one stable function body in place; no table, lock or data change.
 create or replace function ops.notification_morning_release_at(p_actor uuid)
 returns timestamptz language plpgsql stable security definer
 set search_path = pg_catalog, ops, public, pg_temp
