@@ -28,6 +28,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["sponsored_actor_required", "An authenticated partner or sponsored agent must perform this operation."],
   ["doctrine_doc_not_found", "The document was not found. Use doctrine-index to choose a current document id or slug for the document argument."],
   ["needs_disambiguation", "Choose an exact record reference from the candidates before retrying."],
+  ["decline_claims_completion", "Use complete-work-request to close built work. Decline only work that will not be built."],
   ["loop_not_open", "Re-read the loop before choosing another action."],
   ["personal_doc_not_owner", "This personal doctrine belongs to another owner."],
   ["personal_loop_not_owner", "This personal loop belongs to another owner."],
