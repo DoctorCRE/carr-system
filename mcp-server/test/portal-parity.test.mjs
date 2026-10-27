@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parityLaunchOptions } from '../portal-parity/browser.mjs';
 import { runParity } from '../portal-parity/harness.mjs';
+import { FILE_FETCH_PACE_MS } from '../portal-parity/http.mjs';
 import { loadProbes, schemaHasField } from '../portal-parity/probes.mjs';
 import { selectRows } from '../portal-parity/rows.mjs';
 
@@ -94,10 +95,11 @@ test('Stage 1 passes rows whose fields the package maps and fails a row whose fi
 
 // A gated site in the shape of the reference gates: bare redirect, password
 // form, session cookie, and released files.
-async function gatedSite(files, { signInStatus = 303, cookieAttributes = 'Path=/; Max-Age=604800; HttpOnly; Secure; SameSite=Lax', limited = [] } = {}) {
+async function gatedSite(files, { signInStatus = 303, cookieAttributes = 'Path=/; Max-Age=604800; HttpOnly; Secure; SameSite=Lax', statusFor = {}, log = [] } = {}) {
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://x');
-    if (limited.includes(url.pathname)) { response.writeHead(429, { 'Retry-After': '60' }).end(); return; }
+    log.push({ method: request.method, path: url.pathname, at: performance.now() });
+    if (statusFor[url.pathname]) { response.writeHead(statusFor[url.pathname], { 'Retry-After': '60' }).end(); return; }
     if (url.pathname === '/portal') { response.writeHead(301, { Location: '/portal/' }).end(); return; }
     if (!url.pathname.startsWith('/portal/')) { response.writeHead(404).end(); return; }
     if (request.method === 'POST') {
@@ -188,28 +190,58 @@ test('Stage 0 refuses a manifest path outside the site, a file that is not a rou
   await assert.rejects(stage0(undefined), /stage 0 needs .*--manifest/);
 });
 
-test('Stage 0 never records a rate-limited answer as the baseline', async t => {
+test('Stage 0 counts a source file outside the manifest as UNSERVED only on a 404; a 429 or 403 fails', async t => {
+  const { source, manifest } = await stageZeroSource({ 'index.html': 'home', 'limited.txt': 'a', 'forbidden.txt': 'b', 'absent.txt': 'c' },
+    ['/portal/index.html']);
+  const { server, base } = await gatedSite({ 'index.html': 'home' },
+    { statusFor: { '/portal/limited.txt': 429, '/portal/forbidden.txt': 403 } });
+  t.after(() => server.close());
+  const run = await runParity({ stage: 0, site: 'REF-V', probesFile: PROBES, reference: base, password: 'example-health',
+    sourceDir: source, manifest, rows: 'V-G01' });
+  const files = run.lines.filter(line => line.startsWith('FILE ')).map(line => [line.split(' ')[2], line.split('live=')[1]]);
+  assert.deepEqual(files.slice(1).sort(), [['FAIL', 'status-403'], ['FAIL', 'status-429'], ['UNSERVED', 'status-404']]);
+  assert.equal(run.ok, false);
+});
+
+test('Stage 0 writes no baseline when any row is rate-limited, so a good baseline is never overwritten', async t => {
   const { source, manifest, out } = await stageZeroSource({ 'index.html': 'home' }, ['/portal/index.html']);
-  const { server, base } = await gatedSite({ 'index.html': 'home' }, { limited: ['/portal/parity-probe-missing.txt'] });
+  const { server, base } = await gatedSite({ 'index.html': 'home' }, { statusFor: { '/portal/parity-probe-missing.txt': 429 } });
   t.after(() => server.close());
   const baselineOut = path.join(out, 'baseline.json');
+  await writeFile(baselineOut, '{"earlier":"full baseline"}\n');
   const run = await runParity({ stage: 0, site: 'REF-V', probesFile: PROBES, reference: base, password: 'example-health',
     sourceDir: source, manifest, baselineOut, rows: 'V-G01,V-G10' });
   assert.deepEqual(run.results.map(r => [r.id, r.verdict]), [['V-G01', 'PASS'], ['V-G10', 'FAIL']]);
   assert.match(run.lines.join('\n'), /^V-G10 FAIL rate-limited$/m);
-  assert.deepEqual(Object.keys(JSON.parse(await readFile(baselineOut, 'utf8'))), ['V-G01']);
+  assert.match(run.lines.join('\n'), /^baseline not written: rate-limited rows; run again after a minute$/m);
+  assert.equal(await readFile(baselineOut, 'utf8'), '{"earlier":"full baseline"}\n');
   assert.equal(run.ok, false);
+});
+
+test('Stage 0 paces its file fetches so they cannot trip the burst limit', async t => {
+  const { source, manifest } = await stageZeroSource({ 'index.html': 'home', 'a.txt': 'a', 'b.txt': 'b', 'c.txt': 'c' },
+    ['/portal/index.html', '/portal/a.txt', '/portal/b.txt', '/portal/c.txt']);
+  const log = [];
+  const { server, base } = await gatedSite({ 'index.html': 'home', 'a.txt': 'a', 'b.txt': 'b', 'c.txt': 'c' }, { log });
+  t.after(() => server.close());
+  await runParity({ stage: 0, site: 'REF-V', probesFile: PROBES, reference: base, password: 'example-health',
+    sourceDir: source, manifest, rows: 'V-G01' });
+  const fetches = log.filter(entry => /\/(index\.html|[abc]\.txt)$/.test(entry.path)).map(entry => entry.at);
+  assert.equal(fetches.length, 4);
+  const gaps = fetches.slice(1).map((at, i) => at - fetches[i]);
+  assert.ok(gaps.every(gap => gap >= FILE_FETCH_PACE_MS - 5), `gaps ${gaps.map(Math.round)} ms`);
 });
 
 // The doc: "A wrong-password probe counts toward nothing today ... and the run
 // sends fewer than five." Counted here: every Stage 0 request that can reach the
-// password check, a same-origin POST to the sign-in page that is not the real sign-in.
+// password check: a same-origin POST to the sign-in page (the site root or its
+// index.html, both checked by the live gates) that is not the real sign-in.
 test('Stage 0 sends fewer than five wrong-password attempts per site', async () => {
   const doc = await loadProbes(PROBES);
   for (const site of ['A', 'V']) {
     const attempts = doc.probes.filter(p => p.id.startsWith(`${site}-`) && p.kind === 'http' && p.stage0 && !p.retired && !p.fault)
       .flatMap(p => p.requests)
-      .filter(r => r.method === 'POST' && r.path === '' && !r.sign_in && r.headers?.Origin !== '@cross-origin');
+      .filter(r => r.method === 'POST' && ['', 'index.html'].includes(r.path) && !r.sign_in && r.headers?.Origin !== '@cross-origin');
     assert.ok(attempts.length > 0 && attempts.length < 5, `${site}: ${attempts.length}`);
   }
 });

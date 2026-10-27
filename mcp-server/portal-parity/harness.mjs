@@ -97,8 +97,13 @@ async function stageZero(doc, probes, options) {
     baseline[probe.id] = observed;
     results.push({ id: probe.id, verdict: observed.unrun ? 'UNRUN' : 'PASS', reason: observed.unrun ? 'needs-session' : 'recorded' });
   }
-  if (options.baselineOut) await writeFile(options.baselineOut, `${JSON.stringify(baseline, null, 1)}\n`);
-  return { results, files: fidelity.files, prefix: [...fidelity.lines, `files=${fidelity.total} FAIL=${fidelity.failed} UNSERVED=${fidelity.unserved}`], fidelityOk: fidelity.failed === 0 };
+  // A partial baseline would overwrite a good one, and Stage 2 observes live any
+  // gate row the baseline lacks, so a rate-limited run writes none.
+  const limited = results.some(r => r.reason === 'rate-limited');
+  if (options.baselineOut && !limited) await writeFile(options.baselineOut, `${JSON.stringify(baseline, null, 1)}\n`);
+  const prefix = [...fidelity.lines, `files=${fidelity.total} FAIL=${fidelity.failed} UNSERVED=${fidelity.unserved}`];
+  if (options.baselineOut && limited) prefix.push('baseline not written: rate-limited rows; run again after a minute');
+  return { results, files: fidelity.files, prefix, fidelityOk: fidelity.failed === 0 };
 }
 
 async function stageTwo(doc, probes, options) {
