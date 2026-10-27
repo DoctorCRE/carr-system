@@ -1,3 +1,4 @@
+// Read paginated client and vendor workspace data.
 import { networkStatement, projectNetwork } from './relationship-network.js';
 import { vendorRelationshipJoin, enrichRelationship } from "./vendor-relationship.js";
 // Journey 1 business workspace: the Clients and Vendors READ model.

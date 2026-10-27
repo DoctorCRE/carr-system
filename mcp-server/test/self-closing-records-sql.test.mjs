@@ -1,3 +1,4 @@
+// Test self-closing record predicates in PostgreSQL.
 import { readMigration } from "./migration-source.testhelper.mjs";
 // self-closing-records-sql.test.mjs — the SQL half of migration 0872, run on a
 // real disposable PostgreSQL rather than a fake that answers marker comments.

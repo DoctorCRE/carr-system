@@ -1,3 +1,4 @@
+// Read lead workspace data and validate lifecycle reviews.
 import { isCalendarDate } from "./calendar-date.ts";
 
 // Optional authenticated Leads workspace; the legacy board has live callers.

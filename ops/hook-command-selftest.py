@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test configured hook commands and their execution.
 import json
 import os
 from pathlib import Path

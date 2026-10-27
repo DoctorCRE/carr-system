@@ -1,3 +1,4 @@
+// Handle capture sessions and their recorded outcomes.
 import { randomString } from "./google-oidc.js";
 import { publicError } from "./public-errors.ts";
 import { isCalendarDate } from "./calendar-date.ts";

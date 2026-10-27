@@ -1,3 +1,4 @@
+// Tests the seeded operational bot profiles and their authority limits.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";

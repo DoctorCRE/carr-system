@@ -1,3 +1,4 @@
+// Test local client credential selection and isolation between profiles.
 import test from "node:test";
 import assert from "node:assert/strict";
 

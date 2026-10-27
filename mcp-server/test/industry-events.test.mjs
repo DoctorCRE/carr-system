@@ -1,3 +1,4 @@
+// Test tenant-scoped industry event contracts, validation and audited writes.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";

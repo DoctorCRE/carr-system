@@ -1,3 +1,4 @@
+// Expose resource dashboard and metering observations.
 import { connectionsProjection } from './connections.v1.ts';
 // DoctorCRE v5 slices V5-UX-C02 (Resource dashboard and metering read
 // contract) and V5-UX-C06 (Local compute capacity and model-route

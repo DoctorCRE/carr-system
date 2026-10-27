@@ -1,3 +1,4 @@
+// Tests pull request validation workflow event and readiness rules.
 import assert from "node:assert/strict";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

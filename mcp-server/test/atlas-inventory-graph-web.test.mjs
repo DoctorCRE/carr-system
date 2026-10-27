@@ -1,3 +1,4 @@
+// Test authentication and responses for the atlas inventory graph route.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createDealroomHandler, isDealroomRequest } from "../src/dealroom-web.js";

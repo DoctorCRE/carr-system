@@ -1,3 +1,4 @@
+// Capture Salesforce opportunity list rows from the browser.
 (() => {
   const result = { state: 'running' };
   window.__carrSalesforceRefresh = result;

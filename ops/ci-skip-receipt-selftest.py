@@ -56,11 +56,13 @@ def make_sandbox(ci_exit=0):
     with open(ci_path, "w", encoding="utf-8") as fh:
         fh.write(f"#!/bin/sh\nexit {ci_exit}\n")
     os.chmod(ci_path, 0o755)
-    # pre-push runs the leak guard first; stub it like ci.sh so the sandbox
+    # pre-push runs both content scanners first; stub them like ci.sh so the sandbox
     # needs no corpus, gitleaks download or real pushed commits.
     os.makedirs(os.path.join(d, "security"), exist_ok=True)
     with open(os.path.join(d, "security", "leak_guard.py"), "w", encoding="utf-8") as fh:
         fh.write("import sys\nsys.stdin.read()\n")
+    with open(os.path.join(d, "ops", "ci-secret-scan.py"), "w", encoding="utf-8") as fh:
+        fh.write("")
     # one commit so HEAD/branch resolve
     with open(os.path.join(d, "README.md"), "w", encoding="utf-8") as fh:
         fh.write("sandbox\n")

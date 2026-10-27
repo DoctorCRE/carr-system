@@ -1,3 +1,4 @@
+// Tests bounded conversation preparation reads and identity resolution.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 

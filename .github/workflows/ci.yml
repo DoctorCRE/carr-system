@@ -166,7 +166,8 @@ jobs:
         run: bash ops/ci-postgres.sh
 
       - name: Verify edge incident delivery
-        if: matrix.classes == 'gates'
+        # Gate shard 1 owns it, like the other repository-wide invariants.
+        if: matrix.classes == 'gates' && matrix.gate_shard == 1
         run: python3 test/ci-noise-incident-test.py
 
       - name: Run this group's check classes
@@ -212,7 +213,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: [reconstruction, equivalence, shadow, gates-serial, gates-isolated, acceptance]
+        part: [reconstruction, equivalence, shadow, gates, acceptance]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -254,13 +255,13 @@ jobs:
         run: ops/ci-zsh.sh
 
       - name: Prove independent migration fixture
-        if: matrix.part != 'acceptance' && !startsWith(matrix.part, 'gates-')
+        if: matrix.part != 'acceptance' && matrix.part != 'gates'
         env:
           CARR_CI_PORTABLE_ONLY: "1"
           CARR_SHADOW_ARTIFACT_DIR: ${{ runner.temp }}/migration-shadow
         run: ops/ci.sh --strict --only migration --migration-part "${{ matrix.part }}"
       - name: Prove database programs on their own migrated cluster
-        if: matrix.part == 'acceptance' || startsWith(matrix.part, 'gates-')
+        if: matrix.part == 'acceptance' || matrix.part == 'gates'
         env:
           CARR_CI_PORTABLE_ONLY: "1"
           CARR_LOCAL_PG_ALLOW_HOSTED: "1"

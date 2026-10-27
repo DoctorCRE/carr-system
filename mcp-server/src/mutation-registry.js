@@ -1,3 +1,4 @@
+// Validate operations against the registered mutation manifest.
 import {
   SCAC_MUTATION_DB_METADATA_AUTHORITY,
   SCAC_MUTATION_OPERATIONS,
