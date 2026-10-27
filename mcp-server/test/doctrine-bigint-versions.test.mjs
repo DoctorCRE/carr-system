@@ -153,3 +153,20 @@ test("read-doctrine names a missing document and explains how to find a current 
     return true;
   });
 });
+
+test("read-doctrine keeps current slugs and aliases readable", async () => {
+  const doc = { id, slug: "synthetic-current-plan", title: "Synthetic plan", content_class: "reference", visibility: "shared" };
+  const db = { async query(sql, params = []) {
+    if (sql.includes("from doctrine_document") && params[0] === doc.slug ||
+        sql.includes("from doctrine_slug_alias") && params[0] === "synthetic-old-plan")
+      return { rows: [doc] };
+    if (sql.includes("from doctrine_meta")) return { rows: [{ generation: "3" }] };
+    return { rows: [] };
+  } };
+  for (const document of [doc.slug, "synthetic-old-plan"]) {
+    const read = await TOOLS["read-doctrine"].handler(db, actor, { document });
+    assert.equal(read.ok, true);
+    assert.deepEqual(read.document, doc);
+    assert.deepEqual(read.sections, []);
+  }
+});
