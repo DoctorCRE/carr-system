@@ -243,6 +243,11 @@ check_gates() {
     fail_tail "$LOGDIR/codemap.log"
   fi
 
+  if ! run_quiet "$LOGDIR/test-clocks.log" "$PY" ops/test-clock-check.py; then
+    failures="$failures test-clocks"
+    fail_tail "$LOGDIR/test-clocks.log"
+  fi
+
   # rustup installs the pinned toolchain before concurrent HxStore builds.
   if [ -f vendor/hxprobe/Cargo.toml ]; then
     if ! run_quiet "$LOGDIR/hxprobe-prepare.log" bash -c 'cd vendor/hxprobe && cargo build --locked'; then
