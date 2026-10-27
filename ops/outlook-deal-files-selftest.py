@@ -30,7 +30,8 @@ def docx() -> bytes:
 
 class Fakes:
     def __init__(self, upload_error: Exception | None = None, verb_error: Exception | None = None, existing: bool = False):
-        self.puts, self.calls = [], []
+        self.puts: list[tuple[str, str, bytes]] = []
+        self.calls: list[tuple[str, dict]] = []
         self.upload_error, self.verb_error, self.existing = upload_error, verb_error, existing
 
     def put(self, key, sha, data):
