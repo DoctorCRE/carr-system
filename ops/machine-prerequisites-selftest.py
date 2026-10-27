@@ -111,6 +111,7 @@ with tempfile.TemporaryDirectory() as config_home, patch.dict(os.environ, {"HOME
     setattr(config, "pairs", lambda holds=None: [])
     setattr(config, "hook_scripts_untracked", lambda: [])
     setattr(config, "secondary_scheduled_task_violations", lambda: [])
+    setattr(config, "managed_safety_plan", lambda: [])
     setattr(config, "PREREQUISITE_CHECK", lambda _repo: [
         Requirement("postgres-client", "PostgreSQL client", False, "missing fixture", "install fixture"),
     ])

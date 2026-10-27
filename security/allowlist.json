@@ -346,6 +346,18 @@
       "sha256": "c9479ec38c9545cac579db69f2ee0c9a8b245d367fc2d7e195da4e5a9a6aaa2d",
       "rule": "generic-api-key",
       "reason": "Historical synthetic UUID tests idempotency only and is not a credential; replaced by randomUUID in 578227931."
+    },
+    {
+      "path": "mcp-server/contracts/email-reply-draft.v1.json",
+      "sha256": "58f1bd0f281a7bfaf206edaa12e749e1bf3edb73d8d9b3349cab6fb90199ef51",
+      "rule": "pii-email",
+      "reason": "WR441.S3.J2 explicitly permits the two canonical partner email addresses for copy routing documentation and synthetic behavioral fixtures. This exception binds the reviewed file bytes and email rule only; all other fixture addresses use reserved domains."
+    },
+    {
+      "path": "mcp-server/test/email-deal-progress-postgres.test.mjs",
+      "sha256": "1858a8fd6491a5e448563dacfd36bc49f68a4931cc5e4877bb9b5eb513939b62",
+      "rule": "pii-email",
+      "reason": "WR441.S3.J2 explicitly permits the two canonical partner email addresses for copy routing documentation and synthetic behavioral fixtures. This exception binds the reviewed file bytes and email rule only; all other fixture addresses use reserved domains."
     }
   ]
 }

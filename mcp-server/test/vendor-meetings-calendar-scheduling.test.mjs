@@ -85,6 +85,7 @@ test('a fresh empty calendar offers the rolling window while a full calendar has
 test('known lifecycle and group gaps retain candidate openings and their uncertainty', async () => {
   const result = await read(client(snapshot([], { warnings: [
     { code: 'responses_unverified' }, { code: 'group_invites_not_shown' }, { code: 'recurring_unverified' },
+    { code: 'canceled_hidden', count: 2 },
   ] })));
   assert.equal(result.calendar.state, 'partial');
   assert.equal(result.calendar.scheduling.state, 'partial');
@@ -93,6 +94,9 @@ test('known lifecycle and group gaps retain candidate openings and their uncerta
   assert.ok(result.calendar.notes.some(note => note.includes('group')));
   const reviewsTrimmed = await read(client(snapshot([], { warnings: [{ code: 'follow_up_trimmed', count: 1 }] })));
   assert.equal(reviewsTrimmed.calendar.scheduling.items.length, 1);
+  const cancelled = await read(client(snapshot([], { warnings: [{ code: 'canceled_hidden', count: 2 }] })));
+  assert.equal(cancelled.calendar.scheduling.state, 'partial', 'a cancelled meeting takes no time');
+  assert.equal(cancelled.calendar.scheduling.items.length, 1);
 });
 
 test('failed calendar reads retain vendor results, unavailable scheduling, and transaction recovery', async () => {

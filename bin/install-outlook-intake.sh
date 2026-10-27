@@ -122,6 +122,20 @@ if not (helper.is_file() and os.access(helper, os.X_OK) and pin.is_file() and pi
         os.replace(built, helper)
     pin.write_text(wanted)
 settings.verify_helper()
+
+if 'outbox' in settings.services:
+    label = 'com.carr.outlook-outbox'
+    rendered = repo / 'out' / f'{label}.plist'
+    rendered.parent.mkdir(parents=True, exist_ok=True)
+    rendered.write_bytes(settings.render_plist(repo / 'ops/launchd' / f'{label}.plist'))
+    rendered.chmod(0o644)
+    log = repo / 'out/outlook-outbox-launchd.log'
+    log.touch(mode=0o600)
+    log.chmod(0o600)
+    dest = home / 'Library/LaunchAgents' / f'{label}.plist'
+    print('install-outlook-intake: outbox worker rendered; it is NOT loaded.')
+    print(f"  install -m 644 '{rendered}' '{dest}'")
+    print(f"  launchctl bootstrap gui/{os.getuid()} '{dest}'")
 PY
 
 mkdir -p "$REPO/out"
