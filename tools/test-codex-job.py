@@ -115,7 +115,8 @@ while True: time.sleep(1)
         self.codex.write_text(f'#!{sys.executable}\n' +
                               f'import pathlib, time\npathlib.Path({str(ready)!r}).touch()\ntime.sleep(30)\n')
         self.codex.chmod(0o755)
-        alias = self.root / 'checkout alias'
+        (self.root / 'checkout').mkdir()
+        alias = self.root / 'checkout -alias'
         alias.symlink_to(active / 'checkout', target_is_directory=True)
         live = subprocess.Popen([str(self.codex), 'exec', '-C', str(alias)])
         try:
