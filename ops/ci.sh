@@ -243,11 +243,6 @@ check_gates() {
     fail_tail "$LOGDIR/codemap.log"
   fi
 
-  if ! run_quiet "$LOGDIR/test-clocks.log" "$PY" ops/test-clock-check.py; then
-    failures="$failures test-clocks"
-    fail_tail "$LOGDIR/test-clocks.log"
-  fi
-
   # rustup installs the pinned toolchain before concurrent HxStore builds.
   if [ -f vendor/hxprobe/Cargo.toml ]; then
     if ! run_quiet "$LOGDIR/hxprobe-prepare.log" bash -c 'cd vendor/hxprobe && cargo build --locked'; then
@@ -410,7 +405,7 @@ PYEOF
 # through --gate-programs, so its qualification cannot drift from what runs.
 gate_programs() {
   local t
-  for t in ops/*-selftest.py tools/test-*.py tools/test_*.py tools/*-selftest.py \
+  for t in ops/test-clock-check.py ops/*-selftest.py tools/test-*.py tools/test_*.py tools/*-selftest.py \
            tools/room-bridge/test_*_unit.py \
            tools/room-bridge/test_activation_reliability.py \
            tools/dictation-rig/tests/test_call_mode_runtime.py \
