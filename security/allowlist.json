@@ -442,6 +442,12 @@
       "sha256": "14f2a7dd1805a65c30d9155585c89896c49d411c038de73fc5d462d6e8d2b66e",
       "rule": "pii-email",
       "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
+    },
+    {
+      "path": "migrations/1011_dell_actor_email.sql",
+      "sha256": "442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a",
+      "rule": "pii-email",
+      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
     }
   ]
 }
