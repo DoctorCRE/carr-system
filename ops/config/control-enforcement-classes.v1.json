@@ -39,7 +39,7 @@
         "ops/ci.sh"
       ],
       "test": [
-        "ops/hermes-autonomy-check-selftest.py"
+        "ops/ci-selftest.py"
       ]
     },
     "human_authority_runtime": {

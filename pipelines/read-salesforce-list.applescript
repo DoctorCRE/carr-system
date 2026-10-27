@@ -1,3 +1,4 @@
+-- Manage Chrome tabs and read the Salesforce list.
 on run argv
     set operation to item 1 of argv
     if application "Google Chrome" is not running then error "Chrome is not running"

@@ -1,3 +1,4 @@
+// Tests property registration migration and its authority grants.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";

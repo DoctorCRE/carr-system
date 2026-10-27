@@ -1,3 +1,4 @@
+// Tests human-authorized map promotion and rejection receipts.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { tourMapPromotionTools } from "../src/tour-map-promotion.js";

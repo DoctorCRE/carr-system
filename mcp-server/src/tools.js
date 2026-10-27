@@ -1,3 +1,4 @@
+// Register MCP tools and their shared write envelope.
 import { vendorMeetingTools } from "./vendor-meetings.js";
 import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.ts";
 import { canonicalJson } from "./artifact-trust.js";
@@ -7,6 +8,7 @@ import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeatur
 import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.ts";
 import { factObservationTools } from "./fact-observations.ts";
+import { actionClosureTools } from "./action-closure.ts";
 import { dealItemTools, readDealItems, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.ts";
 import { bindReferralDeal } from "./relationship-network.js";
 import { trustedOverride, dealEvidenceEntries, requireRelationshipPartner, mergeRelationshipFields } from "./vendor-relationship.js";
@@ -61,6 +63,7 @@ import { DEAL_ROOM_FIELDS, assertDealRoomField, stripDealPlaceholders } from "./
 import { authenticatedIdentity, authorizationClassForActor, organizationTenantForActor,
          permittedActionOwnerSlugs, personalScopeForActor } from "./identity.js";
 import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
+import { isPersonalRecordOwner } from "./personal-record-ownership.ts";
 import { assertRegisteredOperation, mutationManifestIdentity, MutationRegistryRefusal } from "./mutation-registry.js";
 import { readRuleEnforcementCoverage } from "./lifecycle-assurance.v5.js";
 import { recordSourceAuthorityStoreTools } from "./record-source-authority-store.v5.js";
@@ -1229,24 +1232,31 @@ async function resolveSubject(client, ref) {
 // closed — so it opts in rather than the default widening for everyone.
 async function resolveLoop(client, args, opts = {}) {
   const anyStatus = opts.anyStatus === true;
+  const lock = opts.actor ? " for update of li" : "";
+  const authorize = async row => {
+    if (opts.actor && row.tier === "personal" &&
+        !await isPersonalRecordOwner(client, opts.actor, row.personal_to))
+      throw new ToolError({ error: "personal_loop_not_owner" });
+    return row;
+  };
   if (args.loop_id) {
     const r = await client.query(
       `select li.id, li.kind, li.number, li.status, li.marker, li.due_on,
-              li.close_outcome, li.blocker_class, lb.block_key as section
+              li.close_outcome, li.blocker_class, li.tier, li.personal_to, lb.block_key as section
          from loop_item li join loop_block lb on lb.id = li.block_id
-        where li.id = $1`, [args.loop_id]);
+        where li.id = $1${lock}`, [args.loop_id]);
     if (!r.rows.length) throw new ToolError({ error: "not_found", loop_id: args.loop_id });
-    return r.rows[0];
+    return authorize(r.rows[0]);
   }
   if (!args.number)
     throw new ToolError({ error: "missing_loop_ref",
       hint: "pass loop_id, or number (plus kind when the number is shared across kinds)" });
   const r = await client.query(
     `select li.id, li.kind, li.number, li.status, li.marker, li.due_on,
-            li.close_outcome, li.blocker_class, lb.block_key as section, lb.rel_path
+            li.close_outcome, li.blocker_class, li.tier, li.personal_to, lb.block_key as section, lb.rel_path
        from loop_item li join loop_block lb on lb.id = li.block_id
       where li.number = $1 and (${anyStatus ? "true" : "li.status = 'open'"})
-        and ($2::text is null or li.kind = $2)`, [args.number, args.kind || null]);
+        and ($2::text is null or li.kind = $2)${lock}`, [args.number, args.kind || null]);
   if (!r.rows.length)
     throw new ToolError({ error: "loop_not_found", number: args.number, kind: args.kind || null,
       hint: anyStatus ? "no row, open or closed, carries this number — pass loop_id"
@@ -1258,7 +1268,7 @@ async function resolveLoop(client, args, opts = {}) {
       hint: "this number names more than one live row — pass loop_id to act on one now, and " +
             "fix the collision itself with update-loop's `number` (plus renumber_reason). " +
             "Migration 0112 makes a new one impossible; anything left is pre-0112 history." });
-  return r.rows[0];
+  return authorize(r.rows[0]);
 }
 
 // read-loop's amendment attachment. loop_amendment_history() (migration 0702)
@@ -7452,7 +7462,7 @@ export const TOOLS = {
       section: { type: "string", enum: ["hot", "backlog", "open"], description: "move the row to this section of its file" } },
       required: ["idempotency_key"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "update-loop", args, async () => {
-      const cur = await resolveLoop(c, args);
+      const cur = await resolveLoop(c, args, { actor });
       await versionGuard(c, "loop_item", cur.id, args.base_version);
       if (cur.status !== "open")
         throw new ToolError({ error: "loop_not_open", loop_id: cur.id, status: cur.status,
@@ -7738,7 +7748,7 @@ export const TOOLS = {
           hint: "close-loop will not close a loop silently — say what came of it. " +
                 "If nothing came of it and you are abandoning it, say that and pass resolution 'dropped'." });
 
-      const cur = await resolveLoop(c, args);
+      const cur = await resolveLoop(c, args, { actor });
       await versionGuard(c, "loop_item", cur.id, args.base_version);
       if (cur.status !== "open")
         throw new ToolError({ error: "loop_not_open", loop_id: cur.id, status: cur.status,
@@ -7898,7 +7908,7 @@ export const TOOLS = {
       // rather than call resolveLoop as every other loop verb does: it is the
       // one verb whose entire purpose is acting on a row every other number
       // lookup would refuse to find.
-      const cur = await resolveLoop(c, args, { anyStatus: true });
+      const cur = await resolveLoop(c, args, { anyStatus: true, actor });
       await versionGuard(c, "loop_item", cur.id, args.base_version);
       if (cur.status === "open")
         throw new ToolError({ error: "loop_open", loop_id: cur.id, status: cur.status,
@@ -7937,14 +7947,8 @@ export const TOOLS = {
             hint: "the successor must be a different open loop" });
       }
 
-      // The prior outcome, read from resolveLoop's row — BEFORE versionGuard's
-      // `for update` lock, not from it. That read is still safe: it is the
-      // version check right above, not the lock itself, that makes it so — a
-      // concurrent amend that changed the row between this read and the lock
-      // moves the version, versionGuard throws version_conflict on the stale
-      // base_version, and this priorOutcome is never written. Not from the
-      // args, not reconstructed either way — the actual current text this
-      // amendment is correcting.
+      // Resolution locked and authorized this exact target before versionGuard;
+      // its prior outcome remains stable until this transaction commits.
       const priorOutcome = cur.close_outcome || "";
       const priorResolution = cur.status;
 
@@ -8920,6 +8924,7 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
 
 
 const TOOL_REGISTRATION_SOURCE = Object.freeze({
+  'action-closure': 'mcp-server/src/action-closure.ts',
   'deal-items': 'mcp-server/src/deal-items.ts',
   'feature-switches':'mcp-server/src/feature-switches.js',
   "inline": "mcp-server/src/tools.js",
@@ -10297,6 +10302,7 @@ registerTools(partyDuplicateCandidateTools(), "party-duplicate-candidates");
 registerTools(scheduleBoardTools(), "schedule-board");
 registerTools(dealItemTools({ withEnvelope, writeEvent, resolveSubject,
   canExercisePartnerAuthority, partnerAuthoritySlugForActor }), "deal-items");
+registerTools(actionClosureTools({ withEnvelope, writeEvent, canExercisePartnerAuthority }), "action-closure");
 
 // WR-AI-006: curation proposals are machine-callable; approval and retirement
 // remain human-only inside their handlers and the dispatcher boundary.

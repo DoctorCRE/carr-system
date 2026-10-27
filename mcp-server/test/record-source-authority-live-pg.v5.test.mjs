@@ -1,3 +1,4 @@
+// Tests record source authority migrations and verbs on PostgreSQL.
 import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
 // V5-F01 on REAL PostgreSQL: the migration, the two SQL fixtures, and the
 // registered verbs end to end.

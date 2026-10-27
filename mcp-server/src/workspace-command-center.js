@@ -1,3 +1,4 @@
+// Read command center summaries and destinations.
 import { organizationTenantForActor } from "./identity.js";
 
 export const COMMAND_CENTER_PATH = "/api/v1/command-center";

@@ -20,6 +20,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { bearerCredential } from "../src/bearer.ts";
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
 const INDEX = readFileSync(path.join(SRC, "index.js"), "utf8");
@@ -45,8 +46,9 @@ function makeIngest() {
       return [{ id: "11111111-1111-4111-8111-111111111111", was_duplicate: false }];
     };
   };
-  const factory = new Function("json", "neon", "INGEST_TRANSPORT", `${liftIngest()}\nreturn ingest;`);
-  return { ingest: factory(json, neon, TRANSPORT), db };
+  const factory = new Function("json", "neon", "INGEST_TRANSPORT", "bearerCredential",
+    `${liftIngest()}\nreturn ingest;`);
+  return { ingest: factory(json, neon, TRANSPORT, bearerCredential), db };
 }
 
 const TOKEN = "test-ingest-token";

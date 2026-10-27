@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test migration number collision detection.
 from pathlib import Path
 import sys
 import unittest

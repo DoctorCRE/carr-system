@@ -1,3 +1,4 @@
+// Render Instagram grid cards to images with headless Chromium.
 import { CHROMIUM_SAFETY_ARGS } from "../../tools/chromium-safety-args.mjs";
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';

@@ -1,3 +1,4 @@
+// Test successor contracts for lead and invoice actions.
 import test from 'node:test';
 import {assertAdmits} from './helpers/registry-admission.mjs';
 

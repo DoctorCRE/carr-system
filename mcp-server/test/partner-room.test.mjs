@@ -1,3 +1,4 @@
+// Tests partner room conversation reads and writes.
 import { readMigration } from "./migration-source.testhelper.mjs";
 // partner-room.test.mjs — the shared room's contract, written BEFORE the verbs
 // (rule e65efc68). The room is Idea 78's spectator surface: an append-only turn

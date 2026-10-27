@@ -1,3 +1,4 @@
+// Test safe version conversion in tool responses.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError } from "../src/tools.js";

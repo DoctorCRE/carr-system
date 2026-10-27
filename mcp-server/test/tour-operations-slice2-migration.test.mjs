@@ -1,3 +1,4 @@
+// Tests migration safeguards for rights lineage and public projection sealing.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";

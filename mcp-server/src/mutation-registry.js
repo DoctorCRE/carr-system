@@ -1,3 +1,4 @@
+// Validate operations against the registered mutation manifest.
 import {
   SCAC_MUTATION_DB_METADATA_AUTHORITY,
   SCAC_MUTATION_OPERATIONS,
@@ -53,6 +54,7 @@ export async function assertRegisteredOperation(name, tool, args) {
     schema_digest: await sha256(tool?.inputSchema || {}),
     write: tool?.write === true,
     human_only: tool?.humanOnly === true,
+    human_caller_only: tool?.humanCallerOnly === true,
     authority_only: tool?.authorityOnly === true,
   };
   for (const [key, value] of Object.entries(actual)) {
