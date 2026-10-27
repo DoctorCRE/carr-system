@@ -1,3 +1,4 @@
+import { NOW } from "./helpers/fixed-clock.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { OAuthConsentState } from "../src/oauth-consent-state.js";
@@ -15,7 +16,7 @@ function fixture(alarm = null) {
     transaction: async callback => callback(storage),
   };
   const subject = new OAuthConsentState({ storage });
-  const pending = { state: "state", browser: "browser", csrf: "csrf", expiresAt: Date.now() + 600000 };
+  const pending = { state: "state", browser: "browser", csrf: "csrf", expiresAt: NOW + 600000 };
   const call = operation => subject.fetch(new Request(`https://consent.example/${operation}`, {
     method: "POST", body: JSON.stringify(pending),
   }));
@@ -31,7 +32,7 @@ test("consent creation schedules cleanup once and preserves an existing alarm", 
   await assert.rejects(fresh.call("create"), /Consent already exists/);
   assert.equal(fresh.scheduled(), 1);
 
-  const deadline = Date.now() + 300000;
+  const deadline = NOW + 300000;
   const existing = fixture(deadline);
   assert.equal((await existing.call("create")).status, 204);
   assert.equal(await existing.storage.getAlarm(), deadline);

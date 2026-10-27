@@ -40,7 +40,7 @@ THE ASSERTIONS.
   6. BOTH WORKERS CARRY A CPU CAP. Workers Paid has no spend ceiling, so the
      top-level `[limits] cpu_ms` is what bounds one invocation's CPU; staging
      inherits it, and a staging override may only lower it.
-  7. NO ENVIRONMENT EXPOSES WORKERS.DEV OR PREVIEW URLS. Explicit false values
+  8. NO ENVIRONMENT EXPOSES WORKERS.DEV OR PREVIEW URLS. Explicit false values
      prevent deployments from undoing the billing audit's public URL shutoff.
 """
 
@@ -205,7 +205,7 @@ def main() -> int:
 
     for name, config in [("production", wrangler), *wrangler.get("env", {}).items()]:
         for setting in ("workers_dev", "preview_urls"):
-            check(f"7. {name} disables {setting}", config.get(setting) is False,
+            check(f"8. {name} disables {setting}", config.get(setting) is False,
                   f"{setting} must be explicitly false")
 
     print()
