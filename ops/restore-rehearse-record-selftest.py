@@ -324,7 +324,7 @@ def postgres_parity():
     import socket
     import psycopg
     from lib.disposable_pg_fixture import DisposablePostgres, postgres_fixture_group, postgres_bin_dir
-    from restore_security import declaration, apply_grants, check_parity
+    from restore_security import declaration, apply_grants, check_parity, rebuild_security
 
     bins = postgres_bin_dir()
     schema = """-- CARR GRANTS (bin/schema-snapshot.sh) — not produced by pg_dump.
@@ -378,6 +378,27 @@ grant execute on function public.private_action() to carr_writer;
             conn.execute('grant execute on function public.private_action() to public')
             result = check_parity(conn, declared)
             check('local PG PUBLIC execute leak fails parity', result['verdict'] == 'FAIL', str(result))
+
+            # The hosted restore admin is NOT a superuser. Neon's neondb_owner holds
+            # the app roles through the provider's CREATEROLE grant, which on
+            # PostgreSQL 16+ carries ADMIN but neither SET nor INHERIT (read on
+            # production 2026-10-27: app_writer and app_reader admin_option=t,
+            # set_option=f), so `set local role app_writer` was refused. Rebuild
+            # as exactly that shape.
+            conn.execute('create role restore_admin login createrole createdb')
+            for role in ('app_writer', 'app_reader', 'carr_writer', 'carr_reader'):
+                conn.execute(f'grant {role} to restore_admin with admin true, inherit false, set false')
+            conn.execute('create database restored owner restore_admin')
+        target = f'host=127.0.0.1 port={port} user=restore_admin dbname=restored'
+        with psycopg.connect(target, autocommit=True) as conn:
+            conn.execute('create table public.fixture(id integer generated always as identity, derived integer generated always as (1) stored, value integer); create table public.denied(id integer generated always as identity, derived integer generated always as (1) stored, value integer)')
+            conn.execute("create function public.private_action() returns integer language sql as 'select 1'")
+        try:
+            result = rebuild_security(target, declared)
+        except Exception as exc:  # the refusal is the failure under test
+            result = {'verdict': f'{type(exc).__name__}: {exc}'}
+        check('a non-superuser restore admin holding the app roles with ADMIN but no SET '
+              'rebuilds and passes security parity', result['verdict'] == 'PASS', str(result))
 
 
 def main() -> int:
