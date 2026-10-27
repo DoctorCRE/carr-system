@@ -68,7 +68,7 @@ class ReconstructionTests(unittest.TestCase):
                 actual = dict(conn.execute('select filename, sha256 from schema_migrations').fetchall())
             self.assertEqual(actual, expected)
 
-            email_migration = ROOT / 'migrations' / '1006_dell_actor_email.sql'
+            email_migration = ROOT / 'migrations' / '1010_dell_actor_email.sql'
             email_sql = email_migration.read_text()
             actor_emails_query = """select slug,email from actor
                 where slug in ('dell','joe','synthetic-email-test') order by slug"""
