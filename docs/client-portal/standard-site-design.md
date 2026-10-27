@@ -115,7 +115,12 @@ binds R2 `carr-documents` and reaches Postgres. The gap in today's host (two
 OpenAI Sites projects, one behind a proxy) is that it cannot read
 `ops.client_portal`, R2 or the deal record without storing a CARR credential at
 a third party. Rejected: keeping Sites and calling the CARR API from it (two
-hosts, a stored credential, two deploy paths). Reopen if the Worker cannot take
+hosts, a stored credential, two deploy paths). Joe 2026-10-27: "all sites should
+host on my site". That direction is about the address, and this keeps every
+client on `share.doctorcre.com`. It does change the platform behind the address:
+today the domain is a CNAME to OpenAI Sites, and only Codex can publish there.
+After cutover, publishing is a record-layer verb, and Codex has no part in it.
+Reopen if Joe wants Codex Sites to stay the host, or if the Worker cannot take
 the custom domain.
 
 **D7. The portal adapter copies the `reports-web.js` shape.** One host adapter
@@ -1186,8 +1191,9 @@ PR.
 
 - That the deployed ciphertext equals the read-only source copies. The content
   keys are not readable; Stage 0 in S6 proves it before anything is built.
-- How the `share.doctorcre.com` custom domain is wired in DNS today (Sites-managed
-  or a record in the Cloudflare zone). S22 checks it before cutover.
+- The DNS record for `share.doctorcre.com` was not read in this slice. Another
+  session recorded on 2026-10-27 that it is a CNAME to OpenAI Sites' custom-domain
+  host. S22 rereads it, and the cutover replaces it with the Worker custom domain.
 - Whether the Sites projects allow a D1 export. S21 tries it; the fallback is
   stated in migration step 3.
 - Runtime behaviour of the live sites. This inventory comes from reading the code
