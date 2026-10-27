@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline tests for the evening Outlook triage. A fake cua-driver plays Outlook; nothing real is touched.
+"""Offline tests for Outlook triage using synthetic windows and messages.
 
 The fake mirrors the shapes read from Joe's live Outlook on 2026-10-20: a folder
 pane (AXOutline) that View > Sidebar toggles, the window title naming the open
@@ -32,7 +32,7 @@ sys.path.insert(0, str(ROOT))
 from lib import outlook_triage as triage
 from outlook_test_support import write_settings
 from lib.launchd_calendar import calendar_for_window
-from lib.outlook_ui import Row, Waits
+from lib.outlook_ui import Row, Waits, is_compose_window
 
 ZONE = ZoneInfo('America/Chicago')
 EVENING = datetime(2026, 10, 20, 19, 15, tzinfo=ZONE)
@@ -78,6 +78,8 @@ TOOLBAR = window(11, '', 1512, 32, False)
 FULL_SCREEN = window(12, MAILBOX, 1512, 949, False)
 ORDINARY = window(13, MAILBOX, 1230, 768)
 COMPOSE = window(14, 'Re: subject-000', 917, 911)
+UNTITLED_OFFSCREEN = window(15, '', 500, 500, None) | {'is_on_screen': False}
+UNTITLED_OFFSCREEN['bounds']['y'] = 580
 
 
 def msg(sender, subject, when='10:02 AM', unread=False, email=None):
@@ -367,6 +369,28 @@ class FakeOutlookCase(unittest.TestCase):
         return {r['label'] for rows in state['lists'].values() for r in rows if r['unread']}
 
 
+class ComposeWindowTest(unittest.TestCase):
+    def test_observed_untitled_offscreen_window_does_not_block_preflight(self):
+        self.assertFalse(is_compose_window(UNTITLED_OFFSCREEN))
+
+    def test_subjectless_and_resized_drafts_still_block_preflight(self):
+        for title in ('', None, 'UNTITLED', 'subject-000'):
+            for width, height in ((917, 911), (500, 501), (501, 500)):
+                with self.subTest(title=title, width=width, height=height):
+                    draft = window(16, title, width, height, None) | {'is_on_screen': False}
+                    self.assertTrue(is_compose_window(draft))
+        for draft in (UNTITLED_OFFSCREEN | {'is_on_screen': True},
+                      UNTITLED_OFFSCREEN | {'on_current_space': False},
+                      UNTITLED_OFFSCREEN | {'on_current_space': True},
+                      UNTITLED_OFFSCREEN | {'title': 'subject-000'},
+                      UNTITLED_OFFSCREEN | {'title': 'UNTITLED'}, UNTITLED_OFFSCREEN | {'title': None},
+                      {k: v for k, v in UNTITLED_OFFSCREEN.items() if k != 'is_on_screen'},
+                      {k: v for k, v in UNTITLED_OFFSCREEN.items() if k != 'on_current_space'},
+                      window(16, '', 500, 500)):
+            with self.subTest(draft=draft):
+                self.assertTrue(is_compose_window(draft))
+
+
 class OutlookTriageTest(FakeOutlookCase):
     def test_configured_driver_outside_shell_path_works(self):
         self.given([FILE_A, NEWS, UNREAD])
@@ -524,6 +548,19 @@ class OutlookTriageTest(FakeOutlookCase):
         outcome, _ = self.run_triage(LAST)
         self.assertEqual(outcome.state, 'skipped')
         self.assertEqual(self.settled().read_text(), 'skipped user_active\n')
+
+    def test_observed_untitled_offscreen_window_allows_triage(self):
+        self.given([FILE_A], windows=[TOOLBAR, ORDINARY, UNTITLED_OFFSCREEN])
+        outcome, state = self.run_triage()
+        self.assertEqual((outcome.state, outcome.reason), ('succeeded', 'filed'))
+        self.assertEqual(state['moved'], [[FILE_A['label'], 'folder-A']])
+
+    def test_empty_subject_draft_skips_the_night(self):
+        self.given([FILE_A], windows=[ORDINARY, COMPOSE | {'title': ''}])
+        outcome, state = self.run_triage()
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+        self.assertTrue(state['running'])
+        self.assertEqual(state['moved'], [])
 
     def test_open_draft_skips_the_night(self):
         self.given([FILE_A], windows=[TOOLBAR, ORDINARY, COMPOSE])

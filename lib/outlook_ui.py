@@ -131,12 +131,16 @@ def is_main_window(window: dict) -> bool:
 
 
 def is_compose_window(window: dict) -> bool:
-    """Any sizeable Outlook window that is not a mailbox window may hold a draft.
+    """Protect possible drafts, except the observed unassigned off-screen window.
 
-    Toolbar and full-screen helper surfaces are a few dozen points tall and
-    untitled; a compose window is roughly 917x911 and titled by its subject.
+    The 500x500 window has an empty title and unknown purpose; AX did not resolve it.
+    Keep all other sizeable non-mailbox windows protected, even without a subject.
     """
     bounds = window.get('bounds') or {}
+    if (window.get('title') == '' and bounds.get('width') == 500
+            and bounds.get('height') == 500 and window.get('is_on_screen') is False
+            and 'on_current_space' in window and window['on_current_space'] is None):
+        return False
     return (not is_main_window(window) and bounds.get('width', 0) >= 400
             and bounds.get('height', 0) >= 400)
 
