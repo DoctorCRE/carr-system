@@ -1,3 +1,4 @@
+// Derive candidate scheduling gaps from stored calendar coverage.
 const NOTE = 'Candidate openings from stored meetings, not confirmed availability. May include overnight hours. Check Outlook before booking.';
 
 export function calendarScheduling(snapshot, section, now) {
