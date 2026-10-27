@@ -9,6 +9,7 @@ import io
 import json
 import os
 import plistlib
+import re
 import signal
 import stat
 import subprocess
@@ -225,10 +226,16 @@ def check_and_install_cases() -> list[bool]:
     real_run = mod.subprocess.run
     launchctl_calls: list[list[str]] = []
     loaded_paths: dict[str, str] = {}
+    disabled: set[str] = set()
 
     def stub_run(args, *a, **k):
         if args and os.path.basename(str(args[0])) == "launchctl":
             launchctl_calls.append(list(args))
+            if args[1] == "disable":
+                disabled.add(args[2].rsplit("/", 1)[-1])
+            if args[1] == "print-disabled":
+                return SimpleNamespace(returncode=0, stderr="", stdout="".join(
+                    f'\t"{label}" => disabled\n' for label in sorted(disabled)))
             if args[1] == "print":
                 label = args[2].rsplit("/", 1)[-1]
                 if label in loaded_paths:
@@ -300,6 +307,44 @@ def check_and_install_cases() -> list[bool]:
             out.append(check("install retires removed templates in its apply path",
                              not orphan.exists()
                              and len(list((home / "Library/LaunchAgents-quarantine").rglob(orphan.name))) == 1))
+            # Outlook jobs ship only through bin/install-outlook-*.sh, which
+            # also builds and pins the helper they run; a fleet install must
+            # leave even a stale Outlook plist exactly as that installer left it.
+            from outlook_test_support import write_settings
+            write_settings(home, home / "outlook-runtime")
+            outlook = "com.carr.outlook-triage.plist"
+            (launchd / outlook).write_text(plist("com.carr.outlook-triage", "{{REPO}}/new"), encoding="utf-8")
+            stale = plist("com.carr.outlook-triage", str(home / "outlook-runtime/old"))
+            (agents / outlook).write_text(stale, encoding="utf-8")
+            launchctl_calls.clear()
+            with contextlib.redirect_stdout(io.StringIO()) as outlook_out:
+                mod.cmd_install(True)
+            out.append(check(
+                "install leaves an installer-owned Outlook plist untouched and names its installer",
+                (agents / outlook).read_text(encoding="utf-8") == stale
+                and f"SKIP  {outlook} (installer-owned: bin/install-outlook-triage.sh)" in outlook_out.getvalue()
+                and not any(outlook in " ".join(c) for c in launchctl_calls),
+                outlook_out.getvalue()[-800:]))
+            (launchd / outlook).unlink()
+            (agents / outlook).unlink()
+            # A definition-only agent found installed is switched off AND moved
+            # aside, so the convergence leaves `check` green rather than red.
+            held = "com.carr.defonly.plist"
+            (launchd / held).write_text(plist("com.carr.defonly"), encoding="utf-8")
+            (agents / held).write_text(plist("com.carr.defonly"), encoding="utf-8")
+            with patch.dict(mod.launchd_hold.DEFINITION_ONLY, {held: "fixture awaiting activation"}):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    mod.cmd_install(False)
+                dry_kept = (agents / held).exists()
+                with contextlib.redirect_stdout(io.StringIO()) as held_out:
+                    mod.cmd_install(True)
+                left_installed = mod.definition_only_installed_plists()
+            out.append(check(
+                "install --apply quarantines an installed definition-only plist; dry run keeps it",
+                dry_kept and not (agents / held).exists() and held not in left_installed
+                and len(list((home / "Library/LaunchAgents-quarantine").rglob(held))) == 1,
+                held_out.getvalue()[-800:]))
+            (launchd / held).unlink()
             # A routine fleet refresh must not opt a machine into Flash.
             from tools import flash_install
             (launchd / "com.carr.planted.plist").unlink()
@@ -354,6 +399,26 @@ def check_and_install_cases() -> list[bool]:
                 and "com.carr.good.plist (PENDING RELOAD)" in pending_out.getvalue(),
                 (pending_rc, pending_out.getvalue()[:800]),
             ))
+            pending.unlink()
+            # install refuses everything while the administrator-owned policy
+            # cannot be written, so its absence must show in check, not only
+            # as an install failure nobody runs.
+            policy = home / "managed-settings.json"
+            body = json.dumps({"permissions": {"deny": ["Read(~/.ssh/id_*)"]}}, indent=2) + "\n"
+            with patch.object(mod, "managed_safety_plan", return_value=[(str(policy), body)]):
+                with contextlib.redirect_stdout(io.StringIO()) as absent_out:
+                    absent_rc = mod.cmd_check()
+                policy.write_text(json.dumps(json.loads(body)), encoding="utf-8")
+                with contextlib.redirect_stdout(io.StringIO()) as present_out:
+                    mod.cmd_check()
+            out.append(check(
+                "cmd_check reports a missing managed safety policy and accepts an equal one",
+                absent_rc == 1 and f"Claude managed safety policy {policy}" in absent_out.getvalue()
+                and "managed safety policy" not in present_out.getvalue()
+                and len(re.findall(r"of (\d+) items", absent_out.getvalue())) == 1
+                and re.findall(r"of (\d+) items", absent_out.getvalue())
+                == re.findall(r"of (\d+) items", present_out.getvalue()),
+                (absent_out.getvalue()[:600], present_out.getvalue()[:600])))
     finally:
         mod.subprocess.run = real_run
         for name, value in saved.items():
@@ -700,6 +765,38 @@ def outlook_render_cases() -> list[bool]:
                 outcomes.append(check("generic Outlook render refuses missing settings with file diagnostic", False))
             outcomes.append(check("generic non-Outlook render needs no Outlook settings",
                                   mod.concrete(plist("com.carr.synthetic")) == plist("com.carr.synthetic")))
+        # The Studio arrangement: the checker runs from the canonical checkout
+        # while bin/install-outlook-intake.sh runs the jobs from the separate
+        # checkout named in settings.repo.
+        canonical, runtime = root / "canonical", root / "outlook-runtime"
+        write_settings(home, runtime)
+        settings = load_settings(home)
+        with patch.object(mod, "HOME", str(home)), patch.object(mod, "REPO", str(canonical)), \
+                patch.object(mod, "TOKENS", [("{{REPO}}", str(canonical)), ("{{HOME}}", str(home))]), \
+                patch("pathlib.Path.home", return_value=home):
+            for name in ("intake", "refresh", "triage"):
+                template = (REPO / f"ops/launchd/com.carr.outlook-{name}.plist").read_text()
+                installed = settings.render_plist(template.encode()).decode()
+                try:
+                    matches = mod.launchd_texts_match(installed, template)
+                except SettingsError as error:
+                    matches = error
+                outcomes.append(check(
+                    f"installer-rendered Outlook {name} plist matches when its runtime checkout is separate",
+                    matches is True, matches))
+            # The research-copy installer writes with plistlib (sorted keys);
+            # the tracked template is hand-formatted. Same job, so no drift.
+            source = REPO / "spec/outlook/com.carr.outlook-research-copy.plist"
+            definition = {key: value.replace("{{HOME}}", str(home)) if isinstance(value, str)
+                          else [item.replace("{{HOME}}", str(home)) for item in value] if key == "ProgramArguments"
+                          else value
+                          for key, value in plistlib.loads(source.read_bytes()).items()}
+            installed = plistlib.dumps(definition).decode()
+            outcomes.append(check("plistlib re-serialized research-copy plist matches its hand-formatted template",
+                                  mod.launchd_texts_match(installed, source.read_text()) is True))
+            changed = plistlib.dumps({**definition, "Umask": 18}).decode()
+            outcomes.append(check("a changed research-copy value is still drift",
+                                  mod.launchd_texts_match(changed, source.read_text()) is False))
     return outcomes
 
 
