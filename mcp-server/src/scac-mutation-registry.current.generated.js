@@ -2642,6 +2642,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": true,
     "delegates_to": []
   },
+  "register-client-portal": {
+    "ingress_key": "mcp-tool:register-client-portal",
+    "source_locator": "mcp-server/src/client-portal.ts",
+    "schema_digest": "00c44019421387c2c793304e33b1051cd1b100eea9e54f30b62fa37797e99e81",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "register-derivative-source-link": {
     "ingress_key": "mcp-tool:register-derivative-source-link",
     "source_locator": "mcp-server/src/record-source-authority-store.v5.js",
@@ -3610,6 +3620,21 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.list_fact_conflicts(p_tenant text, p_entity_ref text, p_limit integer)",
       "volatility": "s",
       "ingress_key": "db-function-acl:ops.list_fact_conflicts(p_tenant text, p_entity_ref text, p_limit integer):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.register_client_portal(p_deal_id uuid, p_slug text, p_password text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.register_client_portal(p_deal_id uuid, p_slug text, p_password text):carr_writer:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
