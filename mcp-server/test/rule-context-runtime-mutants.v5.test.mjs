@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 // V5-F05 planted-bug mutants for the guards the live adapter introduces.
 //
 // Each mutant is KILLED here the honest way: the same behavioural expectation
@@ -27,13 +28,13 @@ function mutate(id, anchor, replacement) {
   const source = readFileSync(SOURCE, "utf8");
   assert.equal(source.split(anchor).length - 1, 1,
     `mutant ${id}: anchor must occur exactly once`);
-  const path = join(WORK, `${id}-${Date.now()}.mjs`);
+  const path = join(WORK, `${id}-${randomUUID()}.mjs`);
   const relinked = source.replace(anchor, replacement).replace(
     /from "\.\/([^"]+)"/g,
     (_, file) => `from "${pathToFileURL(join(SOURCE_DIR, file)).href}"`,
   );
   writeFileSync(path, relinked);
-  return import(`${pathToFileURL(path).href}?mutant=${id}-${Date.now()}`);
+  return import(`${pathToFileURL(path).href}?mutant=${id}-${randomUUID()}`);
 }
 
 const ACTOR = { id: "10000000-0000-4000-8000-000000000031", slug: "joe-local",

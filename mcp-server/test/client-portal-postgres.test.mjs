@@ -93,9 +93,9 @@ test('a password opens only its client portal and the live deal roadmap', async 
         const pids = await Promise.all(callers.map(async caller =>
           (await caller.query('select pg_backend_pid() as pid')).rows[0].pid));
         const allVerifying = async slug => {
-          const deadline = Date.now() + 5000;
+          const deadline = performance.now() + 5000;
           let verifying = 0;
-          while (Date.now() < deadline) {
+          while (performance.now() < deadline) {
             verifying = Number((await c.query(`select count(*) as n from pg_locks
               where pid=any($1::int[]) and locktype='advisory' and not granted`, [pids])).rows[0].n);
             if (verifying === callers.length) break;

@@ -1,3 +1,4 @@
+import { NOW } from "./helpers/fixed-clock.mjs";
 // Test sourced deal checklist reminders, eligibility, and retry behavior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -108,7 +109,7 @@ test('retries preserve notification identity and changed owner or due date gets 
 test('today is due in Chicago and cleared, future or unsourced deadlines produce no reminders', async () => {
   const c = database();
   c.dates[0].due_on = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago',
-    year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(NOW));
   assert.equal((await ping(c)).queued, 1);
   c.dates[0].status = 'cleared';
   assert.deepEqual((await ping(c)).notifications, []);
@@ -171,7 +172,7 @@ test('an unknown deal type retains sourced due dates without inventing a documen
 test('stored open checklist deadlines join critical dates without exposing their text', async () => {
   const c = database();
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago',
-    year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(NOW));
   const base = { title: 'Synthetic vendor follow-up', source_ref: 'synthetic:private-source', status: 'open' };
   c.items.push(...[
     { id: 'late', due_on: '2000-01-01' },

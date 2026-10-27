@@ -648,6 +648,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": true,
     "delegates_to": []
   },
+  "complete-work-request": {
+    "ingress_key": "mcp-tool:complete-work-request",
+    "source_locator": "mcp-server/src/work-request-intake.js",
+    "schema_digest": "ba6119c8b5476f08d8d5e20df152395f3c89b81732ce898cc783b4f7adc933b0",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "confirm-email-deal-progress": {
     "ingress_key": "mcp-tool:confirm-email-deal-progress",
     "source_locator": "mcp-server/src/email-deal-progress.ts",
