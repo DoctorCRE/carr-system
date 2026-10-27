@@ -985,6 +985,7 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
                             'calendar_agenda_recurring', 'calendar_agenda_trimmed',
                             'calendar_follow_up_trimmed'), 0)
     items, reviews = [], []
+    hidden_canceled = 0
     for goid, group in by_goid.items():
         if _instance(goid) == '00000000' and goid in with_occurrences:
             continue
@@ -998,6 +999,7 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
             continue
         if any(CANCELED.match(e['subject'] or '') for e in group):
             counts['calendar_agenda_canceled'] += 1
+            hidden_canceled += bool(current)
             continue
         shown = max(current or recent, key=lambda e: (len(e['attendees']), len(e['subject'] or ''), e['end_unix']))
         starts = sorted({e['start_unix'] for e in group})
@@ -1036,8 +1038,9 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
     warnings: list[dict] = [{'code': 'responses_unverified'}, {'code': 'group_invites_not_shown'}]
     if undecoded:
         warnings.append({'code': 'undecoded', 'count': undecoded})
-    if counts['calendar_agenda_canceled']:
-        warnings.append({'code': 'canceled_hidden', 'count': counts['calendar_agenda_canceled']})
+    if hidden_canceled:
+        # Only meetings in the agenda window: one cancelled yesterday was never on the agenda.
+        warnings.append({'code': 'canceled_hidden', 'count': hidden_canceled})
     if counts['calendar_agenda_time_changed']:
         warnings.append({'code': 'time_changed', 'count': counts['calendar_agenda_time_changed']})
     if with_occurrences:
