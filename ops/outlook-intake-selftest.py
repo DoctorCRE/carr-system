@@ -362,6 +362,15 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.run_intake(events=events, touch=False).reason, 'store_unchanged')
         self.assertEqual(self.fake.decodes, 2)
 
+    def test_unchanged_store_proposes_review_for_meetings_beyond_the_agenda_window(self):
+        events = [event('later', timedelta(days=15, hours=1))]
+        self.run_intake(events=events)
+        self.assertEqual(self.fake.agenda['items'], [])
+        self.fake.now += timedelta(days=15, hours=3)
+        self.run_intake(events=events, touch=False)
+        self.assertEqual(len(self.fake.agenda['follow_up_reviews']), 1)
+        self.assertEqual(self.fake.writes(), [])
+
     def test_review_upgrade_initializes_an_unchanged_store_and_failed_publish_retries(self):
         events = [event('elapsed', -timedelta(hours=2))]
         self.run_intake(events=events)

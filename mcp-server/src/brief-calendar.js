@@ -74,7 +74,7 @@ export function calendarSection(snapshot, now = new Date()) {
   if (snapshot.follow_up_reviews !== undefined && !Array.isArray(snapshot.follow_up_reviews)) malformedReviews++;
   for (const row of Array.isArray(snapshot.follow_up_reviews) ? snapshot.follow_up_reviews : []) {
     const start = instant(row?.start), end = instant(row?.end);
-    if (row?.state !== "needs_review" || !/^[a-f0-9]{16}$/.test(row?.key ?? "")
+    if (row?.state !== "needs_review" || typeof row?.key !== "string" || !/^[a-f0-9]{16}$/.test(row.key)
         || !text(row?.title) || !text(row?.prompt) || start === null || end === null || end <= start) {
       malformedReviews++; continue;
     }

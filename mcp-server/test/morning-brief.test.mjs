@@ -471,10 +471,10 @@ test("meeting outcome reviews expire and stale or malformed snapshots never beco
   const calendar = calendarFixture(now);
   calendar.follow_up_reviews = [{ ...review, start: at(-26), end: at(-24) },
     { ...review, start: at(1), end: at(2) }, { ...review, end: "invalid" },
-    { ...review, state: "completed" }, review];
+    { ...review, state: "completed" }, review, { ...review, key: 1234567890123456 }];
   const result = await executeRegisteredTool(client({ calendar }), JOE, "morning-brief", {});
   assert.equal(result.sections.calendar.follow_up_reviews.length, 1);
-  assert.ok(result.sections.calendar.notes.some(note => /2 stored meeting outcome reviews could not be shown/.test(note)));
+  assert.ok(result.sections.calendar.notes.some(note => /3 stored meeting outcome reviews could not be shown/.test(note)));
   calendar.follow_up_reviews = {};
   const malformed = await executeRegisteredTool(client({ calendar }), JOE, "morning-brief", {});
   assert.deepEqual(malformed.sections.calendar.follow_up_reviews, []);

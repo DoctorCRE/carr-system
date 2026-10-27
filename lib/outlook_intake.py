@@ -1200,7 +1200,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         try:
             publish_agenda(ports.carr, snapshot)
             state['calendar_review_at'] = min((e['end_unix'] for e in events
-                if now.timestamp() < e['end_unix'] and e['start_unix'] < now.timestamp() + AGENDA_DAYS * 86_400),
+                if now.timestamp() < e['end_unix']),
                 default=None)
             work.counts.update(calendar_agenda_published=1, calendar_agenda_failed=0)
         except CarrError:
