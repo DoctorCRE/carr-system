@@ -62,6 +62,27 @@ class SettingsTest(unittest.TestCase):
         self.assertFalse(settings.mcp_credentials.exists())
         self.assertFalse(settings.database_credentials.exists())
 
+    def test_outbox_requires_a_partner_copy_without_breaking_existing_intake(self):
+        values = json.loads(self.path.read_text())
+        values.pop('partner_cc', None)
+        self.path.write_text(json.dumps(values))
+        self.assertEqual(load_settings(self.home).partner_cc, '')
+        values['services'].append('outbox')
+        for copy in ('', 'bad', 'owner@example.test', 'PARTNER@example.test'):
+            with self.subTest(copy=copy):
+                self.path.write_text(json.dumps({**values, 'partner_cc': copy}))
+                with self.assertRaisesRegex(SettingsError, 'partner_cc'):
+                    load_settings(self.home)
+        self.path.write_text(json.dumps({**values, 'partner_cc': 'partner@example.test'}))
+        settings = load_settings(self.home)
+        settings.require_service('outbox')
+        self.assertEqual(settings.partner_cc, 'partner@example.test')
+        rendered = plistlib.loads(settings.render_plist(ROOT / 'ops/launchd/com.carr.outlook-outbox.plist'))
+        self.assertEqual(rendered['StartCalendarInterval'], [{'Minute': n} for n in range(60)])
+        self.assertEqual(rendered['ProgramArguments'], [str(settings.copy_helper), '--run-outbox'])
+        self.assertEqual(rendered['WorkingDirectory'], str(self.repo))
+        self.assertNotIn('{{', str(rendered))
+
     def test_missing_and_invalid_fields_name_file_and_field(self):
         values = json.loads(self.path.read_text())
         for field, value in [('owner', ''), ('account', 'bad'), ('timezone', 'No/Such_Zone'),
@@ -162,7 +183,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(values[5], 'joe')
         owners = [call.args[1][5] for call in cursor.execute.call_args_list
                   if 'insert into ops.service\n' in call.args[0]]
-        self.assertEqual(owners, ['joe', 'joe', 'joe'])
+        self.assertEqual(owners, ['joe', 'joe', 'joe', 'joe'])
 
     def test_configured_exporter_file_wins_over_an_unrelated_shell_export(self):
         from exporters import common
@@ -195,12 +216,15 @@ class SettingsTest(unittest.TestCase):
         self.assertFalse(settings.database_credentials.exists())
         self.assertFalse((repo / 'out').exists())
 
-    def test_window_guard_uses_the_configured_display_height(self):
+    def test_window_guard_uses_visible_window_size(self):
         from lib import outlook_ui as ui
-        window = {'title': 'Inbox • owner@example.test', 'on_current_space': True,
-                  'bounds': {'height': 949}}
-        self.assertFalse(ui.is_ordinary_main_window(window, 949))
-        self.assertTrue(ui.is_ordinary_main_window(window, 1200))
+        window = {'title': 'Inbox • owner@example.test', 'is_on_screen': True,
+                  'bounds': {'x': -1329, 'width': 1329, 'height': 1002}}
+        self.assertTrue(ui.is_ordinary_main_window(window))
+        for width, height in ((1920, 30), (64, 64), (0, 1002)):
+            self.assertFalse(ui.is_ordinary_main_window(
+                window | {'bounds': {'width': width, 'height': height}}))
+        self.assertFalse(ui.is_ordinary_main_window(window | {'is_on_screen': False}))
 
     def test_private_pointers_reject_aliases_into_checkout_or_settings(self):
         self.repo.mkdir()

@@ -32,6 +32,8 @@ const ENGINEERING_ADMISSION_LITERAL_PATTERNS = [
 ];
 const engineeringAdmissionLiteralClassified = literal =>
   ENGINEERING_ADMISSION_LITERAL_PATTERNS.some(pattern => pattern.test(literal));
+const submittedDraftCopyLiteralClassified = literal =>
+  literal.slice(1, -1) === "select email from actor where slug=$1 and kind='human' and active for share";
 
 test("registered search-doctrine resolves joe-local sponsorship to Joe's human actor", async () => {
   const calls = [];
@@ -228,6 +230,7 @@ test("no read verb filters the actor table on a column carr_reader cannot read",
     !(CLASSIFIED[f.name] ||
       (f.name === "relationship-network.ts" && /join public\.actor a on a\.id=/.test(f.literal) && !/\ba\.(?:kind|active)\b/.test(f.literal)) ||
       (f.name === "memory.js" && memoryWriteLiteralClassified(f.literal)) ||
+      (f.name === "email-proposals.js" && submittedDraftCopyLiteralClassified(f.literal)) ||
       // undo-lead-move is a partner-only writer. Its predecessor association
       // must authenticate the historical approver; no read handler uses this SQL.
       (f.name === "lead-automation.js" &&
@@ -253,6 +256,14 @@ test("memory actor classification is literal-specific, not filename-wide", () =>
   assert.equal(memoryWriteLiteralClassified(writeUpdate), true);
   assert.equal(memoryWriteLiteralClassified(readShape), false,
     "a future memory read literal must remain unclassified and fail the architectural gate");
+});
+
+test("submitted draft copy lookup classification is literal-specific", () => {
+  assert.equal(TOOLS['submit-email-draft'].write, true);
+  assert.equal(submittedDraftCopyLiteralClassified(
+    `"select email from actor where slug=$1 and kind='human' and active for share"`), true);
+  assert.equal(submittedDraftCopyLiteralClassified(
+    `"select email from actor where slug=$1 and kind='human' and active"`), false);
 });
 
 test("engineering admission actor classification is literal-specific", () => {

@@ -60,6 +60,9 @@
 // plan` requires concrete already-existing evidence rows; this slice adds no
 // script and no call that manufactures that evidence for any live workflow.
 
+import type { Db, Actor, WithEnvelope, VerbInputs } from "./verb-contract.ts";
+import type { ToolError as ToolErrorClass } from "./tool-error.ts";
+
 const CUTOVER_STAGES = Object.freeze([
   "read_legacy", "build_projection", "shadow_compare", "single_write_authority",
   "cutover", "monitor", "recovery_ready", "retired",
@@ -92,7 +95,8 @@ const CUTOVER_STAGES = Object.freeze([
 // real read again (over HTTP/fetch, which workerd supports) -- Q157 still
 // requires it to fail closed until then, in EITHER runtime.
 
-export function workflowCutoverTools({ withEnvelope, ToolError }) {
+// Exception payloads stay unchecked to preserve legacy property reads on thrown values.
+export function workflowCutoverTools({ withEnvelope, ToolError }: { withEnvelope: WithEnvelope; ToolError: typeof ToolErrorClass }) {
 
   return {
 
@@ -108,14 +112,14 @@ export function workflowCutoverTools({ withEnvelope, ToolError }) {
         },
         required: ["idempotency_key", "plan_id", "reason"],
       },
-      handler: async (c, actor, args) => withEnvelope(c, actor, "cancel-workflow-cutover-plan", args, async () => {
+      handler: async (c: Db, actor: Actor, args: VerbInputs["cancel-workflow-cutover-plan"]) => withEnvelope(c, actor, "cancel-workflow-cutover-plan", args, async () => {
         let row;
         try {
           row = (await c.query(
             "select * from ops.cancel_workflow_cutover_plan($1,$2,$3)",
             [args.plan_id, args.reason, args.idempotency_key],
           )).rows[0];
-        } catch (err) {
+        } catch (err: any) {
           throw new ToolError({ error: "workflow_cutover_cancel_refused", detail: String(err.message || err) });
         }
         if (!row) throw new ToolError({ error: "workflow_cutover_plan_not_found" });
@@ -137,7 +141,7 @@ export function workflowCutoverTools({ withEnvelope, ToolError }) {
         },
         required: ["idempotency_key", "plan_id", "to_stage", "reason"],
       },
-      handler: async (c, actor, args) => withEnvelope(c, actor, "advance-workflow-cutover-stage", args, async () => {
+      handler: async (c: Db, actor: Actor, args: VerbInputs["advance-workflow-cutover-stage"]) => withEnvelope(c, actor, "advance-workflow-cutover-stage", args, async () => {
         if (args.to_stage === "retired")
           throw new ToolError({ error: "retired_stage_requires_retire_door" });
         let row;
@@ -146,7 +150,7 @@ export function workflowCutoverTools({ withEnvelope, ToolError }) {
             "select * from ops.advance_workflow_cutover_stage($1,$2,$3,$4,$5)",
             [args.plan_id, args.to_stage, args.evidence_ref ?? null, args.reason, args.idempotency_key],
           )).rows[0];
-        } catch (err) {
+        } catch (err: any) {
           throw new ToolError({ error: "workflow_cutover_stage_advance_refused", detail: String(err.message || err) });
         }
         if (!row) throw new ToolError({ error: "workflow_cutover_plan_not_found" });
@@ -161,7 +165,7 @@ export function workflowCutoverTools({ withEnvelope, ToolError }) {
         type: "object", additionalProperties: false,
         properties: { since: { type: ["string", "null"] } },
       },
-      handler: async (c, _actor, args) => {
+      handler: async (c: Db, _actor: Actor, args: VerbInputs["list-shipped-releases"]) => {
         const rows = (await c.query(
           "select * from ops.list_shipped_releases($1::timestamptz)",
           [args.since ?? null],
@@ -187,7 +191,7 @@ export function workflowCutoverTools({ withEnvelope, ToolError }) {
         },
         required: ["idempotency_key", "slice_ids", "reason"],
       },
-      handler: async (c, actor, args) => withEnvelope(c, actor, "confirm-slice-completions", args, async () => {
+      handler: async (c: Db, actor: Actor, args: VerbInputs["confirm-slice-completions"]) => withEnvelope(c, actor, "confirm-slice-completions", args, async () => {
         const expected = args.expected_proposal_ids ?? null;
         if (expected !== null) {
           const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -204,7 +208,7 @@ export function workflowCutoverTools({ withEnvelope, ToolError }) {
             [args.slice_ids, args.reason, args.idempotency_key,
               expected === null ? null : JSON.stringify(expected)],
           )).rows;
-        } catch (err) {
+        } catch (err: any) {
           throw new ToolError({ error: "slice_completion_confirm_refused", detail: String(err.message || err) });
         }
         const results = rows.map(r => ({ slice_id: r.slice_id, outcome: r.outcome, mark_id: r.mark_id ?? null,

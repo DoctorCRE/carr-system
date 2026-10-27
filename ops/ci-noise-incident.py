@@ -76,7 +76,7 @@ def publish(repo, code, facts, run_url, api=github):
     body = (f'{MARKER}\n\n{status}\n\nProbe exit: {code}\n'
             f'Observed: {datetime.now(timezone.utc).isoformat()}\n\n'
             f'[Latest probe run]({run_url})\n\n```text\n{details}\n```\n\n'
-            'Inspect service evidence with `tools/ops-record.py health`. '
+            '[Remediation: inspect service evidence](https://github.com/DoctorCRE/carr-system/blob/main/tools/ops-record.py) '
             'Scheduled observations update this issue; recovery closes it and a new incident reopens it.')
     if issue is None:
         if code == 0:

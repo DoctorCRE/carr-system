@@ -96,14 +96,26 @@ class ParityTest(unittest.TestCase):
         artifacts = {path.name: path.read_bytes() for path in sorted(out.glob('*')) if path.is_file()}
         return result, fake.calls, artifacts, module.status_line(result).encode()
 
-    def test_mail_record_calls_are_byte_identical_to_baseline_without_calendar_writes(self):
+    def test_mail_record_payloads_preserve_baseline_except_provenance_and_partner_keys(self):
         before = self.exercise(baseline_module())
         after = self.exercise()
         calendar_activity = current.key('log-activity', 'C-901',
                                         f'past-visit|{self.fixtures.ts(-timedelta(hours=5))}')
         before_calls = [(verb, args) for verb, args in before[1]
                         if args.get('idempotency_key') != calendar_activity]
-        self.assertEqual(json.dumps(before_calls).encode(), json.dumps(after[1]).encode())
+        self.assertEqual(len(before_calls), len(after[1]))
+        for (old_verb, old_args), (verb, args) in zip(before_calls, after[1], strict=True):
+            self.assertEqual(verb, old_verb)
+            expected = dict(old_args)
+            actual = dict(args)
+            if verb == 'log-activity':
+                self.assertNotEqual(actual.pop('idempotency_key'), expected.pop('idempotency_key'))
+                if args['kind'] == 'email_in':
+                    self.assertEqual(actual.pop('email_source'),
+                                     {'sender_email': 'pat@example.test', 'mailbox_owner': 'joe'})
+                else:
+                    self.assertNotIn('email_source', actual)
+            self.assertEqual(json.dumps(expected).encode(), json.dumps(actual).encode())
 
     def test_studio_settings_preserve_mail_artifacts_and_quarantine_calendar(self):
         result, calls, artifacts, status = self.exercise()

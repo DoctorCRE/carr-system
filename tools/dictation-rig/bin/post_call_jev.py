@@ -23,6 +23,7 @@ recorded-deal list, never an email body.
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 import re
 from typing import Any
@@ -38,6 +39,10 @@ MAX_CANDIDATE_DEALS = 5
 # along, and the hard cap on how many are ever sent.
 SEGMENT_WINDOW = 2
 MAX_SEGMENTS_SENT = 6
+# A Choice answer below this confidence is not trusted to confirm the deal.
+DEAL_CONFIDENCE_GATE = 0.55
+# Items are judged one call each, at most this many in flight at once.
+MAX_CONCURRENT_CALLS = 6
 
 _LIST_PARTNER = {"joe_tasks": "Joe", "dell_tasks": "Dell"}
 _LIST_KIND = {
@@ -159,9 +164,14 @@ def _questions(deal_options: dict[str, str], attributed: str | None) -> dict[str
     return {
         "deal_match": Choice(
             instructions="Given `item` and `transcript_excerpt`, which of `candidate_deals` "
-            "does `item`'s words actually match? Choose none if no candidate "
-            "fits.",
+            "does `item`'s words match best?",
             criteria=deal_options,
+        ),
+        "deal_in_candidates": Noul(
+            instructions="Given `item` and `transcript_excerpt`, does any of "
+            "`candidate_deals` actually match `item`'s words?",
+            criteria={"true": "At least one candidate deal matches this item.",
+            "false": "None of the candidate deals match this item."},
         ),
         "speaker_right": Noul(
             instructions=speaker_instructions,
@@ -189,7 +199,6 @@ def _item_request(kind: str, list_partner: str | None,
         raw_id = deal.get("id")
         deal_id: str = raw_id if isinstance(raw_id, str) and raw_id else f"deal-{index}"
         deal_options[deal_id] = str(deal.get("name") or deal_id)
-    deal_options["none"] = "None of the candidate deals match this item."
 
     attributed = list_partner
     state = {
@@ -217,13 +226,21 @@ def _item_checks(item, answers):
     deal = answers["deal_match"]
     speaker = answers["speaker_right"]
     details = answers["details_supported"]
-    deal_pass = deal.choice == item.get("deal_id")
-    # Noul is a yes/no probability: take the more likely answer. No confidence gate.
+    in_candidates = answers["deal_in_candidates"]
+    confident = deal.confidence >= DEAL_CONFIDENCE_GATE
+    deal_pass = (deal.choice == item.get("deal_id") and confident
+                 and in_candidates.noul > 0.5)
+    # Noul is a yes/no probability: take the more likely answer.
     speaker_pass = speaker.noul > 0.5
     details_pass = details.noul > 0.5
     reasons = []
     if not deal_pass:
-        reasons.append(f"Right deal: Jev matched a different deal ({deal.choice!r}).")
+        if in_candidates.noul <= 0.5:
+            reasons.append("Right deal: Jev found no candidate deal that matches.")
+        elif not confident:
+            reasons.append("Right deal: Jev was not confident which deal this matches.")
+        else:
+            reasons.append(f"Right deal: Jev matched a different deal ({deal.choice!r}).")
     if not speaker_pass:
         reasons.append("Right speaker: the excerpt does not support the attribution.")
     if not details_pass:
@@ -275,38 +292,35 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
              ("joe_tasks", "dell_tasks", "deal_updates", "draft_proposals")]
 
     any_unavailable = False
-    state: dict[str, Any] = {"checks": {}}
-    questions: dict[str, Any] = {}
-    pending: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+    pending: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
     for list_name, kind in lists:
         for item in result.get(list_name, []):
             if not item.get("evidence"):
                 item["checks"] = {"advisory_only": True, "flagged": True,
                                   "reasons": ["No bounded evidence available; independent review required."]}
                 continue
-            label = "i"+str(len(pending))
             local_state, local_questions = _item_request(kind, _LIST_PARTNER.get(list_name),
                                                        item, deals, segments, context)
-            state["checks"][label] = local_state
-            for name,q in local_questions.items():
-                q = q.model_copy()
-                instruction = q.instructions
-                for field in ("item", "transcript_excerpt", "candidate_deals"):
-                    instruction = instruction.replace(field, "checks."+label+"."+field)
-                q.instructions = instruction
-                questions[label+":"+name] = q
-            pending.append((label,item,local_questions))
+            pending.append((item, local_state, local_questions))
     if pending:
+        def judge(entry: tuple[dict[str, Any], dict[str, Any], dict[str, Any]]) -> None:
+            item, local_state, local_questions = entry
+            try:
+                response = sdk.system_one(state=local_state, questions=local_questions)
+                item["checks"] = _item_checks(item, {name: response.answers[name]
+                                                    for name in local_questions})
+            except TypeSafeError:
+                item["checks"] = _unavailable()
+
+        # One call per item: unrelated items sharing a state hurt accuracy.
         try:
             with nullcontext(client) if client is not None else TypeSafeClient(model="jev-latest") as sdk:
-                response = sdk.system_one(state=state, questions=questions)
-            for label, item, local_questions in pending:
-                item["checks"] = _item_checks(item, {name: response.answers[label+":"+name]
-                                                    for name in local_questions})
-        except TypeSafeError:
-            for _, item, _ in pending:
+                with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CALLS) as pool:
+                    list(pool.map(judge, pending))
+        except TypeSafeError:  # no key, or the client could not open
+            for item, _, _ in pending:
                 item["checks"] = _unavailable()
-            any_unavailable = True
+        any_unavailable = any(item["checks"].get("unavailable") for item, _, _ in pending)
 
     if any_unavailable:
         result.setdefault("review_questions", []).append({

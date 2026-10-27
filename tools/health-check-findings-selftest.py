@@ -676,83 +676,10 @@ class CanonicalHealthTests(unittest.TestCase):
                   _breach_consumer=lambda: None,
                   _GREEN_EVIDENCE={},
                   _verb_usage_lines=_load_verb_usage_lines(),
-                  _grok_session_row=lambda: ("OK fixture Grok session", 0),
                   flashlib=Mock(health_row=Mock(return_value="OK Flash stopped")),
                   subprocess=Mock(run=Mock(return_value=subprocess.CompletedProcess([], 0, "SKIP fixture", ""))))
         exec(compile(mod, str(HEALTH_CHECK_PATH), "exec"), ns)
         return ns
-
-    def grok_reader_failure(self, mode):
-        """Exercise the shipped reader with failed import or actual lock storage."""
-        import builtins, importlib.util, sys
-        from functools import partial
-        from unittest.mock import patch
-        if mode == "import":
-            original = builtins.__import__
-            def unavailable(name, *args, **kwargs):
-                if name == "grok_session":
-                    raise ImportError("fixture Grok reader unavailable")
-                return original(name, *args, **kwargs)
-            return patch.object(builtins, "__import__", unavailable)
-        spec = importlib.util.spec_from_file_location(
-            "grok_session", HEALTH_CHECK_PATH.parent.parent / "ops" / "grok_session.py")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        parent = Path(self.enterContext(tempfile.TemporaryDirectory())) / "not-a-directory"
-        parent.write_text("fixture blocked storage")
-        module.health_row = partial(module.health_row, state_path=parent / "state.json",
-                                    observe=lambda: {"status": "OK", "detail": "healthy fixture"})
-        return patch.dict(sys.modules, grok_session=module)
-
-    def test_grok_reader_errors_preserve_canonical_findings_and_remaining_checks(self):
-        import contextlib, io
-        for section in ("credentials", "all"):
-            for mode, error in (("import", "ImportError"), ("lock", "FileExistsError")):
-                with self.subTest(section=section, mode=mode):
-                    ns = self.all_namespace() if section == "all" else self.namespace()
-                    exec(compile(ast.Module(body=[_find_function("_grok_session_row")],
-                                            type_ignores=[]), str(HEALTH_CHECK_PATH), "exec"), ns)
-                    with self.grok_reader_failure(mode), contextlib.redirect_stdout(io.StringIO()) as out:
-                        self.assertEqual(ns["_canonical_health"](), 1)
-                    self.assertEqual(out.getvalue().count("HEALTH_COMPLETE"), 1)
-                    self.assertIn("UNAVAILABLE Grok session", out.getvalue())
-                    self.assertIn(error, out.getvalue())
-                    self.assertFalse(any("credential-health.py" in str(call.args[0])
-                                         for call in ns["subprocess"].run.call_args_list))
-                    [finding] = ns["_FINDINGS"]
-                    self.assertEqual(finding["key"], "grok_session")
-                    self.assertTrue(finding["hard_error"])
-                    self.assertIn(error, finding["detail"])
-
-    def test_grok_narrow_cli_errors_emit_findings_and_completion(self):
-        import contextlib, io, runpy, sys
-        from unittest.mock import patch
-        for mode, error in (("import", "ImportError"), ("lock", "FileExistsError")):
-            with self.subTest(mode=mode):
-                findings = Path(self.enterContext(tempfile.TemporaryDirectory())) / "findings.json"
-                with self.grok_reader_failure(mode), \
-                        patch.object(sys, "argv", [str(HEALTH_CHECK_PATH), "--section", "grok-session",
-                                                   "--findings-json", str(findings)]), \
-                        contextlib.redirect_stdout(io.StringIO()) as out:
-                    with self.assertRaises(SystemExit) as exited:
-                        runpy.run_path(str(HEALTH_CHECK_PATH), run_name="__main__")
-                self.assertEqual(exited.exception.code, 1)
-                self.assertIn("UNAVAILABLE Grok session", out.getvalue())
-                self.assertIn(error, out.getvalue())
-                self.assertEqual(out.getvalue().count("Projection freshness/tamper checks are recovery evidence; use --recovery --reason <why>."), 1)
-                [finding] = json.loads(findings.read_text())["findings"]
-                self.assertEqual(finding["key"], "grok_session")
-                self.assertTrue(finding["hard_error"])
-                self.assertIn(error, finding["detail"])
-
-
-    def test_grok_failure_remains_a_finding(self):
-        ns = self.namespace()
-        ns["_grok_session_row"] = lambda: ("FAIL fixture Grok session", 1)
-        self.assertEqual(ns["_canonical_health"](), 1)
-        self.assertEqual([row["key"] for row in ns["_FINDINGS"]], ["grok_session"])
-
-
 
     def all_namespace(self):
         from unittest.mock import Mock

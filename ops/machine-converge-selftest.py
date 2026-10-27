@@ -44,7 +44,6 @@ from lib import launchd_calendar, machine_role  # noqa: E402
 # and the test drift apart, which is the two-homes disease.
 COPIES = [
     "hooks/machine-converge.py",
-    "hooks/grok_invocation.py",
     "lib/machine_prerequisites.py",
     "lib/launchd_calendar.py",
     "lib/machine_role.py",
@@ -307,6 +306,60 @@ def case_secondary_converges(tmp):
     return checks
 
 
+def case_failed_install_names_stale_hooks(tmp):
+    repo, home, stubs = build_fixture(tmp, "dell@example.com", actor_slug="dell",
+                                      behind=False)
+    settings = Path(home, ".claude/settings.json")
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    missing = [Path(repo, "hooks/write-effect-check.py"),
+               Path(repo, "hooks/deleted-safety-check.py")]
+    settings.write_text(json.dumps({"hooks": {"PreToolUse": [{"hooks": [
+        {"command": f"python3 {path}"} for path in missing
+    ]}]}, "unrelated": "preserve"}))
+    codex = Path(home, ".codex/hooks.json")
+    codex.parent.mkdir()
+    codex.write_bytes(settings.read_bytes())
+    before = settings.read_bytes()
+    Path(repo, "ops/config/claude-managed-settings.json").write_text("invalid JSON")
+    r = run_hook(repo, home, stubs, tmp)
+    return {
+        "failed install remains fail-soft": r.returncode == 0 and not r.stderr,
+        "original install failure remains visible": "install FAILED" in r.stdout,
+        "both client settings files named": all(str(path) in r.stdout for path in (settings, codex)),
+        "every stale script named": all(str(path) in r.stdout for path in missing),
+        "stale references labeled plainly": "installed hook invokes missing file" in r.stdout,
+        "failed install preserves settings": settings.read_bytes() == codex.read_bytes() == before,
+        "no successful apply claimed": "re-applied" not in r.stdout,
+    }
+
+
+def case_failed_install_without_stale_hooks(tmp):
+    repo, home, stubs = build_fixture(tmp, "dell@example.com", actor_slug="dell",
+                                      behind=False)
+    Path(repo, "ops/config/claude-managed-settings.json").write_text("invalid JSON")
+    r = run_hook(repo, home, stubs, tmp)
+    return {
+        "hook remains fail-soft": r.returncode == 0 and not r.stderr,
+        "install failure visible": "install FAILED" in r.stdout,
+        "no stale hook claim": "installed hook" not in r.stdout,
+    }
+
+
+def case_success_removes_stale_hooks(tmp):
+    repo, home, stubs = build_fixture(tmp, "dell@example.com", actor_slug="dell",
+                                      behind=False)
+    settings = Path(home, ".claude/settings.json")
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps({"hooks": {"PreToolUse": [{"hooks": [{
+        "command": f"python3 {repo}/hooks/write-effect-check.py"
+    }]}]}, "unrelated": "preserve"}))
+    r = run_hook(repo, home, stubs, tmp)
+    return {
+        "install succeeds": r.returncode == 0 and "re-applied" in r.stdout,
+        "stale reference removed": "write-effect-check.py" not in settings.read_text(),
+        "unrelated setting preserved": json.loads(settings.read_text())["unrelated"] == "preserve",
+        "no stale diagnostic after repair": "installed hook" not in r.stdout,
+    }
 
 
 def case_primary_noop(tmp):
@@ -412,6 +465,9 @@ def case_flash_is_explicit(tmp):
 
 def main():
     cases = [
+        ("failed install names stale hooks", case_failed_install_names_stale_hooks),
+        ("failed install without stale hooks", case_failed_install_without_stale_hooks),
+        ("successful install removes stale hooks", case_success_removes_stale_hooks),
         ("Flash installation requires explicit activation", case_flash_is_explicit),
         ("secondary machine converges", case_secondary_converges),
         ("primary machine (actor slug) is a no-op", case_primary_noop),

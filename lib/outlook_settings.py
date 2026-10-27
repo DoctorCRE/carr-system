@@ -39,6 +39,7 @@ class OutlookSettings:
     full_screen_height: int
     source: Path
     model: str = 'haiku'
+    partner_cc: str = ''
 
     @property
     def decoder(self) -> Path:
@@ -122,7 +123,7 @@ def load_settings(home: Path | None = None) -> OutlookSettings:
     if 'model' in values and (not isinstance(values['model'], str)
                               or not re.fullmatch(r'[a-z0-9][a-z0-9.-]{0,63}', values['model'])):
         fail('model', 'must be a model name such as haiku')
-    for name in sorted(expected - {'model'}):
+    for name in sorted(expected - {'model', 'partner_cc'}):
         if name not in values:
             fail(name, 'required')
         value = values[name]
@@ -131,8 +132,8 @@ def load_settings(home: Path | None = None) -> OutlookSettings:
                 fail(name, 'must be a positive integer in screen points')
             continue
         if name == 'services':
-            if not isinstance(value, list) or not value or any(v not in ('intake', 'refresh', 'triage') for v in value):
-                fail(name, 'must list enabled intake, refresh, or triage services')
+            if not isinstance(value, list) or not value or any(v not in ('intake', 'refresh', 'triage', 'outbox') for v in value):
+                fail(name, 'must list enabled intake, refresh, triage, or outbox services')
             values[name] = tuple(value)
             continue
         if not isinstance(value, str) or not value.strip() or value != value.strip() or any(ord(c) < 32 for c in value):
@@ -142,6 +143,11 @@ def load_settings(home: Path | None = None) -> OutlookSettings:
             if not p.is_absolute() or '..' in p.parts or str(p) != value:
                 fail(name, 'must be a normalized absolute path')
             values[name] = p.resolve() if name == 'repo' else p
+    partner_cc = values.get('partner_cc', '')
+    if (not isinstance(partner_cc, str) or (partner_cc or 'outbox' in values['services']) and (
+            not re.fullmatch(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+", partner_cc)
+            or partner_cc != partner_cc.lower() or partner_cc == values['account'])):
+        fail('partner_cc', 'outbox requires a lowercase partner email different from account')
     for unknown in values.keys() - expected:
         fail(unknown, 'unknown field; credential values do not belong in settings')
     if not re.fullmatch(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+", values['account']):
