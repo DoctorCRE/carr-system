@@ -178,7 +178,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/header.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/header.rs), `check`.
+- [`vendor/hxprobe/src/header.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/header.rs), `check`.
 
 ## Magic (store.offset.0)
 
@@ -196,7 +196,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/header.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/header.rs), `check`.
+- [`vendor/hxprobe/src/header.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/header.rs), `check`.
 
 ## Version (store.offset.8)
 
@@ -214,7 +214,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/header.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/header.rs), `check`.
+- [`vendor/hxprobe/src/header.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/header.rs), `check`.
 
 ## Page size (store.offset.56)
 
@@ -232,7 +232,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/header.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/header.rs), `check`.
+- [`vendor/hxprobe/src/header.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/header.rs), `check`.
 
 ## Guard pattern (store.offset.156)
 
@@ -250,7 +250,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/header.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/header.rs), `module documentation`.
+- [`vendor/hxprobe/src/header.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/header.rs), `module documentation`.
 
 ## Block container (block)
 
@@ -268,7 +268,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/block.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/block.rs), `parse`.
+- [`vendor/hxprobe/src/block.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/block.rs), `parse`.
 
 ## Block type 8 (block.type.8)
 
@@ -286,7 +286,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/block.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/block.rs), `module documentation`.
+- [`vendor/hxprobe/src/block.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/block.rs), `module documentation`.
 
 ## Block type 16 (block.type.16)
 
@@ -304,7 +304,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/block.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/block.rs), `module documentation`.
+- [`vendor/hxprobe/src/block.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/block.rs), `module documentation`.
 
 ## Unknown block type (block.type.unknown)
 
@@ -322,7 +322,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/block.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/block.rs), `Block::kind`.
+- [`vendor/hxprobe/src/block.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/block.rs), `Block::kind`.
 
 ## Header CRC (block.offset.0)
 
@@ -340,7 +340,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/block.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/block.rs), `module documentation`.
+- [`vendor/hxprobe/src/block.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/block.rs), `module documentation`.
 
 ## Body CRC (block.offset.4)
 
@@ -358,7 +358,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/block.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/block.rs), `module documentation`.
+- [`vendor/hxprobe/src/block.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/block.rs), `module documentation`.
 
 ## Magic (block.offset.8)
 
@@ -376,7 +376,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/block.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/block.rs), `module documentation`.
+- [`vendor/hxprobe/src/block.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/block.rs), `module documentation`.
 
 ## Block type (block.offset.16)
 
@@ -394,7 +394,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/block.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/block.rs), `module documentation`.
+- [`vendor/hxprobe/src/block.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/block.rs), `module documentation`.
 
 ## Payload length (block.offset.20)
 
@@ -412,7 +412,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/block.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/block.rs), `module documentation`.
+- [`vendor/hxprobe/src/block.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/block.rs), `module documentation`.
 
 ## Inflated length (block.offset.24)
 
@@ -430,7 +430,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/block.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/block.rs), `module documentation`.
+- [`vendor/hxprobe/src/block.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/block.rs), `module documentation`.
 
 ## Observed constant 4 (block.offset.28)
 
@@ -448,7 +448,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/block.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/block.rs), `module documentation`.
+- [`vendor/hxprobe/src/block.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/block.rs), `module documentation`.
 
 ## Unknown reserved header bytes (block.offset.32)
 
@@ -466,7 +466,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/block.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/block.rs), `module documentation`.
+- [`vendor/hxprobe/src/block.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/block.rs), `module documentation`.
 
 ## Compressed payload (block.offset.40)
 
@@ -484,7 +484,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/block.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/block.rs), `module documentation`.
+- [`vendor/hxprobe/src/block.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/block.rs), `module documentation`.
 
 ## Serialized object envelope (envelope)
 
@@ -502,7 +502,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `envelopes`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `envelopes`.
 
 ## Envelope marker 5 (envelope.offset.0)
 
@@ -520,7 +520,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `envelopes`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `envelopes`.
 
 ## Envelope tag (envelope.offset.2)
 
@@ -538,7 +538,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `envelopes`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `envelopes`.
 
 ## Length including envelope (envelope.offset.4)
 
@@ -556,7 +556,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `envelopes`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `envelopes`.
 
 ## Zero padding (envelope.offset.8)
 
@@ -574,7 +574,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `envelopes`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `envelopes`.
 
 ## Object body (envelope.offset.10)
 
@@ -592,7 +592,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `envelopes`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `envelopes`.
 
 ## Folder envelope (envelope.tag.04c2)
 
@@ -610,7 +610,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::observe`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::observe`.
 
 ## Folder envelope, 2026-10 build (envelope.tag.04d8)
 
@@ -629,7 +629,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::observe`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::observe`.
 
 ## Folder (object.class.004d)
 
@@ -648,7 +648,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::observe`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::observe`.
 
 ## View membership envelope (envelope.tag.0430)
 
@@ -666,7 +666,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::links`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::links`.
 
 ## View membership (object.class.004f)
 
@@ -685,7 +685,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::links`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::links`.
 
 ## Compact message envelope (envelope.tag.0740)
 
@@ -703,7 +703,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::links`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::links`.
 
 ## Compact message envelope, 2026-10 build (envelope.tag.074e)
 
@@ -722,7 +722,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::links`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::links`.
 
 ## Compact message (object.class.00ca)
 
@@ -741,7 +741,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::links`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::links`.
 
 ## Message metadata envelope (envelope.tag.02c8)
 
@@ -759,7 +759,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::observe`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::observe`.
 
 ## Message metadata envelope, 2026-10 build (envelope.tag.02b8)
 
@@ -778,7 +778,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::observe`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::observe`.
 
 ## Message metadata (object.class.00bf)
 
@@ -797,7 +797,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::observe`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::observe`.
 
 ## Calendar or working hours envelope (envelope.tag.0455)
 
@@ -815,7 +815,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/calendar.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/calendar.rs), `objects`.
+- [`vendor/hxprobe/src/calendar.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/calendar.rs), `objects`.
 
 ## Calendar or working hours (object.class.006b)
 
@@ -834,7 +834,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/calendar.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/calendar.rs), `objects`.
+- [`vendor/hxprobe/src/calendar.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/calendar.rs), `objects`.
 
 ## Unknown envelope tag (envelope.tag.unknown)
 
@@ -852,7 +852,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `envelopes`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `envelopes`.
 
 ## View collection reference (object.class.0004)
 
@@ -870,7 +870,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::observe`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::observe`.
 
 ## Unknown object class (object.class.unknown)
 
@@ -888,7 +888,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `envelopes`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `envelopes`.
 
 ## Object class (object.class.004d.offset.0)
 
@@ -906,7 +906,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `reference`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `reference`.
 
 ## Signature zero bytes (object.class.004d.offset.2)
 
@@ -924,7 +924,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `reference`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `reference`.
 
 ## Local object key (object.class.004d.offset.10)
 
@@ -942,7 +942,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `reference`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `reference`.
 
 ## Reference kind (object.class.004d.offset.18)
 
@@ -960,7 +960,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `reference`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `reference`.
 
 ## Owner key (object.class.004d.offset.22)
 
@@ -978,7 +978,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `reference`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `reference`.
 
 ## Repeated local key (object.class.004d.offset.30)
 
@@ -996,7 +996,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `reference`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `reference`.
 
 ## Repeated owner or local key (object.class.004d.offset.38)
 
@@ -1014,7 +1014,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `reference`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `reference`.
 
 ## Object class (object.class.004f.offset.0)
 
@@ -1032,7 +1032,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `reference`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `reference`.
 
 ## Signature zero bytes (object.class.004f.offset.2)
 
@@ -1050,7 +1050,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `reference`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `reference`.
 
 ## Local object key (object.class.004f.offset.10)
 
@@ -1068,7 +1068,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `reference`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `reference`.
 
 ## Reference kind (object.class.004f.offset.18)
 
@@ -1086,7 +1086,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `reference`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `reference`.
 
 ## Owner key (object.class.004f.offset.22)
 
@@ -1104,7 +1104,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `reference`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `reference`.
 
 ## Repeated local key (object.class.004f.offset.30)
 
@@ -1122,7 +1122,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `reference`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `reference`.
 
 ## Repeated owner or local key (object.class.004f.offset.38)
 
@@ -1140,7 +1140,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `reference`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `reference`.
 
 ## Object class (object.class.00ca.offset.0)
 
@@ -1158,7 +1158,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `message_key`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `message_key`.
 
 ## Signature zero bytes (object.class.00ca.offset.2)
 
@@ -1176,7 +1176,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `message_key`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `message_key`.
 
 ## Local object key (object.class.00ca.offset.10)
 
@@ -1195,7 +1195,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `message_key`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `message_key`.
 
 ## Repeated local key (object.class.00ca.offset.30)
 
@@ -1213,7 +1213,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `message_key`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `message_key`.
 
 ## Repeated local key (object.class.00ca.offset.38)
 
@@ -1231,7 +1231,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `message_key`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `message_key`.
 
 ## Object class (object.class.00bf.offset.0)
 
@@ -1249,7 +1249,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `message_key`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `message_key`.
 
 ## Signature zero bytes (object.class.00bf.offset.2)
 
@@ -1267,7 +1267,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `message_key`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `message_key`.
 
 ## Local object key (object.class.00bf.offset.10)
 
@@ -1285,7 +1285,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `message_key`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `message_key`.
 
 ## Repeated local key (object.class.00bf.offset.30)
 
@@ -1303,7 +1303,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `message_key`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `message_key`.
 
 ## Repeated local key (object.class.00bf.offset.38)
 
@@ -1321,7 +1321,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `message_key`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `message_key`.
 
 ## Object class (object.class.0004.offset.0)
 
@@ -1339,7 +1339,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::observe`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::observe`.
 
 ## Signature zero bytes (object.class.0004.offset.2)
 
@@ -1357,7 +1357,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::observe`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::observe`.
 
 ## Local object key (object.class.0004.offset.10)
 
@@ -1375,7 +1375,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::observe`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::observe`.
 
 ## Repeated collection key (object.class.0004.offset.38)
 
@@ -1393,7 +1393,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::observe`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::observe`.
 
 ## View collection reference (object.class.004d.offset.160)
 
@@ -1411,7 +1411,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::observe`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::observe`.
 
 ## View collection reference (object.class.004d.offset.360)
 
@@ -1429,7 +1429,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::observe`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::observe`.
 
 ## Parent folder reference (object.class.004d.offset.792)
 
@@ -1448,7 +1448,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `parent`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `parent`.
 
 ## Expanded folder reference (object.class.00ca.offset.408)
 
@@ -1466,7 +1466,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::links`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::links`.
 
 ## Folder name (folder.name)
 
@@ -1484,7 +1484,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `trailing_name`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `trailing_name`.
 
 ## Local folder key (metadata.folder)
 
@@ -1503,7 +1503,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `Index::observe`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::observe`.
 
 ## Calendar start (object.class.006b.offset.574)
 
@@ -1522,7 +1522,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/calendar.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/calendar.rs), `tick`.
+- [`vendor/hxprobe/src/calendar.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/calendar.rs), `tick`.
 
 ## Calendar end (object.class.006b.offset.582)
 
@@ -1541,7 +1541,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/calendar.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/calendar.rs), `tick`.
+- [`vendor/hxprobe/src/calendar.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/calendar.rs), `tick`.
 
 ## Global object ID (calendar.goid)
 
@@ -1559,7 +1559,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/calendar.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/calendar.rs), `goid`.
+- [`vendor/hxprobe/src/calendar.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/calendar.rs), `goid`.
 
 ## Calendar subject (calendar.subject)
 
@@ -1577,7 +1577,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/calendar.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/calendar.rs), `parse`.
+- [`vendor/hxprobe/src/calendar.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/calendar.rs), `parse`.
 
 ## Calendar location (calendar.location)
 
@@ -1595,7 +1595,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/calendar.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/calendar.rs), `parse`.
+- [`vendor/hxprobe/src/calendar.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/calendar.rs), `parse`.
 
 ## Organizer name (calendar.organizer_name)
 
@@ -1613,7 +1613,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/calendar.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/calendar.rs), `parse`.
+- [`vendor/hxprobe/src/calendar.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/calendar.rs), `parse`.
 
 ## Organizer address (calendar.organizer_email)
 
@@ -1631,7 +1631,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/calendar.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/calendar.rs), `parse`.
+- [`vendor/hxprobe/src/calendar.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/calendar.rs), `parse`.
 
 ## Calendar notes (calendar.body)
 
@@ -1649,7 +1649,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/calendar.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/calendar.rs), `parse`.
+- [`vendor/hxprobe/src/calendar.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/calendar.rs), `parse`.
 
 ## Attendees (calendar.attendees)
 
@@ -1667,7 +1667,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/calendar.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/calendar.rs), `attendees_at`.
+- [`vendor/hxprobe/src/calendar.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/calendar.rs), `attendees_at`.
 
 ## Mail anchor region (mail)
 
@@ -1686,7 +1686,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/record.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/record.rs), `anchor_needle`.
+- [`vendor/hxprobe/src/record.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/record.rs), `anchor_needle`.
 
 ## SenderAddress (mail.selector.SenderAddress)
 
@@ -1705,7 +1705,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/schema.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/schema.rs), `build_bounded`.
+- [`vendor/hxprobe/src/schema.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/schema.rs), `build_bounded`.
 
 ## SenderName (mail.selector.SenderName)
 
@@ -1724,7 +1724,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/schema.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/schema.rs), `build_bounded`.
+- [`vendor/hxprobe/src/schema.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/schema.rs), `build_bounded`.
 
 ## ItemClass (mail.selector.ItemClass)
 
@@ -1743,7 +1743,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/schema.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/schema.rs), `build_bounded`.
+- [`vendor/hxprobe/src/schema.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/schema.rs), `build_bounded`.
 
 ## InternetMessageId (mail.selector.InternetMessageId)
 
@@ -1762,7 +1762,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/schema.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/schema.rs), `build_bounded`.
+- [`vendor/hxprobe/src/schema.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/schema.rs), `build_bounded`.
 
 ## Preview (mail.selector.Preview)
 
@@ -1781,7 +1781,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/schema.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/schema.rs), `build_bounded`.
+- [`vendor/hxprobe/src/schema.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/schema.rs), `build_bounded`.
 
 ## NormalizedSubject (mail.selector.NormalizedSubject)
 
@@ -1800,7 +1800,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/schema.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/schema.rs), `build_bounded`.
+- [`vendor/hxprobe/src/schema.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/schema.rs), `build_bounded`.
 
 ## Recipient (mail.selector.Recipient)
 
@@ -1819,7 +1819,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/schema.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/schema.rs), `build_bounded`.
+- [`vendor/hxprobe/src/schema.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/schema.rs), `build_bounded`.
 
 ## ConversationId (mail.selector.ConversationId)
 
@@ -1838,7 +1838,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/schema.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/schema.rs), `build_bounded`.
+- [`vendor/hxprobe/src/schema.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/schema.rs), `build_bounded`.
 
 ## Send time (mail.sent)
 
@@ -1856,7 +1856,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/record.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/record.rs), `read_time`.
+- [`vendor/hxprobe/src/record.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/record.rs), `read_time`.
 
 ## Message body (mail.body)
 
@@ -1874,7 +1874,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/record.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/record.rs), `parse`.
+- [`vendor/hxprobe/src/record.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/record.rs), `parse`.
 
 ## Sidecar reference (mail.sidecar)
 
@@ -1892,7 +1892,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/body.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/body.rs), `sidecar_names`.
+- [`vendor/hxprobe/src/body.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/body.rs), `sidecar_names`.
 
 ## Unknown property IDs (mail.wire-fields.unknown)
 
@@ -1911,7 +1911,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/schema.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/schema.rs), `build_bounded`.
+- [`vendor/hxprobe/src/schema.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/schema.rs), `build_bounded`.
 
 ## Unknown property IDs (object.class.004d.wire-fields.unknown)
 
@@ -1930,7 +1930,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `envelopes`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `envelopes`.
 
 ## Unknown property IDs (object.class.004f.wire-fields.unknown)
 
@@ -1949,7 +1949,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `envelopes`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `envelopes`.
 
 ## Unknown property IDs (object.class.00ca.wire-fields.unknown)
 
@@ -1968,7 +1968,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `envelopes`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `envelopes`.
 
 ## Unknown property IDs (object.class.00bf.wire-fields.unknown)
 
@@ -1987,7 +1987,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `envelopes`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `envelopes`.
 
 ## Unknown property IDs (object.class.006b.wire-fields.unknown)
 
@@ -2006,7 +2006,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/calendar.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/calendar.rs), `objects`.
+- [`vendor/hxprobe/src/calendar.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/calendar.rs), `objects`.
 
 ## Unknown property IDs (object.class.0004.wire-fields.unknown)
 
@@ -2025,7 +2025,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `envelopes`.
+- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `envelopes`.
 
 ## Attachment object (object.class.016a)
 
@@ -2044,7 +2044,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `parse`.
+- [`vendor/hxprobe/src/attachment.rs` at `bc8538ac6845ddd716efa18791361ab04e9c5694`](https://github.com/DoctorCRE/carr-system/blob/bc8538ac6845ddd716efa18791361ab04e9c5694/vendor/hxprobe/src/attachment.rs), `parse`.
 
 ## Attachment envelope (attachment.envelope)
 
@@ -2063,7 +2063,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `observe`.
+- [`vendor/hxprobe/src/attachment.rs` at `bc8538ac6845ddd716efa18791361ab04e9c5694`](https://github.com/DoctorCRE/carr-system/blob/bc8538ac6845ddd716efa18791361ab04e9c5694/vendor/hxprobe/src/attachment.rs), `observe`.
 
 ## Attachment owning message (attachment.message)
 
@@ -2082,7 +2082,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `parse`.
+- [`vendor/hxprobe/src/attachment.rs` at `bc8538ac6845ddd716efa18791361ab04e9c5694`](https://github.com/DoctorCRE/carr-system/blob/bc8538ac6845ddd716efa18791361ab04e9c5694/vendor/hxprobe/src/attachment.rs), `parse`.
 
 ## Attachment declared byte length (attachment.size)
 
@@ -2101,7 +2101,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `parse`.
+- [`vendor/hxprobe/src/attachment.rs` at `bc8538ac6845ddd716efa18791361ab04e9c5694`](https://github.com/DoctorCRE/carr-system/blob/bc8538ac6845ddd716efa18791361ab04e9c5694/vendor/hxprobe/src/attachment.rs), `parse`.
 
 ## Attachment display filename (attachment.name)
 
@@ -2120,7 +2120,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `parse`.
+- [`vendor/hxprobe/src/attachment.rs` at `bc8538ac6845ddd716efa18791361ab04e9c5694`](https://github.com/DoctorCRE/carr-system/blob/bc8538ac6845ddd716efa18791361ab04e9c5694/vendor/hxprobe/src/attachment.rs), `parse`.
 
 ## Attachment declared MIME type (attachment.type)
 
@@ -2139,7 +2139,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `declared_type`.
+- [`vendor/hxprobe/src/attachment.rs` at `bc8538ac6845ddd716efa18791361ab04e9c5694`](https://github.com/DoctorCRE/carr-system/blob/bc8538ac6845ddd716efa18791361ab04e9c5694/vendor/hxprobe/src/attachment.rs), `declared_type`.
 
 ## Attachment MIME content ID (attachment.content-id)
 
@@ -2158,42 +2158,42 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `parse`.
+- [`vendor/hxprobe/src/attachment.rs` at `bc8538ac6845ddd716efa18791361ab04e9c5694`](https://github.com/DoctorCRE/carr-system/blob/bc8538ac6845ddd716efa18791361ab04e9c5694/vendor/hxprobe/src/attachment.rs), `parse`.
 
 ## Source bindings
 
 ```json
 {
   "vendor/hxprobe/src/block.rs": {
-    "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+    "revision": "b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d",
     "sha256": "093617bc8e5aaa9f3597b873dc93539850c202b4531209db69a39de9c8a316d6"
   },
   "vendor/hxprobe/src/header.rs": {
-    "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+    "revision": "b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d",
     "sha256": "6e774497fed3d077d89437525e0106d2975954675f4db763079991a0556eb3a3"
   },
   "vendor/hxprobe/src/folder.rs": {
-    "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+    "revision": "b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d",
     "sha256": "af4abd79a95f36a325e0d12e9994df80add60851e9c54bc88cd7a4c6e1c9b6d8"
   },
   "vendor/hxprobe/src/calendar.rs": {
-    "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+    "revision": "b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d",
     "sha256": "28f9a5f9fb11701369e8c4a161195ad4a709f181975e07f6c092ce085bb1362f"
   },
   "vendor/hxprobe/src/record.rs": {
-    "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+    "revision": "b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d",
     "sha256": "327cfc0658b26279fc33385e72f01e3f65ae036a35e2822f34a87f30f5968d41"
   },
   "vendor/hxprobe/src/schema.rs": {
-    "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+    "revision": "b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d",
     "sha256": "a76bd8449dd21c14f987f5d303ec0932e70dcc084c4e672c76721ecc4d963102"
   },
   "vendor/hxprobe/src/body.rs": {
-    "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
+    "revision": "b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d",
     "sha256": "ac7130b31bc06e000598c5acfe019942316900010d8ccb4f95a9be4a651bc499"
   },
   "vendor/hxprobe/src/attachment.rs": {
-    "revision": "a32d8b6cfb325055455201995e406e07094d217e",
+    "revision": "bc8538ac6845ddd716efa18791361ab04e9c5694",
     "sha256": "796850d32e1169eecd7e70094072b438ccb0530a4b7fa7d5dd70c65edee3461b"
   }
 }
