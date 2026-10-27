@@ -4,7 +4,7 @@
 #
 # WHY THIS EXISTS (DoctorCRE V5-R02 review, PR #1245, 2026-09-24). The
 # reviewer's worktree at scratchpad/pr1245 reproduced a real production
-# crash: mcp-server/src/workflow-cutover.v5.js called
+# crash: mcp-server/src/workflow-cutover.v5.ts called
 # `fileURLToPath(import.meta.url)` at MODULE SCOPE, and tools.js imports that
 # module unconditionally. In workerd there is no filesystem and no
 # import.meta.url-relative repo path the way there is on Node, so that line
