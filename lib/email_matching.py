@@ -17,7 +17,6 @@ from tools.credential_env import load_carr_tokens
 MODEL = 'jev-1.13.0'
 HIGH, LOW, CHOICE_CONFIDENCE = 0.7, 0.3, 0.7
 CALLS = threading.BoundedSemaphore(6)
-VENDOR_ROLES = frozenset({'landlord_side', 'lender', 'attorney', 'other_vendor'})
 ROLES = {
     'client': 'Tenant or buyer client, or a contact representing their practice.',
     'landlord_side': 'Landlord, seller, listing broker or property manager representing the property side.',
@@ -69,15 +68,8 @@ def thread_match(email: dict, deals: list[dict], history: list[dict]) -> dict | 
     if len({p['deal'] for p in candidates}) != 1:
         return None
     prior = max(candidates, key=lambda p: p['occurred_at'])
-    previous = _people(prior)
-    client_id = deal_by_id[prior['deal']].get('client_id')
-    for person in email.get('recipients', []):
-        if person.get('internal') or str(person.get('email') or '').casefold() in previous:
-            continue
-        if person.get('client_id') and person['client_id'] != client_id:
-            return None
-        if (person.get('unknown') or not person.get('party_id')) and person.get('role') not in VENDOR_ROLES:
-            return None
+    if _people(email) - _people(prior):
+        return None
     return prior
 
 

@@ -183,6 +183,18 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
         activity = email['activity_id']
         counts['emails'] += 1
         inheritance = None
+        def matching_proposal(decision):
+            if decision.kind == 'contact_only':
+                counts['contact_only'] += 1
+                return []
+            args = {'kind': decision.kind, 'activity_id': activity, 'confidence': decision.confidence,
+                    'sender_role': decision.sender_role,
+                    'evidence_quote': (email.get('body') or email.get('subject') or '')[:MAX_QUOTE]}
+            if decision.deal:
+                args['deal'] = decision.deal
+            if decision.text:
+                args['text'] = decision.text
+            return [args]
         try:
             if email.get('deal'):
                 reply = classify(email, now.date())
@@ -193,17 +205,8 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
                 kept = []
                 if decision.kind == 'inherit_thread':
                     inheritance = {'activity_id': activity, 'thread_activity_id': decision.thread_activity_id}
-                elif decision.kind != 'contact_only':
-                    args = {'kind': decision.kind, 'activity_id': activity, 'confidence': decision.confidence,
-                            'sender_role': decision.sender_role,
-                            'evidence_quote': (email.get('body') or email.get('subject') or '')[:MAX_QUOTE]}
-                    if decision.deal:
-                        args['deal'] = decision.deal
-                    if decision.text:
-                        args['text'] = decision.text
-                    kept.append(args)
                 else:
-                    counts['contact_only'] += 1
+                    kept = matching_proposal(decision)
         except Exception:
             counts['model_failed'] += 1
             failed(activity)
@@ -216,8 +219,14 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
                                                    **inheritance})
                     counts['inherited'] += 1
                 except Exception as error:
-                    # A stale thread must be read again, never silently marked handled.
-                    raise WriteFailed() from error
+                    if not (refusal_code(error) or '').startswith('email_thread_'):
+                        raise WriteFailed() from error
+                    try:
+                        kept = matching_proposal(matching(email, queue['open_deals'], []))
+                    except Exception:
+                        counts['model_failed'] += 1
+                        failed(activity)
+                        continue
             for args in kept:
                 digest = hashlib.sha256(json.dumps(args, sort_keys=True).encode()).hexdigest()
                 key = str(uuid.uuid5(uuid.NAMESPACE_URL, f'record-email-proposal|{digest}'))

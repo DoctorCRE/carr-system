@@ -330,6 +330,12 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual((decision.kind, decision.deal, decision.thread_activity_id), ('inherit_thread', DEAL, 'prior'))
         self.assertEqual(fake.calls, [])
 
+    def test_new_known_vendor_or_sender_breaks_continuity(self):
+        vendor = {'email': 'new@example.test', 'party_id': 'new', 'role': 'lender'}
+        for mail in (self.mail(recipients=self.mail()['recipients'] + [vendor]), self.mail(sender=vendor)):
+            with self.subTest(mail=mail):
+                self.assertIsNone(email_matching.thread_match(mail, [{'id': DEAL}], [self.prior()]))
+
     def test_subject_fallback_requires_overlap_and_thirty_days(self):
         for history, expected in [([self.prior(conversation_id=None)], 'inherit_thread'),
                                   ([self.prior(conversation_id=None, occurred_at='2026-09-01T14:00:00Z')], 'file_to_deal'),
@@ -424,6 +430,23 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual(writes[0], writes[1])
         self.assertEqual(writes[1][0], 'inherit-email-thread')
         self.assertEqual(writes[1][1]['thread_activity_id'], 'prior')
+
+    def test_router_matches_after_thread_refusal(self):
+        calls = []
+        def carr(verb, args):
+            calls.append((verb, args))
+            if verb == 'email-router-queue':
+                return {'open_deals': [{'id': DEAL}], 'emails': [self.mail(thread_history=[self.prior()])]}
+            if verb == 'inherit-email-thread':
+                raise Refused('email_thread_ambiguous')
+            return {'ok': True}
+        def matching(mail, deals, history):
+            if history:
+                return email_matching.MatchDecision('inherit_thread', DEAL, thread_activity_id='prior')
+            return email_matching.MatchDecision('possible_new_deal', sender_role='lender', confidence=0.9, text='New matter')
+        counts = email_router.route(carr, None, refusal_code, {}, NOW, matching=matching)
+        self.assertEqual((counts['routed'], counts['recorded'], counts['write_failed']), (1, 1, 0))
+        self.assertEqual(calls[-1][1]['kind'], 'possible_new_deal')
 
 
     def test_missing_current_conversation_never_joins_prior_known_conversation(self):

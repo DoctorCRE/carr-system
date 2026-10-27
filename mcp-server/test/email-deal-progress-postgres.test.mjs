@@ -1238,6 +1238,17 @@ test('a vendor email stays unfiled until a partner confirms, then records a part
   assert.equal((await command('confirm-email-filing', args)).replayed, true);
 });
 
+test('filing an unknown sender requires a contact before changing the deal', async () => {
+  const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+    kind: 'email_in', summary: 'Email from Unknown: Coastal property', detail: quote,
+    email_context: { subject: 'Coastal property', sender: { email: `unknown-${randomUUID()}@example.test`, internal: false }, recipients: [] } });
+  const stored = await record({ kind: 'file_to_deal', activity_id: source.activity_id, evidence_quote: quote, sender_role: 'lender' });
+  const item = (await listed()).find(p => p.id === stored.proposal_id);
+  await assert.rejects(command('confirm-email-filing', { idempotency_key: randomUUID(), proposal_id: item.id,
+    base_version: item.version, proposal_digest: item.preview.proposal_digest }), error => error.payload?.error === 'email_sender_contact_required');
+  assert.equal((await c.query('select deal_id from activity where id=$1', [source.activity_id])).rows[0].deal_id, null);
+});
+
 test('possible new matters stay on Home without a deal or automatic creation', async () => {
   const source = await email();
   const stored = await command('record-email-proposal', { idempotency_key: randomUUID(), kind: 'possible_new_deal',
@@ -1275,6 +1286,16 @@ test('thread continuity files an unchanged reply but a new doctor defeats inheri
   await assert.rejects(command('inherit-email-thread', { idempotency_key: randomUUID(), activity_id: changed.activity_id,
     thread_activity_id: prior.activity_id }, router()), error => error.payload?.error === 'email_thread_recipient_changed');
   assert.equal((await c.query('select deal_id from activity where id=$1', [changed.activity_id])).rows[0].deal_id, null);
+  const vendorAddress = `known-${randomUUID()}@synthetic.example`;
+  await c.query("insert into party(kind,name,email,created_by,updated_by) values('person','Known vendor',$1,$2,$2)", [vendorAddress, actor.id]);
+  const addedVendor = await reply([{ email: vendorAddress, internal: false, kind: 'cc' }]);
+  const newSender = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
+    summary: 'Email from Known vendor: Re: Coastal property', detail: quote,
+    email_context: { ...context, sender: { email: vendorAddress, internal: false } } });
+  for (const message of [addedVendor, newSender]) {
+    await assert.rejects(command('inherit-email-thread', { idempotency_key: randomUUID(), activity_id: message.activity_id,
+      thread_activity_id: prior.activity_id }, router()), error => error.payload?.error === 'email_thread_recipient_changed');
+  }
   const queue = await command('email-router-queue', { limit: 200 }, router());
   const item = queue.emails.find(p => p.activity_id === changed.activity_id);
   assert.equal(item.recipients.find(p => p.email === 'new-doctor@synthetic.example').unknown, true);
@@ -1337,6 +1358,27 @@ test('subject continuity tolerates reply spacing and refuses a thread older than
     kind: 'email_in', summary: 'Email from Vendor: Re: Synthetic practice', detail: quote, email_context: context });
   await assert.rejects(command('inherit-email-thread', { idempotency_key: randomUUID(), activity_id: later.activity_id,
     thread_activity_id: prior.activity_id }, router()), error => error.payload?.error === 'email_thread_not_continuous');
+});
+
+test('queue history includes recent subject candidates and older matching conversations only', async () => {
+  const conversation = randomUUID();
+  const make = async (id, age) => {
+    const row = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
+      summary: 'Email from Vendor: History', detail: quote,
+      email_context: { subject: 'History', conversation_id: id, sender: { email: 'vendor@synthetic.example', internal: false }, recipients: [] } });
+    await c.query("update activity set deal_id=$2, occurred_at=now()-make_interval(days=>$3) where id=$1", [row.activity_id, deal, age]);
+    return row.activity_id;
+  };
+  const recent = await make(null, 10), old = await make(null, 45), matching = await make(conversation, 45), unrelated = await make(randomUUID(), 45);
+  const current = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
+    summary: 'Email from Vendor: History', detail: quote,
+    email_context: { subject: 'History', conversation_id: conversation, sender: { email: 'vendor@synthetic.example', internal: false }, recipients: [] } });
+  const queue = await command('email-router-queue', { limit: 200 }, router());
+  const history = queue.emails.find(row => row.activity_id === current.activity_id).thread_history.map(row => row.activity_id);
+  assert.ok(history.includes(recent));
+  assert.ok(history.includes(matching));
+  assert.ok(!history.includes(old));
+  assert.ok(!history.includes(unrelated));
 });
 
 test('reply drafts keep captured mailbox ownership and submit the exact partner text once', async () => {

@@ -119,15 +119,13 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         await c.query('select id from deal where id=$1 for update', [row.deal_id]);
         const current = await matchingPreview(c, row);
         if (current.proposal_digest !== args.proposal_digest) fail('email_proposal_stale');
+        if (!current.sender.party_id) fail('email_sender_contact_required', { message: 'Create the sender contact before confirming this filing.' });
         await c.query(`update activity set deal_id=$2,version=version+1,updated_by=$3,updated_at=now() where id=$1`,
           [row.activity_id,row.deal_id,actor.id]);
-        if (current.sender.party_id) {
-          await c.query('select id from deal where id=$1 for update', [row.deal_id]);
-          await c.query(`insert into deal_participant(deal_id,party_id,role,set_by)
+        await c.query(`insert into deal_participant(deal_id,party_id,role,set_by)
             select $1,$2,$3,$4 where not exists(select 1 from deal_participant
               where deal_id=$1 and party_id=$2 and role=$3 and to_at is null)`,
             [row.deal_id,current.sender.party_id,row.sender_role,actor.id]);
-        }
         await resolveEmailProposal(c, actor, row.kind, row.deal_id, row.activity_id);
         await writeEvent(c, actor, 'confirm-email-filing', 'deal', row.deal_id,
           { new: { activity_id: row.activity_id, sender_party_id: current.sender.party_id, role: row.sender_role },
@@ -171,8 +169,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             [...participants(other)].some(email => participants(a).has(email) &&
               ![a.sender,...a.recipients].find(p => p.email === email)?.internal))) fail('email_thread_ambiguous');
         const deal = (await c.query(`select id,client_id from deal where id=$1 and phase<>'closed' and invoiced_on is null for share`, [prior.deal])).rows[0];
-        if (!deal || a.recipients.some(p => !p.internal && !previous.has(p.email) &&
-          ((p.client_id && p.client_id !== deal.client_id) || p.unknown)))
+        if (!deal || [a.sender,...a.recipients].some(p => !p.internal && !previous.has(p.email)))
           fail('email_thread_recipient_changed');
         await c.query(`update activity set deal_id=$2,version=version+1,updated_by=$3,updated_at=now() where id=$1 and deal_id is null`,
           [current.activity_id,prior.deal,actor.id]);
@@ -416,12 +413,20 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
               where dp.deal_id=d.id and dp.to_at is null),'[]'::jsonb) as participants
           from deal d join client cl on cl.id=d.client_id join party p on p.id=cl.party_id
           where d.phase<>'closed' and d.invoiced_on is null order by d.id`)).rows;
+        const queued = rows.slice(0, limit);
+        const conversations = queued.map(row => row.email_context?.conversation_id).filter(Boolean);
         const history = (await c.query(`select id as activity_id,deal_id as deal,summary,email_context,occurred_at
           from activity where kind in ('email_in','email_out') and deal_id is not null
-            and email_context is not null and occurred_at<=now()`)).rows.map(row => evidence(row, people));
+            and email_context is not null and occurred_at<=now()
+            and (occurred_at >= now()-make_interval(days=>$1) or email_context->>'conversation_id'=any($2::text[]))`,
+          [(args.days ?? 3) + 30, conversations])).rows.map(row => evidence(row, people));
         return { schema_version: 'email-router-queue.v2', more: rows.length > limit, open_deals: openDeals,
-          emails: rows.slice(0, limit).map(row => ({ ...evidence(row, people),
-            thread_history: history.filter(prior => new Date(prior.occurred_at) < new Date(row.occurred_at)) })) };
+          emails: queued.map(row => ({ ...evidence(row, people),
+            thread_history: history.filter(prior => {
+              const age = new Date(row.occurred_at) - new Date(prior.occurred_at);
+              return age > 0 && (age <= 30*86400000 ||
+                (row.email_context?.conversation_id && row.email_context.conversation_id === prior.conversation_id));
+            }) })) };
       },
     },
     'email-proposal-quality': {
