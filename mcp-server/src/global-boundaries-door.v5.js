@@ -140,10 +140,6 @@ export const V5_DOOR_SYSTEM_AUTHORITY_VERBS = deepFreeze({
     action: "system.policy", when: null,
     existing_enforcement: "ops.retire_rule refuses a non-Joe authority session",
   },
-  "disable-legacy-schedule": {
-    action: "system.autonomy_tier_activation", when: null,
-    existing_enforcement: "ops.disable_legacy_schedule refuses a non-Joe authority session",
-  },
   "accept-workflow": {
     action: "system.autonomy_tier_activation", when: { field: "mode", equals: "canary" },
     existing_enforcement: "ops.record_workflow_acceptance refuses canary acceptance by a non-Joe authority session",

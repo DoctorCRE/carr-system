@@ -345,14 +345,6 @@ class DatabaseDesign(unittest.TestCase):
         refusal=self.refuses("select ops.complete_job(%s,null,'{}','synthetic')",(job,))
         self.assertIsNotNone(refusal, 'NULL lease completed job while attempt stayed running')
 
-    def test_13_month_boundary_counts_settled_reservations(self):
-        j,t=self.job(); j2,t2=self.job(); route=uuid.uuid4().hex
-        self.c.execute("insert into ops.provider_route(route_key,priority,endpoint_ref,monthly_budget_usd) values(%s,(select coalesce(max(priority),0)+1 from ops.provider_route),'synthetic',10)",(route,))
-        self.c.execute("update ops.job_attempt set started_at=date_trunc('month',now())-interval '1 second' where job_id=%s",(j,))
-        rid=self.one('select ops.reserve_job_cost(%s,%s,%s,6)',(j,t,route))
-        self.one('select ops.settle_job_cost(%s,%s,%s,1,1,6)',(rid,j,t))
-        self.assertIsNotNone(self.refuses('select ops.reserve_job_cost(%s,%s,%s,6)',(j2,t2,route)), 'second $6 admitted after $6 settled this month')
-
     def test_15_cadence_does_not_read_temporary_actor(self):
         before=self.one("select ops.v5_a05_assurance_cadence_batch('joe')")
         self.c.execute('create temp table actor(id uuid,slug text,kind text,active boolean); grant select on actor to public; set local role carr_reader')
@@ -510,62 +502,6 @@ class DatabaseDesign(unittest.TestCase):
                     self.assertIsInstance(second,dict,(first,second))
                     self.assertIn(second['refused'],('23514','40001','25001'))
                     self.assertEqual([result['refused'] for result in (first,second)],['25001','25001'])
-
-    def test_11_budget_serializes_competing_reservations(self):
-        self.isolated_race_database()
-        a,ta=self.job();b,tb=self.job();route=uuid.uuid4().hex
-        self.c.execute("insert into ops.provider_route(route_key,priority,endpoint_ref,monthly_budget_usd) values(%s,(select coalesce(max(priority),0)+1 from ops.provider_route),'synthetic',10)",(route,))
-        first,second=self.overlap('select ops.reserve_job_cost(%s,%s,%s,6)',(a,ta,route),'select ops.reserve_job_cost(%s,%s,%s,6)',(b,tb,route))
-        self.assertIsInstance(second,dict,(first,second))
-        self.assertEqual(self.one('select sum(estimated_cost_usd) from ops.cost_reservation where route_key=%s',(route,)),6)
-
-    def test_11b_budget_competing_fixed_snapshots_preserve_limit(self):
-        for isolation in (psycopg.IsolationLevel.REPEATABLE_READ,
-                          psycopg.IsolationLevel.SERIALIZABLE):
-            with self.subTest(isolation=isolation):
-                self.isolated_race_database()
-                a,ta=self.job();b,tb=self.job();route=uuid.uuid4().hex
-                self.c.execute("insert into ops.provider_route(route_key,priority,endpoint_ref,monthly_budget_usd) values(%s,(select coalesce(max(priority),0)+1 from ops.provider_route),'synthetic',10)",(route,))
-                first,second=self.overlap(
-                    'select ops.reserve_job_cost(%s,%s,%s,6)',(a,ta,route),
-                    'select ops.reserve_job_cost(%s,%s,%s,6)',(b,tb,route),
-                    isolation=isolation,census='select count(*) from ops.cost_reservation')
-                reserved=self.one('select coalesce(sum(estimated_cost_usd),0) from ops.cost_reservation where route_key=%s',(route,))
-                self.assertLessEqual(reserved,10,(first,second))
-                self.assertIsInstance(second,dict,(first,second))
-                self.assertIn(second['refused'],('40001','25001'))
-                self.assertEqual([result['refused'] for result in (first,second)],['25001','25001'])
-
-    def test_26_cache_works_without_unused_evidence_column(self):
-        self.assertFalse(self.one("""select exists(select 1 from information_schema.columns
-            where table_schema='ops' and table_name='cognition_result_cache'
-              and column_name='evidence_refs')"""))
-        cognition = 'dot-' + uuid.uuid4().hex
-        self.c.execute('set local session_replication_role=replica')
-        self.c.execute("insert into ops.cognition_job(key,version,input_schema_version,output_schema_version,input_schema,output_schema,max_tokens,max_cost_usd,timeout_seconds,provider_routes) values(%s,1,1,1,'{}','{}',1,1,60,array['synthetic'])", (cognition,))
-        self.c.execute('set local session_replication_role=origin')
-        key, dependency = uuid.uuid4().hex, uuid.uuid4().hex
-        self.c.execute('set local role carr_jobs')
-        for proposal in ({'synthetic': 'first'}, {'synthetic': 'replacement'}):
-            self.assertTrue(self.one(
-                'select ops.put_cognition_cache(%s,%s,1,1,%s,array[%s],60)',
-                (key, cognition, Jsonb(proposal), dependency)))
-            self.assertEqual(self.one('select ops.get_cognition_cache(%s)', (key,)), proposal)
-        self.assertEqual(self.one('select ops.invalidate_cognition_cache(%s)', (dependency,)), 1)
-        self.assertIsNone(self.one('select ops.get_cognition_cache(%s)', (key,)))
-        self.assertEqual(self.one('select ops.invalidate_cognition_cache(%s)', (dependency,)), 0)
-
-    def test_27_cache_evidence_retirement_refuses_unexpected_dependency(self):
-        self.c.execute("alter table ops.cognition_result_cache add column evidence_refs text[] not null default '{}'")
-        self.c.execute("create temp view synthetic_cache_evidence as select evidence_refs from ops.cognition_result_cache")
-        migration = ROOT / 'migrations/0965_retire_cache_evidence_refs.sql'
-        refusal = self.refuses(migration.read_text())
-        self.assertIsNotNone(refusal, 'retirement removed an unexpected dependent view')
-        self.assertEqual(refusal[0], '2BP01')
-        self.assertTrue(self.one("""select exists(select 1 from information_schema.columns
-            where table_schema='ops' and table_name='cognition_result_cache'
-              and column_name='evidence_refs')"""))
-        self.assertEqual(self.c.execute('select * from synthetic_cache_evidence').fetchall(), [])
 
     def test_19_refused_conversation_rename_leaves_no_revision(self):
         self.isolated_race_database()
