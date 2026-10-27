@@ -92,6 +92,12 @@ class AvailabilityMatcherTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 0)
         self.assertNotIn("--canary", output.getvalue())
 
+    def test_nightly_retains_other_jobs_without_legacy_mail_capture(self):
+        nightly = (ROOT / "bin/nightly.sh").read_text()
+        self.assertNotIn("./bin/mail-capture.sh", nightly)
+        self.assertIn('step "calendar archive" ./bin/archive-calendar.sh', nightly)
+        self.assertIn('step "lead stages" python3 ./bin/lead-stage-job.py', nightly)
+
     def test_nightly_rejects_unknown_options_before_running_jobs(self):
         # Never invoke the old --canary branch: it enumerates the environment.
         result = subprocess.run(["/bin/zsh", str(ROOT / "bin/nightly.sh"), "--unknown"],
