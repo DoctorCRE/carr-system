@@ -1,3 +1,4 @@
+# Test the doctrine mirror: file hashing, excluded tables and atomic tree swaps.
 import hashlib
 import json
 from datetime import date, datetime, timezone
