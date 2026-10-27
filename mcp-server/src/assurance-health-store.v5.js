@@ -142,7 +142,7 @@ export function assuranceHealthStoreTools({ ToolError }) {
         required: ["scope"],
       },
       handler: async (c, _actor, args) => {
-        if (!validScope(args?.scope)) throw new ToolError({ error: "assurance_health_scope_invalid" });
+        if (!validScope(args?.scope)) throw new ToolError({ error: "invalid_field_value", field: "scope" });
         const { workflow_key, workflow_version, work_request_id = null } = args.scope;
         const projection = (await c.query(
           "select ops.read_assurance_health($1::text,$2::integer,$3::text) as projection /* read-assurance-health */",

@@ -227,10 +227,11 @@ with tempfile.TemporaryDirectory() as tmp:
 
 # ── the wiring: a gate nothing runs is decoration ──────────────────────────
 print("wiring")
-ci_sh = (REPO / "ops" / "ci.sh").read_text()
-inventory = ci_sh.split("for inv in ", 1)[1].split("; do", 1)[0] if "for inv in " in ci_sh else ""
-check("ops/ci.sh's gates inventory loop runs migration-order-gate",
-      "migration-order-gate" in inventory.split(), inventory[-200:])
+spec = importlib.util.spec_from_file_location("ci_gates", REPO / "ops/ci-gates.py")
+assert spec is not None and spec.loader is not None
+gates = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gates)
+check("gates inventory runs migration-order-gate", "migration-order-gate" in gates.INVARIANTS)
 ci_yml = (REPO / ".github" / "workflows" / "ci.yml").read_text()
 pr_types = ci_yml.split("pull_request:", 1)[1].split("\n", 3)[1] if "pull_request:" in ci_yml else ""
 check("CI re-runs on synchronize (the update-branch re-check path)",

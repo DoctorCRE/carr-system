@@ -561,6 +561,12 @@ class Run:
         self.attempted: set[str] = set()
         self.lead_candidates: list[tuple[dict, dict]] = []
 
+    def activity_key(self, ref: str, source: str) -> str:
+        legacy = key('log-activity', ref, source)
+        if legacy in self.state.get('requests', {}):
+            return legacy
+        return key('log-activity', ref, f'{self.settings.owner}|{source}')
+
     def write(self, verb: str, args: dict, who: str, note: str = '') -> bool:
         requests = self.state.setdefault('requests', {})
         request = requests.setdefault(args['idempotency_key'], {
@@ -714,11 +720,13 @@ class Run:
             if m['full'] and m['ident'] not in pending:
                 steps.setdefault(m['ident'], {'ck': m['ck'], 'sent': m['sent_unix'], 'ref': refs[0],
                                            'who': who, 'outbound': outbound,
-                                           'activity_keys': [key('log-activity', ref, m['ident']) for ref in refs]})
+                                           'activity_keys': [self.activity_key(ref, m['ident']) for ref in refs]})
             results = [self.write('log-activity', {
-                'idempotency_key': key('log-activity', ref, m['ident']), 'ref': ref, 'kind': kind,
+                'idempotency_key': self.activity_key(ref, m['ident']), 'ref': ref, 'kind': kind,
                 'summary': f'{label}: {m["subject"] or "(no subject)"}', 'detail': m['text'],
-                'occurred_at': _iso(m['sent_unix'])}, who, '' if m['full'] else 'preview_only') for ref in refs]
+                'occurred_at': _iso(m['sent_unix']),
+                **({'email_source': {'sender_email': m['sender'].lower(), 'mailbox_owner': self.settings.owner}}
+                   if not outbound else {})}, who, '' if m['full'] else 'preview_only') for ref in refs]
             completed.extend(ref for ref, ok in zip(refs, results) if ok)
             if not all(results):
                 continue
@@ -815,7 +823,7 @@ class Run:
                 continue
             m = match[0]
             ok = all([self.write('log-activity', {
-                'idempotency_key': key('log-activity', ref, f'fullbody|{ident}'), 'ref': ref, 'kind': 'note',
+                'idempotency_key': self.activity_key(ref, f'fullbody|{ident}'), 'ref': ref, 'kind': 'note',
                 'summary': f'Full text of email: {m["subject"] or "(no subject)"}', 'detail': m['text'],
                 'occurred_at': _iso(p['sent'])}, p['sender_email'], 'full text follow-up') for ref in p['refs']])
             if ok:
@@ -826,9 +834,9 @@ class Run:
                     'ck': p['ck'], 'sent': p['sent'], 'ref': p['refs'][0],
                     'who': p.get('who', p['sender_email']),
                     'outbound': p.get('outbound', _internal(p['sender_email'], self.settings.internal_domain)),
-                    'activity_keys': [key('log-activity', ref, ident) for ref in p['refs']
-                                      if key('log-activity', ref, ident) in self.state['requests']] +
-                                     [key('log-activity', ref, f'fullbody|{ident}') for ref in p['refs']]})
+                    'activity_keys': [self.activity_key(ref, ident) for ref in p['refs']
+                                      if self.activity_key(ref, ident) in self.state['requests']] +
+                                     [self.activity_key(ref, f'fullbody|{ident}') for ref in p['refs']]})
                 del pending[ident]
 
     # calendar

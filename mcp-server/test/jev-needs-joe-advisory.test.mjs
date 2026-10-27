@@ -14,10 +14,10 @@ function vendorResult() {
   for (const [index, ref] of ["WR-000123", "WR-000124"].entries()) {
     const prefix = `item_${index}_${ref}_`;
     const attention = index === 0 ? "decision_ready" : "information_needed";
-    answers[`${prefix}class`] = { type: "choice", choice: `${index}|${ref}|${attention}`,
+    answers[`${prefix}class`] = { type: "choice", choice: attention,
       confidence: 0.9, probabilities: Object.fromEntries(
         ["decision_ready", "information_needed", "blocked", "routine_review", "unclear"]
-          .map(value => [`${index}|${ref}|${value}`, value === attention ? 0.92 : 0.02])) };
+          .map(value => [value, value === attention ? 0.92 : 0.02])) };
     for (const [dimension, value] of Object.entries({ priority: index === 0 ? 0.8 : 0.2, relevance: 0.7, ambiguity: 0.1 }))
       answers[`${prefix}${dimension}`] = { type: "noul", noul: value };
   }
@@ -53,7 +53,10 @@ test("typed advice binds separate item judgments and sends only six bounded fiel
   const { url, body, init } = remote.requests[0];
   assert.equal(url, "https://api.typesafe.ai/v1/systemone");
   assert.equal(init.method, "POST");
-  assert.equal(body.model, "jev-latest");
+  assert.equal(body.model, "jev-1.13.0");
+  for (const question of Object.values(body.questions).filter(q => q.criteria))
+    assert.deepEqual(Object.keys(question.criteria),
+      ["decision_ready", "information_needed", "blocked", "routine_review", "unclear"]);
   assert.deepEqual(body.state.items[0], { human_ref: "WR-000123", title: "x".repeat(160), state: "ready",
     source_label: "Synthetic source", source_freshness: "current", next_human_action: first.next_human_action });
   assert.equal(JSON.stringify(body).includes("DO NOT SEND"), false);
@@ -105,13 +108,13 @@ test("invalid vendor envelopes are unavailable and disclose no raw vendor fields
   }
 });
 
-test("malformed probabilities and cross-item choices abstain only their own item", async () => {
+test("malformed probabilities and unknown choices abstain only their own item", async () => {
   const changes = [
-    answer => { answer.choice = "1|WR-000124|decision_ready"; },
+    answer => { answer.choice = "not_a_class"; },
     answer => { answer.type = "score"; },
-    answer => { delete answer.probabilities["0|WR-000123|unclear"]; },
-    answer => { answer.probabilities["0|WR-000123|unclear"] = 0.9; },
-    answer => { answer.probabilities["0|WR-000123|decision_ready"] = -0.1; },
+    answer => { delete answer.probabilities["unclear"]; },
+    answer => { answer.probabilities["unclear"] = 0.9; },
+    answer => { answer.probabilities["decision_ready"] = -0.1; },
     answer => { answer.confidence = 0.1; },
   ];
   for (const change of changes) {
@@ -138,40 +141,51 @@ test("sparse evidence and unclear classifications return explicit abstentions", 
   assert.equal(advice.items[0].reason_code, "insufficient_recorded_evidence");
   assert.equal(advice.items[0].judged, false);
   const result = vendorResult();
-  result.answers["item_0_WR-000123_class"].choice = "0|WR-000123|unclear";
-  result.answers["item_0_WR-000123_class"].probabilities["0|WR-000123|decision_ready"] = 0.02;
-  result.answers["item_0_WR-000123_class"].probabilities["0|WR-000123|unclear"] = 0.92;
+  result.answers["item_0_WR-000123_class"].choice = "unclear";
+  result.answers["item_0_WR-000123_class"].probabilities.decision_ready = 0.02;
+  result.answers["item_0_WR-000123_class"].probabilities.unclear = 0.92;
   advice = await needsJoeAdvisory(queue, { apiKey: "synthetic-key", ...vendor(result), now: NOW });
   assert.equal(advice.items[0].reason_code, "advisory_abstained");
   assert.equal(advice.items[0].judged, false);
 });
 
-test("vendor refusal and malformed JSON return unavailable without retries or error disclosure", async () => {
-  for (const [response, reason] of [[new Response("synthetic private error", { status: 503 }), "jev_unavailable"],
-    [new Response("not-json"), "invalid_jev_answer"]]) {
-    let attempts = 0;
-    const advice = await needsJoeAdvisory(queue, { apiKey: "synthetic-key", now: NOW,
-      fetchImpl: async () => { attempts++; return response; } });
-    assert.equal(attempts, 1);
-    assert.equal(advice.status, "unavailable");
-    assert.equal(advice.reason, reason);
-    assert.equal(JSON.stringify(advice).includes("synthetic private error"), false);
-  }
+test("vendor refusal is retried by the SDK within the budget and malformed JSON is not disclosed", async () => {
+  let attempts = 0;
+  const started = performance.now();
+  const advice = await needsJoeAdvisory(queue, { apiKey: "synthetic-key", now: NOW,
+    fetchImpl: async () => { attempts++; return new Response("synthetic private error", { status: 503 }); } });
+  assert.ok(attempts >= 2 && attempts <= 3, `attempts ${attempts}`);
+  assert.ok(performance.now() - started < 1600);
+  assert.equal(advice.status, "unavailable");
+  assert.equal(advice.reason, "jev_unavailable");
+  assert.equal(JSON.stringify(advice).includes("synthetic private error"), false);
+  const bad = await needsJoeAdvisory(queue, { apiKey: "synthetic-key", now: NOW,
+    fetchImpl: async () => new Response("not-json") });
+  assert.equal(bad.reason, "invalid_jev_answer");
 });
 
-test("a stalled vendor is aborted at the bounded SDK timeout", async () => {
+test("a 429 is retried by the SDK default policy and then answers", async () => {
   let attempts = 0;
-  let aborted = false;
   const advice = await needsJoeAdvisory(queue, { apiKey: "synthetic-key", now: NOW,
-    fetchImpl: async (_url, init) => {
+    fetchImpl: async () => {
       attempts++;
-      return new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => {
-        aborted = true;
-        reject(new Error("synthetic timeout"));
-      }, { once: true }));
+      return attempts === 1 ? new Response("slow down", { status: 429, headers: { "retry-after-ms": "5" } })
+        : Response.json(vendorResult());
     } });
-  assert.equal(attempts, 1);
+  assert.equal(attempts, 2);
+  assert.equal(advice.status, "available");
+});
+
+test("a stalled vendor is aborted within the caller's budget", async () => {
+  let aborted = false;
+  const started = performance.now();
+  const advice = await needsJoeAdvisory(queue, { apiKey: "synthetic-key", now: NOW,
+    fetchImpl: async (_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => {
+      aborted = true;
+      reject(new Error("synthetic timeout"));
+    }, { once: true })) });
   assert.equal(aborted, true);
+  assert.ok(performance.now() - started < 1600);
   assert.equal(advice.status, "unavailable");
   assert.equal(advice.reason, "jev_unavailable");
 });
