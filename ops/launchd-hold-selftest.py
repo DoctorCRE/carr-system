@@ -405,7 +405,8 @@ class DeclaredDisabledTests(unittest.TestCase):
         for label in sorted(declared_off):
             if not label.startswith("com.carr."):
                 continue  # local.* agents are not in the fleet installer's com.carr. set
-            body = (ROOT / "ops/launchd" / (label + ".plist")).read_text()
+            folder = "ops/headless-tasks" if label.startswith("com.carr.headless.") else "ops/launchd"
+            body = (ROOT / folder / (label + ".plist")).read_text()
             # pairs() skips exactly the plists this returns a reason for.
             self.assertTrue(cac.launchd_off_reason(label + ".plist", body, holds={}), label + " would be installed")
 

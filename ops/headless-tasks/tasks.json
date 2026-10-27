@@ -1,6 +1,21 @@
 {
   "schema": "carr-headless-tasks/v1",
-  "source": "Custom headless recurrences retired; portable instructions remain available on demand under ops/scheduled-tasks",
+  "source": "Reviewed headless recurrences; portable prompts under ops/scheduled-tasks. A task whose plist label is DEFINITION_ONLY in lib/launchd_hold.py is defined but refused by the installer until its activation slice.",
   "timezone": "America/Chicago",
-  "tasks": {}
+  "tasks": {
+    "social-batch-headless": {
+      "cron": "0 6 * * 5",
+      "timeout_seconds": 5400,
+      "grace_seconds": 3600,
+      "model": "opus",
+      "allowed_tools": [
+        "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch", "Agent",
+        "Bash(./run.sh *)", "Bash(grok -p *)", "Bash(ffmpeg *)", "Bash(./video/make-animated-static.sh *)"
+      ],
+      "disallowed_tools": [
+        "Read(~/.zprofile)", "Read(~/.zshrc)", "Bash(curl *)", "Bash(wget *)",
+        "WebFetch(domain:backend.blotato.com)", "WebFetch(domain:blotato.com)", "WebFetch(domain:blotato.io)"
+      ]
+    }
+  }
 }
