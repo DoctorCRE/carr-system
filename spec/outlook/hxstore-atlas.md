@@ -2044,7 +2044,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `parse`.
+- [`vendor/hxprobe/src/attachment.rs` at `bc8538ac6845ddd716efa18791361ab04e9c5694`](https://github.com/DoctorCRE/carr-system/blob/bc8538ac6845ddd716efa18791361ab04e9c5694/vendor/hxprobe/src/attachment.rs), `parse`.
 
 ## Attachment envelope (attachment.envelope)
 
@@ -2063,7 +2063,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `observe`.
+- [`vendor/hxprobe/src/attachment.rs` at `bc8538ac6845ddd716efa18791361ab04e9c5694`](https://github.com/DoctorCRE/carr-system/blob/bc8538ac6845ddd716efa18791361ab04e9c5694/vendor/hxprobe/src/attachment.rs), `observe`.
 
 ## Attachment owning message (attachment.message)
 
@@ -2082,7 +2082,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `parse`.
+- [`vendor/hxprobe/src/attachment.rs` at `bc8538ac6845ddd716efa18791361ab04e9c5694`](https://github.com/DoctorCRE/carr-system/blob/bc8538ac6845ddd716efa18791361ab04e9c5694/vendor/hxprobe/src/attachment.rs), `parse`.
 
 ## Attachment declared byte length (attachment.size)
 
@@ -2101,7 +2101,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `parse`.
+- [`vendor/hxprobe/src/attachment.rs` at `bc8538ac6845ddd716efa18791361ab04e9c5694`](https://github.com/DoctorCRE/carr-system/blob/bc8538ac6845ddd716efa18791361ab04e9c5694/vendor/hxprobe/src/attachment.rs), `parse`.
 
 ## Attachment display filename (attachment.name)
 
@@ -2120,7 +2120,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `parse`.
+- [`vendor/hxprobe/src/attachment.rs` at `bc8538ac6845ddd716efa18791361ab04e9c5694`](https://github.com/DoctorCRE/carr-system/blob/bc8538ac6845ddd716efa18791361ab04e9c5694/vendor/hxprobe/src/attachment.rs), `parse`.
 
 ## Attachment declared MIME type (attachment.type)
 
@@ -2139,7 +2139,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `declared_type`.
+- [`vendor/hxprobe/src/attachment.rs` at `bc8538ac6845ddd716efa18791361ab04e9c5694`](https://github.com/DoctorCRE/carr-system/blob/bc8538ac6845ddd716efa18791361ab04e9c5694/vendor/hxprobe/src/attachment.rs), `declared_type`.
 
 ## Attachment MIME content ID (attachment.content-id)
 
@@ -2158,7 +2158,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `parse`.
+- [`vendor/hxprobe/src/attachment.rs` at `bc8538ac6845ddd716efa18791361ab04e9c5694`](https://github.com/DoctorCRE/carr-system/blob/bc8538ac6845ddd716efa18791361ab04e9c5694/vendor/hxprobe/src/attachment.rs), `parse`.
 
 ## Source bindings
 
@@ -2193,7 +2193,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
     "sha256": "ac7130b31bc06e000598c5acfe019942316900010d8ccb4f95a9be4a651bc499"
   },
   "vendor/hxprobe/src/attachment.rs": {
-    "revision": "a32d8b6cfb325055455201995e406e07094d217e",
+    "revision": "bc8538ac6845ddd716efa18791361ab04e9c5694",
     "sha256": "796850d32e1169eecd7e70094072b438ccb0530a4b7fa7d5dd70c65edee3461b"
   }
 }
