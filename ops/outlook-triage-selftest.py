@@ -78,8 +78,8 @@ TOOLBAR = window(11, '', 1512, 32, False)
 FULL_SCREEN = window(12, MAILBOX, 1512, 949, False)
 ORDINARY = window(13, MAILBOX, 1230, 768)
 COMPOSE = window(14, 'Re: subject-000', 917, 911)
-HELPER = window(15, 'UNTITLED', 500, 500, None) | {'is_on_screen': False}
-HELPER['bounds']['y'] = 580
+UNTITLED_OFFSCREEN = window(15, 'UNTITLED', 500, 500, None) | {'is_on_screen': False}
+UNTITLED_OFFSCREEN['bounds']['y'] = 580
 
 
 def msg(sender, subject, when='10:02 AM', unread=False, email=None):
@@ -370,8 +370,8 @@ class FakeOutlookCase(unittest.TestCase):
 
 
 class ComposeWindowTest(unittest.TestCase):
-    def test_untitled_offscreen_helper_does_not_block_preflight(self):
-        self.assertFalse(is_compose_window(HELPER))
+    def test_observed_untitled_offscreen_window_does_not_block_preflight(self):
+        self.assertFalse(is_compose_window(UNTITLED_OFFSCREEN))
 
     def test_subjectless_and_resized_drafts_still_block_preflight(self):
         for title in ('', None, 'UNTITLED', 'subject-000'):
@@ -379,13 +379,13 @@ class ComposeWindowTest(unittest.TestCase):
                 with self.subTest(title=title, width=width, height=height):
                     draft = window(16, title, width, height, None) | {'is_on_screen': False}
                     self.assertTrue(is_compose_window(draft))
-        for draft in (HELPER | {'is_on_screen': True},
-                      HELPER | {'on_current_space': False},
-                      HELPER | {'on_current_space': True},
-                      HELPER | {'title': 'subject-000'},
-                      HELPER | {'title': ''}, HELPER | {'title': None},
-                      {k: v for k, v in HELPER.items() if k != 'is_on_screen'},
-                      {k: v for k, v in HELPER.items() if k != 'on_current_space'},
+        for draft in (UNTITLED_OFFSCREEN | {'is_on_screen': True},
+                      UNTITLED_OFFSCREEN | {'on_current_space': False},
+                      UNTITLED_OFFSCREEN | {'on_current_space': True},
+                      UNTITLED_OFFSCREEN | {'title': 'subject-000'},
+                      UNTITLED_OFFSCREEN | {'title': ''}, UNTITLED_OFFSCREEN | {'title': None},
+                      {k: v for k, v in UNTITLED_OFFSCREEN.items() if k != 'is_on_screen'},
+                      {k: v for k, v in UNTITLED_OFFSCREEN.items() if k != 'on_current_space'},
                       window(16, '', 500, 500)):
             with self.subTest(draft=draft):
                 self.assertTrue(is_compose_window(draft))
@@ -549,8 +549,8 @@ class OutlookTriageTest(FakeOutlookCase):
         self.assertEqual(outcome.state, 'skipped')
         self.assertEqual(self.settled().read_text(), 'skipped user_active\n')
 
-    def test_untitled_offscreen_helper_allows_triage(self):
-        self.given([FILE_A], windows=[TOOLBAR, ORDINARY, HELPER])
+    def test_observed_untitled_offscreen_window_allows_triage(self):
+        self.given([FILE_A], windows=[TOOLBAR, ORDINARY, UNTITLED_OFFSCREEN])
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('succeeded', 'filed'))
         self.assertEqual(state['moved'], [[FILE_A['label'], 'folder-A']])
