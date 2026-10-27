@@ -40,6 +40,8 @@ THE ASSERTIONS.
   6. BOTH WORKERS CARRY A CPU CAP. Workers Paid has no spend ceiling, so the
      top-level `[limits] cpu_ms` is what bounds one invocation's CPU; staging
      inherits it, and a staging override may only lower it.
+  7. NO ENVIRONMENT EXPOSES WORKERS.DEV OR PREVIEW URLS. Explicit false values
+     prevent deployments from undoing the billing audit's public URL shutoff.
 """
 
 import json
@@ -126,6 +128,9 @@ def main() -> int:
           "needs:" not in staging_job and "needs:" not in production_job
           and "--env staging" not in production_job,
           "a `needs:` would let one environment's failure stop the other's deploy")
+    check("2f. staging deployment is paused until Cloudflare Access protects it",
+          staging_job.splitlines()[0].strip() == "if: ${{ false }}" if staging_job else False,
+          "the disabled staging URL cannot serve the release verification")
 
     # ── 3 ────────────────────────────────────────────────────────────────────
     db_tap_src = DB_TAP.read_text()
@@ -163,7 +168,7 @@ def main() -> int:
     check("4d. staging declares no domain, and wrangler gives it an explicit empty routes list",
           not envs["staging"]["domains"]
           and "routes" in stg_cfg and stg_cfg["routes"] == []
-          and "route" not in stg_cfg and stg_cfg.get("workers_dev") is True,
+          and "route" not in stg_cfg,
           f"[env.staging] routes={stg_cfg.get('routes', '<missing: inherits production>')!r}")
 
     # ── 5 ────────────────────────────────────────────────────────────────────
@@ -197,6 +202,11 @@ def main() -> int:
           isinstance(cpu_cap, int) and 0 < cpu_cap < 30_000
           and isinstance(stg_cap, int) and 0 < stg_cap <= cpu_cap,
           f"[limits] cpu_ms={cpu_cap!r}, [env.staging.limits] cpu_ms={stg_cap!r}")
+
+    for name, config in [("production", wrangler), *wrangler.get("env", {}).items()]:
+        for setting in ("workers_dev", "preview_urls"):
+            check(f"7. {name} disables {setting}", config.get(setting) is False,
+                  f"{setting} must be explicitly false")
 
     print()
     if FAILURES:

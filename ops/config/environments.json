@@ -1,5 +1,5 @@
 {
-  "_note": "Runtime and diagnostic environment declarations. GitHub Actions (.github/workflows/deploy.yml) deploys production and, in a parallel job, staging from each green main canary; staging database diagnostics and assurance binding reads remain.",
+  "_note": "Runtime and diagnostic environment declarations. GitHub Actions (.github/workflows/deploy.yml) deploys production from each green main canary. Staging deploys are paused until Cloudflare Access protects the endpoint and release probe; staging database diagnostics and assurance binding reads remain.",
   "_rule": "Every difference between two environments is either INTENTIONAL and listed in intentional_differences, or it is drift. There is no third category, and the check treats an unlisted difference as a failure rather than a curiosity.",
   "version": 1,
   "environments": [
@@ -47,7 +47,7 @@
     },
     {
       "name": "staging",
-      "purpose": "the app's signed-in staging tests, database diagnostics and assurance scope reads; deployed from main alongside production",
+      "purpose": "database diagnostics and assurance scope reads; Worker deploys and signed-in staging tests are paused until Cloudflare Access protects the endpoint and release probe",
       "data_class": "synthetic diagnostics only",
       "database": {
         "kind": "neon-project",
@@ -118,7 +118,7 @@
     },
     {
       "difference": "staging has no custom domain while production has four",
-      "why": "A staging hostname on the same zone is one typo and one certificate away from production. workers.dev needs no DNS and is unmistakably not production."
+      "why": "Staging has no public endpoint. workers.dev and preview URLs are disabled for billing safety; deploys stay paused until Cloudflare Access protects the staging endpoint and release probe."
     },
     {
       "difference": "staging has no R2 bucket while production declares carr_documents",
