@@ -136,6 +136,20 @@ while True: time.sleep(1)
             live.terminate()
             live.wait(timeout=5)
 
+    def test_startup_preserves_retained_workspace_with_recent_activity(self):
+        workspace = self.root / 'codex-job-edited'
+        checkout = workspace / 'checkout'
+        index = checkout / '.git' / 'index'
+        index.parent.mkdir(parents=True)
+        index.touch()
+        old = time.time() - 3 * 24 * 60 * 60
+        for path in (workspace, checkout):
+            os.utime(path, (old, old))
+        job = self.launch('')
+        _, errors = job.communicate(timeout=10)
+        self.assertEqual(job.returncode, 0, errors.decode())
+        self.assertTrue(index.exists(), 'recent Git activity must preserve an old workspace')
+
     def test_relative_live_checkout_prevents_unsafe_pruning(self):
         active = self.root / 'codex-job-active'
         (active / 'checkout' / '.git').mkdir(parents=True)
