@@ -111,6 +111,7 @@ class CaptureFake {
     }
     if (sql.includes("capture:post-call-phase-base"))
       return { rows: this.phaseBase ? [{ event_id: this.phaseBase }] : [] };
+    if (sql.includes("capture:post-call-next-step-base")) return { rows: [] };
     if (sql.includes("dealroom:base-event")) return { rows: [{ id: params[0] }] };
     if (sql.includes("dealroom:latest-field-event"))
       return { rows: this.phaseBase !== params[2] ? [{ event_id: this.phaseBase,
@@ -436,7 +437,8 @@ test("post-call next-step proposals stay pending, validate exact deals, and repl
   });
   assert.equal(changed.status, 409);
   const queue = await TOOLS["capture-queue"].handler(db, joe, {});
-  assert.deepEqual(queue.candidates[0].payload, item.payload);
+  assert.deepEqual(queue.candidates[0].payload, { ...item.payload,
+    plan_base: { next_step: null, next_date: null } });
   const session = await r.handler.fetch(new Request("https://worker.test/capture/session",
     { headers: { authorization: `Bearer ${token}` } }), {});
   assert.equal((await session.json()).candidate_statuses[0].status, "pending");
@@ -451,6 +453,7 @@ test("post-call next-step proposals stay pending, validate exact deals, and repl
     { ...item.payload, next_date: "2027-02-29" },
     { ...item.payload, next_date: "tomorrow" }, { ...item.payload, next_date: true },
     { ...item.payload, ref: ids.deal },
+    { ...item.payload, plan_base: { next_step: null, next_date: null } },
     { deal: ids.deal, text: "Call landlord" },
   ];
   for (const [index, payload] of invalid.entries()) {

@@ -56,6 +56,7 @@ test("MCP projects translated database validation errors without schema diagnost
 
 for (const [code, extra] of [
   ["version_conflict", { current_version: 3 }], ["needs_confirm", {}],
+  ["missing_plan_base", {}], ["newer_change_exists", {}],
   ["not_found", {}], ["unauthorized", {}], ["loop_not_open", {}],
   ["value_not_in_declared_vocabulary", { field: "filter" }],
   ["AUTHORIZATION_REFUSED", {}], ["vendor_meetings_query_invalid", {}], ["vendor_meetings_unavailable", {}],

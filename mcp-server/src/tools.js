@@ -9734,7 +9734,7 @@ registerTools({
         throw new ToolError({ error: "call_already_undone" });
       const { candidate, resolution } = await prepareCaptureCandidate(c, actor, args, {
         table: "capture_candidate",
-        read: `select c.id, c.kind, c.payload, c.status, c.resulting_ref, c.evidence_quote, s.post_call
+        read: `select c.id, c.session_id, c.kind, c.payload, c.status, c.resulting_ref, c.evidence_quote, s.post_call
            from capture_candidate c join capture_session s on s.id=c.session_id
           where c.id=$1 for update of c /* capture:resolve-read */`,
         skip: `update capture_candidate
@@ -9761,6 +9761,7 @@ registerTools({
       const verb = verbByKind[candidate.kind];
       if (!verb) throw new ToolError({ error: "unknown_candidate_kind", kind: candidate.kind });
       const innerArgs = { ...candidate.payload, idempotency_key: `capture:${candidate.id}` };
+      delete innerArgs.plan_base;
       if (candidate.kind === "meeting_record") innerArgs.kind = "meeting";
       if (candidate.kind === "phase_move") {
         // The partners' own words on the call are the evidence for the move,
@@ -9775,6 +9776,22 @@ registerTools({
         await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0))", [subject.id]);
         await lockDealField(c, subject.id, "next_date");
         await lockDealField(c, subject.id, "next_step");
+        if (automatic) {
+          const base = candidate.payload.plan_base;
+          if (!base || !Object.hasOwn(base, "next_step") || !Object.hasOwn(base, "next_date"))
+            throw new ToolError({ error: "missing_plan_base", hint: "Review this older call proposal before applying it." });
+          const changed = await c.query(
+            `select e.field from jsonb_each_text($2::jsonb) b
+              join event e on e.subject_type='deal' and e.subject_id=$1 and e.field=b.key
+              where (b.value is null or (e.recorded_at,e.id) >
+                (select recorded_at,id from event where id=b.value::uuid))
+                and not exists(select 1 from capture_candidate sibling
+                  where sibling.session_id=$3 and sibling.status='confirmed' and sibling.applied_automatically
+                    and e.idempotency_key='capture:' || sibling.id::text)
+              limit 1 /* capture:automatic-plan-conflict */`, [subject.id, JSON.stringify(base), candidate.session_id]);
+          if (changed.rows.length) throw new ToolError({ error: "newer_change_exists", field: changed.rows[0].field,
+            hint: "The plan changed after this call proposal was filed. Review it before applying." });
+        }
         innerArgs.base_version = (await c.query("select version from deal where id=$1 for update", [subject.id])).rows[0]?.version;
       }
       const result = await executeRegisteredTool(c, actor, verb, innerArgs);
