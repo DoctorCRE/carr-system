@@ -42,18 +42,6 @@ pymupdf>=1.28      # pipelines/check-brand.py, the pre-delivery brand reader
 # the marker keeps its migration/runtime dependency install compatible.
 mypy>=2.3; python_version >= "3.10"
 
-# EventKit binding for tools/calendar-attendee-probe.py and
-# tools/calendar-touch-matcher.py, which read the LOCAL Apple Calendar store.
-# UNDECLARED UNTIL 2026-08-13, and the gap was worse than a missing package: with
-# it absent the probe dies on `import objc` before it ever asks for permission, so
-# the moment Joe grants Calendar access the tool would still have failed and looked
-# exactly like the grant not working. Declared here so the dependency and the
-# permission are two separate, separately-diagnosable answers.
-#
-# macOS only by construction — EventKit does not exist elsewhere — and the marker
-# keeps Dell's install working rather than failing on a framework his machine has.
-pyobjc-framework-EventKit>=10.0; sys_platform == "darwin"
-
 # Preserve user TOML syntax while reconciling reserved Codex permission profiles.
 tomlkit>=0.13.3
 

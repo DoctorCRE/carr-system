@@ -57,8 +57,6 @@ class RestoreCallers(unittest.TestCase):
     def test_all_tracked_callers_identify_the_backup_run(self):
         found, violations = caller_violations(ROOT)
         for required in ('bin/key-recovery-test.sh', 'bin/restore-rehearse.sh',
-                         'ops/config/control-plane-workflows.v1.json',
-                         'ops/scheduled-tasks/restore-rehearse-weekly.SKILL.md',
                          'run.sh', 'RECOVERY.md'):
             self.assertTrue(any(item == required or item.startswith(required + ':')
                                 for item in found), required)

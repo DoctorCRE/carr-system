@@ -13,7 +13,6 @@ class NativeSchedulingTests(unittest.TestCase):
         services = json.loads((ROOT / 'ops/config/services.json').read_text())
         self.assertNotIn('control-plane-tick', {row['key'] for row in services['services']})
         jobs = {
-            'com.carr.calendar-eventkit': 'calendar-eventkit-capture.sh',
             'com.carr.nightly-record-layer': 'nightly.sh',
             'com.carr.notes-sweep': 'notes-sweep-post.sh',
         }
