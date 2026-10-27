@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { applyPendingPortalLink } from './helpers/snapshot-schema.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 
 let fixture, admin, database, c, actor, deal, clientRef, connection;
@@ -41,6 +42,7 @@ before(async () => {
   const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
   if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
   else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
+  await applyPendingPortalLink(c);
   if (!(await c.query("select 1 from information_schema.columns where table_schema='public' and table_name='activity' and column_name='email_source'")).rows.length)
     await c.query(readFileSync(new URL('../../migrations/1008_email_reply_draft.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select to_regclass('public.v_email_reply_partner') as relation")).rows[0].relation)

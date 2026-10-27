@@ -219,6 +219,15 @@ new_sqlite_classes = ["OAuthConsentState"]
 [observability]
 enabled = true
 
+# Spend guard. Workers Paid has no hard spend cap, and without this every
+# invocation may burn up to the 30 s default CPU. Measured 2026-09-27..10-27
+# (Workers analytics, production): daily p99 26-55 ms, p99.9 at most 370 ms,
+# one-month max 1,804 ms (an authenticated POST /mcp, 2026-10-24). 5,000 ms is
+# about 2.8x that max. Staging inherits this value; ops/environment-matrix-
+# selftest.py check 6 keeps both bounded. Raise only from a new measured max.
+[limits]
+cpu_ms = 5000
+
 [[r2_buckets]]
 binding = "carr_documents"
 bucket_name = "carr-documents"

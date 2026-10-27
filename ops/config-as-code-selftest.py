@@ -155,8 +155,10 @@ def installed_hook_file_regressions():
 
 def retired_machine_config_regressions():
     retired = {'ai-capability-builder', 'linkedin-engagement-daily',
-               'restore-rehearse-weekly', 'social-batch-weekly', 'social-metrics-pull-weekly'}
+               'restore-rehearse-weekly', 'social-metrics-pull-weekly'}
     with patch.object(mod, 'IS_PRIMARY', True):
+        assert 'social-batch-weekly' in mod.scheduled_task_install_plan()['install'], \
+            'Friday social batch must remain installed'
         assert not retired.intersection(mod.scheduled_task_install_plan()['install']), \
             'retired scheduled tasks must not be installed'
     assert not (Path(REPO) / 'ops/launchd/com.carr.calendar-eventkit.plist').exists(), \
