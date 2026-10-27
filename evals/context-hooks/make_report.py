@@ -1,3 +1,4 @@
+# Build a baseline and candidate report for context hook evaluation.
 import hashlib
 import json
 import subprocess

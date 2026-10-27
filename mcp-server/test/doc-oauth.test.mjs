@@ -1,3 +1,4 @@
+// Test Doc OAuth discovery and existing authorization metadata.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";

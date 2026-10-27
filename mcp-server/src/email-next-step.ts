@@ -1,3 +1,4 @@
+// Apply next steps and actions proposed from email.
 import { sha256 } from './sha256.ts';
 import { isCalendarDate } from './calendar-date.ts';
 import { ToolError } from './tool-error.ts';

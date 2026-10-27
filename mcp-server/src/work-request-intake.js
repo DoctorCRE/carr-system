@@ -97,18 +97,28 @@ async function deliverySourceForPlan(c, actor, row, args) {
   }
 }
 function validate(args, ToolError) {
-  if (Object.keys(args).some(key => !FIELDS.has(key)))
-    throw new ToolError({ error: "invalid_report_problem_fields" });
-  if (!UUID.test(args.idempotency_key || "") || !text(args.situation) || text(args.situation).length > 1000 ||
-      !text(args.title) || text(args.title).length > 200 || !text(args.desired_outcome) || text(args.desired_outcome).length > 2000 ||
-      !Array.isArray(args.acceptance_criteria) || !args.acceptance_criteria.length || args.acceptance_criteria.length > 12)
-    throw new ToolError({ error: "invalid_report_problem" });
+  const invalid = (field, hint) => { throw new ToolError({ error: "invalid_report_problem", field, hint }); };
+  const extraField = Object.keys(args).find(key => !FIELDS.has(key));
+  if (extraField)
+    throw new ToolError({ error: "invalid_report_problem_fields", field: extraField,
+      hint: "remove this field; report-problem accepts only idempotency_key, situation, title, desired_outcome, and acceptance_criteria" });
+  if (!UUID.test(args.idempotency_key || ""))
+    invalid("idempotency_key", "supply a UUID idempotency key");
+  if (!text(args.situation) || text(args.situation).length > 1000)
+    invalid("situation", "supply non-empty situation text of at most 1000 characters");
+  if (!text(args.title) || text(args.title).length > 200)
+    invalid("title", "supply non-empty title text of at most 200 characters");
+  if (!text(args.desired_outcome) || text(args.desired_outcome).length > 2000)
+    invalid("desired_outcome", "supply non-empty desired outcome text of at most 2000 characters");
+  if (!Array.isArray(args.acceptance_criteria) || !args.acceptance_criteria.length || args.acceptance_criteria.length > 12)
+    invalid("acceptance_criteria", "supply an array of 1 through 12 criteria, each with a unique uppercase id and non-empty text of at most 500 characters");
   const ids = new Set();
   for (const criterion of args.acceptance_criteria) {
     if (!criterion || typeof criterion !== "object" || Object.keys(criterion).some(key => key !== "id" && key !== "text") ||
         !text(criterion.id) || !CRITERION_ID.test(criterion.id.trim()) || !text(criterion.text) || text(criterion.text).length > 500 ||
         ids.has(criterion.id.trim()))
-      throw new ToolError({ error: "invalid_acceptance_criteria" });
+      throw new ToolError({ error: "invalid_acceptance_criteria", field: "acceptance_criteria",
+        hint: "provide only id and text; id must be unique uppercase letters, digits, or hyphens, and text must be non-empty and at most 500 characters" });
     ids.add(criterion.id.trim());
   }
 }
@@ -524,7 +534,8 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
         // actor. Program 6 cannot bind personal scope, so choose the first
         // ranked source that the database proves is shared, active, and current.
         const hits = retrieval.hits.filter(hit => hit.section_id);
-        if (!hits.length) throw new ToolError({ error: "current_situation_source_not_found" });
+        if (!hits.length) throw new ToolError({ error: "current_situation_source_not_found", field: "situation",
+          hint: "provide a situation with a current shared source in doctrine, then retry report-problem" });
         const shared = await c.query(
           `select ranked.section_id, s.current_revision_id
              from unnest($1::uuid[]) with ordinality as ranked(section_id, ordinal)
@@ -536,7 +547,8 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
         const selected = shared.rows[0];
         const source = selected && hits.find(hit => hit.section_id === selected.section_id);
         if (!source || !selected.current_revision_id)
-          throw new ToolError({ error: "current_situation_source_not_found" });
+          throw new ToolError({ error: "current_situation_source_not_found", field: "situation",
+            hint: "revise situation so it matches a current shared doctrine source, then retry report-problem" });
         return captureFromSource(c, actor, args, source, selected.current_revision_id);
         });
       },

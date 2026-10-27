@@ -1,3 +1,4 @@
+// Expose memory tools with server-derived authority.
 import { personalScopeForActor, organizationTenantForActor } from "./identity.js";
 
 import { integerFields } from "./safe-integer.ts";

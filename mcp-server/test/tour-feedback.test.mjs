@@ -1,3 +1,4 @@
+// Tests projection-bound client feedback writes and broker reads.
 import { readMigration } from "./migration-source.testhelper.mjs";
 
 import assert from "node:assert/strict";

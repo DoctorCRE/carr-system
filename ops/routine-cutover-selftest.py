@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test routine cutover configuration.
 import json
 import plistlib
 import sys

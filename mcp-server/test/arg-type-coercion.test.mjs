@@ -1,3 +1,4 @@
+// Test schema-driven tool argument coercion and validation.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

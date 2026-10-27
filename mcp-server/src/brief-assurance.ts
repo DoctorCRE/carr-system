@@ -1,3 +1,4 @@
+// Read assurance items for the brief.
 import type { ClientBase } from "@neondatabase/serverless";
 
 export async function readBriefAssurance(c: Pick<ClientBase, "query">, sponsor: string) {

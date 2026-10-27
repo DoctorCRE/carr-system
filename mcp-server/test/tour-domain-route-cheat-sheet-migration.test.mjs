@@ -1,3 +1,4 @@
+// Tests route versioning and internal cheat sheet migration contracts.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";

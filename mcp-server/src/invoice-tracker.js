@@ -1,3 +1,4 @@
+// Read commissions and record invoice receipts.
 import { isCalendarDate } from './calendar-date.ts';
 
 // One read owns the closed-deal/commission join for Invoices and Home.

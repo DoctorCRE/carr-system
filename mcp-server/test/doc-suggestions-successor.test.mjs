@@ -1,3 +1,4 @@
+// Test Doc suggestions and successor tool contract admission.
 import test from 'node:test';
 import {assertAdmits} from './helpers/registry-admission.mjs';
 

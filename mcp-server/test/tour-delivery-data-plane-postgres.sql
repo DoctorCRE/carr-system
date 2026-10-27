@@ -207,4 +207,46 @@ begin
   end if;
 end $owner$;
 
+-- storage_ref bound (0583; moved from tour-pdf-render-result-storage-ref-local-pg-gate.py).
+-- Render job b87f59da (2026-09-24): 0430's '{16,400}' regex exceeded RE_DUP_MAX,
+-- so every real storage_ref raised 2201B. The job FK is dropped (rolled back) to
+-- keep the fixture to what ops.record_tour_pdf_render_result reads.
+alter table ops.tour_pdf_render_job drop constraint tour_pdf_render_job_organization_tenant_id_projection_id_fkey;
+insert into actor(id,slug,kind,display_name)
+values('ab000000-0000-4000-8000-0000000000aa','tour-pdf-storage-ref-proof','automation','Tour PDF storage_ref proof');
+insert into ops.tour_pdf_render_job(id,organization_tenant_id,projection_id,requested_by_actor_id,request,projection_digest,packet_digest,template_digest,renderer_digest,qc_ruleset_digest,expected_property_count)
+select j::uuid,'tour-pdf-storage-ref-proof',gen_random_uuid(),'actor:ab000000-0000-4000-8000-0000000000aa','{"fixture":true}',
+       'sha256:'||repeat('1',64),'sha256:'||repeat('2',64),'sha256:'||repeat('3',64),'sha256:'||repeat('4',64),'sha256:'||repeat('5',64),1
+from unnest(array['ab000000-0000-4000-8000-000000000001','ab000000-0000-4000-8000-000000000002']) j;
+set local session authorization carr_authority;
+do $storage_ref$
+declare
+  v_ref text:='tour-pdf/tour-pdf-storage-ref-proof/ab000000-0000-4000-8000-000000000001/'||repeat('7',64)||'.pdf';
+  v_result uuid;
+begin
+  v_result:=ops.record_tour_pdf_render_result('tour-pdf-storage-ref-proof','ab000000-0000-4000-8000-000000000001','review_ready',
+    'artifact:tour-pdf:ab000000000040008000000000000001','sha256:'||repeat('7',64),v_ref,12345,1,0,'sha256:'||repeat('8',64),
+    'actor:ab000000-0000-4000-8000-0000000000aa');
+  if v_result is null then raise exception 'valid storage_ref returned no render result'; end if;
+  begin
+    perform ops.record_tour_pdf_render_result('tour-pdf-storage-ref-proof','ab000000-0000-4000-8000-000000000002','review_ready',
+      'artifact:tour-pdf:ab000000000040008000000000000002','sha256:'||repeat('7',64),
+      'tour-pdf/tour-pdf-storage-ref-proof/ab000000-0000-4000-8000-000000000002/'||repeat('a',400)||'.pdf',
+      12345,1,0,'sha256:'||repeat('8',64),'actor:ab000000-0000-4000-8000-0000000000aa');
+    raise exception 'over-length storage_ref was accepted';
+  exception when raise_exception then
+    if sqlerrm='over-length storage_ref was accepted' then raise; end if;
+  end;
+  perform set_config('tour_proof.result_id',v_result::text,true);
+  perform set_config('tour_proof.storage_ref',v_ref,true);
+end $storage_ref$;
+reset session authorization;
+do $stored$
+begin
+  if (select storage_ref from ops.tour_pdf_render_result where id=current_setting('tour_proof.result_id')::uuid)
+     is distinct from current_setting('tour_proof.storage_ref') then
+    raise exception 'stored storage_ref drifted';
+  end if;
+end $stored$;
+
 rollback;

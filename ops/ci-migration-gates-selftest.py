@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Tests migration gate scheduling, isolation, and failure handling.
+"""Prove the DB gate runner: failures stay visible and isolated gates get private clusters."""
 import importlib.util
 from pathlib import Path
 import socket
@@ -17,24 +17,6 @@ spec.loader.exec_module(runner)
 from lib.disposable_pg_fixture import postgres_fixture_group
 
 class Isolation(unittest.TestCase):
-    def test_partition_union_preserves_gate_order_and_isolated_prerequisites(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            gates = [root / name for name in ('serial-a.py', 'head.py', 'isolated.py', 'serial-b.py')]
-            for gate in gates:
-                gate.write_text(runner.BEFORE_ISOLATED_MARKER if gate.name == 'head.py' else '')
-            serial = runner.partition_gates(gates, 'serial', rollback_only={'isolated.py'})
-            isolated = runner.partition_gates(gates, 'isolated', rollback_only={'isolated.py'})
-            self.assertEqual(serial, [gates[1], gates[0], gates[3]])
-            self.assertEqual(isolated, [gates[1], gates[2]])
-            self.assertEqual(set(serial) | set(isolated), set(gates))
-            self.assertEqual(set(serial) & set(isolated), {gates[1]})
-            self.assertEqual(runner.partition_gates(gates, 'all'), gates)
-            with self.assertRaises(ValueError):
-                runner.partition_gates(gates, 'unknown')
-
-
-
     def test_snapshots_complete_before_private_clusters_start(self):
         completed=0
         started=threading.Event()

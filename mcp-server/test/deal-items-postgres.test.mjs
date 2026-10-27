@@ -1,3 +1,4 @@
+// Test persisted deal items, board projections, and item-level writes in PostgreSQL.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';

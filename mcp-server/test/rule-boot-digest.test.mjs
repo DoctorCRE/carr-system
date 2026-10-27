@@ -1,3 +1,4 @@
+// Test bounded pagination of the rule boot digest.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ruleBootPage } from "../src/rule-boot.js";

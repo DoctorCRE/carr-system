@@ -1,3 +1,4 @@
+// Test deal item parsing, validation, headings, and commands.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { splitDealNextStep, validateDealItem, shortDealHeading } from '../src/deal-items.ts';

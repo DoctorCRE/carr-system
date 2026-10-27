@@ -12,6 +12,10 @@ import psycopg
 
 from gate_runtime_role import rollback_only_connection
 
+FORBIDDEN_COLUMNS = {"id", "pool_id", "source_key", "source_row", "email", "phone", "address"}
+REQUIRED_COLUMNS = {"display_name", "est_lease_event", "tier_status", "flag_status", "has_channel",
+                    "decision_count", "source_observed_at", "freshness_state", "owner_slug"}
+
 
 def one(cur: psycopg.Cursor[Any], sql: str, args: tuple[object, ...] = ()) -> tuple[Any, ...]:
     cur.execute(sql, args)
@@ -61,6 +65,25 @@ def main() -> int:
           end if;
           grant carr_authority to carr_authority_joe,carr_authority_dell;
         end $$""")
+        # Safe-view shape and read boundary (moved from the retired
+        # renewal-decision-delivery-gate.py, whose pre-0279 branch was dead).
+        columns = {row[0] for row in cur.execute(
+            "select column_name from information_schema.columns "
+            "where table_schema='public' and table_name='v_renewal_decision_queue'").fetchall()}
+        if columns & FORBIDDEN_COLUMNS or not REQUIRED_COLUMNS <= columns:
+            raise RuntimeError(f"safe renewal queue columns are wrong: {sorted(columns)}")
+        if one(cur, "select count(*) from information_schema.columns where table_schema='public' "
+                    "and table_name='v_renewal_decision_queue_status' and column_name='owner_slug'") != (1,):
+            raise RuntimeError("renewal status view is not sponsor-scoped")
+        for role, relation in (("carr_reader", "public.v_renewal_decision_queue"),
+                               ("carr_reader", "public.v_renewal_decision_queue_status"),
+                               ("carr_reader", "public.candidate_pool"), ("carr_reader", "public.v_export_pool"),
+                               ("carr_reader", "public.lease"),
+                               ("carr_reader", "ops.renewal_decision_source_run"),
+                               ("carr_jobs", "ops.renewal_decision_source_run")):
+            if one(cur, "select has_table_privilege(%s,%s,'select')", (role, relation))[0] \
+                    != relation.startswith("public.v_renewal_decision"):
+                raise RuntimeError(f"unexpected {role} select boundary on {relation}")
         joe = one(cur, "select id from actor where slug='joe'")[0]
         dell = one(cur, "select id from actor where slug='dell'")[0]
         party, client, deal = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()

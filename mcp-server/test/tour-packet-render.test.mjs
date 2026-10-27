@@ -1,3 +1,4 @@
+// Tests deterministic Tour packet rendering and public fact validation.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { formatApprovedMetric, renderTourPacket, TourPacketRenderError } from "../src/tour-packet-render.js";
