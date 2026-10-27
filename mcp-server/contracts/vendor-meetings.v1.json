@@ -1,6 +1,6 @@
 {
   "schema": "vendor-meetings.v1",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "operation": "read-vendor-meetings",
   "write": false,
   "audience": "Authenticated Joe or Dell. Shared canonical facts, never caller-supplied identity or tenant.",
@@ -18,7 +18,8 @@
     "has_more": "Whether a subsequent page exists in this snapshot",
     "next_cursor": "Opaque cursor or null",
     "consistency": "live_keyset; restart after record changes",
-    "calendar": "Own authenticated partner's calendar metadata. State is ready, empty, partial or unavailable. Includes observed_at, notes and source freshness when available. Does not return unrelated meetings. Missing, malformed or failed reads remain unavailable; calendar failures preserve the vendor page."
+    "calendar": "Own authenticated partner's calendar metadata. State is ready, empty, partial or unavailable. Includes observed_at, notes and source freshness when available. Does not return unrelated meetings. Missing, malformed or failed reads remain unavailable; calendar failures preserve the vendor page.",
+    "calendar_scheduling": "calendar.scheduling returns maximal candidate openings of at least 30 minutes in the rolling next 24 hours, with explicit window bounds and minimum_duration_minutes. Each item contains start and end only. It may include overnight hours, makes no business-hour assumptions, and never confirms availability or books anything. State is ready, partial, empty, or unavailable; note always requires checking Outlook before booking. Every stored meeting, including all-day entries and unrelated meetings, blocks its stored interval. Overlapping and touching intervals merge. Missing/failed/stale/future/malformed/ambiguous/truncated calendar coverage suppresses candidates, including the conservative 100-item projection cap. Known unverified responses, group invites, and recurring coverage retain partial candidates alongside existing calendar notes. Outcome-review trimming does not suppress scheduling."
   },
   "candidate": {
     "vendor_id": "Exact live vendor UUID",

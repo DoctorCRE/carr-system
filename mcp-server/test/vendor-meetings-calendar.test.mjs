@@ -93,7 +93,10 @@ test('calendar failure preserves the vendor page and recovers its read transacti
   const result = await executeRegisteredTool(c, JOE, 'read-vendor-meetings', {});
   assert.equal(result.items[0].contact.email, 'ada@example.test');
   assert.deepEqual(result.items[0].possible_meetings, []);
-  assert.deepEqual(result.calendar, { state: 'unavailable', reason: 'source_unavailable' });
+  assert.equal(result.calendar.state, 'unavailable');
+  assert.equal(result.calendar.reason, 'source_unavailable');
+  assert.equal(result.calendar.scheduling.state, 'unavailable');
+  assert.deepEqual(result.calendar.scheduling.items, []);
   assert.ok(!JSON.stringify(result).includes('diagnostic'));
   assert.deepEqual(c.queries.filter(q => q.sql.includes('savepoint')).map(q => q.sql), [
     'savepoint vendor_calendar', 'rollback to savepoint vendor_calendar', 'release savepoint vendor_calendar',
