@@ -9,6 +9,7 @@ from git_env import scrubbed_env
 import unittest
 
 spec = importlib.util.spec_from_file_location('clock_check', Path(__file__).with_name('test-clock-check.py'))
+assert spec is not None and spec.loader is not None
 clock = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(clock)
 
