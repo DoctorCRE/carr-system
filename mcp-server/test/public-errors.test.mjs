@@ -127,6 +127,16 @@ test("MCP routes decline completion claims to complete-work-request", async t =>
   assert.deepEqual(Object.keys(payload).sort(), ["correlation_id", "error", "hint"]);
 });
 
+test("MCP names every client portal refusal instead of collapsing it to a server fault", async t => {
+  for (const code of ["not_a_deal", "portal_slug_invalid", "portal_password_invalid", "portal_deal_not_found",
+    "portal_slug_taken", "portal_password_differs", "portal_deal_already_registered"]) {
+    const payload = await failure(t, new ToolError({ error: code, hint: privateText }));
+    assert.equal(payload.error, code);
+    assert.notEqual(payload.hint, "The operation failed. Quote the correlation_id when reporting it.");
+    assert.doesNotMatch(payload.hint, /password:|hash|\$2[aby]\$/i);
+  }
+});
+
 test("unknown ToolError codes cannot carry diagnostic text onto the wire", async t => {
   const payload = await failure(t, new ToolError({ error: privateText }));
   assert.equal(payload.error, "unhandled_verb_failure");
