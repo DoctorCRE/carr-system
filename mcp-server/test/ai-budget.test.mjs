@@ -216,3 +216,21 @@ test('exhaustion is cached within an isolate and expires at the next UTC day', a
   await budgetedAi(f.env).run(MODEL, input());
   assert.equal(f.requests, 3);
 });
+
+
+test('a 3000-chunk revision with only 1000 neurons left admits no paid work', async () => {
+  const { embedDoctrineRevisions } = await import('../src/doctrine-embeddings.ts');
+  const f = fixture({ budget: '8000', run: async (_model, data) => ({ data: data.text.map(() => [1, ...Array(383).fill(0)]) }) });
+  f.values.set('daily', { day: new Date().toISOString().slice(0, 10), spent: 7000 });
+  let inserts = 0;
+  const c = { ai: budgetedAi(f.env), query: async sql => {
+    if (sql.includes('insert into doctrine_embedding')) inserts++;
+    return { rows: [{ revision_id: 'revision' }] };
+  } };
+  const result = await embedDoctrineRevisions(c, [{ revision_id: 'revision', plain_text: 'x'.repeat(480 + 2999 * 384) }]);
+  assert.equal(result.reason, 'ai_daily_budget_exhausted');
+  assert.equal(result.embedded, 0);
+  assert.equal(inserts, 0);
+  assert.equal(f.providerCalls, 0, 'a refused revision must not burn the remaining budget');
+  assert.equal(f.values.get('daily').spent, 7000);
+});
