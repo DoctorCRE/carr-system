@@ -126,6 +126,26 @@
       ]
     },
     {
+      "key": "outlook-outbox",
+      "name": "Submitted Outlook replies",
+      "purpose": "Dispatch only app-submitted reply drafts from the owning partner's Outlook, with the other partner copied. Confirm Sent Items before recording sent; replay receipts without repeating dispatch.",
+      "family": "Local Mac edge",
+      "criticality": "high",
+      "owner_actor": "joe",
+      "repo_path": "lib/outlook_outbox.py",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.outlook-outbox.plist",
+          "runs_on": "primary",
+          "expected_cadence_seconds": 60,
+          "cadence_grace_seconds": 2400,
+          "notes": "Opt-in outbox service on each partner's own Mac. Identity, partner_cc and paths come from ~/.config/carr/outlook.json. Shares the existing send lock, daily cap, duplicate latch and Sent Items confirmation. Rendered by bin/install-outlook-intake.sh without loading. Logs contain counts only."
+        }
+      ]
+    },
+    {
       "key": "flash-idle-stop",
       "name": "Flash idle shutdown",
       "purpose": "Every five minutes, stop and disable Flash after its human grant expires or fifteen idle minutes. Expiry ends in-flight work.",
