@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { connectionRouteForTool } from '../src/mcp.js';
+import { publicError } from '../src/public-errors.ts';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
 
@@ -45,7 +46,14 @@ async function command(name, args, identity = agent, client = c) {
 }
 const set = (description, extra = {}, identity = joe) => command('set-next-action', { ref: 'C-901', description, ...extra }, identity);
 const read = () => command('get-next-action', { ref: 'C-901', owner: 'joe' });
-const conflict = error => error.payload?.error === 'next_action_conflict';
+const conflict = error => {
+  assert.equal(error.payload?.error, 'next_action_conflict');
+  const payload = publicError(error);
+  assert.equal(payload.error, 'next_action_conflict');
+  assert.match(payload.hint, /get-next-action/);
+  assert.match(payload.hint, /expected_action/);
+  return true;
+};
 const reset = () => c.query("update next_action set status='done' where status='open'");
 
 test('canonical action remains visible behind 35 newer timeline entries and a hold', async () => {
