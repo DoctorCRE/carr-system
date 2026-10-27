@@ -63,6 +63,9 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
           sorted(classes['strategy']['matrix']['classes']) == sorted(pr['jobs']['classes']['strategy']['matrix']['classes'])
           and classes['strategy']['matrix']['gate_shard'] == [1, 2]
           and classes['strategy']['matrix']['exclude'] == pr['jobs']['classes']['strategy']['matrix']['exclude'])
+    check('main uses the same distinct gate shard job names as PR CI',
+          classes['name'] == pr['jobs']['classes']['name']
+          and classes['strategy']['matrix']['job_names'] == pr['jobs']['classes']['strategy']['matrix']['job_names'])
     check('all classes run unless exact-tree proof succeeded',
           classes.get('if') == "${{ always() && (needs.evidence.result != 'success' || needs.evidence.outputs.reused != 'true') }}")
     main_steps = classes['steps']
