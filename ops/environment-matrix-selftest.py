@@ -41,8 +41,9 @@ THE ASSERTIONS.
      top-level `[limits] cpu_ms` is what bounds one invocation's CPU; staging
      inherits it, and an environment override may only lower it. Production
      samples at 0.1 and staging at 0.01, including any nested logs override.
-  7. ONLY THE DAILY BUDGET WRAPPER MAY ACCESS THE AI BINDING. A parsed source
+  8. ONLY THE DAILY BUDGET WRAPPER MAY ACCESS THE AI BINDING. A parsed source
      check catches raw access, aliases, destructuring, and static computed names.
+  9. PRODUCTION AND STAGING AI BUDGETS TOTAL LESS THAN THE SHARED FREE ALLOWANCE.
 """
 
 import json
@@ -107,6 +108,17 @@ def billing_failures(config: dict) -> list[str]:
         logs_rate = worker.get("observability", {}).get("logs", {}).get("head_sampling_rate", rate)
         if type(logs_rate) not in (int, float) or not 0 <= logs_rate < 1 or (expected is not None and logs_rate != expected):
             failures.append(f"{name}: unsafe logs.head_sampling_rate override")
+    return failures
+
+
+def ai_budget_failures(config: dict) -> list[str]:
+    """Keep the two isolated counters below the account's shared free allowance."""
+    failures = []
+    for name, worker, cap in (("production", config, 8000),
+                              ("staging", config.get("env", {}).get("staging", {}), 1500)):
+        value = worker.get("vars", {}).get("AI_DAILY_NEURON_BUDGET")
+        if not isinstance(value, str) or not value.isascii() or not value.isdigit() or int(value) > cap:
+            failures.append(f"{name}: missing or unsafe AI_DAILY_NEURON_BUDGET")
     return failures
 
 
@@ -215,13 +227,18 @@ def main() -> int:
           "an entry names a difference with no why")
 
     # ── 6 ────────────────────────────────────────────────────────────────────
-    billing = billing_failures(wrangler)
+    uptime_path = REPO / "mcp-server" / "wrangler.uptime.toml"
+    with uptime_path.open("rb") as fh:
+        uptime = tomllib.load(fh)
+    billing = billing_failures(wrangler) + [f"uptime: {failure}" for failure in billing_failures(uptime)]
     check("6. every Worker has bounded CPU and explicit log sampling", not billing, "; ".join(billing))
     ai_boundary = subprocess.run(
         ["node", str(REPO / "mcp-server/check-ai-boundary.mjs")],
         capture_output=True, text=True, cwd=REPO)
-    check("7. only the daily budget wrapper accesses Workers AI", ai_boundary.returncode == 0,
+    check("8. only the daily budget wrapper accesses Workers AI", ai_boundary.returncode == 0,
           ai_boundary.stdout + ai_boundary.stderr)
+    ai_budget = ai_budget_failures(wrangler)
+    check("9. AI budgets stay below the shared free allowance", not ai_budget, "; ".join(ai_budget))
 
     print()
     if FAILURES:

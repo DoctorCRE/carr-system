@@ -10,7 +10,7 @@ const TIMEOUT_MS = 2000;
 /** The Workers AI binding, as far as this module calls it. */
 type EmbeddingAi = {
   run(model: string, input: { text: string[]; pooling: string }): Promise<unknown>;
-  assertOperationFits?(textCount: number): void;
+  reserveOperation?(textCount: number): Promise<Pick<EmbeddingAi, 'run'>>;
 };
 /** The database client tools.js hands doctrine verbs: it carries the AI binding and its transaction state. */
 type DoctrineDb = Db & { ai?: EmbeddingAi; inTransaction?: boolean };
@@ -59,10 +59,10 @@ async function doctrineEmbeddings(ai: EmbeddingAi | undefined, texts: string[]):
 }
 
 async function embedChunks(ai: EmbeddingAi | undefined, texts: string[]) {
-  ai?.assertOperationFits?.(texts.length);
+  const operation = ai?.reserveOperation ? await ai.reserveOperation(texts.length) : ai;
   const vectors: Vector[] = [];
   for (let offset = 0; offset < texts.length; offset += 16)
-    vectors.push(...await doctrineEmbeddings(ai, texts.slice(offset, offset + 16)));
+    vectors.push(...await doctrineEmbeddings(operation, texts.slice(offset, offset + 16)));
   return vectors;
 }
 

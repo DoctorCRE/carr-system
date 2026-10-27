@@ -1,6 +1,7 @@
+// Reserve daily Workers AI neurons before provider work.
 const MODEL = '@cf/baai/bge-small-en-v1.5';
 const DEFAULT_BUDGET = 8000;
-const DAY_MS = 86_400_000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 const exhaustedNamespaces = new WeakMap();
 
 export class AiBudgetError extends Error {
@@ -11,10 +12,11 @@ export class AiBudgetError extends Error {
 }
 
 function dailyLimit(env) {
-  const raw = env.AI_DAILY_NEURON_BUDGET ?? String(DEFAULT_BUDGET);
-  if (typeof raw !== 'string' || !/^(0|[1-9]\d*)$/.test(raw) || Number(raw) > DEFAULT_BUDGET)
-    throw new AiBudgetError('ai_budget_invalid_config');
   if (!['production', 'staging'].includes(env.CARR_ENV))
+    throw new AiBudgetError('ai_budget_invalid_config');
+  const maximum = env.CARR_ENV === 'staging' ? 1500 : DEFAULT_BUDGET;
+  const raw = env.AI_DAILY_NEURON_BUDGET ?? String(maximum);
+  if (typeof raw !== 'string' || !/^(0|[1-9]\d*)$/.test(raw) || Number(raw) > maximum)
     throw new AiBudgetError('ai_budget_invalid_config');
   return Number(raw);
 }
@@ -36,45 +38,60 @@ function embeddingInput(model, input, options) {
   return Object.freeze({ text: Object.freeze([...input.text]), pooling: 'cls' });
 }
 
+function estimatedNeurons(textCount) {
+  // Reserve the full model context, independent of tokenizer normalization.
+  return Math.ceil(textCount * 512 * 1841 / 1_000_000);
+}
+
 export function budgetedAi(env) {
+  async function reserve(neurons) {
+    const limit = dailyLimit(env);
+    if (neurons > limit) throw exhausted(utcDay());
+    if (!env.AI?.run || !env.AI_NEURON_BUDGET?.get || !env.AI_NEURON_BUDGET?.idFromName)
+      throw new AiBudgetError('ai_budget_unavailable');
+    const namespace = env.AI_NEURON_BUDGET;
+    const cached = exhaustedNamespaces.get(namespace);
+    if (cached?.day === utcDay() && cached.limit === limit) throw exhausted(cached.day);
+    let response, receipt;
+    try {
+      const stub = namespace.get(namespace.idFromName(env.CARR_ENV));
+      response = await stub.fetch(new Request('https://ai-budget.internal/reserve', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ neurons }),
+      }));
+      receipt = await response.json();
+    } catch {
+      throw new AiBudgetError('ai_budget_unavailable');
+    }
+    if (response.status === 429 && receipt?.error === 'ai_daily_budget_exhausted') {
+      if (receipt.day === utcDay() && receipt.limit === limit && receipt.remaining === 0)
+        exhaustedNamespaces.set(namespace, { day: receipt.day, limit });
+      throw exhausted(utcDay());
+    }
+    if (!response.ok || receipt?.day !== utcDay() || receipt.limit !== limit ||
+        !Number.isInteger(receipt.spent) || receipt.spent < neurons || receipt.spent > limit ||
+        receipt.remaining !== limit - receipt.spent)
+      throw new AiBudgetError('ai_budget_unavailable');
+    if (receipt.remaining === 0) exhaustedNamespaces.set(namespace, { day: receipt.day, limit });
+  }
   return {
-    assertOperationFits(textCount) {
-      const limit = dailyLimit(env);
-      if (!Number.isInteger(textCount) || textCount < 1)
+    async reserveOperation(textCount) {
+      if (!Number.isSafeInteger(textCount) || textCount < 1)
         throw new AiBudgetError('ai_budget_unsupported_input');
-      if (textCount > limit) throw exhausted(utcDay());
+      let remaining = Math.floor(textCount / 16) * estimatedNeurons(16) + estimatedNeurons(textCount % 16);
+      await reserve(remaining);
+      return {
+        async run(model, input, ...options) {
+          const snapshot = embeddingInput(model, input, options);
+          const neurons = estimatedNeurons(snapshot.text.length);
+          if (neurons > remaining) throw exhausted(utcDay());
+          remaining -= neurons;
+          return env.AI.run(model, snapshot);
+        },
+      };
     },
     async run(model, input, ...options) {
       const snapshot = embeddingInput(model, input, options);
-      const limit = dailyLimit(env);
-      if (!env.AI?.run || !env.AI_NEURON_BUDGET?.get || !env.AI_NEURON_BUDGET?.idFromName)
-        throw new AiBudgetError('ai_budget_unavailable');
-      // Reserve the full model context, independent of tokenizer normalization.
-      const neurons = Math.ceil(snapshot.text.length * 512 * 1841 / 1_000_000);
-      if (neurons > limit) throw exhausted(utcDay());
-      const namespace = env.AI_NEURON_BUDGET;
-      const cached = exhaustedNamespaces.get(namespace);
-      if (cached?.day === utcDay() && cached.limit === limit) throw exhausted(cached.day);
-      let response, receipt;
-      try {
-        const stub = namespace.get(namespace.idFromName(env.CARR_ENV));
-        response = await stub.fetch(new Request('https://ai-budget.internal/reserve', {
-          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ neurons }),
-        }));
-        receipt = await response.json();
-      } catch {
-        throw new AiBudgetError('ai_budget_unavailable');
-      }
-      if (response.status === 429 && receipt?.error === 'ai_daily_budget_exhausted') {
-        if (receipt.day === utcDay() && receipt.limit === limit && receipt.remaining === 0)
-          exhaustedNamespaces.set(namespace, { day: receipt.day, limit });
-        throw exhausted(utcDay());
-      }
-      if (!response.ok || receipt?.day !== utcDay() || receipt.limit !== limit ||
-          !Number.isInteger(receipt.spent) || receipt.spent < neurons || receipt.spent > limit ||
-          receipt.remaining !== limit - receipt.spent)
-        throw new AiBudgetError('ai_budget_unavailable');
-      if (receipt.remaining === 0) exhaustedNamespaces.set(namespace, { day: receipt.day, limit });
+      await reserve(estimatedNeurons(snapshot.text.length));
       // A failed or timed-out provider call may still bill. Never refund it.
       return env.AI.run(model, snapshot);
     },
