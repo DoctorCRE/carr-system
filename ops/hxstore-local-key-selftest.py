@@ -82,8 +82,8 @@ class LocalKeyExportTests(unittest.TestCase):
     def test_identical_sender_and_time_do_not_merge_distinct_keys(self):
         # Sender plus send time joins these; the keys say they are two store items.
         rows, meta = self.export(message(0x2002), message(0x3003))
-        self.assertEqual(sorted(rows), [('pat@example.test', 1_793_000_000, 1, str(0x2002)),
-                                        ('pat@example.test', 1_793_000_000, 1, str(0x3003))])
+        self.assertEqual(sorted(rows), [('pat@example.test', 1_793_000_000, 1, str(0x3003)),
+                                        ('pat@example.test', 1_793_000_000, 1, str(0x2002))])
         self.assertEqual((meta['messages_with_key'], meta['local_key_conflicts']), (2, 0))
 
     def test_preview_does_not_join_another_keys_full_body(self):
@@ -95,6 +95,29 @@ class LocalKeyExportTests(unittest.TestCase):
             columns='subject, body_kind, copies, local_keys')
         self.assertEqual(rows, [('Preview subject', 'preview', 1, str(0x3003)),
                                 ('Full subject', 'full', 1, str(0x2002))])
+
+    def test_same_key_and_unkeyed_copies_keep_existing_merge_behavior(self):
+        for key in (0x2002, 0):
+            with self.subTest(key=key):
+                rows, _ = self.export(message(key, sent=1_793_000_300), message(key))
+                self.assertEqual(rows, [('pat@example.test', 1_793_000_000, 2, str(key) if key else None)])
+
+    def test_same_key_and_unkeyed_previews_still_join_their_full_body(self):
+        preview = 'Synthetic local key study preview text for one message'
+        for key in (0x2002, 0):
+            with self.subTest(key=key):
+                rows, _ = self.export(
+                    message(key, sent=1_793_000_300, subject='Full subject',
+                            html=f'<html><body>{preview}</body></html>'),
+                    message(key, subject='Preview subject'),
+                    columns='subject, body_kind, copies, local_keys')
+                self.assertEqual(rows, [('Full subject', 'full', 2, str(key) if key else None)])
+
+    def test_unkeyed_rows_cannot_bridge_distinct_keyed_items(self):
+        rows, meta = self.export(message(0x2002, sent=1_793_000_300), message(0), message(0x3003))
+        self.assertEqual(len(rows), 3)
+        self.assertCountEqual([r[2:] for r in rows], [(1, str(0x2002)), (1, None), (1, str(0x3003))])
+        self.assertEqual(meta['local_key_conflicts'], 0)
 
     def test_an_anchor_inside_the_fixed_header_or_without_a_header_gets_no_key(self):
         bare = bytearray(message(0x4004, preview='Another synthetic opening without any header'))
