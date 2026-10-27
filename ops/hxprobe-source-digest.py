@@ -41,9 +41,9 @@ def digest(crate: Path) -> str:
             continue
         entries.append(f'{relative.as_posix()}\0{hashlib.sha256(path.read_bytes()).hexdigest()}\n')
     root = crate.parent.parent
-    for relative in EXTERNAL_INPUTS:
-        path = root / relative
-        entries.append(f'{relative}\0{hashlib.sha256(path.read_bytes()).hexdigest()}\n')
+    for external_input in EXTERNAL_INPUTS:
+        path = root / external_input
+        entries.append(f'{external_input}\0{hashlib.sha256(path.read_bytes()).hexdigest()}\n')
     return hashlib.sha256(''.join(entries).encode()).hexdigest()
 
 

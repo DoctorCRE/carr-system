@@ -79,6 +79,9 @@ impl Index {
             };
             self.objects += 1;
             self.identities.insert((goid.clone(), start));
+            if end < start {
+                continue;
+            }
             let Some(ev) = parse(obj, goid, start, end) else { continue };
             self.events.entry(obj.to_vec()).or_insert(ev);
         }
@@ -356,6 +359,16 @@ mod tests {
         idx.observe(&envelope(&obj));
         assert_eq!(idx.objects, 1, "the identity is still counted");
         assert!(idx.events.is_empty(), "and left undecoded");
+    }
+
+    #[test]
+    fn reversed_times_are_counted_but_not_exported_as_candidates() {
+        let mut obj = object(true, &[]);
+        obj[END..END + 8].copy_from_slice(&ticks(1_792_999_999));
+        let mut idx = Index::default();
+        idx.observe(&envelope(&obj));
+        assert_eq!(idx.identities.len(), 1, "the unreadable item remains visible in counts");
+        assert!(idx.events.is_empty(), "an event cannot end before it starts");
     }
 
     #[test]
