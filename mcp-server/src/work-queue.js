@@ -7,6 +7,9 @@ const text = (max = 100) => ({ type: 'string', minLength: 1, maxLength: max });
 const positive = { type: 'integer', minimum: 1, maximum: 0x7fffffff };
 const base = { idempotency_key: { type: 'string', format: 'uuid' }, work_request: text() };
 const slice = { ...positive, default: 1 };
+const jobFacts = ['executor', 'model', 'effort', 'card_title', 'description'];
+const jobStart = ['job', 'runner_job_id'];
+const repositories = Object.keys(addressFormat.repositories);
 export function queueCardId(ref, ordinal, number) {
   const work_request = 'WR' + new RegExp(addressFormat.work_request_pattern).exec(ref)[1].replace(/^0+(?=\d)/u, '');
   return addressFormat[number == null ? 'slice_template' : 'job_template']
@@ -34,10 +37,10 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
   const ordered = async (c, actor) => (await c.query(`select j.*,w.ref as work_request from ops.work_request_job j
     join ops.work_request w on w.id=j.work_request_id where w.organization_tenant_id=$1
     and ${readableWorkRequestSql('w')} order by j.priority,w.ref,j.slice_ordinal,j.j_number`, [organizationTenantForActor(actor)])).rows;
-  const command = (name, description, extra, required, run) => {
+  const command = (name, description, extra, required, run, schema = {}) => {
     const properties = { ...base, ...extra }, needed = ['idempotency_key', 'work_request', ...required];
     return { write: true, description,
-      inputSchema: { type: 'object', additionalProperties: false, properties, required: needed },
+      inputSchema: { type: 'object', additionalProperties: false, properties, required: needed, ...schema },
       handler: async (c, actor, args) => {
         validate(args, properties, needed);
         await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
@@ -61,9 +64,23 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
           select $1,ordinality,title from unnest($2::text[]) with ordinality as s(title,ordinality)`, [wr.id, titles]);
         return { slices: titles.map((title, index) => ({ slice_id: queueCardId(wr.ref, index + 1), title })) };
       }),
-    'dispatch-job': command('dispatch-job', 'Record job facts and mint the next J number under a slice. This does not start an executor.',
-      { slice, executor: text(), model: text(), effort: text(), card_title: text(80), description: text(500) },
-      ['executor', 'model', 'effort', 'card_title', 'description'], async (c, actor, args, wr) => {
+    'dispatch-job': command('dispatch-job', 'Mint a queued job from facts, or record a runner start for an existing job exactly once.',
+      { slice, job: positive, runner_job_id: text(), repository: { ...text(), enum: repositories }, executor: text(), model: text(), effort: text(), card_title: text(80), description: text(500) },
+      [], async (c, actor, args, wr) => {
+        const starting = jobStart.some(key => Object.hasOwn(args, key));
+        if ((starting ? jobStart : jobFacts).some(key => args[key] == null)
+          || (starting ? jobFacts : jobStart).some(key => Object.hasOwn(args, key))) refuse('invalid_work_queue_fields');
+        if ((starting || Object.hasOwn(args, 'repository')) && !repositories.includes(args.repository)) refuse('invalid_work_queue_fields');
+        if (starting) {
+          const row = (await c.query(`select runner_job_id,repository from ops.work_request_job
+            where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`, [wr.id, args.slice || 1, args.job])).rows[0];
+          if (!row) refuse('job_not_found');
+          if (row.repository !== args.repository) refuse('job_repository_mismatch');
+          if (row.runner_job_id != null) refuse('job_already_started');
+          await c.query(`update ops.work_request_job set runner_job_id=$4,started_at=now()
+            where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`, [wr.id, args.slice || 1, args.job, args.runner_job_id]);
+          return { card_id: queueCardId(wr.ref, args.slice || 1, args.job), runner_job_id: args.runner_job_id };
+        }
         if (!/^[A-Za-z']+( [A-Za-z']+){1,2}$/.test(args.card_title)) refuse('invalid_card_title');
         if (args.description.trim().split(/[.!?](?:\s|$)/u).filter(Boolean).length !== 1) refuse('invalid_job_description');
         const ordinal = args.slice || 1;
@@ -73,12 +90,15 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         const priority = Number((await c.query(`select coalesce(max(j.priority),0)+1 as next from ops.work_request_job j
           join ops.work_request w on w.id=j.work_request_id where w.organization_tenant_id=$1`, [organizationTenantForActor(actor)])).rows[0].next);
         const number = (await c.query(`insert into ops.work_request_job
-          (work_request_id,slice_ordinal,j_number,priority,executor,model,effort,card_title,description)
-          select $1,$2,coalesce(max(j_number),0)+1,$3,$4,$5,$6,$7,$8 from ops.work_request_job
+          (work_request_id,slice_ordinal,j_number,priority,executor,model,effort,card_title,description,repository)
+          select $1,$2,coalesce(max(j_number),0)+1,$3,$4,$5,$6,$7,$8,$9 from ops.work_request_job
           where work_request_id=$1 and slice_ordinal=$2 returning j_number`,
-        [wr.id, ordinal, priority, args.executor, args.model, args.effort, args.card_title, args.description])).rows[0].j_number;
+        [wr.id, ordinal, priority, args.executor, args.model, args.effort, args.card_title, args.description, args.repository ?? null])).rows[0].j_number;
         return { card_id: queueCardId(wr.ref, ordinal, number), priority };
-      }),
+      }, { anyOf: [
+        { required: jobFacts },
+        { required: [...jobStart, 'repository'] },
+      ] }),
     'prioritize-job': command('prioritize-job', 'Move one visible job to a one-based queue position, preserving the relative order of its siblings.',
       { slice, job: positive, position: positive }, ['job', 'position'], async (c, actor, args, wr) => {
         const rows = await ordered(c, actor), slots = rows.map(row => row.priority);
