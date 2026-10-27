@@ -77,7 +77,7 @@ test('same-name leads at different locations keep their own verify result (WR-00
     signal: `Synthetic observation ${index}`, sourceUrl: `https://example.invalid/same-name/${index}`,
   }));
   const result = await runInNewContext(
-    `(async () => { ${source.replace(/^export const meta =/, 'const meta =')} })()`, {
+    `(async () => { ${source.replace(/^export const meta =/m, 'const meta =')} })()`, {
       args: { today: 'SYNTHETIC', lanes: ['one', 'two'], regions: ['fixture'], cap: 2 },
       phase() {}, log() {},
       parallel: jobs => Promise.all(jobs.map(job => job())),
@@ -100,7 +100,7 @@ test('an ambiguous or mismatched verify claim is refused, never guessed (WR-0005
     signal: `Synthetic observation ${index}`, sourceUrl: `https://example.invalid/refuse/${index}`,
   }));
   const result = await runInNewContext(
-    `(async () => { ${source.replace(/^export const meta =/, 'const meta =')} })()`, {
+    `(async () => { ${source.replace(/^export const meta =/m, 'const meta =')} })()`, {
       args: { today: 'SYNTHETIC', lanes: ['one', 'two'], regions: ['fixture'], cap: 2 },
       phase() {}, log() {},
       parallel: jobs => Promise.all(jobs.map(job => job())),

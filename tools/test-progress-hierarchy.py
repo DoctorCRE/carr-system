@@ -1,3 +1,4 @@
+# Test progress board hierarchy projection.
 import copy
 import json
 import sys

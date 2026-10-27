@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test uptime health checks and reporting.
 import importlib.util
 import contextlib
 import io

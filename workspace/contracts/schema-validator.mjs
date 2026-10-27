@@ -1,3 +1,4 @@
+// Compile and validate local JSON schemas.
 const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
 function resolvePointer(root, reference) {
