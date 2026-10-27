@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
-"""The Outlook installer's decoder is byte-for-byte the CI build of vendor/hxprobe.
+"""Exercise the real installer and compare its decoder with the same local CI build.
 
-Runs the real bin/install-outlook-intake.sh against a fixture checkout holding
-the committed vendor/hxprobe tree and compares the installed binary with
-`cargo build --release --locked` run in this checkout's vendor/hxprobe, the
-command the hxprobe CI class runs. It needs macOS (the installer uses zsh and
-plutil) and the toolchain recorded in vendor/hxprobe/BUILD-SHA256, because the
-installer refuses any other build; elsewhere it skips.
+Only synthetic homes and committed source copies enter this test. A different
+host toolchain is valid when the source receipt and locked release tests pass.
 """
 import hashlib
 import os
@@ -24,7 +20,7 @@ from outlook_test_support import write_settings
 
 CRATE = ROOT / 'vendor/hxprobe'
 SOURCES = ('vendor/hxprobe', 'spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py')
-INSTALLER_FILES = ('bin/install-outlook-intake.sh', 'tools/outlook-intake-copy.c', 'lib/outlook_settings.py',
+INSTALLER_FILES = ('ops/hxprobe-source-digest.py', 'bin/install-outlook-intake.sh', 'tools/outlook-intake-copy.c', 'lib/outlook_settings.py',
                    'ops/launchd/com.carr.outlook-intake.plist', 'ops/launchd/com.carr.outlook-refresh.plist')
 
 
@@ -32,14 +28,7 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def toolchain_matches_receipt() -> bool:
-    if sys.platform != 'darwin' or not shutil.which('cargo'):
-        return False
-    rustc = subprocess.run(['rustc', '-vV'], capture_output=True, text=True).stdout.strip()
-    return bool(rustc) and rustc in (CRATE / 'BUILD-SHA256').read_text()
-
-
-@unittest.skipUnless(toolchain_matches_receipt(), 'needs macOS and the toolchain recorded in BUILD-SHA256')
+@unittest.skipUnless(sys.platform == 'darwin' and shutil.which('cargo'), 'needs macOS and Cargo')
 class InstalledDecoderTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -63,7 +52,8 @@ class InstalledDecoderTest(unittest.TestCase):
         self.vendor = self.home / 'carr local/hxstore'
         self.helper = self.home / 'carr local/bin/outlook-intake-copy'
         write_settings(self.home, self.repo, vendor=str(self.vendor), copy_helper=str(self.helper),
-                       profile=str(self.home / 'Profile'))
+                       profile=str(self.home / 'Profile'),
+                       executable_path=f'{Path(shutil.which("cargo")).parent}:/usr/bin:/bin:/usr/sbin:/sbin')
         self.decoder = self.vendor / 'hxprobe/target/release/hxprobe'
 
     def git(self, *args):
@@ -77,13 +67,12 @@ class InstalledDecoderTest(unittest.TestCase):
     def install(self, check=True):
         env = fixture_env()
         env['CARGO_HOME'] = os.environ.get('CARGO_HOME', str(Path.home() / '.cargo'))
+        env['RUSTUP_HOME'] = os.environ.get('RUSTUP_HOME', str(Path.home() / '.rustup'))
         command = ['/bin/zsh', '-f', '-c', 'export HOME="$1"; exec /bin/zsh -f "$2"', 'installer-test',
                    str(self.home), str(self.repo / 'bin/install-outlook-intake.sh')]
         return subprocess.run(command, capture_output=True, text=True, check=check, env=env)
 
     def test_installed_decoder_equals_the_ci_build_and_rebuilds_only_on_source_change(self):
-        receipt = (CRATE / 'BUILD-SHA256').read_text().split()[0]
-        self.assertEqual(self.ci_build, receipt, 'refresh line 1 of vendor/hxprobe/BUILD-SHA256')
         self.install()
         self.assertEqual(sha256(self.decoder), self.ci_build)
         pin = (self.vendor / '.carr-pin').read_text()
@@ -107,7 +96,7 @@ class InstalledDecoderTest(unittest.TestCase):
         self.commit('stale receipt')
         result = self.install(check=False)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('differs from vendor/hxprobe/BUILD-SHA256', result.stderr)
+        self.assertIn('records source (none)', result.stderr)
         self.assertFalse(self.decoder.exists())
         self.assertFalse((self.vendor / '.carr-pin').exists())
         receipt.write_text(good)
@@ -116,14 +105,14 @@ class InstalledDecoderTest(unittest.TestCase):
         self.assertEqual(sha256(self.decoder), self.ci_build)
         self.assertTrue((self.vendor / '.carr-pin').read_text().startswith('source '))
 
-    def test_a_build_that_differs_from_the_receipt_keeps_the_installed_decoder(self):
+    def test_a_stale_source_receipt_keeps_the_installed_decoder(self):
         self.install()
         pin = (self.vendor / '.carr-pin').read_text()
         (self.repo / 'vendor/hxprobe/BUILD-SHA256').write_text('0' * 64 + '  target/release/hxprobe\n')
         self.commit('stale receipt')
         result = self.install(check=False)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('differs from vendor/hxprobe/BUILD-SHA256', result.stderr)
+        self.assertIn('records source (none)', result.stderr)
         self.assertEqual(sha256(self.decoder), self.ci_build)
         self.assertEqual((self.vendor / '.carr-pin').read_text(), pin)
 

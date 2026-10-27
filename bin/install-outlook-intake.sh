@@ -1,12 +1,12 @@
 #!/bin/zsh
-# install-outlook-intake.sh — build the fixed-scope copier and the vendored hxprobe, then render the job.
+# Build the configured Outlook copier and decoder, then render the jobs.
 #
 # A narrow installer like install-outlook-triage.sh: ops/config-as-code.py install
 # would also rewrite every unrelated hook and LaunchAgent. The decoder is built
 # from vendor/hxprobe in this checkout, the tree the hxprobe CI class tests, with
 # the same `cargo build --release --locked`. Cargo's target directory sits under
-# the settings `vendor` path, and the binary is installed only when its SHA-256
-# equals vendor/hxprobe/BUILD-SHA256; otherwise the previous decoder stays. It
+# the settings `vendor` path. The source receipt must match before locked
+# tests and build; a local receipt records the installed binary and toolchain. It
 # never loads the job: it renders the plist, creates the launchd log at 0600,
 # and prints the two commands the operator runs to load it.
 #
@@ -25,6 +25,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$REPO"
 PY="$REPO/.venv/bin/python"
 RUNTIME="$("$PY" -m lib.outlook_settings field repo)"
+export PATH="$("$PY" -m lib.outlook_settings field executable_path)"
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 if [ "$REPO" != "$RUNTIME" ]; then
   SHA="$(git rev-parse HEAD)"
@@ -58,7 +59,6 @@ RENDERED="$REPO/out/$LABEL.plist"
 LOG="$REPO/out/outlook-intake-launchd.log"
 VENDOR="$("$PY" -m lib.outlook_settings field vendor)"
 HELPER="$("$PY" -m lib.outlook_settings field copy_helper)"
-CRATE="$REPO/vendor/hxprobe"
 # build.rs also reads the store atlas and its generator from the repository root.
 SOURCES=(vendor/hxprobe spec/outlook/hxstore-atlas.json ops/hxstore-atlas.py)
 DECODER="$VENDOR/hxprobe/target/release/hxprobe"
@@ -84,18 +84,7 @@ if [ ! -x "$DECODER" ] || [ "$HAVE_PIN" != "$WANT_PIN" ]; then
     print -u2 -- "install-outlook-intake: $VENDOR holds the old upstream decoder checkout; move it aside first"
     exit 1
   fi
-  mkdir -p "$VENDOR/hxprobe/target/release"
-  (cd "$CRATE" && cargo test --release --locked --quiet --target-dir "$VENDOR/build" \
-     && cargo build --release --locked --quiet --target-dir "$VENDOR/build")
-  BUILT="$(/usr/bin/shasum -a 256 "$VENDOR/build/release/hxprobe" | cut -d' ' -f1)"
-  RECEIPT="$(head -n 1 "$CRATE/BUILD-SHA256" | cut -d' ' -f1)"
-  if [ "$BUILT" != "$RECEIPT" ]; then
-    print -u2 -- "install-outlook-intake: built decoder $BUILT differs from vendor/hxprobe/BUILD-SHA256 $RECEIPT"
-    print -u2 -- "  local toolchain: $(rustc -V); the installed decoder is unchanged. Refresh BUILD-SHA256 in a PR."
-    exit 1
-  fi
-  cp "$VENDOR/build/release/hxprobe" "$DECODER.new"
-  mv -f "$DECODER.new" "$DECODER"
+  "$PY" "$REPO/ops/hxprobe-source-digest.py" --build-into "$VENDOR"
   print -- "$WANT_PIN" > "$PIN"
 fi
 
