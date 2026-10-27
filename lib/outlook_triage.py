@@ -213,6 +213,8 @@ class Report:
 
     def text(self, outcome: Outcome) -> str:
         lines = [f'outcome: {outcome.state} {outcome.reason}']
+        if outcome.detail:
+            lines.append(outcome.detail)
         lines += ['opened for a full download:'] + [f'  {r}: {n}' for r, n in sorted(self.refreshed.items())]
         lines += [f'moved: {len(self.moved)}'] + [f'  {digest} {rule}' for digest, rule in self.moved]
         lines += ['left in Inbox:'] + [f'  {reason}: {n}' for reason, n in sorted(self.left.items())]
@@ -455,7 +457,7 @@ def run(repo: Path, home: Path, now: datetime, waits: Waits = Waits(), limits: L
         with private_file(_settled(repo, day)) as handle:
             handle.write(f'{outcome.state} {outcome.reason}\n')
     print(f'outlook-triage {outcome.state} {outcome.reason} moved={len(report.moved)} '
-          f'left={sum(report.left.values())}')
+          f'left={sum(report.left.values())}' + (f' {outcome.detail}' if outcome.detail else ''))
     return outcome
 
 

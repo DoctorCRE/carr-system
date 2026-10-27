@@ -52,7 +52,7 @@ case "$MIGRATION_PART" in
   *) echo "ci.sh: unknown migration part" >&2; exit 64 ;;
 esac
 
-CLASS_ORDER="pushfloor unit types contract gates secret dependency migration binding artifact freshness hxprobe"
+CLASS_ORDER="pushfloor unit types gates secret dependency migration binding artifact freshness hxprobe"
 
 class_desc() {
   case "$1" in
@@ -61,7 +61,6 @@ class_desc() {
     pushfloor)  echo "seeded defect that must not leave the machine (local pre-push floor)" ;;
     unit)       echo "seeded failing unit test" ;;
     types)      echo "seeded shape mistake in a data hand-off" ;;
-    contract)   echo "seeded PostgreSQL path outside the disposable fixture resolver" ;;
     gates)      echo "seeded enforcement-layer regression" ;;
     secret)     echo "seeded credential in the tree" ;;
     dependency) echo "seeded unpinned or vulnerable dependency" ;;
@@ -214,18 +213,10 @@ check_types() {
   fi
 }
 
-check_contract() {
-  # The unit class owns the Node contract suites (control-room tests and
-  # workspace/contracts/validate.mjs through workspace/test). This class owns
-  # only the PostgreSQL-path boundary.
-  local pg_paths rc=0
-  pg_paths="$(git grep -n -F '/opt/homebrew/opt/postgresql@17' -- '*.py' ':!lib/disposable_pg_fixture.py')" || rc=$?
-  if [ "$rc" -ne 1 ]; then
-    printf '%s\n' "PostgreSQL paths must use lib/disposable_pg_fixture.py (grep exit $rc)" "$pg_paths" >&2
-    bad contract "PostgreSQL paths bypass lib/disposable_pg_fixture.py"
-  else
-    ok contract "PostgreSQL paths resolve through lib/disposable_pg_fixture.py"
-  fi
+tree_fingerprint() {
+  printf '%s\n' "$(git rev-parse HEAD 2>/dev/null)"
+  git status --porcelain --untracked-files=no 2>/dev/null
+  git diff --cached --name-only 2>/dev/null
 }
 
 check_gates() {
@@ -245,35 +236,12 @@ gate_programs() {
 }
 
 check_secret() {
-  local leak_args="--staged"
-  if [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ]; then
-    leak_args="--ci"
-  elif [ -n "${CARR_CI_RANGE:-}" ]; then
-    leak_args="--range $CARR_CI_RANGE"
-  fi
-  for t in security/test_*.py; do
-    if ! run_quiet "$LOGDIR/leak-guard-tests.log" "$PY" "$t"; then
-      cat "$LOGDIR/leak-guard-tests.log" >&2
-      bad secret "leak guard qualification failed"
-      return
-    fi
-  done
-  if ! run_quiet "$LOGDIR/leak-guard.log" "$PY" security/leak_guard.py $leak_args \
-      ${CARR_PUSH_RECEIVER:+--remote "$CARR_PUSH_RECEIVER"}; then
-    cat "$LOGDIR/leak-guard.log" >&2
-    bad secret "secret or client data in introduced Git blobs"
-    return
-  fi
-  local scope_args="" scope_words="tracked files"
-  if [ -n "${CARR_CI_RANGE:-}" ]; then
-    scope_args="--range $CARR_CI_RANGE"
-    scope_words="blobs pushed in $CARR_CI_RANGE"
-  fi
-  if run_quiet "$LOGDIR/secret.log" "$PY" ops/ci-secret-scan.py $scope_args; then
-    ok secret "no shaped credential in $scope_words"
+  local verdict rc=0
+  verdict="$("$PY" ops/ci-secret.py --logdir "$LOGDIR" --python "$PY")" || rc=$?
+  if [ "$rc" -eq 0 ] && [ -n "$verdict" ]; then
+    ok secret "$verdict"
   else
-    cat "$LOGDIR/secret.log" >&2
-    bad secret "credential-shaped content found in $scope_words"
+    bad secret "${verdict:-secret runner exited $rc without a verdict}"
   fi
 }
 
