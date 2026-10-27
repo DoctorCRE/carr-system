@@ -21,7 +21,9 @@ class ClockGate(unittest.TestCase):
             for source in ['Date.now()', 'new Date()', 'new Date ( /* clock */ )',
                            'Date /* clock */ . now ()', '''`https://example.test/${Date.now()}`''', '''`It's ${Date.now()} o'clock`''',
                            r'const s = /https?:\/\//; Date.now();',
-                           '`nested ${`inner ${new Date()}`} tail`']:
+                           '`nested ${`inner ${new Date()}`} tail`',
+                           r"const ok = true && /https?:\/\//.test('x'); Date.now();",
+                           r"if (true) /https?:\/\//.test('x'); Date.now();"]:
                 fixture.write_text(source)
                 self.assertTrue(clock.violations(root), source)
             for source in ['new Date("2026-10-27T15:00:00Z")', 'new Date(NOW)',

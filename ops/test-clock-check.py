@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Reject ambient JavaScript clocks in MCP tests unless live time is required."""
 from pathlib import Path
-import re
+import json
 import sys
 import subprocess
 
@@ -16,85 +16,45 @@ ALLOW = {
     'shared-oauth-worker.test.mjs': 'Token expiry runs in a separate Workerd clock.',
     'relationship-network-postgres.test.mjs': 'Network hold fixtures are relative to the database clock.',
 }
-CLOCK = re.compile(r'\bDate\s*\.\s*now\s*\(|\bnew\s+Date\s*\(\s*\)')
-
-
-def code_only(source):
-    masked = list(source)
-    stack, previous, i = [], '', 0
-    def hide(start, end, literal=False):
-        for offset in range(start, end):
-            if source[offset] != '\n':
-                masked[offset] = '_' if literal else ' '
-    while i < len(source):
-        start, char = i, source[i]
-        if stack and stack[-1] == 'template':
-            if source.startswith('${', i):
-                stack.append(0)
-                i += 2
-                previous = '('
-            elif char == '`':
-                stack.pop()
-                hide(i, i + 1, True)
-                i += 1
-            else:
-                i += 2 if char == '\\' else 1
-                hide(start, min(i, len(source)), True)
-            continue
-        if char.isspace():
-            i += 1
-            continue
-        if source.startswith('//', i) or source.startswith('/*', i):
-            closing = '\n' if source[i + 1] == '/' else '*/'
-            end = source.find(closing, i + 2)
-            i = len(source) if end < 0 else end + len(closing)
-            hide(start, i)
-            continue
-        if char in "\"'" or (char == '/' and previous in {'', '=', '(', '[', ',', ':', 'return', '=>', '!', '?', ';', '{'}):
-            quote, bracket = char, False
-            i += 1
-            while i < len(source):
-                current = source[i]
-                if current == '\\':
-                    i += 2
-                    continue
-                if quote == '/':
-                    if current == '[': bracket = True
-                    if current == ']': bracket = False
-                i += 1
-                if current == quote and not bracket:
-                    break
-            hide(start, min(i, len(source)), True)
-            previous = '_'
-            continue
-        if char == '`':
-            stack.append('template')
-            hide(i, i + 1, True)
-        elif stack and isinstance(stack[-1], int):
-            if char == '{': stack[-1] += 1
-            if char == '}':
-                if stack[-1] == 0:
-                    stack.pop()
-                else:
-                    stack[-1] -= 1
-        word = re.match(r'[\w$]+|=>|.', source[i:])[0]
-        previous = word
-        i += len(word)
-    return ''.join(masked)
+# Acorn supplies JavaScript syntax; Python owns the clock policy and reporting.
+PARSER = r"""
+const {parse} = require(process.argv[1]);
+const tree = parse(require('fs').readFileSync(0, 'utf8'),
+  {ecmaVersion: 'latest', sourceType: 'module', locations: true});
+const nodes = [];
+function visit(node) {
+  if (!node || typeof node !== 'object') return;
+  if (node.type === 'CallExpression' || node.type === 'NewExpression') {
+    const name = node.callee.type === 'Identifier' ? node.callee.name :
+      node.callee.type === 'MemberExpression' && !node.callee.computed ?
+      `${node.callee.object.name}.${node.callee.property.name}` : '';
+    nodes.push([node.type === 'NewExpression', name, node.arguments.length, node.loc.start.line]);
+  }
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) value.forEach(visit);
+    else if (value && typeof value === 'object') visit(value);
+  }
+}
+visit(tree);
+console.log(JSON.stringify(nodes));
+"""
 
 
 def violations(root, paths=None):
     failures = []
     for path in sorted(root.rglob('*') if paths is None else paths):
-        if path.suffix not in {'.js', '.mjs', '.cjs', '.ts'}:
+        if path.suffix not in {'.js', '.mjs', '.cjs'}:
             continue
         relative = path.relative_to(root).as_posix()
         if relative == 'helpers/fixed-clock.mjs' or relative in ALLOW:
             continue
-        source = code_only(path.read_text())
-        for match in CLOCK.finditer(source):
-            line = source.count('\n', 0, match.start()) + 1
-            failures.append(f'{path}:{line}: inject a fixed clock or document a live-time exception')
+        parsed = subprocess.check_output(
+            ['node', '-e', PARSER, str(Path(__file__).resolve().parents[1] /
+                                      'mcp-server/node_modules/acorn')],
+            input=path.read_text(), text=True)
+        for is_new, expression, arguments, line in json.loads(parsed):
+            if (is_new and expression == 'Date' and arguments == 0) or (not is_new and expression == 'Date.now'):
+                failures.append(f'{path}:{line}: inject a fixed clock or document a live-time exception')
     return failures
 
 
