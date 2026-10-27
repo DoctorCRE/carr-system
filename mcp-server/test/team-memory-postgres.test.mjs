@@ -1,24 +1,25 @@
 // P1 S2 proof (docs/memory/team-memory-design.md §9): attach, real-time
 // lesson, attribution, stale write, and the memory_attach_required gate,
-// against a disposable PostgreSQL built from db/schema.sql + the S2 migration.
+// against a disposable PostgreSQL built as deploy builds it: db/schema.sql, then
+// every migration missing from its ledger, in filename order (S2's included).
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { migrationNames, readMigration } from './migration-source.testhelper.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 import { publicError } from '../src/public-errors.ts';
 import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.current.generated.js';
 
-const MIGRATION = readdirSync(new URL('../../migrations/', import.meta.url))
-  .find(name => /^\d{4}_team_memory_store\.sql$/.test(name));
+const MIGRATION = migrationNames().find(name => /^\d{4}_team_memory_store\.sql$/.test(name));
 const LESSON = 'Ruled out: X — the dependency checks were clean. Next agent: skip X, go straight to Y.';
 
 let fixture, c, actor;
 before(async () => {
   assert.ok(MIGRATION, 'the S2 migration exists');
-  const bin = ['/opt/homebrew/opt/postgresql@18/bin', '/usr/lib/postgresql/18/bin',
+  const bin = [process.env.CARR_LOCAL_PG_BIN_DIR, '/opt/homebrew/opt/postgresql@18/bin', '/usr/lib/postgresql/18/bin',
     '/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin'].find(p => existsSync(`${p}/initdb`));
   assert.ok(bin, 'PostgreSQL is required for the isolated team-memory proof');
   fixture = await acquireDisposablePostgres({ prefix: 'team-memory-', pgCtl: `${bin}/pg_ctl` });
@@ -30,7 +31,12 @@ before(async () => {
   await c.query('do $$ begin create role neondb_owner; exception when duplicate_object then null; end $$;');
   await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', '-X', '-v', 'ON_ERROR_STOP=1', '-q',
     '-f', new URL('../../db/schema.sql', import.meta.url).pathname]);
-  await c.query(readFileSync(new URL(`../../migrations/${MIGRATION}`, import.meta.url), 'utf8'));
+  // The snapshot can lag main: newer migrations (such as other grant-contract
+  // registrations) are applied here exactly as tools/migrate.py would.
+  const applied = new Set((await c.query('select filename from schema_migrations')).rows.map(r => r.filename));
+  const pending = migrationNames().filter(name => !applied.has(name)).sort();
+  assert.ok(pending.includes(MIGRATION), 'the S2 migration is pending over the snapshot');
+  for (const name of pending) await c.query(readMigration(name));
   actor = { ...(await c.query(`insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner')
     on conflict(slug) do update set active=true returning id,slug`)).rows[0], human: true, client_id: 'synthetic-client' };
 });
