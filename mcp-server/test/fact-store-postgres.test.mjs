@@ -1,3 +1,4 @@
+// Test fact store promotion, isolation, and grants on PostgreSQL.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';

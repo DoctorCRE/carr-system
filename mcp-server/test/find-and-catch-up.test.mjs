@@ -1,3 +1,4 @@
+// Test bounded find and catch-up resolution and refusal paths.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 

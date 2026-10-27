@@ -1,3 +1,4 @@
+// Test Hermes runtime admission bindings and fail-closed paths.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";

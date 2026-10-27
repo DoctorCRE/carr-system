@@ -1,3 +1,4 @@
+// Create a database fixture for doctrine routing tests.
 import { readFileSync } from 'node:fs';
 import { postgresDatabase } from './postgres-database.mjs';
 

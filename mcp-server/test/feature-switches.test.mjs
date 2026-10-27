@@ -1,3 +1,4 @@
+// Test feature switch evaluation and disabled tool dispatch.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { featureEnabled, requireFeature } from '../src/feature-switches.js';

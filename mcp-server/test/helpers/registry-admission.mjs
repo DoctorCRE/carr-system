@@ -1,3 +1,4 @@
+// Assert that registered verbs pass runtime admission.
 import assert from 'node:assert/strict';
 import {TOOLS} from '../../src/tools.js';
 import {assertRegisteredOperation} from '../../src/mutation-registry.js';
