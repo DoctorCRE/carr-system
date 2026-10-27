@@ -19,25 +19,32 @@ with tempfile.TemporaryDirectory(prefix="trigger-grant-single-query-") as tmp:
     client = home / ".local" / "bin" / "psql"
     client.parent.mkdir(parents=True)
     calls = root / "calls"
+    query_file = root / "query"
     rows = [
         ("rel", "public", "write_table", "", "", ""),
         ("rel", "public", "read_table", "", "", ""),
+        ("rel", "public", "MixedCase", "", "", ""),
         ("trg", "public.write_table", "guard_read", "guard_read_fn", "f",
-         "begin perform side from read_table; return new; end;"),
+         'begin perform side from read_table; perform side from "MixedCase"; return new; end;'),
         ("role", "carr_writer", "", "", "", ""),
         ("w", "carr_writer", "public.write_table", "", "", ""),
         ("x", "carr_writer", "public.read_table", "side", "1", ""),
+        ("c", "carr_writer", "public.MixedCase", "side", "1", ""),
     ]
     output = "\n".join(SEP.join(row) for row in rows)
     client.write_text(
         "#!/usr/bin/env " + sys.executable + "\n"
+        "import sys\n"
         "from pathlib import Path\n"
         f"calls = Path({str(calls)!r})\n"
+        f"Path({str(query_file)!r}).write_text(sys.argv[-1])\n"
         "calls.write_text(calls.read_text() + 'x' if calls.exists() else 'x')\n"
         f"print({output!r})\n"
     )
     client.chmod(0o755)
     spec = importlib.util.spec_from_file_location("trigger_grant_check", CHECK)
+    if spec is None or spec.loader is None:
+        sys.exit("trigger-grant test: could not load ops/trigger-grant-check.py")
     check = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(check)
     check.db_tap.psql_bin = lambda: str(client)
@@ -47,12 +54,15 @@ with tempfile.TemporaryDirectory(prefix="trigger-grant-single-query-") as tmp:
         returncode = check.main()
     observed = stdout.getvalue()
     count = calls.read_text() if calls.exists() else ""
+    query = query_file.read_text()
     expected = (
         returncode == 1
         and "guard_read" in observed
         and "public.read_table" in observed
         and "carr_writer" in observed
         and len(count) == 1
+        and "nspname || chr(46) || c.relname as tbl" in query
+        and "format('%I.%I'" not in query
     )
     if not expected:
         print("FAIL one connection reports the seeded missing column")
@@ -60,7 +70,7 @@ with tempfile.TemporaryDirectory(prefix="trigger-grant-single-query-") as tmp:
         print(f"psql launches: {len(count)}")
         raise SystemExit(1)
 
-    rows[-1] = ("c", "carr_writer", "public.read_table", "side", "1", "")
+    rows[6] = ("c", "carr_writer", "public.read_table", "side", "1", "")
     output = "\n".join(SEP.join(row) for row in rows)
     client.write_text(
         "#!/usr/bin/env " + sys.executable + "\n"

@@ -119,7 +119,7 @@ def main():
         catalog = psql(dsn, rf"""
             with relations as (
                 select c.oid, n.nspname, c.relname,
-                       format('%I.%I', n.nspname, c.relname) as tbl
+                       n.nspname || chr(46) || c.relname as tbl
                 from pg_class c join pg_namespace n on n.oid = c.relnamespace
                 where c.relkind in ('r','p','v','m')
                   and n.nspname not in ('pg_catalog','information_schema')
