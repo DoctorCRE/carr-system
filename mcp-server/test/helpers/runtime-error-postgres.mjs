@@ -1,3 +1,4 @@
+// Create a PostgreSQL fixture for runtime error tests.
 import { readFile } from 'node:fs/promises';
 import { postgresDatabase } from './postgres-database.mjs';
 

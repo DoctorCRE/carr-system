@@ -1,3 +1,4 @@
+// Tests uptime probes, outage alerts, recovery, and worker behavior.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {

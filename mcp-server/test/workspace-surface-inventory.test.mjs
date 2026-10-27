@@ -1,3 +1,4 @@
+// Tests the inventory of authenticated workspace surfaces.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AUTHENTICATED_SURFACES, WORKSPACE_ROUTES } from "../src/workspace-surface-inventory.js";

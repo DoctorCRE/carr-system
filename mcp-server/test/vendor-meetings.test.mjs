@@ -1,3 +1,4 @@
+// Tests vendor meeting reads, contact suggestions, and access controls.
 import test, { before, after } from 'node:test';
 import { existsSync } from 'node:fs';
 import { execFile } from 'node:child_process';

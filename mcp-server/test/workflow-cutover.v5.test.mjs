@@ -1,3 +1,4 @@
+// Tests workflow cutover transitions and slice completion.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ToolError, executeRegisteredTool, TOOLS } from "../src/tools.js";

@@ -1,3 +1,4 @@
+// Tests vendor directory migrations and PostgreSQL read and write contracts.
 import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';

@@ -1,3 +1,4 @@
+// Tests Work Request triage transitions and authority.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";

@@ -1,3 +1,4 @@
+// Tests current work item selection and reporting.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

@@ -1,3 +1,4 @@
+# Test Salesforce active snapshot processing.
 import sys
 import copy
 import json

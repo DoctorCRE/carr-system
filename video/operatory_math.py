@@ -1,3 +1,4 @@
+# Define and calculate operatory video timing and graphics.
 from __future__ import annotations
 
 import json

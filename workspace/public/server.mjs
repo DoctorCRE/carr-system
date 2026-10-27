@@ -1,3 +1,4 @@
+// Serve the workspace prototype and its fixtures.
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";

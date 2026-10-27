@@ -1,3 +1,4 @@
+// Tests authenticated work inventory census web routes and refusals.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createDealroomHandler, isDealroomRequest } from "../src/dealroom-web.js";

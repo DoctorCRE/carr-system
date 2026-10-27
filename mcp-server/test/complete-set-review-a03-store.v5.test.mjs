@@ -1,3 +1,4 @@
+// Tests retired complete-set review verbs are unavailable through MCP.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { TOOLS, executeRegisteredTool } from "../src/tools.js";

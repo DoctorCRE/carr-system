@@ -1,3 +1,4 @@
+// Tests CRE lifecycle store envelopes, evidence, and authority.
 import { readMigration } from "./migration-source.testhelper.mjs";
 
 import test from "node:test";

@@ -1,3 +1,4 @@
+// Render and navigate the workspace prototype.
 import { authoredStates, isActionableState, loadFixture } from "./client.js";
 
 const surfaces = {
