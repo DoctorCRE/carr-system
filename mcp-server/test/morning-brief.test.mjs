@@ -420,6 +420,22 @@ test("morning-brief shows the partner's own published calendar for the next seve
   assert.ok(result.coverage.required_sections.some((row) => row.key === "calendar" && row.counts.items === 2));
 });
 
+test("morning-brief flags overlapping timed meetings without treating all-day entries as conflicts", async () => {
+  const now = Date.now();
+  const at = hours => new Date(now + hours * 3600000).toISOString();
+  const calendar = calendarFixture(now);
+  calendar.items = [
+    { start: at(1), end: at(3), title: "Synthetic first" },
+    { start: at(2), end: at(4), title: "Synthetic overlapping" },
+    { start: at(4), end: at(5), title: "Synthetic adjacent" },
+    { start: at(0), end: at(24), title: "Synthetic all day", all_day: true },
+  ];
+  const result = await executeRegisteredTool(client({ calendar }), JOE, "morning-brief", {});
+  const overlaps = Object.fromEntries(result.sections.calendar.items.map(item => [item.title, item.schedule_conflict]));
+  assert.deepEqual(overlaps, { "Synthetic all day": false, "Synthetic first": true,
+    "Synthetic overlapping": true, "Synthetic adjacent": false });
+});
+
 test("every known gap becomes a plain sentence and the section is partial, never ready", async () => {
   const warnings = [{ code: "responses_unverified" }, { code: "group_invites_not_shown" },
     { code: "undecoded", count: 3 }, { code: "time_changed", count: 1 }, { code: "recurring_unverified", count: 2 },
