@@ -42,3 +42,23 @@ test("limiter binding failures refuse without reaching application dependencies"
     assert.equal((await response.json()).error, "verb_request_budget_unavailable");
   }
 });
+
+
+test("edge binding refusal makes no billed Durable Object request or application call", async () => {
+  let objectRequests = 0;
+  const response = await dispatch(request(), {
+    VERB_REQUEST_BUDGET_AGENT: { limit: async () => ({ success: false }) },
+    VERB_REQUEST_BUDGET: {
+      idFromName: name => name,
+      get: () => ({ fetch: async () => {
+        objectRequests += 1;
+        return Response.json({ allowed: true });
+      } }),
+    },
+    get DATABASE_URL_READER() { assert.fail("edge refusal reached reader"); },
+    get DATABASE_URL_WRITER() { assert.fail("edge refusal reached writer"); },
+  }, {}, { ...HUMAN });
+  assert.equal(response.status, 429);
+  assert.equal((await response.json()).error, "verb_request_budget_exceeded");
+  assert.equal(objectRequests, 0);
+});

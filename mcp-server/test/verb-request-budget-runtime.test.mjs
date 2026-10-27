@@ -95,3 +95,15 @@ test("workerd alarm cleans an expired window and the next request receives a fre
   assert.equal((await stub.fetch("https://budget.internal/advance")).status, 204);
   assert.equal((await (await consume()).json()).allowed, true);
 });
+
+
+test("workerd admits the supplied 500 per minute OAuth connector peak", async t => {
+  t.mock.method(console, "error", () => {});
+  const mf = await runtime();
+  t.after(() => mf.dispose());
+  const env = await mf.getBindings();
+  const responses = await Promise.all(Array.from({ length: 500 }, () =>
+    dispatch(request(), env, {}, { ...HUMAN })));
+  assert.equal(responses.filter(response => response.status === 200).length, 500);
+  assert.equal(responses.filter(response => response.status === 429).length, 0);
+});
