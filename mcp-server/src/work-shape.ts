@@ -2,24 +2,31 @@
 // Requests. Revisions are append-only: the current recommendation may change,
 // but the assumption and fact that changed the choice remain inspectable.
 
-const textPresent = value => typeof value === "string" && value.trim().length > 0;
-const score = value => Number.isInteger(value) && value >= 1 && value <= 5;
-const githubUrl = value => textPresent(value) && /^https:\/\/github\.com\/[^/]+\/[^/]+\/?(?:[?#].*)?$/i.test(value.trim());
-const words = value => textPresent(value) ? value.trim().split(/\s+/).length : 0;
-const repoRoot = value => typeof value === "string" ? value.trim().replace(/\/$/, "").toLowerCase() : "";
+import type { Db, Actor, WithEnvelope, WriteEvent, VerbInputs } from "./verb-contract.ts";
+import type { ToolError as ToolErrorClass } from "./tool-error.ts";
+
+// Validators inspect each field of legacy JSON without changing its failure behavior.
+type UnvalidatedShape = Record<string, any>;
+
+const textPresent = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
+const score = (value: number) => Number.isInteger(value) && value >= 1 && value <= 5;
+const githubUrl = (value: unknown) => textPresent(value) && /^https:\/\/github\.com\/[^/]+\/[^/]+\/?(?:[?#].*)?$/i.test(value.trim());
+const words = (value: unknown) => textPresent(value) ? value.trim().split(/\s+/).length : 0;
+const repoRoot = (value: unknown) => typeof value === "string" ? value.trim().replace(/\/$/, "").toLowerCase() : "";
 const PREBUILD_STATES = new Set(["captured", "triaged", "ready"]);
 
 export const SHAPE_DISPOSITIONS = Object.freeze(["required", "not_required"]);
 
-function plainObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value);
+function plainObject(value: unknown): value is UnvalidatedShape {
+  // Preserve the original falsy return values; callers only test truthiness.
+  return (value && typeof value === "object" && !Array.isArray(value)) as boolean;
 }
 
-function stringList(value, minimum = 1) {
+function stringList(value: unknown, minimum = 1) {
   return Array.isArray(value) && value.length >= minimum && value.every(textPresent);
 }
 
-export function shapeDecisionError(value) {
+export function shapeDecisionError(value: unknown) {
   const s = plainObject(value) ? value : {};
   const invalid = [];
   const trinity = plainObject(s.trinity) ? s.trinity : {};
@@ -57,7 +64,7 @@ export function shapeDecisionError(value) {
   if (!textPresent(s.mind_changing_fact)) invalid.push("mind_changing_fact");
   const brief = plainObject(s.builder_brief) ? s.builder_brief : {};
   if (!textPresent(brief.chosen_shape)) invalid.push("builder_brief.chosen_shape");
-  const repoUrls = new Set((s.maintained_repos || []).map(repo => repo?.url));
+  const repoUrls = new Set((s.maintained_repos || []).map((repo: UnvalidatedShape | null) => repo?.url));
   if (!githubUrl(brief.repo_url) || !repoUrls.has(brief.repo_url)) invalid.push("builder_brief.repo_url (must cite researched repository)");
   if (!stringList(brief.must_have_integrations)) invalid.push("builder_brief.must_have_integrations");
   if (!stringList(brief.v1_non_goals)) invalid.push("builder_brief.v1_non_goals");
@@ -70,7 +77,7 @@ export function shapeDecisionError(value) {
   return invalid.length ? { error: "work_shape_invalid", invalid } : null;
 }
 
-export function shapeDispositionError(value) {
+export function shapeDispositionError(value: unknown) {
   const v = plainObject(value) ? value : {};
   if (!SHAPE_DISPOSITIONS.includes(v.disposition))
     return { error: "work_shape_disposition_invalid", allowed: SHAPE_DISPOSITIONS };
@@ -83,7 +90,7 @@ export function shapeDispositionError(value) {
   return null;
 }
 
-async function sourcedDispositionLineage(c, workRequestId) {
+async function sourcedDispositionLineage(c: Db, workRequestId: string) {
   const row = (await c.query(
     `select ops.read_sourced_work_request_shape_disposition_lineage($1::uuid) as lineage /* work-shape:disposition-lineage */`,
     [workRequestId],
@@ -91,7 +98,7 @@ async function sourcedDispositionLineage(c, workRequestId) {
   return row?.lineage ?? null;
 }
 
-function shapeRow(row) {
+function shapeRow(row: UnvalidatedShape | undefined) {
   if (!row) return null;
   return {
     id: row.id,
@@ -145,7 +152,7 @@ const builderBriefSchema = {
   required: ["chosen_shape", "repo_url", "trinity", "must_have_integrations", "v1_non_goals", "text"],
 };
 
-export function workShapeTools({ withEnvelope, writeEvent, ToolError }) {
+export function workShapeTools({ withEnvelope, writeEvent, ToolError }: { withEnvelope: WithEnvelope; writeEvent: WriteEvent; ToolError: typeof ToolErrorClass }) {
 
   return {
     "read-work-shape": {
@@ -155,7 +162,7 @@ export function workShapeTools({ withEnvelope, writeEvent, ToolError }) {
         type: "object", additionalProperties: false,
         properties: { work_request: { type: "string" }, include_history: { type: "boolean" } }, required: ["work_request"],
       },
-      handler: async (c, _actor, args) => {
+      handler: async (c: Db, _actor: Actor, args: VerbInputs["read-work-shape"]) => {
         const work = (await c.query(`select id, ref, title, state, version, capture_idempotency_key, shape_disposition, shape_fixed_surface_ref, shape_rationale, shape_decided_by_actor_id, shape_decided_at from ops.work_request where ref=$1 or id::text=$1 limit 1`, [args.work_request])).rows[0];
         if (!work) throw new ToolError({ error: "work_request_not_found", work_request: args.work_request });
         const revisions = (await c.query(`select * from ops.work_shape_revision where work_request_id=$1 order by version desc`, [work.id])).rows;
@@ -183,7 +190,7 @@ export function workShapeTools({ withEnvelope, writeEvent, ToolError }) {
         },
         required: ["idempotency_key", "work_request", "base_version", "disposition", "rationale"],
       },
-      handler: async (c, actor, args) => withEnvelope(c, actor, "set-work-shape-disposition", args, async () => {
+      handler: async (c: Db, actor: Actor, args: VerbInputs["set-work-shape-disposition"]) => withEnvelope(c, actor, "set-work-shape-disposition", args, async () => {
         const validation = shapeDispositionError(args);
         if (validation) throw new ToolError(validation);
         const work = (await c.query(`select id, ref, title, state, version, capture_idempotency_key, shape_disposition, shape_fixed_surface_ref, shape_rationale from ops.work_request where ref=$1 or id::text=$1 limit 1 for update`, [args.work_request])).rows[0];
@@ -192,7 +199,8 @@ export function workShapeTools({ withEnvelope, writeEvent, ToolError }) {
           throw new ToolError({ error: "work_shape_disposition_frozen", work_request: work.ref, state: work.state, allowed_states: [...PREBUILD_STATES] });
         if (Number(args.base_version) !== Number(work.version))
           throw new ToolError({ error: "version_conflict", current_version: Number(work.version), base_version: Number(args.base_version), resolution: "re-read the Work Request and reconsider its shape disposition; never overwrite blind" });
-        const fixedSurface = args.disposition === "not_required" ? args.fixed_surface_ref.trim() : null;
+        // Disposition validation above proves the reference exists on this branch.
+        const fixedSurface = args.disposition === "not_required" ? args.fixed_surface_ref!.trim() : null;
         let updated;
         if (work.capture_idempotency_key) {
           updated = (await c.query(
