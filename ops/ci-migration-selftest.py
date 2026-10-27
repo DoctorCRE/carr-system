@@ -92,6 +92,7 @@ class MigrationTests(unittest.TestCase):
             PATH=str(self.root / "bin") + os.pathsep + os.defpath,
             TRACE=str(self.root / "trace"),
             CARR_CI_DATABASE_URL="postgres://ci@127.0.0.1:55432/ci",
+            CARR_SHADOW_ARTIFACT_DIR="",
             RUNNER_TEMP=str(self.root),
         )
 
