@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Tests CI evidence validation and required-check aggregation.
 import copy
 import json
 import sys
