@@ -39,6 +39,19 @@ def unwired_checks(catalog, ci, runners=None):
     for runner, source in (runners or {}).items():
         if runner not in calls:
             continue
+        if runner == 'ops/ci-gates.py':
+            module = ast.parse(source)
+            inventories = [ast.literal_eval(node.value) for node in module.body
+                           if isinstance(node, ast.Assign)
+                           and any(isinstance(t, ast.Name) and t.id == 'INVARIANTS' for t in node.targets)]
+            executes = any(isinstance(node, ast.For) and isinstance(node.iter, ast.Name)
+                and node.iter.id == 'INVARIANTS'
+                and any(isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                        and call.func.attr == 'execute' and len(call.args) >= 3
+                        and ast.unparse(call.args[2]) == "f'ops/{inv}.py'"
+                        for call in ast.walk(node)) for node in ast.walk(module))
+            if inventories and executes:
+                calls.update(f'ops/{name}.py' for name in inventories[0])
         for node in ast.walk(ast.parse(source)):
             if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                     and node.func.attr == 'py' and len(node.args) >= 2
@@ -61,9 +74,23 @@ class EnforcementWiringTest(unittest.TestCase):
         mapping = json.loads((REPO / 'ops/config/rule-enforcement-map.json').read_text())
         self.assertEqual([], unwired_checks(mapping['control_catalog'],
                                            (REPO / 'ops/ci.sh').read_text(),
-                                           {'ops/ci-migration.py': (REPO / 'ops/ci-migration.py').read_text()}))
+                                           {path: (REPO / path).read_text() for path in
+                                            ('ops/ci-migration.py', 'ops/ci-gates.py')}))
         for name, path in declared_checks(mapping['control_catalog']):
             self.assertTrue((REPO / path).is_file(), f'{name}: missing {path}')
+
+    def test_python_inventory_requires_live_runner_and_execution(self):
+        source = (REPO / 'ops/ci-gates.py').read_text()
+        catalog = {'order': {'failure_mode': 'CI failure',
+                             'implementation': ['ops/migration-order-gate.py']}}
+        ci = self.ci('  "$PY" ops/ci-gates.py --logdir "$LOGDIR"')
+        self.assertEqual([], unwired_checks(catalog, ci, {'ops/ci-gates.py': source}))
+        for broken_ci, broken_source in (
+                (ci.replace('"$PY"', 'echo'), source),
+                (ci.replace('"gates"', '"unit"'), source),
+                (ci, source.replace('self.execute(', 'self.describe('))):
+            self.assertEqual(['order: ops/migration-order-gate.py'],
+                             unwired_checks(catalog, broken_ci, {'ops/ci-gates.py': broken_source}))
 
     def test_selftest_comment_and_echo_are_not_checker_calls(self):
         ci = self.ci('  "$PY" ops/example-selftest.py\n'
