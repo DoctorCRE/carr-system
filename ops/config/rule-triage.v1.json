@@ -1,9 +1,9 @@
 {
   "counts": {
     "core": 16,
-    "gate": 25,
+    "gate": 24,
     "gone": 0,
-    "jit": 163
+    "jit": 164
   },
   "fallback_narrowing": {
     "delegation-council": {
@@ -1128,10 +1128,10 @@
       "title_gist": "A PERMISSION-CLASSIFIER BLOCK IS NOT A PERMISSION DENIAL \u2014 RETRY IT ONCE BEFORE EVER HANDING THE COMMAND TO"
     },
     {
-      "carrying_control": "stale_count",
-      "home": "gate",
+      "home": "jit",
       "id": "b01edd26",
-      "reason": "Already machine-enforced via control 'stale_count' (ops/stale-count-check.py); binds CI, on any committed source or doc. Failure mode on violation: CI class failure",
+      "jit_trigger_hint": "Writing or reviewing source and documents; optional diagnostic: python3 ops/stale-count-check.py",
+      "reason": "WR-000544 removes mandatory prose lint. Task packs deliver the rule; the checker remains an explicit manual diagnostic.",
       "title_gist": "No hardcoded counts or blanket self-summaries a later edit can falsify"
     },
     {

@@ -11,6 +11,7 @@ const CALENDAR_AGENDA_SCHEMA = "carr-calendar-agenda.v1";
 const HORIZON_MS = 7 * 86_400_000;
 const STALE_MS = 18 * 3_600_000;
 const LIMIT = 100;
+const CONFLICT_DETAIL_LIMIT = 5;
 const plural = (n, one, many) => (n === 1 ? one : many);
 const WARNINGS = {
   responses_unverified: () => "May include meetings you declined or that were cancelled or deleted. Check Outlook.",
@@ -18,6 +19,7 @@ const WARNINGS = {
   undecoded: n => `${n} calendar ${plural(n, "item", "items")} in Outlook couldn't be read, so meetings may be missing.`,
   time_changed: n => `${n} ${plural(n, "meeting has", "meetings have")} more than one stored time. Check Outlook for the current time.`,
   recurring_unverified: () => "Recurring meetings show only the occurrences Outlook stored; some may be missing.",
+  canceled_hidden: n => `${n} cancelled ${plural(n, "meeting was", "meetings were")} left out.`,
   follow_up_trimmed: n => `${n} meeting outcome ${plural(n, "review was", "reviews were")} left out to keep the brief small.`,
   trimmed: n => `${n} later ${plural(n, "meeting was", "meetings were")} left out to keep the brief small.`,
 };
@@ -50,13 +52,27 @@ export function calendarSection(snapshot, now = new Date()) {
       conflict: row.conflict === true });
   }
   items.sort((a, b) => a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
-  for (const item of items) item.schedule_conflict = false;
+  for (const item of items) {
+    item.schedule_conflict = false;
+    item.schedule_conflicts = [];
+    item.schedule_conflicts_omitted = 0;
+  }
   for (let i = 0; i < items.length; i++) {
     const a = items[i];
     if (a.all_day || a.end <= a.start) continue;
     for (let j = i + 1; j < items.length && items[j].start < a.end; j++) {
       const b = items[j];
-      if (!b.all_day && b.end > b.start) a.schedule_conflict = b.schedule_conflict = true;
+      if (!b.all_day && b.end > b.start) {
+        a.schedule_conflict = b.schedule_conflict = true;
+        const overlap_start = a.start > b.start ? a.start : b.start;
+        const overlap_end = a.end < b.end ? a.end : b.end;
+        for (const [item, other] of [[a, b], [b, a]]) {
+          if (item.schedule_conflicts.length < CONFLICT_DETAIL_LIMIT) {
+            item.schedule_conflicts.push({ title: other.title, start: other.start, end: other.end,
+              overlap_start, overlap_end });
+          } else item.schedule_conflicts_omitted++;
+        }
+      }
     }
   }
   const notes = [];

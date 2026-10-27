@@ -1,0 +1,650 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://doctorcre.com/schemas/carr.market-study.v1.schema.json",
+  "title": "carr.market-study.v1",
+  "description": "Every per-deal value one client-portal market study shows. Groups appear in render order; an optional group switches its template module on by being present. The slug is not a package field: ops.client_portal is its single source of truth and the builder overlays it at build time. Coordinates are [longitude, latitude] in WGS 84; money is US dollars; rich text is typed runs, never raw HTML.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "client", "prepared", "market", "map", "properties", "purchases", "developments", "demographics", "sources"],
+  "properties": {
+    "schema": { "const": "carr.market-study.v1" },
+    "client": { "$ref": "#/$defs/Client" },
+    "prepared": {
+      "type": "object", "additionalProperties": false, "required": ["for", "on"],
+      "properties": { "for": { "$ref": "#/$defs/Text" }, "on": { "$ref": "#/$defs/Date" } }
+    },
+    "market": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "home_title", "headline", "intro", "snapshot", "footer_note", "mini_map_caption"],
+      "properties": {
+        "name": { "$ref": "#/$defs/Text" },
+        "home_title": { "$ref": "#/$defs/Text" },
+        "headline": { "$ref": "#/$defs/Text" },
+        "intro": { "$ref": "#/$defs/Text" },
+        "snapshot": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "$ref": "#/$defs/Figure" } },
+        "footer_note": { "$ref": "#/$defs/Text" },
+        "mini_map_caption": { "$ref": "#/$defs/Text" }
+      }
+    },
+    "map": {
+      "type": "object", "additionalProperties": false, "required": ["basemap", "center", "zoom"],
+      "properties": {
+        "basemap": { "$ref": "#/$defs/Basemap" },
+        "center": { "$ref": "#/$defs/LonLat" },
+        "zoom": { "type": "number", "minimum": 0, "maximum": 22 },
+        "home_extent_points": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/LonLat" } }
+      }
+    },
+    "properties": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Property" } },
+    "purchases": {
+      "type": "object", "additionalProperties": false, "required": ["intro", "screening_factors"],
+      "properties": {
+        "intro": { "$ref": "#/$defs/Text" },
+        "screening_factors": { "type": "array", "minItems": 6, "maxItems": 6, "items": { "$ref": "#/$defs/Point" } },
+        "table": {
+          "type": "object", "additionalProperties": false, "required": ["locator_note", "parking_note"],
+          "properties": { "locator_note": { "$ref": "#/$defs/Text" }, "parking_note": { "$ref": "#/$defs/Text" } }
+        },
+        "market_context_note": { "$ref": "#/$defs/Text" }
+      }
+    },
+    "developments": { "type": "array", "items": { "$ref": "#/$defs/Development" } },
+    "context_anchors": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ContextAnchor" } },
+    "demographics": { "$ref": "#/$defs/Demographics" },
+    "ownership": { "$ref": "#/$defs/Ownership" },
+    "sources": {
+      "type": "object", "additionalProperties": false, "required": ["sections"],
+      "properties": {
+        "sections": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["heading", "body"],
+            "properties": { "heading": { "$ref": "#/$defs/Text" }, "body": { "$ref": "#/$defs/Rich" } }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "Text": {
+      "description": "Display text. Any HTML-like tag is refused.",
+      "type": "string", "minLength": 1, "maxLength": 4000,
+      "pattern": "^(?![\\s\\S]*<[A-Za-z/!?])[\\s\\S]+$"
+    },
+    "Id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+    "Url": { "type": "string", "maxLength": 2048, "pattern": "^https://[^\\s<>\"]+$" },
+    "Date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "Count": { "type": "number", "minimum": 0 },
+    "Percent": { "type": "number", "minimum": -100, "maximum": 1000 },
+    "Page": { "type": "integer", "minimum": 1 },
+    "Asset": {
+      "description": "A file in R2 under client-portal/<slug>/files/<sha256>.",
+      "type": "object", "additionalProperties": false, "required": ["sha256", "name", "type"],
+      "properties": {
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+        "type": { "type": "string", "pattern": "^[a-z]+/[a-z0-9.+-]+$" }
+      }
+    },
+    "Link": {
+      "type": "object", "additionalProperties": false, "required": ["label", "url"],
+      "properties": { "label": { "$ref": "#/$defs/Text" }, "url": { "$ref": "#/$defs/Url" } }
+    },
+    "Rich": {
+      "description": "Rich text as a list of runs: plain text or a link.",
+      "type": "array", "minItems": 1,
+      "items": {
+        "oneOf": [
+          { "type": "object", "additionalProperties": false, "required": ["text"], "properties": { "text": { "$ref": "#/$defs/Text" } } },
+          { "type": "object", "additionalProperties": false, "required": ["link"], "properties": { "link": { "$ref": "#/$defs/Link" } } }
+        ]
+      }
+    },
+    "LonLat": {
+      "type": "array", "minItems": 2, "maxItems": 2,
+      "prefixItems": [
+        { "type": "number", "minimum": -180, "maximum": 180 },
+        { "type": "number", "minimum": -90, "maximum": 90 }
+      ]
+    },
+    "Locator": {
+      "description": "An approximate study locator, never a navigation entrance (design D15).",
+      "type": "object", "additionalProperties": false, "required": ["lon", "lat", "precision"],
+      "properties": {
+        "lon": { "type": "number", "minimum": -180, "maximum": 180 },
+        "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+        "precision": { "$ref": "#/$defs/Text" }
+      }
+    },
+    "Figure": {
+      "type": "object", "additionalProperties": false, "required": ["value", "label"],
+      "properties": { "value": { "$ref": "#/$defs/Text" }, "label": { "$ref": "#/$defs/Text" } }
+    },
+    "Point": {
+      "type": "object", "additionalProperties": false, "required": ["title", "body"],
+      "properties": { "title": { "$ref": "#/$defs/Text" }, "body": { "$ref": "#/$defs/Text" } }
+    },
+    "Source": {
+      "type": "object", "additionalProperties": false, "required": ["label", "url"],
+      "properties": { "date": { "$ref": "#/$defs/Date" }, "label": { "$ref": "#/$defs/Text" }, "url": { "$ref": "#/$defs/Url" } }
+    },
+    "GeoJSON": {
+      "type": "object", "required": ["type", "features"],
+      "properties": { "type": { "const": "FeatureCollection" }, "features": { "type": "array", "minItems": 1 } }
+    },
+    "YearValues": {
+      "description": "Values keyed by four-digit year.",
+      "type": "object", "minProperties": 1,
+      "propertyNames": { "pattern": "^[0-9]{4}$" },
+      "additionalProperties": { "$ref": "#/$defs/Count" }
+    },
+    "Client": {
+      "type": "object", "additionalProperties": false, "required": ["display_name", "wordmark"],
+      "properties": {
+        "display_name": { "$ref": "#/$defs/Text" },
+        "wordmark": {
+          "type": "object", "additionalProperties": false, "required": ["line1", "line2"],
+          "properties": { "line1": { "$ref": "#/$defs/Text" }, "line2": { "$ref": "#/$defs/Text" } }
+        },
+        "logo": { "$ref": "#/$defs/Asset" },
+        "website": { "$ref": "#/$defs/Url" },
+        "current_practice": {
+          "type": "object", "additionalProperties": false,
+          "required": ["address", "size_note", "marker_letter", "locator", "source_note"],
+          "properties": {
+            "address": { "$ref": "#/$defs/Text" },
+            "size_note": { "$ref": "#/$defs/Text" },
+            "marker_letter": { "type": "string", "pattern": "^[A-Z]$" },
+            "locator": { "$ref": "#/$defs/Locator" },
+            "source_note": { "$ref": "#/$defs/Rich" }
+          }
+        }
+      }
+    },
+    "Basemap": {
+      "type": "object", "required": ["kind"],
+      "properties": { "kind": { "enum": ["local-layers", "vector-style"] } },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "local-layers" } } },
+          "then": {
+            "additionalProperties": false, "required": ["kind", "water", "roads", "attribution"],
+            "properties": {
+              "kind": true,
+              "water": { "$ref": "#/$defs/Asset" },
+              "roads": { "$ref": "#/$defs/Asset" },
+              "attribution": { "$ref": "#/$defs/Text" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "vector-style" } } },
+          "then": {
+            "additionalProperties": false, "required": ["kind", "style_url", "attribution_link"],
+            "properties": {
+              "kind": true,
+              "style_url": { "$ref": "#/$defs/Url" },
+              "attribution_link": { "$ref": "#/$defs/Link" }
+            }
+          }
+        }
+      ]
+    },
+    "Property": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "number", "address", "status", "role", "photo", "facts", "summary", "sources"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Id" },
+        "number": { "type": "integer", "minimum": 1 },
+        "address": { "$ref": "#/$defs/Text" },
+        "city": { "$ref": "#/$defs/Text" },
+        "status": { "$ref": "#/$defs/Text" },
+        "role": { "enum": ["candidate", "market-context"] },
+        "photo": { "$ref": "#/$defs/Asset" },
+        "facts": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Figure" } },
+        "summary": { "$ref": "#/$defs/Text" },
+        "review_point": { "$ref": "#/$defs/Text" },
+        "notes": {
+          "type": "object", "additionalProperties": false, "minProperties": 1,
+          "properties": {
+            "plan": { "$ref": "#/$defs/Text" },
+            "possession": { "$ref": "#/$defs/Text" },
+            "public_check": { "$ref": "#/$defs/Text" }
+          }
+        },
+        "floorplan": { "$ref": "#/$defs/Asset" },
+        "sources": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Source" } },
+        "source_caption": { "$ref": "#/$defs/Text" },
+        "locator": {
+          "type": "object", "additionalProperties": false, "required": ["lon", "lat", "precision"],
+          "properties": {
+            "lon": { "type": "number", "minimum": -180, "maximum": 180 },
+            "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+            "precision": { "$ref": "#/$defs/Text" },
+            "preferred_offset": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number" } }
+          }
+        },
+        "ownership": {
+          "type": "object", "additionalProperties": false,
+          "required": ["total_sf", "asking_price", "tenure", "offering", "contiguous_sf"],
+          "properties": {
+            "total_sf": { "$ref": "#/$defs/Count" },
+            "asking_price": { "$ref": "#/$defs/Count" },
+            "tenure": { "$ref": "#/$defs/Text" },
+            "offering": { "$ref": "#/$defs/Text" },
+            "contiguous_sf": { "$ref": "#/$defs/Count" },
+            "available_sf": { "$ref": "#/$defs/Count" },
+            "current_occupancy": { "$ref": "#/$defs/Text" },
+            "current_income_annual": { "$ref": "#/$defs/Count" }
+          }
+        }
+      }
+    },
+    "Development": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "title", "place", "status", "stage", "summary", "relevance", "image", "sources"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Id" },
+        "title": { "$ref": "#/$defs/Text" },
+        "place": { "$ref": "#/$defs/Text" },
+        "status": { "$ref": "#/$defs/Text" },
+        "stage": { "$ref": "#/$defs/Text" },
+        "summary": { "$ref": "#/$defs/Text" },
+        "copy": { "$ref": "#/$defs/Text" },
+        "relevance": { "$ref": "#/$defs/Text" },
+        "image": {
+          "type": "object", "additionalProperties": false, "required": ["asset", "alt", "credit"],
+          "properties": {
+            "asset": { "$ref": "#/$defs/Asset" },
+            "alt": { "$ref": "#/$defs/Text" },
+            "credit": { "$ref": "#/$defs/Text" },
+            "fit": { "enum": ["cover", "contain"] }
+          }
+        },
+        "locator": { "$ref": "#/$defs/Locator" },
+        "overlay": { "$ref": "#/$defs/GeoJSON" },
+        "overlay_note": { "$ref": "#/$defs/Text" },
+        "concept_note": { "$ref": "#/$defs/Text" },
+        "scale": { "$ref": "#/$defs/Text" },
+        "latest_update": { "$ref": "#/$defs/Text" },
+        "sources": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Source" } }
+      }
+    },
+    "ContextAnchor": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "category", "address", "locator", "source_note", "address_source_url", "locator_source_url"],
+      "properties": {
+        "name": { "$ref": "#/$defs/Text" },
+        "category": { "$ref": "#/$defs/Text" },
+        "address": { "$ref": "#/$defs/Text" },
+        "locator": { "$ref": "#/$defs/Locator" },
+        "source_note": { "$ref": "#/$defs/Text" },
+        "address_source_url": { "$ref": "#/$defs/Url" },
+        "locator_source_url": { "$ref": "#/$defs/Url" }
+      }
+    },
+    "Demographics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["growth", "age", "median_income", "income_bands", "methodology"],
+      "properties": {
+        "growth": {
+          "type": "object", "additionalProperties": false,
+          "required": ["area_label", "tiles", "geographies", "reach_note", "source"],
+          "properties": {
+            "area_label": { "$ref": "#/$defs/Text" },
+            "tiles": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "$ref": "#/$defs/Figure" } },
+            "geographies": {
+              "type": "array", "minItems": 1,
+              "items": {
+                "type": "object", "additionalProperties": false, "required": ["name", "series", "source_url"],
+                "properties": {
+                  "name": { "$ref": "#/$defs/Text" },
+                  "series": {
+                    "type": "array", "minItems": 2,
+                    "items": {
+                      "type": "object", "additionalProperties": false, "required": ["label", "value", "kind"],
+                      "properties": {
+                        "label": { "$ref": "#/$defs/Text" },
+                        "value": { "$ref": "#/$defs/Count" },
+                        "kind": { "enum": ["census", "estimate", "projection"] }
+                      }
+                    }
+                  },
+                  "source_url": { "$ref": "#/$defs/Url" }
+                }
+              }
+            },
+            "reach_note": { "$ref": "#/$defs/Text" },
+            "source": { "$ref": "#/$defs/Rich" }
+          }
+        },
+        "age": {
+          "type": "object", "additionalProperties": false, "required": ["geographies"],
+          "properties": {
+            "geographies": {
+              "type": "array", "minItems": 1,
+              "items": {
+                "type": "object", "additionalProperties": false, "required": ["name", "under_18_pct", "over_65_pct", "source_url"],
+                "properties": {
+                  "name": { "$ref": "#/$defs/Text" },
+                  "under_18_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+                  "over_65_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+                  "source_url": { "$ref": "#/$defs/Url" }
+                }
+              }
+            }
+          }
+        },
+        "median_income": {
+          "type": "object", "additionalProperties": false, "required": ["geographies", "households_note"],
+          "properties": {
+            "geographies": {
+              "type": "array", "minItems": 1,
+              "items": {
+                "type": "object", "additionalProperties": false, "required": ["name", "value"],
+                "properties": { "name": { "$ref": "#/$defs/Text" }, "value": { "$ref": "#/$defs/Count" } }
+              }
+            },
+            "households_note": { "$ref": "#/$defs/Text" }
+          }
+        },
+        "income_bands": {
+          "type": "object", "additionalProperties": false, "required": ["thresholds", "areas", "notes"],
+          "properties": {
+            "thresholds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 1 } },
+            "areas": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/IncomeArea" } },
+            "combined": {
+              "type": "object", "additionalProperties": false, "required": ["label", "households", "counts", "caption"],
+              "properties": {
+                "label": { "$ref": "#/$defs/Text" },
+                "households": { "$ref": "#/$defs/Count" },
+                "counts": { "$ref": "#/$defs/ThresholdCounts" },
+                "caption": { "$ref": "#/$defs/Text" }
+              }
+            },
+            "notes": { "$ref": "#/$defs/Rich" }
+          }
+        },
+        "micro_zones": { "$ref": "#/$defs/MicroZones" },
+        "competition": {
+          "type": "object", "additionalProperties": false, "required": ["markets", "offices", "scope_note"],
+          "properties": {
+            "markets": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Text" } },
+            "offices": {
+              "type": "array", "minItems": 1,
+              "items": {
+                "type": "object", "additionalProperties": false,
+                "required": ["name", "address", "market", "service_type", "services", "source_url", "logo", "locator"],
+                "properties": {
+                  "name": { "$ref": "#/$defs/Text" },
+                  "address": { "$ref": "#/$defs/Text" },
+                  "market": { "$ref": "#/$defs/Text" },
+                  "service_type": { "$ref": "#/$defs/Text" },
+                  "services": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Text" } },
+                  "source_url": { "$ref": "#/$defs/Url" },
+                  "logo": { "$ref": "#/$defs/Asset" },
+                  "locator": { "$ref": "#/$defs/Locator" }
+                }
+              }
+            },
+            "scope_note": { "$ref": "#/$defs/Rich" }
+          }
+        },
+        "methodology": { "$ref": "#/$defs/Rich" }
+      }
+    },
+    "ThresholdCounts": {
+      "description": "Household counts at or above each income threshold, keyed by the threshold in dollars.",
+      "type": "object", "minProperties": 1,
+      "propertyNames": { "pattern": "^[1-9][0-9]*$" },
+      "additionalProperties": { "$ref": "#/$defs/Count" }
+    },
+    "IncomeArea": {
+      "type": "object", "additionalProperties": false, "required": ["name", "group", "households", "counts", "caption"],
+      "properties": {
+        "name": { "$ref": "#/$defs/Text" },
+        "group": { "enum": ["county", "place", "radius", "municipal"] },
+        "households": { "$ref": "#/$defs/Count" },
+        "population": { "$ref": "#/$defs/Count" },
+        "median": { "$ref": "#/$defs/Count" },
+        "counts": { "$ref": "#/$defs/ThresholdCounts" },
+        "caption": { "$ref": "#/$defs/Text" }
+      }
+    },
+    "MicroZones": {
+      "description": "Radius study areas from one third-party demographic report per zone (REF-A shape). The template draws each circle from geography.center and radius_miles. Unsuffixed current-year fields are for estimate_year; growth runs from estimate_year to projection_year.",
+      "type": "object", "additionalProperties": false,
+      "required": ["title", "description", "comparison_note", "years", "estimate_year", "projection_year", "zones"],
+      "properties": {
+        "title": { "$ref": "#/$defs/Text" },
+        "description": { "$ref": "#/$defs/Text" },
+        "comparison_note": { "$ref": "#/$defs/Text" },
+        "years": {
+          "type": "array", "minItems": 2,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["year", "label"],
+            "properties": { "year": { "type": "integer", "minimum": 1900, "maximum": 2200 }, "label": { "$ref": "#/$defs/Text" } }
+          }
+        },
+        "estimate_year": { "type": "integer", "minimum": 1900, "maximum": 2200 },
+        "projection_year": { "type": "integer", "minimum": 1900, "maximum": 2200 },
+        "zones": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/MicroZone" } }
+      }
+    },
+    "CountShare": {
+      "type": "object", "additionalProperties": false, "required": ["label", "count", "derived_percent"],
+      "properties": {
+        "label": { "$ref": "#/$defs/Text" },
+        "count": { "$ref": "#/$defs/Count" },
+        "reported_percent": { "$ref": "#/$defs/Percent" },
+        "derived_percent": { "$ref": "#/$defs/Percent" }
+      }
+    },
+    "MicroZone": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "name", "study_pdf", "source", "geography", "population", "households", "income", "age",
+        "household_income", "housing", "education", "employment", "home_values_and_commute"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Id" },
+        "name": { "$ref": "#/$defs/Text" },
+        "study_pdf": { "$ref": "#/$defs/Asset" },
+        "source": {
+          "type": "object", "additionalProperties": false,
+          "required": ["provider", "pages", "report_timestamp", "data_release", "geography_version"],
+          "properties": {
+            "provider": { "$ref": "#/$defs/Text" },
+            "pages": { "$ref": "#/$defs/Page" },
+            "report_timestamp": { "$ref": "#/$defs/Text" },
+            "report_timezone": { "$ref": "#/$defs/Text" },
+            "data_release": { "$ref": "#/$defs/Text" },
+            "geography_version": { "$ref": "#/$defs/Text" }
+          }
+        },
+        "geography": {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "center", "center_address", "center_precision", "radius_miles", "reported_area_sq_miles", "allocation_method", "source_pages"],
+          "properties": {
+            "kind": { "const": "radius" },
+            "center": { "$ref": "#/$defs/LonLat" },
+            "center_address": { "$ref": "#/$defs/Text" },
+            "center_precision": { "$ref": "#/$defs/Text" },
+            "radius_miles": { "type": "number", "exclusiveMinimum": 0 },
+            "reported_area_sq_miles": { "$ref": "#/$defs/Count" },
+            "allocation_method": { "$ref": "#/$defs/Text" },
+            "source_pages": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Page" } }
+          }
+        },
+        "population": {
+          "type": "object", "additionalProperties": false, "required": ["by_year", "density_per_sq_mile", "growth", "source_page"],
+          "properties": {
+            "by_year": { "$ref": "#/$defs/YearValues" },
+            "density_per_sq_mile": { "$ref": "#/$defs/Count" },
+            "growth": {
+              "type": "object", "additionalProperties": false,
+              "required": ["persons", "percent", "reported_annual_percent", "percent_method", "annual_percent_method"],
+              "properties": {
+                "persons": { "type": "number" },
+                "percent": { "$ref": "#/$defs/Percent" },
+                "reported_annual_percent": { "$ref": "#/$defs/Percent" },
+                "percent_method": { "$ref": "#/$defs/Text" },
+                "annual_percent_method": { "$ref": "#/$defs/Text" }
+              }
+            },
+            "source_page": { "$ref": "#/$defs/Page" }
+          }
+        },
+        "households": {
+          "type": "object", "additionalProperties": false, "required": ["by_year", "with_children", "average_size", "source_page"],
+          "properties": {
+            "by_year": { "$ref": "#/$defs/YearValues" },
+            "with_children": {
+              "type": "object", "additionalProperties": false, "required": ["count", "reported_percent"],
+              "properties": { "count": { "$ref": "#/$defs/Count" }, "reported_percent": { "$ref": "#/$defs/Percent" } }
+            },
+            "average_size": { "$ref": "#/$defs/Count" },
+            "source_page": { "$ref": "#/$defs/Page" }
+          }
+        },
+        "income": {
+          "type": "object", "additionalProperties": false,
+          "required": ["average_household", "median_household", "per_capita", "average_family", "median_family", "average_household_net_worth", "source_page"],
+          "properties": {
+            "average_household": { "$ref": "#/$defs/YearValues" },
+            "median_household": { "$ref": "#/$defs/YearValues" },
+            "per_capita": { "$ref": "#/$defs/YearValues" },
+            "average_family": { "$ref": "#/$defs/Count" },
+            "median_family": { "$ref": "#/$defs/Count" },
+            "average_household_net_worth": { "$ref": "#/$defs/Count" },
+            "source_page": { "$ref": "#/$defs/Page" }
+          }
+        },
+        "age": {
+          "type": "object", "additionalProperties": false, "required": ["median_years", "bins", "groups", "denominator_population", "source_page"],
+          "properties": {
+            "median_years": { "$ref": "#/$defs/Count" },
+            "bins": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/CountShare" } },
+            "groups": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/CountShare" } },
+            "denominator_population": { "$ref": "#/$defs/Count" },
+            "source_page": { "$ref": "#/$defs/Page" }
+          }
+        },
+        "household_income": {
+          "type": "object", "additionalProperties": false, "required": ["denominator_households", "bins", "thresholds", "source_page"],
+          "properties": {
+            "denominator_households": { "$ref": "#/$defs/Count" },
+            "bins": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/CountShare" } },
+            "thresholds": {
+              "type": "array", "minItems": 1,
+              "items": {
+                "type": "object", "additionalProperties": false, "required": ["minimum_usd", "count", "derived_percent", "method"],
+                "properties": {
+                  "minimum_usd": { "type": "integer", "minimum": 1 },
+                  "count": { "$ref": "#/$defs/Count" },
+                  "reported_percent": { "$ref": "#/$defs/Percent" },
+                  "derived_percent": { "$ref": "#/$defs/Percent" },
+                  "method": { "$ref": "#/$defs/Text" }
+                }
+              }
+            },
+            "source_page": { "$ref": "#/$defs/Page" }
+          }
+        },
+        "housing": {
+          "type": "object", "additionalProperties": false,
+          "required": ["total_units", "occupied_units", "occupied_percent_of_all_units", "owner_occupied_units",
+            "owner_occupied_reported_percent_of_occupied", "renter_occupied_units", "renter_occupied_reported_percent_of_occupied",
+            "vacant_units", "vacant_percent_of_all_units", "family_households", "non_family_households", "source_page"],
+          "properties": {
+            "total_units": { "$ref": "#/$defs/Count" },
+            "occupied_units": { "$ref": "#/$defs/Count" },
+            "occupied_percent_of_all_units": { "$ref": "#/$defs/Percent" },
+            "owner_occupied_units": { "$ref": "#/$defs/Count" },
+            "owner_occupied_reported_percent_of_occupied": { "$ref": "#/$defs/Percent" },
+            "renter_occupied_units": { "$ref": "#/$defs/Count" },
+            "renter_occupied_reported_percent_of_occupied": { "$ref": "#/$defs/Percent" },
+            "vacant_units": { "$ref": "#/$defs/Count" },
+            "vacant_percent_of_all_units": { "$ref": "#/$defs/Percent" },
+            "family_households": { "$ref": "#/$defs/Count" },
+            "non_family_households": { "$ref": "#/$defs/Count" },
+            "source_page": { "$ref": "#/$defs/Page" }
+          }
+        },
+        "education": {
+          "type": "object", "additionalProperties": false,
+          "required": ["denominator_label", "denominator_count", "bins", "bachelors_or_higher_count", "bachelors_or_higher_derived_percent", "source_page"],
+          "properties": {
+            "denominator_label": { "$ref": "#/$defs/Text" },
+            "denominator_count": { "$ref": "#/$defs/Count" },
+            "bins": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/CountShare" } },
+            "bachelors_or_higher_count": { "$ref": "#/$defs/Count" },
+            "bachelors_or_higher_derived_percent": { "$ref": "#/$defs/Percent" },
+            "source_page": { "$ref": "#/$defs/Page" }
+          }
+        },
+        "employment": {
+          "type": "object", "additionalProperties": false,
+          "required": ["population_age_16_plus", "employed", "unemployed", "armed_forces", "not_in_labor_force", "occupation_denominator",
+            "white_collar", "blue_collar", "businesses", "daytime_employees", "labor_source_page", "business_source_page"],
+          "properties": {
+            "population_age_16_plus": { "$ref": "#/$defs/Count" },
+            "employed": { "$ref": "#/$defs/Count" },
+            "unemployed": { "$ref": "#/$defs/Count" },
+            "armed_forces": { "$ref": "#/$defs/Count" },
+            "not_in_labor_force": { "$ref": "#/$defs/Count" },
+            "occupation_denominator": { "$ref": "#/$defs/Count" },
+            "white_collar": { "$ref": "#/$defs/Count" },
+            "blue_collar": { "$ref": "#/$defs/Count" },
+            "businesses": { "$ref": "#/$defs/Count" },
+            "daytime_employees": { "$ref": "#/$defs/Count" },
+            "labor_source_page": { "$ref": "#/$defs/Page" },
+            "business_source_page": { "$ref": "#/$defs/Page" }
+          }
+        },
+        "home_values_and_commute": {
+          "type": "object", "additionalProperties": false,
+          "required": ["median_owner_home_value", "median_renter_rent", "mean_commute_minutes", "source_page"],
+          "properties": {
+            "median_owner_home_value": { "$ref": "#/$defs/Count" },
+            "median_renter_rent": { "$ref": "#/$defs/Count" },
+            "mean_commute_minutes": { "$ref": "#/$defs/Count" },
+            "source_page": { "$ref": "#/$defs/Page" }
+          }
+        }
+      }
+    },
+    "Ownership": {
+      "type": "object", "additionalProperties": false, "required": ["program", "defaults", "default_property", "copy"],
+      "properties": {
+        "program": {
+          "type": "object", "additionalProperties": false, "required": ["min_share", "min_sf"],
+          "properties": { "min_share": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }, "min_sf": { "$ref": "#/$defs/Count" } }
+        },
+        "defaults": {
+          "type": "object", "additionalProperties": false,
+          "required": ["financed_pct", "rate", "years", "rent_psf", "collection_pct", "buildout_psf", "lease_up_months", "appreciation_pct", "ti_options"],
+          "properties": {
+            "financed_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+            "rate": { "type": "number", "minimum": 0, "maximum": 100 },
+            "years": { "type": "integer", "minimum": 1, "maximum": 50 },
+            "rent_psf": { "$ref": "#/$defs/Count" },
+            "collection_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+            "buildout_psf": { "$ref": "#/$defs/Count" },
+            "lease_up_months": { "type": "integer", "minimum": 0 },
+            "appreciation_pct": { "$ref": "#/$defs/Percent" },
+            "ti_options": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "$ref": "#/$defs/Count" } }
+          }
+        },
+        "default_property": { "$ref": "#/$defs/Id" },
+        "copy": {
+          "type": "object", "additionalProperties": false, "required": ["intro", "benefits", "notes", "methods"],
+          "properties": {
+            "intro": { "$ref": "#/$defs/Text" },
+            "benefits": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "$ref": "#/$defs/Point" } },
+            "notes": { "$ref": "#/$defs/Rich" },
+            "methods": { "$ref": "#/$defs/Rich" }
+          }
+        }
+      }
+    }
+  }
+}

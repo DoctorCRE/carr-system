@@ -3152,7 +3152,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "submit-email-draft": {
     "ingress_key": "mcp-tool:submit-email-draft",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "26ae09ec7ce0a1d98425fc1ed901bec8ab69f262cd76fdf0055372f06e707c92",
+    "schema_digest": "0502bfe1836ed7abefa06e0441e114e41a21855f0ecbc8abf904d66ca91c8ce5",
     "write": true,
     "human_only": true,
     "human_caller_only": true,
