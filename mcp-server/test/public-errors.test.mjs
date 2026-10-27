@@ -80,6 +80,14 @@ test("MCP next-action conflicts explain how to review the current action", async
   assert.deepEqual(Object.keys(payload).sort(), ["correlation_id", "error", "hint"]);
 });
 
+test("MCP routes decline completion claims to complete-work-request", async t => {
+  const payload = await failure(t, new ToolError({ error: "decline_claims_completion",
+    hint: privateText, detail: privateText }));
+  assert.equal(payload.error, "decline_claims_completion");
+  assert.match(payload.hint, /complete-work-request/);
+  assert.deepEqual(Object.keys(payload).sort(), ["correlation_id", "error", "hint"]);
+});
+
 test("unknown ToolError codes cannot carry diagnostic text onto the wire", async t => {
   const payload = await failure(t, new ToolError({ error: privateText }));
   assert.equal(payload.error, "unhandled_verb_failure");
