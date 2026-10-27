@@ -101,7 +101,7 @@ test('while any repository is unreadable nothing is stale, because a missing PR 
   }
 });
 
-test('a truncated search never makes an old job stale', () => {
+test('a truncated search never makes an old job stale, even a building one', () => {
   const at = Date.parse('2026-10-28T12:00:00Z'), old = new Date(at - 30 * STALE_AFTER_MS).toISOString();
   const view = queueView([{ work_request_id: 'x', work_request: 'WR-000557', work_request_title: 'Queue', slice_ordinal: 1, j_number: 1, created_at: old }],
     [{ repo: 'DoctorCRE/carr-system', state: 'ok', truncated: true, prs: [] }], at);
@@ -115,9 +115,45 @@ test('the search only spans PRs updated since the oldest visible job, since no e
   const read = createPullRequestSource({ token: 'synthetic', fetchImpl, now: () => clock });
   await read(REPOS.slice(0, 1), '2026-10-20T15:30:00.000Z');
   assert.deepEqual(queries, ['repo:DoctorCRE/carr-system is:pr in:body "Card: WR" updated:>=2026-10-20']);
+  await read(REPOS.slice(0, 1), '2026-10-20T23:59:00.000Z');
+  assert.equal(queries.length, 1, 'the same bound day shares the cached search');
   await read(REPOS.slice(0, 1), '2026-10-21T00:00:00.000Z');
-  assert.equal(queries.length, 1, 'still one search per repository per window when the bound moves');
+  assert.deepEqual(queries.at(-1), 'repo:DoctorCRE/carr-system is:pr in:body "Card: WR" updated:>=2026-10-21',
+    'a different bound is a different search, so a caller never gets a narrower window than it asked for');
   clock = PULL_REQUEST_TTL_MS;
   await read(REPOS.slice(0, 1));
   assert.deepEqual(queries.at(-1), 'repo:DoctorCRE/carr-system is:pr in:body "Card: WR"', 'an empty queue searches without a bound');
+});
+
+const at = Date.parse('2026-10-28T12:00:00Z');
+const jobRow = (j, extra = {}) => ({ work_request_id: 'w1', work_request: 'WR-000557', work_request_title: 'Queue', slice_ordinal: 1, j_number: j,
+  created_at: new Date(at - 10 * STALE_AFTER_MS).toISOString(), finished: null, ...extra });
+const livePr = (number, cards, extra = {}) => ({ repo: 'DoctorCRE/carr-system', number, cards, url: `u${number}`, title: `PR ${number}`,
+  updated_at: new Date(at - 5 * STALE_AFTER_MS).toISOString(), draft: false, state: 'open', ...extra });
+
+test('a truncated window suppresses stale on a long-idle draft too', () => {
+  const view = queueView([jobRow(1)], [{ repo: 'DoctorCRE/carr-system', state: 'ok', truncated: true, prs: [livePr(5, ['WR557.S1.J1'], { draft: true })] }], at);
+  assert.deepEqual(view.jobs.map(job => [job.stage, job.stale]), [['build', false]]);
+});
+
+test('a job whose saved finish has left the search window keeps its merged stage and PR links', () => {
+  const saved = { stage: 'merged', prs: [{ repo: 'DoctorCRE/carr-system', number: 9, state: 'merged', card_id: 'WR557.S1.J1.carr#9' }] };
+  const view = queueView([jobRow(1, { finished: saved })], [{ repo: 'DoctorCRE/carr-system', state: 'ok', truncated: true, prs: [] }], at);
+  assert.deepEqual(view.jobs.map(job => [job.card_id, job.stage, job.stale, job.prs.map(pr => pr.card_id)]), [['WR557.S1.J1', 'merged', false, ['WR557.S1.J1.carr#9']]]);
+  assert.equal('finished' in view.jobs[0], false);
+  assert.deepEqual(view.finishes, []);
+});
+
+test('a live PR outranks a saved finish, so a reopened job shows its new work', () => {
+  const saved = { stage: 'closed', prs: [{ repo: 'DoctorCRE/carr-system', number: 9, state: 'closed', card_id: 'WR557.S1.J1.carr#9' }] };
+  const view = queueView([jobRow(1, { finished: saved })], [{ repo: 'DoctorCRE/carr-system', state: 'ok', prs: [livePr(11, ['WR557.S1.J1'])] }], at);
+  assert.deepEqual(view.jobs.map(job => [job.stage, job.prs.map(pr => pr.number)]), [['review', [11]]]);
+  assert.deepEqual(view.finishes, [], 'a saved finish is never rewritten');
+});
+
+test('only a job first seen merged or closed is saved, once, as its finish', () => {
+  const view = queueView([jobRow(1), jobRow(2), jobRow(3), jobRow(4, { finished: { stage: 'merged', prs: [] } })], [{ repo: 'DoctorCRE/carr-system', state: 'ok', prs: [
+    livePr(21, ['WR557.S1.J1'], { state: 'merged' }), livePr(22, ['WR557.S1.J2'], { state: 'closed' }), livePr(23, ['WR557.S1.J3']), livePr(24, ['WR557.S1.J4'], { state: 'merged' })] }], at);
+  assert.deepEqual(view.finishes.map(({ key, finished }) => [key, finished.stage, finished.prs.map(pr => pr.card_id)]), [
+    [['w1', 1, 1], 'merged', ['WR557.S1.J1.carr#21']], [['w1', 1, 2], 'closed', ['WR557.S1.J2.carr#22']]]);
 });

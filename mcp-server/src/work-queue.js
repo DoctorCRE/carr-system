@@ -13,7 +13,9 @@ export function queueCardId(ref, ordinal, number) {
     .replace('{work_request}', work_request).replace('{slice}', ordinal).replace('{job}', number);
 }
 
-// Stage and PR links are never stored: a PR belongs to a job through a "Card: WRn.Sm.Jk" line in its body.
+// A PR belongs to a job through a "Card: WRn.Sm.Jk" line in its body, and stage is derived from those PRs live.
+// The one stored fact is a job's first observed merged or closed state (`finished`), so the search only has to
+// span unfinished jobs and a finished job keeps its stage after its PR leaves GitHub's 100-result window.
 export const PULL_REQUEST_TTL_MS = 60_000;
 // Building is the only stage a job can stall in without anyone else holding it. Codex jobs run in hours, so a day
 // with no push to the open draft means stalled. Queued jobs wait their priority turn (dispatch-job starts nothing),
@@ -23,8 +25,9 @@ const CARD_LINE = /^Card:[ \t]*(WR\d+\.S\d+\.J\d+)\b/gmu;
 const unavailablePullRequests = async repos => repos.map(repo => ({ repo, state: 'unavailable', reason: 'no_github_reader', prs: [] }));
 
 // One GitHub search per repository per TTL, shared by every caller in this isolate; failures are cached too.
-// `since` bounds it to PRs updated on or after the oldest visible job's day: a card ID does not exist until
+// `since` bounds it to PRs updated on or after the oldest unfinished job's day: a card ID does not exist until
 // dispatch-job mints it, so any PR carrying one was created or edited after that, and older PRs cannot fill the window.
+// The cache is keyed by repository and bound day, so no caller receives a narrower window than it asked for.
 export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...a), now = Date.now, ttlMs = PULL_REQUEST_TTL_MS }) {
   const memo = new Map();
   async function search(repo, since) {
@@ -45,10 +48,12 @@ export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...
     } catch { return { repo, state: 'unavailable', reason: 'github_unreachable', prs: [] }; }
   }
   return (repos, since) => Promise.all(repos.map(repo => {
-    const hit = memo.get(repo);
+    const key = `${repo} ${since?.slice(0, 10) ?? ''}`;
+    const hit = memo.get(key);
     if (hit && now() - hit.at < ttlMs) return hit.value;
     const value = search(repo, since);
-    memo.set(repo, { at: now(), value });
+    for (const [old, entry] of memo) if (now() - entry.at >= ttlMs) memo.delete(old);
+    memo.set(key, { at: now(), value });
     return value;
   }));
 }
@@ -73,16 +78,20 @@ export function queueView(rows, sources, at) {
     const { cards, ...fact } = pr;
     byCard.set(card, [...(byCard.get(card) ?? []), { ...fact, card_id: `${card}.${addressFormat.repositories[pr.repo]}#${pr.number}` }]);
   }
-  // An unreadable repository may hold the newer push, so a stall is only claimed when every source answered.
-  const complete = sources.every(source => source.state === 'ok');
-  const jobs = rows.map(({ work_request_id, created_at, ...row }) => {
+  // A stall is only claimed when every repository answered in full: an unreadable or truncated one may hold the newer push.
+  const complete = sources.every(source => source.state === 'ok' && !source.truncated);
+  const finishes = [];
+  const jobs = rows.map(({ work_request_id, created_at, finished, ...row }) => {
     const card_id = queueCardId(row.work_request, row.slice_ordinal, row.j_number);
-    const prs = byCard.get(card_id) ?? [];
-    const stage = jobStage(prs);
+    const live = byCard.get(card_id) ?? [];
+    const prs = live.length || !finished ? live : finished.prs;
+    const stage = live.length || !finished ? jobStage(live) : finished.stage;
+    if (!finished && (stage === 'merged' || stage === 'closed'))
+      finishes.push({ key: [work_request_id, row.slice_ordinal, row.j_number], finished: { stage, prs } });
     const since = stage === 'build' ? Math.max(...prs.filter(pr => pr.state === 'open').map(pr => Date.parse(pr.updated_at))) : NaN;
     return { ...row, card_id, created_at: new Date(created_at).toISOString(), stage, stale: complete && at - since >= STALE_AFTER_MS, prs };
   });
-  return { jobs, github: sources.map(({ prs, ...source }) => source) };
+  return { jobs, finishes, github: sources.map(({ prs, ...source }) => source) };
 }
 
 export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
@@ -169,10 +178,15 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
       handler: async (c, actor, args) => {
         validate(args, {}, []);
         const rows = await ordered(c, actor);
-        const oldest = rows.reduce((min, row) => Math.min(min, new Date(row.created_at).getTime()), Infinity);
+        const oldest = rows.filter(row => !row.finished).reduce((min, row) => Math.min(min, new Date(row.created_at).getTime()), Infinity);
         const sources = await (c.pullRequests ?? unavailablePullRequests)(Object.keys(addressFormat.repositories),
           Number.isFinite(oldest) ? new Date(oldest).toISOString() : undefined);
-        return { ok: true, stale_after_hours: STALE_AFTER_MS / 3_600_000, ...queueView(rows, sources, Date.now()) };
+        const { finishes, ...view } = queueView(rows, sources, Date.now());
+        // One conditional single-row update per newly finished job, on the reader route's optional side connection:
+        // it runs only on the first observation, writes no audit row, and a lost write is redone by the next read.
+        for (const { key, finished } of finishes) c.sideWrite?.(`update ops.work_request_job set finished=$4::jsonb
+          where work_request_id=$1 and slice_ordinal=$2 and j_number=$3 and finished is null`, [...key, JSON.stringify(finished)]);
+        return { ok: true, stale_after_hours: STALE_AFTER_MS / 3_600_000, ...view };
       } },
   };
 }
