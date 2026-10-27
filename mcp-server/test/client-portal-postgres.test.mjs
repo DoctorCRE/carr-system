@@ -72,6 +72,18 @@ test('a password opens only its client portal and the live deal roadmap', async 
     assert.deepEqual(await read(), expected);
     const denied = { ok: false, error: 'portal_access_denied' };
 
+    await t.test('portal update time ignores password attempts but tracks portal changes', async () => {
+      const updatedAt = async () => (await executeRegisteredTool(c, actor, 'list-client-portals', {})).portals[0].updated_at;
+      const before = await updatedAt();
+      assert.deepEqual(await read('synthetic-a', 'wrong-password'), denied);
+      assert.deepEqual(await updatedAt(), before);
+      assert.deepEqual(await read(), expected);
+      assert.deepEqual(await updatedAt(), before);
+      await c.query("update ops.client_portal set disabled_at=clock_timestamp() where slug='synthetic-a'");
+      assert.ok((await updatedAt()) > before);
+      await c.query("update ops.client_portal set disabled_at=null where slug='synthetic-a'");
+    });
+
     await t.test('the real writer route commits denials and locks the portal after five failures', async t => {
       await c.query('create role carr_jobs; alter role carr_writer login; grant select on actor to carr_writer');
       const writer = new pg.Client({ ...c.connectionParameters, user: 'carr_writer' });
