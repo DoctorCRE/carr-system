@@ -268,12 +268,29 @@ vision check becomes a required `check` input.
 
 - Model: `--model opus`. Both baseline runs used Opus at medium effort, and the runner's
   default is Sonnet. This is the subscription, not the paid API.
-- Allowlist: Read, Write, Edit, Glob, Grep, WebFetch, WebSearch, `Bash(./run.sh *)`,
-  `Bash(grok -p *)`, `Bash(ffmpeg *)`, the animated-static builder, and `Agent`, which
-  keeps the independent Sonnet claims reviewer that caught real errors both weeks.
-  Headless Chrome runs only through `./run.sh social-batch render`, with a throwaway
-  profile and `--use-mock-keychain`. That avoids the keychain prompts that hung securityd
-  on 2026-10-24, and keeps the Chrome binary off the allowlist.
+- Allowlist (the #2538 review narrowed it so the model cannot rewrite its own guard or
+  reach any other writer):
+  - Read, Glob, Grep, WebFetch, WebSearch;
+  - `Agent`, which keeps the independent Sonnet claims reviewer that caught real errors both weeks;
+  - Write and Edit only under `out/social-batch/*/work/**`;
+  - `Bash(./run.sh social-batch *)` and `Bash(./run.sh call read-doctrine *)`.
+
+  The deny list covers `tools/`, `lib/`, `ops/`, `bin/`, `run.sh`, the batch ledger and
+  `batch.json`, the Blotato hosts, `~/.zprofile`, curl and wget. `submit` calls the store
+  write verbs from its own subprocess, so the model needs no write verb.
+- Headless Chrome runs only through `./run.sh social-batch render`, which writes only into
+  that work folder. It uses a throwaway profile and `--use-mock-keychain`, which avoids the
+  keychain prompts that hung securityd on 2026-10-24 and keeps the Chrome binary off the
+  allowlist.
+- Two capabilities are left out until S3:
+  - **ffmpeg and the animated-static builder.** A permission rule cannot bind their output
+    paths. Until S3 the batch ships static cards only.
+  - **`grok -p`.** It is an agent with its own tools, and Claude's deny rules do not bind
+    it. Its `--tools`, `--sandbox` and `--permission-mode` flags exist, but the built-in
+    tool names were not confirmed: the 2026-10-27 probe returned HTTP 402 "usage balance
+    exhausted". **S3 precondition:** confirm a read-only grok invocation, then add exactly
+    that pinned command to the allowlist. Until then the prompt records `grok.status:
+    skipped` (D9's fallback).
 - Schedule: Friday 06:00 CT (`0 6 * * 5`), with a 5400 s timeout and a 3600 s grace.
 - Task id: `social-batch-headless`, kept separate from `social-batch-weekly` so the old
   file is never touched.

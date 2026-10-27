@@ -292,12 +292,16 @@ def plan(ctx: Context, own: frozenset[tuple[str, str]] = frozenset()) -> dict:
         held[key] = {'platform': platform, 'utc': key[1], 'source': 'listing', 'lane': _lane(platform, by_minute.get(key))}
     # The default listing reaches about 7 days back; every post this script logged for
     # the week is also read back by submission id, so no listing horizon can hide it.
+    # Keyed by Blotato's current time, so a post Joe moved is not counted twice.
     for row in logged:
-        key = (row['platform'], row['utc'][:16])
-        if key in held or key in own or not start <= parse_utc(row['utc']) < end:
+        if (row['platform'], row['utc'][:16]) in own or not start <= parse_utc(row['utc']) < end:
             continue
         status = api.status(row['submission_id']) if row.get('submission_id') else {'status': 'scheduled'}
-        if status and status['status'] != 'failed':
+        if not status or status['status'] == 'failed':
+            continue
+        when = status.get('scheduledTime') or row['utc']
+        key = (row['platform'], minute(when))
+        if key not in held and key not in own and start <= parse_utc(when) < end:
             held[key] = {'platform': row['platform'], 'utc': key[1], 'source': 'log', 'lane': _lane(row['platform'], row)}
     warnings = []
     if not api.listing(*bounds(week - timedelta(days=7))):
@@ -679,8 +683,19 @@ def _section(posts, notes, current) -> str:
 
 
 # ---------------------------------------------------------------- render
-def render(html: Path, png: Path, width: int, height: int, chrome: str = CHROME) -> dict:
-    """Headless Chrome screenshot with a throwaway profile and no keychain access."""
+def render(html: Path, png: Path, width: int, height: int, chrome: str = CHROME, out: Path = OUT) -> dict:
+    """Headless Chrome screenshot with a throwaway profile and no keychain access.
+
+    The PNG may land only in out/social-batch/<week>/work/, the one folder the
+    unattended model may write, so render can never overwrite the guard or its ledger.
+    """
+    try:
+        place = png.resolve().relative_to(out.resolve()).parts
+    except ValueError:
+        place = ()
+    if len(place) < 3 or place[1] != 'work' or png.suffix != '.png':
+        raise Stop('render_failed', 'cards render only to out/social-batch/<week>/work/*.png')
+    png.parent.mkdir(parents=True, exist_ok=True)  # Chrome will not create it
     with tempfile.TemporaryDirectory() as profile:
         subprocess.run([chrome, '--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run',
                         '--no-default-browser-check', '--use-mock-keychain', '--password-store=basic',

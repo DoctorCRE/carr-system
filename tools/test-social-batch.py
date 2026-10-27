@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import fnmatch
+import importlib.util
 import json
 import plistlib
 import re
@@ -370,15 +372,101 @@ class SocialBatchTest(unittest.TestCase):
         manifest = json.loads((REPO / 'ops/headless-tasks/tasks.json').read_text())
         task = manifest['tasks']['social-batch-headless']
         self.assertEqual((manifest['timezone'], task['cron'], task['model']), ('America/Chicago', '0 6 * * 5', 'opus'))
-        self.assertIn('Bash(./run.sh *)', task['allowed_tools'])
         self.assertTrue({'WebFetch(domain:backend.blotato.com)', 'Read(~/.zprofile)'} <= set(task['disallowed_tools']))
-        self.assertFalse(any(t.startswith('Bash(curl') for t in task['allowed_tools']))
         label = 'com.carr.headless.social-batch-headless'
         template = plistlib.loads((REPO / f'ops/headless-tasks/{label}.plist').read_bytes())
         self.assertEqual(template['Label'], label)
         self.assertEqual(template['ProgramArguments'], ['{{REPO}}/bin/headless-task', 'social-batch-headless'])
         self.assertEqual(template['StartCalendarInterval'], calendar_entries(task['cron']))
         self.assertIn(f'{label}.plist', launchd_hold.DEFINITION_ONLY)
+
+    def test_task_scope_cannot_reach_the_guard_or_other_writers(self):
+        """The unattended model may write only its drafts and cards, and run only submit's front door."""
+        task = json.loads((REPO / 'ops/headless-tasks/tasks.json').read_text())['tasks']['social-batch-headless']
+        allowed, denied = task['allowed_tools'], task['disallowed_tools']
+        rule = re.compile(r'^(\w+)(?:\((.*)\))?$')
+        bash = [rule.match(t).group(2) for t in allowed if rule.match(t).group(1) == 'Bash']
+        files = [rule.match(t) for t in allowed if rule.match(t).group(1) in ('Write', 'Edit', 'NotebookEdit', 'MultiEdit')]
+        self.assertTrue(all(m.group(2) for m in files), 'an unscoped Write or Edit reaches every path')
+        self.assertTrue(all(rule.match(t).group(2) for t in allowed if rule.match(t).group(1) == 'Bash'))
+
+        def reaches(patterns, value):
+            return any(fnmatch.fnmatchcase(value, p) for p in patterns)
+        for command in ('./run.sh outlook-send --to x', './run.sh migrate --apply', './run.sh call add-loop {}',
+                        './run.sh call write-doctrine-section {}', './run.sh config install --apply',
+                        'curl -q https://backend.blotato.com/v2/posts', 'grok -p hi',
+                        'ffmpeg -y -i a.gif tools/social_batch.py', 'python3 tools/social_batch.py submit d.json'):
+            self.assertFalse(reaches(bash, command), command)
+        for command in ('./run.sh social-batch plan', './run.sh call read-doctrine {"document":"x-posting-spec"}'):
+            self.assertTrue(reaches(bash, command), command)
+        file_patterns = [m.group(2) for m in files]
+        guarded = ('tools/social_batch.py', 'ops/social/cadence.v1.json', 'ops/headless-tasks/tasks.json',
+                   'lib/headless_tasks.py', 'bin/headless-task', 'run.sh', 'tools/writing-lint.py',
+                   'out/social-batch/2026-11-02/ledger.jsonl', 'out/social-batch/2026-11-02/batch.json',
+                   'claude-tree/skills/social-media-manager/config/blotato-accounts.json')
+        for path in guarded:
+            self.assertFalse(reaches(file_patterns, path), path)
+        for path in ('out/social-batch/2026-11-02/work/drafts.json', 'out/social-batch/2026-11-02/work/cards/x1.png'):
+            self.assertTrue(reaches(file_patterns, path), path)
+        for entry in ('Edit(tools/**)', 'Edit(lib/**)', 'Edit(ops/**)', 'Edit(bin/**)', 'Edit(run.sh)',
+                      'Edit(out/social-batch/*/ledger.jsonl)', 'Edit(out/social-batch/*/batch.json)'):
+            self.assertIn(entry, denied)
+
+    def test_render_writes_only_inside_a_work_folder(self):
+        html = self.media / 'card.html'
+        html.write_text('<p>x</p>')
+        for target in (REPO / 'tools/social_batch.png', self.ctx.out / '2026-11-02/ledger.png',
+                       self.ctx.out / '2026-11-02/work/../batch.png'):
+            with self.subTest(target=target), self.assertRaises(sb.Stop):
+                sb.render(html, target, 10, 10, chrome='/nonexistent/chrome', out=self.ctx.out)
+
+    def test_render_creates_the_work_folder_and_checks_the_size(self):
+        html = self.media / 'card.html'
+        html.write_text('<p>x</p>')
+        chrome = self.media / 'chrome'
+        # Like Chrome, the fake writes the screenshot and fails when the folder is missing.
+        chrome.write_text('#!/usr/bin/env python3\nimport struct, sys, zlib\n'
+                          'path = next(a for a in sys.argv if a.startswith("--screenshot=")).split("=", 1)[1]\n'
+                          f'sys.path.insert(0, {str(REPO / "tools")!r})\n'
+                          'exec(open(sys.argv[0] + ".png.py").read())\npng(path, 12, 8)\n')
+        (self.media / 'chrome.png.py').write_text(
+            'from pathlib import Path\nimport struct, zlib\n'
+            'def png(path, w, h):\n'
+            '    def chunk(k, d): return struct.pack(">I", len(d)) + k + d + struct.pack(">I", zlib.crc32(k + d))\n'
+            '    raw = b"".join(b"\\x00" + b"\\x00\\x00\\x00" * w for _ in range(h))\n'
+            '    Path(path).open("xb").write(b"\\x89PNG\\r\\n\\x1a\\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))'
+            ' + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))\n')
+        chrome.chmod(0o755)
+        target = self.ctx.out / '2026-11-02/work/cards/x1.png'
+        result = sb.render(html, target, 12, 8, chrome=str(chrome), out=self.ctx.out)
+        self.assertEqual((result['width'], result['height']), (12, 8))
+        with self.assertRaises(sb.Stop):
+            sb.render(html, self.ctx.out / '2026-11-02/work/x2.png', 99, 8, chrome=str(chrome), out=self.ctx.out)
+
+    def test_submit_rechecks_lead_time_after_slow_uploads(self):
+        # Uploads ran so long that x1 (Mon 10:23 CST) is now under 12 hours away.
+        batch, real = self.drafts(), self.fake
+
+        def slow(method, url, headers, data):
+            if method == 'PUT':
+                self.ctx.now = datetime(2026, 11, 2, 5, 0, tzinfo=UTC)
+            return real(method, url, headers, data)
+        self.ctx.transport = slow
+        with self.assertRaises(sb.Stop) as stop:
+            sb.submit(batch, self.ctx)
+        self.assertEqual(stop.exception.code, 'submit_failed')
+        self.assertNotIn(('POST', sb.API + '/posts'), real.requests)
+
+    def test_a_logged_post_joe_moved_is_counted_once(self):
+        folder = self.ctx.out / '2026-11-02'
+        folder.mkdir(parents=True)
+        (folder / 'ledger.jsonl').write_text(json.dumps({
+            'event': 'posted', 'draft': 'old', 'platform': 'linkedin', 'lane': 'carr', 'format': 'text',
+            'visual': False, 'utc': '2026-11-03T15:06:00Z', 'submission_id': 'sid-moved'}) + '\n')
+        self.fake.posts['sid-moved'] = {'postSubmissionId': 'sid-moved', 'status': 'scheduled',
+                                        'scheduledTime': '2026-11-04T15:11:00.000Z'}
+        self.fake.items = [item('linkedin', '2026-11-04T15:11:00.000Z')]
+        self.assertEqual(sb.plan(self.ctx)['lanes']['linkedin']['held'], 1)
 
     def test_prompt_is_store_first_and_carries_a_typed_contract(self):
         from lib.acceptance_checks import contract
@@ -387,10 +475,18 @@ class SocialBatchTest(unittest.TestCase):
         acceptance = contract(text)
         self.assertEqual({c['kind'] for c in acceptance['criteria']}, {'contains', 'json_equals'})
         self.assertEqual(acceptance['noop_criteria'][0]['text'], 'SOCIAL_BATCH_WEEK_COVERED')
-        # STORE-FIRST: the only Drive file the prompt may name is the fuel inbox (no store copy).
-        outside_repo = [p for p in re.findall(r'[\w./{}-]+\.md\b', text) if not (REPO / p).is_file()]
-        self.assertEqual(outside_repo, ['Media/content-fuel-inbox.md'])
-        self.assertNotIn('GoogleDrive', text)
+        # STORE-FIRST: every Drive path the prompt names must be one the tracked doctrine
+        # inventory keeps off the store by design (ARCHIVE_MARKERS); anything else has a store copy.
+        spec = importlib.util.spec_from_file_location('doctrine_inventory', REPO / 'pipelines/doctrine_inventory.py')
+        inventory = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(inventory)
+        vault = re.findall(r'\{\{VAULT\}\}/([^"\n]+?\.md)', text)
+        self.assertTrue(vault)
+        for path in vault:
+            self.assertTrue(any(marker in path for marker in inventory.ARCHIVE_MARKERS), f'{path} has a store copy')
+        for drive in ('GoogleDrive', 'CloudStorage', 'My Drive', 'CARR AI/'):
+            self.assertNotIn(drive, text)
+        self.assertEqual(text.count('{{VAULT}}'), len(vault), 'every vault reference must be a .md path checked above')
         for retired in ('x-batch-', 'grok.com', 'INDEX.md', 'Chrome Grok'):
             self.assertNotIn(retired, text)
         self.assertLessEqual(len(json.loads(text.strip()[8:-3])['instructions']), 40)
