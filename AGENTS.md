@@ -20,6 +20,7 @@ When matching an existing client site, inspect its actual map style and behavior
 passing interaction tests alone does not establish visual parity. Separate
 partner-supplied properties from additional public research candidates, and
 explain comparisons introduced from client correspondence with their source.
+Check project-card coverage against actual rendered map markers before delivery.
 
 ## Always-on rules
 
