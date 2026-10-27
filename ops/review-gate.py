@@ -25,6 +25,10 @@ def approved(pr, files, comments):
                 if lines[:1] in (["VERDICT: APPROVE"], ["VERDICT: CHANGES"]) and sha_line in lines]
     if verdicts[-1:] == ["VERDICT: CHANGES"]:
         return False
+    # Markdown-only PRs carry no runtime behaviour, so they merge on green CI at any size (Joe 2026-10-27).
+    if files and len(files) == pr["changed_files"] and all(
+            f.get(key, "x.md").lower().endswith(".md") for f in files for key in ("filename", "previous_filename")):
+        return True
     risky = any(f.get("status") == "added" and f.get("filename", "").startswith(("bin/", "hooks/", "ops/", ".github/workflows/")) for f in files) or any(fnmatch.fnmatchcase(f.get(key, "").lower(), pattern)
                 for f in files for key in ("filename", "previous_filename") for pattern in RISKY)
     if len(files) == pr["changed_files"] and pr["additions"] - pr["deletions"] <= 150 and not risky:
