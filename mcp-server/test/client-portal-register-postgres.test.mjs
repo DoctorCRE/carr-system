@@ -80,6 +80,10 @@ test('registering a client portal stores only a verifier and exposes only a deri
         ]);
         assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
         assert.equal((await c.query('select count(*)::int n from ops.client_portal where deal_id=$1 and disabled_at is null', [b.deal])).rows[0].n, 1);
+        await assert.rejects(c.query(`insert into ops.client_portal(slug,client_id,deal_id,password_hash)
+          select $1, client_id, deal_id, password_hash from ops.client_portal
+          where deal_id=$2 and disabled_at is null`, ['race-direct-insert', b.deal]),
+        error => error.code === '23505' && error.constraint === 'client_portal_one_active_per_deal');
         await c.query('update ops.client_portal set disabled_at=now() where deal_id=$1', [b.deal]);
       } finally { await other.end(); }
     });
