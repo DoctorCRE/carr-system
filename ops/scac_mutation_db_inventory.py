@@ -237,12 +237,13 @@ def validate_registered_grants(projection, baseline, contract):
     # A retired definition may share its ingress key with the registered grant
     # that replaces it (same function and grantee, new metadata); only an
     # unregistered installed row with that key means the old grant survived.
-    for grant in contract.get("retired_secdef_execute", []):
-        if any(row["ingress_key"] == grant["ingress_key"] for row in remaining["secdef_execute"]):
-            raise RuntimeError(f"retired grant is still installed: {grant['ingress_key']}")
-        remaining["secdef_execute"].append(grant)
-    if contract.get("retired_secdef_execute"):
-        remaining["secdef_execute"].sort(key=lambda row: row["ingress_key"])
+    for category in ("secdef_execute", "relation_dml"):
+        for grant in contract.get("retired_" + category, []):
+            if any(row["ingress_key"] == grant["ingress_key"] for row in remaining[category]):
+                raise RuntimeError(f"retired grant is still installed: {grant['ingress_key']}")
+            remaining[category].append(grant)
+        if contract.get("retired_" + category):
+            remaining[category].sort(key=lambda row: row["ingress_key"])
     for name, rows in remaining.items():
         if {"count": len(rows), "digest": digest(rows)} != baseline[name]:
             raise RuntimeError(f"current DB catalog drift: {name}")
