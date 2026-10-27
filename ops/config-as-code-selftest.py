@@ -130,8 +130,20 @@ def installed_hook_file_regressions():
             problems = mod.installed_hook_missing_files()
             assert len(problems) == 4, problems
             assert all(str(missing) in reason for _, reason in problems)
+            output = io.StringIO()
+            with patch.object(sys, "argv", ["config-as-code.py", "check-hook-files"]), contextlib.redirect_stdout(output):
+                assert mod.main() == 1
+            assert all(str(path) in output.getvalue() for path in paths)
+            assert str(missing) in output.getvalue()
+            assert str(existing) not in output.getvalue()
+
             missing.touch()
             assert mod.installed_hook_missing_files() == []
+            output = io.StringIO()
+            with patch.object(sys, "argv", ["config-as-code.py", "check-hook-files"]), contextlib.redirect_stdout(output):
+                assert mod.main() == 0
+            assert output.getvalue() == ""
+
             existing.unlink()
             assert len(mod.installed_hook_missing_files()) == 4
         with patch.dict(os.environ, {"HOME": directory}):
