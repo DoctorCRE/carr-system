@@ -90,12 +90,13 @@ class Context:
         return result.reply
 
     def failure(self, detail):
-        title = f'{self.ident}: repair failed code routine'
-        board = self.read('loop-board', {'owner': 'claude', 'status': 'open', 'search': title, 'limit': 300})
-        if any(row.get('title') == title for row in board.get('loops', [])):
+        title = f'{self.ident}: investigate failed routine'
+        old_title = f'{self.ident}: repair failed code routine'
+        board = self.read('loop-board', {'owner': 'claude', 'status': 'open', 'search': self.ident, 'limit': 300})
+        if any(row.get('title') in (title, old_title) for row in board.get('loops', [])):
             return
         self.write('add-loop', {'kind': 'open_loop', 'owner': 'claude', 'domain': 'system',
-            'title': title, 'body': f'THE FIX: inspect {self.ident} inputs and its private journal. Read back any unresolved effect before retrying; preserve its idempotency key. Repair code or integration, run its selftests and --dry-run. Failure: {detail}',
+            'title': title, 'body': f'Investigate: inspect {self.ident} inputs and its private journal. Read back any unresolved effect before retrying; preserve its idempotency key. Investigate the failure and its source; if a code or integration change is needed, run its selftests and --dry-run. Failure: {detail}',
             'blocker': 'other_lane', 'blocker_detail': 'The orchestrator builder queue owns source repairs and effect readback.',
             'marker': 'none'}, 'failure-loop:' + period(self.now))
 
