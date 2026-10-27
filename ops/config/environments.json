@@ -89,6 +89,7 @@
         "name": "carr-mcp",
         "config": "mcp-server/wrangler.toml [top level]"
       },
+      "retiring_domains": ["api.practicecre.com"],
       "domains": [
         "api.doctorcre.com",
         "dealroom.doctorcre.com",

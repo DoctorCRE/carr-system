@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DOMAIN = 'practicecre' + '.com'
 HISTORY = re.compile(r'(^corpus/|(^|/)(fixtures|history|archive)(/|$)|runbook.*\d{4}-\d{2}-\d{2})')
 RETAINED = {
+    'ops/config/environments.json': '"retiring_domains": ["api.' + DOMAIN + '"],',
     'mcp-server/wrangler.toml': '{ pattern = "api.' + DOMAIN + '", custom_domain = true },',
     'ops/doctorcre-production-smoke.py': 'expected = {"api.' + DOMAIN + '", "api.doctorcre.com", "dealroom.doctorcre.com", "reports.doctorcre.com"}',
 }
