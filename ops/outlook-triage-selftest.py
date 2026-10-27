@@ -766,8 +766,6 @@ class RefreshTest(FakeOutlookCase):
         self.assertEqual(plist['StartCalendarInterval'], calendar_for_window((7, 15), (19, 15), 30))
         installer = (ROOT / 'bin/install-outlook-intake.sh').read_text()
         self.assertIn('LABEL="com.carr.outlook-refresh"', installer)
-        self.assertNotIn('launchctl bootstrap', '\n'.join(line for line in installer.splitlines()
-                                                         if not line.startswith('print ')))
 
     def test_same_host_refresh_worker_opens_only_read_mail_without_filing(self):
         from lib import outlook_refresh

@@ -203,7 +203,7 @@ class InstallerTest(unittest.TestCase):
         result = self.install()
         plist = plistlib.loads(rendered.read_bytes())
         self.assertEqual(plist['WorkingDirectory'], str(self.repo))
-        self.assertEqual(plist['StartInterval'], 60)
+        self.assertEqual(plist['StartCalendarInterval'], [{'Minute': n} for n in range(60)])
         self.assertEqual(plist['ProgramArguments'], [str(self.helper), '--run-outbox'])
         self.assertEqual(self.helper.read_bytes(), before)
         self.assertEqual(stat.S_IMODE((self.repo / 'out/outlook-outbox-launchd.log').stat().st_mode), 0o600)

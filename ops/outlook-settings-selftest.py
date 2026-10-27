@@ -78,7 +78,7 @@ class SettingsTest(unittest.TestCase):
         settings.require_service('outbox')
         self.assertEqual(settings.partner_cc, 'partner@example.test')
         rendered = plistlib.loads(settings.render_plist(ROOT / 'ops/launchd/com.carr.outlook-outbox.plist'))
-        self.assertEqual(rendered['StartInterval'], 60)
+        self.assertEqual(rendered['StartCalendarInterval'], [{'Minute': n} for n in range(60)])
         self.assertEqual(rendered['ProgramArguments'], [str(settings.copy_helper), '--run-outbox'])
         self.assertEqual(rendered['WorkingDirectory'], str(self.repo))
         self.assertNotIn('{{', str(rendered))
