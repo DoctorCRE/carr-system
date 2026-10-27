@@ -6,7 +6,7 @@ type Deps = { withEnvelope: WithEnvelope; writeEvent: WriteEvent;
   resolveSubject: (c: Db, ref: string) => Promise<{ type: string; id: string }> };
 // ops.register_client_portal raises these; each is a refusal the partner can act on.
 const REGISTER_REFUSALS = ['portal_slug_invalid', 'portal_password_invalid', 'portal_deal_not_found',
-  'portal_slug_taken', 'portal_deal_already_registered'];
+  'portal_slug_taken', 'portal_password_mismatch', 'portal_deal_already_registered'];
 export function clientPortalTools({ withEnvelope, writeEvent, resolveSubject }: Deps) {
   return {
     'register-client-portal': {

@@ -1,6 +1,8 @@
 -- rollback: forward-only; drop ops.register_client_portal and public.v_deal_client_portal, but keep registered portal rows — they are the client's credentials of record.
 -- expand-contract: expand — one new function and one new view; no existing object changes.
--- lock-review: object creation only; no table scan or rewrite.
+-- lock-review: partial index scans the small client portal table during migration.
+
+create unique index client_portal_one_active_per_deal on ops.client_portal(deal_id) where disabled_at is null;
 
 -- Registers the portal for one deal. Only the bcrypt(SHA-256(password)) verifier
 -- that ops.read_client_portal checks is stored; the password itself never is.
@@ -22,12 +24,15 @@ begin
   if owner_client is null then
     raise exception 'portal_deal_not_found' using errcode='22023';
   end if;
+  perform pg_advisory_xact_lock(hashtextextended('client-portal-deal:'||p_deal_id::text,0));
   perform pg_advisory_xact_lock(hashtextextended('client-portal:'||p_slug,0));
   select p.* into existing from ops.client_portal p where p.slug=p_slug;
   if found then
-    if existing.client_id=owner_client and existing.deal_id=p_deal_id and existing.disabled_at is null
-       and existing.password_hash=public.crypt(encode(public.digest(p_password,'sha256'),'hex'),existing.password_hash) then
-      return 'existing';
+    if existing.client_id=owner_client and existing.deal_id=p_deal_id and existing.disabled_at is null then
+      if existing.password_hash=public.crypt(encode(public.digest(p_password,'sha256'),'hex'),existing.password_hash) then
+        return 'existing';
+      end if;
+      raise exception 'portal_password_mismatch' using errcode='23505';
     end if;
     raise exception 'portal_slug_taken' using errcode='23505';
   end if;
@@ -45,10 +50,10 @@ grant execute on function ops.register_client_portal(uuid,text,text) to carr_wri
 
 -- Deal Room readers have no access to ops.client_portal; they read the derived link here.
 create view public.v_deal_client_portal as
-select deal_id, 'https://share.doctorcre.com/' || (array_agg(slug order by created_at, slug))[1] as client_portal_url
+select deal_id, 'https://share.doctorcre.com/' || slug as client_portal_url
   from ops.client_portal
- where disabled_at is null
- group by deal_id;
+ where disabled_at is null;
+revoke all on public.v_deal_client_portal from dot_reader;
 grant select on public.v_deal_client_portal to carr_reader, carr_writer;
 
 do $contract$

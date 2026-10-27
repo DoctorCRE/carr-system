@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import pg from 'pg';
 import { readFile } from 'node:fs/promises';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.current.generated.js';
@@ -15,8 +16,8 @@ test('registering a client portal stores only a verifier and exposes only a deri
   try {
     await c.query(await migration('0001_init.sql'));
     await c.query(await migration('0008_client_merged_into.sql'));
-    await c.query('create schema ops; create role carr_reader; create role carr_writer; create role carr_authority; create role dot_reader; grant usage on schema ops to dot_reader; alter default privileges in schema ops grant select on tables to dot_reader; create extension pgcrypto');
-    for (const name of ['0975_client_portal.sql', '0976_client_portal_binding.sql', '0981_client_portal_writer_denials.sql', '1011_register_client_portal.sql'])
+    await c.query('create schema ops; create role carr_reader; create role carr_writer; create role carr_authority; create role dot_reader; grant usage on schema ops to dot_reader; alter default privileges in schema ops grant select on tables to dot_reader; alter default privileges in schema public grant select on tables to dot_reader; create extension pgcrypto');
+    for (const name of ['0975_client_portal.sql', '0976_client_portal_binding.sql', '0981_client_portal_writer_denials.sql', '1013_register_client_portal.sql'])
       await c.query(await migration(name));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner')", [actor.id]);
     await c.query("insert into client_status(slug,label) values('active','Active'); insert into deal_phase(slug,label,sort) values('research','Research',1)");
@@ -50,7 +51,7 @@ test('registering a client portal stores only a verifier and exposes only a deri
     await t.test('a slug bound elsewhere, a wrong password, a second portal for the deal and bad input are refused by name', async () => {
       for (const [args, code] of [
         [[b.deal, 'synthetic-a', password], 'portal_slug_taken'],
-        [[a.deal, 'synthetic-a', 'another-password'], 'portal_slug_taken'],
+        [[a.deal, 'synthetic-a', 'another-password'], 'portal_password_mismatch'],
         [[a.deal, 'synthetic-second', password], 'portal_deal_already_registered'],
         [[b.deal, 'Bad Slug', password], 'portal_slug_invalid'],
         [[b.deal, 'synthetic-b', ''], 'portal_password_invalid'],
@@ -67,6 +68,20 @@ test('registering a client portal stores only a verifier and exposes only a deri
       await assert.rejects(register(a.deal, 'synthetic-a', password), e => e.message === 'portal_slug_taken');
       assert.equal(await register(a.deal, 'synthetic-a2', password), 'created');
       assert.equal(await link(a.deal), 'https://share.doctorcre.com/synthetic-a2');
+    });
+
+    await t.test('concurrent registrations leave at most one active portal for a deal', async () => {
+      const other = new pg.Client(c.connectionParameters);
+      await other.connect();
+      try {
+        const results = await Promise.allSettled([
+          register(b.deal, 'race-one', password),
+          other.query('select ops.register_client_portal($1,$2,$3)', [b.deal, 'race-two', password]),
+        ]);
+        assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+        assert.equal((await c.query('select count(*)::int n from ops.client_portal where deal_id=$1 and disabled_at is null', [b.deal])).rows[0].n, 1);
+        await c.query('update ops.client_portal set disabled_at=now() where deal_id=$1', [b.deal]);
+      } finally { await other.end(); }
     });
 
     await t.test('grants: the writer registers, readers see only the link, dot_reader sees nothing', async () => {
