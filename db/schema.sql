@@ -113059,6 +113059,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 1003_notification_morning_midnight.sql	7b3eb4a20aeed80ce5c01bd17a4b2fe02c43184e5903957ac4edee459b80d050	1970-01-01 00:00:00+00
 1004_phase_start_undo.sql	921899f7e36a786c3570d2da68645051b710c7fd51ec7fbe6c8b74488bd93e52	1970-01-01 00:00:00+00
 1005_calendar_intake_retained_control_ref.sql	2d1910179c7f719c91b55416062725031a447a0ce711621dace61e3049488751	1970-01-01 00:00:00+00
+1010_dell_actor_email.sql	442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a	1970-01-01 00:00:00+00
 \.
 
 
@@ -113105,7 +113106,6 @@ SET row_security = off;
 --
 
 COPY public.actor (id, slug, kind, display_name, email, active, phone) FROM stdin;
-722901b8-efb3-4bd6-bef0-c5d481c0a35e	dell	human	Dell McCraney	\N	t	\N
 c659db8e-1920-4ddf-b795-ae30b8bd3380	automation	automation	Scheduled jobs	\N	t	\N
 c16ce9d1-0b9e-4306-baab-dabaedda9961	system	system	System (migrations, exporters)	\N	t	\N
 b6c38b27-d006-4fad-9c38-49edf3130a07	joe	human	Joe Bookout	joe.bookout@carr.us	t	850.361.2208
@@ -113129,6 +113129,7 @@ b0e0c932-f529-4a1b-8f0e-fc6241a0e8d6	codex-fa-execution	automation	Codex Global 
 1130ec99-97f9-4aad-a5a7-86cea352c822	codex-fa-secrets	automation	Codex Global Secrets Boundary Oracle	\N	t	\N
 bc43680e-8468-4258-9856-e5bf325b5840	codex-fa-source	automation	Codex Global Source Authority Oracle	\N	t	\N
 3c4a3e52-211a-4926-8ba3-a5e58418b7aa	codex-fa-minimum	automation	Codex Foundation Assurance Minimum Oracle	\N	t	\N
+722901b8-efb3-4bd6-bef0-c5d481c0a35e	dell	human	Dell McCraney	dell.mccraney@carr.us	t	\N
 \.
 
 
