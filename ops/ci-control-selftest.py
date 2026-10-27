@@ -113,13 +113,11 @@ class Controls(unittest.TestCase):
         self.assertFalse(any(row == {'classes': 'gates'} for row in exclusions))
         self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
 
-    def test_ready_metadata_does_not_replace_required_check(self):
+    def test_ready_transition_runs_required_check(self):
         wf = workflow()
         triggers = wf['on']['pull_request']['types']
-        self.assertNotIn('ready_for_review', triggers)
-        self.assertNotIn('edited', triggers)
-        self.assertNotIn('labeled', triggers)
-        self.assertTrue({'opened', 'synchronize', 'reopened'} <= set(triggers))
+        self.assertEqual(triggers, ['opened', 'synchronize', 'reopened',
+                                    'converted_to_draft', 'ready_for_review'])
         self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
 
     def test_events(self):
