@@ -71,6 +71,25 @@ class LaunchdMainPathTests(unittest.TestCase):
         with patch.object(installer, "LAUNCHD_DEPENDENCY_CHECKOUTS", (str(dependency),), create=True):
             self.assertIsNone(installer.launchd_template_refusal(body))
 
+    def test_outlook_job_may_run_from_its_configured_installer_checkout(self):
+        # bin/install-outlook-intake.sh keeps a standalone checkout detached at
+        # a main commit; only Outlook jobs may run from it.
+        sys.path.insert(0, str(ROOT / "ops"))
+        from outlook_test_support import write_settings
+        home, runtime = self.root / "home", self.root / "outlook-runtime"
+        self.git("init", "-b", "main", str(runtime))
+        self.git("-C", str(runtime), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                 "commit", "--allow-empty", "-m", "seed")
+        self.git("-C", str(runtime), "checkout", "--detach")
+        write_settings(home, runtime)
+
+        def body(label):
+            return plistlib.dumps({"Label": label, "ProgramArguments": ["/usr/bin/true"],
+                                   "WorkingDirectory": str(runtime)}).decode()
+        with patch.object(installer, "HOME", str(home)):
+            self.assertIsNone(installer.launchd_path_refusal(body("com.carr.outlook-triage")))
+            self.assertIsNotNone(installer.launchd_path_refusal(body("com.carr.not-outlook")))
+
     def assert_runtime_refused(self, data):
         body = plistlib.dumps(data).decode()
         with self.subTest(seam="runtime guard"):

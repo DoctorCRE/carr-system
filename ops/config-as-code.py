@@ -160,6 +160,16 @@ LAUNCHD_ALT_REPO = {
         REPO, "tools", "dictation-rig", "launchd", "com.carr.call-mode.plist"
     ),
 }
+# Outlook jobs run from the separate checkout named in ~/.config/carr/outlook.json
+# and ship only through these installers, which also build and pin the helper
+# each job runs. `check` compares them; `install` never writes or reloads them.
+OUTLOOK_INSTALLERS = {
+    "com.carr.outlook-intake.plist": "bin/install-outlook-intake.sh",
+    "com.carr.outlook-outbox.plist": "bin/install-outlook-intake.sh",
+    "com.carr.outlook-refresh.plist": "bin/install-outlook-intake.sh",
+    "com.carr.outlook-triage.plist": "bin/install-outlook-triage.sh",
+    "com.carr.outlook-research-copy.plist": "bin/install-outlook-research-copy.sh",
+}
 HOOKS_REPO = os.path.join(REPO, "ops", "config", "hooks.json")
 CODEX_HOOKS_SRC = os.path.join(HOME, ".codex", "hooks.json")
 CODEX_HOOKS_REPO = os.path.join(REPO, "ops", "config", "codex-hooks.json")
@@ -399,10 +409,9 @@ def missing_targets(body):
 
 
 def portable(text):
-    if '<plist' in text and (launchd_calendar.plist_label(text) or '').startswith('com.carr.outlook-'):
+    if '<plist' in text and f"{launchd_calendar.plist_label(text)}.plist" in OUTLOOK_INSTALLERS:
         from lib.outlook_settings import load_settings
         settings = load_settings(Path(HOME))
-        settings.require_repo(Path(REPO))
         for token, value in sorted(settings.plist_replacements.items(), key=lambda item: len(item[1]), reverse=True):
             text = text.replace(escape(value), token)
     for tok, real in TOKENS:
@@ -414,7 +423,6 @@ def concrete(text):
     if '{{COPY_HELPER}}' in text or '{{EXECUTABLE_PATH}}' in text:
         from lib.outlook_settings import load_settings
         settings = load_settings(Path(HOME))
-        settings.require_repo(Path(REPO))
         text = settings.render_plist(text.encode()).decode()
     for tok, real in TOKENS:
         text = text.replace(tok, real)
@@ -433,9 +441,18 @@ def read(path):
 
 
 def launchd_texts_match(live_text, repo_text):
-    """Compare launchd plist bodies with token portability normalized on both sides."""
+    """Compare launchd plists by value, with token portability normalized on both sides.
+
+    launchd reads values, not layout: an installer that writes with plistlib
+    (sorted keys, tabs, no comments) installs the same job as a hand-formatted
+    template, so only an unparseable body falls back to text equality.
+    """
     desired = concrete(repo_text) if repo_text and '<plist' in repo_text else repo_text
-    return portable(live_text or "") == portable(desired or "")
+    live, wanted = portable(live_text or ""), portable(desired or "")
+    try:
+        return plistlib.loads(live.encode()) == plistlib.loads(wanted.encode())
+    except Exception:
+        return live == wanted
 
 
 def tracked_text_match(label, live, repo_text):
@@ -1129,6 +1146,13 @@ def launchd_path_refusal(body):
     if not isinstance(working_directory, str) or not os.path.isabs(working_directory):
         return "invalid LaunchAgent: WorkingDirectory must be absolute"
     paths = [working_directory, definition.get("Program"), *arguments]
+    standalone = {os.path.realpath(root) for root in LAUNCHD_DEPENDENCY_CHECKOUTS}
+    if f"{definition.get('Label')}.plist" in OUTLOOK_INSTALLERS:
+        from lib.outlook_settings import load_settings
+        try:
+            standalone.add(os.path.realpath(load_settings(Path(HOME)).repo))
+        except SettingsError:
+            pass
     for path in paths:
         if not isinstance(path, str) or not path or path.startswith("-"):
             continue
@@ -1159,10 +1183,10 @@ def launchd_path_refusal(body):
             identities = dirs.stdout.strip().splitlines()
             if dirs.returncode or len(identities) != 2:
                 return f"cannot verify main/worktree identity for {path}"
-            # Only named package-manager checkouts may use release branches.
-            # Standalone session clones have the same Git directory shape.
-            if identities[0] == identities[1] and os.path.realpath(checkout) in {
-                    os.path.realpath(root) for root in LAUNCHD_DEPENDENCY_CHECKOUTS}:
+            # Only named package-manager checkouts, and for Outlook jobs the
+            # installer's own detached checkout, may leave main. Standalone
+            # session clones have the same Git directory shape.
+            if identities[0] == identities[1] and os.path.realpath(checkout) in standalone:
                 continue
             branch = subprocess.run(["git", "-C", checkout, "symbolic-ref", "--short", "HEAD"],
                                     capture_output=True, text=True, env=_git_env(), timeout=15)
@@ -1315,6 +1339,18 @@ def _cmd_check(holds):
         for name in pending_launchd_reloads()
         if not launchd_off_reason(name, read(launchd_repo_path(name)), holds)
     ]
+    # The administrator-owned Claude policy carries the deny rules the removed
+    # shell hooks used to enforce, and install refuses everything while it
+    # cannot write it, so its absence is reported here rather than only there.
+    try:
+        policy = [(f"Claude managed safety policy {name}",
+                   "MISSING OR STALE; an administrator must install it before "
+                   "`install --apply` can converge anything")
+                  for name, body in managed_safety_plan()
+                  if json.loads(read(name) or "null") != json.loads(body)]
+    except (OSError, ValueError, TypeError) as exc:
+        policy = [("Claude managed safety policy", f"UNREADABLE: {exc}")]
+    missing += policy
     drift = missing + untracked + different + disallowed + refused + pending_reloads
     drift += installed_hook_missing_files()
     if not drift and not unversioned:
@@ -1339,7 +1375,7 @@ def _cmd_check(holds):
     # intentionally omitted from normal pairs() on a secondary.  Otherwise
     # "16 of 4" could claim to have checked only four items while reporting
     # sixteen violations, which is operationally misleading.
-    checked_items = (len(configured_pairs) + len(disallowed) + len(refused)
+    checked_items = (len(configured_pairs) + len(policy) + len(disallowed) + len(refused)
                      + len(pending_reloads))
     headline = f"config-as-code: DRIFT — {len(drift)} of {checked_items} items"
     if missing:
@@ -1466,6 +1502,33 @@ def reconcile_retired_launchd(apply):
         except (OSError, ValueError, plistlib.InvalidFileException, subprocess.SubprocessError) as exc:
             print(f"  RETIRE FAILED  {filename}: {exc}")
             failures.append(filename)
+    return failures
+
+
+def quarantine_definition_only_plists(apply, held_labels):
+    """Move installed definition-only plists aside once launchd has them off.
+
+    reconcile_off has already disabled and booted the label out; the file left
+    in LaunchAgents is what `check` reports, so convergence moves it here, never
+    deletes it. Returns the filenames that could not be moved.
+    """
+    failures = []
+    quarantine = os.path.join(HOME, "Library", "LaunchAgents-quarantine", "carr-definition-only")
+    for filename in definition_only_installed_plists():
+        if (launchd_calendar.plist_label(read(launchd_repo_path(filename)) or "")
+                or filename.removesuffix(".plist")) not in held_labels:
+            continue
+        dest = os.path.join(quarantine, filename)
+        if not apply:
+            print(f"  would quarantine  {filename} (definition only) -> {dest}")
+            continue
+        if os.path.exists(dest):
+            print(f"  ERROR  quarantine already has {dest}; refusing to overwrite it")
+            failures.append(filename)
+            continue
+        os.makedirs(quarantine, exist_ok=True)
+        shutil.move(os.path.join(LAUNCHD_SRC, filename), dest)
+        print(f"  QUARANTINED  {filename} (definition only) -> {dest}")
     return failures
 
 
@@ -2064,6 +2127,7 @@ def cmd_install(apply):
               "secondary task scope is configured)")
 
     launchd_activation_failures = reconcile_retired_launchd(apply)
+    launchd_activation_failures += quarantine_definition_only_plists(apply, held_labels)
     if apply:
         os.makedirs(LAUNCHD_SRC, exist_ok=True)
     for f in sorted(os.listdir(LAUNCHD_REPO)) if os.path.isdir(LAUNCHD_REPO) else []:
@@ -2071,6 +2135,9 @@ def cmd_install(apply):
             continue
         source = read(launchd_repo_path(f))
         if (launchd_calendar.plist_label(source or "") or f.removesuffix(".plist")) in held_labels:
+            continue
+        if f in OUTLOOK_INSTALLERS:
+            print(f"  SKIP  {f} (installer-owned: {OUTLOOK_INSTALLERS[f]})")
             continue
         if f in PRIMARY_ONLY and not IS_PRIMARY:
             live = os.path.join(LAUNCHD_SRC, f)
@@ -2338,6 +2405,9 @@ def launchd_calendar_reinstall_plan(templates_dir, agents_dir):
         refusal = launchd_template_refusal(source)
         if refusal:
             row.update(action="fail", why=f"template refused: {refusal}")
+            continue
+        if name in OUTLOOK_INSTALLERS:
+            row["why"] = f"installer-owned: {OUTLOOK_INSTALLERS[name]}"
             continue
         if name in PRIMARY_ONLY and not IS_PRIMARY:
             row["why"] = "primary-only job on a secondary (install retires it)"
