@@ -434,12 +434,16 @@ class MatchingTests(unittest.TestCase):
     def test_router_matches_after_thread_refusal(self):
         self.assertIsNotNone(email_router.REFUSAL.fullmatch('email_thread_ambiguous'))
         calls = []
+        projected = json.loads(subprocess.check_output([
+            'node', '--experimental-strip-types', '--input-type=module', '-e',
+            "import {publicError} from './mcp-server/src/public-errors.ts'; import {ToolError} from './mcp-server/src/tool-error.ts'; console.log(JSON.stringify(publicError(new ToolError({error:'email_thread_ambiguous'}), '00000000-0000-4000-8000-000000000001')));",
+        ], cwd=Path(__file__).resolve().parents[1], text=True))
         def carr(verb, args):
             calls.append((verb, args))
             if verb == 'email-router-queue':
                 return {'open_deals': [{'id': DEAL}], 'emails': [self.mail(thread_history=[self.prior()])]}
             if verb == 'inherit-email-thread':
-                raise Refused('email_thread_ambiguous')
+                raise Refused(projected['error'])
             return {'ok': True}
         def matching(mail, deals, history):
             if history:

@@ -1,0 +1,28 @@
+{
+  "schema": "carr-email-reply-draft.v1",
+  "version": "1.0.0",
+  "card": "WR441.S3.J2",
+  "transport": "Authenticated MCP list-email-proposals and submit-email-draft",
+  "review": "Reply-draft cards shown to verified human partners Joe and Dell may display the exact reply_draft.to and reply_draft.cc addresses. Display both before Submit, which authorizes sending. Evidence remains untrusted text. Do not infer recipients from display names or expose these pending recipient fields to agents.",
+  "pending_reply_draft": {
+    "subject": "Stored draft subject, editable by the owning partner",
+    "body": "Stored draft body, editable by the owning partner",
+    "owner": "Captured mailbox owner, joe or dell",
+    "to": "Exactly one address, copied unchanged from activity.email_source.sender_email",
+    "cc": "Exactly one address, copied unchanged from the other active human partner's actor.email",
+    "unavailable": "Missing source or mandatory copy address sets preview_error on that row and disables confirm_verb. No guessed recipient or partial recipient set is returned."
+  },
+  "submit": {
+    "verb": "submit-email-draft",
+    "arguments": ["idempotency_key", "proposal_id", "base_version", "subject", "body", "to", "cc"],
+    "recipient_binding": "Send the exact displayed to and cc arrays. The server resolves recipients again under transaction locks and compares them byte for byte before recording approval or queuing. No trimming, case folding, extra recipients or client-selected destinations.",
+    "mismatch_error": "email_draft_recipients_mismatch",
+    "recovery": "After a mismatch, read and display the current recipient addresses before submitting a newly reviewed request. Keep the original payload and idempotency key when an outcome is unknown.",
+    "replay": "A successful same-key retry returns the frozen original receipt even if actor.email has since changed.",
+    "receipt": "approved_to_send with the exact subject, body, sha256, to, cc and incremented version. Submission authorizes sending but does not prove delivery."
+  },
+  "partner_copy": {
+    "authority": "Resolve the other active human partner's actor.email at runtime. Do not use a hardcoded routing fallback."
+  },
+  "consumer_adoption": "Server contract first. App PR #448 must pin the live producer, update contracts/carr-interface.v1.json email_proposals.review to permit these exact reply-draft addresses for partners, render both before Submit, and echo the displayed arrays. The app's general raw-address prohibition continues outside this reply-draft exception."
+}

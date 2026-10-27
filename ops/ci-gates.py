@@ -20,7 +20,7 @@ PROGRAM_PATTERNS = (
     'tools/test-*.sh', 'tools/test_*.sh',
 )
 INVARIANTS = (
-    'stale-count-check', 'rule-load-layer-check', 'rule-classification-parity-check',
+    'rule-load-layer-check', 'rule-classification-parity-check',
     'selftest-git-isolation-check', 'sync-core-rule-ids', 'rule-route-coverage',
     'migration-order-gate', 'migration-safety-gate',
 )

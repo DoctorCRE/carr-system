@@ -6,7 +6,7 @@ const MATCHING = new Set(['file_to_deal', 'possible_new_deal']);
 const ROLES = ['client', 'landlord_side', 'lender', 'attorney', 'other_vendor'];
 const KINDS = {
   file_to_deal: { confirm: 'confirm-email-filing', args: () => ({}) },
-  possible_new_deal: { confirm: null, args: () => ({}) },
+  possible_new_deal: { confirm: 'confirm-email-filing', args: () => ({}) },
   phase_move: { preview: 'preview-email-deal-progress', confirm: 'confirm-email-deal-progress',
     args: () => ({}) },
   next_step: { preview: 'preview-email-next-step', confirm: 'confirm-email-next-step',
@@ -93,6 +93,16 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     if (row.owner !== owner) fail('email_draft_not_owner');
     return row;
   };
+  const draftRecipients = async (c, row, lock = false) => {
+    const source = (await c.query(`select email_source from activity where id=$1${lock ? ' for share' : ''}`,
+      [row.activity_id])).rows[0]?.email_source;
+    if (!source || source.mailbox_owner !== row.owner) fail('email_draft_source_missing');
+    const copy = (await c.query(lock
+      ? "select email from actor where slug=$1 and kind='human' and active for share"
+      : 'select email from v_email_reply_partner where slug=$1', [row.owner === 'joe' ? 'dell' : 'joe'])).rows[0]?.email;
+    if (typeof copy !== 'string' || !/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(copy)) fail('email_draft_copy_address_missing');
+    return { to: [source.sender_email], cc: [copy] };
+  };
   const checkVersion = (row, version) => {
     if (row.version !== version) fail('version_conflict', { current_version: row.version });
   };
@@ -104,33 +114,38 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
   return {
     'confirm-email-filing': {
       write: true, humanOnly: true, humanCallerOnly: true,
-      description: 'A partner confirms one displayed file-to-deal proposal with its version and digest. Files the email and records the sender as a participant hint. Sends nothing.',
+      description: 'A partner confirms a displayed filing proposal with its version and digest. For a possible new deal, supply the created deal ID. Files the email and records the sender as a participant hint. Sends nothing.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: ['idempotency_key','proposal_id','base_version','proposal_digest'], properties: {
           idempotency_key: { type: 'string', minLength: 1, maxLength: 200 },
           proposal_id: { type: 'string', format: 'uuid' }, base_version: { type: 'integer', minimum: 1 },
-          proposal_digest: { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' } } },
+          proposal_digest: { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' }, deal: { type: 'string', format: 'uuid' } } },
       handler: (c, actor, args) => withEnvelope(c, actor, 'confirm-email-filing', args, async () => {
         if (actor.human !== true || !['joe','dell'].includes(actor.slug)) fail('partner_confirmation_required');
         const row = (await c.query(`select * from email_proposal where id=$1 for update`, [args.proposal_id])).rows[0];
-        if (!row || row.kind !== 'file_to_deal' || row.status !== 'pending') fail('email_proposal_not_pending');
+        if (!row || !MATCHING.has(row.kind) || row.status !== 'pending') fail('email_proposal_not_pending');
         if (row.version !== args.base_version) fail('version_conflict');
-        await c.query('select id from activity where id=$1 for update', [row.activity_id]);
-        await c.query('select id from deal where id=$1 for update', [row.deal_id]);
+        const activity = (await c.query('select id,client_id,deal_id from activity where id=$1 for update', [row.activity_id])).rows[0];
+        const targetId = row.kind === 'possible_new_deal' ? args.deal : row.deal_id;
+        if (row.kind === 'file_to_deal' && args.deal && args.deal.toLowerCase() !== row.deal_id) fail('email_proposal_deal_invalid');
+        const target = targetId && (await c.query('select id,client_id from deal where id=$1 for update', [targetId])).rows[0];
+        if (!target) fail('email_new_deal_not_found');
+        if (row.kind === 'possible_new_deal' && activity.client_id && activity.client_id !== target.client_id) fail('email_new_deal_client_mismatch');
+        if (activity.deal_id && activity.deal_id !== target.id) fail('email_proposal_deal_invalid');
         const current = await matchingPreview(c, row);
         if (current.proposal_digest !== args.proposal_digest) fail('email_proposal_stale');
         if (!current.sender.party_id) fail('email_sender_contact_required', { message: 'Create the sender contact before confirming this filing.' });
-        await c.query(`update activity set deal_id=$2,version=version+1,updated_by=$3,updated_at=now() where id=$1`,
-          [row.activity_id,row.deal_id,actor.id]);
+        await c.query(`update activity set deal_id=$2,client_id=coalesce(client_id,$4),version=version+1,updated_by=$3,updated_at=now() where id=$1`,
+          [row.activity_id,target.id,actor.id,target.client_id]);
         await c.query(`insert into deal_participant(deal_id,party_id,role,set_by)
             select $1,$2,$3,$4 where not exists(select 1 from deal_participant
               where deal_id=$1 and party_id=$2 and role=$3 and to_at is null)`,
-            [row.deal_id,current.sender.party_id,row.sender_role,actor.id]);
-        await resolveEmailProposal(c, actor, row.kind, row.deal_id, row.activity_id);
-        await writeEvent(c, actor, 'confirm-email-filing', 'deal', row.deal_id,
+            [target.id,current.sender.party_id,row.sender_role,actor.id]);
+        await c.query("update email_proposal set status='confirmed',version=version+1,resolved_by=$2,resolved_at=now() where id=$1", [row.id,actor.id]);
+        await writeEvent(c, actor, 'confirm-email-filing', 'deal', target.id,
           { new: { activity_id: row.activity_id, sender_party_id: current.sender.party_id, role: row.sender_role },
             cause: 'human_stated', idempotency_key: args.idempotency_key });
-        return { ok: true, status: 'confirmed', deal: row.deal_id, activity_id: row.activity_id };
+        return { ok: true, status: 'confirmed', deal: target.id, activity_id: row.activity_id };
       }),
     },
     'inherit-email-thread': {
@@ -181,10 +196,12 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'submit-email-draft': {
       write: true, humanOnly: true, humanCallerOnly: true,
-      description: 'The owning partner submits the exact final subject and body from a review card. Approval freezes the original sender as recipient and the other partner actor.email as cc. Missing copy address refuses. Enqueues for that partner’s Mac; does not send mail.',
+      description: 'The owning partner submits the exact final subject, body and displayed to/cc arrays from a review card. Missing or changed recipients refuse email_draft_recipients_mismatch. Approval freezes the original sender as recipient and the other partner actor.email as cc. Missing copy address refuses. Enqueues for that partner’s Mac; does not send mail.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: [...Object.keys(draftProperties), 'subject', 'body'], properties: { ...draftProperties,
-          subject: { type: 'string', minLength: 1, maxLength: 998 }, body: { type: 'string', maxLength: 20000 } } },
+          subject: { type: 'string', minLength: 1, maxLength: 998 }, body: { type: 'string', maxLength: 20000 },
+          to: { type: 'array', minItems: 1, maxItems: 1, items: { type: 'string', format: 'email' } },
+          cc: { type: 'array', minItems: 1, maxItems: 1, items: { type: 'string', format: 'email' } } } },
       handler: async (c, actor, args) => {
         if (actor.human !== true || !['joe', 'dell'].includes(actor.slug)) fail('email_draft_not_owner');
         await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
@@ -194,14 +211,11 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           checkVersion(row, args.base_version);
           if (!args.body.trim()) fail('email_draft_empty_body');
           if (!args.subject.trim() || /[\r\n]/.test(args.subject)) fail('email_draft_subject_invalid');
-          const source = (await c.query('select email_source from activity where id=$1 for share', [row.activity_id])).rows[0]?.email_source;
-          if (!source || source.mailbox_owner !== row.owner) fail('email_draft_source_missing');
-          const copy = (await c.query("select email from actor where slug=$1 and kind='human' and active for share",
-            [actor.slug === 'joe' ? 'dell' : 'joe'])).rows[0]?.email;
-          if (typeof copy !== 'string' || !/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(copy)) fail('email_draft_copy_address_missing');
+          const recipients = await draftRecipients(c, row, true);
+          if (['to', 'cc'].some(field => !Array.isArray(args[field]) || args[field].length !== 1 ||
+              args[field][0] !== recipients[field][0])) fail('email_draft_recipients_mismatch');
           const submitted = { subject: args.subject, body: args.body,
-            sha256: sha256(JSON.stringify({ subject: args.subject, body: args.body })),
-            to: [source.sender_email], cc: [copy] };
+            sha256: sha256(JSON.stringify({ subject: args.subject, body: args.body })), ...recipients };
           await c.query(`update email_proposal set status='approved_to_send',version=version+1,
             submitted_email=$2::jsonb,submitted_at=now(),resolved_by=$3,resolved_at=now() where id=$1`,
           [row.id, JSON.stringify(submitted), actor.id]);
@@ -339,7 +353,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'list-email-proposals': {
       write: false,
-      description: 'List email proposals for Home across deals, or only the optional deal UUID, oldest first. Status defaults to pending; select confirmed, dismissed, approved_to_send, sent or failed to read resolved proposals. Reply drafts include subject, body and owner in reply_draft, and submit-email-draft as confirm_verb. Every item includes its status, kind, deal, confidence, source email sender, subject, quote, activity_id and suspected_instruction warning. Pending items have a fresh preview and confirm_verb; confirm with the preview fields or dismiss with dismiss-email-proposal and the version. A stale pending item has preview null and preview_error. Resolved items have resolution (resolved_at, resolved_by actor ID, reason), the stored proposed_next_step when applicable, and null confirm_verb, preview and preview_error. Phase history retains the quote; exact phase changes remain in deal history. Without limit, refuses above 200 matching proposals. For pagination, pass limit and then next_cursor until more is false; a cursor remains valid after resolution, but must belong to the selected deal when deal is supplied.',
+      description: 'List email proposals for Home across deals, or only the optional deal UUID, oldest first. Status defaults to pending; select confirmed, dismissed, approved_to_send, sent or failed to read resolved proposals. Reply drafts include subject, body and owner in reply_draft. Pending drafts also include exact to/cc arrays for verified human Joe or Dell. Missing source/copy addresses set preview_error and disable confirm_verb; machine callers receive no pending recipient addresses. Submit must echo the displayed arrays through submit-email-draft. Every item includes its status, kind, deal, confidence, source email sender, subject, quote, activity_id and suspected_instruction warning. Pending items have a fresh preview and confirm_verb; confirm with the preview fields or dismiss with dismiss-email-proposal and the version. A stale pending item has preview null and preview_error. Resolved items have resolution (resolved_at, resolved_by actor ID, reason), the stored proposed_next_step when applicable, and null confirm_verb, preview and preview_error. Phase history retains the quote; exact phase changes remain in deal history. Without limit, refuses above 200 matching proposals. For pagination, pass limit and then next_cursor until more is false; a cursor remains valid after resolution, but must belong to the selected deal when deal is supplied.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         deal: { type: 'string', format: 'uuid' },
         status: { type: 'string', enum: ['pending', 'confirmed', 'dismissed', 'approved_to_send', 'sent', 'failed'], default: 'pending' },
@@ -364,7 +378,11 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const proposals = [];
         for (const row of rows.slice(0, limit)) {
           const pending = row.status === 'pending';
-          let shown = null, previewError = null;
+          let shown = null, previewError = null, recipients = null;
+          if (pending && row.kind === 'reply_draft' && actor.human === true && ['joe', 'dell'].includes(actor.slug)) {
+            try { recipients = await draftRecipients(c, row); }
+            catch (error) { if (!(error instanceof ToolError)) throw error; previewError = error.payload?.error ?? 'preview_failed'; }
+          }
           if (pending && row.kind !== 'reply_draft') {
             try { shown = await show(c, actor, row); }
             catch (error) { if (!(error instanceof ToolError)) throw error; previewError = error.payload?.error ?? 'preview_failed'; }
@@ -375,13 +393,13 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             proposed_matter: row.kind === 'possible_new_deal' ? row.task_text : null,
             resolution: pending ? null : { resolved_at: new Date(row.resolved_at).toISOString(),
               resolved_by: row.resolved_by, reason: row.resolution_reason },
-            ...(row.kind === 'reply_draft' ? { reply_draft: { subject: row.draft_subject, body: row.draft_body, owner: row.owner }, submitted_email: row.submitted_email, send_result: row.send_result } : {}),
+            ...(row.kind === 'reply_draft' ? { reply_draft: { subject: row.draft_subject, body: row.draft_body, owner: row.owner, ...recipients }, submitted_email: row.submitted_email, send_result: row.send_result } : {}),
             proposed_next_step: row.kind === 'next_step'
               ? { text: row.task_text, next_date: row.next_date, owner: row.owner } : null,
             suspected_instruction: suspected(row.evidence_quote),
             source: { activity_id: row.activity_id, sender: named?.[1] ?? null, subject: named?.[2] ?? row.summary,
               evidence_quote: row.evidence_quote, occurred_at: new Date(row.occurred_at).toISOString() },
-            confirm_verb: pending ? KINDS[row.kind].confirm : null, preview: shown, preview_error: previewError });
+            confirm_verb: pending && !(row.kind === 'reply_draft' && (!recipients || previewError)) ? KINDS[row.kind].confirm : null, preview: shown, preview_error: previewError });
         }
         return { schema_version: 'email-proposals.v1', proposals, send: false,
           ...(args.limit ? { more, next_cursor: more ? proposals.at(-1).id : null } : {}) };

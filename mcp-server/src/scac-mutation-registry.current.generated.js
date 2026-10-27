@@ -671,7 +671,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "confirm-email-filing": {
     "ingress_key": "mcp-tool:confirm-email-filing",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "0c730d587c7f1890b3a1034eac6f2db2b479f02f731c3b9a19ebfca1ba2e6edf",
+    "schema_digest": "401140a64483ed45129e8c2856a8e47db3732fb6a07abb08a043daa7b5e385d6",
     "write": true,
     "human_only": true,
     "human_caller_only": true,
@@ -3172,7 +3172,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "submit-email-draft": {
     "ingress_key": "mcp-tool:submit-email-draft",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "26ae09ec7ce0a1d98425fc1ed901bec8ab69f262cd76fdf0055372f06e707c92",
+    "schema_digest": "0502bfe1836ed7abefa06e0441e114e41a21855f0ecbc8abf904d66ca91c8ce5",
     "write": true,
     "human_only": true,
     "human_caller_only": true,
