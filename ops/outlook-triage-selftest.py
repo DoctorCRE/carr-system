@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline tests for the evening Outlook triage. A fake cua-driver plays Outlook; nothing real is touched.
+"""Offline tests for Outlook triage using synthetic windows and messages.
 
 The fake mirrors the shapes read from Joe's live Outlook on 2026-10-20: a folder
 pane (AXOutline) that View > Sidebar toggles, the window title naming the open
@@ -78,7 +78,7 @@ TOOLBAR = window(11, '', 1512, 32, False)
 FULL_SCREEN = window(12, MAILBOX, 1512, 949, False)
 ORDINARY = window(13, MAILBOX, 1230, 768)
 COMPOSE = window(14, 'Re: subject-000', 917, 911)
-UNTITLED_OFFSCREEN = window(15, 'UNTITLED', 500, 500, None) | {'is_on_screen': False}
+UNTITLED_OFFSCREEN = window(15, '', 500, 500, None) | {'is_on_screen': False}
 UNTITLED_OFFSCREEN['bounds']['y'] = 580
 
 
@@ -383,7 +383,7 @@ class ComposeWindowTest(unittest.TestCase):
                       UNTITLED_OFFSCREEN | {'on_current_space': False},
                       UNTITLED_OFFSCREEN | {'on_current_space': True},
                       UNTITLED_OFFSCREEN | {'title': 'subject-000'},
-                      UNTITLED_OFFSCREEN | {'title': ''}, UNTITLED_OFFSCREEN | {'title': None},
+                      UNTITLED_OFFSCREEN | {'title': 'UNTITLED'}, UNTITLED_OFFSCREEN | {'title': None},
                       {k: v for k, v in UNTITLED_OFFSCREEN.items() if k != 'is_on_screen'},
                       {k: v for k, v in UNTITLED_OFFSCREEN.items() if k != 'on_current_space'},
                       window(16, '', 500, 500)):
