@@ -46,12 +46,14 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CORPUS = os.path.join(REPO, "corpus")
 SET_FILE = os.path.join(CORPUS, "corpus-set.tsv")
 MANIFEST = os.path.join(CORPUS, "manifest.json")
+PUSH_MANIFEST = os.path.join(REPO, "out", "corpus-push-manifest.json")
 
 VAULT = os.environ.get("CARR_VAULT") or os.path.join(
     os.path.expanduser("~"), "Library/CloudStorage/GoogleDrive-joe.bookout.carr.us@gmail.com/My Drive/CARR AI")
@@ -190,9 +192,9 @@ def load_set():
     return rows
 
 
-def load_manifest():
+def load_manifest(path=MANIFEST):
     try:
-        with open(MANIFEST, encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             return json.load(fh)
     except FileNotFoundError:
         return None
@@ -203,28 +205,9 @@ def load_manifest():
 VOLATILE_KEYS = ("generated_at", "generator")
 
 
-def write_manifest(out) -> bool:
-    """Write the manifest only when its SUBSTANCE changed. Returns True if written.
-
-    ADDED 2026-08-07. Both --sync and --push rewrote this file unconditionally,
-    stamping a fresh generated_at every night. corpus/manifest.json is tracked in
-    git, so the nightly chain left the repo permanently dirty: `git status` in
-    ~/carr-system showed a modified file every single morning, on a night where
-    nothing had been pushed at all.
-
-    That is not a cosmetic annoyance, it is a broken instrument. A working tree
-    that is never clean cannot tell you that something real is uncommitted — which
-    is exactly what happened on 2026-08-07, when a genuine fix sat unnoticed in
-    the same `git status` as this permanent noise. Same failure family as the
-    nightly alarm the ORDER 2 addendum killed: a signal that fires every day
-    stops being read.
-
-    The timestamp is not lost, it is made truthful. generated_at now means "when
-    the corpus last actually moved", which is the question anyone reading it is
-    asking, rather than "when this script last ran", which out/nightly.log
-    already answers.
-    """
-    old = load_manifest()
+def write_manifest(out, path=MANIFEST) -> bool:
+    """Write only when manifest substance changes, ignoring timestamps."""
+    old = load_manifest(path)
     if old is not None:
         a = {k: v for k, v in old.items() if k not in VOLATILE_KEYS}
         b = {k: v for k, v in out.items() if k not in VOLATILE_KEYS}
@@ -235,15 +218,22 @@ def write_manifest(out) -> bool:
             ]
         if a == b:
             return False
-    with open(MANIFEST, "w", encoding="utf-8") as fh:
-        json.dump(out, fh, indent=2, ensure_ascii=False)
-        fh.write("\n")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".corpus-manifest-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(out, fh, indent=2, ensure_ascii=False)
+            fh.write("\n")
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
     return True
 
 
 def status():
     """Classify every file in the set. Pure read; safe for the health check."""
-    man = load_manifest()
+    man = load_manifest(PUSH_MANIFEST) or load_manifest()
     if man is None:
         return {"manifest": False, "files": [], "skipped": [], "orphans": [],
                 "counts": {}, "mirrored": 0, "manifest_count": 0}
@@ -303,7 +293,7 @@ def status():
 
 def sync(force=False, prune=False):
     """Copy Drive -> mirror for everything that changed, then rewrite the manifest."""
-    man = load_manifest() or {"files": [], "skipped": []}
+    man = load_manifest(PUSH_MANIFEST) or load_manifest() or {"files": [], "skipped": []}
     recorded = {f["source"]: f for f in man.get("files", [])}
     now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
 
@@ -371,6 +361,7 @@ def sync(force=False, prune=False):
         "skipped": sorted(skipped, key=lambda s: s["source"]),
     }
     wrote = write_manifest(out)
+    write_manifest(out, PUSH_MANIFEST)
     return {"copied": copied, "refused": refused, "skipped": skipped,
             "orphans": orphans, "pruned": pruned, "count": len(files),
             "manifest_written": wrote}
@@ -385,7 +376,7 @@ def push():
     resolve it. Every row actually pushed gets its manifest entry rewritten so both hashes read
     equal afterward (the same guarantee --sync gives in the other direction).
     """
-    man = load_manifest() or {"files": [], "skipped": []}
+    man = load_manifest(PUSH_MANIFEST) or load_manifest() or {"files": [], "skipped": []}
     recorded = {f["source"]: f for f in man.get("files", [])}
     now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
 
@@ -465,7 +456,7 @@ def push():
         "files": sorted(files_by_source.values(), key=lambda f: f["source"]),
         "skipped": man.get("skipped", []),
     }
-    wrote = write_manifest(out)
+    wrote = write_manifest(out, PUSH_MANIFEST)
     return {"pushed": pushed, "conflicts": conflicts, "refused": refused,
             "unchanged": unchanged, "unreachable": unreachable, "manifest_written": wrote}
 
