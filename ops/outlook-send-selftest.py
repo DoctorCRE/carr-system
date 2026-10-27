@@ -1012,16 +1012,81 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual(receipts[0]['base_version'], 2)
         self.assertEqual(receipts[0]['sha256'], self.draft['sha256'])
 
-    def test_wrong_partner_or_tampered_submission_never_opens_outlook(self):
-        for change in (dict(cc=[]), dict(cc=['wrong@example.test']), dict(body='Changed after submission.')):
-            with self.subTest(change=change):
-                original = dict(self.draft)
-                self.draft.update(change)
-                with self.assertRaises(ValueError):
-                    self.worker.run(self.settings, self.ports)
-                self.draft = original
+    def test_invalid_rows_record_failure_and_do_not_block_later_draft(self):
+        bad = dict(self.draft, cc=['wrong@example.test'])
+        good = dict(self.draft, proposal_id='22222222-2222-4222-8222-222222222222')
+        carr = self.ports.carr
+        self.ports.carr = lambda verb, args: (dict(schema_version='email-outbox.v1', owner='joe', drafts=[bad, {'version': 0}, good]) if verb == 'outbox-for-sender' else carr(verb, args))
+        counts = self.worker.run(self.settings, self.ports)
+        self.assertEqual((counts['failed'], counts['sent']), (2, 1))
+        receipts = [args for verb, args in self.calls if verb == 'record-email-sent']
+        self.assertEqual(receipts[0]['reason'], 'submission_recipients_invalid')
+        self.assertEqual(receipts[1]['status'], 'sent')
+        self.assertEqual(len(self.sent), 1)
+
+    def test_aborted_press_records_failure(self):
+        original = self.ports.open_form
+        def open_form(item):
+            form = original(item)
+            def abort(**kwargs):
+                raise send_mod.UserActive('user_active')
+            form.press = abort
+            return form
+        self.ports.open_form = open_form
+        self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
+        [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
+        self.assertEqual(receipt['reason'], 'aborted_before_dispatch')
         self.assertEqual(self.sent, [])
-        self.assertFalse(any(verb == 'record-email-sent' for verb, _ in self.calls))
+
+    def test_ambiguous_latch_expires_without_resending(self):
+        self.settings.send_state.mkdir(parents=True)
+        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        send_mod.Ledger(self.settings.send_state / send_mod.LEDGER).append(
+            draft.key, 'send', 'pressing', send_mod.fingerprint(draft.mail), NOW)
+        self.assertEqual(self.worker.run(self.settings, self.ports)['deferred'], 1)
+        self.clock.t += send_mod.DUPLICATE_WINDOW
+        self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
+        [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
+        self.assertEqual(receipt['reason'], f'unconfirmed_after_{send_mod.DUPLICATE_WINDOW}')
+        self.assertEqual(self.sent, [])
+
+    def test_press_refusal_remains_ambiguous_until_window_expires(self):
+        original = self.ports.open_form
+        def open_form(item):
+            form = original(item)
+            def refuse(**kwargs):
+                raise send_mod.UiFailure('press_refused')
+            form.press = refuse
+            form.closed = lambda: False
+            return form
+        self.ports.open_form = open_form
+        self.assertEqual(self.worker.run(self.settings, self.ports)['deferred'], 1)
+        self.clock.t += send_mod.DUPLICATE_WINDOW
+        self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
+        [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
+        self.assertEqual(receipt['reason'], f'unconfirmed_after_{send_mod.DUPLICATE_WINDOW}')
+        self.assertEqual(self.sent, [])
+
+    def test_aborted_latch_survives_receipt_save_failure(self):
+        original = self.ports.open_form
+        def open_form(item):
+            form = original(item)
+            def abort(**kwargs):
+                raise send_mod.UserActive('user_active')
+            form.press = abort
+            return form
+        self.ports.open_form = open_form
+        with patch.object(self.worker, '_save', side_effect=OSError('crash')):
+            with self.assertRaises(OSError):
+                self.worker.run(self.settings, self.ports)
+        self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
+        [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
+        self.assertEqual(receipt['reason'], 'aborted_before_dispatch')
+        self.assertEqual(self.sent, [])
+
+    def test_main_reports_deferred(self):
+        with patch.object(self.worker, 'load_settings', return_value=self.settings), patch.object(self.settings.__class__, 'require_repo'), patch.object(self.worker, 'run', return_value=dict(sent=0, failed=0, deferred=1, receipt_failed=0)):
+            self.assertEqual(self.worker.main(), 1)
 
     def test_other_partner_identity_cannot_send_on_this_machine(self):
         carr = self.ports.carr

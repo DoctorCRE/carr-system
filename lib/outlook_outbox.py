@@ -4,6 +4,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import uuid
 
@@ -45,7 +46,8 @@ class SubmittedDraft:
                     base_version=self.version, sha256=self.sha256)
         if result.state is send.State.DONE and result.sent_item_id:
             return dict(args, status='sent', sent_item_id=result.sent_item_id)
-        return dict(args, status='failed', reason=f'{result.state.value}:{result.reason}')
+        reason = result.reason if (result.reason == 'aborted_before_dispatch' or result.reason.startswith('unconfirmed_after_')) else f'{result.state.value}:{result.reason}'
+        return dict(args, status='failed', reason=reason)
 
 
 def _save(path: Path, receipt: dict):
@@ -100,17 +102,34 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
                 or not isinstance(box.get('drafts'), list)):
             raise ValueError('outbox_identity_or_schema_mismatch')
         for row in box['drafts']:
-            if row.get('proposal_id') in pending:
+            if isinstance(row, dict) and isinstance(row.get('proposal_id'), str) and row['proposal_id'] in pending:
                 continue
-            draft = SubmittedDraft.parse(row, settings)
-            result = send.send_submitted(draft.mail, idempotency_key=draft.key, ports=ports)
-            if (result.state in (send.State.NOT_IDLE, send.State.PRESSED_UNCONFIRMED,
-                                 send.State.WINDOW_NOT_CLOSED)
-                    or result.reason in ('daily_cap', 'another_write_running')):
-                counts['deferred'] += 1
-                continue
-            receipt = draft.receipt(result)
-            path = root / f'{draft.key}.json'
+            try:
+                draft = SubmittedDraft.parse(row, settings)
+            except (ValueError, KeyError, TypeError, AttributeError) as exc:
+                counts['failed'] += 1
+                try:
+                    ident = str(uuid.UUID(row['proposal_id']))
+                    version, digest = row['version'], row['sha256']
+                    if type(version) is not int or version < 1 or not isinstance(digest, str) or not re.fullmatch(r'[a-f0-9]{64}', digest):
+                        continue
+                except (ValueError, KeyError, TypeError, AttributeError):
+                    continue
+                key = str(uuid.uuid5(uuid.NAMESPACE_URL, f'outlook-outbox|{ident}|{version}'))
+                reason = str(exc) if str(exc) in ('invalid_submission', 'submission_hash_mismatch', 'submission_recipients_invalid') else 'invalid_submission'
+                receipt = dict(idempotency_key=key, proposal_id=ident, base_version=version,
+                               sha256=digest, status='failed', reason=reason)
+            else:
+                result = send.send_submitted(draft.mail, idempotency_key=draft.key, ports=ports)
+                if (result.state in (send.State.NOT_IDLE, send.State.PRESSED_UNCONFIRMED,
+                                     send.State.WINDOW_NOT_CLOSED)
+                        or result.reason in ('daily_cap', 'another_write_running')):
+                    counts['deferred'] += 1
+                    continue
+                receipt = draft.receipt(result)
+                key = draft.key
+                counts[receipt['status']] += 1
+            path = root / f'{key}.json'
             _save(path, receipt)
             try:
                 reply = ports.carr('record-email-sent', receipt)
@@ -120,7 +139,6 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
                 counts['receipt_failed'] += 1
             else:
                 path.unlink()
-            counts[receipt['status']] += 1
     return counts
 
 
@@ -130,7 +148,7 @@ def main() -> int:
         settings.require_repo(Path(__file__).resolve().parents[1])
         counts = run(settings, send.default_ports())
         print('outlook-outbox ' + ' '.join(f'{key}={value}' for key, value in counts.items()))
-        return 1 if counts['failed'] or counts['receipt_failed'] else 0
+        return 1 if counts['failed'] or counts['receipt_failed'] or counts['deferred'] else 0
     except Exception as exc:
         print(f'outlook-outbox failed {type(exc).__name__}')
         return 1

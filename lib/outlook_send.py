@@ -333,6 +333,8 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
         done = next((r for r in rows if r['state'] == State.DONE.value and r.get('sent_item_id')), None)
         if done:
             return Result(State.DONE, 'confirmed_in_mailbox', sent_item_id=done['sent_item_id'])
+        if rows[-1]['state'] == 'aborted_before_dispatch':
+            return Result(State.FAILED, 'aborted_before_dispatch')
         try:
             item_id = confirmed_mail(ports.mailbox.snapshot(), item, min(r['at'] for r in rows) - CLOCK_SKEW)
         except Exception:
@@ -340,6 +342,8 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
         if item_id:
             ledger.append(key, 'send', State.DONE.value, fingerprint(item), ports.now(), item_id)
             return Result(State.DONE, 'confirmed_in_mailbox', sent_item_id=item_id)
+        if ports.now() - min(r['at'] for r in rows) >= DUPLICATE_WINDOW:
+            return Result(State.FAILED, f'unconfirmed_after_{DUPLICATE_WINDOW}')
         return Result(State.PRESSED_UNCONFIRMED, 'previous_attempt_unconfirmed')
     if send_requested and (ledger.states(key) or ledger.contains_item(fingerprint(item),
             ports.now() - DUPLICATE_WINDOW if isinstance(item, Mail) else 0)):
@@ -395,6 +399,9 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
     try:
         mode = form.press(approved_at=approved_at)
     except UserActive:
+        if submitted:
+            ledger.append(key, kind, 'aborted_before_dispatch', print_, ports.now())
+            return _discard(form, Result(State.FAILED, 'aborted_before_dispatch'))
         return _discard(form, Result(State.NOT_IDLE, 'user_active'))
     except (UiFailure, ui.CuaError, OSError, subprocess.SubprocessError) as exc:
         mode = None
