@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { publicError } from '../src/public-errors.ts';
 import { queueCardId } from '../src/work-queue.js';
 import { executeRegisteredTool } from '../src/tools.js';
 
@@ -117,7 +118,7 @@ test('refusals preserve the queue and name the rejected operation', async () => 
     ['dispatch-job', job('WR-000014', { description: 'First sentence. Second sentence.' }), 'invalid_job_description'],
     ['prioritize-job', { ...plan, job: 99, position: 1 }, 'job_not_found'],
     ['prioritize-job', { ...plan, job: 1, position: 99 }, 'priority_out_of_range'],
-  ]) await assert.rejects(command(name, { ...args, idempotency_key: randomUUID() }), { message: error });
+  ]) await assert.rejects(command(name, { ...args, idempotency_key: randomUUID() }), failure => { assert.equal(failure.message, error); assert.equal(publicError(failure).error, error); return true; });
   const args = job('WR-000014');
   await command('dispatch-job', args);
   await assert.rejects(command('dispatch-job', { ...args, model: 'another-model' }), { message: 'key_reuse' });
