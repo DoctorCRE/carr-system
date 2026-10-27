@@ -64,6 +64,7 @@ for (const [code, extra] of [
   ["work_request_not_found", {}], ["work_request_terminal_state", {}], ["work_request_not_completable", {}],
   ["invalid_completion", {}], ["missing_criterion_evidence", {}], ["missing_change_ref", {}],
   ["missing_user_journey_ref", {}], ["completion_capsule_refused", {}], ["sponsored_actor_required", {}],
+  ["memory_attach_required", {}], ["memory_read_only", {}],
 ]) test(`MCP preserves the public ${code} contract`, async t => {
   const payload = await failure(t, new ToolError({ error: code, ...extra,
     detail: privateText, hint: privateText, nested: { stack: privateText } }));
