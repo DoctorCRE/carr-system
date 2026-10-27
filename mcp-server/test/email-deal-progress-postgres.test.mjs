@@ -971,6 +971,10 @@ test('the quality report counts proposal outcomes by kind and lists Joe\'s corre
   assert.deepEqual(after.corrections.map(row => [row.kind, row.deal_name, row.reason]),
     [['next_step', 'Synthetic coastal purchase', 'Dell already sent it']]);
   await c.query("update email_proposal set created_at=now()-interval '10 days'");
-  assert.equal((await report()).kinds.every(k => k.proposed === 0), true);
+  const recentDecision = await report();
+  assert.equal(recentDecision.kinds.every(k => k.proposed === 0), true);
+  assert.deepEqual(recentDecision.corrections.map(row => row.reason), ['Dell already sent it']);
+  await c.query("update email_proposal set resolved_at=now()-interval '10 days' where status='dismissed'");
+  assert.deepEqual((await report()).corrections, []);
   assert.equal((await report(30)).kinds[0].proposed, 1);
 });
