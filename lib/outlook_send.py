@@ -1,8 +1,9 @@
 """Prepare one Outlook mail or calendar draft, or dispatch it when requested.
 
 A default call leaves a field-verified draft open. Explicit send intent requires
-native confirmation after suppression, the ten-item daily limit, duplicate checks
-and idle checks. A local delivery latch prevents ambiguous effects from being
+native confirmation unless the app already submitted the exact mail. Both paths
+retain suppression, the ten-item daily limit, duplicate checks and idle checks.
+A local delivery latch prevents ambiguous effects from being
 repeated. Successful delivery is confirmed against Sent Items or the calendar
 before logging an activity. Diagnostics contain no addresses, subjects or bodies.
 """
@@ -67,6 +68,7 @@ class Result:
     reason: str
     mode: str | None = None
     logged: tuple[str, ...] = ()
+    sent_item_id: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -106,6 +108,7 @@ class SentRow:
     recipients: str | None
     subject: str
     sent_unix: int
+    item_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -222,15 +225,21 @@ class Ledger:
         return any(row.get('fingerprint') == print_ and row['at'] >= since
                    for row in map(json.loads, self.path.read_text().splitlines()))
 
-    def append(self, key: str, kind: str, state: str, print_: str, at: float) -> None:
+    def append(self, key: str, kind: str, state: str, print_: str, at: float,
+               sent_item_id: str | None = None) -> None:
         fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         try:
             os.fchmod(fd, 0o600)
             os.write(fd, (json.dumps({'key': key, 'kind': kind, 'state': state, 'fingerprint': print_,
-                                      'at': int(at)}) + '\n').encode())
+                                      'at': int(at), 'sent_item_id': sent_item_id}) + '\n').encode())
             os.fsync(fd)
         finally:
             os.close(fd)
+        directory = os.open(self.path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
 
 
 # ---- mailbox matching --------------------------------------------------------
@@ -250,6 +259,17 @@ def mail_in_mailbox(snapshot: Snapshot, mail: Mail, since: float) -> bool:
         if not listed or listed & wanted:
             return True
     return False
+
+
+def confirmed_mail(snapshot: Snapshot, mail: Mail, since: float) -> str | None:
+    """Require readable exact recipients and a decoded Sent Items identifier."""
+    for row in snapshot.sent:
+        listed = set(re.findall(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+", (row.recipients or '').lower()))
+        if (row.sender.lower() == account() and row.sent_unix >= since
+                and row.subject == mail.subject
+                and listed == set(mail.recipients) and row.item_id):
+            return row.item_id
+    return None
 
 
 def event_in_mailbox(snapshot: Snapshot, event: Event) -> bool:
@@ -285,7 +305,7 @@ def _confirm_dispatch(item: Mail | Event) -> bool:
 
 
 def _write_transport(item: Mail | Event, key: str, ports: Ports, record: str | None = None,
-                     *, send_requested: bool = False) -> Result:
+                     *, send_requested: bool = False, submitted: bool = False) -> Result:
     """Send one mail or save one event, at most once per key and per mailbox match."""
     if not isinstance(key, str) or not key.strip():
         raise ValueError('idempotency_key is required')
@@ -298,15 +318,33 @@ def _write_transport(item: Mail | Event, key: str, ports: Ports, record: str | N
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             return Result(State.FAILED, 'another_write_running')
-        result = _write(item, key, ports, Ledger(out / LEDGER), send_requested)
-    if result.state is State.DONE:
+        result = _write(item, key, ports, Ledger(out / LEDGER), send_requested, submitted)
+    if result.state is State.DONE and not submitted:
         result = replace(result, logged=_log_matches(item, key, record, ports))
         if 'log_failed' in result.logged:
             result = replace(result, state=State.ACTIVITY_LOG_FAILED, reason='confirmed_in_mailbox:log_failed')
     return result
 
 
-def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requested: bool) -> Result:
+def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requested: bool,
+           submitted: bool = False) -> Result:
+    if submitted and isinstance(item, Mail) and ledger.states(key):
+        rows = [r for r in map(json.loads, ledger.path.read_text().splitlines()) if r.get('key') == key]
+        done = next((r for r in rows if r['state'] == State.DONE.value and r.get('sent_item_id')), None)
+        if done:
+            return Result(State.DONE, 'confirmed_in_mailbox', sent_item_id=done['sent_item_id'])
+        if rows[-1]['state'] == 'aborted_before_dispatch':
+            return Result(State.FAILED, 'aborted_before_dispatch')
+        try:
+            item_id = confirmed_mail(ports.mailbox.snapshot(), item, min(r['at'] for r in rows) - CLOCK_SKEW)
+        except Exception:
+            item_id = None
+        if item_id:
+            ledger.append(key, 'send', State.DONE.value, fingerprint(item), ports.now(), item_id)
+            return Result(State.DONE, 'confirmed_in_mailbox', sent_item_id=item_id)
+        if ports.now() - min(r['at'] for r in rows) >= DUPLICATE_WINDOW:
+            return Result(State.FAILED, f'unconfirmed_after_{DUPLICATE_WINDOW}')
+        return Result(State.PRESSED_UNCONFIRMED, 'previous_attempt_unconfirmed')
     if send_requested and (ledger.states(key) or ledger.contains_item(fingerprint(item),
             ports.now() - DUPLICATE_WINDOW if isinstance(item, Mail) else 0)):
         return Result(State.DUPLICATE_KEY, 'key_already_pressed')
@@ -341,12 +379,14 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
     idle = ports.idle_seconds()
     if idle is None or idle < IDLE_SECONDS:
         return _discard(form, Result(State.NOT_IDLE, 'user_active'))
-    dialog_started = time.monotonic()
-    if not _confirm_dispatch(item):
-        return Result(State.DRAFT, 'send_not_confirmed')
-    confirmed_at = time.monotonic()
-    idle = _idle_seconds()
-    approved_at = confirmed_at if idle is not None and idle <= confirmed_at - dialog_started else None
+    approved_at = None
+    if not submitted:
+        dialog_started = time.monotonic()
+        if not _confirm_dispatch(item):
+            return Result(State.DRAFT, 'send_not_confirmed')
+        confirmed_at = time.monotonic()
+        idle = _idle_seconds()
+        approved_at = confirmed_at if idle is not None and idle <= confirmed_at - dialog_started else None
     try:
         if form.read() != shown:
             return Result(State.DRAFT, 'approval_fields_changed')
@@ -359,6 +399,9 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
     try:
         mode = form.press(approved_at=approved_at)
     except UserActive:
+        if submitted:
+            ledger.append(key, kind, 'aborted_before_dispatch', print_, ports.now())
+            return _discard(form, Result(State.FAILED, 'aborted_before_dispatch'))
         return _discard(form, Result(State.NOT_IDLE, 'user_active'))
     except (UiFailure, ui.CuaError, OSError, subprocess.SubprocessError) as exc:
         mode = None
@@ -369,17 +412,24 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
         ledger.append(key, kind, State.WINDOW_NOT_CLOSED.value, print_, ports.now())
         return Result(State.WINDOW_NOT_CLOSED, reason if mode is None else 'window_still_open', mode)
 
+    sent_item_id = None
+
     def confirmed() -> bool:
+        nonlocal sent_item_id
         try:
-            return _in_mailbox(ports.mailbox.snapshot(), item, pressed_at - CLOCK_SKEW)
+            snapshot = ports.mailbox.snapshot()
+            if submitted and isinstance(item, Mail):
+                sent_item_id = confirmed_mail(snapshot, item, pressed_at - CLOCK_SKEW)
+                return sent_item_id is not None
+            return _in_mailbox(snapshot, item, pressed_at - CLOCK_SKEW)
         except Exception:
             return False
 
     if not _wait(confirmed, ports.confirm_seconds, ports):
         ledger.append(key, kind, State.PRESSED_UNCONFIRMED.value, print_, ports.now())
         return Result(State.PRESSED_UNCONFIRMED, 'not_in_mailbox_yet', mode)
-    ledger.append(key, kind, State.DONE.value, print_, ports.now())
-    return Result(State.DONE, 'confirmed_in_mailbox', mode)
+    ledger.append(key, kind, State.DONE.value, print_, ports.now(), sent_item_id)
+    return Result(State.DONE, 'confirmed_in_mailbox', mode, sent_item_id=sent_item_id)
 
 
 def _send_refusal(item: Mail | Event, ports: Ports, ledger: Ledger) -> str | None:
@@ -803,7 +853,9 @@ class DecodedMailbox:
             con = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
             try:
                 sent = tuple(SentRow(*row) for row in con.execute(
-                    'SELECT DISTINCT m.sender, m.recipients, m.subject, m.sent_unix FROM messages m '
+                    'SELECT DISTINCT m.sender, m.recipients, m.subject, m.sent_unix, '
+                    "COALESCE(NULLIF(trim(m.message_id), ''), CASE WHEN m.local_keys <> '' "
+                    "AND m.local_keys NOT GLOB '*[^0-9]*' THEN 'hxstore-key:' || m.local_keys END) FROM messages m "
                     'JOIN message_folders mf ON mf.message_id=m.id JOIN folders f ON f.id=mf.folder_id '
                     "WHERE lower(f.name) IN ('sent', 'sent items') AND m.sender IS NOT NULL "
                     'AND m.subject IS NOT NULL AND m.sent_unix IS NOT NULL'))
@@ -846,6 +898,11 @@ def default_ports(repo: Path | None = None) -> Ports:
 
 
 # ---- public interface --------------------------------------------------------
+
+def send_submitted(mail: Mail, *, idempotency_key: str, ports: Ports) -> Result:
+    """Dispatch an immutable app submission, retaining all transport safeguards."""
+    return _write_transport(mail, idempotency_key, ports, send_requested=True, submitted=True)
+
 
 def send(to, cc, bcc, subject: str, body: str, *, idempotency_key: str, record: str | None = None,
          ports: Ports | None = None, send_requested: bool = False) -> Result:

@@ -822,7 +822,7 @@ class RefreshTest(FakeOutlookCase):
         installer = (ROOT / 'bin/install-outlook-intake.sh').read_text()
         self.assertIn('LABEL="com.carr.outlook-refresh"', installer)
         self.assertNotIn('launchctl bootstrap', '\n'.join(line for line in installer.splitlines()
-                                                         if not line.startswith('print ')))
+                                                         if not line.lstrip().startswith(('print(', 'print '))))
 
     def test_same_host_refresh_worker_opens_only_read_mail_without_filing(self):
         from lib import outlook_refresh
