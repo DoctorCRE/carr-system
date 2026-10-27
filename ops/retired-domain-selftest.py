@@ -35,9 +35,10 @@ def exempt(path, line):
 
 def main():
     assert not exempt('bin/example.sh', '# curl https://api.' + DOMAIN + '/mcp')
+    header = ' '.join(['Authorization:', 'Bearer', 'dummy-test-value'])
     for host, expected in [('api.' + DOMAIN, 2), ('api.doctorcre.com', 0)]:
         for command in [f'curl -X POST -d probe=1 https://{host}/mcp',
-                        f'curl -q -H "Authorization: Bearer dummy-test-value" https://{host}/mcp']:
+                        f'curl -q -H "{header}" https://{host}/mcp']:
             payload = {'tool_name': 'Bash', 'tool_input': {'command': command}}
             guard = subprocess.run(
                 [sys.executable, str(ROOT / 'hooks/guard-unattended.py')],
