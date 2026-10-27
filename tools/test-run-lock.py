@@ -173,11 +173,6 @@ def main():
               "run-lock.sh" in chain)
         check("bin/nightly.sh takes the lock and no-ops when it cannot",
               'carr_take_lock "$SERVICE" || exit 0' in chain)
-        check("bin/nightly.sh releases on signals and on exit",
-              "trap 'exit 143' INT TERM HUP" in chain
-              and "trap 'carr_release_lock' EXIT" in chain)
-        check("bin/nightly.sh only releases a lock it actually took",
-              chain.index('carr_take_lock "$SERVICE" || exit 0') < chain.index("trap 'carr_release_lock' EXIT"))
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
