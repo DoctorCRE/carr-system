@@ -780,6 +780,35 @@ case("plain GitHub job rerun is allowed",
 case("prose describing a metered dispatch remains inert",
      bash('gh pr create --body "npx wrangler deploy is refused"'), ALLOW)
 
+# ── 8b. GitHub polling (Joe 2026-10-27: "fix it and stop it"). A dozen agents
+# each looping on gh tripped the account-wide secondary rate limit. One gh read
+# is fine; a gh status read that repeats is refused.
+_SEQ40 = ("for i in $(seq 1 40); do s=$(gh pr checks 2538 --json name,bucket); "
+          "echo \"$s\"; sleep 60; done")
+for _cmd in (
+    _SEQ40,
+    "until gh run view 36015363917 --json status | grep -q completed; do sleep 20; done",
+    "while true; do gh api repos/o/r/commits/abc/check-runs; done",
+    "gh pr checks 1 --watch",
+    "gh pr checks 1 --watch --interval 30",
+    "gh run watch 36015363917",
+    "watch -n 30 'gh pr checks 1'",
+    "sleep 45; gh pr view 1175 --json mergeStateStatus",
+    "bash -c 'while true; do gh pr checks 1; sleep 30; done'",
+):
+    case(f"GitHub polling is refused: {_cmd[:60]!r}", bash(_cmd), DENY)
+case("Codex GitHub polling loop is refused", direct_exec(_SEQ40), DENY)
+for _cmd in (
+    "gh pr checks 2538",
+    "gh run view 36015363917 --log-failed",
+    "gh api repos/o/r/pulls/1",
+    "for f in *; do echo $f; done",
+    "sleep 5; git status",
+    'echo "while it runs"; gh pr view 1',
+    "gh pr merge --auto 2538",
+):
+    case(f"no GitHub polling: {_cmd!r} is allowed", bash(_cmd), ALLOW)
+
 # ── 9. Codex local-function alias: CARR only, no Life AI spillover ──────────
 case("Codex CARR destructive shell", codex_exec(
     "const r = await tools.exec_command({cmd: 'rm -rf /Users/booko/carr-system/lib'});"), DENY)

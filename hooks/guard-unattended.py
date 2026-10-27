@@ -1864,6 +1864,55 @@ def direct_metered_dispatch(cmd):
     return None
 
 
+# GitHub polling (Joe 2026-10-27: "fix it and stop it"). A dozen agents each
+# looping on `gh pr checks` / `gh run view` tripped the account-wide secondary
+# rate limit while the core quota sat near full, and an agent told to stop
+# restarted its loop minutes later. The orchestrator already receives CI
+# results as app events, so a repeated gh status read has no legitimate caller.
+GITHUB_POLL_REASON = ("Polling GitHub trips the account-wide secondary rate limit. Make one "
+                      "gh call and report; the orchestrator receives CI results as app events.")
+_GH_STATUS_READS = {"pr": {"checks", "view"}, "run": {"view", "list", "watch"}, "api": None}
+_LOOP_KEYWORDS = frozenset({"for", "while", "until", "select"})
+_LOOP_LEAD = frozenset({"then", "do", "else", "elif", "if", "!", "{", "(", "time"})
+
+
+def _starts_loop(script):
+    """True when any simple command in `script` opens a for/while/until loop."""
+    segment = []
+    for token in shell_tokens(script) + [";"]:
+        if token not in SHELL_BOUNDARIES:
+            segment.append(token)
+            continue
+        words = [w for w in segment if w not in _LOOP_LEAD]
+        if words and words[0] in _LOOP_KEYWORDS:
+            return True
+        segment = []
+    return False
+
+
+def github_poll_reason(cmd):
+    """Refuse a gh status read that the same command repeats."""
+    invocations = list(executed_invocations(cmd))
+    reads = [args for program, args in invocations if program == "gh" and args
+             and args[0] in _GH_STATUS_READS
+             and (_GH_STATUS_READS[args[0]] is None or args[1:2] and
+                  args[1] in _GH_STATUS_READS[args[0]])]
+    if not reads:
+        return None
+    if any(args[:2] == ["run", "watch"] or any(a.split("=")[0] == "--watch" for a in args)
+           for args in reads):
+        return GITHUB_POLL_REASON
+    programs = {program for program, _ in invocations}
+    if programs & {"watch", "sleep"}:
+        return GITHUB_POLL_REASON
+    scripts = [strip_inert_text(cmd)] + [
+        " ".join(args) if program == "eval" else _shell_c_script(args) or ""
+        for program, args in invocations if program == "eval" or _SHELLS.match(program)]
+    if any(_starts_loop(script) for script in scripts):
+        return GITHUB_POLL_REASON
+    return None
+
+
 # bypass audit C53 / AGENTS.md:225, REDESIGNED (2026-09-24, Opus review). The
 # original version was a single regex over the whole `git add` argument list,
 # which denied `git add -A hooks/x.py` (a NAMED path alongside -A) exactly as
@@ -2141,7 +2190,7 @@ def check(cmd, cwd=None):
         return reason
 
 
-    reason = direct_metered_dispatch(cmd)
+    reason = direct_metered_dispatch(cmd) or github_poll_reason(cmd)
     if reason:
         return reason
 
