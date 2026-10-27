@@ -188,7 +188,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "advance-workflow-cutover-stage": {
     "ingress_key": "mcp-tool:advance-workflow-cutover-stage",
-    "source_locator": "mcp-server/src/workflow-cutover.v5.js",
+    "source_locator": "mcp-server/src/workflow-cutover.v5.ts",
     "schema_digest": "d82b23ab7624ac7dea98ec11cb70412417fa7926b528902fce8a99dbdfbb7b14",
     "write": true,
     "human_only": false,
@@ -480,7 +480,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "cancel-workflow-cutover-plan": {
     "ingress_key": "mcp-tool:cancel-workflow-cutover-plan",
-    "source_locator": "mcp-server/src/workflow-cutover.v5.js",
+    "source_locator": "mcp-server/src/workflow-cutover.v5.ts",
     "schema_digest": "dd9d470f4fb7f884fc398b14fe5e3d2896733667657adfff3c99c479e9a565e7",
     "write": true,
     "human_only": false,
@@ -690,7 +690,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "confirm-slice-completions": {
     "ingress_key": "mcp-tool:confirm-slice-completions",
-    "source_locator": "mcp-server/src/workflow-cutover.v5.js",
+    "source_locator": "mcp-server/src/workflow-cutover.v5.ts",
     "schema_digest": "e140267ad22953ee2b03cfda598318303f73de68205e864ce9c541a70b7ff15c",
     "write": true,
     "human_only": false,
@@ -1363,7 +1363,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "list-shipped-releases": {
     "ingress_key": "mcp-tool:list-shipped-releases",
-    "source_locator": "mcp-server/src/workflow-cutover.v5.js",
+    "source_locator": "mcp-server/src/workflow-cutover.v5.ts",
     "schema_digest": "7f435f34236214403d51b03f6169599d02a16307bc5ecc5dac0d62ccc566ca47",
     "write": false,
     "human_only": false,
@@ -2214,7 +2214,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "read-work-shape": {
     "ingress_key": "mcp-tool:read-work-shape",
-    "source_locator": "mcp-server/src/work-shape.js",
+    "source_locator": "mcp-server/src/work-shape.ts",
     "schema_digest": "1fdd12ba613b33ad7907ec4b00801b41afe0b4ed02604f38c7c63a0fb2bf258e",
     "write": false,
     "human_only": false,
@@ -3059,7 +3059,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "set-work-shape-disposition": {
     "ingress_key": "mcp-tool:set-work-shape-disposition",
-    "source_locator": "mcp-server/src/work-shape.js",
+    "source_locator": "mcp-server/src/work-shape.ts",
     "schema_digest": "dcc617e4d0702df7293ec660dd2bdbe9e439db385a9cd8b0a45e742a6381593c",
     "write": true,
     "human_only": false,

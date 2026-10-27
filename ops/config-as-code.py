@@ -2656,6 +2656,11 @@ def main():
     apply = "--apply" in sys.argv
     if mode == "--selftest":
         return config_selftest()
+    if mode == "check-hook-files":
+        problems = installed_hook_missing_files()
+        for path, reason in problems:
+            print(f"{path}: {reason}")
+        return 1 if problems else 0
     if mode == "check":
         return cmd_check()
     if mode == "pull":
