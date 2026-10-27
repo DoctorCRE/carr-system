@@ -1,3 +1,4 @@
+import { NOW } from "./helpers/fixed-clock.mjs";
 // Tests the authenticated meeting preparation verb with synthetic calendar and deal records.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -5,9 +6,9 @@ import { executeRegisteredTool } from "../src/tools.js";
 
 const JOE = { slug: "joe", human: true, via: "oauth-google" };
 const DEAL = "11111111-1111-4111-8111-111111111111";
-const start = new Date(Date.now() + 3_600_000).toISOString();
-const end = new Date(Date.now() + 7_200_000).toISOString();
-const snapshot = () => ({ schema: "carr-calendar-agenda.v1", observed_at: new Date().toISOString(),
+const start = new Date(NOW + 3_600_000).toISOString();
+const end = new Date(NOW + 7_200_000).toISOString();
+const snapshot = () => ({ schema: "carr-calendar-agenda.v1", observed_at: new Date(NOW).toISOString(),
   warnings: [], items: [{ title: "Synthetic lease review", start, end,
     organizer: { name: "Test Client", email: "client@example.test" }, attendees: [] }] });
 
@@ -100,7 +101,7 @@ test("missing and failed snapshots are unavailable while a current empty calenda
 });
 
 test("stale and attendance warnings remain visible after preparation succeeds", async () => {
-  const result = await read(client({ calendar: { ...snapshot(), observed_at: new Date(Date.now() - 19 * 3_600_000).toISOString(),
+  const result = await read(client({ calendar: { ...snapshot(), observed_at: new Date(NOW - 19 * 3_600_000).toISOString(),
     warnings: [{ code: "responses_unverified" }] } }));
   assert.equal(result.state, "partial");
   assert.equal(result.sources.outlook_calendar.state, "stale");

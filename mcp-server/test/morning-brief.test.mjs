@@ -1,3 +1,4 @@
+import { NOW } from "./helpers/fixed-clock.mjs";
 // morning-brief.test.mjs — safe record-native morning delivery.
 //
 // This is deliberately a fake-client suite.  It proves the handler's source
@@ -13,8 +14,8 @@ const DELL = { slug: "dell", display: "Dell", human: true, via: "oauth-google", 
 const UNSPONSORED = { slug: "codex", display: "Codex", human: false, via: "agent-token" };
 
 function costFixture() {
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-  return { schema: "carr-system-costs.v1", observed_at: new Date().toISOString(),
+  const yesterday = new Date(NOW - 86400000).toISOString().slice(0, 10);
+  return { schema: "carr-system-costs.v1", observed_at: new Date(NOW).toISOString(),
     month: yesterday.slice(0, 7), through: yesterday, state: "ready",
     providers: [{ provider: "github", label: "GitHub", plan: "Usage", mtd_usd: 2.5,
       projection_usd: 10, budget_usd: 50, state: "ready", reason: null,
@@ -23,7 +24,7 @@ function costFixture() {
     alerts: [], action: "Finance Ops: inspect provider and driver; verify the next complete day; auto-clear when thresholds pass." };
 }
 
-function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture(), todayRows = null, dealRows = null, governanceQueue = null, localUpdatedAt = new Date().toISOString(), calendar = null, calendarContacts = [], calendarDeals = [], meetingPrep = [] } = {}) {
+function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture(), todayRows = null, dealRows = null, governanceQueue = null, localUpdatedAt = new Date(NOW).toISOString(), calendar = null, calendarContacts = [], calendarDeals = [], meetingPrep = [] } = {}) {
   const queries = [];
   return {
     queries,
@@ -226,7 +227,7 @@ test("an empty partial Needs Joe list remains unavailable and names the failed s
 
 test("stale local Needs Joe evidence stays partial in the section and coverage", async () => {
   const result = await executeRegisteredTool(client({
-    localUpdatedAt: new Date(Date.now() - 3 * 3600000).toISOString(),
+    localUpdatedAt: new Date(NOW - 3 * 3600000).toISOString(),
   }), JOE, "morning-brief", {});
   assert.equal(result.sections.needs_joe.state, "partial");
   assert.equal(result.state, "partial");
@@ -369,9 +370,9 @@ test("partial cost coverage remains partial with unavailable providers visible",
 
 test("missing, stale, future, and malformed cost evidence is unavailable with a bound recovery action", async () => {
   const stale = costFixture();
-  stale.observed_at = new Date(Date.now() - 37 * 3600000).toISOString();
+  stale.observed_at = new Date(NOW - 37 * 3600000).toISOString();
   const future = costFixture();
-  future.observed_at = new Date(Date.now() + 3600000).toISOString();
+  future.observed_at = new Date(NOW + 3600000).toISOString();
   const malformed = costFixture();
   malformed.providers[0].mtd_usd = -1;
   const raw = { schema: "carr-system-costs.v1", card_number: "never-return-fixture" };
@@ -391,7 +392,7 @@ test("a failed cost board read never exposes driver error details", async () => 
   assert.doesNotMatch(JSON.stringify(result), /fixture source unavailable/);
 });
 
-function calendarFixture(now = Date.now(), observedAt = new Date(now).toISOString(), warnings = []) {
+function calendarFixture(now = NOW, observedAt = new Date(now).toISOString(), warnings = []) {
   const at = (hours) => new Date(now + hours * 3600000).toISOString();
   return { schema: "carr-calendar-agenda.v1", source: "outlook_hxstore", lifecycle: "unverified",
     observed_at: observedAt, warnings, items: [
@@ -425,7 +426,7 @@ test("morning-brief shows the partner's own published calendar for the next seve
 });
 
 test("morning-brief flags overlapping timed meetings without treating all-day entries as conflicts", async () => {
-  const now = Date.now();
+  const now = NOW;
   const at = hours => new Date(now + hours * 3600000).toISOString();
   const calendar = calendarFixture(now);
   calendar.items = [
@@ -441,7 +442,7 @@ test("morning-brief flags overlapping timed meetings without treating all-day en
 });
 
 test("morning-brief offers recent meeting outcomes for review without creating records", async () => {
-  const now = Date.now();
+  const now = NOW;
   const at = hours => new Date(now + hours * 3600000).toISOString();
   const calendar = calendarFixture(now);
   calendar.items = [];
@@ -461,7 +462,7 @@ test("morning-brief offers recent meeting outcomes for review without creating r
 });
 
 test("meeting outcome reviews expire and stale or malformed snapshots never become confirmed attendance", async () => {
-  const now = Date.now();
+  const now = NOW;
   const at = hours => new Date(now + hours * 3600000).toISOString();
   const review = { key: "0000000000000000", title: "Synthetic review", start: at(-2), end: at(-1),
     state: "needs_review", prompt: "Confirm whether this meeting happened." };
@@ -489,7 +490,7 @@ test("every known gap becomes a plain sentence and the section is partial, never
   const warnings = [{ code: "responses_unverified" }, { code: "group_invites_not_shown" },
     { code: "undecoded", count: 3 }, { code: "time_changed", count: 1 }, { code: "recurring_unverified", count: 2 },
     { code: "trimmed", count: 4 }, { code: "something_new" }];
-  const result = await executeRegisteredTool(client({ calendar: calendarFixture(Date.now(), undefined, warnings) }), JOE, "morning-brief", {});
+  const result = await executeRegisteredTool(client({ calendar: calendarFixture(NOW, undefined, warnings) }), JOE, "morning-brief", {});
   const calendar = result.sections.calendar;
   assert.equal(calendar.state, "partial");
   assert.equal(result.state, "partial");
@@ -504,7 +505,7 @@ test("every known gap becomes a plain sentence and the section is partial, never
   ]);
   assert.ok(result.coverage.required_sections.some((row) => row.key === "calendar"
     && row.incomplete_sources.some((source) => source.key === "outlook_calendar")));
-  const empty = calendarFixture(Date.now(), undefined, [{ code: "recurring_unverified" }]);
+  const empty = calendarFixture(NOW, undefined, [{ code: "recurring_unverified" }]);
   empty.items = [];
   const none = await executeRegisteredTool(client({ calendar: empty }), JOE, "morning-brief", {});
   assert.equal(none.sections.calendar.state, "partial", "an empty day with unexpanded series is not empty");
@@ -518,7 +519,7 @@ test("morning-brief omits the calendar for a partner with no published calendar,
 
 test("a stale, malformed or unreadable calendar is partial or unavailable, never ready", async () => {
   const day = 86400000;
-  const stale = await executeRegisteredTool(client({ calendar: calendarFixture(Date.now(), new Date(Date.now() - day).toISOString()) }), JOE, "morning-brief", {});
+  const stale = await executeRegisteredTool(client({ calendar: calendarFixture(NOW, new Date(NOW - day).toISOString()) }), JOE, "morning-brief", {});
   assert.equal(stale.sections.calendar.state, "partial");
   assert.equal(stale.sections.calendar.sources.outlook_calendar.state, "stale");
   const broken = calendarFixture();
@@ -604,7 +605,7 @@ test("morning-brief prepares possible meeting deals in the authenticated partner
 
 
 test("morning-brief keeps meetings and reports failed preparation without losing source warnings", async () => {
-  const c = client({ calendar: calendarFixture(Date.now(), undefined, [{ code: "responses_unverified" }]),
+  const c = client({ calendar: calendarFixture(NOW, undefined, [{ code: "responses_unverified" }]),
     calendarDeals: [{ email: "bo@example.test", id: "11111111-1111-4111-8111-111111111111",
       name: "Synthetic lease", client_ref: "C-TEST" }], unavailable: "/* calendar_meeting_prep */" });
   const result = await executeRegisteredTool(c, JOE, "morning-brief", {});

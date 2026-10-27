@@ -238,6 +238,28 @@ check_gates() {
   local failures="" count=0 skiplist="" gates_timed_out=0 gate_index=0
   export CARR_HOOK_FIXTURE=1
 
+  if ! "$PY" - <<'PYEOF'
+from pathlib import Path
+import subprocess, sys
+base = subprocess.check_output(['git', 'merge-base', 'origin/main', 'HEAD'], text=True).strip()
+changed = subprocess.check_output(['git', 'diff', '--name-only', '--diff-filter=ACMR', base, '--', 'mcp-server/test'], text=True)
+untracked = subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard', '--', 'mcp-server/test'], text=True)
+allow = (
+    # These fixtures must agree with a database, Python, CLI, or Workerd clock.
+    'lead-automation-concurrency.postgres.mjs', 'invoice-review-regressions.postgres.mjs',
+    'salesforce-read-run-store-rw02-postgres.test.mjs', 'program-controller-census-role-boundary.v5.test.mjs',
+    'call-mode-rehearsal.test.mjs', 'recovery-matrix.v5.test.mjs', 'shared-oauth-worker.test.mjs',
+)
+paths = sorted({p for p in (changed + untracked).splitlines()
+                if Path(p).suffix in {'.js', '.mjs', '.cjs'} and Path(p).name not in allow})
+if paths:
+    result = subprocess.run(['grep', '-nE', r'Date\s*\.\s*now\s*\(\s*\)|new\s+Date\s*\(\s*\)', '--', *paths])
+    sys.exit(1 if result.returncode == 0 else 0 if result.returncode == 1 else result.returncode)
+PYEOF
+  then
+    failures="$failures test-clocks"
+  fi
+
   if ! run_quiet "$LOGDIR/codemap.log" "$PY" tools/codemap.py --check; then
     failures="$failures codemap"
     fail_tail "$LOGDIR/codemap.log"
