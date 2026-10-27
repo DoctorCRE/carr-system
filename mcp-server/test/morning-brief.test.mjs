@@ -23,12 +23,13 @@ function costFixture() {
     alerts: [], action: "Finance Ops: inspect provider and driver; verify the next complete day; auto-clear when thresholds pass." };
 }
 
-function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture(), todayRows = null, dealRows = null, governanceQueue = null, localUpdatedAt = new Date().toISOString(), calendar = null } = {}) {
+function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture(), todayRows = null, dealRows = null, governanceQueue = null, localUpdatedAt = new Date().toISOString(), calendar = null, calendarContacts = [] } = {}) {
   const queries = [];
   return {
     queries,
     query: async (sql, params = []) => {
       queries.push({ sql, params });
+      if (/^(savepoint|rollback to savepoint|release savepoint) calendar_contacts/.test(sql)) return { rows: [] };
       if (unavailable && sql.includes(unavailable)) throw new Error("fixture source unavailable");
       if (sql.includes("calendar_deal_matches")) return { rows: [] };
       if (sql.includes("from v_today_triage")) return { rows: todayRows || [
@@ -57,6 +58,7 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
         { display_name: "Renewal Safe", city: "Pensacola", est_lease_event: "2027-01-01",
           tier_status: "t1", flag_status: "clear", has_channel: true },
       ] };
+      if (sql.includes("from v_export_clients") && sql.includes("calendar_contacts")) return { rows: calendarContacts };
       if (sql.includes("from board_snapshot") && params[2] === "calendar-agenda")
         return { rows: calendar === null ? [] : [{ snapshot_json: calendar }] };
       if (sql.includes("from board_snapshot") && params[2] === "system-costs")
@@ -485,6 +487,30 @@ test("a stale, malformed or unreadable calendar is partial or unavailable, never
   }
   const failed = await executeRegisteredTool(client({ unavailable: "board_id=$3" }), JOE, "morning-brief", {});
   assert.equal(failed.sections.calendar.state, "unavailable");
+});
+
+
+test("morning-brief connects meetings to all exact matching record contacts", async () => {
+  const c = client({ calendar: calendarFixture(), calendarContacts: [
+    { email: "bo@example.test", kind: "client", ref: "C-101", name: "Bo Example" },
+    { email: "bo@example.test", kind: "lead", ref: "L-102", name: "Bo Example" },
+    { email: "ada@example.test", kind: "vendor", ref: "V-103", name: "Ada Example" },
+  ] });
+  const result = await executeRegisteredTool(c, JOE, "morning-brief", {});
+  assert.deepEqual(result.sections.calendar.items[1].contacts, [
+    { kind: "client", ref: "C-101", name: "Bo Example" },
+    { kind: "lead", ref: "L-102", name: "Bo Example" },
+    { kind: "vendor", ref: "V-103", name: "Ada Example" },
+  ]);
+  assert.deepEqual(result.sections.calendar.items[0].contacts, []);
+});
+
+test("morning-brief keeps meetings and reports unavailable contact context", async () => {
+  const c = client({ calendar: calendarFixture(), unavailable: "calendar_contacts" });
+  const result = await executeRegisteredTool(c, JOE, "morning-brief", {});
+  assert.equal(result.sections.calendar.state, "partial");
+  assert.equal(result.sections.calendar.items.length, 2);
+  assert.equal(result.sections.calendar.sources.record_contacts.state, "unavailable");
 });
 
 test("morning-brief suggests open deals for meetings with an exact client email", async () => {
