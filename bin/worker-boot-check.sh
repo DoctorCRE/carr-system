@@ -34,6 +34,14 @@
 # -- the committed wrangler.toml is never touched -- with a minimal stub that
 # exists purely so the ASSETS binding has somewhere to point.
 #
+# WHY PORT 0 (WR-000545, 2026-10-26). The port used to be a fixed 18799, so
+# two checkouts running the binding class at once collided: the second
+# workerd died with "bind(): Address already in use" and this check reported
+# it as a module-load failure. Reproduced on main 8705c540 by starting two
+# boot checks one second apart. workerd now binds a port of its own choosing
+# and the URL is read from its "Ready on" line, so no window exists between
+# choosing a port and owning it. WORKER_BOOT_CHECK_PORT still pins one.
+#
 # Usage: bin/worker-boot-check.sh
 set -eu
 
@@ -46,7 +54,7 @@ WRANGLER="$WORKER_DIR/node_modules/.bin/wrangler"
   exit 1
 }
 
-PORT="${WORKER_BOOT_CHECK_PORT:-18799}"
+PORT="${WORKER_BOOT_CHECK_PORT:-0}"
 ASSETS_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t carr-worker-boot)"
 echo "<!doctype html><title>boot check stub</title>" > "$ASSETS_DIR/index.html"
 LOG="$(mktemp 2>/dev/null || mktemp -t carr-worker-boot-log)"
@@ -73,7 +81,7 @@ trap cleanup EXIT INT TERM
 
 (
   cd "$WORKER_DIR" &&
-  exec "$WRANGLER" dev --local --port "$PORT" --ip 127.0.0.1 --assets "$ASSETS_DIR"
+  exec "$WRANGLER" dev --local --port "$PORT" --inspector-port 0 --ip 127.0.0.1 --assets "$ASSETS_DIR"
 ) > "$LOG" 2>&1 &
 WRANGLER_PID=$!
 
@@ -93,7 +101,13 @@ if [ "$READY" -ne 1 ]; then
   exit 1
 fi
 
-HEALTHZ_STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$PORT/healthz" 2>/dev/null || echo "curl_failed")"
+ORIGIN="$(sed -n 's|.*Ready on \(http://127\.0\.0\.1:[0-9][0-9]*\).*|\1|p' "$LOG" | head -1)"
+if [ -z "$ORIGIN" ]; then
+  echo "worker-boot-check: FAIL — workerd reported Ready without a loopback URL." >&2
+  cat "$LOG" >&2
+  exit 1
+fi
+HEALTHZ_STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$ORIGIN/healthz" 2>/dev/null || echo "curl_failed")"
 
 if [ "$HEALTHZ_STATUS" != "200" ]; then
   echo "worker-boot-check: FAIL — GET /healthz returned '$HEALTHZ_STATUS', not 200." >&2

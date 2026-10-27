@@ -49,6 +49,15 @@ export function calendarSection(snapshot, now = new Date()) {
       conflict: row.conflict === true });
   }
   items.sort((a, b) => a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
+  for (const item of items) item.schedule_conflict = false;
+  for (let i = 0; i < items.length; i++) {
+    const a = items[i];
+    if (a.all_day || a.end <= a.start) continue;
+    for (let j = i + 1; j < items.length && items[j].start < a.end; j++) {
+      const b = items[j];
+      if (!b.all_day && b.end > b.start) a.schedule_conflict = b.schedule_conflict = true;
+    }
+  }
   const notes = [];
   for (const warning of Array.isArray(snapshot.warnings) ? snapshot.warnings : []) {
     const count = Number.isSafeInteger(warning?.count) && warning.count > 0 ? warning.count : 1;
