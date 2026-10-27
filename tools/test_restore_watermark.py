@@ -1340,7 +1340,8 @@ class RehearsalReceiptGate(unittest.TestCase):
                       f"REPO='{t}'; WORKDIR='{t}'; COPYDIR='{t}'; PY='{stub}'; BACKUP_RUN_ID=101\n"
                       "BACKUP_REPOSITORY=o/r; IDENTITY=/k; PROJECT_ID=proj; RESTORE_DB=restore_rehearse\n"
                       "EXERCISE_VERDICT=''; VERIFY_PID=''; VERIFY_FIFO=''; VERIFY_ARM_TIMEOUT=5\n"
-                      + _script_function("exercise_reason") + _script_function("arm_verify_restore")
+                      + _script_function("exercise_reason") + _script_function("evaluate_piped_receipt")
+                      + _script_function("arm_verify_restore")
                       + _script_function("hand_over_to_verify_restore")
                       + "arm_verify_restore\n"
                       f"echo branch-created >> '{t}/order'\n"
@@ -1383,6 +1384,9 @@ class RehearsalReceiptGate(unittest.TestCase):
         out, _ = self.run_flow(verify_exit=1)
         self.assertNotIn("HANDOVER=0", out)
         self.assertIn("VERDICT=verify_restore_refused", out)
+        # 2026-10-27: the evaluator ran on the refused verifier's empty stdout and its
+        # "Unexpected end of JSON input" buried the refusal. It must never start.
+        self.assertEqual(self.node_args, "")
 
     def test_an_evaluator_failure_on_the_piped_receipt_fails_the_handover(self):
         out, _ = self.run_flow(verdict="watermark_mismatch")
