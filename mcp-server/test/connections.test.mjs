@@ -1,3 +1,4 @@
+// Tests provider connection projections and observation refusals.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CONNECTION_PROVIDERS, connectionsProjection } from '../src/connections.v1.ts';

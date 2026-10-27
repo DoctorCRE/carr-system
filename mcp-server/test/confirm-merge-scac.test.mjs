@@ -1,3 +1,4 @@
+// Tests the human-only admission contract for identity merges.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {registeredOperation} from '../src/mutation-registry.js';

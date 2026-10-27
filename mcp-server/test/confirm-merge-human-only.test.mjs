@@ -1,3 +1,4 @@
+// Tests confirm-merge refuses non-human actors before database access.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { executeRegisteredTool, ToolError } from "../src/tools.js";
