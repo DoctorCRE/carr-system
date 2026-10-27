@@ -5,21 +5,23 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from git_env import fixture_env
 
 SCRIPT = pathlib.Path(__file__).resolve().parent / 'checkout-pull.py'
+ENV = fixture_env()
 
 class CheckoutPullTest(unittest.TestCase):
     def test_dirty_tree_names_file(self):
         with tempfile.TemporaryDirectory() as d:
             repo = pathlib.Path(d)
-            subprocess.run(['git', 'init', '-q', str(repo)], check=True)
-            subprocess.run(['git', '-C', str(repo), 'config', 'user.email', 'test@example.com'], check=True)
-            subprocess.run(['git', '-C', str(repo), 'config', 'user.name', 'Test'], check=True)
+            subprocess.run(['git', 'init', '-q', str(repo)], check=True, env=ENV)
+            subprocess.run(['git', '-C', str(repo), 'config', 'user.email', 'test@example.com'], check=True, env=ENV)
+            subprocess.run(['git', '-C', str(repo), 'config', 'user.name', 'Test'], check=True, env=ENV)
             (repo / 'tracked').write_text('one')
-            subprocess.run(['git', '-C', str(repo), 'add', 'tracked'], check=True)
-            subprocess.run(['git', '-C', str(repo), 'commit', '-qm', 'initial'], check=True)
+            subprocess.run(['git', '-C', str(repo), 'add', 'tracked'], check=True, env=ENV)
+            subprocess.run(['git', '-C', str(repo), 'commit', '-qm', 'initial'], check=True, env=ENV)
             (repo / 'tracked').write_text('two')
-            result = subprocess.run([sys.executable, str(SCRIPT), str(repo)], capture_output=True, text=True)
+            result = subprocess.run([sys.executable, str(SCRIPT), str(repo)], capture_output=True, text=True, env=ENV)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('tracked', result.stderr)
 
@@ -28,7 +30,7 @@ class CheckoutPullTest(unittest.TestCase):
             root = pathlib.Path(d)
             remote, source, checkout = (root / name for name in ('remote.git', 'source', 'checkout'))
             def git(*args):
-                subprocess.run(['git', *map(str, args)], check=True, capture_output=True)
+                subprocess.run(['git', *map(str, args)], check=True, capture_output=True, env=ENV)
             git('init', '--bare', remote)
             git('clone', remote, source)
             git('-C', source, 'config', 'user.email', 'test@example.com')
@@ -41,7 +43,7 @@ class CheckoutPullTest(unittest.TestCase):
             (source / 'tracked').write_text('two')
             git('-C', source, 'commit', '-am', 'update')
             git('-C', source, 'push')
-            result = subprocess.run([sys.executable, str(SCRIPT), str(checkout)], capture_output=True, text=True)
+            result = subprocess.run([sys.executable, str(SCRIPT), str(checkout)], capture_output=True, text=True, env=ENV)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual((checkout / 'tracked').read_text(), 'two')
 
@@ -51,9 +53,18 @@ class CheckoutPullTest(unittest.TestCase):
             git = repo / 'git'
             git.write_text('#!/bin/sh\nif [ "$3" = status ]; then exit 0; fi\nif [ ! -f "$2/attempt" ]; then touch "$2/attempt"; echo "error: cannot lock ref refs/remotes/origin/main" >&2; exit 1; fi\nexit 0\n')
             git.chmod(0o755)
-            result = subprocess.run([sys.executable, str(SCRIPT), str(repo), str(git)], capture_output=True, text=True)
+            result = subprocess.run([sys.executable, str(SCRIPT), str(repo), str(git)], capture_output=True, text=True, env=ENV)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn('retry', result.stderr.lower())
+
+    def test_inherited_git_directory_does_not_escape_fixture(self):
+        with tempfile.TemporaryDirectory() as d:
+            inherited = dict(ENV, GIT_DIR=str(pathlib.Path(d) / 'missing'))
+            result = subprocess.run(
+                [sys.executable, __file__, 'CheckoutPullTest.test_fast_forwards_from_remote'],
+                capture_output=True, text=True, env=inherited,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
 
 if __name__ == '__main__':
     unittest.main()
