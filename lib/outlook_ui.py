@@ -133,11 +133,11 @@ def is_main_window(window: dict) -> bool:
 def is_compose_window(window: dict) -> bool:
     """Protect possible drafts, except the observed unassigned off-screen window.
 
-    The 500x500 UNTITLED window has unknown purpose; AX could not resolve it.
+    The 500x500 window has an empty title and unknown purpose; AX did not resolve it.
     Keep all other sizeable non-mailbox windows protected, even without a subject.
     """
     bounds = window.get('bounds') or {}
-    if (window.get('title') == 'UNTITLED' and bounds.get('width') == 500
+    if (window.get('title') == '' and bounds.get('width') == 500
             and bounds.get('height') == 500 and window.get('is_on_screen') is False
             and 'on_current_space' in window and window['on_current_space'] is None):
         return False
