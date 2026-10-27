@@ -328,6 +328,18 @@
       "sha256": "3ea854a4192faab8ca31795f12e99dfdeef9ec23912d2e809ab34f9ebb994c23",
       "rule": "pii-email",
       "reason": "Historical synthetic account-exclusion fixture introduced by b5ce2848 in PR #2390. The invented longer-domain recipient tests exact-address matching in an offline SQLite fixture, not a real contact. Commit 2ed36da6 replaces it with a reserved .invalid domain. Qualification binds only these exact historical file bytes and this detector because pushed history is retained without force-push."
+    },
+    {
+      "path": "mcp-server/contracts/email-reply-draft.v1.json",
+      "sha256": "58f1bd0f281a7bfaf206edaa12e749e1bf3edb73d8d9b3349cab6fb90199ef51",
+      "rule": "pii-email",
+      "reason": "WR441.S3.J2 explicitly permits the two canonical partner email addresses for copy routing documentation and synthetic behavioral fixtures. This exception binds the reviewed file bytes and email rule only; all other fixture addresses use reserved domains."
+    },
+    {
+      "path": "mcp-server/test/email-deal-progress-postgres.test.mjs",
+      "sha256": "1858a8fd6491a5e448563dacfd36bc49f68a4931cc5e4877bb9b5eb513939b62",
+      "rule": "pii-email",
+      "reason": "WR441.S3.J2 explicitly permits the two canonical partner email addresses for copy routing documentation and synthetic behavioral fixtures. This exception binds the reviewed file bytes and email rule only; all other fixture addresses use reserved domains."
     }
   ]
 }
