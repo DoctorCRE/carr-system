@@ -22,9 +22,7 @@
     "receipt": "approved_to_send with the exact subject, body, sha256, to, cc and incremented version. Submission authorizes sending but does not prove delivery."
   },
   "partner_copy": {
-    "joe": "dell.mccraney@carr.us",
-    "dell": "joe.bookout@carr.us",
-    "authority": "Resolve actor.email at runtime. These expected partner addresses are not hardcoded routing fallbacks."
+    "authority": "Resolve the other active human partner's actor.email at runtime. Do not use a hardcoded routing fallback."
   },
   "consumer_adoption": "Server contract first. App PR #448 must pin the live producer, update contracts/carr-interface.v1.json email_proposals.review to permit these exact reply-draft addresses for partners, render both before Submit, and echo the displayed arrays. The app's general raw-address prohibition continues outside this reply-draft exception."
 }

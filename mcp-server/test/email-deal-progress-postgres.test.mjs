@@ -1402,14 +1402,14 @@ test('recipient read grant exposes only active human partners without widening a
 
 test('partner recipient review shows canonical copies and hides pending addresses from machines', async () => {
   await c.query('delete from email_proposal');
-  await c.query("update actor set email=case slug when 'joe' then 'joe.bookout@carr.us' else 'dell.mccraney@carr.us' end where slug in ('joe','dell')");
+  await c.query("update actor set email=case slug when 'joe' then 'joe@partner.test' else 'dell@partner.test' end where slug in ('joe','dell')");
   try {
     for (const owner of ['joe', 'dell']) {
       const proposal = await draftFor(owner);
       const identity = { ...(await c.query('select id,slug from actor where slug=$1', [owner])).rows[0], human: true };
       const shown = (await command('list-email-proposals', {}, identity, 'carr_reader')).proposals.find(item => item.id === proposal.proposal_id);
       assert.deepEqual(shown.reply_draft.to, ['sender@example.test']);
-      assert.deepEqual(shown.reply_draft.cc, [owner === 'joe' ? 'dell.mccraney@carr.us' : 'joe.bookout@carr.us']);
+      assert.deepEqual(shown.reply_draft.cc, [owner === 'joe' ? 'dell@partner.test' : 'joe@partner.test']);
       assert.equal(shown.confirm_verb, 'submit-email-draft');
       for (const machine of [machineFor(owner), { ...identity, human: false }]) {
         const hidden = (await command('list-email-proposals', {}, machine, 'carr_reader')).proposals.find(item => item.id === proposal.proposal_id);
