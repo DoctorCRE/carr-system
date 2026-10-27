@@ -43,6 +43,7 @@ class CaptureFake {
     this.queryCount += 1;
     const sql = text.replace(/\s+/g, " ").trim();
     if (sql === "select pg_advisory_xact_lock(hashtextextended($1, 0))") return { rows: [] };
+    if (sql.includes("call-outcome:resolve-session-lock") || sql.includes("call-outcome:resolve-undo-check")) return { rows: [] };
     if (sql.includes("dealroom:field-lock")) return { rows: [] };
     if (sql === "select next_date::text as next_date from deal where id=$1")
       return { rows: [{ next_date: this.nextDate ?? null }] };

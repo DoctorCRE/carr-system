@@ -5,7 +5,7 @@ on:
   merge_group:
     types: [checks_requested]
   pull_request:
-    types: [opened, synchronize, reopened, converted_to_draft]
+    types: [opened, synchronize, reopened, converted_to_draft, ready_for_review]
   schedule:
     # 06:20 UTC daily. Sits after the nightly backup (02:35 UTC) and the 05:10
     # edge-liveness slot.
@@ -180,6 +180,7 @@ jobs:
           CARR_CI_PORTABLE_ONLY: "1"
           CARR_LOCAL_PG_ALLOW_HOSTED: "1"
           CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
+          CARR_CI_PROGRAM_RECORDS: ${{ runner.temp }}/ci-programs.json
           LC_ALL: C
         run: |
           if [ "${{ matrix.classes }}" = migration ]; then
@@ -197,12 +198,16 @@ jobs:
             fi
           fi
 
-      - name: Retain failed CI logs
-        if: ${{ failure() }}
+      - name: Retain per-program records and failed CI logs
+        # Every attempt keeps its own artifact, so a re-run never hides the
+        # first failure. Records hold program names, exits and seconds only.
+        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: failed-ci-${{ strategy.job-index }}-${{ github.job }}
-          path: ${{ runner.temp }}/carr-ci.*/*.log.redacted
+          name: ci-${{ github.job }}-${{ strategy.job-index }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/carr-ci.*/*.log.redacted
+            ${{ runner.temp }}/ci-programs.json
           if-no-files-found: ignore
           retention-days: 14
 
@@ -259,6 +264,7 @@ jobs:
         env:
           CARR_CI_PORTABLE_ONLY: "1"
           CARR_SHADOW_ARTIFACT_DIR: ${{ runner.temp }}/migration-shadow
+          CARR_CI_PROGRAM_RECORDS: ${{ runner.temp }}/ci-programs.json
         run: ops/ci.sh --strict --only migration --migration-part "${{ matrix.part }}"
       - name: Prove database programs on their own migrated cluster
         if: matrix.part == 'acceptance' || matrix.part == 'gates'
@@ -266,6 +272,7 @@ jobs:
           CARR_CI_PORTABLE_ONLY: "1"
           CARR_LOCAL_PG_ALLOW_HOSTED: "1"
           CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
+          CARR_CI_PROGRAM_RECORDS: ${{ runner.temp }}/ci-programs.json
         run: python ops/local-pg-ci.py --class migration --migration-part "${{ matrix.part }}"
       - name: Retain a regenerated schema on failure
         if: failure()
@@ -276,12 +283,16 @@ jobs:
           if-no-files-found: ignore
 
 
-      - name: Retain failed CI logs
-        if: ${{ failure() }}
+      - name: Retain per-program records and failed CI logs
+        # Every attempt keeps its own artifact, so a re-run never hides the
+        # first failure. Records hold program names, exits and seconds only.
+        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: failed-ci-${{ strategy.job-index }}-${{ github.job }}
-          path: ${{ runner.temp }}/carr-ci.*/*.log.redacted
+          name: ci-${{ github.job }}-${{ strategy.job-index }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/carr-ci.*/*.log.redacted
+            ${{ runner.temp }}/ci-programs.json
           if-no-files-found: ignore
           retention-days: 14
 

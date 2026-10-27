@@ -23,7 +23,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
   return {
     'record-email-proposal': {
       write: true,
-      description: 'Store one pending email proposal for Home review: a phase move or a Joe or Dell next step, with a literal quote from a captured inbound email on the selected deal and the router confidence. The matching preview must accept the evidence first. A quote that reads like an injected instruction to an AI is still stored, flagged suspected_instruction with the reason for Joe to see. Re-recording the same kind for the same deal and email returns the stored proposal. Never confirms, changes the deal or sends anything; Joe confirms through confirm-email-deal-progress or confirm-email-next-step.',
+      description: 'Store one pending email proposal for Home review: a phase move or a Joe or Dell next step, with a literal quote from a captured inbound email on the selected deal and the router confidence. The matching preview must accept the evidence first. A quote that reads like an injected instruction to an AI is still stored, flagged suspected_instruction with the reason for Joe to see. Re-recording the same kind for the same deal and email returns the stored proposal and its fresh digest. A stale stored proposal has a null digest and preview_error. Never confirms, changes the deal or sends anything; Joe confirms through confirm-email-deal-progress or confirm-email-next-step.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: ['idempotency_key', 'kind', 'deal', 'activity_id', 'evidence_quote', 'confidence'],
         properties: {
@@ -47,15 +47,22 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const row = { kind: args.kind, deal_id: args.deal.toLowerCase(), activity_id: args.activity_id.toLowerCase(),
           evidence_quote: args.evidence_quote, task_text: step ? args.text.trim() : null,
           next_date: step ? args.next_date : null, owner: step ? args.owner || 'joe' : null };
-        const shown = await preview(c, actor, KINDS[row.kind].preview, previewArgs(row));
+        const existing = (await c.query(`select 1 from email_proposal
+          where kind=$1 and deal_id=$2 and activity_id=$3 for update`, [row.kind, row.deal_id, row.activity_id])).rows.length > 0;
+        if (!existing) await preview(c, actor, KINDS[row.kind].preview, previewArgs(row));
         const stored = (await c.query(`insert into email_proposal
             (kind,deal_id,activity_id,evidence_quote,task_text,next_date,owner,confidence,created_by)
           values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
           on conflict (kind,deal_id,activity_id) do update set kind=excluded.kind
-          returning id,status,version`, [row.kind, row.deal_id, row.activity_id, row.evidence_quote,
+          returning id,status,version,kind,deal_id,activity_id,evidence_quote,task_text,
+            next_date::text as next_date,owner`, [row.kind, row.deal_id, row.activity_id, row.evidence_quote,
           row.task_text, row.next_date, row.owner, args.confidence, actor.id])).rows[0];
+        let shown = null, previewError = null;
+        try { shown = await preview(c, actor, KINDS[stored.kind].preview, previewArgs(stored)); }
+        catch (error) { if (!(error instanceof ToolError)) throw error; previewError = error.payload?.error ?? 'preview_failed'; }
         return { ok: true, proposal_id: stored.id, status: stored.status, version: stored.version,
-          proposal_digest: shown.proposal_digest, suspected_instruction: suspected(row.evidence_quote),
+          proposal_digest: shown?.proposal_digest ?? null, preview_error: previewError,
+          suspected_instruction: suspected(stored.evidence_quote),
           requires_confirmation: true };
       }),
     },
@@ -121,7 +128,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'email-proposal-quality': {
       write: false,
-      description: 'WR-000441 QUALITY report: email proposals created in the last 1-90 days (default 7), by kind: how many were proposed, are still pending, were confirmed by Joe or dismissed, the dismissal rate among resolved ones, and the average router confidence of each outcome. over_threshold is true when at least 10 are resolved and more than 5% were dismissed, the point where that kind should stay propose-only until the router is fixed. corrections lists up to 20 recent dismissals with the reason given. Counts only; changes nothing.',
+      description: 'WR-000441 QUALITY report: email proposals created in the last 1-90 days (default 7), by kind: how many were proposed, are still pending, were confirmed by Joe or dismissed, the dismissal rate among resolved ones, and the average router confidence of each outcome. over_threshold is true when at least 10 are resolved and more than 5% were dismissed, the point where that kind should stay propose-only until the router is fixed. corrections lists up to 20 dismissals made in the requested period with the reason given, regardless of when the proposal was created. Proposal counts use the creation date. Counts only; changes nothing.',
       inputSchema: { type: 'object', additionalProperties: false,
         properties: { days: { type: 'integer', minimum: 1, maximum: 90 } } },
       handler: async (c, _actor, args) => {
@@ -144,7 +151,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         });
         const corrections = (await c.query(`select p.id,p.kind,d.name as deal_name,p.resolution_reason as reason,
             p.resolved_at from email_proposal p join deal d on d.id=p.deal_id
-          where p.status='dismissed' and p.created_at>now()-make_interval(days=>$1)
+          where p.status='dismissed' and p.resolved_at>now()-make_interval(days=>$1)
           order by p.resolved_at desc,p.id limit 20`, [days])).rows
           .map(row => ({ ...row, resolved_at: new Date(row.resolved_at).toISOString() }));
         return { schema_version: 'email-proposal-quality.v1', days, kinds, corrections, send: false };
