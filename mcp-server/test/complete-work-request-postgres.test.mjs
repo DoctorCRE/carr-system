@@ -40,7 +40,7 @@ before(async () => {
   const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
   if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
   else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
-  await c.query(readFileSync(new URL('../../migrations/1005_complete_work_request.sql', import.meta.url), 'utf8'));
+  await c.query(readFileSync(new URL('../../migrations/1006_complete_work_request.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => {
@@ -147,7 +147,7 @@ test('repair migration preserves named rows with a different reason or open stat
     for (const ref of ['WR-000414','WR-000436','WR-000499']) await sourcedRequest(ref);
     for (const [ref,reason] of [['WR-000414','Synthetic obsolete'],['WR-000499','Done: synthetic']])
       await c.query('select ops.decline_sourced_work_request($1,1,$2,$3,$4)',[ref,reason,actor.slug,randomUUID()]);
-    await c.query(readFileSync(new URL('../../migrations/1005_complete_work_request.sql',import.meta.url),'utf8'));
+    await c.query(readFileSync(new URL('../../migrations/1006_complete_work_request.sql',import.meta.url),'utf8'));
     assert.deepEqual((await c.query("select ref,state,version from ops.work_request where ref=any($1) order by ref",[['WR-000414','WR-000436','WR-000499']])).rows,[
       {ref:'WR-000414',state:'declined',version:2}, {ref:'WR-000436',state:'captured',version:1}, {ref:'WR-000499',state:'captured',version:3},
     ]);
@@ -163,7 +163,7 @@ test('repair migration reopens exactly eligible named rows, preserves receipts, 
   await sourcedRequest('WR-999024');
   await command('decline-work-request',{idempotency_key:randomUUID(),human_ref:'WR-999024',base_version:1,
     exit_reason:'Done: unlisted synthetic'},actor,'carr_writer');
-  const migration=readFileSync(new URL('../../migrations/1005_complete_work_request.sql',import.meta.url),'utf8');
+  const migration=readFileSync(new URL('../../migrations/1006_complete_work_request.sql',import.meta.url),'utf8');
   await c.query(migration);
   const rows=(await c.query('select ref,state,closed_at,exit_reason,version from ops.work_request where ref=any($1) order by ref',[refs])).rows;
   assert.equal(rows.length,14);

@@ -287,7 +287,36 @@ $arm$);
     insert into public.event(occurred_at,actor_id,verb,subject_type,subject_id,field,old_value,new_value,cause)
     values(now(),(select id from public.actor where slug='joe'),'repair-built-work-request-decline','ops_work_request',repaired.id,'state',
       jsonb_build_object('state','declined','version',repaired.old_version,'exit_reason',repaired.old_reason),
-      jsonb_build_object('state','captured','version',repaired.version,'reason','Built work was incorrectly withdrawn. Reopened for evidence-backed complete-work-request.','migration','1005_complete_work_request'),'import_migration');
+      jsonb_build_object('state','captured','version',repaired.version,'reason','Built work was incorrectly withdrawn. Reopened for evidence-backed complete-work-request.','migration','1006_complete_work_request'),'import_migration');
   end loop;
   execute definition;
 end $repair$;
+
+do $completion_grant$
+declare
+  original jsonb := ops.scac_current_grant_contract();
+  addition jsonb := $grant${
+    "config": ["search_path=pg_catalog, ops, public, pg_temp"],
+    "grantee": "carr_writer", "parallel": "u", "grantable": false,
+    "privilege": "execute", "volatility": "v", "function_kind": "f",
+    "security_definer": true, "ingress_kind": "db_function_acl",
+    "signature": "ops.complete_work_request(p_ref text, p_base_version integer, p_changes jsonb, p_criteria jsonb, p_user_facing boolean, p_journey text, p_actor_slug text, p_key uuid)",
+    "ingress_key": "db-function-acl:ops.complete_work_request(p_ref text, p_base_version integer, p_changes jsonb, p_criteria jsonb, p_user_facing boolean, p_journey text, p_actor_slug text, p_key uuid):carr_writer:execute"
+  }$grant$::jsonb;
+  next_contract jsonb;
+begin
+  if exists (select 1 from jsonb_array_elements(original->'secdef_execute') item
+      where item->>'ingress_key'=addition->>'ingress_key' and item<>addition) then
+    raise exception 'Completion grant conflicts with the current SCAC grant contract';
+  end if;
+  if not (original->'secdef_execute' @> jsonb_build_array(addition)) then
+    next_contract := jsonb_set(original, '{secdef_execute}',
+      (original->'secdef_execute') || jsonb_build_array(addition));
+    execute format('CREATE OR REPLACE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb '
+      'LANGUAGE sql IMMUTABLE SET search_path=pg_catalog AS %L',
+      'SELECT ' || quote_literal(next_contract::text) || '::jsonb');
+  end if;
+  if ops.scac_mutation_catalog_v118_current() is not true then
+    raise exception 'Completion migration left the SCAC grant catalog inconsistent';
+  end if;
+end $completion_grant$;
