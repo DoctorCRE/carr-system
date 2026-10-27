@@ -68,6 +68,28 @@ class ReconstructionTests(unittest.TestCase):
                 actual = dict(conn.execute('select filename, sha256 from schema_migrations').fetchall())
             self.assertEqual(actual, expected)
 
+            email_migration = ROOT / 'migrations' / '1005_dell_actor_email.sql'
+            email_sql = email_migration.read_text()
+            with psycopg.connect(dsn) as conn:
+                self.assertEqual(conn.execute("select email from actor where slug='dell'").fetchone(),
+                    ('dell.mccraney@carr.us',))
+                self.assertEqual(conn.execute("select email from actor where slug='joe'").fetchone(),
+                    ('joe.bookout@carr.us',))
+                conn.execute("insert into actor (slug,kind,display_name) values ('synthetic-email-test','automation','Synthetic email test')")
+                conn.execute("update actor set email=null where slug='dell'")
+                conn.execute(email_sql)
+                self.assertEqual(conn.execute("select slug,email from actor where slug in ('dell','joe','synthetic-email-test') order by slug").fetchall(), [
+                    ('dell', 'dell.mccraney@carr.us'),
+                    ('joe', 'joe.bookout@carr.us'),
+                    ('synthetic-email-test', None),
+                ])
+                conn.execute(email_sql)
+                self.assertEqual(conn.execute("select slug,email from actor where slug in ('dell','joe','synthetic-email-test') order by slug").fetchall(), [
+                    ('dell', 'dell.mccraney@carr.us'),
+                    ('joe', 'joe.bookout@carr.us'),
+                    ('synthetic-email-test', None),
+                ])
+
             captured = subprocess.run(['node', '--input-type=module', '-e', """
                 import { TOOLS } from './mcp-server/src/tools.js';
                 const queries = [];
