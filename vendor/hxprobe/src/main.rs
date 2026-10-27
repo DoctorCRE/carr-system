@@ -412,12 +412,14 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 continue;
             }
 
-            // Identity is sender + send time: the only fields present on
-            // essentially every record. `InternetMessageId` is deliberately
+            // Local keys partition every merge so identical templates from
+            // distinct store items stay separate. Unkeyed records retain the
+            // sender/time and content heuristics, isolated from keyed records.
+            // `InternetMessageId` is deliberately
             // excluded -- the store reuses one across a conversation, so keying
             // on it merges distinct messages, and pairing it with anything else
             // splits the revisions of one. See SPEC.md 4.7.
-            let key = format!("{:?}|{:?}", r.sender, r.sent_unix);
+            let key = format!("{:?}|{:?}|{:?}", r.local_keys, r.sender, r.sent_unix);
             for id in &convo_ids {
                 if let Some(sub) = &r.subject {
                     convo_subject.entry(id.clone()).or_insert_with(|| sub.clone());
@@ -474,14 +476,14 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     let mut by_time: Vec<record::Record> = best.into_values().collect();
     by_time.sort_by_key(|r| r.sent_unix);
     let mut best: Vec<record::Record> = Vec::with_capacity(by_time.len());
-    let mut first_copy: std::collections::HashMap<String, Vec<usize>> = Default::default();
+    let mut first_copy: std::collections::HashMap<(std::collections::BTreeSet<u64>, String), Vec<usize>> = Default::default();
     let mut collapsed = 0usize;
     for r in by_time {
         let Some(key) = body::copy_key(&r) else {
             best.push(r);
             continue;
         };
-        let slots = first_copy.entry(key).or_default();
+        let slots = first_copy.entry((r.local_keys.clone(), key)).or_default();
         let near = slots.iter().copied().find(|&i| match (best[i].sent_unix, r.sent_unix) {
             (Some(a), Some(b)) => b - a <= body::COPY_WINDOW,
             _ => false,
@@ -500,10 +502,10 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     // A revision can carry another subject (inherited from the thread, or a
     // field the map could not claim). A preview-only message joins a full one
     // with the same sender and opening when exactly one is within the window.
-    let full_by_opening: std::collections::HashMap<String, Vec<usize>> =
+    let full_by_opening: std::collections::HashMap<(std::collections::BTreeSet<u64>, String), Vec<usize>> =
         best.iter().enumerate().filter(|(_, r)| r.html.is_some()).fold(Default::default(), |mut m, (i, r)| {
             if let Some(k) = body::sender_opening(r) {
-                m.entry(k).or_default().push(i);
+                m.entry((r.local_keys.clone(), k)).or_default().push(i);
             }
             m
         });
@@ -514,7 +516,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         }
         let Some(k) = body::sender_opening(&best[i]) else { continue };
         let near: Vec<usize> = full_by_opening
-            .get(&k)
+            .get(&(best[i].local_keys.clone(), k))
             .into_iter()
             .flatten()
             .copied()
