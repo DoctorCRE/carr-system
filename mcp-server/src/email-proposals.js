@@ -128,7 +128,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'email-proposal-quality': {
       write: false,
-      description: 'WR-000441 QUALITY report: email proposals created in the last 1-90 days (default 7), by kind: how many were proposed, are still pending, were confirmed by Joe or dismissed, the dismissal rate among resolved ones, and the average router confidence of each outcome. over_threshold is true when at least 10 are resolved and more than 5% were dismissed, the point where that kind should stay propose-only until the router is fixed. corrections lists up to 20 recent dismissals with the reason given. Counts only; changes nothing.',
+      description: 'WR-000441 QUALITY report: email proposals created in the last 1-90 days (default 7), by kind: how many were proposed, are still pending, were confirmed by Joe or dismissed, the dismissal rate among resolved ones, and the average router confidence of each outcome. over_threshold is true when at least 10 are resolved and more than 5% were dismissed, the point where that kind should stay propose-only until the router is fixed. corrections lists up to 20 dismissals made in the requested period with the reason given, regardless of when the proposal was created. Proposal counts use the creation date. Counts only; changes nothing.',
       inputSchema: { type: 'object', additionalProperties: false,
         properties: { days: { type: 'integer', minimum: 1, maximum: 90 } } },
       handler: async (c, _actor, args) => {
@@ -151,7 +151,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         });
         const corrections = (await c.query(`select p.id,p.kind,d.name as deal_name,p.resolution_reason as reason,
             p.resolved_at from email_proposal p join deal d on d.id=p.deal_id
-          where p.status='dismissed' and p.created_at>now()-make_interval(days=>$1)
+          where p.status='dismissed' and p.resolved_at>now()-make_interval(days=>$1)
           order by p.resolved_at desc,p.id limit 20`, [days])).rows
           .map(row => ({ ...row, resolved_at: new Date(row.resolved_at).toISOString() }));
         return { schema_version: 'email-proposal-quality.v1', days, kinds, corrections, send: false };
