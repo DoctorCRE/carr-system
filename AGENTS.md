@@ -16,6 +16,11 @@ does not imply a clinic marketing website. Search Google Drive when the task
 identifies a relevant Drive artifact; system workflow discovery starts with the
 repository and its skills. Keep client data and passwords out of public source.
 
+When matching an existing client site, inspect its actual map style and behavior;
+passing interaction tests alone does not establish visual parity. Separate
+partner-supplied properties from additional public research candidates, and
+explain comparisons introduced from client correspondence with their source.
+
 ## Always-on rules
 
 <!-- Generated from ops/config/rule-cards.v1.json by ops/sync-core-rule-cards.py. -->
