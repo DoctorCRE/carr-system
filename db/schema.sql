@@ -11366,7 +11366,7 @@ CREATE TABLE ops.work_request (
     CONSTRAINT work_request_program_ordinal_positive CHECK (((program_ordinal IS NULL) OR (program_ordinal > 0))),
     CONSTRAINT work_request_shape_disposition_complete CHECK ((((shape_disposition IS NULL) AND (shape_fixed_surface_ref IS NULL) AND (shape_rationale IS NULL) AND (shape_decided_by_actor_id IS NULL) AND (shape_decided_at IS NULL)) OR ((shape_disposition = 'required'::text) AND (shape_fixed_surface_ref IS NULL) AND (shape_rationale IS NOT NULL) AND (btrim(shape_rationale) <> ''::text) AND (shape_decided_by_actor_id IS NOT NULL) AND (shape_decided_at IS NOT NULL)) OR ((shape_disposition = 'not_required'::text) AND (shape_fixed_surface_ref IS NOT NULL) AND (btrim(shape_fixed_surface_ref) <> ''::text) AND (shape_rationale IS NOT NULL) AND (btrim(shape_rationale) <> ''::text) AND (shape_decided_by_actor_id IS NOT NULL) AND (shape_decided_at IS NOT NULL)))),
     CONSTRAINT work_request_shape_disposition_valid CHECK (((shape_disposition IS NULL) OR (shape_disposition = ANY (ARRAY['required'::text, 'not_required'::text])))),
-    CONSTRAINT work_request_sourced_capture_shape CHECK ((((capture_idempotency_key IS NULL) AND (organization_tenant_id IS NULL) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL)) OR ((capture_idempotency_key IS NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key = ANY (ARRAY['carr-ai-engineering-suite-v1'::text, 'carr-system-integrity-elimination-v1'::text])) AND (program_ordinal IS NOT NULL) AND (program_ordinal > 0) AND (NOT (requester_actor IS DISTINCT FROM 'joe'::text)) AND (NOT (owner_actor IS DISTINCT FROM 'joe'::text))) OR ((capture_idempotency_key IS NOT NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NOT NULL) AND (doctrine_revision_id IS NOT NULL) AND (sourced_capture_sequence IS NOT NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL) AND (origin_ref IS NOT NULL) AND (origin_ref ~ '^doctrine:[a-z0-9][a-z0-9-]*#[a-z0-9][a-z0-9-]*$'::text) AND (((state = 'captured'::text) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['triaged'::text, 'ready'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (((triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL))) AND (exit_reason IS NOT NULL) AND (btrim(exit_reason) <> ''::text) AND (closed_at IS NOT NULL) AND (((state = 'declined'::text) AND (superseded_by IS NULL)) OR ((state = 'superseded'::text) AND (superseded_by IS NOT NULL)))))))),
+    CONSTRAINT work_request_sourced_capture_shape CHECK ((((capture_idempotency_key IS NULL) AND (organization_tenant_id IS NULL) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL)) OR ((capture_idempotency_key IS NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key = ANY (ARRAY['carr-ai-engineering-suite-v1'::text, 'carr-system-integrity-elimination-v1'::text])) AND (program_ordinal IS NOT NULL) AND (program_ordinal > 0) AND (NOT (requester_actor IS DISTINCT FROM 'joe'::text)) AND (NOT (owner_actor IS DISTINCT FROM 'joe'::text))) OR ((capture_idempotency_key IS NOT NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NOT NULL) AND (doctrine_revision_id IS NOT NULL) AND (sourced_capture_sequence IS NOT NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL) AND (origin_ref IS NOT NULL) AND (origin_ref ~ '^doctrine:[a-z0-9][a-z0-9-]*#[a-z0-9][a-z0-9-]*$'::text) AND (((state = ANY (ARRAY['captured'::text, 'confirmed_closed'::text])) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['triaged'::text, 'ready'::text, 'verification'::text, 'confirmed_closed'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (((triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL))) AND (exit_reason IS NOT NULL) AND (btrim(exit_reason) <> ''::text) AND (closed_at IS NOT NULL) AND (((state = 'declined'::text) AND (superseded_by IS NULL)) OR ((state = 'superseded'::text) AND (superseded_by IS NOT NULL)))))))),
     CONSTRAINT work_request_state_check CHECK ((state = ANY (ARRAY['captured'::text, 'triaged'::text, 'ready'::text, 'claimed'::text, 'in_progress'::text, 'verification'::text, 'awaiting_release'::text, 'released'::text, 'confirmed_closed'::text, 'needs_joe'::text, 'blocked'::text, 'declined'::text, 'superseded'::text, 'failed'::text])))
 );
 
@@ -18148,6 +18148,22 @@ $_$;
 --
 
 COMMENT ON FUNCTION ops.gate_zero_record_read_only_outcome(p_idempotency_key uuid, p_receipt jsonb) IS 'The only way to record a Gate Zero read-only outcome. The producing seat, actor and outcome digest are derived; the receipt and idempotency key are the only parameters. It admits only the staffed non-human oracle seat and validates the closed receipt and identity schemas. One insert is arbitrated by candidate_digest; its fallback always returns the immutable first row, including when later evidence, identity or time bytes differ, so the caller can report convergence and heal a missing outer audit event. No receipt is replaced. outcome_digest is the tagged digest r7 declares; candidate_scoped_digest is informational only.';
+
+
+--
+-- Name: guard_captured_email_source(); Type: FUNCTION; Schema: ops; Owner: -
+--
+
+CREATE FUNCTION ops.guard_captured_email_source() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog'
+    AS $$
+begin
+  if new.email_source is distinct from old.email_source then
+    raise exception 'email_source_immutable' using errcode='23514';
+  end if;
+  return new;
+end $$;
 
 
 --
@@ -60208,6 +60224,14 @@ begin
     return new;
   end if;
 
+  -- built completion delegates evidence rules to enforce_completion_capsule.
+  if old.state in ('captured','triaged','ready','verification') and new.state='confirmed_closed'
+     and new.completion_kind='built' and new.version=old.version+1
+     and (to_jsonb(new)-array['state','completion_kind','completion_evidence','verification_accepted_at','closed_at','version','updated_at'])
+       is not distinct from
+       (to_jsonb(old)-array['state','completion_kind','completion_evidence','verification_accepted_at','closed_at','version','updated_at']) then
+    return new;
+  end if;
   if old.state = 'captured'
      and new.state = 'triaged'
      and new.version = old.version + 1
@@ -77236,7 +77260,9 @@ CREATE TABLE public.activity (
     version integer DEFAULT 1 NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_by uuid,
-    connected boolean
+    connected boolean,
+    email_source jsonb,
+    CONSTRAINT activity_email_source_check CHECK ((((email_source IS NULL) OR ((kind = 'email_in'::text) AND (jsonb_typeof(email_source) = 'object'::text) AND (email_source ?& ARRAY['mailbox_owner'::text, 'sender_email'::text]) AND ((email_source ->> 'mailbox_owner'::text) = ANY (ARRAY['joe'::text, 'dell'::text])) AND ((email_source ->> 'sender_email'::text) ~ '^[^[:space:]<>@]+@[^[:space:]<>@]+[.][^[:space:]<>@]+$'::text))) IS TRUE))
 );
 
 
@@ -78975,14 +79001,21 @@ CREATE TABLE public.email_proposal (
     resolved_by uuid,
     resolved_at timestamp with time zone,
     resolution_reason text,
-    CONSTRAINT email_proposal_check CHECK ((((kind = 'phase_move'::text) AND (task_text IS NULL) AND (next_date IS NULL) AND (owner IS NULL)) OR ((kind = 'next_step'::text) AND (task_text IS NOT NULL) AND (next_date IS NOT NULL) AND (owner IS NOT NULL)))),
-    CONSTRAINT email_proposal_check1 CHECK ((((status = 'pending'::text) AND (resolved_by IS NULL) AND (resolved_at IS NULL) AND (resolution_reason IS NULL)) OR ((status = 'confirmed'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL)) OR ((status = 'dismissed'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL) AND (resolution_reason IS NOT NULL)))),
+    draft_subject text,
+    draft_body text,
+    submitted_email jsonb,
+    submitted_at timestamp with time zone,
+    send_result jsonb,
     CONSTRAINT email_proposal_confidence_check CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric))),
     CONSTRAINT email_proposal_evidence_quote_check CHECK (((length(evidence_quote) >= 10) AND (length(evidence_quote) <= 2000))),
-    CONSTRAINT email_proposal_kind_check CHECK ((kind = ANY (ARRAY['phase_move'::text, 'next_step'::text]))),
+    CONSTRAINT email_proposal_kind_check CHECK ((kind = ANY (ARRAY['phase_move'::text, 'next_step'::text, 'reply_draft'::text]))),
     CONSTRAINT email_proposal_owner_check CHECK ((owner = ANY (ARRAY['joe'::text, 'dell'::text]))),
+    CONSTRAINT email_proposal_resolution CHECK ((((status = 'pending'::text) AND (resolved_by IS NULL) AND (resolved_at IS NULL) AND (resolution_reason IS NULL)) OR ((status = 'confirmed'::text) AND (kind <> 'reply_draft'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL)) OR ((status = 'dismissed'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL) AND (resolution_reason IS NOT NULL)) OR ((status = ANY (ARRAY['approved_to_send'::text, 'sent'::text, 'failed'::text])) AND (kind = 'reply_draft'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL)))),
     CONSTRAINT email_proposal_resolution_reason_check CHECK (((length(btrim(resolution_reason)) >= 1) AND (length(btrim(resolution_reason)) <= 500))),
-    CONSTRAINT email_proposal_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'confirmed'::text, 'dismissed'::text]))),
+    CONSTRAINT email_proposal_send_result CHECK (((((status <> ALL (ARRAY['sent'::text, 'failed'::text])) AND (send_result IS NULL)) OR ((status = ANY (ARRAY['sent'::text, 'failed'::text])) AND ((send_result ->> 'status'::text) = status))) IS TRUE)),
+    CONSTRAINT email_proposal_shape CHECK (((((kind = 'phase_move'::text) AND (task_text IS NULL) AND (next_date IS NULL) AND (owner IS NULL) AND (draft_subject IS NULL) AND (draft_body IS NULL)) OR ((kind = 'next_step'::text) AND (task_text IS NOT NULL) AND (next_date IS NOT NULL) AND (owner IS NOT NULL) AND (draft_subject IS NULL) AND (draft_body IS NULL)) OR ((kind = 'reply_draft'::text) AND (task_text IS NULL) AND (next_date IS NULL) AND (owner IS NOT NULL) AND ((length(draft_subject) >= 1) AND (length(draft_subject) <= 998)) AND ((length(btrim(draft_body)) >= 1) AND (length(btrim(draft_body)) <= 20000)))) IS TRUE)),
+    CONSTRAINT email_proposal_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'confirmed'::text, 'dismissed'::text, 'approved_to_send'::text, 'sent'::text, 'failed'::text]))),
+    CONSTRAINT email_proposal_submission CHECK (((((submitted_email IS NULL) AND (submitted_at IS NULL) AND (status <> ALL (ARRAY['approved_to_send'::text, 'sent'::text, 'failed'::text]))) OR ((kind = 'reply_draft'::text) AND (submitted_at IS NOT NULL) AND (status = ANY (ARRAY['approved_to_send'::text, 'sent'::text, 'failed'::text])) AND (jsonb_typeof(submitted_email) = 'object'::text) AND (submitted_email ?& ARRAY['subject'::text, 'body'::text, 'sha256'::text, 'to'::text, 'cc'::text]))) IS TRUE)),
     CONSTRAINT email_proposal_task_text_check CHECK (((length(btrim(task_text)) >= 1) AND (length(btrim(task_text)) <= 500)))
 );
 
@@ -83855,6 +83888,17 @@ CREATE VIEW public.v_drip_conflict AS
 --
 
 COMMENT ON VIEW public.v_drip_conflict IS 'Leads queued on a PROSPECTING drip whose linked client is live. Empty is the correct state. Added 0045 after four clients in active deals were found on the Monthly Newsletter — latent, since loop #47 (first send) has never fired, which is exactly why nothing caught it. "not ilike client care" rather than a list of prospecting campaigns: a list goes stale the first time someone adds a campaign and forgets this view exists.';
+
+
+--
+-- Name: v_email_reply_partner; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_email_reply_partner WITH (security_barrier='true') AS
+ SELECT slug,
+    email
+   FROM public.actor
+  WHERE ((kind = 'human'::text) AND active AND (slug = ANY (ARRAY['joe'::text, 'dell'::text])));
 
 
 --
@@ -95726,6 +95770,13 @@ CREATE INDEX doctrine_section_title_search_idx ON public.doctrine_section USING 
 
 
 --
+-- Name: email_proposal_outbox; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX email_proposal_outbox ON public.email_proposal USING btree (owner, submitted_at, id) WHERE (status = 'approved_to_send'::text);
+
+
+--
 -- Name: email_proposal_pending; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -99792,6 +99843,13 @@ CREATE TRIGGER campaign_channels_check BEFORE INSERT OR UPDATE OF channels ON pu
 --
 
 CREATE TRIGGER campaign_touch BEFORE UPDATE ON public.campaign FOR EACH ROW EXECUTE FUNCTION public.trg_touch_row();
+
+
+--
+-- Name: activity captured_email_source_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER captured_email_source_immutable BEFORE UPDATE OF email_source ON public.activity FOR EACH ROW EXECUTE FUNCTION ops.guard_captured_email_source();
 
 
 --
@@ -107856,6 +107914,7 @@ revoke all on function ops.gate_zero_producer_actor_id() from public;
 revoke all on function ops.gate_zero_producer_login_role() from public;
 revoke all on function ops.gate_zero_producer_seat_holder_ref() from public;
 revoke all on function ops.gate_zero_record_read_only_outcome(p_idempotency_key uuid, p_receipt jsonb) from public;
+revoke all on function ops.guard_captured_email_source() from public;
 revoke all on function ops.guard_engineering_actor_authority_update() from public;
 revoke all on function ops.guard_engineering_envelope_supersession() from public;
 revoke all on function ops.guard_engineering_job_definition_currentness_update() from public;
@@ -110561,6 +110620,7 @@ grant select on table public.v_defect_class to carr_writer;
 grant select on table public.v_defect_class to dot_reader;
 grant select on table public.v_detector_health to dot_reader;
 grant select on table public.v_drip_conflict to dot_reader;
+grant select on table public.v_email_reply_partner to carr_reader;
 grant select on table public.v_expired_verification to carr_reader;
 grant select on table public.v_expired_verification to carr_writer;
 grant select on table public.v_expired_verification to dot_reader;
@@ -113059,6 +113119,9 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 1003_notification_morning_midnight.sql	7b3eb4a20aeed80ce5c01bd17a4b2fe02c43184e5903957ac4edee459b80d050	1970-01-01 00:00:00+00
 1004_phase_start_undo.sql	921899f7e36a786c3570d2da68645051b710c7fd51ec7fbe6c8b74488bd93e52	1970-01-01 00:00:00+00
 1005_calendar_intake_retained_control_ref.sql	2d1910179c7f719c91b55416062725031a447a0ce711621dace61e3049488751	1970-01-01 00:00:00+00
+1006_complete_work_request.sql	5e378cf45c69a0d974684f7538f86649a0fdf1f0a61694a677a962f904fd10fa	1970-01-01 00:00:00+00
+1008_email_reply_draft.sql	2a3faa08aa0088f8946fac0678d2a250dd90a493c28c7a6635f5cbc38f5808b3	1970-01-01 00:00:00+00
+1010_email_reply_recipients.sql	12f43a47da714557b17ec3c3e95209388a88f67898b4ea24089475d38f1fbb74	1970-01-01 00:00:00+00
 \.
 
 
