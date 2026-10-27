@@ -423,7 +423,7 @@ test("morning-brief shows the partner's own published calendar for the next seve
 test("every known gap becomes a plain sentence and the section is partial, never ready", async () => {
   const warnings = [{ code: "responses_unverified" }, { code: "group_invites_not_shown" },
     { code: "undecoded", count: 3 }, { code: "time_changed", count: 1 }, { code: "recurring_unverified", count: 2 },
-    { code: "trimmed", count: 4 }, { code: "something_new" }];
+    { code: "trimmed", count: 4 }, { code: "canceled_hidden", count: 2 }, { code: "something_new" }];
   const result = await executeRegisteredTool(client({ calendar: calendarFixture(Date.now(), undefined, warnings) }), JOE, "morning-brief", {});
   const calendar = result.sections.calendar;
   assert.equal(calendar.state, "partial");
@@ -435,6 +435,7 @@ test("every known gap becomes a plain sentence and the section is partial, never
     "1 meeting has more than one stored time. Check Outlook for the current time.",
     "Recurring meetings show only the occurrences Outlook stored; some may be missing.",
     "4 later meetings were left out to keep the brief small.",
+    "2 cancelled meetings were left out.",
     "This calendar has a gap the brief cannot describe. Check Outlook.",
   ]);
   assert.ok(result.coverage.required_sections.some((row) => row.key === "calendar"

@@ -18,6 +18,7 @@ const WARNINGS = {
   undecoded: n => `${n} calendar ${plural(n, "item", "items")} in Outlook couldn't be read, so meetings may be missing.`,
   time_changed: n => `${n} ${plural(n, "meeting has", "meetings have")} more than one stored time. Check Outlook for the current time.`,
   recurring_unverified: () => "Recurring meetings show only the occurrences Outlook stored; some may be missing.",
+  canceled_hidden: n => `${n} cancelled ${plural(n, "meeting was", "meetings were")} left out.`,
   trimmed: n => `${n} later ${plural(n, "meeting was", "meetings were")} left out to keep the brief small.`,
 };
 
