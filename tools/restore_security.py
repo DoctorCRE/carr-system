@@ -180,9 +180,24 @@ def check_parity(conn, declared):
             'roles': roles, 'mismatches': mismatches}
 
 
+def allow_set_role(conn):
+    """Give the connecting admin SET (never INHERIT) on each app role it cannot yet assume.
+
+    A hosted admin is not a superuser: Neon's neondb_owner holds the app roles
+    through the provider's CREATEROLE grant, which on PostgreSQL 16+ carries
+    ADMIN but not SET, so `set local role` is refused. ADMIN lets it grant
+    itself SET. Only ever called on the disposable restore target."""
+    from psycopg import sql
+    for role in ROLE_BUNDLES:
+        if not conn.execute("select pg_has_role(current_user, %s, 'SET')", (role,)).fetchone()[0]:
+            conn.execute(sql.SQL('grant {} to current_user with inherit false, set true')
+                         .format(sql.Identifier(role)))
+
+
 def rebuild_security(target, declared):
     import psycopg
     with psycopg.connect(target, autocommit=True, connect_timeout=30,
                          options='-c statement_timeout=30000') as conn:
+        allow_set_role(conn)
         apply_grants(conn, declared)
         return check_parity(conn, declared)

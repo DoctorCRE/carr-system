@@ -132,17 +132,18 @@ def rows(db: Path) -> list[dict]:
 
 def extract(db: Path, files: Path, out: Path | None = None, cap: int = CAP,
             messages: set[int] | None = None, max_files: int = MAX_FILES,
-            max_total: int = MAX_TOTAL) -> list[dict]:
+            max_total: int = MAX_TOTAL, attachments: set[int] | None = None) -> list[dict]:
     """One result per attachment; bytes are written only for deal types when `out` is set.
 
     `messages` limits the work to those message row ids (the caller's matched mail) and
-    is required whenever `out` is set. Without `out`, None reads every message."""
+    is required whenever `out` is set. Without `out`, None reads every message.
+    `attachments` restricts work before batch caps, so completed files cannot starve retries."""
     if out is not None and messages is None:
         raise ValueError('writing attachments requires the matched message ids')
     files = Path(files)
     results, read_files, read_bytes = [], 0, 0
     for row in rows(db):
-        if messages is not None and row['message'] not in messages:
+        if (messages is not None and row['message'] not in messages) or (attachments is not None and row['attachment'] not in attachments):
             continue
         result = {**row, 'status': 'batch_cap', 'detected_type': None, 'byte_length': None,
                   'sha256': None, 'stored': None}
