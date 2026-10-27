@@ -779,6 +779,10 @@ test('replaying a proposal returns the digest and warning for the stored proposa
   assert.equal(replay.proposal_digest, stored.preview.proposal_digest);
   assert.equal(replay.suspected_instruction, stored.suspected_instruction);
   assert.equal(stored.preview.text, 'Send the floor plan');
+  const invalidRetry = await record({ kind: 'next_step', activity_id: source.activity_id,
+    evidence_quote: 'This quote is not in the email.', text: 'Different task', next_date: '2027-01-09' });
+  assert.equal(invalidRetry.proposal_id, first.proposal_id);
+  assert.equal(invalidRetry.proposal_digest, stored.preview.proposal_digest);
 });
 
 test('replaying a stale proposal reports its preview error without replacing it', async () => {
