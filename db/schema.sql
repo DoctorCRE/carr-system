@@ -96756,6 +96756,13 @@ CREATE INDEX critical_date_open_due_idx ON public.critical_date USING btree (due
 
 
 --
+-- Name: deal_client_closed_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX deal_client_closed_idx ON public.deal USING btree (client_id, closed_on DESC NULLS LAST);
+
+
+--
 -- Name: deal_conflict_open_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -114437,6 +114444,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0993_dispatch_ack_recipient_authority.sql	95fe5c0e20addde14c24639b75bf1e2968272db7aed1c8049e0cde3fc978af09	1970-01-01 00:00:00+00
 0995_ci_gates_control_test_ref.sql	8c43f588b209af987d5fe5fa64586c43caa0addb203ce943afeb49a8d5ed2938	1970-01-01 00:00:00+00
 0997_critical_date_resolution.sql	539b1b091142e7c9376499a610eff336acf51836cc99749d2b0a0c8ac7c8a7fe	1970-01-01 00:00:00+00
+0998_deal_client_read_index.sql	8346163dd6b9dbf53132ae93aae4448d17e8d9486c911478c7f868b9a54f336b	1970-01-01 00:00:00+00
 \.
 
 
