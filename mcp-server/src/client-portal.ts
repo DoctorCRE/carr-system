@@ -47,6 +47,16 @@ export function clientPortalTools({ withEnvelope, writeEvent, resolveSubject }: 
         });
       },
     },
+    'list-client-portals': {
+      write: false,
+      description: 'List registered client portals with their deal, status and lock state. Never returns passwords or verifiers.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      handler: async (c: Db) => {
+        const result = await c.query(`select slug, client_id, client_name, deal_id, deal_name, client_portal_url,
+          status, registered_at, updated_at, locked from v_client_portal_list order by slug`);
+        return { ok: true, portals: result.rows };
+      },
+    },
     'read-client-portal': {
       write: true,
       description: 'Read one password-protected client-portal.v1 roadmap and explicitly shared text material. Requires authenticated CARR access. This is not a public login endpoint. The server locks a slug after five failed passwords within 15 minutes. Never accepts client or deal selectors.',
