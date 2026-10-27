@@ -113063,7 +113063,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 1001_retire_scheduler_contracts.sql	2b14240e8b93c30d5dc16c4dfd6a746b365e736895a516be3d769d9b10d27186	1970-01-01 00:00:00+00
 1003_notification_morning_midnight.sql	7b3eb4a20aeed80ce5c01bd17a4b2fe02c43184e5903957ac4edee459b80d050	1970-01-01 00:00:00+00
 1004_phase_start_undo.sql	921899f7e36a786c3570d2da68645051b710c7fd51ec7fbe6c8b74488bd93e52	1970-01-01 00:00:00+00
-1005_email_deal_matching.sql	e4e9c4b9ac676e2ae959b1ebb2741fec59a1f05273a178e0ce69ec66b7c053e1	1970-01-01 00:00:00+00
+1009_email_deal_matching.sql	e4e9c4b9ac676e2ae959b1ebb2741fec59a1f05273a178e0ce69ec66b7c053e1	1970-01-01 00:00:00+00
 \.
 
 
