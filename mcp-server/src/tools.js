@@ -9773,9 +9773,10 @@ registerTools({
         innerArgs.human_quote = candidate.evidence_quote;
         innerArgs.change_reason = "Stated on the weekly pipeline call";
       }
-      if (candidate.kind === 'next_step') {
+      if (["next_step", "phase_move"].includes(candidate.kind)) {
         const subject = await resolveSubject(c, candidate.payload.deal);
-        await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0))", [subject.id]);
+        if (candidate.kind === "next_step")
+          await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0))", [subject.id]);
         await lockDealField(c, subject.id, "next_date");
         await lockDealField(c, subject.id, "next_step");
         if (automatic) {
@@ -9794,7 +9795,8 @@ registerTools({
           if (changed.rows.length) throw new ToolError({ error: "newer_change_exists", field: changed.rows[0].field,
             hint: "The plan changed after this call proposal was filed. Review it before applying." });
         }
-        innerArgs.base_version = (await c.query("select version from deal where id=$1 for update", [subject.id])).rows[0]?.version;
+        if (candidate.kind === "next_step")
+          innerArgs.base_version = (await c.query("select version from deal where id=$1 for update", [subject.id])).rows[0]?.version;
       }
       const result = await executeRegisteredTool(c, actor, verb, innerArgs);
       if (!result || result.ok === false) throw new ToolError(result || { error: "inner_write_failed" });
