@@ -1,8 +1,21 @@
+import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
+
+type PolicyKV = Pick<KVNamespace, "put" | "delete" | "list"> & {
+  get<T = string>(name: string, options?: "json" | "text" | { type?: "json" | "text" }): Promise<T | null>;
+};
+
+type OAuthEnv = Partial<Pick<Env, "CARR_MCP_ALLOWED_ORIGINS">> & {
+  CARR_OAUTH_APPROVED_CLIENT_IDS?: string;
+  OAUTH_PROVIDER: Pick<OAuthHelpers, "unwrapToken">;
+  OAUTH_KV: PolicyKV;
+};
+type Provider = { fetch(request: Request, env: OAuthEnv, ctx: ExecutionContext): Promise<Response> };
+
 // Shared authorization policy around the pinned provider. No OAuth cryptography
 // is duplicated here; the provider remains responsible for codes and tokens.
 import { bearerCredential } from "./bearer.ts";
 
-export function validateAuthorizationRequest(request, auth) {
+export function validateAuthorizationRequest(request: Request, auth: AuthRequest) {
   const params = new URL(request.url).searchParams;
   for (const name of ["response_type", "client_id", "redirect_uri", "code_challenge", "code_challenge_method", "resource"])
     if (params.getAll(name).length > 1) throw new Error(`Duplicate ${name}`);
@@ -15,25 +28,25 @@ export function validateAuthorizationRequest(request, auth) {
 }
 
 export const SHARED_OAUTH_PATHS = ["/mcp", "/doc/mcp", "/pipeline/changes"];
-export const isSharedOAuthPath = path => SHARED_OAUTH_PATHS.some(route => path === route || path.startsWith(route + "/"));
+export const isSharedOAuthPath = (path: string) => SHARED_OAUTH_PATHS.some(route => path === route || path.startsWith(route + "/"));
 const MCP_ORIGINS = ["https://chatgpt.com", "https://chat.openai.com", "https://claude.ai",
   "https://api.doctorcre.com", "https://app.doctorcre.com", "https://dealroom.doctorcre.com"];
 
 // Absence is permitted for native/server-to-server transports. Supplied
 // origins must be canonical exact origins; never reflect an arbitrary caller.
-export function mcpOriginRefusal(request, env = {}) {
+export function mcpOriginRefusal(request: Request, env: Partial<Pick<Env, "CARR_MCP_ALLOWED_ORIGINS">> = {}) {
   const origin = request.headers.get("origin");
   if (origin === null) return null;
-  let extra = [];
+  let extra: unknown = [];
   try {
     if (env.CARR_MCP_ALLOWED_ORIGINS !== undefined) extra = JSON.parse(env.CARR_MCP_ALLOWED_ORIGINS);
-    const canonical = value => typeof value === "string" && new URL(value).origin === value && new URL(value).protocol === "https:";
+    const canonical = (value: unknown) => typeof value === "string" && new URL(value).origin === value && new URL(value).protocol === "https:";
     if (!Array.isArray(extra) || !extra.every(canonical) || !canonical(origin) || ![...MCP_ORIGINS, ...extra].includes(origin)) throw new Error();
   } catch { return Response.json({ error: "origin_not_allowed" }, { status: 403, headers: { "cache-control": "no-store" } }); }
   return null;
 }
 
-export function requireApprovedClient(clientId, env) {
+export function requireApprovedClient(clientId: string, env: Pick<OAuthEnv, "CARR_OAUTH_APPROVED_CLIENT_IDS">) {
   if (env.CARR_OAUTH_APPROVED_CLIENT_IDS === undefined) return;
   let ids;
   try { ids = JSON.parse(env.CARR_OAUTH_APPROVED_CLIENT_IDS); } catch { throw new Error("Client approval policy is invalid"); }
@@ -41,19 +54,19 @@ export function requireApprovedClient(clientId, env) {
     throw new Error("This client is not approved by the server");
 }
 
-function exactResource(value, request) {
+function exactResource(value: unknown, request: Request) {
   const origin = new URL(request.url).origin;
   if (typeof value !== "string" || !SHARED_OAUTH_PATHS.some(path => value === origin + path))
     throw new Error("One exact supported resource is required");
   return value;
 }
 
-function legacyResource(value, request) {
+function legacyResource(value: unknown, request: Request) {
   const origin = new URL(request.url).origin;
   return value == null || value === origin || value === `${origin}/`;
 }
 
-function oauthError(request, status, error) {
+function oauthError(request: Request, status: number, error: string) {
   const url = new URL(request.url);
   return Response.json({ error }, { status, headers: {
     "cache-control": "no-store",
@@ -63,7 +76,7 @@ function oauthError(request, status, error) {
 
 // Interpose policy, not token cryptography. The provider validates client
 // authentication, code/verifier and refresh-token hashes before it writes.
-export async function sharedOAuthFetch(provider, request, env, ctx) {
+export async function sharedOAuthFetch(provider: Provider, request: Request, env: OAuthEnv, ctx: ExecutionContext) {
   const path = new URL(request.url).pathname;
   const corsRoute = isSharedOAuthPath(path) || path === "/token";
   if (corsRoute) {
@@ -79,7 +92,7 @@ export async function sharedOAuthFetch(provider, request, env, ctx) {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
-async function policyFetch(provider, request, env, ctx) {
+async function policyFetch(provider: Provider, request: Request, env: OAuthEnv, ctx: ExecutionContext) {
   const url = new URL(request.url);
   if (isSharedOAuthPath(url.pathname)) {
     const refused = mcpOriginRefusal(request, env);
@@ -105,7 +118,7 @@ async function policyFetch(provider, request, env, ctx) {
     try {
       const type = (request.headers.get("content-type") || "").split(";", 1)[0].trim().toLowerCase();
       if (type === "application/json") {
-        const data = await request.clone().json();
+        const data = await request.clone().json<Record<string, string>>();
         if (Object.values(data).some(v => typeof v !== "string")) throw new Error();
         body = new URLSearchParams(data);
       } else if (type === "application/x-www-form-urlencoded") {
@@ -117,7 +130,7 @@ async function policyFetch(provider, request, env, ctx) {
     // RFC 7009 shares the provider's token endpoint. Authentication and
     // revocation (including unknown-token handling) remain provider-owned.
     if (kind === null && body.has("token")) return provider.fetch(request, env, ctx);
-    if (!["authorization_code", "refresh_token"].includes(kind))
+    if (!(["authorization_code", "refresh_token"] as (string | null)[]).includes(kind))
       return oauthError(request, 400, "unsupported_grant_type");
     if (kind === "authorization_code" && !/^[A-Za-z0-9._~-]{43,128}$/.test(body.get("code_verifier") || ""))
       return oauthError(request, 400, "invalid_request");
@@ -125,7 +138,7 @@ async function policyFetch(provider, request, env, ctx) {
     const parts = opaque.split(":");
     if (parts.length !== 3) return oauthError(request, 400, "invalid_grant");
     const key = `grant:${parts[0]}:${parts[1]}`;
-    const grant = await env.OAUTH_KV.get(key, { type: "json" });
+    const grant = await env.OAUTH_KV.get<{ resource?: unknown }>(key, { type: "json" });
     if (!grant) return oauthError(request, 400, "invalid_grant");
     let resource;
     try {
@@ -139,11 +152,12 @@ async function policyFetch(provider, request, env, ctx) {
     // authenticated successful exchange persists this migration, with its
     // original TTL. Invalid input never rotates or rewrites a grant.
     const kv = env.OAUTH_KV;
-    const projectedKV = {
-      get: async (name, options) => {
-        const value = await kv.get(name, options);
+    const projectedKV: OAuthEnv["OAUTH_KV"] = {
+      // KV wire values are interpreted according to the requested format below.
+      get: async (name: string, options?: "json" | "text" | { type?: "json" | "text" }): Promise<any> => {
+        const value: any = await kv.get(name, options);
         if (name !== key || !value) return value;
-        const json = options === "json" || options?.type === "json";
+        const json = options === "json" || (options as { type?: string } | undefined)?.type === "json";
         const current = json ? value : JSON.parse(value);
         return json ? { ...current, resource } : JSON.stringify({ ...current, resource });
       },

@@ -16,8 +16,8 @@
 import { organizationTenantForActor, personalScopeForActor } from "./identity.js";
 import { embedDoctrineRevisions, backfillDoctrineEmbeddings } from "./doctrine-embeddings.ts";
 import { searchDoctrineSituations, retrievalVisibilityActorId } from "./situation-retrieval.js";
-import { CORE_RULE_IDS, CORE_RULE_COUNT, CORE_RULE_TRIAGE_SOURCE } from "./core-rule-ids.js";
-import { ruleBootPage } from "./rule-boot.js";
+import { CORE_RULE_IDS, CORE_RULE_COUNT, CORE_RULE_TRIAGE_SOURCE } from "./core-rule-ids.ts";
+import { ruleBootPage } from "./rule-boot.ts";
 import { safeInteger, integerFields, normalizedEnvelope } from "./safe-integer.ts";
 import { isPersonalRecordOwner } from "./personal-record-ownership.ts";
 
@@ -1017,7 +1017,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
               sponsoring_human_id: who, agent_principal_id: actor.slug,
               runtime_principal: actor.slug }, rules };
         }
-        // THE GATED RULE BOOT (mcp-server/src/rule-boot.js). Its own branch,
+        // THE GATED RULE BOOT (mcp-server/src/rule-boot.ts). Its own branch,
         // ahead of every other read: it needs only the sponsor-scoped rule
         // rows (same filter as the recitation below) and must stay cheap,
         // because every session and subagent fetches its single digest page.

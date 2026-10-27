@@ -1,33 +1,39 @@
+import type { Actor } from './verb-contract.ts';
+type RelationshipStats = { coverage_verified_at?: string | null; deals_worked: number; deals_referred?: number; won: number; lost: number; first_worked_at?: string | null; last_contacted_at?: string | null };
+type DealEvidence = { deal_id: string; role: string; occurred_at: string; evidence_kind: string; evidence_ref: string };
+type RelationshipFields = { deal_evidence?: DealEvidence[]; loan_programs?: string[]; trust_override?: unknown; deal_history_verified_at?: string | null };
+// Evidence and overrides are external JSON, validated field by field below.
+type EvidenceInput = Record<string, any>;
 // Calculate and merge vendor relationship evidence.
-import { exactDealAssociations } from "./relationship-network.js";
+import { exactDealAssociations } from "./relationship-network.ts";
 // Trust uses verified deal history; missing coverage never becomes zero.
-export function computedTrust(stats, now) {
+export function computedTrust(stats: Partial<RelationshipStats> | null | undefined, now: string) {
   if (!stats?.coverage_verified_at || !Number.isInteger(stats.deals_worked) || !Number.isInteger(stats.won) || !Number.isInteger(stats.lost)) return 'Unrated';
   const years = stats.first_worked_at ? (Date.parse(now) - Date.parse(stats.first_worked_at)) / (365.25 * 86400000) : 0;
   const recency = stats.last_contacted_at ? (Date.parse(now) - Date.parse(stats.last_contacted_at)) / 86400000 : Infinity;
-  const resolved = stats.won + stats.lost;
-  const rate = resolved ? stats.won / resolved : null;
-  if (years >= 2 && stats.deals_worked >= 8 && rate >= .7 && recency >= 0 && recency <= 180) return 'Proven';
-  if (years >= 1 && stats.deals_worked >= 3 && rate >= .5 && recency >= 0 && recency <= 365) return 'Established';
+  const resolved = stats.won! + stats.lost!;
+  const rate = resolved ? stats.won! / resolved : null;
+  if (years >= 2 && stats.deals_worked! >= 8 && rate! >= .7 && recency >= 0 && recency <= 180) return 'Proven';
+  if (years >= 1 && stats.deals_worked! >= 3 && rate! >= .5 && recency >= 0 && recency <= 365) return 'Established';
   return 'Trial';
 }
-export function enrichRelationship(payload, now) {
+export function enrichRelationship(payload: Partial<RelationshipStats> | null | undefined, now: string) {
   const stats = payload || {};
   const verified = Boolean(stats.coverage_verified_at);
   return { ...stats, deals_referred: verified ? stats.deals_referred : null, deals_worked: verified ? stats.deals_worked : null,
-    win_rate: verified && stats.won + stats.lost > 0 ? stats.won / (stats.won + stats.lost) : null,
+    win_rate: verified && stats.won! + stats.lost! > 0 ? stats.won! / (stats.won! + stats.lost!) : null,
     computed_tier: computedTrust(stats, now), formula_version: 'vendor-trust.v1' };
 }
-export function requireRelationshipPartner(actor, code = 'AUTHORIZATION_REFUSED') {
-  if (actor?.human !== true || !['joe', 'dell'].includes(actor?.slug)) throw Object.assign(new Error(code), { code });
+export function requireRelationshipPartner(actor: Actor, code = 'AUTHORIZATION_REFUSED') {
+  if (actor?.human !== true || !['joe', 'dell'].includes(actor?.slug as string)) throw Object.assign(new Error(code), { code });
 }
-export function trustedOverride(value, actor, now = new Date().toISOString()) {
+export function trustedOverride(value: EvidenceInput | null, actor: Actor, now = new Date().toISOString()) {
   requireRelationshipPartner(actor);
   if (value === null) return null;
   if (!value || !['Proven', 'Established', 'Trial'].includes(value.tier) || typeof value.reason !== 'string' || !value.reason.trim() || value.reason.length > 500 || Object.keys(value).some(k => !['tier', 'reason'].includes(k))) throw Object.assign(new Error('trust_override_invalid'), { code: 'trust_override_invalid' });
   return { tier: value.tier, reason: value.reason.trim(), recorded_by: actor.slug, recorded_at: now };
 }
-export function dealEvidenceEntries(value) {
+export function dealEvidenceEntries(value: unknown) {
   if (!Array.isArray(value) || value.length > 100) throw Object.assign(new Error('deal_evidence_invalid'), { code: 'deal_evidence_invalid' });
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const seen = new Set();
@@ -43,7 +49,7 @@ export function dealEvidenceEntries(value) {
 
 // Supported input is an ISO date (UTC midnight) or an ISO timestamp with an
 // explicit timezone. Validate the calendar before Date.parse can normalize it.
-function canonicalEvidenceTimestamp(value) {
+function canonicalEvidenceTimestamp(value: unknown) {
   if (typeof value !== 'string') return null;
   const parts = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(Z|[+-]\d{2}:\d{2}))?$/.exec(value);
   if (!parts) return null;
@@ -61,8 +67,8 @@ function canonicalEvidenceTimestamp(value) {
 // Preserve all programs and exact associations. Conflicting observations keep
 // the survivor's value and are reported with the loser's value in merge history.
 // Coverage transfers only with an unchanged complete evidence set.
-export function mergeRelationshipFields(survivor, loser) {
-  const filled = {}, conflicts = [];
+export function mergeRelationshipFields(survivor: RelationshipFields, loser: RelationshipFields) {
+  const filled: RelationshipFields = {}, conflicts: { field: string; survivor: unknown; merged: unknown }[] = [];
   const a = dealEvidenceEntries(survivor.deal_evidence || []);
   const b = dealEvidenceEntries(loser.deal_evidence || []);
   const entries = new Map(a.map(e => [`${e.deal_id}:${e.role}`, e]));
@@ -77,7 +83,7 @@ export function mergeRelationshipFields(survivor, loser) {
   if (!survivor.trust_override && loser.trust_override) filled.trust_override = loser.trust_override;
   else if (survivor.trust_override && loser.trust_override && JSON.stringify(survivor.trust_override) !== JSON.stringify(loser.trust_override))
     conflicts.push({field:'trust_override',survivor:survivor.trust_override,merged:loser.trust_override});
-  const fingerprint = entries => JSON.stringify(entries.map(e => JSON.stringify(e)).sort());
+  const fingerprint = (entries: DealEvidence[]) => JSON.stringify(entries.map(e => JSON.stringify(e)).sort());
   if (!a.length && !survivor.deal_history_verified_at) filled.deal_history_verified_at = loser.deal_history_verified_at || null;
   else if (!b.length && !loser.deal_history_verified_at) filled.deal_history_verified_at = survivor.deal_history_verified_at || null;
   else if (fingerprint(a) === fingerprint(b)) filled.deal_history_verified_at = survivor.deal_history_verified_at || loser.deal_history_verified_at || null;

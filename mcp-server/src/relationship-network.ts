@@ -1,3 +1,8 @@
+import type { Db, Actor } from './verb-contract.ts';
+type NetworkNode = { id: string; restricted?: boolean; contact_state?: string; contact_state_until?: string | null };
+type NetworkEdge = { id: string; kind: string; from: string; to: string; via: string; detail: string; summary?: string; when?: string | null };
+type ReferralCount = { node_id: string; won: number; lost: number; deals: number };
+type NetworkSnapshot = { nodes: NetworkNode[]; edges: NetworkEdge[]; referrals: ReferralCount[] };
 // One exact snapshot: graph, recorded referral outcomes and offered introductions.
 // No name matching, inferred employment edges, or vendor score probabilities.
 export const NETWORK_SCHEMA = 'carr-relationship-network.v1';
@@ -61,12 +66,12 @@ select jsonb_build_object('nodes',coalesce((select jsonb_agg(item order by item-
  from live p join associations a on a.party_id=p.id and a.role='referred' join deals d on d.id=a.deal_id where p.kind in ('vendor','client') group by p.id
  ) r),'[]'::jsonb)) snapshot`;
 
-function held(node, now) {
+function held(node: NetworkNode | undefined, now: string) {
   if (node?.restricted) return true;
   return node?.contact_state && node.contact_state !== 'active'
     && (!node.contact_state_until || node.contact_state_until >= now.slice(0,10));
 }
-export function projectNetwork(snapshot, observedAt) {
+export function projectNetwork(snapshot: NetworkSnapshot, observedAt: string) {
   if (!Array.isArray(snapshot?.nodes) || !Array.isArray(snapshot?.edges) || !Array.isArray(snapshot?.referrals)) throw Object.assign(new Error('INTERNAL_ERROR'), {code:'INTERNAL_ERROR'});
   // Refuse oversize snapshots, never silently call a clipped graph complete.
   if (snapshot.nodes.length > 5000 || snapshot.edges.length > 20000) throw Object.assign(new Error('DEPENDENCY_UNAVAILABLE'), {code:'DEPENDENCY_UNAVAILABLE'});
@@ -87,7 +92,7 @@ export function projectNetwork(snapshot, observedAt) {
 // The row keeps the referrer the caller resolved from the locked relationship
 // and the caller's date (else the relationship's), so later backfills on the
 // shared relationship never move an already recorded deal.
-export async function bindReferralDeal(client, actor, args, ends, kind, link) {
+export async function bindReferralDeal(client: Db, actor: Actor, args: { deal_id?: string | null; note?: string }, ends: { to_party: string }, kind: string, link: { id: string; referred_by: string; occurred_on?: string | null }) {
   if (args.deal_id == null) return null;
   if (!REFERRAL_KINDS.includes(kind) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(args.deal_id) || typeof args.note !== 'string' || !args.note.trim()) throw Object.assign(new Error('referral_deal_invalid'),{code:'referral_deal_invalid'});
   const found = await client.query(`select d.id from public.deal d join public.client c on c.id=d.client_id and c.merged_into is null join public.party p on p.id=c.party_id and p.merged_into is null and p.deleted_at is null where d.id=$1::uuid and p.id=$2::uuid`,[args.deal_id,ends.to_party]);

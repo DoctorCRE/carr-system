@@ -24,7 +24,7 @@ import { callTool } from "../src/mcp.js";
 import { executeRegisteredTool } from "../src/tools.js";
 import {
   classifyLoopText, needsDecider, parksADecision, loopRowText,
-} from "../src/verb-gate-checks.js";
+} from "../src/verb-gate-checks.ts";
 
 const ACTOR = { slug: "joe", human: true, via: "oauth-google" };
 

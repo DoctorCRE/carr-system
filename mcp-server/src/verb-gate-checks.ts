@@ -101,7 +101,7 @@ const LOOP_TEXT_FIELDS = ["title", "body", "unblocks", "source_note", "blocker_d
 
 /** Same whole-call flattening as loop_text()/row_text() in the Python gates:
  * the subject cannot hide in blocker_detail while the title stays neutral. */
-function loopRowText(args) {
+function loopRowText(args: Record<string, unknown> | null | undefined) {
   if (!args || typeof args !== "object") return "";
   return LOOP_TEXT_FIELDS.map(f => (args[f] == null ? "" : String(args[f])))
     .filter(Boolean).join("\n");
@@ -109,7 +109,7 @@ function loopRowText(args) {
 
 /** Port of escalation-gate.py's classify(), minus the HUMAN_WANTS_CHOICE
  * transcript exemption (see file header). Returns {allow, why}. */
-function classifyLoopText(blob) {
+function classifyLoopText(blob: string | null | undefined) {
   if (!blob || !blob.trim()) return { allow: true, why: "empty" };
   if (BOUNDARY.test(blob)) return { allow: true, why: "boundary_change_is_constitutional" };
   if (FACT_CAPTURE.test(blob)) return { allow: true, why: "fact_capture_only_joe_knows" };
@@ -120,13 +120,13 @@ function classifyLoopText(blob) {
 
 /** Port of escalation-gate.py's parks_a_decision(): only the two spellings
  * that literally await Joe's ruling. */
-function parksADecision(args) {
+function parksADecision(args: Record<string, unknown> | null | undefined) {
   if (!args || typeof args !== "object") return false;
   return args.marker === "decision" || args.blocker === "ruling";
 }
 
 /** Port of blocker-decider-gate.py's needs_decider(). */
-function needsDecider(args) {
+function needsDecider(args: Record<string, unknown> | null | undefined) {
   if (!args || typeof args !== "object") return false;
   if (args.blocker !== "capability") return false;
   const text = loopRowText(args);

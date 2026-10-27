@@ -11,9 +11,9 @@ import { factObservationTools } from "./fact-observations.ts";
 import { actionClosureTools } from "./action-closure.ts";
 import { dealFileTools } from "./deal-files.js";
 import { dealItemTools, readDealItems, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.ts";
-import { bindReferralDeal } from "./relationship-network.js";
-import { trustedOverride, dealEvidenceEntries, requireRelationshipPartner, mergeRelationshipFields } from "./vendor-relationship.js";
-import { readLeadWorkspace, LEAD_WORKSPACE_SCHEMA, validateStageReview, lockLeadLifecycle } from "./lead-workspace.js";
+import { bindReferralDeal } from "./relationship-network.ts";
+import { trustedOverride, dealEvidenceEntries, requireRelationshipPartner, mergeRelationshipFields } from "./vendor-relationship.ts";
+import { readLeadWorkspace, LEAD_WORKSPACE_SCHEMA, validateStageReview, lockLeadLifecycle } from "./lead-workspace.ts";
 // CARR MCP tool registry — Wave 1 verbs (tool-contracts-2026-07-30.md §2).
 // Every write runs the envelope: idempotency replay via tool_call, actor from
 // the verified token (never the payload), base_version conflicts ask and never
@@ -61,7 +61,7 @@ import { tourPropertySearchTools } from "./tour-property-search.js";
 import { tourSharingTools } from "./tour-sharing.js";
 import { tourMapPromotionTools } from "./tour-map-promotion.js";
 import { tourArtifactTools } from "./tour-artifacts.js";
-import { DEAL_ROOM_FIELDS, assertDealRoomField, stripDealPlaceholders } from "./dealroom.js";
+import { DEAL_ROOM_FIELDS, assertDealRoomField, stripDealPlaceholders } from "./dealroom.ts";
 import { authenticatedIdentity, authorizationClassForActor, organizationTenantForActor,
          permittedActionOwnerSlugs, personalScopeForActor } from "./identity.js";
 import { automaticApplyHold } from "./call-auto-apply.js";
@@ -104,7 +104,7 @@ export { canExercisePartnerAuthority, partnerAuthoritySlugForActor };
 import { ToolError } from "./tool-error.ts";
 export { ToolError };
 import { parksADecision, classifyLoopText, needsDecider, loopRowText,
-         ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.js";
+         ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.ts";
 
 // DEFECT 2, HALF (b) (found 2026-08-13, decision 7026246b): a write whose bad
 // input reaches the database raw (an enum this file never learned to validate,
@@ -2632,7 +2632,7 @@ async function applyDealRoomField(c, actor, dealId, field, value, idempotencyKey
   // advance that cell's base immediately, from the record's own word for it.
   //
   // recorded_at is serialized exactly as the changes feed serializes it
-  // (dealroom.js), so the two are directly comparable on the client: a base is
+  // (dealroom.ts), so the two are directly comparable on the client: a base is
   // only ever moved forward, never back onto an older event.
   const committed = (await c.query(
     `select id, to_jsonb(recorded_at)#>>'{}' as recorded_at from event
