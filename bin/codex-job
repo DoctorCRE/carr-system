@@ -29,6 +29,29 @@ def main():
     repo = args.repo
     if not Path(repo).exists() and re.fullmatch(r'[\w.-]+/[\w.-]+', repo):
         repo = f'https://github.com/{repo}.git'
+    try:
+        cutoff = time.time() - 2 * 24 * 60 * 60
+        retained = [path for path in Path(tempfile.gettempdir()).glob('codex-job-*')
+                    if not path.is_symlink() and (path / 'checkout' / '.git').is_dir()
+                    and path.stat().st_mtime < cutoff]
+        if retained:
+            processes = subprocess.run(['ps', '-ww', '-axo', 'args='], check=True,
+                                       capture_output=True, text=True, timeout=5).stdout
+            active = []
+            for line in processes.splitlines():
+                if not re.search(r'(?:^|[/\s])codex(?:\s|$)', line.partition(' -')[0]):
+                    continue
+                match = re.search(r'(?:^|\s)(?:-C\s+|--cd(?:=|\s+))(.+?)(?=\s+-|$)', line)
+                if match:
+                    directory = Path(match[1].strip("\"'"))
+                    if not directory.is_absolute():
+                        raise ValueError('Cannot establish relative Codex checkout')
+                    active.append(directory.resolve(strict=True))
+            for path in retained:
+                if not any(directory.is_relative_to(path.resolve()) for directory in active):
+                    shutil.rmtree(path)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
     workspace = Path(tempfile.mkdtemp(prefix='codex-job-'))
     clone = workspace / 'checkout'
     status, cloned = 1, False
