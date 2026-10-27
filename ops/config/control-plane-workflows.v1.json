@@ -5,30 +5,6 @@
   "cognition_jobs": [],
   "workflows": [
     {
-      "key": "ai-capability-builder", "version": 1, "enabled": false, "risk": "yellow",
-      "recurrence": {"cron": null, "timezone": "America/Chicago", "source": "disabled pending governed cadence"},
-      "execution": {"kind": "cognition", "cognition_job": "audit.proposal", "input_builder": "capability-program.next-candidate"},
-      "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "disabled provider schedule", "owner": "ops.job dispatcher", "inputs": ["scheduled_for", "capability-program.next-candidate"], "canonical_reads": ["capability program", "ops.job_definition"], "canonical_writes": ["ops.job", "ops.job_receipt"], "external_dependencies": ["provider scheduler adapter"], "authority": "proposal-only; no production mutation", "current_completion_signal": "proposal evidence record", "replacement_program": "ops.job_definition:ai-capability-builder:v1", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
-      "routing": {"key": "facts.all_true", "spec": {"all_of": ["capability.candidate_admitted", "runner.identity_bound"]}, "description": "capability candidate is admitted and runner identity is bound"},
-      "filtering": {"key": "facts.all_true", "spec": {"all_of": ["capability.single_bounded_candidate", "mutation.production_absent"]}, "description": "one bounded candidate, no production mutation"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "proposal.worktree", "proposal.tests", "proposal.risks", "proposal.next_human_action"]}, "description": "proposal reconciles to typed input and has worktree, tests, risks, next human action"},
-      "retry": {"max_attempts": 2, "backoff": "exponential", "base_seconds": 300, "cap_seconds": 1800, "timeout_seconds": 1800},
-      "deduplication": {"key_template": "ai-capability-builder:{scheduled_for}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "proposal_recorded"},
-      "legacy_schedule": {"provider": "claude-code", "status": "disabled", "disable_requires": "accepted shadow and canary receipts"}
-    },
-    {
-      "key": "calendar-fetch-daily", "version": 5, "enabled": true, "risk": "yellow",
-      "recurrence": {"cron": "20 7 * * 1-5", "timezone": "America/Chicago", "source": "ops/launchd/com.carr.calendar-eventkit.plist"},
-      "execution": {"kind": "deterministic", "entrypoint": "bin/calendar-eventkit-capture.sh", "args": ["--days", "7"], "shadow_args": ["--dry-run", "--receipt-safe", "--days", "7"], "canary": {"enabled": true, "isolation_guard": "calendar-fetch-daily.canary.v1", "args": ["--canary", "--days", "7"]}},
-      "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "weekday cron 20 7 * * 1-5 America/Chicago", "owner": "ops.job dispatcher", "inputs": ["scheduled_for", "seven-day attendee window"], "canonical_reads": ["local Calendar EventKit store", "v_export_clients", "v_export_leads", "ops.job_definition"], "canonical_writes": ["evidence-backed meeting activity records", "ops.calendar_canary_source_snapshot", "ops.calendar_canary_receipt", "ops.job_receipt"], "external_dependencies": ["registered CARR Calendar Access bundle", "macOS Calendar permission", "local edge GUI session"], "authority": "deterministic exact-email meeting activity only", "current_completion_signal": "EventKit capture receipt", "replacement_program": "ops.job_definition:calendar-fetch-daily:v5", "acceptance": "accepted shadow and main-ledger lease-bound canary receipts; source digest covers the full canonical contact snapshot and output digest covers aggregate counts", "retirement_approval": "Joe approval after accepted evidence for the EventKit launchd surface"},
-      "routing": {"key": "facts.all_true", "spec": {"all_of": ["calendar.weekday", "calendar.eventkit_bundle_registered"]}, "description": "weekday and the registered EventKit access bundle is present"},
-      "filtering": {"key": "facts.all_true", "spec": {"all_of": ["command.registered_args_selected"]}, "description": "the exact registered mode-specific calendar command is selected"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["command.exit_zero", "command.workflow_marker_valid"]}, "description": "the calendar command exits zero with its mode-specific validated summary marker"},
-      "retry": {"max_attempts": 2, "backoff": "exponential", "base_seconds": 60, "cap_seconds": 600, "timeout_seconds": 900},
-      "deduplication": {"key_template": "calendar-fetch-daily:{scheduled_for}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["command.receipt_persisted", "command.execution_evidence_reconciles"]}, "description": "immutable command receipt read back with exact calendar execution evidence", "receipt_kind": "calendar_ingest"},
-      "legacy_schedule": {"provider": "launchd", "status": "enabled", "disable_requires": "accepted shadow and isolated canary receipts plus native enabled-to-disabled readback"}
-    },
-    {
       "key": "contact-enrichment-weekly", "version": 1, "enabled": true, "risk": "green",
       "recurrence": {"cron": "0 9 * * 4", "timezone": "America/Chicago", "source": "services registry"},
       "execution": {"kind": "cognition", "cognition_job": "research.entity-enrichment", "input_builder": "entity-enrichment.next-40"},
@@ -65,18 +41,6 @@
       "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {
-      "key": "linkedin-engagement-daily", "version": 1, "enabled": true, "risk": "yellow",
-      "recurrence": {"cron": "15 9 * * 1-5", "timezone": "America/Chicago", "source": "tracked definition; exact app cron must reconcile before cutover"},
-      "execution": {"kind": "cognition", "cognition_job": "social.engagement-proposal", "input_builder": "linkedin.source-posts"},
-      "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "weekday cron 15 9 * * 1-5 America/Chicago", "owner": "ops.job dispatcher", "inputs": ["LinkedIn source posts", "voice version"], "canonical_reads": ["source-post evidence", "ops.job_definition"], "canonical_writes": ["draft proposal queue", "ops.job_receipt"], "external_dependencies": ["signed-in LinkedIn collector"], "authority": "draft proposal only; no posting", "current_completion_signal": "engagement draft receipt", "replacement_program": "ops.job_definition:linkedin-engagement-daily:v1", "acceptance": "accepted shadow and canary receipts plus cron read-back", "retirement_approval": "Joe approval after accepted evidence"},
-      "routing": {"key": "facts.all_true", "spec": {"all_of": ["linkedin.weekday", "linkedin.collector_available"]}, "description": "weekday and signed-in source collector available"},
-      "filtering": {"key": "facts.all_true", "spec": {"all_of": ["linkedin.post_count_in_range", "linkedin.network_priority"]}, "description": "3-5 actual posts; known network before general peers"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "linkedin.draft_only", "linkedin.voice_valid", "linkedin.link_and_relationship"]}, "description": "3-5 drafts reconcile to input posts and remain draft-only, voice-valid, with relationship supplied"},
-      "retry": {"max_attempts": 1, "backoff": "constant", "base_seconds": 0, "cap_seconds": 0, "timeout_seconds": 1200},
-      "deduplication": {"key_template": "linkedin-engagement-daily:{date}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "engagement_drafts"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled-unreconciled", "disable_requires": "accepted shadow and canary receipts plus exact cron read-back"}
-    },
-    {
       "key": "notes-sweep-hourly", "version": 4, "enabled": true, "risk": "green",
       "recurrence": {"cron": "0 8-18 * * 1-5", "timezone": "America/Chicago", "source": "duplicate Claude task and launchd paths"},
       "execution": {"kind": "deterministic", "entrypoint": "bin/notes-sweep-post.sh", "args": ["--scheduled"], "shadow_args": ["--dry-run"], "canary": {"enabled": false, "args": [], "auto_promote_live": false, "reason": "the Notes canary sender tier was retired; accepted shadow alone satisfies the live ladder for a canary-less workflow, so the automatic tick is pinned at shadow and live ingestion is a person-made schedule --mode live"}},
@@ -110,42 +74,6 @@
       "filtering": {"key": "facts.all_true", "spec": {"all_of": ["radar.lanes_code_scored", "radar.freshness_guard", "radar.overdue_pool"]}, "description": "code-scored lanes, freshness guards and overdue pools"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "radar.lane_health_explicit", "radar.candidates_proposal_only"]}, "description": "nonempty candidates reconcile to typed lanes, lane health is complete, and candidates remain proposals"},
       "retry": {"max_attempts": 2, "backoff": "exponential", "base_seconds": 300, "cap_seconds": 1800, "timeout_seconds": 2400},
       "deduplication": {"key_template": "radar-weekly:{week}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "radar_digest"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
-    },
-    {
-      "key": "restore-rehearse-weekly", "version": 2, "enabled": true, "risk": "green",
-      "recurrence": {"cron": "40 7 * * 2", "timezone": "America/Chicago", "source": "services registry"},
-      "execution": {"kind": "deterministic", "entrypoint": "run.sh", "args": ["restore-rehearse", "--backup-run-id", "latest"], "shadow_args": ["restore-rehearse", "--preflight", "--backup-run-id", "latest"], "canary": {"enabled": false, "reason": "live-equivalent: no staging-only backup, project, key, and receipt profile is registered"}},
-      "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "Tuesday cron 40 7 * * 2 America/Chicago", "owner": "ops.job dispatcher", "inputs": ["latest encrypted dump", "staging credential"], "canonical_reads": ["backup ledger", "ops.job_definition"], "canonical_writes": ["restore rehearsal receipt", "ops.job_receipt"], "external_dependencies": ["non-interactive Neon staging credential"], "authority": "deterministic rehearsal on throwaway branch", "current_completion_signal": "restore rehearsal receipt", "replacement_program": "ops.job_definition:restore-rehearse-weekly:v2", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
-      "routing": {"key": "facts.all_true", "spec": {"all_of": ["restore.encrypted_dump_exists", "restore.non_interactive_credential"]}, "description": "latest encrypted dump exists and non-interactive Neon credential is present"},
-      "filtering": {"key": "facts.all_true", "spec": {"all_of": ["command.registered_args_selected"]}, "description": "the exact registered mode-specific restore command is selected"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["command.exit_zero", "command.workflow_marker_valid"]}, "description": "the restore command exits zero with its mode-specific preflight or reconciliation marker"},
-      "retry": {"max_attempts": 2, "backoff": "exponential", "base_seconds": 600, "cap_seconds": 3600, "timeout_seconds": 7200},
-      "deduplication": {"key_template": "restore-rehearse-weekly:{dump_digest}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["command.receipt_persisted", "command.execution_evidence_reconciles"]}, "description": "immutable command receipt read back with exact restore execution evidence", "receipt_kind": "restore_rehearsal"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
-    },
-    {
-      "key": "social-batch-weekly", "version": 1, "enabled": true, "risk": "yellow",
-      "recurrence": {"cron": "0 8 * * 5", "timezone": "America/Chicago", "source": "services registry"},
-      "execution": {"kind": "cognition", "cognition_job": "social.batch-proposal", "input_builder": "social.next-week-brief"},
-      "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "Friday cron 0 8 * * 5 America/Chicago", "owner": "ops.job dispatcher", "inputs": ["next-week brief", "voice version", "source refs"], "canonical_reads": ["content cadence", "topic rotation", "ops.job_definition"], "canonical_writes": ["draft proposal queue", "ops.job_receipt"], "external_dependencies": ["source collection adapters"], "authority": "draft proposal only; never publish", "current_completion_signal": "social draft batch receipt", "replacement_program": "ops.job_definition:social-batch-weekly:v1", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
-      "routing": {"key": "facts.all_true", "spec": {"all_of": ["social.next_week_uncovered"]}, "description": "next week is not already covered"},
-      "filtering": {"key": "facts.all_true", "spec": {"all_of": ["social.cadence", "social.topic_rotation", "social.no_replies"]}, "description": "cadence and topic rotation predicates; no replies"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "social.schema", "social.writing_lint", "social.source_verification", "social.format", "social.publication_firewall"]}, "description": "nonempty drafts reconcile to typed sources and pass schema, writing lint, format and publication firewall"},
-      "retry": {"max_attempts": 1, "backoff": "constant", "base_seconds": 0, "cap_seconds": 0, "timeout_seconds": 3600},
-      "deduplication": {"key_template": "social-batch-weekly:{target_week}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "social_draft_batch"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
-    },
-    {
-      "key": "social-metrics-pull-weekly", "version": 1, "enabled": true, "risk": "green",
-      "recurrence": {"cron": "45 8 * * 3", "timezone": "America/Chicago", "source": "services registry"},
-      "execution": {"kind": "cognition", "cognition_job": "social.metrics-proposal", "input_builder": "social.metrics-exports"},
-      "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "Wednesday cron 45 8 * * 3 America/Chicago", "owner": "ops.job dispatcher", "inputs": ["platform exports", "measurement window"], "canonical_reads": ["owned account registry", "placement records", "ops.job_definition"], "canonical_writes": ["measurement proposal queue", "ops.job_receipt"], "external_dependencies": ["platform export collectors"], "authority": "typed measurement proposal only", "current_completion_signal": "social metrics receipt", "replacement_program": "ops.job_definition:social-metrics-pull-weekly:v1", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
-      "routing": {"key": "facts.all_true", "spec": {"all_of": ["metrics.current_platform_windows"]}, "description": "platform export collectors returned current windows"},
-      "filtering": {"key": "facts.all_true", "spec": {"all_of": ["metrics.owned_accounts", "metrics.placements_in_window"]}, "description": "owned accounts and placements in measurement window"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "metrics.numeric_types", "metrics.placement_ids", "metrics.source_timestamps"]}, "description": "nonempty measurements reconcile to typed placements, numeric types and source timestamps"},
-      "retry": {"max_attempts": 2, "backoff": "exponential", "base_seconds": 300, "cap_seconds": 1800, "timeout_seconds": 1800},
-      "deduplication": {"key_template": "social-metrics-pull-weekly:{week}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "social_metrics"},
       "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {

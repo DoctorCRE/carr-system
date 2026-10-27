@@ -13,7 +13,6 @@ PROGRAMS = (
     Program("continuity", "mcp-server/test/codex-continuity.test.mjs", "node"),
     Program("leads", "mcp-server/test/lead-workspace-pg.test.mjs", "node"),
     Program("rule-delivery", "ops/rule-delivery-local-pg-acceptance.py"),
-    Program("calendar", "ops/calendar-canary-local-pg-acceptance.py"),
     Program("renewal-ingress", "ops/renewal-signed-ingress-local-pg-acceptance.py"),
     Program("incident", "ops/incident-recovery-local-pg-acceptance.py"),
     Program("snapshot", "bin/schema-snapshot.sh", "snapshot"),

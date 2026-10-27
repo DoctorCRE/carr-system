@@ -54,15 +54,8 @@
     "lib/scheduled_run.py RUN_KEY), distinct from the chain's own 'nightly.*'",
     "step keys, so the two can never collide.",
     "",
-    "ONLY THE CURRENTLY-ENABLED TASKS ARE REGISTERED. x-reply-run-daily,",
-    "linkedin-engagement-daily and calendar-fetch-daily are disabled",
-    "(`list_scheduled_tasks`, checked 2026-08-14) and deliberately left",
-    "unregistered: a cadence-bound service for a task nobody is running would",
-    "read STALE forever, which is exactly the false-alarm failure mode",
-    "local-briefs' grace design and the launchd services above already learned",
-    "to avoid. Register one when its task is re-enabled — sync-registry retires",
-    "a service that leaves this file, never the reverse, so nothing is lost by",
-    "waiting.",
+    "Only current task definitions declare scheduled services. Retained",
+    "on-demand scripts keep receipt services without a scheduled cadence.",
     "",
     "CADENCE for the weekly tasks uses the SAME 604800s/172800s (7 day cadence,",
     "2 day grace) local-briefs already established for a task that can miss its",
@@ -350,26 +343,6 @@
       ]
     },
     {
-      "key": "calendar-eventkit",
-      "name": "Calendar EventKit capture",
-      "purpose": "Local, attendee-aware calendar read (EventKit) into stamp-touch, replacing the published feed the Cowork calendar-fetch-daily task read (which Microsoft strips attendees from). Weekdays 07:20. See ops/launchd/com.carr.calendar-eventkit.plist's own header for the PROP-010 ruling this job exists under.",
-      "family": "Local Mac edge",
-      "criticality": "medium",
-      "owner_actor": "joe",
-      "repo_path": "bin/calendar-eventkit-capture.sh",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.calendar-eventkit.plist",
-          "runs_on": "every",
-          "expected_cadence_seconds": 86400,
-          "cadence_grace_seconds": 172800,
-          "notes": "Weekdays at 07:20 only. Grace spans the weekend stand-down (Joe, 2026-07-11), same shape as local-briefs: the real worst-case gap is Friday to Monday, not one day. PR #97 (Program 4 slice 1) wired the other six launchd jobs and deliberately left this one out for lack of a registration; this entry and the plist's own routing through bin/run-scheduled.sh close that gap."
-        }
-      ]
-    },
-    {
       "key": "recordings-purge",
       "name": "Recording retention purge",
       "purpose": "Deletes call recordings past their retention window.",
@@ -427,43 +400,6 @@
       ]
     },
     {
-      "key": "social-metrics-pull-weekly",
-      "name": "Weekly social analytics pull",
-      "purpose": "Pulls X/FB/IG/LinkedIn metrics and records them via measure-placement.",
-      "family": "Local Mac edge",
-      "criticality": "low",
-      "owner_actor": "joe",
-      "repo_path": "/Users/booko/.claude/scheduled-tasks/social-metrics-pull-weekly/SKILL.md",
-      "runtime": "claude-code-scheduled-task",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "Claude Code scheduled task (native), cron 45 8 * * 3",
-          "expected_cadence_seconds": 604800,
-          "cadence_grace_seconds": 172800
-        }
-      ]
-    },
-    {
-      "key": "social-batch-weekly",
-      "name": "Friday social batch",
-      "purpose": "Drafts + graphics for the following week, queued to Blotato as review-drafts.",
-      "family": "Studio edge",
-      "criticality": "medium",
-      "owner_actor": "joe",
-      "repo_path": "/Users/booko/.claude/scheduled-tasks/social-batch-weekly/SKILL.md",
-      "runtime": "claude-code-scheduled-task",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "Claude Code scheduled task (native), cron 0 8 * * 5",
-          "expected_cadence_seconds": 604800,
-          "cadence_grace_seconds": 172800,
-          "notes": "Re-registered on the Studio 2026-09-26; verification pending. The proof run (session local_cd8147c6-846b-4abd-ac1c-7b0779fa7644) shows as 'succeeded' only because the coordinator stopped it about 10 seconds in, to keep a test run from queuing real posts to Blotato -- that is not a completed run. Its transcript was read back: it called standing-context and read-loop (both read-only) and one Bash call that was interrupted; no write verb was ever called, and no file under the vault's Marketing/Social Media/ changed. This task's first real run is its next scheduled Friday firing. Cause: an in-progress MacBook->Studio hub move on 2026-09-23 copied this task's SKILL.md onto the Studio (one of 22 folders copied that day) but never registered it with create_scheduled_task, while the MacBook copy was deleted; the MacBook's own scheduled-tasks.json kept the stale enabled row pointing at the now-missing file. Family changed from Local Mac edge to Studio edge: the Studio is the host now, MacBook is a thin client over SSH."
-        }
-      ]
-    },
-    {
       "key": "contact-enrichment-weekly",
       "name": "Weekly contact enrichment slice",
       "purpose": "Open-source contact enrichment, 40 records/run until the book is covered.",
@@ -507,14 +443,12 @@
       "family": "Local Mac edge",
       "criticality": "high",
       "owner_actor": "joe",
-      "repo_path": "/Users/booko/.claude/scheduled-tasks/restore-rehearse-weekly/SKILL.md",
-      "runtime": "claude-code-scheduled-task",
+      "repo_path": "bin/restore-rehearse.sh",
+      "runtime": "on-demand-script",
       "environments": [
         {
           "environment": "production",
-          "deploy_mechanism": "Claude Code scheduled task (native), cron 40 7 * * 2 (runs bin/restore-rehearse.sh)",
-          "expected_cadence_seconds": 604800,
-          "cadence_grace_seconds": 172800
+          "deploy_mechanism": "On-demand bin/restore-rehearse.sh and bin/key-recovery-test.sh"
         }
       ]
     },
@@ -809,14 +743,6 @@
     },
     {
       "service": "npi-sweep-weekly",
-      "depends_on": "neon-record-layer"
-    },
-    {
-      "service": "social-metrics-pull-weekly",
-      "depends_on": "neon-record-layer"
-    },
-    {
-      "service": "social-batch-weekly",
       "depends_on": "neon-record-layer"
     },
     {
