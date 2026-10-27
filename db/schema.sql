@@ -80474,9 +80474,11 @@ CREATE TABLE public.lead_contact_draft (
     created_by uuid NOT NULL,
     approved_at timestamp with time zone,
     approved_by uuid,
+    revision integer DEFAULT 1 NOT NULL,
     CONSTRAINT lead_contact_draft_check CHECK (((approved_at IS NULL) = (approved_by IS NULL))),
     CONSTRAINT lead_contact_draft_dispatchable_check CHECK ((NOT dispatchable)),
-    CONSTRAINT lead_contact_draft_requires_human_send_check CHECK (requires_human_send)
+    CONSTRAINT lead_contact_draft_requires_human_send_check CHECK (requires_human_send),
+    CONSTRAINT lead_contact_draft_revision_check CHECK ((revision >= 1))
 );
 
 
@@ -114445,6 +114447,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0995_ci_gates_control_test_ref.sql	8c43f588b209af987d5fe5fa64586c43caa0addb203ce943afeb49a8d5ed2938	1970-01-01 00:00:00+00
 0997_critical_date_resolution.sql	539b1b091142e7c9376499a610eff336acf51836cc99749d2b0a0c8ac7c8a7fe	1970-01-01 00:00:00+00
 0998_deal_client_read_index.sql	8346163dd6b9dbf53132ae93aae4448d17e8d9486c911478c7f868b9a54f336b	1970-01-01 00:00:00+00
+1000_lead_draft_revision.sql	6d720b78fceeb29e4a3e195c10effe4edf548055ef1f7aa1ea36871df8eb525b	1970-01-01 00:00:00+00
 \.
 
 
