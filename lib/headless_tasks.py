@@ -345,9 +345,10 @@ def _terminate(child: subprocess.Popen) -> None:
 
 
 def _claude(prompt: Path, repo: Path, model: str, tools: str, timeout: float,
-            log, env: dict, started_child=None) -> tuple[int, str]:
+            log, env: dict, started_child=None, denied: str = '') -> tuple[int, str]:
     command = ['claude', '-p', '--model', model, '--permission-mode', 'dontAsk',
                '--permission-prompts', 'none', '--allowedTools', tools,
+               *(['--disallowedTools', denied] if denied else []),
                '--no-session-persistence', '--output-format', 'stream-json', '--verbose']
     # Prevent API-billed credentials/provider overrides from taking precedence
     # over the existing subscription login. Never print the environment.
@@ -575,8 +576,9 @@ def main(argv=None) -> int:
     parser.add_argument('task_id')
     parser.add_argument('--repo', type=Path, default=Path.home()/'carr-system')
     parser.add_argument('--timeout-seconds', type=float)
-    parser.add_argument('--model', default='sonnet')
-    parser.add_argument('--allowed-tools', default=DEFAULT_TOOLS)
+    # The reviewed manifest may set model, allowed_tools and disallowed_tools per task.
+    parser.add_argument('--model')
+    parser.add_argument('--allowed-tools')
     parser.add_argument('--check-fresh-since')
     args = parser.parse_args(argv)
     if not re.fullmatch(r'[a-z0-9][a-z0-9-]*', args.task_id):
@@ -586,6 +588,9 @@ def main(argv=None) -> int:
     if args.task_id not in settings['tasks']:
         parser.error('task is not registered in the headless manifest')
     task = settings['tasks'][args.task_id]
+    model = args.model or task.get('model', 'sonnet')
+    tools = args.allowed_tools or ','.join(task.get('allowed_tools', [])) or DEFAULT_TOOLS
+    denied = ','.join(task.get('disallowed_tools', []))
     timeout = args.timeout_seconds if args.timeout_seconds is not None else task.get('timeout_seconds', 5400)
     if timeout <= 0 or timeout != timeout or timeout == float('inf'):
         parser.error('timeout must be finite and positive')
@@ -681,8 +686,8 @@ def main(argv=None) -> int:
                     raise ValueError('child identity unavailable')
                 row.update(child_pid=child.pid, child_birth=birth)
                 append_ledger(ledger, row)
-            code, reason = _claude(prompt, repo, args.model, args.allowed_tools, timeout,
-                                   log, env, started_child)
+            code, reason = _claude(prompt, repo, model, tools, timeout,
+                                   log, env, started_child, denied)
         except InterruptedRun as exc:
             code, reason = exc.code, 'interrupted'
         except Exception as exc:
@@ -816,6 +821,9 @@ def _install_task(action: str, task_id: str, home: Path, repo: Path,
             private_folder(quarantine)
             target.replace(quarantine/(uuid.uuid4().hex+'-'+target.name))
         return
+    from lib.launchd_hold import off_reason
+    if off_reason(label, home):
+        raise ValueError('definition only or held: awaits its activation slice')
     if not (home/'.claude/scheduled-tasks'/task_id/'SKILL.md').is_file():
         raise ValueError('task prompt missing')
     folder = repo/'out/headless'/task_id

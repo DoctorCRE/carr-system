@@ -11,6 +11,20 @@ spec.loader.exec_module(gate)
 
 
 class ReviewGate(unittest.TestCase):
+    def test_card_line_gate(self):
+        pr = {"changed_files": 1, "body": "", "user": {"type": "User"}}
+        code = [{"filename": "app.py"}]
+        for body, expected in [("", False), ("Card: WR557.S3.J1", True),
+                               ("Intro\nCard: WR557.S3.J1\nEnd", True),
+                               ("Card: WR557.S3.J1 extra", False),
+                               (" Card: WR557.S3.J1", False),
+                               ("Card: WR557.S3.J", False)]:
+            with self.subTest(body=body):
+                self.assertEqual(gate.card_allowed({**pr, "body": body}, code), expected)
+        self.assertTrue(gate.card_allowed(pr, [{"filename": "README.md"}]))
+        self.assertTrue(gate.card_allowed({**pr, "user": {"type": "Bot"}}, code))
+        self.assertFalse(gate.card_allowed(pr, [{"filename": "README.md", "previous_filename": "app.py"}]))
+
     def test_threshold(self):
         for net, expected in [(150, True), (151, False), (-20, True)]:
             with self.subTest(net=net):
@@ -72,7 +86,7 @@ class ReviewGate(unittest.TestCase):
                     self.assertEqual(gate.approved(pr, [], comments), expected)
 
     def test_event_adapter(self):
-        pr = {"base": {"ref": "main"}, "additions": 151, "deletions": 0, "head": {"sha": "abc"}, "changed_files": 1}
+        pr = {"body": "Card: WR557.S3.J1", "base": {"ref": "main"}, "additions": 151, "deletions": 0, "head": {"sha": "abc"}, "changed_files": 1}
         for event in ({"number": 4}, {"issue": {"number": 4}}):
             for approved in (False, True):
                 comments = [{"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok"}] if approved else []
@@ -91,6 +105,15 @@ class ReviewGate(unittest.TestCase):
             gate.run({"merge_group": {"head_sha": "queue"}}, "owner/repo")
             self.assertEqual(api.call_args.args[0], "repos/owner/repo/statuses/queue")
             self.assertEqual(api.call_args.args[1]["state"], "success")
+
+    def test_missing_card_fails_status(self):
+        pr = {"base": {"ref": "main"}, "head": {"sha": "abc"}, "changed_files": 1,
+              "additions": 1, "deletions": 0, "body": "", "user": {"type": "User"}}
+        with patch.object(gate, "api", side_effect=[pr, {}, [{"filename": "app.py"}], [], pr, {}]) as api:
+            gate.run({"number": 4}, "owner/repo")
+            status = api.call_args.args[1]
+            self.assertEqual(status["state"], "failure")
+            self.assertIn("Card: WR557.S3.J1", status["description"])
 
     def test_paginated_api(self):
         from types import SimpleNamespace
