@@ -1314,3 +1314,24 @@ test('the queue resolves every recipient, split contact addresses, clients and l
   assert.equal(old.sender.address_unavailable, true);
   assert.equal(old.participant_evidence_missing, true);
 });
+
+test('subject continuity tolerates reply spacing and refuses a thread older than thirty days', async () => {
+  const context = { subject: 'Synthetic practice', conversation_id: null,
+    sender: { email: 'vendor@synthetic.example', internal: false },
+    recipients: [{ email: 'broker@internal.example', kind: 'to', internal: true }] };
+  const prior = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+    kind: 'email_in', summary: 'Email from Vendor: Synthetic practice', detail: quote,
+    occurred_at: new Date(Date.now()-60000).toISOString(), email_context: context });
+  await c.query('update activity set deal_id=$2 where id=$1', [prior.activity_id,deal]);
+  const reply = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+    kind: 'email_in', summary: 'Email from Vendor: Re: Synthetic practice', detail: quote,
+    email_context: { ...context, subject: '   Re:    Synthetic practice  ' } });
+  await command('inherit-email-thread', { idempotency_key: randomUUID(), activity_id: reply.activity_id,
+    thread_activity_id: prior.activity_id }, router());
+  assert.equal((await c.query('select deal_id from activity where id=$1', [reply.activity_id])).rows[0].deal_id, deal);
+  await c.query("update activity set occurred_at=now()-interval '31 days' where id=$1", [prior.activity_id]);
+  const later = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+    kind: 'email_in', summary: 'Email from Vendor: Re: Synthetic practice', detail: quote, email_context: context });
+  await assert.rejects(command('inherit-email-thread', { idempotency_key: randomUUID(), activity_id: later.activity_id,
+    thread_activity_id: prior.activity_id }, router()), error => error.payload?.error === 'email_thread_not_continuous');
+});

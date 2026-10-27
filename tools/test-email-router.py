@@ -338,8 +338,8 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual(request['model'], 'jev-1.13.0')
         self.assertEqual(request['state']['email']['recipients'], mail['recipients'])
         self.assertEqual(request['state']['body_excerpt'], mail['body'])
-        self.assertEqual(list(request['questions']['deal']['criteria']), [str(i) for i in reversed(range(81))])
-        self.assertIn('Synthetic Vendor', request['questions']['deal']['criteria']['80'])
+        self.assertEqual(list(request['questions']['deal'].criteria), [str(i) for i in reversed(range(81))])
+        self.assertIn('Synthetic Vendor', request['questions']['deal'].criteria['80'])
         self.assertEqual(set(request['questions']), {'deal', 'existing', 'different', 'role'})
 
     def test_router_records_new_matter_and_never_runs_phase_classifier(self):
@@ -406,7 +406,7 @@ class MatchingTests(unittest.TestCase):
         with patch.dict('os.environ', {}, clear=True), \
                 patch.object(email_matching, 'load_carr_tokens', create=True,
                              return_value={'TYPESAFE_API_KEY': 'synthetic-key'}) as load, \
-                patch.dict(sys.modules, {'typesafe_sdk': SimpleNamespace(TypeSafeClient=construct)}):
+                patch('typesafe_sdk.TypeSafeClient', side_effect=construct):
             decision = email_matching.match(self.mail(), [{'id': DEAL}], [])
         self.assertEqual(decision.kind, 'file_to_deal')
         self.assertEqual(constructor_calls, [{'api_key': 'synthetic-key', 'model': 'jev-1.13.0'}])
@@ -420,15 +420,15 @@ class MatchingTests(unittest.TestCase):
             return __import__('contextlib').nullcontext(fake)
         with patch.dict('os.environ', {'TYPESAFE_API_KEY': 'synthetic-env-key'}, clear=True), \
                 patch.object(email_matching, 'load_carr_tokens', side_effect=AssertionError('must not read a file')), \
-                patch.dict(sys.modules, {'typesafe_sdk': SimpleNamespace(TypeSafeClient=construct)}):
+                patch('typesafe_sdk.TypeSafeClient', side_effect=construct):
             email_matching.match(self.mail(), [{'id': DEAL}], [])
         self.assertEqual(constructor_calls, [{'api_key': 'synthetic-env-key', 'model': 'jev-1.13.0'}])
 
     def test_unconfigured_jev_does_not_attempt_a_model_request(self):
         with patch.dict('os.environ', {}, clear=True), \
                 patch.object(email_matching, 'load_carr_tokens', create=True, return_value={}), \
-                patch.dict(sys.modules, {'typesafe_sdk': SimpleNamespace(TypeSafeClient=lambda **kwargs:
-                    self.fail('missing credentials must fail before client creation'))}):
+                patch('typesafe_sdk.TypeSafeClient', side_effect=lambda **kwargs:
+                    self.fail('missing credentials must fail before client creation')):
             with self.assertRaisesRegex(ValueError, 'email matching Jev authentication is not configured'):
                 email_matching.match(self.mail(), [{'id': DEAL}], [])
 
@@ -477,11 +477,11 @@ class FakeJev:
 
     def system_one(self, **kwargs):
         self.calls.append(kwargs)
-        return SimpleNamespace(answers={
-            'deal': SimpleNamespace(choice=self.choice, confidence=self.confidence),
-            'existing': SimpleNamespace(noul=self.existing),
-            'different': SimpleNamespace(noul=self.different),
-            'role': SimpleNamespace(choice='lender', confidence=0.9)})
+        from typesafe_sdk import ChoiceAnswer, NoulAnswer
+        return SimpleNamespace(
+            nouls={'existing': NoulAnswer(noul=self.existing), 'different': NoulAnswer(noul=self.different)},
+            choices={'deal': ChoiceAnswer(choice=self.choice, confidence=self.confidence, probabilities={self.choice: 1.0}),
+                     'role': ChoiceAnswer(choice='lender', confidence=0.9, probabilities={'lender': 1.0})})
 
 
 if __name__ == '__main__':

@@ -131,7 +131,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             new Date(prior.occurred_at) >= new Date(current.occurred_at) ||
             (current.deal && current.deal !== prior.deal)) fail('email_thread_not_continuous');
         const a = evidence(current, people), b = evidence(prior, people);
-        const norm = subject => subject.replace(/^(?:(?:re|fw|fwd)\s*:\s*)+/ig, '').trim().replace(/\s+/g, ' ').toLowerCase();
+        const norm = subject => subject.trim().replace(/^(?:(?:re|fw|fwd)\s*:\s*)+/ig, '').trim().replace(/\s+/g, ' ').toLowerCase();
         const participants = mail => new Set([mail.sender,...mail.recipients].map(p => p.email).filter(Boolean));
         const previous = participants(b);
         const sameConversation = a.conversation_id && b.conversation_id && a.conversation_id === b.conversation_id;
@@ -185,7 +185,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'record-email-proposal': {
       write: true,
-      description: 'Store one pending email proposal for Home review: a phase move or a Joe or Dell next step, with a literal quote from a captured inbound email on the selected deal and the router confidence. The matching preview must accept the evidence first. A quote that reads like an injected instruction to an AI is still stored, flagged suspected_instruction with the reason for Joe to see. Re-recording the same kind for the same deal and email returns the stored proposal and its fresh digest. A stale stored proposal has a null digest and preview_error. Never confirms, changes the deal or sends anything; Joe confirms through confirm-email-deal-progress or confirm-email-next-step.',
+      description: 'Store one pending email proposal for Home review: file_to_deal, possible_new_deal, phase_move or next_step, with literal captured email evidence and confidence. Matching kinds use sender_role; possible_new_deal omits deal and may include text describing the sender and new people. The matching preview must accept the evidence first. A quote that reads like an injected instruction to an AI is still stored, flagged suspected_instruction with the reason for Joe to see. Re-recording the same kind for the same deal and email returns the stored proposal and its fresh digest. A stale stored proposal has a null digest and preview_error. Never confirms, creates a deal or sends anything. A partner confirms filing through confirm-email-filing, or the other changes through confirm-email-deal-progress or confirm-email-next-step.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: ['idempotency_key', 'kind', 'activity_id', 'evidence_quote', 'confidence'],
         properties: {

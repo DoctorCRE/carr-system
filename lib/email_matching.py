@@ -1,7 +1,7 @@
 """Email filing decisions. Only verified conversation continuity can file automatically."""
 from __future__ import annotations
 
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import math
@@ -112,17 +112,19 @@ def match(email: dict, deals: list[dict], history: list[dict], *, client=None, s
                     'Use subject, body, every recipient, property and client identity to distinguish new matters. '
                     'A recipient with unknown=true is an unknown person.',
     }
-    questions = {
-        'existing': {'type': 'noul', 'instructions': 'Is this email about one of the existing open_deals?'},
-        'different': {'type': 'noul', 'instructions': 'Does this email discuss a new or different matter '
-                      '(new property, new client, new practice) than these open_deals?'},
-        'role': {'type': 'choice', 'instructions': "What is the sender's role in this email?", 'criteria': ROLES},
+    from typesafe_sdk import Choice, Noul, TypeSafeClient
+
+    questions: dict[str, Noul | Choice] = {
+        'existing': Noul(instructions='Is this email about one of the existing open_deals?'),
+        'different': Noul(instructions='Does this email discuss a new or different matter '
+                         '(new property, new client, new practice) than these open_deals?'),
+        'role': Choice(instructions="What is the sender's role in this email?", criteria=ROLES),
     }
     if ordered:
-        questions['deal'] = {'type': 'choice', 'instructions': 'Which existing deal best matches this email?',
-                             'criteria': {d['id']: _description(d) for d in ordered}}
+        questions['deal'] = Choice(instructions='Which existing deal best matches this email?',
+                                   criteria={d['id']: _description(d) for d in ordered})
+    context: AbstractContextManager[TypeSafeClient]
     if client is None:
-        from typesafe_sdk import TypeSafeClient
         api_key = os.environ.get('TYPESAFE_API_KEY', '').strip()
         if not api_key:
             api_key = load_carr_tokens(['TYPESAFE_API_KEY'],
@@ -133,9 +135,10 @@ def match(email: dict, deals: list[dict], history: list[dict], *, client=None, s
     else:
         context = nullcontext(client)
     with CALLS, context as sdk:
-        answers = sdk.system_one(state=state, questions=questions, model=MODEL).answers
-    existing, different = _probability(answers['existing'].noul), _probability(answers['different'].noul)
-    role = answers['role'].choice
+        response = sdk.system_one(state=state, questions=questions, model=MODEL)
+    existing = _probability(response.nouls['existing'].noul)
+    different = _probability(response.nouls['different'].noul)
+    role = response.choices['role'].choice
     if role not in ROLES:
         raise ValueError('invalid email sender role')
     if different >= HIGH or existing <= LOW or not ordered:
@@ -143,7 +146,7 @@ def match(email: dict, deals: list[dict], history: list[dict], *, client=None, s
         names = [str(p.get('name') or p.get('email') or 'unknown person') for p in people if not p.get('internal')]
         return MatchDecision('possible_new_deal', sender_role=role, confidence=max(different, 1-existing),
                              text=('Possible new matter. Sender and people: ' + ', '.join(names))[:500])
-    chosen = answers['deal']
+    chosen = response.choices['deal']
     confidence = _probability(chosen.confidence)
     if chosen.choice not in {d['id'] for d in ordered}:
         raise ValueError('email match selected an unknown deal')
