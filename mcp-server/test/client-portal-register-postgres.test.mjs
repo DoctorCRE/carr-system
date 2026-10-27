@@ -15,7 +15,7 @@ test('registering a client portal stores only a verifier and exposes only a deri
   try {
     await c.query(await migration('0001_init.sql'));
     await c.query(await migration('0008_client_merged_into.sql'));
-    await c.query('create schema ops; create role carr_reader; create role carr_writer; create role carr_authority; create role dot_reader; grant usage on schema ops to dot_reader; alter default privileges in schema ops grant select on tables to dot_reader; create extension pgcrypto');
+    await c.query('create schema ops; create role carr_reader; create role carr_writer; create role carr_authority; create role dot_reader; grant usage on schema ops to dot_reader; alter default privileges in schema ops grant select on tables to dot_reader; alter default privileges in schema public grant select on tables to dot_reader; create extension pgcrypto');
     for (const name of ['0975_client_portal.sql', '0976_client_portal_binding.sql', '0981_client_portal_writer_denials.sql', '1011_register_client_portal.sql'])
       await c.query(await migration(name));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner')", [actor.id]);
@@ -50,7 +50,7 @@ test('registering a client portal stores only a verifier and exposes only a deri
     await t.test('a slug bound elsewhere, a wrong password, a second portal for the deal and bad input are refused by name', async () => {
       for (const [args, code] of [
         [[b.deal, 'synthetic-a', password], 'portal_slug_taken'],
-        [[a.deal, 'synthetic-a', 'another-password'], 'portal_slug_taken'],
+        [[a.deal, 'synthetic-a', 'another-password'], 'portal_password_differs'],
         [[a.deal, 'synthetic-second', password], 'portal_deal_already_registered'],
         [[b.deal, 'Bad Slug', password], 'portal_slug_invalid'],
         [[b.deal, 'synthetic-b', ''], 'portal_password_invalid'],

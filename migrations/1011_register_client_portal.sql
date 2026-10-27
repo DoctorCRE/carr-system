@@ -22,12 +22,16 @@ begin
   if owner_client is null then
     raise exception 'portal_deal_not_found' using errcode='22023';
   end if;
+  -- Slug first, then deal, so concurrent registrations for one slug or one deal serialize.
   perform pg_advisory_xact_lock(hashtextextended('client-portal:'||p_slug,0));
+  perform pg_advisory_xact_lock(hashtextextended('client-portal-deal:'||p_deal_id::text,0));
   select p.* into existing from ops.client_portal p where p.slug=p_slug;
   if found then
-    if existing.client_id=owner_client and existing.deal_id=p_deal_id and existing.disabled_at is null
-       and existing.password_hash=public.crypt(encode(public.digest(p_password,'sha256'),'hex'),existing.password_hash) then
-      return 'existing';
+    if existing.client_id=owner_client and existing.deal_id=p_deal_id and existing.disabled_at is null then
+      if existing.password_hash=public.crypt(encode(public.digest(p_password,'sha256'),'hex'),existing.password_hash) then
+        return 'existing';
+      end if;
+      raise exception 'portal_password_differs' using errcode='23505';
     end if;
     raise exception 'portal_slug_taken' using errcode='23505';
   end if;
@@ -49,6 +53,8 @@ select deal_id, 'https://share.doctorcre.com/' || (array_agg(slug order by creat
   from ops.client_portal
  where disabled_at is null
  group by deal_id;
+-- public carries default select for dot_reader; the slug is half of a client's credential.
+revoke all on public.v_deal_client_portal from dot_reader;
 grant select on public.v_deal_client_portal to carr_reader, carr_writer;
 
 do $contract$

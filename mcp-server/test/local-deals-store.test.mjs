@@ -70,6 +70,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await c.query(`do $$ begin
       begin create role carr_reader; exception when duplicate_object then null; end;
       begin create role carr_writer; exception when duplicate_object then null; end;
+      begin create role dot_reader; exception when duplicate_object then null; end;
     end $$;`);
     // Use the committed table definitions and caller views, without production data.
     for (const name of ['actor', 'party', 'vendor', 'client', 'deal', 'deal_phase', 'deal_participant', 'next_action', 'deal_note', 'national_account_owner', 'deal_market_assignment', 'deal_review_item', 'deal_review_session', 'event', 'tool_call', 'deal_conflict', 'critical_date', 'lease', 'activity', 'premises', 'negotiation_round', 'document', 'commission', 'capture_post_call_action', 'capture_post_call_candidate', 'building', 'space', 'premises_space', 'lead', 'lead_stage', 'lead_lane', 'lead_stage_move', 'record_flag']) {
@@ -363,10 +364,13 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await t.test('a registered client portal appears as a derived link on both Deal Room reads, never its password', async () => transaction(async () => {
       await fixture(false);
       const password = 'synthetic-simple-password';
+      const key = randomUUID();
       const registered = await TOOLS['register-client-portal'].handler(c, actor, {
-        idempotency_key: randomUUID(), deal: id(4), slug: 'synthetic-practice', password });
+        idempotency_key: key, deal: id(4), slug: 'synthetic-practice', password });
       const portal = 'https://share.doctorcre.com/synthetic-practice';
       assert.deepEqual(registered, {ok: true, deal_id: id(4), client_portal_url: portal, created: true});
+      assert.deepEqual(await TOOLS['register-client-portal'].handler(c, actor, {
+        idempotency_key: key, deal: id(4), slug: 'synthetic-practice', password }), {replayed: true, ...registered});
       const reads = async () => {
         await c.query('set role carr_reader');
         try {
