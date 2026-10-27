@@ -52,13 +52,7 @@ grant execute on function ops.register_client_portal(uuid,text,text) to carr_wri
 create view public.v_deal_client_portal as
 select deal_id, 'https://share.doctorcre.com/' || slug as client_portal_url
   from ops.client_portal
-<<<<<<< HEAD:migrations/1013_register_client_portal.sql
  where disabled_at is null;
-=======
- where disabled_at is null
- group by deal_id;
--- public carries default select for dot_reader; the slug is half of a client's credential.
->>>>>>> origin/client-portal-link:migrations/1011_register_client_portal.sql
 revoke all on public.v_deal_client_portal from dot_reader;
 grant select on public.v_deal_client_portal to carr_reader, carr_writer;
 
