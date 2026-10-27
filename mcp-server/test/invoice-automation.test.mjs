@@ -1,3 +1,4 @@
+// Test invoice automation evidence matching and lifecycle proposals.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {planInvoiceCloses,invoiceAutomation} from '../src/invoice-automation.js';

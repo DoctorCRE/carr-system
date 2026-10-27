@@ -1,3 +1,4 @@
+// Canonicalize and hash artifacts for trust checks.
 import { createHash } from "node:crypto";
 
 export function canonicalJson(value) {

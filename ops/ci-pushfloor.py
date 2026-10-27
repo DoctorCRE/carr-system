@@ -26,6 +26,9 @@ SCAC_ATLAS = re.compile(
     r"|ops/config/scac-registry-.*\.json)$")
 GATE_SURFACE = re.compile(
     r"^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/codex-hooks\.json|ops/[^/]+-selftest\.py)")
+# The detectors and their corpus. The hook runs both scanners on every push; their
+# 64s qualification suite runs here only when one of them changes (WR-000537).
+SECRET_DETECTOR = re.compile(r"^(security/|ops/ci-secret-scan\.py$|ops/githooks/pre-push$)")
 MISSING_PACKAGE = re.compile(r"Error.*Cannot find package '")
 
 
@@ -124,6 +127,14 @@ def check(floor, diff_range, gates_deferred):
         if rc:
             floor.fail("test-collection",
                        "include the new test in CI's collection or its named decision exception", log, 12)
+
+    if any(SECRET_DETECTOR.search(path) for path in changed):
+        floor.ran.append("secret-qualification")
+        for test in sorted(Path("security").glob("test_*.py")):
+            rc, log = floor.py(f"secret-{test.stem}", str(test))
+            if rc:
+                floor.fail(f"secret-{test.stem}", f"a changed detector fails its qualification: "
+                           f".venv/bin/python {test}", log, 20)
 
     if any(path.endswith(".py") for path in changed):
         rc, log = floor.run("types", "./bin/type-check.sh")

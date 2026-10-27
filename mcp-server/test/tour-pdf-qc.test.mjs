@@ -1,3 +1,4 @@
+// Tests PDF quality proof checks and separation from approval authority.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { inspectTourPdfProof } from "../src/deliverable-qc.js";

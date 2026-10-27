@@ -1,3 +1,4 @@
+// Tests record source authority verb schemas and dispatch.
 import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
 // V5-F01 — the live door (recordSourceAuthorityStoreTools) and the numbered
 // migration, proved offline.

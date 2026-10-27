@@ -1,3 +1,4 @@
+// Validate and manage economic fact observations.
 import { authorizationClassForActor, organizationTenantForActor } from './identity.js';
 import { ToolError } from './tool-error.ts';
 import type { Actor, Db, VerbInputs } from './verb-contract.ts';

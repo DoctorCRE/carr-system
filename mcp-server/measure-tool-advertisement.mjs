@@ -1,3 +1,4 @@
+// Measure MCP tool advertisement and continuity costs.
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";

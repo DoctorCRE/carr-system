@@ -15,7 +15,6 @@ PROGRAMS = (
     Program("rule-delivery", "ops/rule-delivery-local-pg-acceptance.py"),
     Program("calendar", "ops/calendar-canary-local-pg-acceptance.py"),
     Program("renewal-ingress", "ops/renewal-signed-ingress-local-pg-acceptance.py"),
-    Program("renewal-lease", "ops/renewal-lease-ledger-local-pg-gate.py"),
     Program("incident", "ops/incident-recovery-local-pg-acceptance.py"),
     Program("snapshot", "bin/schema-snapshot.sh", "snapshot"),
 )

@@ -1,3 +1,4 @@
+// Test control room acceptance IDs, schemas, authority, and fixture behavior.
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

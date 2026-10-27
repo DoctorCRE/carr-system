@@ -1,3 +1,4 @@
+# Score context hook firing against the expected event matrix.
 import json
 import re
 import subprocess

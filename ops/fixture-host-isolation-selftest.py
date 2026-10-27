@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Run installer proofs with hostile parent host state and deny native launchctl."""
+"""Sole gate owner of two installer proofs: runs each under hostile parent host
+state with native launchctl denied (ops/config/ci-check-scope.json run_by)."""
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -38,6 +40,11 @@ class HostIsolation(unittest.TestCase):
 
     def test_config_reconciliation_proof_is_independent_of_host(self):
         self.run_suite('config-as-code-selftest.py')
+
+    def test_gate_collector_leaves_these_suites_to_this_owner(self):
+        scope = json.loads((ROOT / 'ops/config/ci-check-scope.json').read_text())
+        owned = {e['check'] for e in scope.get('run_by', []) if e['owner'] == Path(__file__).name}
+        self.assertEqual(owned, {'reinstall-launchd-calendar-selftest.py', 'config-as-code-selftest.py'})
 
 
 if __name__ == '__main__':

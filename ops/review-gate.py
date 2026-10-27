@@ -19,19 +19,17 @@ SKIP_CI = re.compile(r"\[(skip ci|ci skip|no ci|skip actions|actions skip)\]", r
 def approved(pr, files, comments):
     if SKIP_CI.search(pr.get("title") or ""):
         return False
-    if any(c["body"].splitlines()[:1] == ["VERDICT: CHANGES"]
-           and f'Reviewed-SHA: {pr["head"]["sha"]}' in c["body"].splitlines() for c in comments):
+    sha_line = f'Reviewed-SHA: {pr["head"]["sha"]}'
+    # GitHub lists comments oldest first; the newest VERDICT naming the current head wins.
+    verdicts = [lines[0] for lines in (c["body"].splitlines() for c in comments)
+                if lines[:1] in (["VERDICT: APPROVE"], ["VERDICT: CHANGES"]) and sha_line in lines]
+    if verdicts[-1:] == ["VERDICT: CHANGES"]:
         return False
     risky = any(f.get("status") == "added" and f.get("filename", "").startswith(("bin/", "hooks/", "ops/", ".github/workflows/")) for f in files) or any(fnmatch.fnmatchcase(f.get(key, "").lower(), pattern)
                 for f in files for key in ("filename", "previous_filename") for pattern in RISKY)
     if len(files) == pr["changed_files"] and pr["additions"] - pr["deletions"] <= 150 and not risky:
         return True
-    return any(c["body"].splitlines()[:1] == ["VERDICT: APPROVE"]
-               and len(c["body"].splitlines()) >= 3
-               and (c["body"].splitlines()[2] in ("Reviewer: grok", "Reviewer: the Dot", "Reviewer: orchestrator re-pin")
-                    or c["body"].splitlines()[2].startswith(("Reviewer: Grok", "Reviewer: Claude "))
-                    or c["body"].splitlines()[2] == "Reviewer: Claude")
-               and f'Reviewed-SHA: {pr["head"]["sha"]}' in c["body"].splitlines() for c in comments)
+    return verdicts[-1:] == ["VERDICT: APPROVE"]
 
 
 def api(path, payload=None):

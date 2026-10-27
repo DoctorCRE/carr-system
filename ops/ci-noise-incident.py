@@ -4,6 +4,7 @@
 import argparse
 from datetime import datetime, timezone
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -26,7 +27,28 @@ def github(endpoint, payload=None):
     return json.loads(result.stdout)
 
 
-def publish(repo, code, details, run_url, api=github):
+def service_facts(rows):
+    keys = {row['key'] for row in json.loads(
+        Path(__file__).with_name('config').joinpath('services.json').read_text())['services']}
+    if not isinstance(rows, list):
+        raise ValueError('malformed affected services')
+    facts = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        key, age, kind = (row.get(field) for field in
+                          ('service_key', 'hours_since_observed', 'classification'))
+        if (not isinstance(key, str) or key not in keys
+                or kind not in ('failed', 'stale', 'never started')
+                or (age is not None and (type(age) not in (int, float)
+                                        or age < 0 or age > sys.float_info.max
+                                        or not math.isfinite(age)))):
+            continue
+        facts.append({'service_key': key, 'hours_since_observed': age, 'classification': kind})
+    return facts
+
+
+def publish(repo, code, facts, run_url, api=github):
     if code not in (0, 1, 78):
         raise ValueError(f'probe did not produce a liveness verdict: exit {code}')
     matches = []
@@ -46,12 +68,16 @@ def publish(repo, code, details, run_url, api=github):
     issue = matches[0] if matches else None
     status = {0: 'Recovered', 1: 'ALARM: a registered service failed or missed a report',
               78: 'BLIND: ledger unavailable; no service health verdict'}[code]
+    details = '\n'.join(
+        f"{row['service_key']}: {row['classification']}; "
+        + (f"last heard {row['hours_since_observed']:.1f}h ago"
+           if row['hours_since_observed'] is not None else 'no completion observed')
+        for row in facts)
     body = (f'{MARKER}\n\n{status}\n\nProbe exit: {code}\n'
             f'Observed: {datetime.now(timezone.utc).isoformat()}\n\n'
-            f'[Latest probe run]({run_url})\n\n```text\n{details[-28000:]}\n```\n\n'
-            'This issue is the incident alert. Scheduled observations update its body, '
-            'without comments or a new failed-workflow email. Recovery closes it; '
-            'a new incident reopens it. The probe result above remains authoritative.')
+            f'[Latest probe run]({run_url})\n\n```text\n{details}\n```\n\n'
+            'Inspect service evidence with `tools/ops-record.py health`. '
+            'Scheduled observations update this issue; recovery closes it and a new incident reopens it.')
     if issue is None:
         if code == 0:
             return {'state': 'healthy', 'issue': None, 'probe_exit': code}
@@ -95,9 +121,7 @@ def main():
                 or type(completed.get('probe_exit')) is not int
                 or completed['probe_exit'] != probe.returncode or completed.get('status') != expected):
             raise ValueError('probe did not complete a valid verdict')
-        verdict['affected_services'] = [
-            {'service_key': row['service_key'], 'hours_since_observed': row['hours_since_observed']}
-            for row in completed.get('affected_services', [])]
+        verdict['affected_services'] = service_facts(completed.get('affected_services', []))
         verdict['status'] = expected
     except (ValueError, subprocess.TimeoutExpired, OSError):
         pass
@@ -106,7 +130,7 @@ def main():
     if verdict['status'] == 'ERROR':
         print('BLIND/ERROR: probe failed; service health is unknown', file=sys.stderr)
         return 1
-    result = publish(repo, probe.returncode, verdict['status'], run_url)
+    result = publish(repo, probe.returncode, verdict['affected_services'], run_url)
     print(json.dumps(result))
     summary = os.environ.get('GITHUB_STEP_SUMMARY')
     if summary:

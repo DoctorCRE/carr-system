@@ -1,3 +1,4 @@
+// Test shared OAuth policy and consent in the Worker.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { builtinModules } from "node:module";

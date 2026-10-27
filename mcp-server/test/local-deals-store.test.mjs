@@ -1,3 +1,4 @@
+// Test Local Deals PostgreSQL operations, evidence and regressions.
 import { readMigration } from './migration-source.testhelper.mjs';
 import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
 import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';

@@ -1,3 +1,4 @@
+// Test rule scope selection and visibility.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { validateRuleScope, hasUsableRuleScope, ToolError } from "../src/tools.js";

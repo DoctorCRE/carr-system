@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Exercise CI classes, fixture isolation, collection, and failure behavior.
 
 import contextlib
 import hashlib
@@ -37,7 +38,7 @@ def ci_fixture():
     with tempfile.TemporaryDirectory(prefix="carr-ci-fixture-") as directory:
         root = pathlib.Path(directory)
         for rel in (
-            "ops/ci.sh", "ops/ci-pushfloor.py", "ops/node_test_summary.py",
+            "ops/ci.sh", "ops/ci-pushfloor.py", "ops/node_test_summary.py", "tools/codemap.py",
             "ops/ci-secret-scan.py", "ops/pii_guard.py", "ops/ci-dep-check.py",
             "ops/git_env.py", "ops/no-client-deliverables-gate.py",
             "ops/hook-deletion-check.py", "ops/githooks/path-hygiene-check.py",
@@ -218,6 +219,8 @@ def test_gates_build_hxprobe_before_parallel_selftests():
         (root / "ops/config").mkdir(parents=True)
         (root / "vendor/hxprobe").mkdir(parents=True)
         (root / "bin").mkdir()
+        (root / "tools").mkdir()
+        shutil.copy2(REPO / "tools/codemap.py", root / "tools/codemap.py")
         for name in ("ci.sh", "node_test_summary.py", "git_env.py",
                      "ci-secret-scan.py", "pii_guard.py"):
             shutil.copy2(REPO / "ops" / name, root / "ops" / name)
@@ -244,6 +247,8 @@ def test_gates_build_hxprobe_before_parallel_selftests():
         subprocess.run(["git", "-C", str(root), "add", "ops/ci.sh"], env=env, check=True)
         subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture", "-c",
                         "user.email=fixture@example.invalid", "commit", "-qm", "fixture"], env=env, check=True)
+        subprocess.run(["git", "-C", str(root), "update-ref", "refs/remotes/origin/main", "HEAD"],
+                       env=env, check=True)
         for failure in ("0", "1"):
             for name in ("worker-built", "gate-ran"):
                 (root / name).unlink(missing_ok=True)
@@ -356,7 +361,7 @@ def test_hosted_migration_ownership():
           and "GH_TOKEN" in runner["env"])
     check("hosted migration partitions cover all independent proof groups",
           set(wf["jobs"]["migration-fixtures"].get("strategy", {}).get("matrix", {}).get("part", []))
-          == {"reconstruction", "equivalence", "shadow", "gates-serial", "gates-isolated", "acceptance"}
+          == {"reconstruction", "equivalence", "shadow", "gates", "acceptance"}
           and "--migration-part proofs" in runner["run"])
     check("required aggregate waits for independent fixtures", "migration-fixtures" in wf["jobs"]["checks"]["needs"])
     aggregate = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Fail unless every class group succeeded")
@@ -422,7 +427,7 @@ def test_migration_partitions_execute_complete_inventory():
                      "FAIL_PROGRAM": fail}, capture_output=True, text=True)
             return result.returncode, set(calls.read_text().splitlines())
         fixtures = {}
-        for part in ("reconstruction", "equivalence", "shadow", "fixtures", "proofs", "gates", "gates-serial", "gates-isolated", "acceptance", "core"):
+        for part in ("reconstruction", "equivalence", "shadow", "fixtures", "proofs", "gates", "acceptance", "core"):
             rc, fixtures[part] = run(part)
             check(f"migration {part} partition executes", rc == 0)
         check("fixture partition union retains the complete canonical fixture inventory",
@@ -439,14 +444,14 @@ def test_migration_partitions_execute_complete_inventory():
               for call in fixtures["proofs"]))
         check("DB gate partition excludes consumer proofs", not any(
               "node --test" in call for call in fixtures["gates"]))
-        for partition in ("serial", "isolated"):
-            check(f"gate {partition} partition reaches the canonical selector", any(
-                  f"--partition {partition}" in call for call in fixtures["gates-" + partition]))
+        check("the gate partition runs every DB gate in one runner", any(
+              "ci-migration-gates.py --logdir" in call and "--partition" not in call
+              for call in fixtures["gates"]))
         check("acceptance bootstrap excludes consumer and gate programs", not any(
               "node --test" in call or "ci-migration-gates.py --logdir" in call
               for call in fixtures["acceptance"]))
         check("a failing partition fails the migration verdict", run("reconstruction", "schema-reconstruction-selftest.py")[0] == 1)
-        rc, calls = run("gates-serial", "tools/ops-record.py sync-registry")
+        rc, calls = run("gates", "tools/ops-record.py sync-registry")
         check("service-catalog bootstrap failure stops database gates", rc == 1 and not any(
               "ci-migration-gates.py --logdir" in call for call in calls))
 
@@ -458,6 +463,12 @@ def test_gate_shards_execute_a_disjoint_complete_inventory():
             (root / name).mkdir()
         inventory = {"ops/a-selftest.py", "ops/b-selftest.py", "ops/c-selftest.py",
                      "tools/test-d.py", "tools/test-e.sh", "tools/test-f.sh"}
+        shutil.copy2(REPO / "tools/codemap.py", root / "tools/codemap.py")
+        for args in (("init", "-q"),
+                     ("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                      "commit", "--allow-empty", "-qm", "Synthetic shard baseline"),
+                     ("update-ref", "refs/remotes/origin/main", "HEAD")):
+            subprocess.run(["git", *args], cwd=root, env=fixture_env(), check=True, capture_output=True)
         for path in inventory:
             (root / path).write_text("")
         (root / "hooks/gate-integrity.py").write_text("")
