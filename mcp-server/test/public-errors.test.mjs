@@ -72,6 +72,16 @@ for (const [code, extra] of [
   if (code === "value_not_in_declared_vocabulary") assert.deepEqual(payload.fields, ["filter"]);
 });
 
+test("MCP preserves a missing_required refusal and names only declared fields", async t => {
+  // Regression: #2194's closed allowlist omitted missing_required, so every
+  // verb called without a required argument answered unhandled_verb_failure
+  // (read-assurance-health in production, 2026-10-27).
+  const payload = await failure(t, new ToolError({ error: "missing_required",
+    missing: ["filter", "private_table"], hint: privateText }));
+  assert.equal(payload.error, "missing_required");
+  assert.deepEqual(payload.fields, ["filter"]);
+});
+
 test("MCP read-doctrine names a missing document through the real reader path", async t => {
   const { neonConfig } = await import("@neondatabase/serverless");
   t.mock.method(console, "error", () => {});
