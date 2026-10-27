@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import {
   assuranceHealthStoreTools,
   validateAssuranceHealthProjection,
-} from "../src/assurance-health-store.v5.js";
+} from "../src/assurance-health-store.v5.ts";
 
 class ToolError extends Error {
   constructor(payload) { super(payload.error); this.payload = payload; }

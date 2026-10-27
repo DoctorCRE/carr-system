@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { digest } from "../src/artifact-trust.js";
 import { ORGANIZATION_TENANT_ID } from "../src/identity.js";
-import { JOURNEY_ONE_DEADLINE_CONTRACT } from "../src/journey-one-clock.v5.js";
+import { JOURNEY_ONE_DEADLINE_CONTRACT } from "../src/journey-one-clock.v5.ts";
 import {
   BENCHMARK_ACCEPTANCE_ENVELOPE_FIELDS, BENCHMARK_CACHE_STATES, BENCHMARK_COST_VARIANCE_THRESHOLDS,
   BENCHMARK_COVERAGE_FACT_FIELDS, BENCHMARK_COVERAGE_FACT_SCHEMA,

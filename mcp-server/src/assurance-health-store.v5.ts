@@ -9,6 +9,15 @@
 // scope reads unknown / unavailable / not green -- an unregistered workflow can
 // never read healthy. The guard below refuses any other answer in that state.
 
+import type { Actor, Db, VerbInputs } from "./verb-contract.ts";
+import type { ToolError as ToolErrorClass } from "./tool-error.ts";
+
+// Preserve the existing field-by-field validation of database JSON.
+type ProjectionRecord = Record<string, any>;
+type Scope = VerbInputs["read-assurance-health"]["scope"];
+// Error remains a supported default, including its existing object-payload behavior.
+type ProjectionError = new (payload: any) => Error;
+
 export const ASSURANCE_HEALTH_SCHEMA_VERSION = "assurance-health.v1";
 
 export const ASSURANCE_HEALTH_LAYERS = Object.freeze([
@@ -29,13 +38,13 @@ const EVIDENCE_STATES = new Set([
 ]);
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const WORK_REQUEST = /^WR-[0-9]{1,12}$/;
-function sameScope(a, b) {
+function sameScope(a: ProjectionRecord | null | undefined, b: ProjectionRecord | null | undefined) {
   return a?.workflow_key === b?.workflow_key
     && a?.workflow_version === b?.workflow_version
     && (a?.work_request_id ?? null) === (b?.work_request_id ?? null);
 }
 
-function validScope(scope) {
+function validScope(scope: ProjectionRecord | null | undefined) {
   if (!scope || typeof scope !== "object" || Array.isArray(scope)) return false;
   const keys = Object.keys(scope).sort();
   const expected = scope.work_request_id == null
@@ -47,7 +56,7 @@ function validScope(scope) {
     && (scope.work_request_id == null || WORK_REQUEST.test(scope.work_request_id));
 }
 
-function refuse(ErrorType, reason) {
+function refuse(ErrorType: ProjectionError, reason: string): never {
   throw new ErrorType({ error: "assurance_health_projection_invalid", reason });
 }
 
@@ -56,7 +65,7 @@ function refuse(ErrorType, reason) {
  * This is a guard, not a second classifier: it never upgrades a state and never
  * manufactures evidence. The database remains the producer.
  */
-export function validateAssuranceHealthProjection(projection, requestedScope, ErrorType = Error) {
+export function validateAssuranceHealthProjection(projection: ProjectionRecord | null | undefined, requestedScope: Scope, ErrorType: ProjectionError = Error) {
   if (!projection || typeof projection !== "object" || Array.isArray(projection)) refuse(ErrorType, "projection_not_object");
   if (projection.schema_version !== ASSURANCE_HEALTH_SCHEMA_VERSION) refuse(ErrorType, "schema_version");
   if (!validScope(requestedScope) || !validScope(projection.scope) || !sameScope(projection.scope, requestedScope))
@@ -108,7 +117,7 @@ export function validateAssuranceHealthProjection(projection, requestedScope, Er
   if (!projection.impact || !sameScope(projection.impact.scope_limited_to, requestedScope)
       || !Array.isArray(projection.impact.withdrawn_stages)) refuse(ErrorType, "impact_scope");
   if (!projection.recovery || !Array.isArray(projection.recovery.required_evidence)
-      || projection.recovery.required_evidence.some(layer => !ASSURANCE_HEALTH_LAYERS.includes(layer)))
+      || projection.recovery.required_evidence.some((layer: string) => !ASSURANCE_HEALTH_LAYERS.includes(layer)))
     refuse(ErrorType, "recovery_contract");
   for (const layer of nonpassing) {
     if (!projection.recovery.required_evidence.includes(layer)) refuse(ErrorType, `recovery_omits:${layer}`);
@@ -116,7 +125,7 @@ export function validateAssuranceHealthProjection(projection, requestedScope, Er
   return projection;
 }
 
-export function assuranceHealthStoreTools({ ToolError }) {
+export function assuranceHealthStoreTools({ ToolError }: { ToolError: typeof ToolErrorClass }) {
   if (typeof ToolError !== "function") throw new TypeError("ToolError is required");
   return {
     "read-assurance-health": {
@@ -141,7 +150,7 @@ export function assuranceHealthStoreTools({ ToolError }) {
         },
         required: ["scope"],
       },
-      handler: async (c, _actor, args) => {
+      handler: async (c: Db, _actor: Actor, args: VerbInputs["read-assurance-health"]) => {
         if (!validScope(args?.scope)) throw new ToolError({ error: "assurance_health_scope_invalid" });
         const { workflow_key, workflow_version, work_request_id = null } = args.scope;
         const projection = (await c.query(

@@ -40,7 +40,7 @@
 //
 // REUSED, NOT REDECIDED. Canonical hashing is artifact-trust.js's `digest`; the
 // partner predicate is identity.js's `isKnownPartner`; the deadline contract is
-// journey-one-clock.v5.js's JOURNEY_ONE_DEADLINE_CONTRACT, reconciled against
+// journey-one-clock.v5.ts's JOURNEY_ONE_DEADLINE_CONTRACT, reconciled against
 // the manifest's own closed deadline_contract at module load (see
 // BENCHMARK_DEADLINE_CONTRACT) so the two can never drift into two authorities.
 // The small parsing helpers below are re-stated rather than imported because the
@@ -95,7 +95,7 @@
 //     fact is refused when it is absent, mismatched, stale or non-passing, and
 //     it is never called verified merely because this module can compose one.
 //
-// THE M01 SEAM, in full. journey-one-clock.v5.js consumes what this module
+// THE M01 SEAM, in full. journey-one-clock.v5.ts consumes what this module
 // proposes. The field set is now identical; its VALUE DOMAINS are still narrower
 // than r7's in two places. A00 stays on the r7-exact side of both — r7's
 // accepted values are preserved and no new global cap is invented here — and the
@@ -194,7 +194,7 @@
 import { digest } from "./artifact-trust.js";
 import { ORGANIZATION_TENANT_ID, isKnownPartner } from "./identity.js";
 import { V5_NO_EFFECTS } from "./global-boundaries.v5.js";
-import { JOURNEY_ONE_DEADLINE_CONTRACT } from "./journey-one-clock.v5.js";
+import { JOURNEY_ONE_DEADLINE_CONTRACT } from "./journey-one-clock.v5.ts";
 
 // --- schema identity --------------------------------------------------------
 
@@ -465,7 +465,7 @@ const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[
 const ISO_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/;
 
 /**
- * journey-one-clock.v5.js's NARROWER domains, restated here for one purpose: so
+ * journey-one-clock.v5.ts's NARROWER domains, restated here for one purpose: so
  * `journeyOneClockMinimumReceiptView` can refuse a receipt M01 could not read,
  * at the seam, with a code that names the seam. They are NOT applied to r7
  * evidence anywhere else in this file — see THE M01 SEAM in the header for why

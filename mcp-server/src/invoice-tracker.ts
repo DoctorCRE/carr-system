@@ -1,15 +1,17 @@
 // Read commissions and record invoice receipts.
+import type { Actor, Db, VerbInputs, WithEnvelope, WriteEvent } from "./verb-contract.ts";
+import type { ToolError as ToolErrorClass } from "./tool-error.ts";
 import { isCalendarDate } from './calendar-date.ts';
 
 // One read owns the closed-deal/commission join for Invoices and Home.
 // Recording a receipt changes the existing commission only; it moves no money.
-export function invoiceTrackerTools({ ToolError, withEnvelope, writeEvent }) {
+export function invoiceTrackerTools({ ToolError, withEnvelope, writeEvent }: { ToolError: typeof ToolErrorClass; withEnvelope: WithEnvelope; writeEvent: WriteEvent }) {
   return {
     'read-invoice-tracker': {
       write: false,
       description: 'Invoice tracker v1: closed uninvoiced deals and all invoiced commission entries, including received entries. Amounts are CARR gross commissions only, never client benefit or Salesforce placeholders. Blank deal invoiced_on is normal awaiting-invoice state. Due dates are explicit; no payment term is inferred.',
       inputSchema: { type: 'object', properties: {} },
-      handler: async (c, actor) => {
+      handler: async (c: Db, actor: Actor) => {
         const result = await c.query(`select deal_id, name, owner, phase, lane, outcome,
           to_jsonb(closed_on)#>>'{}' as closed_on, to_jsonb(deal_invoiced_on)#>>'{}' as invoiced_on,
           commission_id, gross_amount, status, base_version,
@@ -29,7 +31,7 @@ export function invoiceTrackerTools({ ToolError, withEnvelope, writeEvent }) {
         idempotency_key: { type: 'string' }, commission_id: { type: 'string', format: 'uuid' },
         base_version: { type: 'integer', minimum: 1 }, received_on: { type: 'string', format: 'date' },
       }, required: ['idempotency_key', 'commission_id', 'base_version', 'received_on'] },
-      handler: async (c, actor, args) => withEnvelope(c, actor, 'record-commission-receipt', args, async () => {
+      handler: async (c: Db, actor: Actor, args: VerbInputs["record-commission-receipt"]) => withEnvelope(c, actor, 'record-commission-receipt', args, async () => {
         const day = args.received_on;
         if (!isCalendarDate(day))
           throw new ToolError({ error: 'invalid_received_on' });

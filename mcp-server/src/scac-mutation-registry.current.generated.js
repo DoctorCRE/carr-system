@@ -58,7 +58,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "acknowledge-dispatch": {
     "ingress_key": "mcp-tool:acknowledge-dispatch",
-    "source_locator": "mcp-server/src/dispatch-spine.js",
+    "source_locator": "mcp-server/src/dispatch-spine.ts",
     "schema_digest": "8a2f036ce4faad712a557b4f336f8e991737485f338d349847660b5af0c552cc",
     "write": true,
     "human_only": false,
@@ -68,7 +68,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "acknowledge-notification": {
     "ingress_key": "mcp-tool:acknowledge-notification",
-    "source_locator": "mcp-server/src/notifications.js",
+    "source_locator": "mcp-server/src/notifications.ts",
     "schema_digest": "3c2d95b332067ee9cf468ccbf7145bdc13b0a4a83edc850152cc75430a7a1a19",
     "write": true,
     "human_only": false,
@@ -158,7 +158,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "add-research-site": {
     "ingress_key": "mcp-tool:add-research-site",
-    "source_locator": "mcp-server/src/research-sites.js",
+    "source_locator": "mcp-server/src/research-sites.ts",
     "schema_digest": "75eaf9c84e72066636002f8a19cf30ffb5a6466c3a3b7fa057378d1def1b9696",
     "write": true,
     "human_only": false,
@@ -640,7 +640,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "complete-doc-suggestion-scan": {
     "ingress_key": "mcp-tool:complete-doc-suggestion-scan",
-    "source_locator": "mcp-server/src/doc-suggestions.js",
+    "source_locator": "mcp-server/src/doc-suggestions.ts",
     "schema_digest": "b001ec53c7eccb5299011413a43e4bf0adb6dca50ffc5b289b02a4fe21c74ce0",
     "write": true,
     "human_only": false,
@@ -820,7 +820,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "decide-doc-suggestion": {
     "ingress_key": "mcp-tool:decide-doc-suggestion",
-    "source_locator": "mcp-server/src/doc-suggestions.js",
+    "source_locator": "mcp-server/src/doc-suggestions.ts",
     "schema_digest": "5da012e58b24a686e1012e7de5bc16f6b0d43a1eee011516b04bb7eabdafd112",
     "write": true,
     "human_only": true,
@@ -1283,7 +1283,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "list-doc-suggestions": {
     "ingress_key": "mcp-tool:list-doc-suggestions",
-    "source_locator": "mcp-server/src/doc-suggestions.js",
+    "source_locator": "mcp-server/src/doc-suggestions.ts",
     "schema_digest": "6c5c048e4c820047cf7a98970e4f98629908254b5e1400d9dd0f7308db51ffc5",
     "write": false,
     "human_only": false,
@@ -1353,7 +1353,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "list-research-sites": {
     "ingress_key": "mcp-tool:list-research-sites",
-    "source_locator": "mcp-server/src/research-sites.js",
+    "source_locator": "mcp-server/src/research-sites.ts",
     "schema_digest": "5493417ec69df86cbda832cfeb3f78e02c7778671aaf3aae358385b61c8ac1c4",
     "write": false,
     "human_only": false,
@@ -1571,7 +1571,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "notification-feed": {
     "ingress_key": "mcp-tool:notification-feed",
-    "source_locator": "mcp-server/src/notifications.js",
+    "source_locator": "mcp-server/src/notifications.ts",
     "schema_digest": "b996de53e8285fe886bd3e47406dd97a98a40fa6085a02e4531dbacc4adb0da8",
     "write": false,
     "human_only": false,
@@ -1714,7 +1714,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "propose-doc-correction": {
     "ingress_key": "mcp-tool:propose-doc-correction",
-    "source_locator": "mcp-server/src/doc-suggestions.js",
+    "source_locator": "mcp-server/src/doc-suggestions.ts",
     "schema_digest": "d91399460e294020a3d779fe4a2689968492e9766d385dd4a6e84574615420d3",
     "write": true,
     "human_only": true,
@@ -1824,7 +1824,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "read-assurance-health": {
     "ingress_key": "mcp-tool:read-assurance-health",
-    "source_locator": "mcp-server/src/assurance-health-store.v5.js",
+    "source_locator": "mcp-server/src/assurance-health-store.v5.ts",
     "schema_digest": "a18d5c967bd49cafa432c9bb1d7c116f289725ee3a111b9750b90e8bd2a7bd53",
     "write": false,
     "human_only": false,
@@ -1904,7 +1904,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "read-dispatch-history": {
     "ingress_key": "mcp-tool:read-dispatch-history",
-    "source_locator": "mcp-server/src/session-identity.js",
+    "source_locator": "mcp-server/src/session-identity.ts",
     "schema_digest": "ab8eb05d9de0072dae860e982c077acfa9e09effe59cb22d7590386b95d9a225",
     "write": false,
     "human_only": false,
@@ -1974,7 +1974,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "read-invoice-tracker": {
     "ingress_key": "mcp-tool:read-invoice-tracker",
-    "source_locator": "mcp-server/src/invoice-tracker.js",
+    "source_locator": "mcp-server/src/invoice-tracker.ts",
     "schema_digest": "efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49",
     "write": false,
     "human_only": false,
@@ -2004,7 +2004,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "read-notification-preferences": {
     "ingress_key": "mcp-tool:read-notification-preferences",
-    "source_locator": "mcp-server/src/notifications.js",
+    "source_locator": "mcp-server/src/notifications.ts",
     "schema_digest": "d746974fa9afd5e951f76f9af38954b0ad7f436f2120dc974da65e5ee39f856f",
     "write": false,
     "human_only": false,
@@ -2064,7 +2064,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "read-resource-dashboard": {
     "ingress_key": "mcp-tool:read-resource-dashboard",
-    "source_locator": "mcp-server/src/resource-observation.v5.js",
+    "source_locator": "mcp-server/src/resource-observation.v5.ts",
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
@@ -2124,7 +2124,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "read-session-identity": {
     "ingress_key": "mcp-tool:read-session-identity",
-    "source_locator": "mcp-server/src/session-identity.js",
+    "source_locator": "mcp-server/src/session-identity.ts",
     "schema_digest": "520a23d16b3dc32163cb982d226607eca3ee4b12f745121571a74db2267e4b7e",
     "write": false,
     "human_only": false,
@@ -2244,7 +2244,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "record-commission-receipt": {
     "ingress_key": "mcp-tool:record-commission-receipt",
-    "source_locator": "mcp-server/src/invoice-tracker.js",
+    "source_locator": "mcp-server/src/invoice-tracker.ts",
     "schema_digest": "51745ae15bc5d1ff8741889b5518a243ec1fd5faf9638ce26d9219ae5337244f",
     "write": true,
     "human_only": true,
@@ -2354,7 +2354,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "record-dispatch-link": {
     "ingress_key": "mcp-tool:record-dispatch-link",
-    "source_locator": "mcp-server/src/dispatch-spine.js",
+    "source_locator": "mcp-server/src/dispatch-spine.ts",
     "schema_digest": "c26cf30b62954f502d18cdf3c7c17921b4f9b375a3bc558bf86343d2e5bf6f33",
     "write": true,
     "human_only": false,
@@ -2524,7 +2524,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "record-resource-observation": {
     "ingress_key": "mcp-tool:record-resource-observation",
-    "source_locator": "mcp-server/src/resource-observation.v5.js",
+    "source_locator": "mcp-server/src/resource-observation.v5.ts",
     "schema_digest": "c1d802b085cec84897945813dce470a6ddfd7293fef788a2303ce2e0b305cab4",
     "write": true,
     "human_only": false,
@@ -2674,7 +2674,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "remove-research-site": {
     "ingress_key": "mcp-tool:remove-research-site",
-    "source_locator": "mcp-server/src/research-sites.js",
+    "source_locator": "mcp-server/src/research-sites.ts",
     "schema_digest": "a534cf101856ece084f5e8ae8057d50dc304073e576105903c45f385dc50fb4e",
     "write": true,
     "human_only": false,
@@ -3019,7 +3019,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "set-notification-preference": {
     "ingress_key": "mcp-tool:set-notification-preference",
-    "source_locator": "mcp-server/src/notifications.js",
+    "source_locator": "mcp-server/src/notifications.ts",
     "schema_digest": "67f94733c2353536c9a030607b23106c4dd2c73cbbc9cd5523ae7c4a040dff91",
     "write": true,
     "human_only": false,
@@ -3131,7 +3131,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "suggest-doc-work": {
     "ingress_key": "mcp-tool:suggest-doc-work",
-    "source_locator": "mcp-server/src/doc-suggestions.js",
+    "source_locator": "mcp-server/src/doc-suggestions.ts",
     "schema_digest": "7d43c7dcb29bb048ad4330b22b57100dc04384260973106884bbe343745b0e9c",
     "write": true,
     "human_only": false,
