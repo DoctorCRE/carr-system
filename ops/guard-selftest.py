@@ -782,7 +782,9 @@ case("prose describing a metered dispatch remains inert",
 
 # ── 8b. GitHub polling (Joe 2026-10-27: "fix it and stop it"). A dozen agents
 # each looping on gh tripped the account-wide secondary rate limit. One gh read
-# is fine; a gh status read that repeats is refused.
+# is fine, even after a sleep; a gh status read that a loop, watch or xargs
+# repeats is refused. A loop that reads each of several PRs once is a fan-out,
+# not polling, unless it also sleeps.
 _SEQ40 = ("for i in $(seq 1 40); do s=$(gh pr checks 2538 --json name,bucket); "
           "echo \"$s\"; sleep 60; done")
 for _cmd in (
@@ -793,8 +795,19 @@ for _cmd in (
     "gh pr checks 1 --watch --interval 30",
     "gh run watch 36015363917",
     "watch -n 30 'gh pr checks 1'",
-    "sleep 45; gh pr view 1175 --json mergeStateStatus",
     "bash -c 'while true; do gh pr checks 1; sleep 30; done'",
+    "sleep 30; gh pr checks 1151 --watch",
+    "while true; do gh pr list --json statusCheckRollup; sleep 30; done",
+    "while true; do gh pr status; sleep 30; done",
+    "for i in {1..40}; do gh search prs --checks pending; done",
+    "seq 40 | xargs -I{} gh pr checks 1",
+    "G=gh; while true; do $G pr checks 1; done",
+    "python3 -c 'import subprocess, time\nwhile 1:\n"
+    "    subprocess.run([\"gh\", \"pr\", \"checks\", \"1\"]); time.sleep(30)'",
+    "while :; do curl -s https://api.github.com/repos/o/r/commits/abc/check-runs; "
+    "sleep 30; done",
+    "for n in 2541 2543; do gh pr view $n; sleep 10; done",
+    "for (( i=0; i<40; i++ )); do gh pr checks 1; done",
 ):
     case(f"GitHub polling is refused: {_cmd[:60]!r}", bash(_cmd), DENY)
 case("Codex GitHub polling loop is refused", direct_exec(_SEQ40), DENY)
@@ -806,6 +819,14 @@ for _cmd in (
     "sleep 5; git status",
     'echo "while it runs"; gh pr view 1',
     "gh pr merge --auto 2538",
+    "sleep 45; gh pr view 1175 --json mergeStateStatus",
+    "gh pr view 1 --json files -q '.files[].path' | while read f; do echo $f; done",
+    "for f in *.py; do python3 -m py_compile $f; done && gh pr view 1",
+    "for n in 2541 2543; do gh pr view $n --json title; done",
+    "for i in 1 2; do gh api -X POST repos/o/r/statuses/abc -f state=success; done",
+    "for i in 1 2; do gh api --method PATCH repos/o/r/pulls/1 -f title=t; done",
+    "gh pr list --json number -q '.[].number' | xargs -I{} gh pr view {}",
+    "gh pr list --json number -q '.[].number' | xargs -n1 gh pr view",
 ):
     case(f"no GitHub polling: {_cmd!r} is allowed", bash(_cmd), ALLOW)
 

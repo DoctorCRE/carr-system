@@ -1869,48 +1869,190 @@ def direct_metered_dispatch(cmd):
 # rate limit while the core quota sat near full, and an agent told to stop
 # restarted its loop minutes later. The orchestrator already receives CI
 # results as app events, so a repeated gh status read has no legitimate caller.
+#
+# What counts as repeating: the read sits in the condition or body of a
+# for/while/until loop, under `watch`, under `xargs -I` without the
+# placeholder, or carries `--watch`. A loop that reads each item of its own
+# list once (the read uses the loop variable) is a fan-out and is allowed
+# unless the loop also sleeps. A single read after a sleep is one call.
+# LIMIT, stated: this reads shell structure with a small scanner, not a full
+# parser; zsh `repeat`, functions defined then called in a loop, and loops in
+# script files the command launches are not seen.
 GITHUB_POLL_REASON = ("Polling GitHub trips the account-wide secondary rate limit. Make one "
                       "gh call and report; the orchestrator receives CI results as app events.")
-_GH_STATUS_READS = {"pr": {"checks", "view"}, "run": {"view", "list", "watch"}, "api": None}
+_GH_STATUS_READS = {"pr": {"checks", "view", "list", "status"},
+                    "run": {"view", "list", "watch"}, "search": {"prs"}}
+_GH_API_BODY_FLAGS = ("-f", "-F", "--field", "--raw-field", "--input")
 _LOOP_KEYWORDS = frozenset({"for", "while", "until", "select"})
-_LOOP_LEAD = frozenset({"then", "do", "else", "elif", "if", "!", "{", "(", "time"})
+_COMMAND_LEADS = frozenset({"then", "do", "else", "elif", "if", "while", "until", "!", "{",
+                            "}", "time"})
+_SHELL_OPERATORS = frozenset(";&|()\n")
+_INTERPRETER = re.compile(r"^(?:python[\d.]*|node|ruby|perl|deno|bun)$")
+_SCRIPT_LOOP = re.compile(r"\b(?:while|for)\b|setInterval")
+_SCRIPT_GITHUB = re.compile(r"""['"]gh['"]\s*,\s*['"](?:pr|run|api|search)['"]"""
+                            r"|\bgh\s+(?:pr|run|api|search)\b|api\.github\.com")
+_GH_ALIAS = re.compile(r"""(?:^|[\s;&|(])([A-Za-z_]\w*)=(["']?)(?:[^\s;&|'"]*/)?gh\2"""
+                       r"""(?=$|[\s;&|)])""")
 
 
-def _starts_loop(script):
-    """True when any simple command in `script` opens a for/while/until loop."""
-    segment = []
-    for token in shell_tokens(script) + [";"]:
-        if token not in SHELL_BOUNDARIES:
-            segment.append(token)
+def _gh_status_read(args):
+    """True for a gh invocation that reads GitHub state (not a write)."""
+    if not args:
+        return False
+    if args[0] == "api":
+        method = None
+        for k, word in enumerate(args):
+            if word in ("-X", "--method") and k + 1 < len(args):
+                method = args[k + 1]
+            elif word.startswith("--method="):
+                method = word.split("=", 1)[1]
+            elif word.startswith("-X") and len(word) > 2:
+                method = word[2:]
+        if method is not None:
+            return method.upper() == "GET"
+        return not any(word.split("=")[0] in _GH_API_BODY_FLAGS for word in args)
+    return len(args) > 1 and args[1] in _GH_STATUS_READS.get(args[0], ())
+
+
+def _github_read(program, args):
+    if program == "gh":
+        return _gh_status_read(args)
+    return program in READ_ONLY_FETCHERS | {"http", "https"} and any(
+        "api.github.com" in word for word in args)
+
+
+def _bind_gh_aliases(text):
+    """Spell `$G pr checks` as `gh pr checks` when the command set G=gh."""
+    for name in {m[1] for m in _GH_ALIAS.finditer(text)}:
+        text = re.sub(r"\$(?:\{%s\}|%s(?!\w))" % (name, name), "gh", text)
+    return text
+
+
+def _shell_words(text):
+    """(word, start, end) for each word or operator character; quotes, $(...)
+    and backticks stay inside their word."""
+    words, i, n = [], 0, len(text)
+    while i < n:
+        if text[i] in " \t\r":
+            i += 1
             continue
-        words = [w for w in segment if w not in _LOOP_LEAD]
-        if words and words[0] in _LOOP_KEYWORDS:
+        if text[i] in _SHELL_OPERATORS:
+            words.append((text[i], i, i + 1))
+            i += 1
+            continue
+        start, depth = i, 0
+        while i < n:
+            c = text[i]
+            if c == "\\":
+                i += 2
+            elif c in "'`":
+                close = text.find(c, i + 1)
+                i = n if close < 0 else close + 1
+            elif c == '"':
+                i += 1
+                while i < n and text[i] != '"':
+                    i += 2 if text[i] == "\\" else 1
+                i += 1
+            elif c == "$" and text[i + 1:i + 2] == "(":
+                depth += 1
+                i += 2
+            elif depth:
+                depth += {"(": 1, ")": -1}.get(c, 0)
+                i += 1
+            elif c in " \t\r" or c in _SHELL_OPERATORS:
+                break
+            else:
+                i += 1
+        words.append((text[start:i], start, i))
+    return words
+
+
+def _loops(text):
+    """(repeated text, loop variables) for each for/while/until/select loop."""
+    loops, stack, previous = [], [], None
+    for word, start, end in _shell_words(text):
+        command_position = (previous is None or previous in _SHELL_OPERATORS
+                            or previous in _COMMAND_LEADS)
+        if command_position and word in _LOOP_KEYWORDS:
+            stack.append([word, end, None, None])
+        elif command_position and word == "do" and stack and stack[-1][2] is None:
+            stack[-1][2:] = [start, end]
+        elif command_position and word == "done" and stack:
+            kind, header_start, header_end, body_start = stack.pop()
+            if body_start is not None:
+                header, body = text[header_start:header_end], text[body_start:start]
+                names = header.split()
+                if kind in ("for", "select"):
+                    candidates, repeated = names[:1], body
+                else:
+                    candidates = names[names.index("read") + 1:] if "read" in names else []
+                    repeated = header + "\n" + body
+                variables = [w for w in candidates if re.fullmatch(r"[A-Za-z_]\w*", w)]
+                loops.append((repeated, variables))
+        previous = word
+    return loops
+
+
+def _xargs_repeats_read(args):
+    """`xargs -I{} gh pr checks 1` runs the same read once per input line."""
+    for k, word in enumerate(args):
+        if _exe_name(word) == "gh":
+            gh_args, options = args[k + 1:], args[:k]
+            break
+    else:
+        return False
+    if not _gh_status_read(gh_args):
+        return False
+    placeholder = None
+    for k, word in enumerate(options):
+        if word in ("-I", "-J") and k + 1 < len(options):
+            placeholder = options[k + 1]
+        elif word.startswith(("-I", "-J")) and len(word) > 2:
+            placeholder = word[2:]
+        elif word in ("-i", "--replace"):
+            placeholder = "{}"
+        elif word.startswith("--replace="):
+            placeholder = word.split("=", 1)[1]
+    return placeholder is not None and not any(placeholder in w for w in gh_args)
+
+
+def _polls_github(text, depth=0):
+    invocations = list(executed_invocations(text))
+    for program, args in invocations:
+        if program == "gh" and _gh_status_read(args) and (
+                args[:2] == ["run", "watch"] or any(w.split("=")[0] == "--watch" for w in args)):
             return True
-        segment = []
+        if program == "watch" and any(
+                _github_read(p, a) for k in range(len(args))
+                for p, a in executed_invocations(" ".join(args[k:]))):
+            return True
+        if program == "xargs" and _xargs_repeats_read(args):
+            return True
+        if _INTERPRETER.match(program):
+            scripts = [args[k + 1] for k, w in enumerate(args[:-1]) if w in ("-c", "-e")]
+            if any(_SCRIPT_LOOP.search(s) and _SCRIPT_GITHUB.search(s) for s in scripts):
+                return True
+        if depth < 3 and (program == "eval" or _SHELLS.match(program)):
+            script = " ".join(args) if program == "eval" else _shell_c_script(args)
+            if script and _polls_github(_bind_gh_aliases(script), depth + 1):
+                return True
+    for repeated, variables in _loops(text):
+        found = list(executed_invocations(repeated))
+        sleeps = any(program == "sleep" for program, _ in found)
+        for program, args in found:
+            fan_out = any(re.search(r"\$\{?%s(?!\w)" % v, w) for v in variables for w in args)
+            if _github_read(program, args) and (sleeps or not fan_out):
+                return True
     return False
 
 
 def github_poll_reason(cmd):
     """Refuse a gh status read that the same command repeats."""
-    invocations = list(executed_invocations(cmd))
-    reads = [args for program, args in invocations if program == "gh" and args
-             and args[0] in _GH_STATUS_READS
-             and (_GH_STATUS_READS[args[0]] is None or args[1:2] and
-                  args[1] in _GH_STATUS_READS[args[0]])]
-    if not reads:
+    try:
+        polls = _polls_github(_bind_gh_aliases(strip_inert_text(cmd)))
+    except ValueError:
         return None
-    if any(args[:2] == ["run", "watch"] or any(a.split("=")[0] == "--watch" for a in args)
-           for args in reads):
-        return GITHUB_POLL_REASON
-    programs = {program for program, _ in invocations}
-    if programs & {"watch", "sleep"}:
-        return GITHUB_POLL_REASON
-    scripts = [strip_inert_text(cmd)] + [
-        " ".join(args) if program == "eval" else _shell_c_script(args) or ""
-        for program, args in invocations if program == "eval" or _SHELLS.match(program)]
-    if any(_starts_loop(script) for script in scripts):
-        return GITHUB_POLL_REASON
-    return None
+    return GITHUB_POLL_REASON if polls else None
 
 
 # bypass audit C53 / AGENTS.md:225, REDESIGNED (2026-09-24, Opus review). The
