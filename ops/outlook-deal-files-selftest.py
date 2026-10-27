@@ -65,6 +65,12 @@ class FileAttachmentTest(unittest.TestCase):
                          {'deal': 'Synthetic Deal A', 'r2_key': key, 'filename': 'Lease.pdf', 'mime': 'application/pdf',
                           'sha256': SHA, 'bytes': len(PDF), 'source': 'msg-9/7'})
 
+    def test_unacknowledged_verb_reply_never_claims_the_attachment_is_stored(self):
+        fake = Fakes()
+        for reply in ({'ok': False}, {'ok': True}, None):
+            fake.carr = lambda verb, args: reply
+            self.assertEqual(fake.file()['status'], 'verb_failed')
+
     def test_rerun_sends_the_same_idempotency_key(self):
         a, b = Fakes(), Fakes(existing=True)
         a.file(), b.file()

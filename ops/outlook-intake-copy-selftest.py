@@ -35,16 +35,125 @@ class CopyTest(unittest.TestCase):
         self.out.mkdir(parents=True, mode=0o700)
         self.work = Path(tempfile.mkdtemp(prefix='work-', dir=self.out))
         self.helper = self.root / 'outlook-intake-copy'
+        self.build()
+
+    def build(self, *sources):
         subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                         f'-DOUTLOOK_PROFILE={json.dumps(str(self.profile))}',
                         f'-DOUTLOOK_WORK_ROOT={json.dumps(str(self.out))}',
                         f'-DOUTLOOK_REPO={json.dumps(str(self.root))}',
-                        str(ROOT / 'tools/outlook-intake-copy.c'), '-o', str(self.helper)],
+                        str(ROOT / 'tools/outlook-intake-copy.c'), *sources, '-o', str(self.helper)],
                        check=True, capture_output=True)
 
-    def copy(self, *args, cwd=None, env=None):
+    def copy(self, *args, cwd=None, env=None, input=None):
         return subprocess.run([str(self.helper), *args], cwd=cwd or self.work,
-                              env=env, capture_output=True)
+                              env=env, input=input, capture_output=True)
+
+    def test_selected_attachments_are_copied_privately_without_refreshing_snapshot(self):
+        selected = self.profile / 'Files/S0/845/Attachments/9'
+        selected.mkdir(parents=True)
+        (selected / 'selected.pdf').write_bytes(b'synthetic-attachment')
+        (selected / 'unmatched.pdf').write_bytes(b'must-not-copy')
+        self.assertEqual(self.copy().returncode, 0)
+        (self.profile / 'HxStore.hxd').write_bytes(b'changed-store')
+        (self.sidecars / '7.dat').write_bytes(b'changed-body')
+        request = b'~/Files/S0/845/Attachments/9/selected.pdf\n'
+        for _ in range(2):
+            self.assertEqual(self.copy('--attachments', input=request).returncode, 0)
+        copied = self.work / 'Files/S0/845/Attachments/9/selected.pdf'
+        self.assertEqual(copied.read_bytes(), b'synthetic-attachment')
+        self.assertFalse(copied.with_name('unmatched.pdf').exists())
+        self.assertEqual((self.work / 'store.hxd').read_bytes(), b'synthetic-store')
+        self.assertEqual((self.work / 'Files/S0/845/EFMData/7.dat').read_bytes(), b'synthetic-body')
+        for directory, _, files in os.walk(self.work):
+            self.assertEqual(stat.S_IMODE(Path(directory).stat().st_mode), 0o700)
+            for name in files:
+                self.assertEqual(stat.S_IMODE((Path(directory) / name).stat().st_mode), 0o600)
+
+    def test_attachment_requests_reject_malformed_paths(self):
+        self.assertEqual(self.copy().returncode, 0)
+        for request in (b'Files/S0/845/Attachments/9/a.pdf\n',
+                        b'~/Files/S0/../Attachments/9/a.pdf\n',
+                        b'~/Files/S0/845/EFMData/9/a.pdf\n',
+                        b'~/Files/S0/845/Attachments/x/a.pdf\n',
+                        b'~/Files/S0/845/Attachments/9/../a.pdf\n',
+                        b'~/Files/S0/845/Attachments/9/..\n',
+                        b'~/Files/S0/845/Attachments/9/a.pdf',
+                        b'~/Files/S0/845/Attachments/9/a\tb.pdf\n',
+                        b'~/Files/S0/845/Attachments/9/a\x00.pdf\n', b'\n'):
+            with self.subTest(request=request):
+                self.assertNotEqual(self.copy('--attachments', input=request).returncode, 0)
+        self.assertFalse((self.work / 'Files/S0/845/Attachments').exists())
+        self.assertNotEqual(self.copy('--attachments', input=b'', cwd=self.root).returncode, 0)
+
+    def test_missing_and_oversize_attachments_are_not_copied(self):
+        selected = self.profile / 'Files/S0/845/Attachments/9'
+        selected.mkdir(parents=True)
+        with (selected / 'large.pdf').open('wb') as stream:
+            stream.truncate(25 * 1024 * 1024 + 1)
+        self.assertEqual(self.copy().returncode, 0)
+        request = b'~/Files/S0/845/Attachments/9/large.pdf\n~/Files/S0/845/Attachments/9/missing.pdf\n'
+        self.assertEqual(self.copy('--attachments', input=request).returncode, 0)
+        self.assertEqual(list((self.work / 'Files/S0/845/Attachments/9').iterdir()), [])
+
+    def test_attachment_symlinks_are_refused_at_source_and_destination(self):
+        selected = self.profile / 'Files/S0/845/Attachments/9'
+        selected.mkdir(parents=True)
+        outside = self.root / 'outside'
+        outside.write_bytes(b'outside-scope')
+        attachment = selected / 'a.pdf'
+        attachment.symlink_to(outside)
+        self.assertEqual(self.copy().returncode, 0)
+        request = b'~/Files/S0/845/Attachments/9/a.pdf\n'
+        self.assertNotEqual(self.copy('--attachments', input=request).returncode, 0)
+        attachment.unlink()
+        attachment.write_bytes(b'allowed')
+        destination = self.work / 'Files/S0/845/Attachments/9/a.pdf'
+        destination.symlink_to(outside)
+        self.assertNotEqual(self.copy('--attachments', input=request).returncode, 0)
+        self.assertEqual(outside.read_bytes(), b'outside-scope')
+        destination.unlink()
+        shutil.rmtree(selected)
+        selected.symlink_to(self.root, target_is_directory=True)
+        self.assertNotEqual(self.copy('--attachments', input=request).returncode, 0)
+        selected.unlink()
+        selected.mkdir()
+        (selected / 'a.pdf').write_bytes(b'allowed')
+        destination.parent.rmdir()
+        destination.parent.symlink_to(self.root, target_is_directory=True)
+        self.assertNotEqual(self.copy('--attachments', input=request).returncode, 0)
+        self.assertFalse((self.root / 'a.pdf').exists())
+
+    def test_attachment_copy_caps_batch_count_and_bytes(self):
+        selected = self.profile / 'Files/S0/845/Attachments/9'
+        selected.mkdir(parents=True)
+        self.assertEqual(self.copy().returncode, 0)
+        for name in range(51):
+            (selected / str(name)).write_bytes(b'a')
+        requests = ''.join(f'~/Files/S0/845/Attachments/9/{name}\n' for name in range(51)).encode()
+        self.assertEqual(self.copy('--attachments', input=requests).returncode, 0)
+        destination = self.work / 'Files/S0/845/Attachments/9'
+        self.assertEqual(len(list(destination.iterdir())), 50)
+        self.assertFalse((destination / '50').exists())
+        shutil.rmtree(destination)
+        for name in range(5):
+            with (selected / str(name)).open('wb') as stream:
+                stream.truncate(25 * 1024 * 1024)
+        requests = ''.join(f'~/Files/S0/845/Attachments/9/{name}\n' for name in range(5)).encode()
+        self.assertEqual(self.copy('--attachments', input=requests).returncode, 0)
+        self.assertEqual(sum(path.stat().st_size for path in destination.iterdir()), 100 * 1024 * 1024)
+        self.assertFalse((destination / '4').exists())
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'APFS cloning is macOS only')
+    def test_attachment_copy_falls_back_when_cloning_is_unsupported(self):
+        unsupported = self.root / 'unsupported-clone.c'
+        unsupported.write_text('\n'.join((
+            '#include <errno.h>', '#include <sys/clonefile.h>',
+            'int fclonefileat(int source, int target, const char *name, uint32_t flags) {',
+            '    (void)source; (void)target; (void)name; (void)flags;',
+            '    errno = ENOTSUP; return -1;', '}', '')))
+        self.build(str(unsupported))
+        self.test_selected_attachments_are_copied_privately_without_refreshing_snapshot()
 
     def test_scope_readback_names_only_the_compiled_paths_without_copying(self):
         result = self.copy('--scope', cwd=self.root)

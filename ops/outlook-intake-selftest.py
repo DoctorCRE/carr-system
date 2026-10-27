@@ -256,6 +256,152 @@ class IntakeTest(unittest.TestCase):
     def report_text(self):
         return '\n'.join(p.read_text() for p in sorted(self.out().glob('report-*.md')))
 
+    def attachment_fixture(self, *, sender='pat@example.test', folders=('Inbox/Active Deals/Synthetic Deal',)):
+        write_db(self.fake.fixture, [mail(sender, -timedelta(hours=1))])
+        con = sqlite3.connect(self.fake.fixture)
+        con.executescript("""
+            CREATE TABLE message_keys(message_id INTEGER, local_key INTEGER);
+            CREATE TABLE attachments(id INTEGER, message_key INTEGER, name TEXT, name_verified INTEGER,
+                content_type TEXT, size INTEGER, path TEXT);
+            CREATE TABLE folders(id INTEGER, name TEXT, parent_status TEXT, parent_id INTEGER);
+            CREATE TABLE message_folders(message_id INTEGER, folder_id INTEGER);
+            INSERT INTO message_keys VALUES(1,100);
+        """)
+        self.pdf = b'%PDF-1.7 synthetic attachment'
+        self.cache_path = '~/Files/S0/845/Attachments/1/Lease.pdf'
+        con.execute('INSERT INTO attachments VALUES(7,100,?,1,?,?,?)',
+                    ('Lease.pdf', 'image/png', len(self.pdf), self.cache_path))
+        for i, path in enumerate(folders):
+            parent = None
+            for j, name in enumerate(path.split('/')):
+                fid = i * 10 + j + 1
+                con.execute('INSERT INTO folders VALUES(?,?,?,?)',
+                            (fid, name, 'top' if parent is None else 'folder', parent))
+                parent = fid
+            con.execute('INSERT INTO message_folders VALUES(1,?)', (parent,))
+        con.commit()
+        con.close()
+        self.copied, self.uploads, self.filed = [], {}, {}
+        self.attachment_fail = False
+        self.deals = [{'id': 'synthetic-deal', 'name': 'Synthetic Deal', 'client_ref': 'C-901'}]
+        original = self.fake.carr
+
+        def carr(verb, args):
+            if verb == 'read-deal-reconciliation':
+                return {'deals': self.deals}
+            if verb == 'attach-deal-file':
+                self.fake.calls.append((verb, args))
+                if self.attachment_fail:
+                    raise intake.CarrError()
+                self.filed.setdefault(args['idempotency_key'], dict(args))
+                return {'ok': True, 'attachment_id': 'attachment-1'}
+            return original(verb, args)
+
+        def copy(files, paths):
+            self.copied.extend(paths)
+            for path in paths:
+                target = files / path.removeprefix('~/Files/')
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(self.pdf)
+
+        def put(key, sha, data):
+            self.uploads.setdefault(key, data)
+            return {'uploaded': True}
+
+        self.fake.carr = carr
+        ports = self.fake.ports()
+        ports.copy_attachments, ports.put_object = copy, put
+        return ports
+
+    def test_matched_attachment_is_copied_archived_and_filed_idempotently(self):
+        ports = self.attachment_fixture()
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(len(self.filed), 1)
+        [args] = self.filed.values()
+        self.assertEqual((args['deal'], args['mime'], args['bytes']),
+                         ('synthetic-deal', 'application/pdf', len(self.pdf)))
+        self.assertEqual(args['sha256'], hashlib.sha256(self.pdf).hexdigest())
+        self.assertEqual(self.uploads[args['r2_key']], self.pdf)
+        self.assertEqual(self.copied, [self.cache_path])
+        self.assertFalse(list(self.out().glob('work-*')))
+        self.store.write_bytes(b'changed')
+        intake.run(self.repo, self.home, ports)
+        self.assertEqual((len(self.filed), len(self.uploads), len(self.copied)), (1, 1, 1))
+
+    def test_unmatched_and_ambiguous_attachment_bytes_are_never_copied(self):
+        for sender, folders in [('unknown@example.test', ('Inbox/Active Deals/Synthetic Deal',)),
+                                ('pat@example.test', ('Inbox/Active Deals/Synthetic Deal',
+                                                      'Inbox/Active Deals/Other Deal'))]:
+            with self.subTest(sender=sender):
+                self.fake.fixture.unlink(missing_ok=True)
+                ports = self.attachment_fixture(sender=sender, folders=folders)
+                intake.run(self.repo, self.home, ports)
+                self.assertEqual((self.copied, self.uploads, self.filed), ([], {}, {}))
+                self.assertFalse(list(self.out().glob('work-*')))
+
+    def test_attachment_verb_failure_retries_even_when_mail_and_store_are_unchanged(self):
+        ports = self.attachment_fixture()
+        self.attachment_fail = True
+        intake.run(self.repo, self.home, ports)
+        self.assertEqual(len(self.uploads), 1)
+        self.assertEqual(self.filed, {})
+        self.attachment_fail = False
+        intake.run(self.repo, self.home, ports)
+        self.assertEqual((len(self.uploads), len(self.filed)), (1, 1))
+        writes = [a for v, a in self.fake.calls if v == 'attach-deal-file']
+        self.assertEqual(writes[0], writes[1])
+
+    def test_attachment_folder_name_alone_cannot_choose_another_clients_deal(self):
+        ports = self.attachment_fixture()
+        self.deals[0]['client_ref'] = 'C-902'
+        intake.run(self.repo, self.home, ports)
+        self.assertEqual((self.copied, self.uploads, self.filed), ([], {}, {}))
+
+    def test_duplicate_deal_names_fail_closed_before_reading_bytes(self):
+        ports = self.attachment_fixture()
+        self.deals.append({**self.deals[0], 'id': 'other-deal'})
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.counts['attachments_unresolved'], 1)
+        self.assertEqual((self.copied, self.uploads, self.filed), ([], {}, {}))
+
+    def test_attachment_failure_stays_retryable_after_initial_mail_backfill_window(self):
+        ports = self.attachment_fixture()
+        self.attachment_fail = True
+        intake.run(self.repo, self.home, ports)
+        self.fake.now += timedelta(days=3)
+        self.attachment_fail = False
+        intake.run(self.repo, self.home, ports)
+        self.assertEqual(len(self.filed), 1)
+
+    def test_attachment_upgrade_decodes_an_unchanged_pre_wiring_store(self):
+        ports = self.attachment_fixture()
+        intake.run(self.repo, self.home, ports)
+        state_path = self.out() / intake.STATE
+        state = json.loads(state_path.read_text())
+        state.pop('attachment_policy')
+        state.pop('attachments_done')
+        state_path.write_text(json.dumps(state))
+        before = self.fake.decodes
+        intake.run(self.repo, self.home, ports)
+        self.assertEqual(self.fake.decodes, before + 1)
+        self.assertEqual(len(self.filed), 1)
+
+    def test_attachment_batch_caps_do_not_starve_remaining_files_on_retry(self):
+        ports = self.attachment_fixture()
+        con = sqlite3.connect(self.fake.fixture)
+        for aid in range(8, 58):
+            con.execute('INSERT INTO attachments VALUES(?,100,?,1,?,?,?)',
+                        (aid, 'Lease.pdf', 'application/pdf', len(self.pdf), self.cache_path))
+        con.commit()
+        con.close()
+        intake.run(self.repo, self.home, ports)
+        self.assertEqual(len(self.filed), 50)
+        intake.run(self.repo, self.home, ports)
+        self.assertEqual(len(self.filed), 51)
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertFalse(state['attachments_pending'])
+
     def test_mail_intake_processes_only_the_configured_account(self):
         personal = mail('lee@example.test', -timedelta(hours=1),
                         subject='Foreign mailbox', recipients='personal@example.test')
