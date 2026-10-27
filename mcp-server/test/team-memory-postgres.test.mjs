@@ -150,6 +150,26 @@ test('retire-doctrine-section on team memory requires a read-write attach', asyn
   await refused(call('retire-doctrine-section', args), 'memory_attach_required');
   const out = await call('retire-doctrine-section', { ...args, attach_id: a.attach_id });
   assert.equal(out.status, 'retired');
+  const cs = (await c.query(`select cs.session_key, ci.op from doctrine_change_item ci
+    join doctrine_change_set cs on cs.id = ci.change_set_id where ci.section_id = $1 and ci.op = 'retire'`, [sec.id])).rows;
+  assert.deepEqual(cs, [{ session_key: a.attach_id, op: 'retire' }], 'the retire is attributed to its attach');
+});
+
+test('an attach_id on any document must be this actor\'s own attach', async () => {
+  const other = (await c.query(`insert into actor(slug,kind,display_name) values('synthetic-other','human','Synthetic other')
+    returning id`)).rows[0];
+  const foreign = (await c.query(`insert into memory_session(surface,actor_id,access,attached_generation,attached_index_digest)
+    values('codex',$1,'read_write',0,$2) returning attach_id`, [other.id, 'c'.repeat(64)])).rows[0].attach_id;
+  const write = attach_id => call('write-doctrine-section', { document: 'dreams-log', section_key: 'synthetic-claimed',
+    body_text: 'Synthetic claimed entry.', base_version: 0, attach_id });
+  await refused(write(foreign), 'memory_attach_required');
+  await refused(write(randomUUID()), 'memory_attach_required');
+  await refused(call('change-doctrine-sections', { document: 'dreams-log', attach_id: foreign,
+    items: [{ section_key: 'synthetic-claimed', body_text: 'Synthetic.', base_version: 0 }] }), 'memory_attach_required');
+  const own = await write(a.attach_id);
+  assert.equal(own.version, 1);
+  const rev = (await c.query('select session_key from doctrine_revision where id=$1', [own.revision_id])).rows[0];
+  assert.equal(rev.session_key, a.attach_id);
 });
 
 test('the gate passes other distillation documents untouched', async () => {

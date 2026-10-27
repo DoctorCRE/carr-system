@@ -95,9 +95,21 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
       throw new ToolError({ error: "personal_doc_not_owner" });
   }
 
+  // The memory_session row behind an attach_id, only when this actor made it.
+  async function attachFor(c, actor, attachId) {
+    if (!UUID_RE.test(attachId || "")) return null;
+    return (await c.query(`select access from memory_session where attach_id = $1 and actor_id = $2`,
+      [attachId, actor.id])).rows[0] || null;
+  }
+
   // A write's session: its memory attach when given (WR-000562 D4), else the
-  // OAuth client that carried it.
-  const sessionKey = (actor, args) => args.attach_id || actor.client_id || null;
+  // OAuth client that carried it. A given attach_id must be this actor's own.
+  async function sessionFor(c, actor, args) {
+    if (args.attach_id === undefined) return actor.client_id || null;
+    if (!await attachFor(c, actor, args.attach_id))
+      throw new ToolError({ error: "memory_attach_required", field: "attach_id" });
+    return args.attach_id;
+  }
 
   // The gated rule boot (rule-boot.ts): sponsor-scoped rule rows hashed into
   // one digest page. standing-context detail=boot and attach-memory share it.
@@ -303,9 +315,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
     // the writing actor made. A finding's `refusal` becomes the public error.
     "gates.memory_attach_required": async (c, ctx, cfg) => {
       if (!((cfg && cfg.slugs) || []).includes(ctx.doc_slug)) return [];
-      const attach = UUID_RE.test(ctx.attach_id || "") && (await c.query(
-        `select access from memory_session where attach_id = $1 and actor_id = $2`,
-        [ctx.attach_id, ctx.actor.id])).rows[0];
+      const attach = await attachFor(c, ctx.actor, ctx.attach_id);
       if (!attach)
         return [{ refusal: "memory_attach_required", path: "attach_id",
           message: "pass the attach_id that attach-memory returned to this actor" }];
@@ -500,10 +510,11 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         } else if (args.title) {
           await c.query(`update doctrine_section set title=$2 where id=$1`, [sec.id, args.title]);
         }
+        const session = await sessionFor(c, actor, args);
         const cs = await c.query(
           `insert into doctrine_change_set (actor_id, session_key, idempotency_key, state, committed_at)
            values ($1,$2,$3,'committed',now()) returning id`,
-          [actor.id, sessionKey(actor, args), args.idempotency_key]);
+          [actor.id, session, args.idempotency_key]);
         const hash = await sha256hex(args.body_text);
         const newVersion = safeInteger(version(sec.current_version) + 1, "doctrine_version_invalid");
         const rev = await c.query(
@@ -511,7 +522,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
              actor_id, session_key, body, plain_text, content_hash, commit_message)
            values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id`,
           [sec.id, newVersion, sec.current_revision_id, cs.rows[0].id, actor.id,
-           sessionKey(actor, args), JSON.stringify(body), args.body_text, hash,
+           session, JSON.stringify(body), args.body_text, hash,
            args.commit_message || null]);
         await c.query(
           `update doctrine_section
@@ -603,6 +614,13 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         await runGates(c, actor, "retire", { section_id: sec.id, content_class: sec.content_class,
           doc_slug: sec.doc_slug, attach_id: args.attach_id });
         safeInteger(version(sec.current_version) + 1, "doctrine_version_invalid");
+        const cs = await c.query(
+          `insert into doctrine_change_set (actor_id, session_key, idempotency_key, state, committed_at)
+           values ($1,$2,$3,'committed',now()) returning id`,
+          [actor.id, await sessionFor(c, actor, args), args.idempotency_key]);
+        await c.query(
+          `insert into doctrine_change_item (change_set_id, section_id, op, expected_version)
+           values ($1,$2,'retire',$3)`, [cs.rows[0].id, sec.id, args.base_version]);
         await c.query(
           `update doctrine_section set status='retired', updated_at=now(),
                   current_version = current_version + 1 where id=$1`, [sec.id]);
@@ -885,10 +903,11 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         if (!args.items.length) throw new ToolError({ error: "empty_change_set" });
         const doc = await resolveDoc(c, args.document, true);
         await assertDocumentOwner(c, actor, doc);
+        const session = await sessionFor(c, actor, args);
         const cs = await c.query(
           `insert into doctrine_change_set (actor_id, session_key, idempotency_key, state)
            values ($1,$2,$3,'prepared') returning id`,
-          [actor.id, sessionKey(actor, args), args.idempotency_key]);
+          [actor.id, session, args.idempotency_key]);
         // The document's own declared review policy, read once for the whole
         // batch. write-doctrine-section has always applied this; this door did
         // not, so every section written here landed with a null review_after and
@@ -958,7 +977,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
                actor_id, session_key, body, plain_text, content_hash, commit_message)
              values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id`,
             [sec.id, newVersion, sec.current_revision_id, cs.rows[0].id, actor.id,
-             sessionKey(actor, args), JSON.stringify(body), it.body_text, hash,
+             session, JSON.stringify(body), it.body_text, hash,
              args.commit_message || null]);
           await c.query(
             `update doctrine_section set current_revision_id=$2, current_version=$3,
