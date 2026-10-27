@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import glob
 import os
 from pathlib import Path
 import re
@@ -12,8 +11,8 @@ import sys
 import time
 
 
-def qualification_programs():
-    return sorted(glob.glob('security/test_*.py'))
+def qualification_programs(root=Path('.')):
+    return sorted(path.relative_to(root).as_posix() for path in root.glob('security/test_*.py'))
 
 
 def check(logdir, python):

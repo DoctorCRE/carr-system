@@ -597,7 +597,7 @@ def test_every_test_file_in_the_tree_is_collected():
     assert spec is not None and spec.loader is not None
     secret = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(secret)
-    collected.update(secret.qualification_programs())
+    collected.update(secret.qualification_programs(REPO))
 
     on_disk = _test_shaped_files()
     check("the tree still contains test files to collect", on_disk,
