@@ -327,6 +327,32 @@ def _trusted_binary(name: str) -> str:
     raise ValueError(f"{name} is not installed in any of {', '.join(TRUSTED_BIN_DIRS)}")
 
 
+# GitHub's secondary rate limit answers HTTP 403 (or 429) with an optional
+# Retry-After header. A rehearsal makes a burst of reads, so it waits that out:
+# Retry-After seconds when sent, else 60, at most RATE_LIMIT_RETRIES times.
+# Any other 403 (a permission refusal) is not retried. (WR-000560)
+RATE_LIMIT_RETRIES = 3
+RATE_LIMIT_DEFAULT_WAIT = 60
+RATE_LIMIT_MAX_WAIT = 900
+_rate_limit_sleep = time.sleep
+_RETRY_AFTER_RE = re.compile(r"^retry-after:\s*(\d+)\s*$", re.I | re.M)
+
+
+def _rate_limited(stderr: str | bytes | None) -> bool:
+    text = stderr.decode(errors="replace") if isinstance(stderr, bytes) else (stderr or "")
+    return "(HTTP 429)" in text or ("(HTTP 403)" in text and "rate limit" in text.lower())
+
+
+def _rate_limit_wait(headers: str = "") -> int:
+    got = _RETRY_AFTER_RE.search(headers)
+    return min(int(got.group(1)), RATE_LIMIT_MAX_WAIT) if got else RATE_LIMIT_DEFAULT_WAIT
+
+
+def _wait_out_rate_limit(headers: str = "") -> None:
+    # Looked up at call time so a test can replace the module's sleep.
+    _rate_limit_sleep(_rate_limit_wait(headers))
+
+
 class _PinnedGh:
     """Stands in for `subprocess` inside ops/backup-workflow-status.py: its `gh` is the pinned one."""
 
@@ -337,9 +363,21 @@ class _PinnedGh:
         return getattr(subprocess, name)
 
     def run(self, argv, *args, **kwargs):
-        if argv and argv[0] == "gh":
-            argv = [self.gh, *argv[1:]]
-        return subprocess.run(argv, *args, **kwargs)
+        if not argv or argv[0] != "gh":
+            return subprocess.run(argv, *args, **kwargs)
+        if argv[1:2] != ["api"] or not kwargs.get("text"):
+            return subprocess.run([self.gh, *argv[1:]], *args, **kwargs)
+        # --include puts the response headers ahead of the body, so Retry-After
+        # is readable; the caller still receives the body alone.
+        command = [self.gh, "api", "--include", *argv[2:]]
+        for attempt in range(RATE_LIMIT_RETRIES + 1):
+            got = subprocess.run(command, *args, **kwargs)
+            headers, _, body = (got.stdout or "").partition("\n\n")
+            got.stdout = body
+            if not got.returncode or attempt == RATE_LIMIT_RETRIES or not _rate_limited(got.stderr):
+                return got
+            _wait_out_rate_limit(headers)
+        raise AssertionError("unreachable")
 
 
 def _status_module():
@@ -545,9 +583,15 @@ def download_copy(repository: str, artifact_id: int, out_dir: Path) -> tuple[Pat
     """Download one stored artifact ZIP and extract its one dump. Returns (zip, dump)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     archive = out_dir / "artifact.zip"
-    with archive.open("wb") as fh:
-        got = subprocess.run([_trusted_binary("gh"), "api", f"/repos/{repository}/actions/artifacts/{artifact_id}/zip"],
-                             stdout=fh, stderr=subprocess.PIPE, timeout=600, check=False)
+    for attempt in range(RATE_LIMIT_RETRIES + 1):
+        # The body streams straight to disk, so no headers are read: a limited
+        # download waits the default and starts the file over.
+        with archive.open("wb") as fh:
+            got = subprocess.run([_trusted_binary("gh"), "api", f"/repos/{repository}/actions/artifacts/{artifact_id}/zip"],
+                                 stdout=fh, stderr=subprocess.PIPE, timeout=600, check=False)
+        if not got.returncode or attempt == RATE_LIMIT_RETRIES or not _rate_limited(got.stderr):
+            break
+        _wait_out_rate_limit()
     if got.returncode:
         raise ValueError(f"artifact download failed: {got.stderr.decode(errors='replace').strip()[-200:]}")
     with zipfile.ZipFile(archive) as zf:
