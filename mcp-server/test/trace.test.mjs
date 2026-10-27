@@ -37,7 +37,7 @@ import {
   withFailureRecording,
   wrapNeonRows,
 } from "../src/trace.js";
-import { dispatch } from "../src/mcp.js";
+import { dispatch } from "./helpers/budgeted-dispatch.mjs";
 import { auditIdentity } from "../src/tools.js";
 
 const A_CORR = "9f3b2c1a-4d5e-4f60-8a1b-0123456789ab";

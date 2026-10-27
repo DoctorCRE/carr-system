@@ -1138,7 +1138,7 @@ async function handleRequest(request, env, ctx, dependencies) {
             !equalStrings(request.headers.get("x-carr-csrf"), session.csrfToken)) {
           return json({ error: "forbidden", reason: "csrf_mismatch" }, 403);
         }
-        response = await dependencies.mcpHandler(request, env, ctx, session.actor);
+        response = await dependencies.mcpHandler(request, env, ctx, session.actor, session.key);
       }
       else if (url.pathname === "/pipeline/changes") response = await dependencies.pipelineHandler(request, env, ctx, session.actor);
       else if (url.pathname === JEV_DEAL_READING_PATH) {

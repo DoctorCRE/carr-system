@@ -87,6 +87,30 @@ function identityHandler(email, clock) {
   return createDealroomHandler(identityOverrides(email, clock));
 }
 
+test("browser MCP passes the verified session key independently of caller budget hints", async () => {
+  const email = "joe.bookout.carr.us@gmail.com", environment = env();
+  const sessions = [];
+  const handler = createDealroomHandler({ ...identityOverrides(email),
+    mcpHandler: async (_request, _env, _ctx, actor, sessionKey) => {
+      assert.equal(actor.human, true);
+      assert.ok(environment.OAUTH_KV.values.has(sessionKey));
+      sessions.push(sessionKey);
+      return new Response("{}");
+    },
+  });
+  const first = namedCookie(await login(handler, environment, email), "__Host-dealroom_session");
+  const send = cookie => handler.fetch(new Request(`https://${PRODUCTION_HOST}/mcp?budget=agent`, {
+    method: "POST", headers: { cookie, origin: `https://${PRODUCTION_HOST}`, "x-session-key": "caller-choice" },
+  }), environment, {});
+  assert.equal((await send(first)).status, 200);
+  assert.equal((await send(first)).status, 200);
+  const second = namedCookie(await login(handler, environment, email), "__Host-dealroom_session");
+  assert.equal((await send(second)).status, 200);
+  assert.equal(sessions[0], sessions[1]);
+  assert.notEqual(sessions[0], sessions[2]);
+  assert.notEqual(sessions[0], "caller-choice");
+});
+
 test("Deal Room host is explicit per environment and request matching fails closed", async () => {
   const wrangler = await readFile(WRANGLER_PATH, "utf8");
   assert.match(wrangler, /\[vars\]\nCARR_ENV = "production"\nAPP_HOST = "app\.doctorcre\.com"\nLEGACY_DEALROOM_HOST = "dealroom\.doctorcre\.com"/);

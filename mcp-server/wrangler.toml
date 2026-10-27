@@ -212,9 +212,17 @@ id = "b033d3b5c454445080e9d0ab51ff8f3c"
 name = "OAUTH_CONSENT_STATE"
 class_name = "OAuthConsentState"
 
+[[durable_objects.bindings]]
+name = "VERB_REQUEST_BUDGET"
+class_name = "VerbRequestBudget"
+
 [[migrations]]
 tag = "oauth-consent-v1"
 new_sqlite_classes = ["OAuthConsentState"]
+
+[[migrations]]
+tag = "verb-request-budget-v1"
+new_sqlite_classes = ["VerbRequestBudget"]
 
 [observability]
 enabled = true
@@ -292,3 +300,7 @@ enabled = true
 # Wrangler does not inherit `ai` into a named environment.
 [env.staging.ai]
 binding = "AI"
+
+[[env.staging.durable_objects.bindings]]
+name = "VERB_REQUEST_BUDGET"
+class_name = "VerbRequestBudget"
