@@ -98,50 +98,7 @@ def psql(dsn, sql):
                        capture_output=True, text=True)
     if p.returncode != 0:
         raise RuntimeError(p.stderr.strip()[:300])
-    return [line.split(SEP) for line in p.stdout.strip().split("\n") if line]
-
-
-def privileges(dsn, roles, fired, read):
-    """Every privilege answer the check needs, from one query (WR-000540).
-
-    Returns the (role, table) pairs that may INSERT or UPDATE a trigger table,
-    the (role, table) pairs with table-level SELECT on a read table, and per
-    (role, read table) its columns in order with whether the role may SELECT
-    each. has_table_privilege() and has_column_privilege() stay the authority;
-    only the number of round trips changed, from one psql per question.
-    """
-    if not roles or not read:
-        return set(), set(), {}
-
-    def values(items):
-        return ", ".join("('" + i.replace("'", "''") + "')" for i in sorted(items))
-
-    answers = psql(dsn, f"""
-        with r(role) as (values {values(roles)}),
-             f(tbl) as (values {values(fired)}),
-             t(tbl) as (values {values(read)})
-        select 'w', role, tbl, '', 0
-        from r cross join f
-        where has_table_privilege(role, tbl::regclass, 'INSERT')
-           or has_table_privilege(role, tbl::regclass, 'UPDATE')
-        union all
-        select 's', role, tbl, '', 0
-        from r cross join t
-        where has_table_privilege(role, tbl::regclass, 'SELECT')
-        union all
-        select case when has_column_privilege(role, tbl::regclass, a.attnum, 'SELECT')
-                    then 'c' else 'x' end, role, tbl, a.attname, a.attnum
-        from r cross join t
-        join pg_attribute a on a.attrelid = tbl::regclass
-         and a.attnum > 0 and not a.attisdropped
-        order by 1, 2, 3, 5""")
-    writes = {(role, tbl) for kind, role, tbl, _, _ in answers if kind == "w"}
-    selects = {(role, tbl) for kind, role, tbl, _, _ in answers if kind == "s"}
-    columns: dict[tuple[str, str], list[tuple[str, bool]]] = {}
-    for kind, role, tbl, column, _ in sorted((a for a in answers if a[0] in "cx"),
-                                              key=lambda a: (a[1], a[2], int(a[4]))):
-        columns.setdefault((role, tbl), []).append((column, kind == "c"))
-    return writes, selects, columns
+    return [line.split(SEP) for line in p.stdout.rstrip("\n").split("\n") if line]
 
 
 def main():
@@ -153,17 +110,24 @@ def main():
         return 0
 
     try:
-        # ONE CATALOG READ. Every relation, trigger and app role arrives in one
-        # psql session, tagged by kind (WR-000540). SCHEMA-QUALIFIED THROUGHOUT.
+        # Catalog and privilege rows arrive in one psql session, tagged by
+        # kind (WR-000540). SCHEMA-QUALIFIED THROUGHOUT.
         # A bare name is not resolvable: this database has an `ops` schema as
         # well as `public`, and '<name>'::regclass follows search_path, so the
         # first full run died on `relation "capability_verification" does not
         # exist`. Bodies name tables bare, so a bare -> qualified map is kept.
         catalog = psql(dsn, rf"""
-            select 'rel', n.nspname, c.relname, '', '', ''
-            from pg_class c join pg_namespace n on n.oid = c.relnamespace
-            where c.relkind in ('r','p','v','m')
-              and n.nspname not in ('pg_catalog','information_schema')
+            with relations as (
+                select c.oid, n.nspname, c.relname,
+                       format('%I.%I', n.nspname, c.relname) as tbl
+                from pg_class c join pg_namespace n on n.oid = c.relnamespace
+                where c.relkind in ('r','p','v','m')
+                  and n.nspname not in ('pg_catalog','information_schema')
+            ),
+            app_roles as (
+                select rolname from pg_roles where rolname like '{ROLE_PREFIX}'
+            )
+            select 'rel', nspname, relname, '', '', '' from relations
             union all
             select 'trg', n.nspname || '.' || c.relname, t.tgname, p.proname,
                    case when p.prosecdef then 't' else 'f' end,
@@ -174,8 +138,24 @@ def main():
             join pg_proc  p on p.oid = t.tgfoid
             where not t.tgisinternal
             union all
-            select 'role', rolname, '', '', '', '' from pg_roles
-            where rolname like '{ROLE_PREFIX}'""")
+            select 'role', rolname, '', '', '', '' from app_roles
+            union all
+            select 'w', r.rolname, t.tbl, '', '', ''
+            from app_roles r cross join relations t
+            where has_table_privilege(r.rolname, t.oid, 'INSERT')
+               or has_table_privilege(r.rolname, t.oid, 'UPDATE')
+            union all
+            select 's', r.rolname, t.tbl, '', '', ''
+            from app_roles r cross join relations t
+            where has_table_privilege(r.rolname, t.oid, 'SELECT')
+            union all
+            select case when has_column_privilege(r.rolname, t.oid, a.attnum, 'SELECT')
+                        then 'c' else 'x' end,
+                   r.rolname, t.tbl, a.attname, a.attnum::text, ''
+            from app_roles r cross join relations t
+            join pg_attribute a on a.attrelid = t.oid
+             and a.attnum > 0 and not a.attisdropped
+            order by 1, 2, 3, 5""")
     except RuntimeError as exc:
         print(f"trigger-grant: CANNOT READ the database — {exc}", file=sys.stderr)
         return 1
@@ -210,12 +190,13 @@ def main():
         if reads:
             candidates.append((table, tgname, proname, src, sorted(reads)))
 
-    try:
-        writes, selects, columns = privileges(
-            dsn, roles, {c[0] for c in candidates}, {t for c in candidates for t in c[4]})
-    except RuntimeError as exc:
-        print(f"trigger-grant: CANNOT READ the database — {exc}", file=sys.stderr)
-        return 1
+    writes = {(role, tbl) for kind, role, tbl, _, _, _ in catalog if kind == "w"}
+    selects = {(role, tbl) for kind, role, tbl, _, _, _ in catalog if kind == "s"}
+    columns: dict[tuple[str, str], list[tuple[str, bool]]] = {}
+    for kind, role, tbl, column, ordinal, _ in sorted(
+            (r for r in catalog if r[0] in "cx"),
+            key=lambda r: (r[1], r[2], int(r[4]))):
+        columns.setdefault((role, tbl), []).append((column, kind == "c"))
 
     def missing_reads(role, table, body):
         """The columns of `table` this body names that `role` cannot SELECT.
