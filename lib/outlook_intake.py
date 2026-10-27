@@ -40,6 +40,10 @@ reports failed and does not advance its watermark.
 
 Each decoded email carries its observed folder paths (Inbox, Sent Items, user
 subfolders such as Active Deals/<deal>) as `folders`; nothing is written from them yet.
+Attachment metadata travels as `attachments` with id, name, size, content_type and
+nullable content_id. Cache paths and bytes stay in the private decoder output.
+Only mail naming the configured account as sender or recipient enters intake;
+BCC-only mail without that evidence is omitted.
 
 An email whose body is still only Outlook's preview is logged with the preview,
 flagged preview_only, and listed in out/outlook-intake/needs-refresh.json for the
@@ -313,20 +317,47 @@ def _folder_paths(con: sqlite3.Connection) -> dict[int, list[str]]:
     return {message: sorted(paths) for message, paths in found.items()}
 
 
-def _load(db: Path) -> tuple[dict, list[dict], list[dict]]:
+def _attachment_metadata(con: sqlite3.Connection) -> dict[int, list[dict]]:
+    tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if not {'attachments', 'message_keys'} <= tables:
+        return {}
+    columns = {r[1] for r in con.execute('PRAGMA table_info(attachments)')}
+    content_id = 'a.content_id' if 'content_id' in columns else 'NULL AS content_id'
+    found: dict[int, list[dict]] = {}
+    for row in con.execute(
+            'WITH k AS (SELECT local_key, MIN(message_id) AS message_id FROM message_keys '
+            '           GROUP BY local_key HAVING COUNT(DISTINCT message_id) = 1) '
+            'SELECT k.message_id, a.id, a.name, a.size, a.content_type, '
+            f'{content_id} FROM attachments a JOIN k ON k.local_key = a.message_key '
+            'ORDER BY k.message_id, a.id'):
+        item = dict(row)
+        found.setdefault(item.pop('message_id'), []).append(item)
+    return found
+
+
+def _load(db: Path, account: str | None = None) -> tuple[dict, list[dict], list[dict]]:
     con = sqlite3.connect(db)
     con.row_factory = sqlite3.Row
     try:
         meta = {r['key']: r['value'] for r in con.execute('SELECT key, value FROM meta')}
         paths = _folder_paths(con)
+        attachments = _attachment_metadata(con)
         # Decoders built before WR-000502 export no local_keys column.
         columns = {r['name'] for r in con.execute('PRAGMA table_info(messages)')}
         local_keys = 'local_keys' if 'local_keys' in columns else 'NULL AS local_keys'
         mails = [dict(r) for r in con.execute(
             'SELECT id, sender, sender_name, recipients, subject, body, preview, body_kind, sent_unix, copy_key, '
             f'{local_keys} FROM messages WHERE sent_unix IS NOT NULL AND sender IS NOT NULL')]
+        mail_count = len(mails)
+        if account is not None:
+            account = account.lower()
+            mails = [m for m in mails if account == m['sender'].lower()
+                     or account in _addresses(m['recipients'])]
+        meta['mail_other_accounts'] = mail_count - len(mails)
         for m in mails:
-            m['folders'] = paths.get(m.pop('id'), [])
+            message_id = m.pop('id')
+            m['folders'] = paths.get(message_id, [])
+            m['attachments'] = attachments.get(message_id, [])
         events = [dict(r) for r in con.execute('SELECT * FROM events')]
         attendees: dict[int, list] = {}
         for r in con.execute('SELECT event_id, name, email FROM event_attendees'):
@@ -368,7 +399,7 @@ def _decode(home: Path, out: Path, decode: Callable[[Path, Path, Path], None]):
         files = work / 'Files'
         db = work / 'store.db'
         decode(copy, files, db)
-        return _load(db)
+        return _load(db, account=load_settings(home).account)
     finally:
         _remove(work)
 
@@ -389,6 +420,8 @@ def _best_copies(mails: list[dict]) -> list[dict]:
         if last and last['ck'] == m['ck'] and m['sent_unix'] - last['first_sent'] <= COPY_WINDOW:
             m['local_keys'] = last['local_keys'] = sorted(set(last['local_keys']) | set(m['local_keys']))
             m['folders'] = last['folders'] = sorted(set(last.get('folders', [])) | set(m.get('folders', [])))
+            attachments = {a['id']: a for a in last.get('attachments', []) + m.get('attachments', [])}
+            m['attachments'] = last['attachments'] = [attachments[k] for k in sorted(attachments)]
             if (m['full'], len(m['text'])) > (last['full'], len(last['text'])):
                 m['first_sent'], m['sent_unix'], m['ident'] = last['first_sent'], last['sent_unix'], last['ident']
                 out[-1] = m
@@ -1092,12 +1125,13 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     pending_writes = any(not r['acknowledged'] and r.get('disposition') != 'calendar_unsupported'
                          for r in state.get('requests', {}).values())
     hydration_due = bool(state.get('pending_full')) and now.timestamp() >= state.get('hydration_check_at', 0)
-    if state.get('store') == signature and not hydration_due and not contacts_changed and not state.get('steps') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY:
+    if 'mail_other_accounts' in state and state.get('store') == signature and not hydration_due and not contacts_changed and not state.get('steps') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY:
         if state.get('pending_full'):
             Run(ports, state, now, out, settings).full_text([])
             _refresh_list(out, state['pending_full'])
             _save(out, state)
-        counts = {**mapping_counts(state), **calendar_counts(state)}
+        counts = {**mapping_counts(state), **calendar_counts(state),
+                  'mail_other_accounts': state['mail_other_accounts']}
         return Outcome('succeeded', 'store_unchanged', counts)
     try:
         meta, mails, events = _decode(home, out, ports.decode)
@@ -1116,6 +1150,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     mails = _best_copies(mails)
     state['hydration_check_at'] = int((now + REFRESH_INTERVAL).timestamp())
     work = Run(ports, state, now, out, settings)
+    work.counts['mail_other_accounts'] = meta['mail_other_accounts']
     try:
         _quarantine_calendar_requests(state)
         _save(out, state)
@@ -1132,7 +1167,8 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         work.leads()
         work.full_text(mails)
         work.next_steps(mails)
-        mail_processed = bool(work.written or any(work.counts.values()))
+        mail_processed = bool(work.written or any(value for key, value in work.counts.items()
+                                                  if key != 'mail_other_accounts'))
         work.events(events, matcher, since)
         snapshot, agenda_counts = agenda(events, meta, settings, now)
         work.counts.update(agenda_counts)
@@ -1161,7 +1197,8 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     if failed:
         _save(out, state)
         return Outcome('failed', failed, counts)
-    state.update(store=signature, high_water=int(now.timestamp()), contact_map=matcher.fingerprint())
+    state.update(store=signature, high_water=int(now.timestamp()), contact_map=matcher.fingerprint(),
+                 mail_other_accounts=meta['mail_other_accounts'])
     _prune(state, now)
     _save(out, state)
     counts.update(mapping_counts(state))  # a run that expires items reports them itself

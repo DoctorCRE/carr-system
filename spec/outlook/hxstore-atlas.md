@@ -136,6 +136,30 @@ be a key change and is unexplained.
 
 ## Catalog confidence
 
+## Attachment metadata intake slice
+
+The attachment catalog binds the maintained decoder source revision below.
+Structure-only research on an immutable helper snapshot found 4,682 physical
+attachment objects whose delimiter-framed filename was followed by a string
+matching an HTML cid reference. This supports the inferred selector; it does not
+establish an exhaustive grammar. Unsupported framing stays unknown.
+
+The release decoder and intake loader were run against that immutable copy.
+The eligible population is dated, sender-bearing email naming the configured
+address exactly as sender or parsed recipient, after copy collapse. It yielded
+756 email records, 744 with a resolved folder path, and 81 attachment metadata
+rows across 8 emails. None of those eligible attachment rows had a content ID.
+Message keys mapping to multiple decoded rows are excluded. These are whole-copy
+counts, not a recent-mail window or complete-mailbox coverage claim. The source
+bytes still matched the helper manifest SHA-256 afterward.
+
+Intake records carry id, name, size, content_type and nullable content_id. Paths
+and bytes stay outside those records. The synthetic actual-CLI test verifies
+folder parents, message membership, metadata export and unchanged source bytes.
+The activity write contract does not persist this metadata yet. Attachment bytes
+remain outside this slice.
+
+
 Null means the first Outlook version is unknown. The pinned source revision establishes catalog provenance, not an Outlook build or introduction version.
 
 ## Store header (store)
@@ -2003,6 +2027,139 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 
 - [`vendor/hxprobe/src/folder.rs` at `57ca38424bb7cae5721e673f9aaf78d166b113df`](https://github.com/DoctorCRE/carr-system/blob/57ca38424bb7cae5721e673f9aaf78d166b113df/vendor/hxprobe/src/folder.rs), `envelopes`.
 
+## Attachment object (object.class.016a)
+
+```json
+{
+  "parent": "store",
+  "identifier": {
+    "kind": "record_type",
+    "value": 362
+  },
+  "wire_type": "serialized_object",
+  "decoder": "attachment::parse",
+  "confidence": "inferred",
+  "first_seen_version": null,
+  "notes": "Bounded tag 0318 envelope; no attachment bytes are read."
+}
+```
+
+- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `parse`.
+
+## Attachment envelope (attachment.envelope)
+
+```json
+{
+  "parent": "object.class.016a",
+  "identifier": {
+    "kind": "envelope_tag",
+    "value": 792
+  },
+  "wire_type": "u16le",
+  "decoder": "attachment::Index::observe",
+  "confidence": "inferred",
+  "first_seen_version": null,
+  "notes": "Ten-byte envelope length includes its header. Typed class signature is checked."
+}
+```
+
+- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `observe`.
+
+## Attachment owning message (attachment.message)
+
+```json
+{
+  "parent": "object.class.016a",
+  "identifier": {
+    "kind": "byte_offset",
+    "value": 360
+  },
+  "wire_type": "typed_reference",
+  "decoder": "attachment::parse",
+  "confidence": "inferred",
+  "first_seen_version": null,
+  "notes": "Class 00ca reference with nonzero repeated key at reference offsets 10, 30 and 38. Conflicting owners quarantine the attachment ID. Conflicting filenames also quarantine the ID."
+}
+```
+
+- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `parse`.
+
+## Attachment declared byte length (attachment.size)
+
+```json
+{
+  "parent": "object.class.016a",
+  "identifier": {
+    "kind": "byte_offset",
+    "value": 558
+  },
+  "wire_type": "u64le",
+  "decoder": "attachment::parse",
+  "confidence": "inferred",
+  "first_seen_version": null,
+  "notes": "Stored declaration, not a measured byte length. Cached revisions retain the maximum."
+}
+```
+
+- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `parse`.
+
+## Attachment display filename (attachment.name)
+
+```json
+{
+  "parent": "object.class.016a",
+  "identifier": {
+    "kind": "string_run_selector",
+    "value": "cache_basename"
+  },
+  "wire_type": "utf16le_z",
+  "decoder": "attachment::parse",
+  "confidence": "inferred",
+  "first_seen_version": null,
+  "notes": "Cache basename with numeric bracket suffix removed. name_verified requires a standalone filename after the cache path and sort-key delimiter 01 01 01 01 00."
+}
+```
+
+- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `parse`.
+
+## Attachment declared MIME type (attachment.type)
+
+```json
+{
+  "parent": "object.class.016a",
+  "identifier": {
+    "kind": "string_run_selector",
+    "value": "mime_before_cache_path"
+  },
+  "wire_type": "utf16le_z",
+  "decoder": "attachment::declared_type",
+  "confidence": "inferred",
+  "first_seen_version": null,
+  "notes": "First short ASCII type/subtype between the fixed header and cache path. Revision disagreement stays unknown. No byte-type detection."
+}
+```
+
+- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `declared_type`.
+
+## Attachment MIME content ID (attachment.content-id)
+
+```json
+{
+  "parent": "object.class.016a",
+  "identifier": {
+    "kind": "string_run_selector",
+    "value": "after_standalone_filename"
+  },
+  "wire_type": "utf16le_z",
+  "decoder": "attachment::parse",
+  "confidence": "inferred",
+  "first_seen_version": null,
+  "notes": "Immediate bounded printable string after the standalone filename. Empty, truncated, whitespace-containing and revision-conflicting values remain NULL. This selector is inferred, not a wire field ID."
+}
+```
+
+- [`vendor/hxprobe/src/attachment.rs` at `a32d8b6cfb325055455201995e406e07094d217e`](https://github.com/DoctorCRE/carr-system/blob/a32d8b6cfb325055455201995e406e07094d217e/vendor/hxprobe/src/attachment.rs), `parse`.
+
 ## Source bindings
 
 ```json
@@ -2034,6 +2191,10 @@ Null means the first Outlook version is unknown. The pinned source revision esta
   "vendor/hxprobe/src/body.rs": {
     "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",
     "sha256": "ac7130b31bc06e000598c5acfe019942316900010d8ccb4f95a9be4a651bc499"
+  },
+  "vendor/hxprobe/src/attachment.rs": {
+    "revision": "a32d8b6cfb325055455201995e406e07094d217e",
+    "sha256": "796850d32e1169eecd7e70094072b438ccb0530a4b7fa7d5dd70c65edee3461b"
   }
 }
 ```
