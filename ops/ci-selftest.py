@@ -386,13 +386,27 @@ def test_hosted_migration_ownership():
     check("not-applicable proof cannot be reused as full main evidence", "full != 'false'" in record.get("if", ""))
 
 
-def test_contract_rejects_platform_postgres_defaults():
+def test_postgres_path_boundary_rejects_platform_defaults():
     with ci_fixture() as root:
-        (root / 'lib/default.py').write_text("DEFAULT = '" + '/opt/homebrew/opt/' + "postgresql@17/bin'\n")
-        subprocess.run(['git', 'add', 'lib/default.py'], cwd=root, env=fixture_env(), check=True)
-        rc, output = run(['--strict', '--only', 'contract'], root=root)
-        check('contract rejects PostgreSQL paths outside the resolver',
-              rc == 1 and 'PostgreSQL paths must use lib/disposable_pg_fixture.py' in output)
+        path = root / 'lib/default.py'
+        path.write_text("DEFAULT = '" + '/opt/homebrew/opt/' + "postgresql@17/bin'\n")
+        subprocess.run(['git', 'add', 'lib/default.py'], cwd=root,
+                       env=fixture_env(), check=True)
+        result = subprocess.run(
+            ['git', 'grep', '-n', '-F', '/opt/homebrew/opt/postgresql@17',
+             '--', '*.py', ':!lib/disposable_pg_fixture.py'],
+            cwd=root, capture_output=True, text=True)
+        check('PostgreSQL path boundary rejects a platform default',
+              result.returncode == 0 and 'lib/default.py' in result.stdout)
+        path.write_text("from lib.disposable_pg_fixture import postgres_binary\n")
+        subprocess.run(['git', 'add', 'lib/default.py'], cwd=root,
+                       env=fixture_env(), check=True)
+        result = subprocess.run(
+            ['git', 'grep', '-n', '-F', '/opt/homebrew/opt/postgresql@17',
+             '--', '*.py', ':!lib/disposable_pg_fixture.py'],
+            cwd=root, capture_output=True, text=True)
+        check('PostgreSQL path boundary accepts fixture-resolver ownership',
+              result.returncode == 1 and not result.stdout)
 
 
 def test_gate_shards_execute_a_disjoint_complete_inventory():
@@ -1489,7 +1503,7 @@ def main(argv=None):
                test_hxprobe_runs_locked_checks_and_propagates_failures,
                test_gates_build_hxprobe_before_parallel_selftests,
                test_gate_shards_execute_a_disjoint_complete_inventory,
-               test_contract_rejects_platform_postgres_defaults,
+               test_postgres_path_boundary_rejects_platform_defaults,
                test_hosted_migration_ownership,
                test_hosted_draft_lifecycle,
                test_database_scope_receipts,

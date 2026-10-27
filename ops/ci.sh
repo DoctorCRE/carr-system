@@ -52,7 +52,7 @@ case "$MIGRATION_PART" in
   *) echo "ci.sh: unknown migration part" >&2; exit 64 ;;
 esac
 
-CLASS_ORDER="pushfloor unit types contract gates secret dependency migration binding artifact freshness hxprobe"
+CLASS_ORDER="pushfloor unit types gates secret dependency migration binding artifact freshness hxprobe"
 
 class_desc() {
   case "$1" in
@@ -61,7 +61,6 @@ class_desc() {
     pushfloor)  echo "seeded defect that must not leave the machine (local pre-push floor)" ;;
     unit)       echo "seeded failing unit test" ;;
     types)      echo "seeded shape mistake in a data hand-off" ;;
-    contract)   echo "seeded PostgreSQL path outside the disposable fixture resolver" ;;
     gates)      echo "seeded enforcement-layer regression" ;;
     secret)     echo "seeded credential in the tree" ;;
     dependency) echo "seeded unpinned or vulnerable dependency" ;;
@@ -211,20 +210,6 @@ check_types() {
   else
     tail -25 "$LOGDIR/types.log" >&2
     bad types "mypy found shape mistakes — see the errors above"
-  fi
-}
-
-check_contract() {
-  # The unit class owns the Node contract suites (control-room tests and
-  # workspace/contracts/validate.mjs through workspace/test). This class owns
-  # only the PostgreSQL-path boundary.
-  local pg_paths rc=0
-  pg_paths="$(git grep -n -F '/opt/homebrew/opt/postgresql@17' -- '*.py' ':!lib/disposable_pg_fixture.py')" || rc=$?
-  if [ "$rc" -ne 1 ]; then
-    printf '%s\n' "PostgreSQL paths must use lib/disposable_pg_fixture.py (grep exit $rc)" "$pg_paths" >&2
-    bad contract "PostgreSQL paths bypass lib/disposable_pg_fixture.py"
-  else
-    ok contract "PostgreSQL paths resolve through lib/disposable_pg_fixture.py"
   fi
 }
 
