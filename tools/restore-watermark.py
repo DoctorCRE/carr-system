@@ -394,6 +394,11 @@ def _status_module():
 
 BACKUP_RUN_EVENTS = ("schedule", "workflow_dispatch")
 BACKUP_RUN_BRANCH = "main"
+# GitHub's merge queue (on since 2026-10-24) builds each commit that lands on
+# main on this read-only branch first, and a nightly's GITHUB_TOKEN Check is
+# then filed in that queue suite for the same sha. Only GitHub creates these
+# branches; the sha is still required to equal the run's head on main.
+MERGE_QUEUE_SUITE_BRANCH_RE = re.compile(rf"gh-readonly-queue/{BACKUP_RUN_BRANCH}/pr-[0-9]+-[0-9a-f]{{40}}")
 
 
 def _instant(value: Any) -> datetime | None:
@@ -440,7 +445,8 @@ def _check_bound_to_run(bws, repository: str, identity, run: dict[str, Any], ite
         raw_app = suite.get("app")
         app: dict[str, Any] = raw_app if isinstance(raw_app, dict) else {}
         if (app.get("id") != bws.ACTIONS_APP_ID or app.get("slug") != bws.ACTIONS_APP_SLUG
-                or suite.get("head_branch") != BACKUP_RUN_BRANCH
+                or not (suite.get("head_branch") == BACKUP_RUN_BRANCH
+                        or MERGE_QUEUE_SUITE_BRANCH_RE.fullmatch(str(suite.get("head_branch") or "")))
                 or str(suite.get("head_sha", "")).lower() != identity.head_sha):
             return False
     return True
