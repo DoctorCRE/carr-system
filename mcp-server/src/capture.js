@@ -313,7 +313,7 @@ async function candidates(request, dependencies) {
         refuse(409, { error: "key_reuse" });
       const items = structuredClone(body.items);
       if (session.post_call && !prior.rows.length) {
-        for (const item of items.filter(item => item.kind === "next_step")) {
+        for (const item of items.filter(item => ["next_step", "phase_move"].includes(item.kind))) {
           const bases = await client.query(
             `select distinct on (field) field,id as event_id from event
               where subject_type='deal' and subject_id=$1 and field in ('next_step','next_date')
