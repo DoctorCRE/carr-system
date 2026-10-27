@@ -71,7 +71,6 @@ portability_root="${CARR_EXPORT_HOME:-$HOME/Library/CloudStorage/OneDrive-CARR,I
 step "portability mirror" env DATABASE_URL="$CARR_DB_EXPORTER_URL" .venv/bin/python pipelines/doctrine_mirror.py \
   --out "$portability_root/Backups/portability-mirror" --also "$HOME/carr-system/out/mirror"
 step "calendar archive" ./bin/archive-calendar.sh
-step "mail capture" ./bin/mail-capture.sh
 step "lead stages" python3 ./bin/lead-stage-job.py
 step "verb probe" ./.venv/bin/python ops/nightly-verb-probe.py
 step "nightly ping" env HC_CHAIN_RC="$NIGHTLY_RC" ./bin/hc-ping.sh --nightly
