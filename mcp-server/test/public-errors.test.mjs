@@ -61,6 +61,9 @@ for (const [code, extra] of [
   ["value_not_in_declared_vocabulary", { field: "filter" }],
   ["AUTHORIZATION_REFUSED", {}], ["vendor_meetings_query_invalid", {}], ["vendor_meetings_unavailable", {}],
   ["tour_share_scope_invalid", {}], ["personal_doc_not_owner", {}], ["personal_loop_not_owner", {}],
+  ["work_request_not_found", {}], ["work_request_terminal_state", {}], ["work_request_not_completable", {}],
+  ["invalid_completion", {}], ["missing_criterion_evidence", {}], ["missing_change_ref", {}],
+  ["missing_user_journey_ref", {}], ["completion_capsule_refused", {}], ["sponsored_actor_required", {}],
 ]) test(`MCP preserves the public ${code} contract`, async t => {
   const payload = await failure(t, new ToolError({ error: code, ...extra,
     detail: privateText, hint: privateText, nested: { stack: privateText } }));

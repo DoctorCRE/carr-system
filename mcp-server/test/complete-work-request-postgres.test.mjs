@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
+import { publicError } from '../src/public-errors.ts';
 
 let fixture, admin, database, c, actor, connection;
 before(async () => {
@@ -119,7 +120,9 @@ for (const [label, ref, modify, expected] of [
     if (label==='terminal state') await c.query("update ops.work_request set state='declined',exit_reason='Synthetic obsolete',closed_at=now() where ref=$1", [ref]);
     const args=completion(ref); modify(args);
     await assert.rejects(command('complete-work-request',args,actor,'carr_writer'),error=>{
-      assert.equal(error.payload?.error,expected); return true;
+      assert.equal(error.payload?.error,expected);
+      assert.equal(publicError(error).error,expected);
+      return true;
     });
     assert.equal((await c.query('select count(*) from tool_call where idempotency_key=$1',[args.idempotency_key])).rows[0].count,'0');
     assert.equal((await c.query("select count(*) from ops.work_request where ref=$1 and state='confirmed_closed'",[ref])).rows[0].count,'0');
