@@ -825,6 +825,50 @@ test('pending email proposals can be read in stable pages after earlier items ar
     error => error.payload?.error === 'email_proposals_cursor_invalid');
 });
 
+test('email proposal review can select one deal without hiding the global queue', async () => {
+  await c.query('delete from email_proposal');
+  const otherDeal = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) select 'Synthetic second review deal',client_id,'purchase','research','joe',$2,$2 from deal where id=$1 returning id", [deal, actor.id])).rows[0].id;
+  try {
+    const source = await email(askQuote);
+    const args = { kind: 'next_step', activity_id: source.activity_id, evidence_quote: askQuote,
+      text: 'Send the floor plan', next_date: '2027-01-08' };
+    const other = await record({ ...args, deal: otherDeal });
+    const selected = await record(args);
+    const items = await command('list-email-proposals', { deal: deal.toUpperCase() }, actor, 'carr_reader');
+    assert.deepEqual(items.proposals.map(item => item.id), [selected.proposal_id]);
+    assert.equal(items.proposals[0].preview.deal, deal);
+    assert.equal(items.send, false);
+    assert.deepEqual(new Set((await listed()).map(item => item.id)), new Set([other.proposal_id, selected.proposal_id]));
+    assert.deepEqual((await command('list-email-proposals', { deal: randomUUID() }, actor, 'carr_reader')).proposals, []);
+  } finally { await c.query("update deal set phase='closed' where id=$1", [otherDeal]); }
+});
+
+test('deal-filtered email pages retain resolved cursors and reject another deal cursor', async () => {
+  await c.query('delete from email_proposal');
+  const otherDeal = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) select 'Synthetic paged review deal',client_id,'purchase','research','joe',$2,$2 from deal where id=$1 returning id", [deal, actor.id])).rows[0].id;
+  try {
+    const stored = [];
+    for (const target of [otherDeal, deal, otherDeal, deal, otherDeal]) {
+      const source = await email(askQuote);
+      stored.push(await record({ kind: 'next_step', deal: target, activity_id: source.activity_id,
+        evidence_quote: askQuote, text: 'Send the floor plan', next_date: '2027-01-08' }));
+    }
+    const page = args => command('list-email-proposals', { deal, limit: 1, ...args }, actor, 'carr_reader');
+    const first = await page({});
+    assert.deepEqual(first.proposals.map(item => item.id), [stored[1].proposal_id]);
+    assert.equal(first.more, true);
+    assert.equal(first.next_cursor, stored[1].proposal_id);
+    await command('dismiss-email-proposal', { idempotency_key: randomUUID(), proposal_id: first.next_cursor,
+      base_version: 1, reason: 'Already handled' }, actor, 'carr_writer');
+    const next = await page({ cursor: first.next_cursor });
+    assert.deepEqual(next.proposals.map(item => item.id), [stored[3].proposal_id]);
+    assert.equal(next.more, false);
+    assert.equal(next.next_cursor, null);
+    await assert.rejects(page({ cursor: stored[0].proposal_id }),
+      error => error.payload?.error === 'email_proposals_cursor_invalid');
+  } finally { await c.query("update deal set phase='closed' where id=$1", [otherDeal]); }
+});
+
 test('confirming through the existing verbs resolves the stored proposal', async () => {
   await c.query('delete from email_proposal');
   const source = await email();
