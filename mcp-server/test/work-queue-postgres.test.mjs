@@ -43,7 +43,8 @@ before(async () => {
   const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
   if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
   else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
-  await c.query(readFileSync(new URL('../../migrations/1007_work_request_queue.sql', import.meta.url), 'utf8'));
+  if (!(await c.query("select 1 from schema_migrations where filename='1007_work_request_queue.sql'")).rows.length)
+    await c.query(readFileSync(new URL('../../migrations/1007_work_request_queue.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => {
@@ -149,4 +150,13 @@ test('the Worker and board share exact IDs without numeric precision loss', asyn
     const result = await promisify(execFile)('python3', ['-c', 'from lib.progress_hierarchy import card_address; import sys; print(card_address(sys.argv[1],2,1)); print(card_address(sys.argv[1],2,1,"DoctorCRE/carr-system",1960))', ref], { cwd: new URL('../../', import.meta.url) });
     assert.deepEqual(result.stdout.trim().split('\n'), [expected, expected + '.carr#1960']);
   }
+});
+
+test('queue grants preserve the current catalog seal and reject wider grants', async () => {
+  const current = async () => (await c.query('select ops.scac_mutation_catalog_v118_current() as current')).rows[0].current;
+  assert.equal(await current(), true);
+  await c.query('begin');
+  try { await c.query('grant delete on ops.work_request_job to carr_writer'); assert.equal(await current(), false); }
+  finally { await c.query('rollback'); }
+  assert.equal(await current(), true);
 });

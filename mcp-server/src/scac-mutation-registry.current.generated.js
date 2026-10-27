@@ -3446,6 +3446,33 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "ingress_key": "db-relation-acl:public.email_proposal:carr_writer:update",
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.work_request_slice:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.work_request_slice",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.work_request_job:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.work_request_job",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.work_request_job:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.work_request_job",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "update",
+      "grantable": false
     }
   ],
   "secdef_execute": [
