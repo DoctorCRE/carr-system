@@ -7,7 +7,7 @@ import sys
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-MIGRATION = ROOT / 'migrations/0999_retire_scheduler_contracts.sql'
+MIGRATION = ROOT / 'migrations/1001_retire_scheduler_contracts.sql'
 spec = importlib.util.spec_from_file_location('scheduler_shadow', ROOT / 'ops/migration-shadow.py')
 assert spec is not None and spec.loader is not None
 shadow = importlib.util.module_from_spec(spec)

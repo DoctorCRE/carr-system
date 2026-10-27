@@ -80,6 +80,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     // WR-000529: a human entrance verification, previously authorityOnly alone.
     "append-tour-entrance-verification-receipt",
     "approve-lead-draft",
+    "approve-lead-drafts",
     "approve-lead-move",
     "approve-retrieval-proposals",
     "backfill-deal-items",
@@ -93,6 +94,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "decide-doc-suggestion",
     "dismiss-email-proposal",
     "drop-action",
+    "edit-lead-draft",
     "instruct-deal-item",
     "link-lead-client",
     "propose-doc-correction",
