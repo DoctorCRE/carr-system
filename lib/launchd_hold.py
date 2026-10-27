@@ -22,6 +22,9 @@ DEFINITION_ONLY: dict[str, str] = {
         "the capacity/model-route collector ships with no trigger key until its "
         "cadence and ops.service mapping are decided, so the definition is "
         "written down and left uninstalled; fleet-sync must not reinstall it",
+    "com.carr.headless.social-batch-headless.plist":
+        "WR561.S3 installs it after one proven Friday run; until then the old "
+        "social-batch-weekly task stays the only scheduler of the weekly batch",
 }
 
 

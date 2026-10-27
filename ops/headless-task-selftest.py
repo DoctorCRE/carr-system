@@ -196,6 +196,29 @@ print(sys.argv[sys.argv.index('--correlation')+1]+' aa000000-0000-4000-8000-0000
         self.assertIn('carr-headless-completion/v1', args['prompt'])
         self.assertEqual(Path(args['cwd']), self.repo.resolve())
         self.assertFalse((self.home / 'records.jsonl').exists())
+        self.assertEqual(args['argv'][args['argv'].index('--model')+1], 'sonnet')
+        self.assertNotIn('--disallowedTools', args['argv'])
+
+    def test_manifest_sets_model_and_tool_lists(self):
+        path = self.repo/'ops/headless-tasks/tasks.json'
+        settings = json.loads(path.read_text())
+        settings['tasks']['test-task'].update(model='opus', allowed_tools=['Read', 'Bash(./run.sh *)'],
+                                              disallowed_tools=['Read(~/.zprofile)', 'Bash(curl *)'])
+        path.write_text(json.dumps(settings))
+        self.assertEqual(self.run_task().returncode, 0)
+        argv = json.loads((self.home / 'args.json').read_text())['argv']
+        self.assertEqual(argv[argv.index('--model')+1], 'opus')
+        self.assertEqual(argv[argv.index('--allowedTools')+1], 'Read,Bash(./run.sh *)')
+        self.assertEqual(argv[argv.index('--disallowedTools')+1], 'Read(~/.zprofile),Bash(curl *)')
+
+    def test_definition_only_task_is_refused_by_installer(self):
+        from lib import launchd_hold
+        def launch(cmd, **kwargs):
+            return subprocess.CompletedProcess(cmd, 113 if cmd[1] == 'print' else 0)
+        with patch.dict(launchd_hold.DEFINITION_ONLY, {'com.carr.headless.test-task.plist': 'awaiting its slice'}):
+            with self.assertRaises(ValueError):
+                self._install(launch)
+        self.assertFalse((self.home/'Library/LaunchAgents/com.carr.headless.test-task.plist').exists())
 
     def test_denial_event_fails_promptly(self):
         result = self.run_task('denied')

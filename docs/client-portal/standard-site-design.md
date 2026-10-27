@@ -115,10 +115,15 @@ binds R2 `carr-documents` and reaches Postgres. The gap in today's host (two
 OpenAI Sites projects, one behind a proxy) is that it cannot read
 `ops.client_portal`, R2 or the deal record without storing a CARR credential at
 a third party. Rejected: keeping Sites and calling the CARR API from it (two
-hosts, a stored credential, two deploy paths). Reopen if the Worker cannot take
-the custom domain. Since 2026-10-27 the host is the partners' own `carr-share`
-Worker; D6 still holds, because that is still a second Worker and deploy path
-with no access to the record layer.
+hosts, a stored credential, two deploy paths). Joe 2026-10-27: "all sites should
+host on my site". That direction is about the address, and this keeps every
+client on `share.doctorcre.com`. It does change the platform behind the address:
+since 2026-10-27 the domain is served by the partners' own `carr-share` Worker
+(before that it was a CNAME to OpenAI Sites, where only Codex could publish).
+After cutover, publishing is a record-layer verb, and Codex has no part in it.
+D6 still holds against `carr-share`: it is a second Worker and deploy path with
+no access to the record layer. Reopen if Joe wants `carr-share` to stay the
+host, or if the Worker cannot take the custom domain.
 
 **D7. The portal adapter copies the `reports-web.js` shape.** One host adapter
 module (`portal-web.js`) with injected record-layer seams, an opaque session
@@ -1229,8 +1234,11 @@ PR.
 
 - That the deployed ciphertext equals the read-only source copies. The content
   keys are not readable; Stage 0 in S6 proves it before anything is built.
-- How the `share.doctorcre.com` route is attached to `carr-share` since the
-  2026-10-27 move (custom domain or zone route). S22 checks it before cutover.
+- The DNS record for `share.doctorcre.com` was not read in this slice. Another
+  session recorded on 2026-10-27 that it was a CNAME to OpenAI Sites' custom-domain
+  host; the `carr-share` Worker's own notes record that the same day's cutover
+  replaced it and keep the old record for rollback. S22 rereads it, and the
+  cutover replaces it with the carr-mcp Worker custom domain.
 - That a `carr-share` D1 export carries REF-V's retired-listing entries. S21
   tries it; the fallback is stated in migration step 3.
 - Runtime behaviour of the live sites. This inventory comes from reading the code

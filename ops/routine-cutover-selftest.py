@@ -36,7 +36,7 @@ class CutoverTests(unittest.TestCase):
         self.assertIn('npi-sweep-weekly', keys)
         self.assertIn('radar-weekly', keys)
         tasks = json.loads((ROOT / 'ops/headless-tasks/tasks.json').read_text())['tasks']
-        self.assertEqual(set(tasks), set())
+        self.assertEqual(set(tasks), {'social-batch-headless'})
 
 
 if __name__ == '__main__':

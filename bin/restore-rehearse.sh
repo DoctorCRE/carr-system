@@ -695,6 +695,14 @@ exercise_reason() {
 try: print(json.load(open(sys.argv[1]))["reason_id"])
 except Exception: print("verify_restore_refused")' "$WORKDIR/exercise-verdict.json" 2>/dev/null || print -r -- "verify_restore_refused"
 }
+evaluate_piped_receipt() {
+  # verify-restore prints its one-line receipt only on success. On a refusal its
+  # stdout is empty: stop here, so the evaluator never starts on empty input and
+  # the run records verify_restore_refused with verify-restore's own error.
+  local receipt
+  IFS= read -r receipt || [ -n "$receipt" ] || return 1
+  print -r -- "$receipt" | node "$REPO/mcp-server/bin/recovery-matrix-evaluate.mjs" restore -
+}
 arm_verify_restore() {
   VERIFY_FIFO="$WORKDIR/verify.handoff"
   mkfifo -m 600 "$VERIFY_FIFO" || die "could not create the verify-restore handoff"
@@ -707,7 +715,7 @@ arm_verify_restore() {
       --work-dir "$COPYDIR/verify" --armed-file "$WORKDIR/verify.armed" \
       < "$VERIFY_FIFO" 2>"$WORKDIR/verify.err" \
       | tee "$WORKDIR/receipt.verified.json" \
-      | node "$REPO/mcp-server/bin/recovery-matrix-evaluate.mjs" restore - > "$WORKDIR/exercise-verdict.json"
+      | evaluate_piped_receipt > "$WORKDIR/exercise-verdict.json"
   ) &
   VERIFY_PID=$!
   exec 4>"$VERIFY_FIFO"
