@@ -1,3 +1,4 @@
+// Test exact effect contracts and delegation closure.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";

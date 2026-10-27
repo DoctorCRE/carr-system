@@ -1,3 +1,4 @@
+// Calculate and merge vendor relationship evidence.
 import { exactDealAssociations } from "./relationship-network.js";
 // Trust uses verified deal history; missing coverage never becomes zero.
 export function computedTrust(stats, now) {

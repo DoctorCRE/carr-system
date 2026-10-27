@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test the disposable database requirement for the lead stage gate.
 import importlib.util
 from pathlib import Path
 import subprocess

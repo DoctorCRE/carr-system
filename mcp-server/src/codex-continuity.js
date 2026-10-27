@@ -1,3 +1,4 @@
+// Expose Codex checkpoint and recovery tools.
 import { organizationTenantForActor, personalScopeForActor } from "./identity.js";
 
 const MAX_CHECKPOINT_VERSION = Number.MAX_SAFE_INTEGER;

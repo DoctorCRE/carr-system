@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test the deal checklist reminder sweep.
 import contextlib
 import importlib.util
 import io

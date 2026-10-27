@@ -1,4 +1,3 @@
-# Test document drift checker behavior and reports.
 import json
 import os
 from pathlib import Path

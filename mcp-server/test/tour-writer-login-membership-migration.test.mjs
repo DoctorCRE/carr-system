@@ -1,3 +1,4 @@
+// Tests writer login membership and Tour mutation authority migration.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";

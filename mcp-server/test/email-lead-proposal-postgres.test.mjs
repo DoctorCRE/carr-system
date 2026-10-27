@@ -1,3 +1,4 @@
+// Test email lead proposal identity, rejection, and replay in PostgreSQL.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';

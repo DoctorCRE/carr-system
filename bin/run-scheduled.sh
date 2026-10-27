@@ -1,4 +1,5 @@
 #!/bin/zsh
+# Run a scheduled command with heartbeat and outcome recording.
 set -u
 
 EX_USAGE=64

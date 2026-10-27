@@ -1,3 +1,4 @@
+// Project and observe task and board linkage.
 import { readableWorkRequestSql } from './work-request-read.ts';
 const text=value=>typeof value==='string' && !!value.trim() && !/[\u0000-\u001f]/.test(value);
 const record=value=>value && typeof value==='object' && !Array.isArray(value);

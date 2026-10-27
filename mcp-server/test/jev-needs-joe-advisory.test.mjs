@@ -1,3 +1,4 @@
+// Test bounded Needs Joe advice, projections and per-item abstentions.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { needsJoeAdvisory } from "../src/jev-needs-joe-advisory.ts";

@@ -1,3 +1,4 @@
+// Tests server-derived actor context for Tour writer transactions.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { setWriterActorContext } from "../src/mcp.js";

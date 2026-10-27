@@ -1,3 +1,4 @@
+// Tests doctrine territory selection in market research prompts.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";

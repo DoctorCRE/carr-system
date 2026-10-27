@@ -1,3 +1,4 @@
+// Dispatch modern MCP requests for practice tools and resources.
 import { TOOLS, callTool } from './tools.mjs';
 import { PLANNER_TOOLS, callPlanner, intake, PANEL_URI } from './planner.mjs';
 import { RESOURCES, readResource } from './resources.mjs';

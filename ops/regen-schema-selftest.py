@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test schema regeneration during merges.
 from pathlib import Path
 import shutil
 import subprocess
