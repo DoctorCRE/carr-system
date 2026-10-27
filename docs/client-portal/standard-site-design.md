@@ -964,8 +964,10 @@ through the terminal prompt; it is never stored, logged or committed. The harnes
   counts toward nothing today (no lockout exists on the live sites) and the run
   sends fewer than five (a test counts them in the probe file). A run sends about
   14 non-GET requests to REF-A and 10 to REF-V, under the write limit; a 429 is
-  never recorded as the baseline: the row reports `FAIL rate-limited`, and the
-  partner runs again after a minute.
+  never recorded as the baseline: the row reports `FAIL rate-limited`, the run
+  writes no baseline file (so an earlier full one survives), and the partner
+  runs again after a minute. File fetches are paced at one per 150 ms so the
+  burst rule is not tripped; only a 404 counts a source file as UNSERVED.
 
 **Stage 1, extraction.** The reference extractor turns each source copy into a
 data package and its files. Pass: both packages validate against

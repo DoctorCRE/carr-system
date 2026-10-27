@@ -1,6 +1,7 @@
 // Gate probes over plain HTTP, sign-in, and the Stage 0 source-copy hash check.
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { digest, relativeTo } from './observe.mjs';
 import { neutralize } from './probes.mjs';
 
@@ -107,6 +108,9 @@ async function liveDigest(url, cookie) {
   return { status: response.status, live: response.status === 200 ? digest(Buffer.from(await response.arrayBuffer())) : `status-${response.status}` };
 }
 
+// The live zone answers 429 to a burst for ten seconds: one file fetch per pace step.
+export const FILE_FETCH_PACE_MS = 150;
+
 const encodePath = served => served.split('/').map(encodeURIComponent).join('/');
 
 // Stage 0: every manifest path, fetched from the live site through a session,
@@ -117,19 +121,25 @@ const encodePath = served => served.split('/').map(encodeURIComponent).join('/')
 export async function sourceFidelity(base, sourceDir, cookie, manifestPaths) {
   const root = new URL(base).pathname;
   const entries = [], covered = new Set();
+  let nextAt = 0;
+  const fetchFile = async url => {
+    await sleep(Math.max(0, nextAt - performance.now()));
+    nextAt = performance.now() + FILE_FETCH_PACE_MS;
+    return liveDigest(url, cookie);
+  };
   for (const [index, served] of manifestPaths.entries()) {
     if (!served.startsWith(root)) throw new Error(`manifest path ${index + 1} is outside the reference`);
     const rel = served.slice(root.length);
     const name = rel === '' || rel.endsWith('/') ? `${rel}index.html` : rel;
     covered.add(name);
     const source = await readFile(path.join(sourceDir, name)).then(digest, () => 'missing');
-    const { live } = await liveDigest(new URL(encodePath(served), base), cookie);
+    const { live } = await fetchFile(new URL(encodePath(served), base));
     entries.push({ verdict: live === source ? 'PASS' : 'FAIL', source, live });
   }
   for await (const name of sourceFiles(sourceDir)) {
     if (covered.has(name)) continue;
     const source = digest(await readFile(path.join(sourceDir, name)));
-    const { status, live } = await liveDigest(new URL(encodePath(name), base), cookie);
+    const { status, live } = await fetchFile(new URL(encodePath(name), base));
     entries.push({ verdict: status === 404 ? 'UNSERVED' : 'FAIL', source, live });
   }
   const files = entries.map((entry, index) => ({ ordinal: index + 1, ...entry }));
