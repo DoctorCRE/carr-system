@@ -1959,7 +1959,7 @@ class PostCallJevChecksTests(unittest.TestCase):
     def test_one_failed_item_call_leaves_the_others_checked(self) -> None:
         inner = self.fake_client()
 
-        def flaky(*, state: object, questions: dict[str, object]) -> SimpleNamespace:
+        def flaky(*, state: dict[str, Any], questions: dict[str, object]) -> SimpleNamespace:
             if state["item"]["fields"]["title"] == "Bad":
                 raise TypeSafeError("refused")
             return inner.system_one(state=state, questions=questions)
