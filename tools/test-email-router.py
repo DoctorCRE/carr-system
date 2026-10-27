@@ -432,6 +432,7 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual(writes[1][1]['thread_activity_id'], 'prior')
 
     def test_router_matches_after_thread_refusal(self):
+        self.assertIsNotNone(email_router.REFUSAL.fullmatch('email_thread_ambiguous'))
         calls = []
         def carr(verb, args):
             calls.append((verb, args))

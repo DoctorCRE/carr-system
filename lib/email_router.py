@@ -50,7 +50,7 @@ from lib import email_matching, model_call
 VERBS = frozenset({'email-router-queue', 'record-email-proposal', 'inherit-email-thread'})
 KINDS = frozenset({'phase_move', 'next_step', 'reply_draft'})
 OWNERS = frozenset({'joe', 'dell'})
-REFUSAL = re.compile(r'^(?:email_proposal|email_deal|email_next_step)_[a-z_]+$')
+REFUSAL = re.compile(r'^(?:email_proposal|email_deal|email_next_step|email_thread)_[a-z_]+$')
 MIN_CONFIDENCE = 0.6
 MAX_EMAILS = 25
 MAX_ATTEMPTS = 3
