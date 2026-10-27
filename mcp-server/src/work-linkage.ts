@@ -6,6 +6,7 @@ type LinkReference = { relation: string; ref: string; title: string; state: stri
 // Project and observe task and board linkage.
 import { readableWorkRequestSql } from './work-request-read.ts';
 const text=(value: unknown): value is string=>typeof value==='string' && !!value.trim() && !/[\u0000-\u001f]/.test(value);
+// Preserve the original falsy return values while describing its object narrowing.
 const record=(value: unknown): value is SnapshotRecord=>(value && typeof value==='object' && !Array.isArray(value)) as boolean;
 const pullRequestUrl=(value: unknown): value is string=>typeof value==='string'&&/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9][0-9]*$/.test(value);
 export function unavailableLinkage(subject: LinkSubject, reason = 'source_linkage_not_observed', references: LinkReference[] = []) {

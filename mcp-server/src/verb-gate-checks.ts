@@ -1,4 +1,4 @@
-// verb-gate-checks.js — server-side port of the DETERMINISTIC deny logic from
+// verb-gate-checks.ts — server-side port of the DETERMINISTIC deny logic from
 // two of the four client verb gates (bypass audit C33/C34, 2026-09-24, Joe's
 // decision 0b11c89b: every place a rule can be overridden or ignored must be
 // enforced).

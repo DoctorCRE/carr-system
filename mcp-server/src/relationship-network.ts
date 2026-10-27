@@ -1,6 +1,6 @@
 import type { Db, Actor } from './verb-contract.ts';
 type NetworkNode = { id: string; restricted?: boolean; contact_state?: string; contact_state_until?: string | null };
-type NetworkEdge = { id: string; kind: string; from: string; to: string; via: string; detail: string; summary?: string; when?: string | null };
+type NetworkEdge = { id: string; kind: string; from: string; to: string; via: string | null; detail: string | null; summary?: string; when?: string | null };
 type ReferralCount = { node_id: string; won: number; lost: number; deals: number };
 type NetworkSnapshot = { nodes: NetworkNode[]; edges: NetworkEdge[]; referrals: ReferralCount[] };
 // One exact snapshot: graph, recorded referral outcomes and offered introductions.
@@ -76,14 +76,15 @@ export function projectNetwork(snapshot: NetworkSnapshot, observedAt: string) {
   // Refuse oversize snapshots, never silently call a clipped graph complete.
   if (snapshot.nodes.length > 5000 || snapshot.edges.length > 20000) throw Object.assign(new Error('DEPENDENCY_UNAVAILABLE'), {code:'DEPENDENCY_UNAVAILABLE'});
   const nodes = new Map(snapshot.nodes.map(node => [node.id,node]));
+  // Truthy IDs and nonempty detail are established by the filters before use.
   const suggestions = snapshot.edges.filter(edge => edge.kind === 'can_introduce' && edge.detail?.trim()
     && nodes.has(edge.from) && nodes.has(edge.to) && (!edge.via || nodes.has(edge.via))
-    && [edge.from,edge.to,edge.via].filter(Boolean).every(id=>!held(nodes.get(id),observedAt))
+    && [edge.from,edge.to,edge.via].filter(Boolean).every(id=>!held(nodes.get(id!),observedAt))
     // Endpoint order records direction, not whether the two have been connected.
     && !snapshot.edges.some(other=> ['introduced','intro','intro_received','intro_requested'].includes(other.kind)
       && [other.from,other.to].sort().join() === [edge.from,edge.to].sort().join()))
     .sort((a,b)=>String(b.when||'').localeCompare(String(a.when||'')) || a.id.localeCompare(b.id))
-    .map(edge=>({id:edge.id,from:edge.from,to:edge.to,via:edge.via,reason:edge.summary || edge.detail.slice(0,180),detail:edge.detail,when:edge.when}));
+    .map(edge=>({id:edge.id,from:edge.from,to:edge.to,via:edge.via,reason:edge.summary || edge.detail!.slice(0,180),detail:edge.detail,when:edge.when}));
   return {schema:NETWORK_SCHEMA,observed_at:observedAt,valid_until:new Date(Date.parse(observedAt)+60000).toISOString(),...snapshot,
     referrals:snapshot.referrals.map(row=>({...row,win_rate:row.won+row.lost ? row.won/(row.won+row.lost):null})),suggestions};
 }

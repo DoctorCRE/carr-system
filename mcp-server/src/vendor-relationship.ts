@@ -11,7 +11,9 @@ export function computedTrust(stats: Partial<RelationshipStats> | null | undefin
   if (!stats?.coverage_verified_at || !Number.isInteger(stats.deals_worked) || !Number.isInteger(stats.won) || !Number.isInteger(stats.lost)) return 'Unrated';
   const years = stats.first_worked_at ? (Date.parse(now) - Date.parse(stats.first_worked_at)) / (365.25 * 86400000) : 0;
   const recency = stats.last_contacted_at ? (Date.parse(now) - Date.parse(stats.last_contacted_at)) / 86400000 : Infinity;
+  // Number.isInteger above establishes these optional numeric fields.
   const resolved = stats.won! + stats.lost!;
+  // Keep the existing null comparison coercion when no outcomes are resolved.
   const rate = resolved ? stats.won! / resolved : null;
   if (years >= 2 && stats.deals_worked! >= 8 && rate! >= .7 && recency >= 0 && recency <= 180) return 'Proven';
   if (years >= 1 && stats.deals_worked! >= 3 && rate! >= .5 && recency >= 0 && recency <= 365) return 'Established';
@@ -19,13 +21,14 @@ export function computedTrust(stats: Partial<RelationshipStats> | null | undefin
 }
 export function enrichRelationship(payload: Partial<RelationshipStats> | null | undefined, now: string) {
   const stats = payload || {};
+  // Keep legacy undefined-to-NaN arithmetic for incomplete unverified payloads.
   const verified = Boolean(stats.coverage_verified_at);
   return { ...stats, deals_referred: verified ? stats.deals_referred : null, deals_worked: verified ? stats.deals_worked : null,
     win_rate: verified && stats.won! + stats.lost! > 0 ? stats.won! / (stats.won! + stats.lost!) : null,
     computed_tier: computedTrust(stats, now), formula_version: 'vendor-trust.v1' };
 }
 export function requireRelationshipPartner(actor: Actor, code = 'AUTHORIZATION_REFUSED') {
-  if (actor?.human !== true || !['joe', 'dell'].includes(actor?.slug as string)) throw Object.assign(new Error(code), { code });
+  if (actor?.human !== true || !(['joe', 'dell'] as readonly unknown[]).includes(actor?.slug)) throw Object.assign(new Error(code), { code });
 }
 export function trustedOverride(value: EvidenceInput | null, actor: Actor, now = new Date().toISOString()) {
   requireRelationshipPartner(actor);

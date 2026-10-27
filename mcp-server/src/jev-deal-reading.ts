@@ -55,7 +55,7 @@ function activeCriticalDates(record: DealRecord, now: Date) {
     return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : Math.abs(parsed - current);
   };
   return items(record.critical_dates)
-    .filter(d => !["completed", "cancelled", "canceled", "satisfied"].includes(d.status!))
+    .filter(d => !(["completed", "cancelled", "canceled", "satisfied"] as readonly unknown[]).includes(d.status))
     .sort((a, b) => distance(a) - distance(b))
     .slice(0, 4);
 }
@@ -86,6 +86,7 @@ function evidenceLines(record: DealRecord, now: Date) {
 
 export function dealReadingState(record: DealRecord, now = new Date()) {
   const today = businessToday(now);
+  // calendarDate validates the optional value before the comparison.
   const expired = (value: string | undefined) => calendarDate(value) === null ? null : value! < today;
   const { lines, kinds } = evidenceLines(record, now);
   const nextStep = clip(record.next_step);
@@ -122,6 +123,7 @@ export function dealReadingState(record: DealRecord, now = new Date()) {
         premises_recorded: premises.length,
         negotiation_rounds_recorded: negotiations.length,
         latest_negotiation: negotiations.length ? {
+          // Number.isInteger establishes the optional round number.
           round_no: Number.isInteger(negotiations[0].round_no) ? negotiations[0].round_no! : null,
           side: clip(negotiations[0].side, 40) || null,
           proposed_on: clip(negotiations[0].proposed_on, 24) || null,
@@ -164,6 +166,7 @@ export async function readDealWithJev(record: DealRecord, { apiKey, client, now 
     const movement = answers?.movement?.score;
     const waiting = answers?.waiting_on?.choice;
     const silence = answers?.silence_is_bad?.noul;
+    // An absent choice remains a nonmatching property key in the existing refusal check.
     if (typeof movement !== "number" || !Number.isFinite(movement) || movement < 0 || movement > 4 ||
         !Object.hasOwn(WAITING, waiting!) || !probability(silence))
       return { ...base, judged: false, reason: "invalid_jev_answer" };
