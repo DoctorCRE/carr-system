@@ -11,7 +11,7 @@ private `carr-documents` R2 bucket, never in git. The carr-mcp Worker serves the
 portal behind the `ops.client_portal` password that slice S1 registers. The two
 reference sites (the two newest, called REF-A and REF-V below)
 are rebuilt from their own data and must match the live sites item for item
-against the 415-row inventory in this document: 255 items for REF-A, 160 for
+against the 456-row inventory in this document: 281 items for REF-A, 175 for
 REF-V. Every existing client address and password keeps working (AC1).
 
 Sources read for this design: WR-000227, decision 9cbc9aea (Joe 2026-10-27),
@@ -88,7 +88,9 @@ flags (zero-tech-debt).
 generator does not emit per-deal HTML.** Both reference sites already render
 most content in the browser from data files. One deployed template means a
 template fix reaches every portal at once (locality). The package carries its
-schema version; the template supports every published schema version.
+schema version, and the template supports only the current one: a schema
+change ships with a migration that re-publishes every live package at the new
+version, so no old-version rendering path survives (zero-tech-debt).
 Rejected: a build step that writes static HTML per deal, which multiplies every
 template fix by the number of portals. Reopen if a client must see a frozen
 snapshot that later template releases may not change.
@@ -132,7 +134,7 @@ endpoint.
 **D9. The lockout needs a clear message on the onboarding call.** Concern: S1
 returns the same null for a wrong password and for a locked slug, so a client
 who mistypes five times during the video call sees "incorrect password" for 15
-minutes. Safer option adopted for slice S10: the verify function returns a
+minutes. Safer option adopted for slices S8 and S9: the verify function returns a
 reason (`denied` or `locked`) and the page says when to retry; a partner verb
 clears the lock. Slug existence is not secret (the URL is given to the client),
 so the reason leaks nothing new.
@@ -144,7 +146,7 @@ a deal. A client with a second deal reopens decision 9cbc9aea.
 **D11. The Tour List stays a portal record, separate from CARR Tours.**
 `ops.client_portal_selection` holds selections and per-property notes with a
 version for compare-and-swap, exactly as both sites do in D1 today. Partners see
-it on the deal card (slice S16).
+it on the deal card (slice S20).
 
 **D12. Later deliverables and documents arrive as portal materials.** A partner
 verb shares a file or a new deliverable into a portal and another withdraws it.
@@ -155,7 +157,7 @@ A new market study version is a new publication, not a material.
 look so format is pretty much set." Source conflict, stated openly (K06): the
 WR-000227 desired outcome (captured 2026-08-03) asks for a dark cinematic
 register. Joe's newer, live direction wins for the market study; the roadmap and
-explainer sections (AC2, AC4) get their own design in slices S12 and S13.
+explainer sections (AC2, AC4) get their own design in slices S18 and S19.
 
 **D14. Reference format is REF-A and REF-V, not LEG-2.** Source conflict, stated
 openly: decision d6c453ff (2026-10-05) named the LEG-2 site as the format to
@@ -176,7 +178,7 @@ from a public CDN. The template self-hosts one pinned version (as reports-web
 does). Basemap stays a data choice with two real adapters, because both exist
 in the references: `local-layers` (REF-V: TIGER water and roads GeoJSON from R2)
 and `vector-style` (REF-A: a public vector tile host). The vector tile host
-needs a provider rights receipt on file before the template ships it (slice S9).
+needs a provider rights receipt on file before the template ships it (slice S16).
 
 ## Inventory of the reference sites
 
@@ -199,7 +201,9 @@ A Worker releases a file only after a password form sets a signed
 
 ### Counting rules
 
-- One row per section, interactive tool, link, asset and gate behaviour.
+- One row per section, interactive tool, link, asset and gate behaviour,
+  including one row per HTTP error path each Worker returns (404, 400, 401,
+  403, 405, 413, 415, 502, 503), read from the Worker code.
 - A link or asset that repeats once per data item gets one row per item, by
   ordinal. A link whose target changes with a switch (for example a source link
   that follows the selected geography) gets one row per state.
@@ -215,9 +219,9 @@ A Worker releases a file only after a password form sets a signed
 
 | Site | Gate | Section | Tool | Link | Asset | Total | T | T+D | D |
 |---|---|---|---|---|---|---|---|---|---|
-| REF-A | 13 | 47 | 56 | 99 | 40 | **255** | 100 | 64 | 91 |
-| REF-V | 9 | 32 | 28 | 55 | 36 | **160** | 49 | 36 | 75 |
-| Both | 22 | 79 | 84 | 154 | 76 | **415** | 149 | 100 | 166 |
+| REF-A | 39 | 47 | 56 | 99 | 40 | **281** | 126 | 64 | 91 |
+| REF-V | 24 | 32 | 28 | 55 | 36 | **175** | 64 | 36 | 75 |
+| Both | 63 | 79 | 84 | 154 | 76 | **456** | 190 | 100 | 166 |
 
 Findings the inventory surfaced:
 
@@ -231,7 +235,7 @@ Findings the inventory surfaced:
 - REF-A's competitor filter offers a market with no offices. Parity keeps it
   (the market list becomes package data); whether to drop it is a content call.
 
-#### REF-A gates (13)
+#### REF-A gates (39)
 
 | ID | Item | T/D | Built today | Served and gated today |
 |---|---|---|---|---|
@@ -248,6 +252,32 @@ Findings the inventory surfaced:
 | A-G11 | Tour List storage: one D1 row per site (sorted selections, notes by property, version) | T+D | origin D1 table `selection_state` | AS, D1 |
 | A-G12 | Property-ID allowlist for the Tour List generated from `properties.json` at build | T+D | `property-ids.js` generated by `tools/package.mjs` | AS |
 | A-G13 | Path safety and private headers (same rules as REF-V) | T | origin Worker code | AS |
+| A-G14 | Error path: 404 for an unknown or unsafe path, returned before the gate | T | origin Worker code | AS |
+| A-G15 | Error path: 503 "temporarily unavailable" when the site secrets are not configured | T | origin Worker code | AS |
+| A-G16 | Error path: 405 with `Allow: GET, HEAD, POST` for other page methods; 405 with `Allow: GET, HEAD` for a POST to any path but the root | T | origin Worker code | AS |
+| A-G17 | Error path: 403 for a password POST from another origin or a cross-site fetch | T | origin Worker code | AS |
+| A-G18 | Error path: 415 for a password form that is not URL-encoded | T | origin Worker code | AS |
+| A-G19 | Error path: 413 for a password form over 2 KB | T | origin Worker code | AS |
+| A-G20 | Error path: 400 for a password form that is not valid UTF-8 | T | origin Worker code | AS |
+| A-G21 | Error path: 401 with an empty body for HEAD without a session | T | origin Worker code | AS |
+| A-G22 | Error path: 503 when a released file is missing or fails to decrypt | T | origin Worker code | AS |
+| A-G23 | Error path: Tour List API: 405 `method_not_allowed` | T | origin Worker code | AS |
+| A-G24 | Error path: Tour List API: 401 `authentication_required` | T | origin Worker code | AS |
+| A-G25 | Error path: Tour List API: 403 `forbidden` for a PUT with a bad Origin or CSRF token | T | origin Worker code | AS |
+| A-G26 | Error path: Tour List API: 415 `unsupported_content_type` | T | origin Worker code | AS |
+| A-G27 | Error path: Tour List API: 413 `request_too_large` over 96 KB | T | origin Worker code | AS |
+| A-G28 | Error path: Tour List API: 400 `invalid_selection` | T | origin Worker code | AS |
+| A-G29 | Error path: Tour List API: 503 `storage_unavailable` | T | origin Worker code | AS |
+| A-G30 | Error path: Session status: 405 for a method other than GET | T | origin Worker code | AS |
+| A-G31 | Error path: Session status: 401 with `authenticated: false` without a session | T | origin Worker code | AS |
+| A-G32 | Error path: Sign out: 405 for a method other than POST | T | origin Worker code | AS |
+| A-G33 | Error path: Sign out: 401 without a session | T | origin Worker code | AS |
+| A-G34 | Error path: Sign out: 403 for a bad Origin or CSRF token | T | origin Worker code | AS |
+| A-G35 | Error path: Edge proxy: 404 for an unsafe path | T | share Worker proxy module for REF-A | edge |
+| A-G36 | Error path: Edge proxy: 405 with `Allow: GET, HEAD, POST, PUT` | T | share Worker proxy module for REF-A | edge |
+| A-G37 | Error path: Edge proxy: 403 for a cross-origin POST or PUT | T | share Worker proxy module for REF-A | edge |
+| A-G38 | Error path: Edge proxy: 503 when the service token is not configured | T | share Worker proxy module for REF-A | edge |
+| A-G39 | Error path: Edge proxy: 502 for an upstream failure, a 15 s timeout, or a redirect off the origin | T | share Worker proxy module for REF-A | edge |
 
 #### REF-A sections (47)
 
@@ -511,7 +541,7 @@ Findings the inventory surfaced:
 | A-A39 | MapLibre ES module 6.13.0 from a public CDN | T | third party | public CDN, outside the gate |
 | A-A40 | Vector basemap style, tiles, glyphs and sprites from a public tile host | T | third party | public tile host, outside the gate |
 
-#### REF-V gates (9)
+#### REF-V gates (24)
 
 | ID | Item | T/D | Built today | Served and gated today |
 |---|---|---|---|---|
@@ -524,6 +554,21 @@ Findings the inventory surfaced:
 | V-G07 | Tour List write: `PUT` with Origin check and CSRF header, compare-and-swap on version, 409 with current state on conflict | T | Worker code | VS, gated + CSRF |
 | V-G08 | Tour List storage: one D1 row per site (selections, notes by property, legacy notes column, version); retired property IDs carried forward on save | T+D | D1 table `<site>_selection_state`; allowed and retired IDs hard-coded in Worker code | VS, D1 |
 | V-G09 | Path safety and private headers: no `%`, `\`, NUL, `//`, dot segments; no-store, nosniff, noindex, same-origin referrer; strict CSP on the password page | T | Worker code | VS |
+| V-G10 | Error path: 404 for an unknown or unsafe path, returned before the gate | T | Worker code | VS |
+| V-G11 | Error path: 503 "temporarily unavailable" when the site secrets are not configured | T | Worker code | VS |
+| V-G12 | Error path: 405 with `Allow: GET, HEAD, POST` for other page methods; 405 with `Allow: GET, HEAD` for a POST to any path but the root | T | Worker code | VS |
+| V-G13 | Error path: 403 for a password POST from another origin or a cross-site fetch | T | Worker code | VS |
+| V-G14 | Error path: 413 for a password form over 2 KB (declared or streamed) | T | Worker code | VS |
+| V-G15 | Error path: 415 for a password form that is not URL-encoded | T | Worker code | VS |
+| V-G16 | Error path: 401 with an empty body for HEAD without a session | T | Worker code | VS |
+| V-G17 | Error path: 503 when a released file is missing or fails to decrypt | T | Worker code | VS |
+| V-G18 | Error path: Tour List API: 401 without a session | T | Worker code | VS |
+| V-G19 | Error path: Tour List API: 405 with `Allow: GET, PUT` | T | Worker code | VS |
+| V-G20 | Error path: Tour List API: 403 for a PUT with a bad Origin or CSRF token | T | Worker code | VS |
+| V-G21 | Error path: Tour List API: 413 for a body over 96 KB | T | Worker code | VS |
+| V-G22 | Error path: Tour List API: 415 for a body that is not JSON | T | Worker code | VS |
+| V-G23 | Error path: Tour List API: 400 for an invalid selection | T | Worker code | VS |
+| V-G24 | Error path: Tour List API: 503 when storage is unavailable or a stored row is invalid | T | Worker code | VS |
 
 #### REF-V sections (32)
 
@@ -702,10 +747,10 @@ Findings the inventory surfaced:
 ### The pieces
 
 ```text
-deal + client record ─┐
-research JSON (R2) ───┼─► package builder ─► validate (schema) ─► publish-market-study
-reference extraction ─┘                                           │
-                                                                  ▼
+deal + client record ─────────┐
+research package (partial, R2) ┴─► package builder ─► validate (schema) ─► publish-market-study
+reference extractor (one-off, migration only) ─────────────────────────────┘ │
+                                                                              ▼
                        Postgres: ops.client_portal_publication ◄──┴──► R2: client-portal/<slug>/...
                                                                   │
 browser ─► share.doctorcre.com/<slug>/ ─► carr-mcp Worker: portal-web.js
@@ -717,15 +762,16 @@ browser ─► share.doctorcre.com/<slug>/ ─► carr-mcp Worker: portal-web.js
 | Module | Repo | Interface | What it hides |
 |---|---|---|---|
 | Data package schema `carr.market-study.v1` | carr-system `client-portal/market-study.v1.schema.json` | One JSON Schema plus a synthetic fixture | Every per-deal field and its type |
-| Package builder | carr-system `tools/client-portal/` | `build(deal, research) -> package` | Mapping record fields and research JSON into the schema |
-| Reference extractor | carr-system `tools/client-portal/` | `extract(site-folder) -> package` | Reading today's data files and hard-coded app.js values |
+| Package builder | carr-system `tools/client-portal/` | `build(deal, research) -> package` | Overlaying the record-layer fields onto a research package |
+| Reference extractor (migration tool, deleted in S22) | carr-system `tools/client-portal/` | `extract(site-folder) -> package` | Reading today's data files and hard-coded app.js values |
 | Template | doctorcre-app, shipped under `/portal/` | `render(package)` in the browser | All layout, maps, charts, the ownership model, the Tour List UI |
 | Portal adapter `portal-web.js` | carr-system `mcp-server/src/` | `handle(request, env, ctx, seams)` for host share.doctorcre.com | Gate, session, routing, CSP, file release, API |
 | Record-layer functions and verbs | carr-system migrations and `client-portal.ts` | `publish-market-study`, `share-portal-material`, `withdraw-portal-material`, `clear-portal-lockout`, plus S1's `register-client-portal` | Storage, isolation, versions, hashing |
 
-Two seams are real because two adapters exist on day one: the basemap
-(`local-layers`, `vector-style`) and the package source (builder for new deals,
-extractor for the references). No other seam is introduced.
+One seam is real because two adapters exist on day one: the basemap
+(`local-layers`, `vector-style`). The reference extractor is not a second
+package source: it has exactly two inputs, runs once during migration, and is
+deleted with the cutover (S22). No other seam is introduced.
 
 ### Data package `carr.market-study.v1`
 
@@ -795,18 +841,26 @@ Synthetic example (fragment):
 }
 ```
 
+**Research package.** The research a partner or research job prepares for a new
+deal (demographics, developments, competition, ownership defaults, copy) is a
+*partial* `carr.market-study.v1` package: the same schema, validated by the same
+validator in partial mode, which only waives the record-layer groups. The
+builder overlays those groups from the record layer (`client`, `prepared`, the
+deal's properties and the slug) and validates the result in full. One format,
+one validator; there is no separate research schema.
+
 ### Where data and files live
 
 | Thing | Where | Key |
 |---|---|---|
 | Portal (slug, client, deal, password verifier, lockout) | `ops.client_portal` (exists, S1) | slug |
 | Publication (package hash, schema, published by and at) | new `ops.client_portal_publication` | slug + version |
-| Session | new `ops.client_portal_session` (session digest, slug, expiry) | digest |
+| Session | new `ops.client_portal_session` (session digest, slug, expiry); one row per slug signed in | digest |
 | Tour List | new `ops.client_portal_selection` (selected ids, notes by property, version) | slug |
 | Portal materials | `ops.client_portal_material` (exists), plus nullable `object_sha256`, `name`, `content_type`, `byte_size` | id |
 | Package JSON | R2 `carr-documents` `client-portal/<slug>/package/<sha256>.json` | content hash |
 | Photos, PDFs, logos, GeoJSON | R2 `carr-documents` `client-portal/<slug>/files/<sha256>` | content hash |
-| Research JSON for a new deal | R2 `carr-documents` `client-portal/<slug>/research/<sha256>.json` | content hash |
+| Research package (partial package) for a new deal | R2 `carr-documents` `client-portal/<slug>/research/<sha256>.json` | content hash |
 
 R2 doctrine: client documents are the bucket's only tenant, keys are structured
 by record, and deletion goes through record-layer verbs, never a raw bucket call.
@@ -817,12 +871,17 @@ by record, and deletion goes through record-layer verbs, never a raw bucket call
    Presentations" page that LEG-2 serves today.
 2. Without a valid session, `GET /<slug>/` returns 401 with the sign-in page
    branded from the portal's publication (client name and wordmark, which the
-   sign-in pages show publicly today). An unknown slug gets the same page shape,
-   so the response does not reveal which slugs exist.
+   sign-in pages show publicly today). An unknown slug returns 404. Slug
+   existence is not secret (D9): the client receives the URL, and the branded
+   page and the lockout message both name a real portal, so nothing tries to hide it.
 3. `POST /<slug>/` with the password calls the verify function. Success inserts a
-   session digest and sets `__Host-portal_session` (HttpOnly, Secure, SameSite=Lax,
-   7 days, matching today). Failure returns 401 with "incorrect password" or, when
-   locked, "too many attempts; try again after <time>" (D9).
+   session digest and sets a cookie named per portal, `__Host-portal-<slug>`
+   (HttpOnly, Secure, SameSite=Lax, `Path=/` as `__Host-` requires, 7 days,
+   matching today). Because each portal has its own cookie, signing in to one
+   portal never ends another portal's session in the same browser (a partner can
+   keep two clients' portals open before calls). Failure returns 401 with
+   "incorrect password" or, when locked, "too many attempts; try again after
+   <time>" (D9).
 4. With a valid session for that slug, the adapter serves the template shell; the
    template loads `/<slug>/package.json` and `/<slug>/files/<sha256>`, both
    released only for that session's slug. A session for slug A never releases
@@ -853,77 +912,112 @@ by record, and deletion goes through record-layer verbs, never a raw bucket call
 
 The check passes when a market study rebuilt by the generator from REF-A's and
 REF-V's own data matches the live sites item for item against the inventory
-above: every one of the 415 rows reports PASS or a declared allowed difference,
+above: every one of the 456 rows reports PASS or a declared allowed difference,
 and none reports FAIL.
 
 ### How the comparison runs
 
 One command, the same for a partner at the Studio and for CI:
-`./run.sh portal-parity --site <REF-A|REF-V> --reference <url> --candidate <url> --probes <file>`.
-It drives headless Chromium (Playwright) and writes one result line per inventory ID.
+`./run.sh portal-parity --site <REF-A|REF-V> --stage <0|1|2> --reference <url> --candidate <url> --probes <file> [--rows <ids>]`.
+It drives headless Chromium (Playwright) and writes one result line per inventory
+ID. `--rows` takes IDs and ranges (for example `--rows A-T40..A-T56,A-S16..A-S25`)
+so each template slice runs only its own rows; a full run omits it.
 
-**Stage 0, source fidelity (once per reference site, at the Studio).** A partner
-supplies the site password at run time through the terminal prompt; it is never
-stored, logged or committed. The harness signs in to the live site, requests every
-manifest path, and compares the SHA-256 of each released body with the matching
-file in the read-only source copy. Pass: every hash matches. This proves the
-source copies are what clients see, because the content keys cannot be read.
+**Stage 0, source fidelity and the live gate baseline (slice S6, before anything
+is built against the copies).** A partner supplies each site password at run time
+through the terminal prompt; it is never stored, logged or committed. The harness:
+
+- signs in to the live site, requests every manifest path, and compares the
+  SHA-256 of each released body with the matching file in the read-only source
+  copy. Pass: every hash matches. This proves the copies are what clients see,
+  because the content keys cannot be read back. The successful sign-in also proves
+  the password the partner will register in the migration is the live one.
+- runs every gate probe that needs no write and no induced fault against the live
+  site and records the observed status, headers and redirect per gate row: the
+  redirects, the sign-in page, a wrong password, every 404, 405, 403, 413, 415 and
+  400 path, HEAD without a session, and the Tour List API's read-side errors. This
+  recorded baseline is the reference for those gate rows. A wrong-password probe
+  counts toward nothing today (no lockout exists on the live sites) and the run
+  sends fewer than five.
 
 **Stage 1, extraction.** The reference extractor turns each source copy into a
 data package and its files. Pass: both packages validate against
 `carr.market-study.v1`, and every row marked D or T+D in the inventory maps to a
 package field (the probe file lists the field path per row).
 
-**Stage 2, item parity.** The reference is the source copy served locally from a
-scratch directory by a static server that mimics today's gate and selection API.
-The candidate is the template plus the extracted package served by `portal-web.js`
-under `wrangler dev` with local R2 and a disposable Postgres. Both run the same
-probe file. Each inventory row has exactly one probe of one of these kinds:
+**Stage 2, item parity.** The reference is the reference sites' own Worker modules
+(the REF-V module and the REF-A origin module, copied from the read-only sources
+into a scratch directory), run under Miniflare with a test content key and test
+password over the source files re-packed with that key. This is the real gate
+code, not a mimic, and Stage 0 proved the files equal what is live. The candidate
+is the template plus the extracted package served by `portal-web.js` under
+`wrangler dev` with local R2 and a disposable Postgres. Both run the same probe
+file. Each inventory row has exactly one probe of one of these kinds:
 
 | Probe kind | Used for | What is compared |
 |---|---|---|
 | `dom` | sections | Presence, heading text, visible text (whitespace-normalised) and a screenshot at 1440, 820 and 390 px wide with map canvases masked; pixel difference at most 0.5% |
 | `interaction` | tools | A scripted action (click, hover, focus, type, drag, select, slider) and the resulting DOM state, focus target and any request made |
 | `link` | links | `href`, `target`, `rel`, visible label, and the in-page destination or new-tab behaviour; external URLs are compared, not fetched |
-| `asset` | assets | SHA-256 of the released bytes and the `Content-Type` |
-| `http` | gate rows | Status, redirect target, headers, cookie attributes and the error text for each scripted request |
+| `media` | media assets: photos, PDFs, fonts, logos, SVG, GeoJSON | SHA-256 of the released bytes and the `Content-Type` |
+| `replaced` | code and data files the template and package replace (AD6) | Not compared as bytes. The row passes when Stage 1 mapped every field it held and every `dom`, `interaction` and `link` row it feeds passes |
+| `http` | gate rows | Status, `Allow` and other headers, redirect target and cookie attributes for each scripted request, against the Stage 0 live baseline; fault paths that cannot be induced on a live site (unconfigured secrets, storage down, decrypt failure, upstream failure) are compared against the reference modules under Miniflare |
 
 **Result.** The harness prints, per site, the inventory count, PASS, ALLOWED
-(with the allowed-difference ID) and FAIL. Pass for the slice is: REF-A 255 rows
-and REF-V 160 rows accounted for, FAIL = 0, and every ALLOWED cites a row of the
-table below. Results with no client values (IDs, verdicts, hashes) are posted to
-the Work Request; the run's screenshots stay on the Studio.
+(with the allowed-difference ID) and FAIL. Pass for the release is: REF-A 281
+rows and REF-V 175 rows accounted for, FAIL = 0, and every ALLOWED cites a row
+of the table below. A slice passes when FAIL = 0 on its own `--rows` set. Results
+with no client values (IDs, verdicts, hashes) are posted to the Work Request; the
+run's screenshots stay on the Studio.
 
 **CI.** Client data never reaches public CI. CI runs the harness against the
 synthetic fixture rendered by the same template, which proves the harness and the
-probe kinds, and the Stage 2 run against REF-A and REF-V happens at the Studio
+probe kinds. The Stage 2 runs against REF-A and REF-V happen at the Studio
 before each template release.
 
 ### Declared allowed differences
 
 | ID | Difference | Rows affected | Why |
 |---|---|---|---|
-| AD1 | MapLibre is self-hosted at one pinned version instead of two CDN versions | REF-A A-T05, A-A38, A-A39; REF-V V-A35, V-A36 | Map doctrine: one renderer; reports-web self-hosts |
-| AD2 | New session cookie name, server-side session, bcrypt verifier, five-failure lockout with a retry message; existing browser sessions sign in once more | A-G01, A-G04, A-G05, A-G11, V-G03, V-G04, V-G08 | S1 verifier and D8, D9 |
+| AD1 | MapLibre is self-hosted at one pinned version instead of two CDN versions | A-T05, A-A38, A-A39, V-A35, V-A36 | Map doctrine: one renderer; reports-web self-hosts |
+| AD2 | Per-portal cookie `__Host-portal-<slug>`, server-side session, bcrypt verifier, five-failure lockout with a retry message; error bodies use the portal's wording while status codes and `Allow` headers stay the same; existing browser sessions sign in once more | A-G04, A-G05, A-G11, V-G03, V-G04, V-G08, and the body text of A-G14 to A-G34 and V-G10 to V-G24 | S1 verifier and D8, D9 |
 | AD3 | The five REF-A redirect pages become 302 redirects to the same `#view` | A-L95 to A-L99, A-A06 to A-A10 | Same destination, no HTML file per view |
 | AD4 | Unreferenced files and build inputs are not served | V-A19 to V-A22, V-A33, V-A34, A-A05 | Nothing links to them |
 | AD5 | REF-V gains Sign Out | V-S02 | Template standard (REF-A has it) |
-| AD6 | `?v=` cache-busting query strings become content-hashed file names | A-A02, A-A03, A-A04 | Immutable caching |
+| AD6 | Code and data files are replaced by the template and the package: different bytes and content-hashed names instead of `?v=` query strings | A-A01 to A-A04, V-A01 to V-A09 | D3, D4; checked by the `replaced` probe |
 | AD7 | REF-V's password page uses the template sign-in page with the same client name, wordmark and password field | V-G02, V-G04 | One sign-in design |
+| AD8 | The edge proxy and its error paths are gone; the portal is served directly | A-G01, A-G35 to A-G39 | D6: one Worker, no second host |
 
 Any other difference is a FAIL until a partner adds it here with a reason.
 
 ## Migration that keeps every address and password working (AC1)
 
-1. **Register each existing portal.** A partner registers REF-A, REF-V, LEG-1 and
-   LEG-2 with `register-client-portal`, using each site's current slug and current
-   password (the client name, rule ac0a6579). The verb is partner-only and the
-   passwords cannot be read back from the current host, so this is a short desk
-   session, batched.
+Preconditions:
+
+- **S1 is live.** carr-system #2525 (`register-client-portal`) and app #453 must
+  be merged and deployed. S8 and every slice after it wait for that, server first.
+- **One deal per site.** `ops.register_client_portal` needs an existing deal whose
+  client is not merged, and refuses a second active portal on a deal. Before
+  registration, a partner resolves the deal for each of the four sites with
+  `get-deal-room` (by client), and where none exists (expected for LEG-1 and LEG-2,
+  which predate the deal record) creates one with the existing deal verb, marked
+  with the phase the client is actually in. Four sites, four deals, confirmed in
+  one desk session.
+- **Stage 0 passed** for REF-A and REF-V (S6), so the copies and passwords are
+  proven against the live sites.
+
+Steps:
+
+1. **Register each existing portal.** In the same desk session, a partner
+   registers REF-A, REF-V, LEG-1 and LEG-2 with `register-client-portal`, using
+   each site's current slug and current password (the client name, rule ac0a6579).
+   The verb is partner-only and the passwords cannot be read back from the current
+   host. For LEG-1 and LEG-2, the partner signs in to the live site with the same
+   password first, which proves it is the live one.
 2. **Publish the two reference packages** from Stage 1, and upload LEG-1 and LEG-2
-   as legacy bundles: their plaintext files (the local plaintext sources, checked
-   by Stage 0) served unchanged behind the same portal gate. LEG-2's top-level
-   `/recovery/` PDF paths become aliases inside the LEG-2 portal.
+   as legacy bundles: their plaintext files served unchanged behind the same portal
+   gate, after a Stage 0 hash check of each file against the live site. LEG-2's
+   top-level `/recovery/` PDF paths become aliases inside the LEG-2 portal.
 3. **Copy each Tour List.** Preferred: export each D1 row from the Sites projects,
    including REF-V's retired-listing entries and legacy notes column. Fallback: a
    partner signs in and the harness reads `GET /api/selection`, which omits the
@@ -938,130 +1032,168 @@ Any other difference is a FAIL until a partner adds it here with a reason.
    Worker route, and run the smoke set: every slug, its password, one file each,
    one Tour List read. Rollback is re-attaching the domain to the Sites project,
    which stays deployed untouched for 14 days.
-6. **Retire** the two Sites projects after 14 days with no rollback, as a removal.
+6. **Retire** the two Sites projects after 14 days with no rollback, as a removal,
+   and delete the reference extractor in the same removal.
 
 What changes for clients: nothing in the address or password. Each client signs
 in once more, because the old session cookie is not carried over (AD2).
 
 ## Slices
 
-Each slice fits one session or less. Order is smallest first within dependency
-order. Every job brief carries the Card line shown, and states the rule "never
-put client data in git; use the synthetic fixture".
+Each slice fits one session or less; none is larger than medium. Order is
+smallest first within dependency order. Every job brief carries the Card line
+shown, and states the rule "never put client data in git; use the synthetic
+fixture". A template slice passes when `./run.sh portal-parity --stage 2 --rows
+<its rows>` reports FAIL = 0 for both sites where the rows exist.
 
 | Slice | Size | Depends on | Card |
 |---|---|---|---|
 | S3 Glossary terms into the doctrine store | tiny | none | `Card: WR227.S3.J1` |
-| S4 Data package schema and synthetic fixture | small | none | `Card: WR227.S4.J1` |
-| S5 Parity harness and probe file | medium | S4 | `Card: WR227.S5.J1` |
-| S6 Reference extractor | medium | S4 | `Card: WR227.S6.J1` |
-| S7 Record-layer storage and isolation test | medium | S4 | `Card: WR227.S7.J1` |
-| S8 Template core (REF-V parity) | large | S5, S6 | `Card: WR227.S8.J1` |
-| S9 Template optional modules (REF-A parity) | large | S8 | `Card: WR227.S9.J1` |
-| S10 Portal adapter on staging | medium | S7, S8 | `Card: WR227.S10.J1` |
-| S11 Portal materials and Documents view | medium | S10 | `Card: WR227.S11.J1` |
-| S12 Roadmap view from the deal phase (AC2) | small | S10 | `Card: WR227.S12.J1` |
-| S13 The two explainers (AC4) | small | S12 | `Card: WR227.S13.J1` |
-| S14 Migration rehearsal on staging | medium | S9, S10, S11 | `Card: WR227.S14.J1` |
-| S15 Cutover and retirement | small | S14 | `Card: WR227.S15.J1` |
-| S16 Package builder from the deal record, and app actions | medium | S10 | `Card: WR227.S16.J1` |
+| S4 Data package schema, partial mode and synthetic fixture | small | none | `Card: WR227.S4.J1` |
+| S5 Parity harness, probe file and `--rows` | medium | S4 | `Card: WR227.S5.J1` |
+| S6 Stage 0: source fidelity and live gate baseline | small | S5 | `Card: WR227.S6.J1` |
+| S7 Reference extractor | medium | S4, S6 | `Card: WR227.S7.J1` |
+| S8 Record-layer storage and isolation test | medium | S4, #2525 merged | `Card: WR227.S8.J1` |
+| S9 Portal adapter on staging (all gate rows) | medium | S8 | `Card: WR227.S9.J1` |
+| S10 Template: shell, router, Home and Sources | medium | S7, S9 | `Card: WR227.S10.J1` |
+| S11 Template: Purchases | medium | S10 | `Card: WR227.S11.J1` |
+| S12 Template: Demographics core | medium | S10 | `Card: WR227.S12.J1` |
+| S13 Template: Tour List UI and Sign Out | small | S10 | `Card: WR227.S13.J1` |
+| S14 Template: ownership modeler | medium | S11 | `Card: WR227.S14.J1` |
+| S15 Template: micro-zones and competitor directory | medium | S12 | `Card: WR227.S15.J1` |
+| S16 Template: master-plan overlay and vector basemap | small | S10 | `Card: WR227.S16.J1` |
+| S17 Portal materials and Documents view | medium | S9 | `Card: WR227.S17.J1` |
+| S18 Roadmap view from the deal phase (AC2) | small | S9 | `Card: WR227.S18.J1` |
+| S19 The two explainers (AC4) | small | S18 | `Card: WR227.S19.J1` |
+| S20 Package builder from the deal record, and app actions | medium | S9, S4 | `Card: WR227.S20.J1` |
+| S21 Migration rehearsal on staging | medium | S11 to S17 | `Card: WR227.S21.J1` |
+| S22 Cutover, retirement and extractor deletion | small | S21 | `Card: WR227.S22.J1` |
+
+### Template row sets
+
+Every S, T, L and A row belongs to exactly one template slice, and every G row to
+S9. After S13 all 175 REF-V rows are covered; after S16 all 281 REF-A rows are.
+
+| Slice | REF-V rows | REF-A rows |
+|---|---|---|
+| S9 | V-G01..V-G24 | A-G01..A-G39, A-L95..A-L99, A-A05..A-A10 |
+| S10 | V-S01..V-S10, V-S25..V-S27, V-S30..V-S32, V-T01..V-T09, V-T13, V-T17, V-T18, V-L01..V-L13, V-L20..V-L22, V-L29, V-L33..V-L55, V-A01..V-A03, V-A06, V-A10..V-A13, V-A26..V-A36 | A-S01..A-S10, A-S35..A-S43, A-S45, A-S47, A-T01..A-T05, A-T07, A-T10, A-T11, A-T13, A-T16, A-T17, A-L01..A-L14, A-L18..A-L28, A-L30..A-L45, A-L76..A-L79, A-A01..A-A04, A-A11..A-A14, A-A23..A-A26, A-A38, A-A39 |
+| S11 | V-S11..V-S16, V-S28, V-S29, V-T10..V-T12, V-T14..V-T16, V-L14, V-L23, V-L30..V-L32, V-A04, V-A05, V-A14..V-A25 | A-S11..A-S15, A-S44, A-T09, A-T12, A-T14, A-T15, A-L15, A-L29, A-A15..A-A22, A-A34 |
+| S12 | V-S17..V-S23, V-T19..V-T22, V-L15..V-L19, V-L24..V-L28, V-A07, V-A08 | A-S27..A-S31, A-S34, A-T18..A-T21, A-L16, A-L46..A-L55 |
+| S13 | V-S24, V-T23..V-T28, V-A09 | A-S26, A-T32..A-T39 |
+| S14 | none | A-S16..A-S25, A-T40..A-T56, A-L80..A-L94 |
+| S15 | none | A-S32, A-S33, A-S46, A-T22..A-T31, A-L17, A-L56..A-L75, A-A27..A-A33, A-A35..A-A37 |
+| S16 | none | A-T06, A-T08, A-A40 |
+
+### Slice details
 
 **S3. Glossary terms into the doctrine store.** Write the nine terms above with
 `write-doctrine-section`. Acceptance: each term is returned by `search-doctrine`
 with this wording. Check: `search-doctrine` for each term after the write.
 
-**S4. Data package schema and synthetic fixture.** Add
-`client-portal/market-study.v1.schema.json` and a synthetic fixture that turns on
-every optional module. Acceptance: the fixture validates; ten named invalid
-fixtures (missing required group, raw HTML in rich text, non-https URL, unknown
-role, bad asset hash, and so on) are refused with the field path. Check:
-`node --test` over the schema tests.
+**S4. Data package schema, partial mode and synthetic fixture.** Add
+`client-portal/market-study.v1.schema.json`, a partial-mode validation that waives
+only the record-layer groups, and a synthetic fixture that turns on every optional
+module. Acceptance: the fixture validates; a partial fixture validates in partial
+mode and fails in full mode; ten named invalid fixtures (missing required group,
+raw HTML in rich text, non-https URL, unknown role, bad asset hash, and so on) are
+refused with the field path. Check: `node --test` over the schema tests.
 
-**S5. Parity harness and probe file.** Add the harness behind
-`./run.sh portal-parity` and a probe file with one probe per inventory ID (415),
-holding selectors and field paths but no client values. Acceptance: run against
-the synthetic fixture served twice, it reports PASS for every probe; with one
-deliberate DOM change it reports exactly that row as FAIL; the probe file's IDs
-equal the inventory IDs in this document. Check: harness self-test in CI.
+**S5. Parity harness, probe file and `--rows`.** Add the harness behind
+`./run.sh portal-parity` with stages 0 to 2, the six probe kinds and `--rows`, and
+a probe file with one probe per inventory ID (456) holding selectors, field paths
+and expected kinds but no client values. Acceptance: run against the synthetic
+fixture served twice, it reports PASS for every probe; one deliberate DOM change
+reports exactly that row as FAIL; `--rows` runs only the named rows; the probe
+file's IDs equal this document's inventory IDs. Check: harness self-test in CI.
 
-**S6. Reference extractor.** Add the extractor that reads a site folder (today's
-data files plus the hard-coded app.js values listed in the inventory) and writes a
-package and files to a private output directory outside the repo. Acceptance:
-both packages validate; every D and T+D row maps to a field; the extractor's tests
-use only synthetic copies of the data-file shapes. Check: `node --test` and a
-Studio run that prints only counts.
+**S6. Stage 0: source fidelity and the live gate baseline.** A partner runs Stage 0
+for REF-A and REF-V, typing each password at the prompt. Acceptance: every
+released file hashes equal to the source copy; the live gate baseline is recorded
+for every gate row Stage 0 can reach without writes or induced faults. Check: the
+harness report (IDs, verdicts, hashes only) posted to the Work Request.
 
-**S7. Record-layer storage and isolation test.** Migration for publication,
-session and selection tables and the material file columns; functions for verify,
-session lookup, package and file release, Tour List read and compare-and-swap;
-verbs `publish-market-study` and `clear-portal-lockout`. Acceptance: AC3, an
-automated Postgres test that one portal's session never returns another portal's
-package, file, Tour List or material, and never any internal note; lockout returns
-a reason; passwords never reach `tool_call` or `event`. Check: Postgres test suite
+**S7. Reference extractor.** A one-off migration tool that reads a site folder
+(today's data files plus the hard-coded app.js values the inventory marks) and
+writes a package and files to a private directory outside the repo. Acceptance:
+both packages validate; every D and T+D row maps to a field; tests use only
+synthetic copies of the data-file shapes. Check: `node --test` and a Studio run
+that prints only counts.
+
+**S8. Record-layer storage and isolation test.** Waits for #2525. Migration for
+publication, per-slug session and selection tables and the material file columns;
+functions for verify (returning `denied` or `locked`), session lookup, package and
+file release, Tour List read and compare-and-swap; verbs `publish-market-study`
+(full validation) and `clear-portal-lockout`. Acceptance: AC3, an automated
+Postgres test that one portal's session never returns another portal's package,
+file, Tour List or material, and never any internal note; lockout returns its
+reason; passwords never reach `tool_call` or `event`. Check: Postgres test suite
 plus the grant-contract test.
 
-**S8. Template core.** In doctorcre-app under `/portal/`: shell, hash router, Home,
-Purchases (directory, map, table, market-context card), Demographics core, Tour
-List UI, Sources, all dialogs, local-layers basemap, self-hosted MapLibre.
-Acceptance: Stage 2 for REF-V reports 160 rows with FAIL = 0. Check: the Studio
-parity run, plus the synthetic fixture run in CI.
+**S9. Portal adapter on staging.** `portal-web.js` with the routes above, wired to
+S8's functions, on a staging host, serving a minimal template shell. Acceptance:
+Stage 2 FAIL = 0 on every G row of both sites and on the REF-A redirect rows;
+Miniflare tests for each row, including per-portal cookies (signing in to one
+portal keeps another's session) and the lockout message. Check: Worker tests and
+`portal-parity --rows` for the S9 set on staging.
 
-**S9. Template optional modules.** Ownership modeler, micro-zones, competitor
-directory, master-plan overlay, vector-style basemap (with a provider rights
-receipt for the tile host). Acceptance: Stage 2 for REF-A reports 255 rows with
-FAIL = 0, and REF-V still 160 with FAIL = 0. Check: both Studio parity runs.
+**S10 to S16. Template slices.** Each builds its part of the template in
+doctorcre-app under `/portal/` and passes Stage 2 on its row set above. S10 also
+self-hosts MapLibre and the `local-layers` basemap. S13 completes REF-V (175 rows,
+FAIL = 0). S16 records a provider rights receipt for the vector tile host or swaps
+the basemap, and completes REF-A (281 rows, FAIL = 0). Check for each: the Studio
+parity run on its rows, plus the synthetic fixture run in CI.
 
-**S10. Portal adapter on staging.** `portal-web.js` with the routes above, wired
-to S7's functions, on a staging host. Acceptance: Miniflare tests for every gate
-row (redirects, sign-in, wrong password, lockout message, session isolation,
-CSRF, sign-out, headers); the synthetic portal works end to end on staging.
-Check: Worker tests and a staging smoke.
+**S17. Portal materials and Documents view.** Verbs `share-portal-material` and
+`withdraw-portal-material`, the file release route and the Documents view.
+Acceptance: a shared file appears and releases; a withdrawn file stops releasing at
+once; another portal cannot list or fetch it. Check: Postgres and Worker tests and
+a staging smoke.
 
-**S11. Portal materials and Documents view.** Verbs `share-portal-material` and
-`withdraw-portal-material`, file release route, Documents view in the template.
-Acceptance: a shared file appears and releases; a withdrawn file stops releasing
-at once; another portal cannot list or fetch it. Check: Postgres and Worker tests
-and a staging smoke.
+**S18. Roadmap view from the deal phase (AC2).** Render the roadmap that
+`ops.read_client_portal` already returns: every phase, the current one marked from
+the deal record. Acceptance: changing the deal phase changes the marked phase with
+no text entry. Check: Postgres test plus a template test.
 
-**S12. Roadmap view from the deal phase (AC2).** Render the roadmap that
-`ops.read_client_portal` already returns: every phase, current one marked from the
-deal record. Acceptance: changing the deal phase changes the marked phase with no
-text entry. Check: Postgres test plus a template test.
-
-**S13. The two explainers (AC4).** How the transaction goes, and why CARR, as
+**S19. The two explainers (AC4).** How the transaction goes, and why CARR, as
 portal sections. Acceptance: both pass the client-facing writing lint and an
 independent fresh-eyes review before any client sees them. Check: lint output and
 the reviewer's verdict on the PR.
 
-**S14. Migration rehearsal on staging.** Steps 1 to 4 of the migration with the
-partner desk session for registration. Acceptance: Stage 0 passes for REF-A and
-REF-V; Stage 2 passes on staging; every LEG-1 and LEG-2 address, password and file
-works on staging; Tour List rows match the source rows. Check: the harness report
-posted to the Work Request.
-
-**S15. Cutover and retirement.** Step 5 and, after 14 days, step 6. Acceptance:
-every existing address opens with its existing password on the production domain;
-the smoke set passes; rollback was rehearsed once on staging. Check: smoke report
-on the Work Request, and the retirement removal PR.
-
-**S16. Package builder from the deal record, and app actions.** Build a package
-from the deal and client record plus research JSON; deal-card "Publish market
+**S20. Package builder from the deal record, and app actions.** Overlay the
+record-layer groups onto a validated research package; deal-card "Publish market
 study" and "Share to portal" actions and a Tour List readout. Acceptance: a new
-synthetic deal goes from record to a live staging portal with no hand-written
-HTML; the partner sees the client's Tour List on the deal card. Measure, per
-decision d6c453ff: hours and model spend per new site before and after. Check:
-end-to-end staging test and the measurement posted to the Work Request.
+synthetic deal goes from record plus research package to a live staging portal
+with no hand-written HTML; the partner sees the client's Tour List on the deal
+card. Measure, per decision d6c453ff: hours and model spend per new site before
+and after. Check: end-to-end staging test and the measurement posted to the Work
+Request.
+
+**S21. Migration rehearsal on staging.** The preconditions and steps 1 to 4 of the
+migration, with the partner desk session for deals and registration. Acceptance:
+four deals resolved or created; four portals registered; full Stage 2 passes on
+staging for both sites; every LEG-1 and LEG-2 address, password and file works on
+staging; Tour List rows match the source rows. Check: the harness report posted to
+the Work Request.
+
+**S22. Cutover, retirement and extractor deletion.** Step 5 and, after 14 days,
+step 6. Acceptance: every existing address opens with its existing password on the
+production domain; the smoke set passes; rollback was rehearsed once on staging;
+the extractor is deleted. Check: smoke report on the Work Request, and the removal
+PR.
 
 ## Not verified in this slice
 
 - That the deployed ciphertext equals the read-only source copies. The content
-  keys are not readable; Stage 0 in S14 proves it.
+  keys are not readable; Stage 0 in S6 proves it before anything is built.
 - How the `share.doctorcre.com` custom domain is wired in DNS today (Sites-managed
-  or a record in the Cloudflare zone). S15 checks it before cutover.
-- Whether the Sites projects allow a D1 export. S14 tries it; the fallback is
+  or a record in the Cloudflare zone). S22 checks it before cutover.
+- Whether the Sites projects allow a D1 export. S21 tries it; the fallback is
   stated in migration step 3.
 - Runtime behaviour of the live sites. This inventory comes from reading the code
-  and data, not from clicking through the signed-in sites.
-- A provider rights receipt for the vector tile host used by REF-A. S9 records one
-  or swaps the basemap.
+  and data, not from clicking through the signed-in sites; S6 records the live
+  gate behaviour.
+- Which deals LEG-1 and LEG-2 belong to. S21 resolves or creates them.
+- A provider rights receipt for the vector tile host used by REF-A. S16 records
+  one or swaps the basemap.
 - LEG-1 and LEG-2 internals beyond their routes and gates; they move unchanged.
