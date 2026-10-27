@@ -165,6 +165,29 @@ test("Jev deal read requires a partner session and same-origin one-deal request"
   assert.equal(readCount, 1);
 });
 
+test("Jev refuses an exhausted browser budget before record or external AI work", async () => {
+  const environment = env();
+  environment.VERB_REQUEST_HUMAN_FILTER = { limit: async () => ({ success: true }) };
+  environment.VERB_REQUEST_BUDGET = {
+    idFromName: key => key,
+    get: () => ({ fetch: async () => Response.json({ allowed: false, retryAfter: 23 }) }),
+  };
+  const handler = createDealroomHandler({
+    ...identityOverrides("joe.bookout.carr.us@gmail.com"),
+    jevDealRecordReader: async () => assert.fail("refused Jev request read deal records"),
+    jevDealRead: async () => assert.fail("refused Jev request called external AI"),
+  });
+  const callback = await login(handler, environment, "joe.bookout.carr.us@gmail.com");
+  const response = await handler.fetch(new Request("https://dealroom.doctorcre.com/api/v1/jev-deal-reading", {
+    method: "POST", headers: { origin: "https://dealroom.doctorcre.com",
+      cookie: namedCookie(callback, "__Host-dealroom_session") },
+    body: JSON.stringify({ deal: "00000000-0000-4000-8000-000000000001" }),
+  }), environment, {});
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get("retry-after"), "23");
+  assert.equal(response.headers.get("cache-control"), "no-store");
+});
+
 test("independent DoctorCRE host owns its OAuth origin and cannot replay sessions across allowed hosts", async () => {
   const environment = {
     ...env(STAGING_HOST),
