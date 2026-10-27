@@ -33,6 +33,8 @@ THE ASSERTIONS.
      [env.staging] carries an explicit `routes = []`. A domain in
      the matrix that wrangler does not serve is fiction; a route wrangler serves
      that the matrix does not name is an undeclared production surface.
+  7. NO ENVIRONMENT EXPOSES WORKERS.DEV OR PREVIEW URLS. Explicit false values
+     prevent deployments from undoing the billing audit's public URL shutoff.
   5. EVERY OBSERVED STAGING-VS-PRODUCTION BINDING DIFFERENCE IS NAMED. Matched
      by keyword against intentional_differences, which is deliberately a loose
      match: the point is that a human wrote a sentence about it, not that the
@@ -40,8 +42,6 @@ THE ASSERTIONS.
   6. BOTH WORKERS CARRY A CPU CAP. Workers Paid has no spend ceiling, so the
      top-level `[limits] cpu_ms` is what bounds one invocation's CPU; staging
      inherits it, and a staging override may only lower it.
-  8. NO ENVIRONMENT EXPOSES WORKERS.DEV OR PREVIEW URLS. Explicit false values
-     prevent deployments from undoing the billing audit's public URL shutoff.
 """
 
 import json
@@ -171,6 +171,11 @@ def main() -> int:
           and "route" not in stg_cfg,
           f"[env.staging] routes={stg_cfg.get('routes', '<missing: inherits production>')!r}")
 
+    for name, config in [("production", wrangler), *wrangler.get("env", {}).items()]:
+        for setting in ("workers_dev", "preview_urls"):
+            check(f"7. {name} disables {setting}", config.get(setting) is False,
+                  f"{setting} must be explicitly false")
+
     # ── 5 ────────────────────────────────────────────────────────────────────
     prod_kv = {k.get("id") for k in wrangler.get("kv_namespaces", [])}
     stg_kv = {k.get("id") for k in stg_cfg.get("kv_namespaces", [])}
@@ -202,11 +207,6 @@ def main() -> int:
           isinstance(cpu_cap, int) and 0 < cpu_cap < 30_000
           and isinstance(stg_cap, int) and 0 < stg_cap <= cpu_cap,
           f"[limits] cpu_ms={cpu_cap!r}, [env.staging.limits] cpu_ms={stg_cap!r}")
-
-    for name, config in [("production", wrangler), *wrangler.get("env", {}).items()]:
-        for setting in ("workers_dev", "preview_urls"):
-            check(f"8. {name} disables {setting}", config.get(setting) is False,
-                  f"{setting} must be explicitly false")
 
     print()
     if FAILURES:
