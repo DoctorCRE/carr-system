@@ -15,6 +15,7 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "@babel/parser": "7.28.5",
     "esbuild": "0.28.1",
     "json-schema-to-typescript": "16.0.0",
     "neonctl": "2.38.5",
