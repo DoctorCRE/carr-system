@@ -24,7 +24,7 @@
 // naming those constructs in a comment here would move the frontier and cost a
 // registry successor.
 
-const SNAPSHOT = new Map();
+const SNAPSHOT = new Map<string, unknown>();
 
 /**
  * Replace the snapshot with exactly the entries given.
@@ -35,11 +35,11 @@ const SNAPSHOT = new Map();
  * plain object keyed by reference. Each body is frozen on the way in, so a
  * later holder of the same object cannot edit what the evaluator already read.
  */
-export function installReleaseReceiptSnapshot(entries) {
+export function installReleaseReceiptSnapshot(entries: Iterable<[string, unknown]> | Record<string, unknown> | null | undefined) {
   SNAPSHOT.clear();
   const pairs = entries == null
     ? []
-    : (typeof entries[Symbol.iterator] === "function" ? [...entries] : Object.entries(entries));
+    : (typeof (entries as { [Symbol.iterator]?: unknown })[Symbol.iterator] === "function" ? [...(entries as Iterable<[string, unknown]>)] : Object.entries(entries));
   for (const [receiptRef, body] of pairs) {
     if (typeof receiptRef !== "string" || receiptRef.length === 0) continue;
     SNAPSHOT.set(receiptRef, deepFreeze(structuredClone(body)));
@@ -47,7 +47,7 @@ export function installReleaseReceiptSnapshot(entries) {
   return SNAPSHOT.size;
 }
 
-function deepFreeze(value) {
+function deepFreeze(value: unknown): unknown {
   if (Array.isArray(value)) { value.forEach(deepFreeze); return Object.freeze(value); }
   if (value !== null && typeof value === "object") {
     Object.values(value).forEach(deepFreeze);
@@ -62,7 +62,7 @@ function deepFreeze(value) {
  * reference — which is a bound holder that holds nothing, not an absent seam.
  */
 export const RELEASE_RECEIPT_HOLDER = Object.freeze({
-  resolveReceipt(receiptRef) {
+  resolveReceipt(receiptRef: string) {
     return SNAPSHOT.get(receiptRef) ?? null;
   },
 });

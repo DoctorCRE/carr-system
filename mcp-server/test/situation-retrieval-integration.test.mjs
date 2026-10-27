@@ -226,7 +226,7 @@ test("no read verb filters the actor table on a column carr_reader cannot read",
 
   const unclassified = found.filter(f =>
     !(CLASSIFIED[f.name] ||
-      (f.name === "relationship-network.js" && /join public\.actor a on a\.id=/.test(f.literal) && !/\ba\.(?:kind|active)\b/.test(f.literal)) ||
+      (f.name === "relationship-network.ts" && /join public\.actor a on a\.id=/.test(f.literal) && !/\ba\.(?:kind|active)\b/.test(f.literal)) ||
       (f.name === "memory.js" && memoryWriteLiteralClassified(f.literal)) ||
       // undo-lead-move is a partner-only writer. Its predecessor association
       // must authenticate the historical approver; no read handler uses this SQL.

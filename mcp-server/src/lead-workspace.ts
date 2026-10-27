@@ -1,4 +1,11 @@
 // Read lead workspace data and validate lifecycle reviews.
+import type { Db, VerbInputs } from "./verb-contract.ts";
+
+// The validator checks each field before returning a normalized review.
+type StageReview = NonNullable<VerbInputs["update-lead"]["stage_review"]>;
+// The existing default is Error; production injects the structured ToolError.
+type ErrorConstructor = new (payload: any) => Error;
+
 import { isCalendarDate } from "./calendar-date.ts";
 
 // Optional authenticated Leads workspace; the legacy board has live callers.
@@ -15,7 +22,7 @@ export const LEAD_WORKSPACE_SCHEMA = {
   },
 };
 
-export async function readLeadWorkspace(c, args = {}, ToolError = Error) {
+export async function readLeadWorkspace(c: Db, args: VerbInputs["lead-board"] = {}, ToolError: ErrorConstructor = Error) {
   const cursor = args.correspondence_cursor;
   if ((cursor !== undefined && (!cursor || typeof cursor !== "object" || Array.isArray(cursor) ||
       Object.keys(cursor).length !== 2 ||
@@ -64,7 +71,7 @@ export async function readLeadWorkspace(c, args = {}, ToolError = Error) {
     ...(args.lead_id ? { detail: row.detail } : {}) };
 }
 
-export function validateStageReview(review, fields, ToolError) {
+export function validateStageReview(review: StageReview, fields: object, ToolError: ErrorConstructor) {
   const allowed = new Set(["reason","evidence_ids","undo_event_id","human_quote"]);
   if (!review || typeof review !== "object" || Array.isArray(review) ||
       Object.keys(review).some(key => !allowed.has(key)) ||
@@ -79,7 +86,7 @@ export function validateStageReview(review, fields, ToolError) {
   return { ...review, evidence_ids: [...new Set(review.evidence_ids.map(id => id.toLowerCase()))] };
 }
 
-export async function lockLeadLifecycle(c, leadId, clientId = null) {
+export async function lockLeadLifecycle(c: Db, leadId: string, clientId: string | null = null) {
   // Lead lock is acquired by versionGuard first; then clients by ID, then
   // parties by ID. FOR SHARE protects lifecycle UPDATEs (KEY SHARE does not).
   const clients = (await c.query(`select id,party_id from client where id=$1::uuid

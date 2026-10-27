@@ -18,7 +18,7 @@ def declared_checks(catalog):
             if path.startswith('ops/') and path.endswith('.py')]
 
 
-def unwired_checks(catalog, ci, gates_source=""):
+def unwired_checks(catalog, ci, runners=None):
     order = re.search(r'^CLASS_ORDER="([^"]+)"', ci, re.M)
     active = set(order[1].split()) if order else set()
     calls = set()
@@ -32,8 +32,15 @@ def unwired_checks(catalog, ci, gates_source=""):
                 r'(?:run_quiet\s+"[^"]+"\s+)?'
                 r'"\$PY"\s+(?:"(ops/[^"]+)"|(ops/[\w./-]+))', text, re.M)}
         calls.update(checker_calls(body))
-        if 'ops/ci-gates.py' in checker_calls(body) and gates_source:
-            module = ast.parse(gates_source)
+        for variable, values, loop in re.findall(
+                r'for (\w+) in ([^;]+); do\n(.*?)^  done', body, re.M | re.S):
+            if f'ops/${variable}.py' in checker_calls(loop):
+                calls.update(f'ops/{value}.py' for value in shlex.split(values, comments=True))
+    for runner, source in (runners or {}).items():
+        if runner not in calls:
+            continue
+        if runner == 'ops/ci-gates.py':
+            module = ast.parse(source)
             inventories = [ast.literal_eval(node.value) for node in module.body
                            if isinstance(node, ast.Assign)
                            and any(isinstance(t, ast.Name) and t.id == 'INVARIANTS' for t in node.targets)]
@@ -45,10 +52,11 @@ def unwired_checks(catalog, ci, gates_source=""):
                         for call in ast.walk(node)) for node in ast.walk(module))
             if inventories and executes:
                 calls.update(f'ops/{name}.py' for name in inventories[0])
-        for variable, values, loop in re.findall(
-                r'for (\w+) in ([^;]+); do\n(.*?)^  done', body, re.M | re.S):
-            if f'ops/${variable}.py' in checker_calls(loop):
-                calls.update(f'ops/{value}.py' for value in shlex.split(values, comments=True))
+        for node in ast.walk(ast.parse(source)):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == 'py' and len(node.args) >= 2
+                    and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str)):
+                calls.add(node.args[1].value)
     return sorted(
         f'{name}: {path}'
         for name, path in declared_checks(catalog) if path not in calls
@@ -66,7 +74,8 @@ class EnforcementWiringTest(unittest.TestCase):
         mapping = json.loads((REPO / 'ops/config/rule-enforcement-map.json').read_text())
         self.assertEqual([], unwired_checks(mapping['control_catalog'],
                                            (REPO / 'ops/ci.sh').read_text(),
-                                           (REPO / 'ops/ci-gates.py').read_text()))
+                                           {path: (REPO / path).read_text() for path in
+                                            ('ops/ci-migration.py', 'ops/ci-gates.py')}))
         for name, path in declared_checks(mapping['control_catalog']):
             self.assertTrue((REPO / path).is_file(), f'{name}: missing {path}')
 
@@ -75,13 +84,13 @@ class EnforcementWiringTest(unittest.TestCase):
         catalog = {'order': {'failure_mode': 'CI failure',
                              'implementation': ['ops/migration-order-gate.py']}}
         ci = self.ci('  "$PY" ops/ci-gates.py --logdir "$LOGDIR"')
-        self.assertEqual([], unwired_checks(catalog, ci, source))
+        self.assertEqual([], unwired_checks(catalog, ci, {'ops/ci-gates.py': source}))
         for broken_ci, broken_source in (
                 (ci.replace('"$PY"', 'echo'), source),
                 (ci.replace('"gates"', '"unit"'), source),
                 (ci, source.replace('self.execute(', 'self.describe('))):
             self.assertEqual(['order: ops/migration-order-gate.py'],
-                             unwired_checks(catalog, broken_ci, broken_source))
+                             unwired_checks(catalog, broken_ci, {'ops/ci-gates.py': broken_source}))
 
     def test_selftest_comment_and_echo_are_not_checker_calls(self):
         ci = self.ci('  "$PY" ops/example-selftest.py\n'
@@ -94,6 +103,15 @@ class EnforcementWiringTest(unittest.TestCase):
         self.assertEqual([], unwired_checks(self.catalog, ci))
         self.assertEqual(['example: ops/example-check.py'],
                          unwired_checks(self.catalog, ci.replace('"gates"', '"unit"')))
+
+    def test_python_runner_must_be_called_and_execute_checker(self):
+        ci = self.ci('  "$PY" ops/ci-migration.py')
+        runner = {'ops/ci-migration.py': 'self.py("log", "ops/example-check.py", "failure")'}
+        self.assertEqual([], unwired_checks(self.catalog, ci, runner))
+        self.assertEqual(['example: ops/example-check.py'],
+                         unwired_checks(self.catalog, ci.replace('"gates"', '"unit"'), runner))
+        self.assertEqual(['example: ops/example-check.py'], unwired_checks(
+            self.catalog, ci, {'ops/ci-migration.py': '"ops/example-check.py"'}))
 
     def test_inventory_requires_execution(self):
         ci = self.ci('  for inv in example-check; do\n'

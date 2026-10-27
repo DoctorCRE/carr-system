@@ -35,7 +35,7 @@
 // the readers suite asserts by source that its module defines NONE.
 
 /** Amendment 2's closed shape, applied to `callable`. */
-export function closedCallable(callable) {
+export function closedCallable<Args extends unknown[], Result>(callable: (...args: Args) => Result) {
   const closed = callable.bind(null);
   Object.defineProperty(closed, Symbol.hasInstance, {
     value: () => false, writable: false, enumerable: false, configurable: false,

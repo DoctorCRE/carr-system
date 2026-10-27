@@ -1,29 +1,22 @@
 #!/usr/bin/env python3
-"""hxprobe-source-digest.py — BUILD-SHA256 must describe the vendor/hxprobe tree it sits in.
+"""Verify the decoder source receipt and install a tested, locked local build.
 
-Line 1 of vendor/hxprobe/BUILD-SHA256 is the macOS release binary's SHA-256, and
-bin/install-outlook-intake.sh installs a decoder only when its local build
-matches it. That hash embeds Joe's Homebrew Cargo paths, so no CI runner can
-rebuild it. A decoder PR that forgot to refresh the receipt therefore merged
-green and the Studio installer refused the upgrade (WR-000515).
-
-The receipt also records a digest of the crate's source. This check recomputes
-it on Linux, so a source change without a refreshed receipt fails CI. Refresh
-both together after the macOS release build:
-
-  python3 ops/hxprobe-source-digest.py --write
-
-ops/hxprobe-source-digest-selftest.py runs the check in the CI gates class.
-
-Every file in the crate counts except the receipt itself, documentation, and
-Cargo's target directory. The atlas and generator used by build.rs also count.
+The source digest covers the crate, atlas, and atlas generator on every host.
+BUILD-SHA256's first line records one reference build, whose binary hash can
+vary by toolchain and Cargo home. Installation verifies the source digest,
+runs locked release tests and build, then records the local artifact hash.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
+import json
+import os
 import re
 import sys
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 CRATE = Path(__file__).resolve().parents[1] / 'vendor/hxprobe'
@@ -60,10 +53,36 @@ def write(crate: Path) -> None:
     receipt.write_text(f'{first}\n{rest}')
 
 
+def build(crate: Path, vendor: Path, source_digest: str) -> None:
+    target = vendor / 'build'
+    for command in ('test', 'build'):
+        subprocess.run(['cargo', command, '--release', '--locked', '--quiet', '--target-dir', str(target)],
+                       cwd=crate, check=True)
+    built = target / 'release/hxprobe'
+    receipt = {
+        'source_digest': source_digest,
+        'binary_sha256': hashlib.sha256(built.read_bytes()).hexdigest(),
+        'cargo': subprocess.run(['cargo', '--version'], check=True, capture_output=True, text=True).stdout.strip(),
+        'rustc': subprocess.run(['rustc', '-vV'], check=True, capture_output=True, text=True).stdout.strip(),
+    }
+    decoder = vendor / 'hxprobe/target/release/hxprobe'
+    decoder.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=vendor) as temp:
+        staged = Path(temp) / 'hxprobe'
+        shutil.copyfile(built, staged)
+        staged.chmod(0o700)
+        local_receipt = Path(temp) / 'receipt.json'
+        local_receipt.write_text(json.dumps(receipt, indent=2) + '\n')
+        os.replace(staged, decoder)
+        os.replace(local_receipt, vendor / '.carr-build.json')
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--crate', type=Path, default=CRATE)
-    parser.add_argument('--write', action='store_true', help='record the current digest in the receipt')
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument('--write', action='store_true', help='record the current digest in the receipt')
+    action.add_argument('--build-into', type=Path, help='install a tested local build under this vendor directory')
     args = parser.parse_args(argv)
     if args.write:
         write(args.crate)
@@ -71,10 +90,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     have, want = recorded(args.crate), digest(args.crate)
     if have == want:
+        if args.build_into:
+            try:
+                build(args.crate, args.build_into, want)
+            except (OSError, subprocess.SubprocessError) as error:
+                print(f'hxprobe-source-digest: decoder build or installation failed: {error}', file=sys.stderr)
+                return 1
         print(f'hxprobe-source-digest: {RECEIPT} describes this source tree ({want[:12]})')
         return 0
     print(f'hxprobe-source-digest: {RECEIPT} records source {have or "(none)"} but the tree is {want}.\n'
-          '  Rebuild on the Studio with `cargo build --release --locked`, put the binary SHA-256 on line 1,\n'
+          '  Refresh the reference build with `cargo build --release --locked` and its SHA-256 on line 1,\n'
           '  then run `python3 ops/hxprobe-source-digest.py --write` and commit both.', file=sys.stderr)
     return 1
 

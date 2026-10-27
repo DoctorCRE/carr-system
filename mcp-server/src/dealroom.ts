@@ -1,6 +1,12 @@
 // Deal Room polling surface. Authentication stays outside this module: callers
 // pass the already-resolved actor and an injected query client. That keeps the
 // contract mountable behind both OAuth and the Deal Room session-cookie gate.
+import type { Actor, Db } from "./verb-contract.ts";
+
+type PipelineCursor = { recorded_at: string; id: string };
+// Patch values are untrusted and checked field by field below.
+type PatchValue = any;
+
 
 const JSON_HEADERS = { "content-type": "application/json" };
 const PLACEHOLDER_FIELDS = new Set([
@@ -8,27 +14,27 @@ const PLACEHOLDER_FIELDS = new Set([
   "sf_close_date_placeholder",
 ]);
 
-const json = (body, status = 200) =>
+const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
 
-function base64UrlEncode(text) {
+function base64UrlEncode(text: string) {
   const bytes = new TextEncoder().encode(text);
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function base64UrlDecode(text) {
+function base64UrlDecode(text: string) {
   const padded = text.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (text.length % 4)) % 4);
   const binary = atob(padded);
   return new TextDecoder().decode(Uint8Array.from(binary, ch => ch.charCodeAt(0)));
 }
 
-export function encodePipelineCursor(recordedAt, id) {
+export function encodePipelineCursor(recordedAt: string, id: string) {
   return base64UrlEncode(JSON.stringify({ recorded_at: recordedAt, id }));
 }
 
-export function decodePipelineCursor(cursor) {
+export function decodePipelineCursor(cursor: string | null | undefined): PipelineCursor | null {
   if (!cursor) return null;
   try {
     const decoded = JSON.parse(base64UrlDecode(cursor));
@@ -49,7 +55,7 @@ export function decodePipelineCursor(cursor) {
 
 // Defense in depth over the SQL view: a historical field-less event may carry
 // an object, so recursively remove placeholder keys from every response shape.
-export function stripDealPlaceholders(value) {
+export function stripDealPlaceholders(value: unknown): any {
   if (Array.isArray(value)) return value.map(stripDealPlaceholders);
   if (value && typeof value === "object") {
     return Object.fromEntries(Object.entries(value)
@@ -59,7 +65,7 @@ export function stripDealPlaceholders(value) {
   return value;
 }
 
-export async function pipelineChanges(request, client, actor, options = {}) {
+export async function pipelineChanges(request: Request, client: Db, actor: Actor | null | undefined, options: { limit?: number } = {}) {
   if (!actor) return json({ error: "unauthorized" }, 401);
   if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
 
@@ -116,7 +122,7 @@ export async function pipelineChanges(request, client, actor, options = {}) {
 export const DEAL_ROOM_FIELDS = Object.freeze(["phase", "owner", "attention", "next_date", "operating_state"]);
 const PARKING_REASONS = Object.freeze(["prospect_never_active", "client_paused", "other"]);
 
-function dealRoomFieldError(field, value) {
+function dealRoomFieldError(field: string, value: PatchValue) {
   if (!DEAL_ROOM_FIELDS.includes(field))
     return { error: "field_not_patchable", field, allowed: DEAL_ROOM_FIELDS };
   if (field === "attention" && typeof value !== "boolean")
@@ -143,18 +149,18 @@ function dealRoomFieldError(field, value) {
   return null;
 }
 
-export function validDealRoomValue(field, value) {
+export function validDealRoomValue(field: string, value: PatchValue) {
   return dealRoomFieldError(field, value) === null;
 }
 
 // Project only validated values, excluding any unrelated or sensitive keys.
-export function dealRoomEvidenceValue(field, value) {
+export function dealRoomEvidenceValue(field: string, value: PatchValue) {
   if (!validDealRoomValue(field, value)) return null;
   if (field !== "operating_state") return value;
   return { state: value.state, reason: value.reason ?? null, note: value.note ?? null };
 }
 
-export function assertDealRoomField(field, value, ToolError) {
+export function assertDealRoomField(field: string, value: PatchValue, ToolError: new (payload: object) => Error) {
   const error = dealRoomFieldError(field, value);
   if (error) throw new ToolError(error);
 }

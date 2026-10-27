@@ -1,5 +1,5 @@
 // Expose progress board summaries and answer tools.
-import { observeBoardLinkage } from './work-linkage.js';
+import { observeBoardLinkage } from './work-linkage.ts';
 import { ToolError } from "./tool-error.ts";
 import { organizationTenantForActor } from "./identity.js";
 import { NEEDS_JOE_LOCAL_BOARD } from "./needs-joe.js";

@@ -38,7 +38,8 @@ def ci_fixture():
     with tempfile.TemporaryDirectory(prefix="carr-ci-fixture-") as directory:
         root = pathlib.Path(directory)
         for rel in (
-            "ops/ci.sh", "ops/ci-gates.py", "ops/ci-pushfloor.py", "ops/node_test_summary.py", "tools/codemap.py",
+            "ops/ci.sh", "ops/ci-gates.py", "ops/ci-pushfloor.py", "ops/ci-migration.py",
+            "ops/node_test_summary.py", "tools/codemap.py",
             "ops/ci-secret-scan.py", "ops/pii_guard.py", "ops/ci-dep-check.py",
             "ops/git_env.py", "ops/no-client-deliverables-gate.py",
             "ops/hook-deletion-check.py", "ops/githooks/path-hygiene-check.py",
@@ -393,67 +394,6 @@ def test_contract_rejects_platform_postgres_defaults():
         rc, output = run(['--strict', '--only', 'contract'], root=root)
         check('contract rejects PostgreSQL paths outside the resolver',
               rc == 1 and 'PostgreSQL paths must use lib/disposable_pg_fixture.py' in output)
-
-
-def test_migration_partitions_execute_complete_inventory():
-    import shlex
-    with tempfile.TemporaryDirectory() as directory:
-        root = pathlib.Path(directory)
-        shim = root / "program"
-        shim.write_text('#!/bin/bash\necho "$*" >> "$CALLS"\n'
-                        '[[ "${FAIL_PROGRAM:-}" != "" && "$*" == *"$FAIL_PROGRAM"* ]] && exit 9\n'
-                        'if [[ "$*" == *"ci-migration-gates.py"* && "$*" != *"--sql-proof"* '
-                        '&& ! -f "$SERVICE_CATALOG" ]]; then exit 9; fi\nexit 0\n')
-        shim.chmod(0o755)
-        (root / "psql").symlink_to(shim)
-        body = _ci_function_body("check_migration_fixtures", "check_binding")
-        prefix = "\n".join(("set -uo pipefail", f"PY={shlex.quote(str(shim))}",
-            f"LOGDIR={shlex.quote(str(root))}", "STRICT=1", "FAILED=0",
-            "bad() { FAILED=1; }", "ok() { :; }", "skip() { FAILED=1; }",
-            'run_quiet() { local log="$1"; shift; echo "$*" >> "$CALLS"; '
-            '[[ "${FAIL_PROGRAM:-}" != "" && "$*" == *"$FAIL_PROGRAM"* ]] && return 9; '
-            '[[ "$*" == *"tools/ops-record.py sync-registry"* ]] && touch "$SERVICE_CATALOG"; '
-            'printf "r03_recovered_health\\njoe,3,3,3,0,0,0,0,1,0,0,0,0,0,No open\\n'
-            'r03_actor_mismatch_health\\njoe,4,3,3,0,1,1,1,1,0,0,0,0,0,On missing\\n" > "$log"; }'))
-        def run(part, fail=""):
-            calls = root / "calls"
-            calls.write_text("")
-            (root / "service-catalog").unlink(missing_ok=True)
-            result = subprocess.run(["bash", "-c", prefix + f"\nMIGRATION_PART={part}\n" + body +
-                                     '\ncheck_migration; exit "$FAILED"'], cwd=REPO,
-                env={**scrubbed_env(), "PATH": directory + os.pathsep + os.environ["PATH"],
-                     "CALLS": str(calls), "CARR_CI_DATABASE_URL": "postgres://ci@127.0.0.1:55432/ci",
-                     "SERVICE_CATALOG": str(root / "service-catalog"),
-                     "FAIL_PROGRAM": fail}, capture_output=True, text=True)
-            return result.returncode, set(calls.read_text().splitlines())
-        fixtures = {}
-        for part in ("reconstruction", "equivalence", "shadow", "fixtures", "proofs", "gates", "acceptance", "core"):
-            rc, fixtures[part] = run(part)
-            check(f"migration {part} partition executes", rc == 0)
-        check("fixture partition union retains the complete canonical fixture inventory",
-              fixtures["reconstruction"] | fixtures["equivalence"] | fixtures["shadow"] == fixtures["fixtures"])
-        check("PR fixture partitions execute restore security parity", any(
-              "restore-rehearse-record-selftest.py --postgres" in call
-              for part in ("reconstruction", "equivalence", "shadow") for call in fixtures[part]))
-        check("restore security failure fails the PR fixture verdict",
-              run("equivalence", "restore-rehearse-record-selftest.py")[0] == 1)
-        check("core partition union retains every canonical database command",
-              fixtures["proofs"] | fixtures["gates"] == fixtures["core"])
-        check("consumer partition excludes DB gate commands", not any(
-              "ci-migration-gates.py --logdir" in call and "--sql-proof" not in call
-              for call in fixtures["proofs"]))
-        check("DB gate partition excludes consumer proofs", not any(
-              "node --test" in call for call in fixtures["gates"]))
-        check("the gate partition runs every DB gate in one runner", any(
-              "ci-migration-gates.py --logdir" in call and "--partition" not in call
-              for call in fixtures["gates"]))
-        check("acceptance bootstrap excludes consumer and gate programs", not any(
-              "node --test" in call or "ci-migration-gates.py --logdir" in call
-              for call in fixtures["acceptance"]))
-        check("a failing partition fails the migration verdict", run("reconstruction", "schema-reconstruction-selftest.py")[0] == 1)
-        rc, calls = run("gates", "tools/ops-record.py sync-registry")
-        check("service-catalog bootstrap failure stops database gates", rc == 1 and not any(
-              "ci-migration-gates.py --logdir" in call for call in calls))
 
 
 def test_gate_shards_execute_a_disjoint_complete_inventory():
@@ -1540,7 +1480,6 @@ def main(argv=None):
                test_hxprobe_runs_locked_checks_and_propagates_failures,
                test_gates_build_hxprobe_before_parallel_selftests,
                test_gate_shards_execute_a_disjoint_complete_inventory,
-               test_migration_partitions_execute_complete_inventory,
                test_contract_rejects_platform_postgres_defaults,
                test_hosted_migration_ownership,
                test_hosted_draft_lifecycle,
