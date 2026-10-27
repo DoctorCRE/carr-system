@@ -1,4 +1,4 @@
-// Server-side confidence bar: a pipeline-call change applies without a card only if this returns null.
+// Server-side bar a pipeline-call change must clear to auto-apply instead of staying a card.
 const words = text => String(text ?? "").trim().split(/\s+/).filter(Boolean).length;
 
 export function automaticApplyHold(candidate) {
