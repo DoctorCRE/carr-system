@@ -94,6 +94,9 @@ test('known lifecycle and group gaps retain candidate openings and their uncerta
   assert.ok(result.calendar.notes.some(note => note.includes('group')));
   const reviewsTrimmed = await read(client(snapshot([], { warnings: [{ code: 'follow_up_trimmed', count: 1 }] })));
   assert.equal(reviewsTrimmed.calendar.scheduling.items.length, 1);
+  const cancelled = await read(client(snapshot([], { warnings: [{ code: 'canceled_hidden', count: 2 }] })));
+  assert.equal(cancelled.calendar.scheduling.state, 'partial', 'a cancelled meeting takes no time');
+  assert.equal(cancelled.calendar.scheduling.items.length, 1);
 });
 
 test('failed calendar reads retain vendor results, unavailable scheduling, and transaction recovery', async () => {
