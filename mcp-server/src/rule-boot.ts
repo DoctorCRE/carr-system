@@ -1,11 +1,13 @@
 // Page and hash the sponsor-visible rule corpus.
+type RuleRow = { id: string; statement: string; scope?: unknown; personal_to?: string | null };
+
 import { digest } from "./artifact-trust.js";
 
 export const RULE_BOOT_SCHEMA = "carr-rule-boot/v1";
 
 // Hash the complete sponsor-visible corpus, without delivering its text at boot.
 // Binding text is delivered by the scoped lookup before the relevant action.
-export async function ruleBootPage(rows, sponsor, page = 1) {
+export async function ruleBootPage(rows: RuleRow[] | null | undefined, sponsor: string | null | undefined, page: number | string = 1) {
   const rules = (rows || [])
     .filter(r => !r.personal_to || r.personal_to === sponsor)
     .map(r => ({ id: r.id, statement: r.statement, scope: r.scope || null, personal_to: r.personal_to || null }))

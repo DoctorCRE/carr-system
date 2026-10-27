@@ -16,8 +16,8 @@ import {
 import { authenticatedIdentity, personalScopeForActor, propsForSlug, slugForEmail } from "./identity.js";
 import { normalizeRoomPaging, ROOM_BODY_MAX } from "./partner-room.js";
 import { redeemProgram6BrowserChallenge } from "./program6-browser-challenge.js";
-import { program6ActionsEnabled } from "./program6-feature-flag.js";
-import { workspaceCommandCenterEnabled } from "./workspace-feature-flag.js";
+import { program6ActionsEnabled } from "./program6-feature-flag.ts";
+import { workspaceCommandCenterEnabled } from "./workspace-feature-flag.ts";
 import { COMMAND_CENTER_PATH } from "./workspace-command-center.js";
 import { neon } from "@neondatabase/serverless";
 import { readWorkInventoryCensus, WORK_INVENTORY_PATH } from "./work-inventory-census.v5.js";
@@ -28,7 +28,7 @@ import {
 } from "./workspace-business-read.js";
 import { isTourInternalRequest } from "./tour-internal-web.js";
 import { executeRegisteredTool } from "./tools.js";
-import { readDealWithJev } from "./jev-deal-reading.js";
+import { readDealWithJev } from "./jev-deal-reading.ts";
 import { callTool } from "./mcp.js";
 import { isStagingBrowserEnvironment } from "./staging-browser.ts";
 import { bearerCredential } from "./bearer.ts";

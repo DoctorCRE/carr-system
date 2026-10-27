@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
+import { publicError } from '../src/public-errors.ts';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
 
@@ -89,6 +90,14 @@ test('Dell resolves a critical date as passed and records the reason in deal his
 });
 
 const refuses = code => error => error.payload?.error === code;
+const publiclyRefuses = (code, record) => error => {
+  assert.ok(refuses(code)(error));
+  const response = publicError(error);
+  assert.equal(response.error, code);
+  assert.match(response.hint, new RegExp(`re-read.*${record}`, 'i'));
+  assert.deepEqual(Object.keys(response).sort(), ['correlation_id', 'error', 'hint']);
+  return true;
+};
 
 test('both partners can drop retired-owner actions for every supported subject', async () => {
   for (const type of ['deal', 'client', 'lead', 'vendor']) {
@@ -107,7 +116,7 @@ test('drop refuses missing, stale, and already terminal actions', async () => {
   for (const status of ['done', 'dropped']) {
     await c.query('update next_action set status=$2 where id=$1', [row.id, status]);
     const version = (await c.query('select version from next_action where id=$1', [row.id])).rows[0].version;
-    await assert.rejects(command('drop-action', { action_id: row.id, base_version: version, reason: 'Already terminal' }), refuses('action_not_open'));
+    await assert.rejects(command('drop-action', { action_id: row.id, base_version: version, reason: 'Already terminal' }), publiclyRefuses('action_not_open', 'action'));
   }
 });
 
@@ -194,7 +203,7 @@ test('critical-date resolution refuses missing and every terminal date without c
   for (const status of ['passed', 'cleared', 'dropped', 'done']) {
     const row = await criticalDate();
     await c.query('update critical_date set status=$2 where id=$1', [row.id, status]);
-    await assert.rejects(command('resolve-critical-date', { critical_date_id: row.id, resolution: 'done', reason: 'Already closed' }), refuses('critical_date_not_open'));
+    await assert.rejects(command('resolve-critical-date', { critical_date_id: row.id, resolution: 'done', reason: 'Already closed' }), publiclyRefuses('critical_date_not_open', 'date'));
     assert.equal((await c.query('select status from critical_date where id=$1', [row.id])).rows[0].status, status);
   }
   assert.equal((await c.query('select status from critical_date where id=$1', [sibling.id])).rows[0].status, 'open');
@@ -241,7 +250,7 @@ test('competing resolutions cannot overwrite the winning terminal status', async
       command('resolve-critical-date', { ...args, resolution: 'dropped' }, dell, other),
     ]);
     assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
-    assert.ok(refuses('critical_date_not_open')(results.find(result => result.status === 'rejected').reason));
+    assert.ok(publiclyRefuses('critical_date_not_open', 'date')(results.find(result => result.status === 'rejected').reason));
     const winner = results.find(result => result.status === 'fulfilled').value;
     assert.deepEqual((await c.query('select status,version from critical_date where id=$1', [row.id])).rows[0], { status: winner.status, version: 2 });
     assert.equal((await c.query("select count(*)::int as count from event where verb='resolve-critical-date' and subject_id=$1", [row.deal_id])).rows[0].count, 1);

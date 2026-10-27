@@ -2,7 +2,7 @@
 import test from 'node:test';
 import { TypeSafeClient, TypeSafeError } from '@typesafe-ai/sdk';
 import assert from 'node:assert/strict';
-import { dealReadingState, readDealWithJev as sdkRead } from '../src/jev-deal-reading.js';
+import { dealReadingState, readDealWithJev as sdkRead } from '../src/jev-deal-reading.ts';
 
 const readDealWithJev = (record, {askJev, ...options} = {}) => sdkRead(record, {
   ...options, ...(askJev ? {client: {systemOne: askJev}} : {}),

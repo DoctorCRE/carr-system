@@ -483,6 +483,13 @@ def history(root, revisions, whole=False):
     return introduced(root, list(raw_records(changes)), whole)
 
 
+def git_oid_length(root):
+    length = len(git(root, 'hash-object', '--stdin', input=b'').strip())
+    if length not in (40, 64):
+        raise Refusal('unsupported git object format')
+    return length
+
+
 def upstream(root, receiver):
     """Exclusions for the commits the receiver advertises now: they were judged when they reached it.
 
@@ -500,8 +507,9 @@ def upstream(root, receiver):
         return []
     if advertised.returncode != 0:
         return []
+    oid_pattern = re.compile(rf'[0-9a-f]{{{git_oid_length(root)}}}')
     oids = sorted({line.split()[0] for line in advertised.stdout.decode().splitlines() if line.strip()})
-    if not oids or not all(re.fullmatch(r'[0-9a-f]{40}', oid) for oid in oids):
+    if not oids or not all(oid_pattern.fullmatch(oid) for oid in oids):
         return []
     # Only commits present here can bound the walk; an unknown oid excludes nothing.
     present = git(root, 'cat-file', '--batch-check=%(objectname) %(objecttype)', input=''.join(
@@ -511,10 +519,12 @@ def upstream(root, receiver):
 
 def pushed(root, stream, receiver):
     revisions = []
-    zero = '0' * 40
+    oid_length = git_oid_length(root)
+    oid_pattern = re.compile(rf'[0-9a-f]{{{oid_length}}}')
+    zero = '0' * oid_length
     for line in ([] if stream == '\n' else stream.splitlines()):
         fields = line.split()
-        if len(fields) != 4 or not all(re.fullmatch(r'[0-9a-f]{40}', fields[i]) for i in (1, 3)):
+        if len(fields) != 4 or not all(oid_pattern.fullmatch(fields[i]) for i in (1, 3)):
             raise Refusal(f'invalid push refs: {line!r}')
         _, local, _, remote = fields
         if local == zero:

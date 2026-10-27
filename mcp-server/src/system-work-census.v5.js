@@ -1,5 +1,5 @@
 // Read and project unfinished system work across sources.
-import { observeBoardLinkage, unavailableLinkage } from './work-linkage.js';
+import { observeBoardLinkage, unavailableLinkage } from './work-linkage.ts';
 // System design/build projection of the existing work inventory federation.
 import { readableWorkRequestSql } from './work-request-read.ts';
 import { canonicalJson } from './artifact-trust.js';

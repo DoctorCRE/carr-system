@@ -1,7 +1,7 @@
 // Tests vendor relationship trust, evidence, overrides, and merging.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computedTrust, enrichRelationship, trustedOverride, dealEvidenceEntries, mergeRelationshipFields } from '../src/vendor-relationship.js';
+import { computedTrust, enrichRelationship, trustedOverride, dealEvidenceEntries, mergeRelationshipFields } from '../src/vendor-relationship.ts';
 import { parseBusinessQuery, readBusinessList } from '../src/workspace-business-read.js';
 const now='2026-10-01T12:00:00Z';
 const proven={coverage_verified_at:now,deals_referred:5,deals_worked:8,won:7,lost:1,first_worked_at:'2024-09-01T12:00:00Z',last_contacted_at:'2026-09-01T12:00:00Z'};
@@ -54,7 +54,7 @@ test('merge compares evidence values independent of object key order and refuses
 
 test('relationship authority has one scoped implementation used by override and attestation', async () => {
  const {readFile}=await import('node:fs/promises');
- const relationship=await readFile(new URL('../src/vendor-relationship.js',import.meta.url),'utf8');
+ const relationship=await readFile(new URL('../src/vendor-relationship.ts',import.meta.url),'utf8');
  const tools=await readFile(new URL('../src/tools.js',import.meta.url),'utf8');
  const writer=tools.slice(tools.indexOf('"update-vendor":'),tools.indexOf('"update-lead":'));
  assert.doesNotMatch(writer,/actor\.human|includes\(actor\.slug\)/);
