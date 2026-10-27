@@ -21,6 +21,10 @@ passing interaction tests alone does not establish visual parity. Separate
 partner-supplied properties from additional public research candidates, and
 explain comparisons introduced from client correspondence with their source.
 Check project-card coverage against actual rendered map markers before delivery.
+Client presentations state facts and observations, without narrated instructions
+for using the page or internal research-process commentary. Keep specific source
+uncertainties and functional control labels. Comparison tools show a useful
+default, explicitly labeled illustrative when actual client inputs are unknown.
 
 ## Always-on rules
 
