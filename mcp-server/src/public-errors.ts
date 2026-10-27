@@ -43,6 +43,9 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["current_situation_source_not_found", "Revise situation to match a current shared doctrine source, then retry report-problem."],
   ["validation_error", "Check the named fields against the tool's documented input."],
   ["missing_required", "Supply the named required fields from the tool's documented input."],
+  ["invalid_boolean", "Supply a boolean value for the named fields."],
+  ["invalid_number", "Supply a numeric value for the named fields."],
+  ["tool_call_markup_in_value", "Remove tool-call markup from the named fields."],
   ["value_not_in_declared_vocabulary", "Use a value from the field's documented vocabulary."],
   ["missing_idempotency_key", "Supply a fresh idempotency_key for this operation."],
   ["missing_base_version", "Re-read the record and supply its base_version."],
@@ -147,7 +150,7 @@ export function publicError(error: unknown, { env, inputSchema, fallback = "unha
       .filter(id => typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(id)))].slice(0, 50);
   if (code === "version_conflict" && Number.isSafeInteger(payload?.current_version) && (payload!.current_version as number) >= 0)
     result.current_version = payload!.current_version as number;
-  if (["invalid_report_problem", "invalid_report_problem_fields", "invalid_acceptance_criteria", "current_situation_source_not_found", "invalid_field_value", "validation_error", "value_not_in_declared_vocabulary", "unregistered_operation_fields", "missing_required"].includes(code)) {
+  if (["invalid_report_problem", "invalid_report_problem_fields", "invalid_acceptance_criteria", "current_situation_source_not_found", "invalid_field_value", "validation_error", "value_not_in_declared_vocabulary", "unregistered_operation_fields", "missing_required", "invalid_boolean", "invalid_number", "tool_call_markup_in_value"].includes(code)) {
     const allowed = inputFields(inputSchema);
     const candidates = [payload?.field, payload?.column,
       ...(Array.isArray(payload?.fields) ? payload.fields : []),
