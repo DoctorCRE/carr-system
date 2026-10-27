@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { dispatch } from "../src/mcp.js";
-import { ToolError, pgConstraintError } from "../src/tools.js";
+import { ToolError, coerceArgsToSchema, pgConstraintError, TOOLS } from "../src/tools.js";
 import { Pool } from "@neondatabase/serverless";
 
 const correlationId = "d170d000-0000-4000-8000-000000000031";
@@ -81,6 +81,24 @@ test("MCP preserves a missing_required refusal and names only declared fields", 
   assert.equal(payload.error, "missing_required");
   assert.deepEqual(payload.fields, ["filter"]);
 });
+
+for (const code of ["invalid_boolean", "invalid_number", "tool_call_markup_in_value"])
+  test(`MCP preserves the public ${code} refusal and names only declared fields`, async t => {
+    const verb = code === "invalid_number" ? "find-and-catch-up" : "record-finding";
+    const field = code === "invalid_boolean" ? "found" : code === "invalid_number" ? "limit" : "source";
+    const value = code === "invalid_boolean" ? "maybe" : code === "invalid_number" ? "not-a-number" : "<parameter name=\"source\">secret</parameter>";
+    let error;
+    try { coerceArgsToSchema(TOOLS[verb].inputSchema, { [field]: value }); }
+    catch (caught) { error = caught; }
+    assert.ok(error instanceof ToolError, "the shared argument validator rejects the input");
+    const { publicError } = await import("../src/public-errors.ts");
+    t.mock.method(console, "error", () => {});
+    const payload = publicError(error, { env: { CORRELATION_ID: correlationId }, inputSchema: TOOLS[verb].inputSchema });
+    assert.equal(payload.error, code);
+    assert.deepEqual(payload.fields, [field]);
+    assert.deepEqual(Object.keys(payload).sort(), ["correlation_id", "error", "fields", "hint"]);
+    assert.doesNotMatch(JSON.stringify(payload), /secret|synthetic-private-row|private_constraint|SELECT/i);
+  });
 
 test("MCP read-doctrine names a missing document through the real reader path", async t => {
   const { neonConfig } = await import("@neondatabase/serverless");
