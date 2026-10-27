@@ -6,6 +6,8 @@ import {
   assuranceHealthStoreTools,
   validateAssuranceHealthProjection,
 } from "../src/assurance-health-store.v5.js";
+import { ToolError as ServerToolError } from "../src/tool-error.ts";
+import { publicError } from "../src/public-errors.ts";
 
 class ToolError extends Error {
   constructor(payload) { super(payload.error); this.payload = payload; }
@@ -157,6 +159,19 @@ test("V5-A01: the read binds a scope without a Work Request as an explicit null 
   const { calls, client, handler } = toolsWith(projection);
   await handler(client, { slug: "dell" }, { scope });
   assert.deepEqual(calls[0].params, ["doctorcre.release", 7, null]);
+});
+
+test("V5-A01: an invalid scope is refused with a public code that names the scope field", async t => {
+  // Regression, 2026-10-27: a null work_request_id threw a private code that
+  // reached the caller as unhandled_verb_failure, the server-fault signal.
+  t.mock.method(console, "error", () => {});
+  const tool = assuranceHealthStoreTools({ ToolError: ServerToolError })["read-assurance-health"];
+  const scope = { workflow_key: "doctorcre.release", workflow_version: 7, work_request_id: null };
+  const client = { query: async () => assert.fail("an invalid scope must be refused before the database") };
+  const refusal = await tool.handler(client, { slug: "joe" }, { scope }).catch(error => error);
+  const payload = publicError(refusal, { inputSchema: tool.inputSchema });
+  assert.equal(payload.error, "invalid_field_value");
+  assert.deepEqual(payload.fields, ["scope"]);
 });
 
 function unavailableTruthProjection(scope = SCOPE) {

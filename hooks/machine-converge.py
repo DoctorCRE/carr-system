@@ -200,17 +200,19 @@ def converge():
     else:
         tail = (r.stderr or r.stdout).strip().splitlines()
         say("config-as-code install FAILED: " + (tail[-1] if tail else "(no output)"))
+        try:
+            audit = config_as_code("check-hook-files", timeout=20)
+        except (OSError, subprocess.SubprocessError):
+            say("installed hook file audit unavailable after failed install")
+            return
+        for line in audit.stdout.splitlines():
+            say(line)
+        if audit.returncode not in (0, 1) or (audit.returncode and not audit.stdout.strip()):
+            say("installed hook file audit unavailable after failed install")
 
 
 def main():
     sys.path.insert(0, REPO)
-    if os.environ.get("CARR_GROK_RUN_READ_ONLY") == "1":
-        try:
-            from hooks.grok_invocation import bounded_grok_read_only
-            if bounded_grok_read_only():
-                return 0
-        except ImportError:
-            pass  # an unavailable optional probe retains ordinary processing
     try:
         if scrubbed_env is None:
             return 0  # cannot pin which repository git would hit — see above

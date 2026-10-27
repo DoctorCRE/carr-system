@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "ops"))
@@ -91,6 +92,7 @@ class MigrationTests(unittest.TestCase):
             PATH=str(self.root / "bin") + os.pathsep + os.defpath,
             TRACE=str(self.root / "trace"),
             CARR_CI_DATABASE_URL="postgres://ci@127.0.0.1:55432/ci",
+            CARR_SHADOW_ARTIFACT_DIR="",
             RUNNER_TEMP=str(self.root),
         )
 
@@ -115,6 +117,23 @@ class MigrationTests(unittest.TestCase):
                 digest = hashlib.sha256(json.dumps(trace, sort_keys=True).encode()).hexdigest()
                 self.assertEqual(digest, expected, json.dumps(trace))
                 self.assertIn("CI passed — every class green", result.stdout)
+
+    def test_host_shadow_artifact_directory_does_not_change_fixture_commands(self):
+        with patch.dict(os.environ, CARR_SHADOW_ARTIFACT_DIR=str(self.root / "host-artifacts")):
+            fixture = MigrationTests()
+            self.addCleanup(fixture.doCleanups)
+            fixture.setUp()
+        result, trace = fixture.run_ci("shadow")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        digest = hashlib.sha256(json.dumps(trace, sort_keys=True).encode()).hexdigest()
+        self.assertEqual(digest, BASELINES["shadow"], json.dumps(trace))
+
+    def test_explicit_shadow_artifact_directory_reaches_runner(self):
+        artifact_dir = "artifacts"
+        result, trace = self.run_ci("shadow", CARR_SHADOW_ARTIFACT_DIR=artifact_dir)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        shadow = next(row for row in trace if "ops/migration-shadow.py" in row["argv"])
+        self.assertEqual(shadow["argv"], ["python3", "ops/migration-shadow.py", "--artifact-dir", artifact_dir])
 
     def test_failure_stops_before_next_proof_and_retains_log(self):
         result, trace = self.run_ci("proofs", FAIL_PROGRAM="find-rule-supersedes.test.mjs")
