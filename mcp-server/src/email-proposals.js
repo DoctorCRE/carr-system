@@ -47,7 +47,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const row = { kind: args.kind, deal_id: args.deal.toLowerCase(), activity_id: args.activity_id.toLowerCase(),
           evidence_quote: args.evidence_quote, task_text: step ? args.text.trim() : null,
           next_date: step ? args.next_date : null, owner: step ? args.owner || 'joe' : null };
-        await preview(c, actor, KINDS[row.kind].preview, previewArgs(row));
+        const existing = (await c.query(`select 1 from email_proposal
+          where kind=$1 and deal_id=$2 and activity_id=$3 for update`, [row.kind, row.deal_id, row.activity_id])).rows.length > 0;
+        if (!existing) await preview(c, actor, KINDS[row.kind].preview, previewArgs(row));
         const stored = (await c.query(`insert into email_proposal
             (kind,deal_id,activity_id,evidence_quote,task_text,next_date,owner,confidence,created_by)
           values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
