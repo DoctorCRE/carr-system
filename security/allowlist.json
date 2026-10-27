@@ -342,14 +342,14 @@
       "reason": "WR441.S3.J2 explicitly permits the two canonical partner email addresses for copy routing documentation and synthetic behavioral fixtures. This exception binds the reviewed file bytes and email rule only; all other fixture addresses use reserved domains."
     },
     {
-      "path": "migrations/1011_dell_actor_email.sql",
+      "path": "migrations/1014_dell_actor_email.sql",
       "sha256": "442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a",
       "rule": "pii-email",
       "reason": "The canonical Dell email is required by WR441.S4.J2 in the guarded migration."
     },
     {
       "path": "ops/schema-reconstruction-selftest.py",
-      "sha256": "cdc3cf1490fe4eb2ccc0ea34799f6f393b6bb7e8b9c19acb9e158fe87bc0a2ed",
+      "sha256": "9392d23e19641e1523bc512372e8384bc91e94c96cfb8f6545b0210b1460da3e",
       "rule": "pii-email",
       "reason": "The reconstruction test verifies the canonical Dell email and migration idempotence."
     }
