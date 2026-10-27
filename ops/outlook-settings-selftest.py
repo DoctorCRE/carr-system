@@ -296,8 +296,11 @@ class SettingsTest(unittest.TestCase):
                 patch.object(mod, 'launchd_path_refusal', return_value=None), \
                 patch.object(mod, 'install_launchd_plist', return_value='loaded') as install, \
                 patch('pathlib.Path.home', return_value=self.home), redirect_stdout(StringIO()) as output:
-            self.assertEqual(mod.cmd_install(True), 1)
+            self.assertEqual(mod.cmd_install(True), 0)
             self.assertIn('com.carr.zz-later.plist', [call.args[0] for call in install.call_args_list])
+            self.assertNotIn('com.carr.outlook-intake.plist', [call.args[0] for call in install.call_args_list])
+            self.assertIn('SKIP  com.carr.outlook-intake.plist (installer-owned: bin/install-outlook-intake.sh)',
+                          output.getvalue())
             self.assertEqual(mod.cmd_check(), 1)
             self.assertEqual(mod.cmd_pull(False), 0)
         self.assertIn('REFUSED', output.getvalue())

@@ -330,124 +330,28 @@
       "reason": "Historical synthetic account-exclusion fixture introduced by b5ce2848 in PR #2390. The invented longer-domain recipient tests exact-address matching in an offline SQLite fixture, not a real contact. Commit 2ed36da6 replaces it with a reserved .invalid domain. Qualification binds only these exact historical file bytes and this detector because pushed history is retained without force-push."
     },
     {
-      "path": "migrations/1009_dell_actor_email.sql",
-      "sha256": "442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a",
+      "path": "mcp-server/contracts/email-reply-draft.v1.json",
+      "sha256": "58f1bd0f281a7bfaf206edaa12e749e1bf3edb73d8d9b3349cab6fb90199ef51",
       "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
+      "reason": "WR441.S3.J2 explicitly permits the two canonical partner email addresses for copy routing documentation and synthetic behavioral fixtures. This exception binds the reviewed file bytes and email rule only; all other fixture addresses use reserved domains."
     },
     {
-      "path": "db/schema.sql",
-      "sha256": "8894b144e27a1773d4c4178d17411f073d1a75a7126ff7d1a4ab9dd46e68eddf",
+      "path": "mcp-server/test/email-deal-progress-postgres.test.mjs",
+      "sha256": "1858a8fd6491a5e448563dacfd36bc49f68a4931cc5e4877bb9b5eb513939b62",
       "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
-    },
-    {
-      "path": "ops/schema-reconstruction-selftest.py",
-      "sha256": "6150ed3bf47abe7380c8255c66aa1fa35e028f8b040f7b6538331458167090e3",
-      "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
-    },
-    {
-      "path": "db/schema.sql",
-      "sha256": "de2521265530369f8945c11831cf6f61c6b0b49721a3bf20f2fc32f1b841309c",
-      "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
-    },
-    {
-      "path": "migrations/1008_dell_actor_email.sql",
-      "sha256": "442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a",
-      "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
-    },
-    {
-      "path": "ops/schema-reconstruction-selftest.py",
-      "sha256": "575200761e6515368e539fd11378f7bce10cf29a49d05893970193c3d223e093",
-      "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
-    },
-    {
-      "path": "db/schema.sql",
-      "sha256": "204713b6fb00c2f6b39ee2c8337a7c2c18e215ed235929ee3ba58a600a3f1ada",
-      "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
-    },
-    {
-      "path": "ops/schema-reconstruction-selftest.py",
-      "sha256": "3ee522f194e33480345c02b9fba374b787a4b93370adcbc49001910ca93ce967",
-      "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
-    },
-    {
-      "path": "migrations/1007_dell_actor_email.sql",
-      "sha256": "442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a",
-      "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
-    },
-    {
-      "path": "db/schema.sql",
-      "sha256": "b0669b25e19cb114f913b7edb691b00e027e3a7dde2f5c9c150b7c981480878e",
-      "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
-    },
-    {
-      "path": "ops/schema-reconstruction-selftest.py",
-      "sha256": "ef9d685726f6dce5aaa525530f50fa4f0ebe2a66ac93851c9fb377d458e68bf4",
-      "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
-    },
-    {
-      "path": "migrations/1010_dell_actor_email.sql",
-      "sha256": "442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a",
-      "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
-    },
-    {
-      "path": "db/schema.sql",
-      "sha256": "ea335286ade4e1b989b0543665af0cdb9269802450ccced02bda8274f8a4d7b0",
-      "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
-    },
-    {
-      "path": "migrations/1006_dell_actor_email.sql",
-      "sha256": "442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a",
-      "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
-    },
-    {
-      "path": "ops/schema-reconstruction-selftest.py",
-      "sha256": "089840ae64dd4c7a057ecb8d9dfd431f09be49dd8922f171787ecf7ab62ba105",
-      "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
-    },
-    {
-      "path": "ops/schema-reconstruction-selftest.py",
-      "sha256": "56724bec7f8920f87fdb86bf9dba6ab1827ae7a2650060cf4ba3d043c0003495",
-      "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
-    },
-    {
-      "path": "db/schema.sql",
-      "sha256": "53c50ac038ce6fc74efbdc86cbe2843bba3bddcec3846cd57b4da565b907f4c4",
-      "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
-    },
-    {
-      "path": "migrations/1005_dell_actor_email.sql",
-      "sha256": "442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a",
-      "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
-    },
-    {
-      "path": "ops/schema-reconstruction-selftest.py",
-      "sha256": "14f2a7dd1805a65c30d9155585c89896c49d411c038de73fc5d462d6e8d2b66e",
-      "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
+      "reason": "WR441.S3.J2 explicitly permits the two canonical partner email addresses for copy routing documentation and synthetic behavioral fixtures. This exception binds the reviewed file bytes and email rule only; all other fixture addresses use reserved domains."
     },
     {
       "path": "migrations/1011_dell_actor_email.sql",
       "sha256": "442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a",
       "rule": "pii-email",
-      "reason": "Canonical actor email explicitly required by WR441.S4.J2; exception binds only this exact file content."
+      "reason": "The canonical Dell email is required by WR441.S4.J2 in the guarded migration."
+    },
+    {
+      "path": "ops/schema-reconstruction-selftest.py",
+      "sha256": "cdc3cf1490fe4eb2ccc0ea34799f6f393b6bb7e8b9c19acb9e158fe87bc0a2ed",
+      "rule": "pii-email",
+      "reason": "The reconstruction test verifies the canonical Dell email and migration idempotence."
     }
   ]
 }
