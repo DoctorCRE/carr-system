@@ -100,6 +100,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await c.query("create table doctrine_section(id uuid primary key, status text, body_hash text)");
     await c.query("grant select on doctrine_section to carr_reader,carr_writer");
     await c.query(readFileSync(path.join(root, 'migrations/0916_deal_phase_start_dates.sql'), 'utf8'));
+    await c.query(readMigration('1002_phase_start_undo.sql'));
     await c.query(readFileSync(path.join(root, 'migrations/0923_deal_status_next_step.sql'), 'utf8'));
     await c.query("create view v_ref_index as select 'deal'::text subject_type, id subject_id from deal union all select 'vendor',id from vendor union all select 'lead', id from lead;");
     await c.query("grant select on v_ref_index to carr_reader");
@@ -1065,6 +1066,26 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query('delete from event where subject_id=$1',[id(4)]);
       await c.query('set local role carr_reader');
       assert.deepEqual((await TOOLS['deal-room-board'].handler(c,actor,{workspace:'team'})).deals[0].phase_started_on,{});
+    }));
+
+    await t.test('undo removes the call phase start and a later move supplies its own date', async () => transaction(async () => {
+      await fixture(false);
+      const move = await TOOLS['patch-deal-field'].handler(c, actor, {
+        idempotency_key: id(180), deal: id(4), field: 'phase', value: 'negotiation', base_event_id: null,
+        occurred_on: '2026-09-01',
+      });
+      const undo = await TOOLS['revert-deal-field'].handler(c, actor, { idempotency_key: id(181), event_id: move.event_id });
+      const undone = await TOOLS['deal-room-board'].handler(c, actor, {workspace:'team'});
+      assert.equal(undone.deals[0].phase_started_on.negotiation, undefined);
+      const restored = await TOOLS['revert-deal-field'].handler(c, actor, { idempotency_key: id(183), event_id: undo.event_id });
+      assert.equal((await TOOLS['deal-room-board'].handler(c, actor, {workspace:'team'})).deals[0].phase_started_on.negotiation, '2026-09-01');
+      const undoneAgain = await TOOLS['revert-deal-field'].handler(c, actor, { idempotency_key: id(184), event_id: restored.event_id });
+      await TOOLS['patch-deal-field'].handler(c, actor, {
+        idempotency_key: id(182), deal: id(4), field: 'phase', value: 'negotiation', base_event_id: undoneAgain.event_id,
+        occurred_on: '2026-10-01',
+      });
+      const board = await TOOLS['deal-room-board'].handler(c, actor, {workspace:'team'});
+      assert.equal(board.deals[0].phase_started_on.negotiation, '2026-10-01');
     }));
 
     await t.test('repeating the current phase through the handler does not create a phase start', async () => transaction(async () => {

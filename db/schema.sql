@@ -83540,11 +83540,36 @@ CREATE VIEW public.v_deal_room_phase_change AS
 --
 
 CREATE VIEW public.v_deal_room_phase_start AS
+ WITH ordered AS (
+         SELECT e.subject_id,
+            e.id,
+            e.recorded_at,
+            e.occurred_at,
+            e.verb,
+            e.old_value,
+            e.new_value,
+            sum(
+                CASE
+                    WHEN (e.verb = 'revert-deal-field'::text) THEN 0
+                    ELSE 1
+                END) OVER (PARTITION BY e.subject_id ORDER BY e.recorded_at, e.id) AS change_group
+           FROM public.event e
+          WHERE ((e.subject_type = 'deal'::text) AND (e.field = 'phase'::text))
+        ), effective AS (
+         SELECT ordered.subject_id,
+            ordered.change_group,
+            (array_agg(ordered.new_value ORDER BY ordered.recorded_at, ordered.id))[1] AS new_value,
+            (array_agg(ordered.old_value ORDER BY ordered.recorded_at, ordered.id))[1] AS old_value,
+            (array_agg(ordered.occurred_at ORDER BY ordered.recorded_at, ordered.id))[1] AS occurred_at,
+            count(*) FILTER (WHERE (ordered.verb = 'revert-deal-field'::text)) AS undos
+           FROM ordered
+          GROUP BY ordered.subject_id, ordered.change_group
+        )
  SELECT subject_id AS deal_id,
     (new_value ->> 'phase'::text) AS phase,
     ((min(occurred_at) AT TIME ZONE 'America/Chicago'::text))::date AS started_on
-   FROM public.event e
-  WHERE ((subject_type = 'deal'::text) AND (field = 'phase'::text) AND (NULLIF((new_value ->> 'phase'::text), ''::text) IS NOT NULL) AND ((old_value ->> 'phase'::text) IS DISTINCT FROM (new_value ->> 'phase'::text)))
+   FROM effective
+  WHERE ((change_group > 0) AND ((undos % (2)::bigint) = 0) AND (NULLIF((new_value ->> 'phase'::text), ''::text) IS NOT NULL) AND ((old_value ->> 'phase'::text) IS DISTINCT FROM (new_value ->> 'phase'::text)))
   GROUP BY subject_id, (new_value ->> 'phase'::text);
 
 
@@ -113030,6 +113055,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0998_deal_client_read_index.sql	8346163dd6b9dbf53132ae93aae4448d17e8d9486c911478c7f868b9a54f336b	1970-01-01 00:00:00+00
 1000_lead_draft_revision.sql	6d720b78fceeb29e4a3e195c10effe4edf548055ef1f7aa1ea36871df8eb525b	1970-01-01 00:00:00+00
 1001_retire_scheduler_contracts.sql	2b14240e8b93c30d5dc16c4dfd6a746b365e736895a516be3d769d9b10d27186	1970-01-01 00:00:00+00
+1002_phase_start_undo.sql	921899f7e36a786c3570d2da68645051b710c7fd51ec7fbe6c8b74488bd93e52	1970-01-01 00:00:00+00
 \.
 
 
