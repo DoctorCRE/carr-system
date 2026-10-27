@@ -77236,7 +77236,9 @@ CREATE TABLE public.activity (
     version integer DEFAULT 1 NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_by uuid,
-    connected boolean
+    connected boolean,
+    email_context jsonb,
+    CONSTRAINT activity_email_context_object CHECK (((email_context IS NULL) OR (jsonb_typeof(email_context) = 'object'::text)))
 );
 
 
@@ -78961,7 +78963,7 @@ CREATE TABLE public.document (
 CREATE TABLE public.email_proposal (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     kind text NOT NULL,
-    deal_id uuid NOT NULL,
+    deal_id uuid,
     activity_id uuid NOT NULL,
     evidence_quote text NOT NULL,
     task_text text,
@@ -78975,13 +78977,15 @@ CREATE TABLE public.email_proposal (
     resolved_by uuid,
     resolved_at timestamp with time zone,
     resolution_reason text,
-    CONSTRAINT email_proposal_check CHECK ((((kind = 'phase_move'::text) AND (task_text IS NULL) AND (next_date IS NULL) AND (owner IS NULL)) OR ((kind = 'next_step'::text) AND (task_text IS NOT NULL) AND (next_date IS NOT NULL) AND (owner IS NOT NULL)))),
+    sender_role text,
+    CONSTRAINT email_proposal_check CHECK ((((kind = 'phase_move'::text) AND (deal_id IS NOT NULL) AND (task_text IS NULL) AND (next_date IS NULL) AND (owner IS NULL) AND (sender_role IS NULL)) OR ((kind = 'next_step'::text) AND (deal_id IS NOT NULL) AND (task_text IS NOT NULL) AND (next_date IS NOT NULL) AND (owner IS NOT NULL) AND (sender_role IS NULL)) OR ((kind = 'file_to_deal'::text) AND (deal_id IS NOT NULL) AND (task_text IS NULL) AND (next_date IS NULL) AND (owner IS NULL) AND (sender_role IS NOT NULL)) OR ((kind = 'possible_new_deal'::text) AND (deal_id IS NULL) AND (next_date IS NULL) AND (owner IS NULL) AND (sender_role IS NOT NULL)))),
     CONSTRAINT email_proposal_check1 CHECK ((((status = 'pending'::text) AND (resolved_by IS NULL) AND (resolved_at IS NULL) AND (resolution_reason IS NULL)) OR ((status = 'confirmed'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL)) OR ((status = 'dismissed'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL) AND (resolution_reason IS NOT NULL)))),
     CONSTRAINT email_proposal_confidence_check CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric))),
-    CONSTRAINT email_proposal_evidence_quote_check CHECK (((length(evidence_quote) >= 10) AND (length(evidence_quote) <= 2000))),
-    CONSTRAINT email_proposal_kind_check CHECK ((kind = ANY (ARRAY['phase_move'::text, 'next_step'::text]))),
+    CONSTRAINT email_proposal_evidence_quote_check CHECK (((length(evidence_quote) >= 1) AND (length(evidence_quote) <= 2000))),
+    CONSTRAINT email_proposal_kind_check CHECK ((kind = ANY (ARRAY['phase_move'::text, 'next_step'::text, 'file_to_deal'::text, 'possible_new_deal'::text]))),
     CONSTRAINT email_proposal_owner_check CHECK ((owner = ANY (ARRAY['joe'::text, 'dell'::text]))),
     CONSTRAINT email_proposal_resolution_reason_check CHECK (((length(btrim(resolution_reason)) >= 1) AND (length(btrim(resolution_reason)) <= 500))),
+    CONSTRAINT email_proposal_sender_role_check CHECK ((sender_role = ANY (ARRAY['client'::text, 'landlord_side'::text, 'lender'::text, 'attorney'::text, 'other_vendor'::text]))),
     CONSTRAINT email_proposal_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'confirmed'::text, 'dismissed'::text]))),
     CONSTRAINT email_proposal_task_text_check CHECK (((length(btrim(task_text)) >= 1) AND (length(btrim(task_text)) <= 500)))
 );
@@ -93494,7 +93498,7 @@ ALTER TABLE ONLY public.document
 --
 
 ALTER TABLE ONLY public.email_proposal
-    ADD CONSTRAINT email_proposal_kind_deal_id_activity_id_key UNIQUE (kind, deal_id, activity_id);
+    ADD CONSTRAINT email_proposal_kind_deal_id_activity_id_key UNIQUE NULLS NOT DISTINCT (kind, deal_id, activity_id);
 
 
 --
@@ -110809,11 +110813,12 @@ grant select (slug, label) on table public.client_type to carr_reader;
 grant select (id) on table public.content_piece to carr_jobs;
 grant select (id, client_id, name) on table public.deal to carr_jobs;
 grant select (deal_id, actor_id, role, to_at) on table public.deal_participant to carr_jobs;
+grant select (deal_id, party_id, role, to_at) on table public.deal_participant to carr_reader;
 grant select (id, registry_ref, party_id, est_lease_event, client_id, owner_id) on table public.lead to carr_jobs;
 grant select (id, registry_ref, party_id, stage, suppressed, segment, notes, owner_id) on table public.lead to carr_reader;
 grant select (slug, side) on table public.participant_role to carr_writer;
 grant select (id, name) on table public.party to carr_jobs;
-grant select (id, kind, name, phone, email, city, state, npi, merged_into, deleted_at, specialty, county, title, ref, contact_state, contact_state_reason, contact_state_until, contact_state_cadence, cell) on table public.party to carr_reader;
+grant select (id, kind, name, org_id, phone, email, city, state, npi, merged_into, deleted_at, specialty, county, title, ref, contact_state, contact_state_reason, contact_state_until, contact_state_cadence, cell) on table public.party to carr_reader;
 grant select (id) on table public.placement to carr_jobs;
 grant update (removed_at, removed_by_actor_id, removal_reason) on table public.research_site to carr_writer;
 grant select (id, status) on table public.rule to carr_jobs;
@@ -113058,6 +113063,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 1001_retire_scheduler_contracts.sql	2b14240e8b93c30d5dc16c4dfd6a746b365e736895a516be3d769d9b10d27186	1970-01-01 00:00:00+00
 1003_notification_morning_midnight.sql	7b3eb4a20aeed80ce5c01bd17a4b2fe02c43184e5903957ac4edee459b80d050	1970-01-01 00:00:00+00
 1004_phase_start_undo.sql	921899f7e36a786c3570d2da68645051b710c7fd51ec7fbe6c8b74488bd93e52	1970-01-01 00:00:00+00
+1005_email_deal_matching.sql	e4e9c4b9ac676e2ae959b1ebb2741fec59a1f05273a178e0ce69ec66b7c053e1	1970-01-01 00:00:00+00
 \.
 
 
@@ -113387,6 +113393,11 @@ capital_partner	Capital Partner	\N
 lead	Lead	actor
 client_contact	Client Contact	party
 listing_side	Listing Side	party
+client	Client	party
+landlord_side	Landlord side	party
+lender	Lender	party
+attorney	Attorney	party
+other_vendor	Other vendor	party
 \.
 
 

@@ -658,6 +658,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "confirm-email-filing": {
+    "ingress_key": "mcp-tool:confirm-email-filing",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "0c730d587c7f1890b3a1034eac6f2db2b479f02f731c3b9a19ebfca1ba2e6edf",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "confirm-email-next-step": {
     "ingress_key": "mcp-tool:confirm-email-next-step",
     "source_locator": "mcp-server/src/email-next-step.ts",
@@ -1101,6 +1111,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "inherit-email-thread": {
+    "ingress_key": "mcp-tool:inherit-email-thread",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "c332c505a0485964fe37690e03489418f074f61f7dd7e0f0519e2a255cc088ec",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "initialize-assignment": {
     "ingress_key": "mcp-tool:initialize-assignment",
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
@@ -1374,7 +1394,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "log-activity": {
     "ingress_key": "mcp-tool:log-activity",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "f4631b7df0c325de5d0fd0f2f75f2e21265dcedf91c718a789363e38ff920e33",
+    "schema_digest": "eda5992be4d135a0de1cacc47a527e114dfedac82c1b84b29b670947b0cc6ebd",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -2365,7 +2385,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-email-proposal": {
     "ingress_key": "mcp-tool:record-email-proposal",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "d053ef06d1b93756dca0e7680244994bb447b94583e2e68f392919eb90ec3944",
+    "schema_digest": "adae8a8db5fdecef4136656fe9ce98d763560579b65f6d81db9061f2c13dc184",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

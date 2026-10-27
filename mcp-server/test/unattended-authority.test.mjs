@@ -187,7 +187,7 @@ test("identity merges, retrieval, board answers, partner-only deal acts and huma
   const flagged = Object.keys(TOOLS).filter(name => TOOLS[name].humanCallerOnly === true);
   assert.deepEqual(flagged.sort(), ["answer-board-question", "answer-work-request-for-joe",
     "append-tour-entrance-verification-receipt", "approve-retrieval-proposals", "cancel-pending-deal", "commit-winning-property",
-    "confirm-email-deal-progress", "confirm-email-next-step", "confirm-merge", "dismiss-email-proposal",
+    "confirm-email-deal-progress", "confirm-email-filing", "confirm-email-next-step", "confirm-merge", "dismiss-email-proposal",
     "record-artifact-preservation-hold", "record-deal-closing", "record-evidence-subject-link", "record-lifecycle-correction",
     "record-partner-lifecycle-fact", "record-tour-map-promotion-receipt", "record-tour-pdf-human-review",
     "register-record-source-authority-policy", "retire-retrieval-curation"]);
