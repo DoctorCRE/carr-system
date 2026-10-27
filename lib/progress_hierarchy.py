@@ -6,20 +6,29 @@ import hashlib
 import json
 import re
 from collections import Counter
+from pathlib import Path
 
-REPOSITORIES = {'DoctorCRE/carr-system': 'carr', 'jbookout/doctorcre-app': 'app',
-                'jbookout/software-factory': 'factory'}
+ADDRESS_FORMAT = json.loads(Path(__file__).with_name('progress-address.v1.json').read_text())
+REPOSITORIES = ADDRESS_FORMAT['repositories']
 
 
 def wr_address(ref):
-    match = re.fullmatch(r'WR-0*(\d+)', ref or '')
+    match = re.fullmatch(ADDRESS_FORMAT['work_request_pattern'], ref or '')
     if not match:
         raise ValueError(f'Captured Work Request required: {ref}')
     return 'WR' + str(int(match[1]))
 
 
+def card_address(ref, ordinal, job=None, repo=None, pr=None):
+    values = {'work_request': wr_address(ref), 'slice': ordinal, 'job': job,
+              'repo': REPOSITORIES[repo] if pr else None, 'pr': pr}
+    template = 'pr_template' if pr else 'job_template' if job is not None else 'slice_template'
+    return ADDRESS_FORMAT[template].format(**values)
+
+
 def project(state):
     requests, slices, cards = {}, {}, {}
+    slice_ordinals = {}
     aliases = state.setdefault('card_aliases', {})
     jobs = state.setdefault('card_jobs', {})
     for ref, request in state.get('work_requests', {}).items():
@@ -41,7 +50,8 @@ def project(state):
             ordinal = row['ordinal']
             if not isinstance(ordinal, int) or ordinal < 1:
                 raise ValueError('Slice ordinals must be positive integers')
-            sid = f'{address}.S{ordinal}'
+            sid = card_address(ref, ordinal)
+            slice_ordinals[sid] = ordinal
             if sid in slices:
                 raise ValueError(f'Duplicate slice ordinal: {sid}')
             slices[sid] = {'id': sid, 'parent_id': address, 'slice_id': row['slice_id'],
@@ -49,7 +59,7 @@ def project(state):
                            'cards': [], 'pr_counts': {}, 'status': 'active'}
             requests[address]['slices'].append(sid)
     for key, task in sorted({**state.get('legacy_history', {}), **state.get('tasks', {})}.items(), key=lambda item: (
-            0 if (item[1].get('pr') or item[1].get('pr_links')) and re.fullmatch(r'WR\d+\.S\d+\.J\d+', item[1].get('card_id', '')) else 1,
+            0 if (item[1].get('pr') or item[1].get('pr_links')) and re.fullmatch(ADDRESS_FORMAT['job_pattern'], item[1].get('card_id', '')) else 1,
             item[1].get('created_at', ''), item[0])):
         if not task.get('work_request') and state.get('legacy_work_request'):
             task['work_request'] = state['legacy_work_request']
@@ -89,9 +99,8 @@ def project(state):
             allocation[pr_key] = number
         addresses = []
         for row in links:
-            address = f'{sid}.J{number}'
-            if row.get('pr'):
-                address += f".{REPOSITORIES[row['repo']]}#{row['pr']}"
+            address = card_address(ref, slice_ordinals[sid], number,
+                                   row.get('repo'), row.get('pr'))
             addresses.append(address)
             card = {**task, **display_copy, **row, 'id': address, 'task_id': key, 'parent_id': sid,
                     'archived': key in state.get('legacy_history', {}) and key not in state.get('tasks', {})}
