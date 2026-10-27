@@ -17,18 +17,18 @@ def _deal(check):
     for deal in check["candidate_deals"]:
         if _words(deal["name"]) - {"synthetic", "dental", "clinic", "lab", "lease", "relocation", "expansion"} & said:
             return deal["id"]
-    return "none"
+    return None
 
 
 class _Client:
     def system_one(self, *, state, questions):
         answers = {}
         for key in questions:
-            label, name = key.split(":")
-            if name == "deal_match":
-                answers[key] = SimpleNamespace(choice=_deal(state["checks"][label]), confidence=0.9)
+            if key == "deal_match":
+                answers[key] = SimpleNamespace(choice=_deal(state), confidence=0.9)
             else:
-                answers[key] = SimpleNamespace(noul=0.9)
+                answers[key] = SimpleNamespace(noul=0.9 if key != "deal_in_candidates" else
+                                               0.9 if _deal(state) else 0.1)
         return SimpleNamespace(answers=answers)
 
 
