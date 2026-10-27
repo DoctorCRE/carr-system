@@ -9224,6 +9224,66 @@ COMMENT ON FUNCTION ops.complete_sourced_work_request_on_bound_evidence(p_work_r
 
 
 --
+-- Name: complete_work_request(text, integer, jsonb, jsonb, boolean, text, text, uuid); Type: FUNCTION; Schema: ops; Owner: -
+--
+
+CREATE FUNCTION ops.complete_work_request(p_ref text, p_base_version integer, p_changes jsonb, p_criteria jsonb, p_user_facing boolean, p_journey text, p_actor_slug text, p_key uuid) RETURNS TABLE(work_request_id uuid, ref text, state text, version integer, previous_state text, closed_at timestamp with time zone)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'ops', 'public', 'pg_temp'
+    AS $_$
+declare w ops.work_request%rowtype; a public.actor%rowtype; capsule jsonb; predicate jsonb;
+begin
+  select * into a from public.actor where slug=p_actor_slug;
+  if not coalesce(a.active and (a.kind='human' or (a.kind='automation'
+    and nullif(btrim(current_setting('carr.sponsoring_human_slug',true)),'') in ('joe','dell'))), false) then
+    raise exception 'sponsored_actor_required: an active partner or sponsored agent must attest';
+  end if;
+  select * into w from ops.work_request where ops.work_request.ref=p_ref for update;
+  if not found then raise exception 'work_request_not_found: %',p_ref; end if;
+  if w.state in ('confirmed_closed','declined','superseded','failed') then
+    raise exception 'work_request_terminal_state: % is %',p_ref,w.state;
+  end if;
+  if w.version is distinct from p_base_version then raise exception 'work_request_version_conflict: %',p_ref; end if;
+  if w.state not in ('captured','triaged','ready','verification') then
+    raise exception 'work_request_not_completable: % is %',p_ref,w.state;
+  end if;
+  if jsonb_typeof(p_changes) is distinct from 'array' then raise exception 'missing_change_ref: supply merged PR references'; end if;
+  if jsonb_array_length(p_changes)=0 or exists(select 1 from jsonb_array_elements(p_changes) x
+    where jsonb_typeof(x)<>'object' or (select count(*) from jsonb_object_keys(case when jsonb_typeof(x)='object' then x else '{}'::jsonb end))<>2
+      or jsonb_typeof(x->'pr_url') is distinct from 'string' or jsonb_typeof(x->'merge_commit_sha') is distinct from 'string'
+      or coalesce(x->>'pr_url','') !~ '^https://github[.]com/(DoctorCRE/carr-system|jbookout/doctorcre-app)/pull/[1-9][0-9]*$'
+      or coalesce(x->>'merge_commit_sha','') !~ '^[0-9a-fA-F]{40}$') then
+    raise exception 'missing_change_ref: supply a merged PR URL and its full merge commit SHA';
+  end if;
+  if jsonb_typeof(p_criteria) is distinct from 'array' then raise exception 'missing_criterion_evidence: supply evidence for every criterion id'; end if;
+  if jsonb_array_length(w.acceptance_criteria)=0 or jsonb_array_length(p_criteria)<>jsonb_array_length(w.acceptance_criteria)
+     or exists(select 1 from jsonb_array_elements(w.acceptance_criteria) criterion
+       where nullif(btrim(criterion->>'id'),'') is null
+          or (select count(*) from jsonb_array_elements(p_criteria) line
+               where line->>'id'=criterion->>'id' and jsonb_typeof(line)='object'
+                 and jsonb_typeof(line->'evidence')='string' and jsonb_typeof(line->'id')='string'
+                 and nullif(btrim(line->>'evidence'),'') is not null
+                 and (select count(*) from jsonb_object_keys(case when jsonb_typeof(line)='object' then line else '{}'::jsonb end))=2)<>1) then
+    raise exception 'missing_criterion_evidence: supply exactly one nonempty evidence line per criterion id';
+  end if;
+  if p_user_facing is null then raise exception 'completion_capsule_refused: user_facing must be explicit'; end if;
+  if p_user_facing and nullif(btrim(p_journey),'') is null then raise exception 'missing_user_journey_ref: user-facing work requires an exercised journey'; end if;
+  select jsonb_agg(to_jsonb((line->>'id') || ': ' || (line->>'evidence'))) into predicate from jsonb_array_elements(p_criteria) line;
+  capsule:=jsonb_build_object('acceptance_predicates',predicate,'change_ref',p_changes::text,
+    'change_refs',p_changes,'criterion_evidence',p_criteria,'user_facing',p_user_facing,'user_journey_ref',p_journey,'attested_by',a.id::text);
+  insert into ops.work_request_completion_receipt(idempotency_key,work_request_id,base_version,result_version,evidence,attestor_actor_id)
+  values(p_key,w.id,w.version,w.version+1,capsule,a.id);
+  begin
+    update ops.work_request set state='confirmed_closed', completion_kind='built', completion_evidence=capsule,
+      verification_accepted_at=now(), closed_at=now(),version=w.version+1,updated_at=now() where id=w.id;
+  exception when check_violation then
+    raise exception 'completion_capsule_refused: %',sqlerrm using errcode='23514';
+  end;
+  return query select x.id,x.ref,x.state,x.version,w.state,x.closed_at from ops.work_request x where x.id=w.id;
+end $_$;
+
+
+--
 -- Name: completed_release_append_only(); Type: FUNCTION; Schema: ops; Owner: -
 --
 
@@ -11366,7 +11426,7 @@ CREATE TABLE ops.work_request (
     CONSTRAINT work_request_program_ordinal_positive CHECK (((program_ordinal IS NULL) OR (program_ordinal > 0))),
     CONSTRAINT work_request_shape_disposition_complete CHECK ((((shape_disposition IS NULL) AND (shape_fixed_surface_ref IS NULL) AND (shape_rationale IS NULL) AND (shape_decided_by_actor_id IS NULL) AND (shape_decided_at IS NULL)) OR ((shape_disposition = 'required'::text) AND (shape_fixed_surface_ref IS NULL) AND (shape_rationale IS NOT NULL) AND (btrim(shape_rationale) <> ''::text) AND (shape_decided_by_actor_id IS NOT NULL) AND (shape_decided_at IS NOT NULL)) OR ((shape_disposition = 'not_required'::text) AND (shape_fixed_surface_ref IS NOT NULL) AND (btrim(shape_fixed_surface_ref) <> ''::text) AND (shape_rationale IS NOT NULL) AND (btrim(shape_rationale) <> ''::text) AND (shape_decided_by_actor_id IS NOT NULL) AND (shape_decided_at IS NOT NULL)))),
     CONSTRAINT work_request_shape_disposition_valid CHECK (((shape_disposition IS NULL) OR (shape_disposition = ANY (ARRAY['required'::text, 'not_required'::text])))),
-    CONSTRAINT work_request_sourced_capture_shape CHECK ((((capture_idempotency_key IS NULL) AND (organization_tenant_id IS NULL) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL)) OR ((capture_idempotency_key IS NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key = ANY (ARRAY['carr-ai-engineering-suite-v1'::text, 'carr-system-integrity-elimination-v1'::text])) AND (program_ordinal IS NOT NULL) AND (program_ordinal > 0) AND (NOT (requester_actor IS DISTINCT FROM 'joe'::text)) AND (NOT (owner_actor IS DISTINCT FROM 'joe'::text))) OR ((capture_idempotency_key IS NOT NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NOT NULL) AND (doctrine_revision_id IS NOT NULL) AND (sourced_capture_sequence IS NOT NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL) AND (origin_ref IS NOT NULL) AND (origin_ref ~ '^doctrine:[a-z0-9][a-z0-9-]*#[a-z0-9][a-z0-9-]*$'::text) AND (((state = 'captured'::text) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['triaged'::text, 'ready'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (((triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL))) AND (exit_reason IS NOT NULL) AND (btrim(exit_reason) <> ''::text) AND (closed_at IS NOT NULL) AND (((state = 'declined'::text) AND (superseded_by IS NULL)) OR ((state = 'superseded'::text) AND (superseded_by IS NOT NULL)))))))),
+    CONSTRAINT work_request_sourced_capture_shape CHECK ((((capture_idempotency_key IS NULL) AND (organization_tenant_id IS NULL) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL)) OR ((capture_idempotency_key IS NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key = ANY (ARRAY['carr-ai-engineering-suite-v1'::text, 'carr-system-integrity-elimination-v1'::text])) AND (program_ordinal IS NOT NULL) AND (program_ordinal > 0) AND (NOT (requester_actor IS DISTINCT FROM 'joe'::text)) AND (NOT (owner_actor IS DISTINCT FROM 'joe'::text))) OR ((capture_idempotency_key IS NOT NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NOT NULL) AND (doctrine_revision_id IS NOT NULL) AND (sourced_capture_sequence IS NOT NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL) AND (origin_ref IS NOT NULL) AND (origin_ref ~ '^doctrine:[a-z0-9][a-z0-9-]*#[a-z0-9][a-z0-9-]*$'::text) AND (((state = ANY (ARRAY['captured'::text, 'confirmed_closed'::text])) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['triaged'::text, 'ready'::text, 'verification'::text, 'confirmed_closed'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (((triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL))) AND (exit_reason IS NOT NULL) AND (btrim(exit_reason) <> ''::text) AND (closed_at IS NOT NULL) AND (((state = 'declined'::text) AND (superseded_by IS NULL)) OR ((state = 'superseded'::text) AND (superseded_by IS NOT NULL)))))))),
     CONSTRAINT work_request_state_check CHECK ((state = ANY (ARRAY['captured'::text, 'triaged'::text, 'ready'::text, 'claimed'::text, 'in_progress'::text, 'verification'::text, 'awaiting_release'::text, 'released'::text, 'confirmed_closed'::text, 'needs_joe'::text, 'blocked'::text, 'declined'::text, 'superseded'::text, 'failed'::text])))
 );
 
@@ -60208,6 +60268,16 @@ begin
     return new;
   end if;
 
+  if old.state in ('captured','triaged','ready','verification') and new.state='confirmed_closed'
+     and new.completion_kind='built' and new.version=old.version+1
+     and (to_jsonb(new)-array['state','completion_kind','completion_evidence','verification_accepted_at','closed_at','version','updated_at'])
+       is not distinct from
+       (to_jsonb(old)-array['state','completion_kind','completion_evidence','verification_accepted_at','closed_at','version','updated_at'])
+     and exists(select 1 from ops.work_request_completion_receipt r where r.work_request_id=old.id
+       and r.base_version=old.version and r.result_version=new.version and r.evidence=new.completion_evidence) then
+    return new;
+  end if;
+
   if old.state = 'captured'
      and new.state = 'triaged'
      and new.version = old.version + 1
@@ -64323,6 +64393,15 @@ end $$;
 --
 
 COMMENT ON FUNCTION ops.work_request_completion_actor() IS 'The actor a Work Request evidence binding or completion is recorded under (0872): the server-set acting actor, refused with 42501 unless it is a human actor or a sponsored agent.';
+
+
+--
+-- Name: work_request_completion_receipt_append_only(); Type: FUNCTION; Schema: ops; Owner: -
+--
+
+CREATE FUNCTION ops.work_request_completion_receipt_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$ begin raise exception 'Work Request completion receipts are append-only'; end $$;
 
 
 --
@@ -76869,6 +76948,21 @@ CREATE VIEW ops.v_work_shape_current WITH (security_invoker='true') AS
     created_at
    FROM ops.work_shape_revision
   ORDER BY work_request_id, version DESC;
+
+
+--
+-- Name: work_request_completion_receipt; Type: TABLE; Schema: ops; Owner: -
+--
+
+CREATE TABLE ops.work_request_completion_receipt (
+    idempotency_key uuid NOT NULL,
+    work_request_id uuid NOT NULL,
+    base_version integer NOT NULL,
+    result_version integer NOT NULL,
+    evidence jsonb NOT NULL,
+    attestor_actor_id uuid NOT NULL,
+    completed_at timestamp with time zone DEFAULT now() NOT NULL
+);
 
 
 --
@@ -92298,6 +92392,22 @@ ALTER TABLE ONLY ops.v5_a05_cadence_receipt
 
 
 --
+-- Name: work_request_completion_receipt work_request_completion_receipt_pkey; Type: CONSTRAINT; Schema: ops; Owner: -
+--
+
+ALTER TABLE ONLY ops.work_request_completion_receipt
+    ADD CONSTRAINT work_request_completion_receipt_pkey PRIMARY KEY (idempotency_key);
+
+
+--
+-- Name: work_request_completion_receipt work_request_completion_receipt_work_request_id_key; Type: CONSTRAINT; Schema: ops; Owner: -
+--
+
+ALTER TABLE ONLY ops.work_request_completion_receipt
+    ADD CONSTRAINT work_request_completion_receipt_work_request_id_key UNIQUE (work_request_id);
+
+
+--
 -- Name: work_request_criterion_evidence work_request_criterion_evidence_idempotency_key_key; Type: CONSTRAINT; Schema: ops; Owner: -
 --
 
@@ -96873,6 +96983,13 @@ CREATE TRIGGER completion_policy_insert_guard BEFORE INSERT ON ops.completion_po
 --
 
 CREATE TRIGGER completion_receipt_append_only BEFORE DELETE OR UPDATE ON ops.completion_receipt FOR EACH ROW EXECUTE FUNCTION ops.completion_reject_mutation();
+
+
+--
+-- Name: work_request_completion_receipt completion_receipt_append_only; Type: TRIGGER; Schema: ops; Owner: -
+--
+
+CREATE TRIGGER completion_receipt_append_only BEFORE DELETE OR UPDATE ON ops.work_request_completion_receipt FOR EACH ROW EXECUTE FUNCTION ops.work_request_completion_receipt_append_only();
 
 
 --
@@ -104579,6 +104696,22 @@ ALTER TABLE ONLY ops.v5_a05_cadence_receipt
 
 
 --
+-- Name: work_request_completion_receipt work_request_completion_receipt_attestor_actor_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: -
+--
+
+ALTER TABLE ONLY ops.work_request_completion_receipt
+    ADD CONSTRAINT work_request_completion_receipt_attestor_actor_id_fkey FOREIGN KEY (attestor_actor_id) REFERENCES public.actor(id);
+
+
+--
+-- Name: work_request_completion_receipt work_request_completion_receipt_work_request_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: -
+--
+
+ALTER TABLE ONLY ops.work_request_completion_receipt
+    ADD CONSTRAINT work_request_completion_receipt_work_request_id_fkey FOREIGN KEY (work_request_id) REFERENCES ops.work_request(id);
+
+
+--
 -- Name: work_request_criterion_evidence work_request_criterion_evidence_bound_by_actor_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: -
 --
 
@@ -107699,6 +107832,7 @@ revoke all on function ops.complete_calendar_prebrief_joe_live_job(p_job uuid, p
 revoke all on function ops.complete_doc_suggestion_scan(p_conversation uuid, p_through_sequence integer, p_key uuid) from public;
 revoke all on function ops.complete_job(p_job_id uuid, p_lease_token uuid, p_evidence jsonb, p_receipt_ref text) from public;
 revoke all on function ops.complete_sourced_work_request_on_bound_evidence(p_work_request text, p_idempotency_key uuid) from public;
+revoke all on function ops.complete_work_request(p_ref text, p_base_version integer, p_changes jsonb, p_criteria jsonb, p_user_facing boolean, p_journey text, p_actor_slug text, p_key uuid) from public;
 revoke all on function ops.completion_dimensions_valid(p_dimensions text[]) from public;
 revoke all on function ops.completion_json_is_redacted(p_value jsonb) from public;
 revoke all on function ops.completion_precedence_valid(p_states text[]) from public;
@@ -108899,6 +109033,7 @@ revoke all on function ops.whats_new_partner_id() from public;
 revoke all on function ops.whats_new_section(p_section text, p_since timestamp with time zone, p_until timestamp with time zone, p_previous pg_snapshot) from public;
 revoke all on function ops.work_request_bound_evidence_verdict(p_criteria jsonb, p_bindings jsonb) from public;
 revoke all on function ops.work_request_completion_actor() from public;
+revoke all on function ops.work_request_completion_receipt_append_only() from public;
 revoke all on function ops.work_request_criterion_evidence_is_append_only() from public;
 revoke all on function ops.work_request_evidence_receipt_kind(p_receipt text) from public;
 revoke all on function ops.work_request_evidence_receipt_mismatch(p_receipt text, p_work_request_id uuid) from public;
@@ -109984,6 +110119,7 @@ grant select on table ops.v_work_shape_current to dot_reader;
 grant select on table ops.work_request to carr_reader;
 grant select, update on table ops.work_request to carr_writer;
 grant select on table ops.work_request to dot_reader;
+grant select on table ops.work_request_completion_receipt to dot_reader;
 grant select on table ops.work_request_criterion_evidence to carr_reader;
 grant select on table ops.work_request_criterion_evidence to carr_writer;
 grant select on table ops.work_request_criterion_evidence to dot_reader;
@@ -110972,6 +111108,7 @@ grant execute on function ops.complete_calendar_prebrief_joe_live_job(p_job uuid
 grant execute on function ops.complete_doc_suggestion_scan(p_conversation uuid, p_through_sequence integer, p_key uuid) to carr_authority;
 grant execute on function ops.complete_job(p_job_id uuid, p_lease_token uuid, p_evidence jsonb, p_receipt_ref text) to carr_jobs;
 grant execute on function ops.complete_sourced_work_request_on_bound_evidence(p_work_request text, p_idempotency_key uuid) to carr_writer;
+grant execute on function ops.complete_work_request(p_ref text, p_base_version integer, p_changes jsonb, p_criteria jsonb, p_user_facing boolean, p_journey text, p_actor_slug text, p_key uuid) to carr_writer;
 grant execute on function ops.completion_runtime_tenant() to carr_jobs;
 grant execute on function ops.completion_runtime_tenant() to carr_reader;
 grant execute on function ops.completion_runtime_tenant() to carr_writer;
@@ -113058,6 +113195,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 1001_retire_scheduler_contracts.sql	2b14240e8b93c30d5dc16c4dfd6a746b365e736895a516be3d769d9b10d27186	1970-01-01 00:00:00+00
 1003_notification_morning_midnight.sql	7b3eb4a20aeed80ce5c01bd17a4b2fe02c43184e5903957ac4edee459b80d050	1970-01-01 00:00:00+00
 1004_phase_start_undo.sql	921899f7e36a786c3570d2da68645051b710c7fd51ec7fbe6c8b74488bd93e52	1970-01-01 00:00:00+00
+1005_complete_work_request.sql	7b10127a1d0d0433471b08894646e8a02a0d139ee2f1227a3fedd3e48459c0a7	1970-01-01 00:00:00+00
 \.
 
 
