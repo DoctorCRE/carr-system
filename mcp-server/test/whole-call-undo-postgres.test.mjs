@@ -78,7 +78,7 @@ async function filedCall() {
   sessionTokens.set(session, token);
   return session;
 }
-async function fileStep(session, text, ref = deal, key = randomUUID()) {
+async function fileCandidate(session, item, key = randomUUID()) {
   const handler = createCaptureHandler({ withWriter: async fn => {
     await c.query('begin');
     await c.query('set local role carr_writer');
@@ -87,14 +87,21 @@ async function fileStep(session, text, ref = deal, key = randomUUID()) {
   } });
   const response = await handler.fetch(new Request('http://127.0.0.1/capture/candidates', {
     method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({
-      session_token:sessionTokens.get(session), idempotency_key:key, items:[{kind:'next_step',
-        payload:{deal:ref,text,next_date:'2027-01-08'}, evidence_quote:'Send the synthetic floor plan next week', confidence:1}]
+      session_token:sessionTokens.get(session), idempotency_key:key, items:[item]
     })
   }), {});
   const body = await response.json();
   assert.equal(response.status,200,JSON.stringify(body));
   return body.candidate_ids[0];
 }
+const fileStep = (session, text, ref = deal, key = randomUUID()) => fileCandidate(session, {
+  kind:'next_step', payload:{deal:ref,text,next_date:'2027-01-08'},
+  evidence_quote:'Send the synthetic floor plan next week', confidence:1,
+}, key);
+const filePhase = (session, value, ref = deal, key = randomUUID()) => fileCandidate(session, {
+  kind:'phase_move', payload:{deal:ref,field:'phase',value,started_on:'2026-10-01'},
+  evidence_quote:'Move the synthetic clinic into negotiation', confidence:1,
+}, key);
 async function candidate(session, text, automatic = true, ref = deal) {
   const named = ref === 'Synthetic coastal purchase';
   const id = await fileStep(session, text, named ? deal : ref);
@@ -104,6 +111,81 @@ async function candidate(session, text, automatic = true, ref = deal) {
 }
 const room = (ref=deal) => command('get-deal-room',{deal:ref});
 const setStep = async (text,ref=deal) => command('set-next-step',{idempotency_key:randomUUID(),deal:ref,text,next_date:'2027-01-01',base_version:(await room(ref)).base_version});
+
+for (const field of ['next_step', 'next_date']) test(`automatic phase move preserves a newer overdue ${field} after filing replay`, async () => {
+  const ref=await secondDeal();
+  await command('set-next-step',{idempotency_key:randomUUID(),deal:ref,text:'Review the original overdue plan',
+    next_date:'2020-01-01',base_version:(await room(ref)).base_version});
+  const session=await filedCall();
+  const key=randomUUID();
+  const id=await filePhase(session,'negotiation',ref,key);
+  if (field==='next_step') {
+    await command('set-next-step',{idempotency_key:randomUUID(),deal:ref,text:'Keep the newer overdue partner plan',
+      next_date:'2020-02-02',base_version:(await room(ref)).base_version});
+  } else {
+    await command('patch-deal-field',{idempotency_key:randomUUID(),deal:ref,field:'next_date',value:'2020-02-02',
+      base_event_id:(await room(ref)).events.find(event=>event.field==='next_date').id});
+  }
+  assert.equal(await filePhase(session,'negotiation',ref,key),id);
+  const before=await room(ref);
+  await assert.rejects(command('resolve-candidate',{idempotency_key:randomUUID(),candidate_id:id,accept:true,automatic:true},actor,'carr_writer'),
+    error=>error.payload?.error==='newer_change_exists');
+  const after=await room(ref);
+  assert.equal(after.phase,before.phase);
+  assert.equal(after.next_step,before.next_step);
+  assert.equal(after.next_date,before.next_date);
+  assert.deepEqual(after.items,before.items);
+  assert.deepEqual(after.events,before.events);
+  assert.equal(after.base_version,before.base_version);
+  const outcome=(await command('read-call-outcomes')).calls.find(call=>call.session_id===session);
+  assert.ok(outcome.open_cards.some(card=>card.candidate_id===id));
+  await command('resolve-candidate',{idempotency_key:randomUUID(),candidate_id:id,accept:true});
+  assert.equal((await room(ref)).phase,'negotiation');
+});
+
+test('a phase proposal without a filed plan base requires review', async () => {
+  const ref=await secondDeal();
+  const session=await filedCall();
+  const id=await filePhase(session,'negotiation',ref);
+  await c.query("update capture_candidate set payload=payload-'plan_base' where id=$1",[id]);
+  const before=await room(ref);
+  await assert.rejects(command('resolve-candidate',{idempotency_key:randomUUID(),candidate_id:id,accept:true,automatic:true}),
+    error=>error.payload?.error==='missing_plan_base');
+  assert.equal((await room(ref)).phase,before.phase);
+  const outcome=(await command('read-call-outcomes')).calls.find(call=>call.session_id===session);
+  assert.ok(outcome.open_cards.some(card=>card.candidate_id===id));
+  await command('resolve-candidate',{idempotency_key:randomUUID(),candidate_id:id,accept:true});
+  assert.equal((await room(ref)).phase,'negotiation');
+});
+
+test('an unrelated edit does not hold an automatic phase move or its undo', async () => {
+  const ref=await secondDeal();
+  const session=await filedCall();
+  const id=await filePhase(session,'negotiation',ref);
+  await command('patch-deal-field',{idempotency_key:randomUUID(),deal:ref,field:'attention',value:true,base_event_id:null});
+  const result=await command('resolve-candidate',{idempotency_key:randomUUID(),candidate_id:id,accept:true,automatic:true},actor,'carr_writer');
+  assert.equal(result.automatic,true);
+  assert.equal((await room(ref)).phase,'negotiation');
+  assert.equal((await room(ref)).attention,true);
+  const outcome=(await command('read-call-outcomes')).calls.find(call=>call.session_id===session);
+  assert.ok(outcome.applied.some(change=>change.candidate_id===id));
+  await command('undo-call-change',{idempotency_key:randomUUID(),candidate_id:id,base_version:(await room(ref)).base_version});
+  assert.equal((await room(ref)).phase,'site_selection');
+  assert.equal((await room(ref)).attention,true);
+});
+
+test('a same-call automatic plan does not hold a filed phase move', async () => {
+  const ref=await secondDeal();
+  const session=await filedCall();
+  const phase=await filePhase(session,'negotiation',ref);
+  await candidate(session,'Send the same call floor plan',true,ref);
+  const result=await command('resolve-candidate',{idempotency_key:randomUUID(),candidate_id:phase,accept:true,automatic:true});
+  assert.equal(result.automatic,true);
+  const after=await room(ref);
+  assert.equal(after.phase,'negotiation');
+  assert.equal(after.next_step,'Send the same call floor plan');
+  assert.equal(after.next_date,'2027-01-08');
+});
 
 for (const field of ['next_step', 'next_date']) test(`automatic next step preserves a newer ${field} edit and stays pending after replay`, async () => {
   await setStep('Keep the original plan');
@@ -266,10 +348,7 @@ test('verified sponsored partners can undo and unattended sessions cannot', asyn
 });
 
 async function phaseCandidate(session, value) {
-  const base=(await room()).events.find(event=>event.field==='phase')?.id ?? null;
-  const id=(await c.query(`insert into capture_candidate(session_id,idempotency_key,batch_hash,item_index,kind,payload,evidence_quote,confidence)
-    values($1,$2,$2,0,'phase_move',$3,'Move the synthetic clinic into negotiation',1) returning id`,
-    [session,randomUUID(),{deal,field:'phase',value,base_event_id:base,started_on:'2026-10-01'}])).rows[0].id;
+  const id=await filePhase(session,value);
   await command('resolve-candidate',{idempotency_key:randomUUID(),candidate_id:id,accept:true,automatic:true});
   return id;
 }

@@ -168,7 +168,7 @@ class IncidentTests(unittest.TestCase):
         self.assertIn('never started', body)
         self.assertIn('no completion observed', body)
         self.assertIn('https://github.com/owner/repo/actions/runs/123', body)
-        self.assertIn('tools/ops-record.py health', body)
+        self.assertIn('[Remediation: inspect service evidence](https://github.com/DoctorCRE/carr-system/blob/main/tools/ops-record.py)', body)
         self.assertEqual(artifact['affected_services'], [
             {key: value for key, value in row.items() if key != 'stderr'}
             for row in facts[:3]])

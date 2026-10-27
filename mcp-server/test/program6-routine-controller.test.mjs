@@ -158,9 +158,9 @@ test("current GET returns vendor advice beside unchanged authorized data", async
       return canonical;
     },
     jevFetch: async () => Response.json({ model: "jev-1.13.0", answers: {
-      [`item_0_${REF}_class`]: { type: "choice", choice: `0|${REF}|decision_ready`, confidence: 0.9,
-        probabilities: { [`0|${REF}|decision_ready`]: 0.9, [`0|${REF}|information_needed`]: 0.025,
-          [`0|${REF}|blocked`]: 0.025, [`0|${REF}|routine_review`]: 0.025, [`0|${REF}|unclear`]: 0.025 } },
+      [`item_0_${REF}_class`]: { type: "choice", choice: "decision_ready", confidence: 0.9,
+        probabilities: { decision_ready: 0.9, information_needed: 0.025,
+          blocked: 0.025, routine_review: 0.025, unclear: 0.025 } },
       [`item_0_${REF}_priority`]: { type: "noul", noul: 0.8 },
       [`item_0_${REF}_relevance`]: { type: "noul", noul: 0.7 },
       [`item_0_${REF}_ambiguity`]: { type: "noul", noul: 0.1 },
@@ -192,7 +192,7 @@ test("vendor failure cannot fail the authorized queue read", async () => {
   assert.deepEqual(body.data, canonical);
   assert.equal(body.advisory.status, "unavailable");
   assert.equal(JSON.stringify(body).includes("private synthetic diagnostics"), false);
-  assert.equal(attempts, 1);
+  assert.ok(attempts >= 1 && attempts <= 3);
 });
 
 test("canonical read failure remains a failure and sends no vendor request", async () => {

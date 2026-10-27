@@ -2,7 +2,7 @@
 import test from 'node:test';
 import { TypeSafeClient, TypeSafeError } from '@typesafe-ai/sdk';
 import assert from 'node:assert/strict';
-import { dealReadingState, readDealWithJev as sdkRead } from '../src/jev-deal-reading.js';
+import { dealReadingState, readDealWithJev as sdkRead } from '../src/jev-deal-reading.ts';
 
 const readDealWithJev = (record, {askJev, ...options} = {}) => sdkRead(record, {
   ...options, ...(askJev ? {client: {systemOne: askJev}} : {}),
@@ -78,6 +78,23 @@ test('eligible Deal Room advice uses one SDK call', async () => {
   assert.equal(calls.length, 1);
   assert.equal(calls[0].model, undefined);
   assert.equal(answer.judged, true);
+});
+
+test('movement confidence is reported and a low-confidence rung abstains', async () => {
+  const text = 'The landlord sent a counter; the tenant must decide whether to accept the revised rate. '.repeat(4);
+  const ask = confidence => ({ askJev: async () => ({ model: 'jev-1.13.0', answers: {
+    movement: { score: 3.1, ...(confidence === undefined ? {} : { confidence }) },
+    waiting_on: { choice: 'client', confidence: 0.91 }, silence_is_bad: { noul: 0.18 } } }) });
+  const sure = await readDealWithJev(eligible(text), ask(0.8));
+  assert.equal(sure.judged, true);
+  assert.equal(sure.movement_confidence, 0.8);
+  const unsure = await readDealWithJev(eligible(text), ask(0.3));
+  assert.equal(unsure.judged, false);
+  assert.equal(unsure.reason, 'low_movement_confidence');
+  assert.equal(Object.hasOwn(unsure, 'movement_score'), false);
+  const unreported = await readDealWithJev(eligible(text), ask(undefined));
+  assert.equal(unreported.judged, true);
+  assert.equal(unreported.movement_confidence, null);
 });
 
 test('invalid vendor answers abstain', async () => {

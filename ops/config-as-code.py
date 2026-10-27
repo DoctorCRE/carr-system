@@ -153,6 +153,9 @@ LAUNCHD_QUARANTINE = os.path.join(
 LAUNCHD_SRC = os.path.join(HOME, "Library", "LaunchAgents")
 LAUNCHD_REPO = os.path.join(REPO, "ops", "launchd")
 LAUNCHD_ALT_REPO = {
+    "com.carr.outlook-research-copy.plist": os.path.join(
+        REPO, "spec", "outlook", "com.carr.outlook-research-copy.plist"
+    ),
     "com.carr.call-mode.plist": os.path.join(
         REPO, "tools", "dictation-rig", "launchd", "com.carr.call-mode.plist"
     ),
@@ -2653,6 +2656,11 @@ def main():
     apply = "--apply" in sys.argv
     if mode == "--selftest":
         return config_selftest()
+    if mode == "check-hook-files":
+        problems = installed_hook_missing_files()
+        for path, reason in problems:
+            print(f"{path}: {reason}")
+        return 1 if problems else 0
     if mode == "check":
         return cmd_check()
     if mode == "pull":

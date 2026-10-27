@@ -46,6 +46,7 @@ BADGE_WALK = 120
 class Outcome:
     state: str
     reason: str
+    detail: str = ''
 
 
 @dataclass(frozen=True)
@@ -145,9 +146,10 @@ def is_compose_window(window: dict) -> bool:
             and bounds.get('height', 0) >= 400)
 
 
-def is_ordinary_main_window(window: dict, full_screen_height: int) -> bool:
-    return (is_main_window(window) and window.get('on_current_space') is True
-            and (window.get('bounds') or {}).get('height', full_screen_height) < full_screen_height)
+def is_ordinary_main_window(window: dict) -> bool:
+    bounds = window.get('bounds') or {}
+    return (is_main_window(window) and window.get('is_on_screen') is True
+            and bounds.get('width', 0) >= 400 and bounds.get('height', 0) >= 400)
 
 
 def cua(tool: str, arguments: dict) -> dict:
@@ -180,22 +182,62 @@ def _readable(pid: int, window: dict) -> bool:
 
 
 def usable_window(pid: int) -> dict | None:
-    full_screen_height = load_settings().full_screen_height
-    return next((w for w in _windows(pid) if is_ordinary_main_window(w, full_screen_height) and _readable(pid, w)), None)
+    return next((w for w in _windows(pid) if is_ordinary_main_window(w) and _readable(pid, w)), None)
 
 
 def _quit(pid: int, windows: list[dict], waits: Waits) -> bool:
-    try:
-        cua('invoke_menu', {'pid': pid, 'window_id': windows[0]['window_id'], 'path': QUIT})
-    except (CuaError, IndexError, KeyError):
-        subprocess.run(['osascript', '-e', f'tell application "{APP}" to quit'],
-                       capture_output=True, timeout=30)
+    window = next((w for w in windows if is_ordinary_main_window(w)), None)
+    fallback_at = time.monotonic()
+    if window is not None:
+        try:
+            cua('invoke_menu', {'pid': pid, 'window_id': window['window_id'], 'path': QUIT})
+            fallback_at = time.monotonic() + min(2, waits.quit_seconds / 2)
+        except (CuaError, KeyError):
+            pass
     deadline = time.monotonic() + waits.quit_seconds
+    fallback_at = min(fallback_at, deadline)
     while outlook_pid() is not None:
-        if time.monotonic() >= deadline:
+        now = time.monotonic()
+        if now >= deadline:
             return False
-        time.sleep(waits.poll_seconds)
+        if now >= fallback_at:
+            try:
+                subprocess.run(['osascript', '-e', f'tell application "{APP}" to quit'],
+                               capture_output=True, timeout=min(30, deadline - now))
+            except subprocess.TimeoutExpired:
+                return False
+            fallback_at = float('inf')
+            continue
+        time.sleep(min(waits.poll_seconds, deadline - now, fallback_at - now))
     return True
+
+
+def _quit_window_detail(pid: int) -> str:
+    try:
+        windows = _windows(pid)
+    except CuaError:
+        return 'windows_unavailable'
+    snapshot = []
+    for window in windows:
+        role = window.get('role')
+        subrole = window.get('subrole')
+        if role == 'AXSheet' or subrole == 'AXSheet':
+            kind = 'sheet'
+        elif subrole in ('AXDialog', 'AXSystemDialog') or role == 'AXDialog':
+            kind = 'dialog'
+        elif is_main_window(window):
+            kind = 'main'
+        elif is_compose_window(window):
+            kind = 'compose'
+        else:
+            kind = 'dialog'
+        bounds = window.get('bounds') or {}
+        size = {key: bounds.get(key) if type(bounds.get(key)) in (int, float) else None
+                for key in ('width', 'height')}
+        visible = window.get('is_on_screen')
+        snapshot.append({'kind': kind, **size,
+                         'is_on_screen': visible if type(visible) is bool else None})
+    return json.dumps({'windows': snapshot}, separators=(',', ':'))
 
 
 def prepare_outlook(waits: Waits) -> Outcome | None:
@@ -207,7 +249,7 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
             if any(is_compose_window(w) for w in windows):
                 return Outcome('skipped', 'compose_window_open')
             if not _quit(pid, windows, waits):
-                return Outcome('failed', 'outlook_quit_timeout')
+                return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
         launched = subprocess.run(['open', '-g', '-a', APP, '--args',
                                    '-ApplePersistenceIgnoreState', 'YES'],
                                   capture_output=True, timeout=60)

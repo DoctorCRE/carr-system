@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build and run the dedicated copier against synthetic files only."""
 import json
+import importlib.util
 import os
 import plistlib
 from pathlib import Path
@@ -50,6 +51,19 @@ class CopyTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout.decode(), f'{self.profile}\n{self.out}\n{self.root}\n')
         self.assertFalse((self.work / 'store.hxd').exists())
+
+    def test_helper_launches_only_fixed_intake_and_outbox_commands(self):
+        (self.root / 'bin').mkdir()
+        (self.root / 'bin/run-scheduled.sh').write_text('printf "%s\\n" "$@"\nexit 23\n')
+        for service, mode, tail in (
+                ('intake', '--run-intake', ['-c', 'from lib.outlook_intake import main; raise SystemExit(main())']),
+                ('outbox', '--run-outbox', ['-m', 'lib.outlook_outbox'])):
+            with self.subTest(service=service):
+                result = self.copy(mode, cwd=self.root)
+                self.assertEqual(result.returncode, 23)
+                self.assertEqual(result.stdout.decode().splitlines(), [f'outlook-{service}',
+                    f'outlook.{service}', str(self.root / '.venv/bin/python'), *tail])
+        self.assertNotEqual(self.copy('--run-outbox', '/tmp/command').returncode, 0)
 
     def test_runtime_refuses_a_settings_profile_that_differs_from_the_granted_binary(self):
         settings_home = tempfile.TemporaryDirectory()
@@ -121,10 +135,11 @@ class InstallerTest(unittest.TestCase):
         self.repo, self.home = self.root / 'repo & quoted', self.root / 'home'
         for relative in ('bin', 'tools', 'ops/launchd', 'lib', '.venv/bin', 'vendor/hxprobe', 'spec/outlook'):
             (self.repo / relative).mkdir(parents=True)
-        for relative in ('bin/install-outlook-intake.sh', 'bin/install-outlook-triage.sh',
+        for relative in ('ops/hxprobe-source-digest.py', 'bin/install-outlook-intake.sh', 'bin/install-outlook-triage.sh',
                          'tools/outlook-intake-copy.c', 'lib/outlook_settings.py',
                          'ops/launchd/com.carr.outlook-intake.plist',
                          'ops/launchd/com.carr.outlook-refresh.plist',
+                         'ops/launchd/com.carr.outlook-outbox.plist',
                          'ops/launchd/com.carr.outlook-triage.plist'):
             shutil.copyfile(ROOT / relative, self.repo / relative)
         for relative in ('vendor/hxprobe/Cargo.toml', 'spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py'):
@@ -177,9 +192,69 @@ class InstallerTest(unittest.TestCase):
         self.install()
         self.assertEqual(self.helper.stat().st_mtime_ns, before, 'an unchanged helper retains its privacy identity')
 
+    def test_outbox_is_rendered_only_when_enabled_and_never_loaded(self):
+        self.install()
+        rendered = self.repo / 'out/com.carr.outlook-outbox.plist'
+        self.assertFalse(rendered.exists())
+        before = self.helper.read_bytes()
+        values = json.loads(self.config.read_text())
+        values['services'].append('outbox')
+        self.config.write_text(json.dumps(values))
+        result = self.install()
+        plist = plistlib.loads(rendered.read_bytes())
+        self.assertEqual(plist['WorkingDirectory'], str(self.repo))
+        self.assertEqual(plist['StartCalendarInterval'], [{'Minute': n} for n in range(60)])
+        self.assertEqual(plist['ProgramArguments'], [str(self.helper), '--run-outbox'])
+        self.assertEqual(self.helper.read_bytes(), before)
+        self.assertEqual(stat.S_IMODE((self.repo / 'out/outlook-outbox-launchd.log').stat().st_mode), 0o600)
+        self.assertIn('outbox worker rendered; it is NOT loaded', result.stdout)
+        self.assertFalse((self.home / 'Library/LaunchAgents').exists())
+
     def git(self, checkout, *args):
         return subprocess.run(['git', '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.test',
                                *args], cwd=checkout, env=fixture_env(), check=True, capture_output=True, text=True).stdout.strip()
+
+    def test_first_build_uses_configured_tools_for_another_owner(self):
+        decoder = self.vendor / 'hxprobe/target/release/hxprobe'
+        decoder.unlink()
+        (self.vendor / '.carr-pin').unlink()
+        tools = self.home / 'configured tools'
+        tools.mkdir(parents=True)
+        cargo = tools / 'cargo'
+        cargo.write_text(f'#!{sys.executable}\n' + '''
+from pathlib import Path
+import sys
+args = sys.argv[1:]
+if args == ['--version']:
+    print('cargo synthetic')
+elif args[0] == 'build':
+    out = Path(args[args.index('--target-dir') + 1]) / 'release/hxprobe'
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(b'synthetic local decoder')
+''')
+        cargo.chmod(0o700)
+        rustc = tools / 'rustc'
+        rustc.write_text(f'#!{sys.executable}\nprint("rustc synthetic-other-host")\n')
+        rustc.chmod(0o700)
+        spec = importlib.util.spec_from_file_location('fixture_digest', ROOT / 'ops/hxprobe-source-digest.py')
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+        (self.repo / 'vendor/hxprobe/BUILD-SHA256').write_text('00' * 32 + '\n')
+        gate.write(self.repo / 'vendor/hxprobe')
+        self.git(self.repo, 'add', 'vendor/hxprobe/BUILD-SHA256')
+        self.git(self.repo, 'commit', '--quiet', '-m', 'synthetic source receipt')
+        write_settings(self.home, self.repo, owner='dell', account='partner@example.test',
+                       profile=str(self.home / 'Main Profile'), vendor=str(self.vendor),
+                       copy_helper=str(self.helper), executable_path=f'{tools}:/usr/bin:/bin:/usr/sbin:/sbin')
+        self.install()
+        self.assertEqual(decoder.read_bytes(), b'synthetic local decoder')
+        receipt = json.loads((self.vendor / '.carr-build.json').read_text())
+        self.assertEqual(receipt['rustc'], 'rustc synthetic-other-host')
+        self.assertEqual(receipt['source_digest'], gate.digest(self.repo / 'vendor/hxprobe'))
+        load_settings(self.home).verify_helper()
+        before = self.helper.stat().st_mtime_ns
+        self.install()
+        self.assertEqual(self.helper.stat().st_mtime_ns, before)
 
     def test_an_upstream_decoder_checkout_is_refused_until_moved_aside(self):
         decoder = self.vendor / 'hxprobe/target/release/hxprobe'

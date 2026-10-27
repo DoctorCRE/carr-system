@@ -482,7 +482,8 @@ test("post-call phase proposals pin the server phase base and preserve it on rep
   assert.equal(submitted.status, 200);
   const receipt = await submitted.json();
   const queue = await TOOLS["capture-queue"].handler(db, joe, {});
-  assert.deepEqual(queue.candidates[0].payload, { ...item.payload, base_event_id: db.phaseBase });
+  assert.deepEqual(queue.candidates[0].payload, { ...item.payload, base_event_id: db.phaseBase,
+    plan_base: { next_step: null, next_date: null } });
   db.phaseBase = "50000000-0000-0000-0000-000000000002";
   const replay = await post(r.handler, "/capture/candidates", batch);
   assert.deepEqual(await replay.json(), receipt);
@@ -508,6 +509,7 @@ test("post-call phase proposals pin the server phase base and preserve it on rep
     { ...item.payload, value: "closed" }, { ...item.payload, value: "invoiced" },
     { ...item.payload, value: "not-a-phase" }, { ...item.payload, field: "owner" },
     { ...item.payload, base_event_id: null }, { ...item.payload, value: true },
+    { ...item.payload, plan_base: { next_step: null, next_date: null } },
     { ...item.payload, human_quote: "Joe said move it" },
     { ...item.payload, started_on: "2026-13-40" }, { ...item.payload, started_on: "October 20" },
   ];
@@ -607,7 +609,7 @@ test("inner failure remains pending and meeting record appears only after a real
 test("capture SQL casts every temporal response and the contract has no transcript field", async () => {
   const source = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/capture.js", import.meta.url), "utf8"));
   assert.match(source, /to_jsonb\(state_at\)#>>'\{\}' as state_at/g);
-  const dealroom = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/dealroom.js", import.meta.url), "utf8"));
+  const dealroom = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/dealroom.ts", import.meta.url), "utf8"));
   assert.match(dealroom, /to_jsonb\(started_at\)#>>'\{\}' as started_at/);
   assert.match(dealroom, /to_jsonb\(state_at\)#>>'\{\}' as state_at/);
   const tools = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/tools.js", import.meta.url), "utf8"));

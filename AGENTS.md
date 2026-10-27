@@ -179,7 +179,7 @@ tree:
 ```
 git push origin HEAD:refs/heads/<name>
 gh pr create --base main --head <name> --title "..." --body "..."
-gh pr merge <n> --squash --delete-branch
+gh pr merge <n> --auto   # the merge queue sets the strategy; --squash is refused
 ```
 
 PR branches are never rebased or force-pushed, `--force-with-lease` included.
@@ -283,6 +283,10 @@ Business records go through the record layer's verbs; guidance changes go
 through the pull-request route above. `./run.sh call <verb> '<json>'` reaches any verb.
 This file and the vault's `CLAUDE.md`/`AGENTS.md` are among the few
 exact-path exceptions.
+
+Complete built Work Requests through `complete-work-request` with acceptance
+evidence and independent attestation. Use `decline-work-request` only for an
+actual withdrawal, never to mark finished work done.
 
 ## Before every PR: design and debt pass
 

@@ -11,9 +11,9 @@ import { factObservationTools } from "./fact-observations.ts";
 import { actionClosureTools } from "./action-closure.ts";
 import { dealFileTools } from "./deal-files.js";
 import { dealItemTools, readDealItems, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.ts";
-import { bindReferralDeal } from "./relationship-network.js";
-import { trustedOverride, dealEvidenceEntries, requireRelationshipPartner, mergeRelationshipFields } from "./vendor-relationship.js";
-import { readLeadWorkspace, LEAD_WORKSPACE_SCHEMA, validateStageReview, lockLeadLifecycle } from "./lead-workspace.js";
+import { bindReferralDeal } from "./relationship-network.ts";
+import { trustedOverride, dealEvidenceEntries, requireRelationshipPartner, mergeRelationshipFields } from "./vendor-relationship.ts";
+import { readLeadWorkspace, LEAD_WORKSPACE_SCHEMA, validateStageReview, lockLeadLifecycle } from "./lead-workspace.ts";
 // CARR MCP tool registry — Wave 1 verbs (tool-contracts-2026-07-30.md §2).
 // Every write runs the envelope: idempotency replay via tool_call, actor from
 // the verified token (never the payload), base_version conflicts ask and never
@@ -33,7 +33,7 @@ import { MEETING_MODE_WRITE_VERBS, meetingModeTools } from "./meeting-mode.js";
 import { notificationTools } from "./notifications.js";
 import { sessionIdentityTools } from "./session-identity.js";
 import { dispatchSpineTools } from "./dispatch-spine.js";
-import { workShapeTools } from "./work-shape.js";
+import { workShapeTools } from "./work-shape.ts";
 import { workRequestIntakeTools } from "./work-request-intake.js";
 import { workPortfolioTools } from "./work-portfolio.js";
 import { leaseTermComparisonTools } from "./lease-term-comparison.js";
@@ -48,10 +48,11 @@ import { invoiceAutomation } from "./invoice-automation.js";
 import { emailDealProgressTools } from "./email-deal-progress.ts";
 import { emailNextStepTools } from "./email-next-step.ts";
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
+import { addCalendarMeetingPrep } from "./calendar-meeting-prep.js";
 import { CALENDAR_AGENDA_BOARD, calendarSection, addCalendarContacts, addCalendarDealSuggestions } from "./brief-calendar.js";
 import { emailLeadProposalTools } from "./email-lead-proposal.ts";
 import { leadAutomationTools } from "./lead-automation.js";
-import { workflowCutoverTools } from "./workflow-cutover.v5.js";
+import { workflowCutoverTools } from "./workflow-cutover.v5.ts";
 import { engineeringRuntimeTools } from "./engineering-runtime.js";
 import { tourRightsProjectionTools } from "./tour-rights-projection.js";
 import { tourPropertyJurisdictionTools } from "./tour-property-jurisdiction.js";
@@ -60,7 +61,7 @@ import { tourPropertySearchTools } from "./tour-property-search.js";
 import { tourSharingTools } from "./tour-sharing.js";
 import { tourMapPromotionTools } from "./tour-map-promotion.js";
 import { tourArtifactTools } from "./tour-artifacts.js";
-import { DEAL_ROOM_FIELDS, assertDealRoomField, stripDealPlaceholders } from "./dealroom.js";
+import { DEAL_ROOM_FIELDS, assertDealRoomField, stripDealPlaceholders } from "./dealroom.ts";
 import { authenticatedIdentity, authorizationClassForActor, organizationTenantForActor,
          permittedActionOwnerSlugs, personalScopeForActor } from "./identity.js";
 import { automaticApplyHold } from "./call-auto-apply.js";
@@ -103,7 +104,7 @@ export { canExercisePartnerAuthority, partnerAuthoritySlugForActor };
 import { ToolError } from "./tool-error.ts";
 export { ToolError };
 import { parksADecision, classifyLoopText, needsDecider, loopRowText,
-         ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.js";
+         ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.ts";
 
 // DEFECT 2, HALF (b) (found 2026-08-13, decision 7026246b): a write whose bad
 // input reaches the database raw (an enum this file never learned to validate,
@@ -344,7 +345,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || verb === "dismiss-email-proposal" || verb === "undo-call" || ["set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || verb === "dismiss-email-proposal" || verb === "undo-call" || ["set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
@@ -2631,7 +2632,7 @@ async function applyDealRoomField(c, actor, dealId, field, value, idempotencyKey
   // advance that cell's base immediately, from the record's own word for it.
   //
   // recorded_at is serialized exactly as the changes feed serializes it
-  // (dealroom.js), so the two are directly comparable on the client: a base is
+  // (dealroom.ts), so the two are directly comparable on the client: a base is
   // only ever moved forward, never back onto an older event.
   const committed = (await c.query(
     `select id, to_jsonb(recorded_at)#>>'{}' as recorded_at from event
@@ -3715,6 +3716,7 @@ export const TOOLS = {
         if (calendar?.sources && calendar.items.length) {
           await addCalendarContacts(c, calendar);
           await addCalendarDealSuggestions(c, calendar, scope.sponsor);
+          await addCalendarMeetingPrep(c, calendar, scope.sponsor);
         }
       } catch {
         calendar = { state: "unavailable", reason: "source_unavailable", items: [] };
@@ -4250,6 +4252,9 @@ export const TOOLS = {
       // migration 0028; without it the FK to activity_kind rejects the row.
       kind: { type: "string", enum: ["call","email_out","email_in","meeting","tour","text","note","counter_sent","counter_received","loi","lease_signed","task","analysis"] },
       summary: { type: "string" }, detail: { type: "string" },
+      email_source: { type: "object", additionalProperties: false, required: ["sender_email", "mailbox_owner"],
+        properties: { sender_email: { type: "string", format: "email", maxLength: 254 },
+          mailbox_owner: { type: "string", enum: ["joe", "dell"] } } },
       occurred_at: { type: "string", description: "ISO timestamp; omit for now" },
       owed: { type: "string", description: "what is missing (a figure, a name) — recorded as owed" },
       human_quote: { type: "string", description: "the human's literal words, if dictated" },
@@ -4297,6 +4302,9 @@ export const TOOLS = {
                   "touch yet: set-next-action carries the ball you owe, and add-critical-date " +
                   "carries a dated obligation on a deal." });
       }
+      if (args.email_source !== undefined && (args.kind !== 'email_in' ||
+          args.email_source.mailbox_owner !== partnerAuthoritySlugForActor(actor)))
+        throw new ToolError({ error: 'email_source_owner_mismatch' });
       const s = await resolveSubject(c, args.ref);
       const assignments = [];
       if (args.vendor_assignments !== undefined) {
@@ -4324,9 +4332,10 @@ export const TOOLS = {
           await c.query('update vendor set updated_by=$1 where id=$2',[actor.id,vendorId]);
       }
       const r = await c.query(
-        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source)
-         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated') returning id, occurred_at`,
-        [args.occurred_at || null, actor.id, args.kind, args.summary, args.detail || null, args.owed || null, s.id]);
+        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_source)
+         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb) returning id, occurred_at`,
+        [args.occurred_at || null, actor.id, args.kind, args.summary, args.detail || null, args.owed || null, s.id,
+          args.email_source ? JSON.stringify(args.email_source) : null]);
       await writeEvent(c, actor, "log-activity", s.type, s.id,
         { new: { activity: r.rows[0].id, kind: args.kind }, human_quote: args.human_quote, idempotency_key: args.idempotency_key });
       const links = args.links && args.links.length
@@ -8947,7 +8956,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "session-identity": "mcp-server/src/session-identity.js",
   "dispatch-spine": "mcp-server/src/dispatch-spine.js",
   "doc-outcome-cards": "mcp-server/src/tools.js",
-  "work-shape": "mcp-server/src/work-shape.js",
+  "work-shape": "mcp-server/src/work-shape.ts",
   "work-request-intake": "mcp-server/src/work-request-intake.js",
   "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
   "fact-observations": "mcp-server/src/fact-observations.ts",
@@ -8961,7 +8970,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "email-next-step": "mcp-server/src/email-next-step.ts",
   "email-proposals": "mcp-server/src/email-proposals.js",
   "email-lead-proposal": "mcp-server/src/email-lead-proposal.ts",
-  "workflow-cutover": "mcp-server/src/workflow-cutover.v5.js",
+  "workflow-cutover": "mcp-server/src/workflow-cutover.v5.ts",
   "memory": "mcp-server/src/memory.js",
   "codex-continuity": "mcp-server/src/codex-continuity.js",
   "incident": "mcp-server/src/incident.js",
@@ -9773,9 +9782,10 @@ registerTools({
         innerArgs.human_quote = candidate.evidence_quote;
         innerArgs.change_reason = "Stated on the weekly pipeline call";
       }
-      if (candidate.kind === 'next_step') {
+      if (["next_step", "phase_move"].includes(candidate.kind)) {
         const subject = await resolveSubject(c, candidate.payload.deal);
-        await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0))", [subject.id]);
+        if (candidate.kind === "next_step")
+          await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0))", [subject.id]);
         await lockDealField(c, subject.id, "next_date");
         await lockDealField(c, subject.id, "next_step");
         if (automatic) {
@@ -9794,7 +9804,8 @@ registerTools({
           if (changed.rows.length) throw new ToolError({ error: "newer_change_exists", field: changed.rows[0].field,
             hint: "The plan changed after this call proposal was filed. Review it before applying." });
         }
-        innerArgs.base_version = (await c.query("select version from deal where id=$1 for update", [subject.id])).rows[0]?.version;
+        if (candidate.kind === "next_step")
+          innerArgs.base_version = (await c.query("select version from deal where id=$1 for update", [subject.id])).rows[0]?.version;
       }
       const result = await executeRegisteredTool(c, actor, verb, innerArgs);
       if (!result || result.ok === false) throw new ToolError(result || { error: "inner_write_failed" });
@@ -10550,7 +10561,7 @@ registerTools(leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoice
 // DoctorCRE V5-R02: workflow cutover, caller migration and retirement
 // readiness. Reads historical acceptance and native retirement evidence rather than
 // duplicating their evidence; retire-workflow-cutover-plan is authority-only.
-// See src/workflow-cutover.v5.js.
+// See src/workflow-cutover.v5.ts.
 registerTools(workflowCutoverTools({ withEnvelope, ToolError }), "workflow-cutover");
 // Phase 1 CARR-native learning memory: evidence-backed context with explicit
 // candidate/promotion/correction/forgetting lifecycle. Memory never grants

@@ -3,7 +3,7 @@ import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { pipelineChanges } from "../src/dealroom.js";
+import { pipelineChanges } from "../src/dealroom.ts";
 import { TOOLS } from "../src/tools.js";
 import { docActivityEntry } from "../src/doc-activity.js";
 import { CHECKLIST_SOURCES } from '../src/deal-checklist.ts';

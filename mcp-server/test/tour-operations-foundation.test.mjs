@@ -146,7 +146,7 @@ test("canonical factual fields require provenance, time, rights, confidence and 
   assert.throws(() => validateCanonicalFieldAssertion({...assertion, rights_receipt_id: ""}), /FACT_METADATA_INVALID:rights_receipt_id/);
   assert.throws(() => validateCanonicalFieldAssertion({...assertion, confidence: "guessed"}), /FACT_METADATA_INVALID:confidence/);
   assert.throws(() => validateCanonicalFieldAssertion({...assertion, data_classification: "publicish"}), /FACT_METADATA_INVALID:data_classification/);
-  for (const value of [null, NaN, Infinity, () => true, Symbol("fact"), 1n, new Date()])
+  for (const value of [null, NaN, Infinity, () => true, Symbol("fact"), 1n, new Date("2026-10-27T15:00:00Z")])
     assert.throws(() => validateCanonicalFieldAssertion({...assertion, value}), /FACT_METADATA_INVALID:value/);
   const arrayWithSerializer = ["safe"];
   Object.defineProperty(arrayWithSerializer, "toJSON", {value: () => 1n});

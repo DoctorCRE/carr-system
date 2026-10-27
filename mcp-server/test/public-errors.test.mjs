@@ -57,16 +57,64 @@ test("MCP projects translated database validation errors without schema diagnost
 for (const [code, extra] of [
   ["version_conflict", { current_version: 3 }], ["needs_confirm", {}],
   ["missing_plan_base", {}], ["newer_change_exists", {}],
-  ["not_found", {}], ["unauthorized", {}], ["loop_not_open", {}],
+  ["not_found", {}], ["doctrine_doc_not_found", { ref: privateText }], ["unauthorized", {}], ["loop_not_open", {}], ["action_not_open", {}], ["critical_date_not_open", {}],
   ["value_not_in_declared_vocabulary", { field: "filter" }],
   ["AUTHORIZATION_REFUSED", {}], ["vendor_meetings_query_invalid", {}], ["vendor_meetings_unavailable", {}],
   ["tour_share_scope_invalid", {}], ["personal_doc_not_owner", {}], ["personal_loop_not_owner", {}],
+  ["work_request_not_found", {}], ["work_request_terminal_state", {}], ["work_request_not_completable", {}],
+  ["invalid_completion", {}], ["missing_criterion_evidence", {}], ["missing_change_ref", {}],
+  ["missing_user_journey_ref", {}], ["completion_capsule_refused", {}], ["sponsored_actor_required", {}],
 ]) test(`MCP preserves the public ${code} contract`, async t => {
   const payload = await failure(t, new ToolError({ error: code, ...extra,
     detail: privateText, hint: privateText, nested: { stack: privateText } }));
   assert.equal(payload.error, code);
   if (code === "version_conflict") assert.equal(payload.current_version, 3);
   if (code === "value_not_in_declared_vocabulary") assert.deepEqual(payload.fields, ["filter"]);
+});
+
+test("MCP read-doctrine names a missing document through the real reader path", async t => {
+  const { neonConfig } = await import("@neondatabase/serverless");
+  t.mock.method(console, "error", () => {});
+  const previous = neonConfig.fetchFunction;
+  t.after(() => { neonConfig.fetchFunction = previous; });
+  neonConfig.fetchFunction = async () => Response.json({
+    fields: [], rows: [], rowCount: 0, command: "SELECT", rowAsArray: true,
+  });
+  const request = new Request("https://synthetic.example/mcp", { method: "POST",
+    body: JSON.stringify({ jsonrpc: "2.0", id: 31, method: "tools/call", params: {
+      name: "read-doctrine", arguments: { document: "synthetic-missing-refinement-plan" },
+    } }),
+  });
+  const response = await dispatch(request, { CORRELATION_ID: correlationId,
+    DATABASE_URL_READER: "postgres://fixture@synthetic.invalid/fixture" }, {},
+  { slug: "joe", human: true });
+  const body = await response.json();
+  assert.equal(body.result.isError, true);
+  const payload = JSON.parse(body.result.content[0].text);
+  assert.equal(payload.error, "doctrine_doc_not_found");
+  assert.equal(payload.correlation_id, correlationId);
+  assert.match(payload.hint, /doctrine-index/);
+  assert.deepEqual(Object.keys(payload).sort(), ["correlation_id", "error", "hint"]);
+  assert.doesNotMatch(JSON.stringify(body), /synthetic-missing-refinement-plan|stack|SELECT|doctrine_slug_alias/);
+});
+
+test("MCP next-action conflicts explain how to review the current action", async t => {
+  const payload = await failure(t, new ToolError({ error: "next_action_conflict",
+    hint: privateText, detail: privateText, nested: { stack: privateText } }));
+  assert.equal(payload.error, "next_action_conflict");
+  assert.match(payload.hint, /get-next-action/);
+  assert.match(payload.hint, /ref and owner/);
+  assert.match(payload.hint, /review/i);
+  assert.match(payload.hint, /expected_action/);
+  assert.deepEqual(Object.keys(payload).sort(), ["correlation_id", "error", "hint"]);
+});
+
+test("MCP routes decline completion claims to complete-work-request", async t => {
+  const payload = await failure(t, new ToolError({ error: "decline_claims_completion",
+    hint: privateText, detail: privateText }));
+  assert.equal(payload.error, "decline_claims_completion");
+  assert.match(payload.hint, /complete-work-request/);
+  assert.deepEqual(Object.keys(payload).sort(), ["correlation_id", "error", "hint"]);
 });
 
 test("unknown ToolError codes cannot carry diagnostic text onto the wire", async t => {

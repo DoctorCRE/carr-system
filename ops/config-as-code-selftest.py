@@ -30,8 +30,7 @@ spec = importlib.util.spec_from_file_location(
 assert spec and spec.loader
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
-TASK_SOURCE = (Path(REPO) / "ops/scheduled-tasks/calendar-fetch-daily.SKILL.md").read_text(
-    encoding="utf-8")
+TASK_SOURCE = "---\nname: fixture-daily\n---\nRun {{REPO}}/fixture.py\n"
 # The fixture below tests config reconciliation. Machine dependencies have their
 # own hermetic suite and must not be inferred from a temporary HOME.
 setattr(mod, "PREREQUISITE_CHECK", lambda _repo: [])
@@ -131,8 +130,20 @@ def installed_hook_file_regressions():
             problems = mod.installed_hook_missing_files()
             assert len(problems) == 4, problems
             assert all(str(missing) in reason for _, reason in problems)
+            output = io.StringIO()
+            with patch.object(sys, "argv", ["config-as-code.py", "check-hook-files"]), contextlib.redirect_stdout(output):
+                assert mod.main() == 1
+            assert all(str(path) in output.getvalue() for path in paths)
+            assert str(missing) in output.getvalue()
+            assert str(existing) not in output.getvalue()
+
             missing.touch()
             assert mod.installed_hook_missing_files() == []
+            output = io.StringIO()
+            with patch.object(sys, "argv", ["config-as-code.py", "check-hook-files"]), contextlib.redirect_stdout(output):
+                assert mod.main() == 0
+            assert output.getvalue() == ""
+
             existing.unlink()
             assert len(mod.installed_hook_missing_files()) == 4
         with patch.dict(os.environ, {"HOME": directory}):
@@ -142,7 +153,39 @@ def installed_hook_file_regressions():
     print("PASS installed Claude, Codex, and project hooks reject missing wrappers")
 
 
+def retired_machine_config_regressions():
+    retired = {'ai-capability-builder', 'linkedin-engagement-daily',
+               'restore-rehearse-weekly', 'social-batch-weekly', 'social-metrics-pull-weekly'}
+    with patch.object(mod, 'IS_PRIMARY', True):
+        assert not retired.intersection(mod.scheduled_task_install_plan()['install']), \
+            'retired scheduled tasks must not be installed'
+    assert not (Path(REPO) / 'ops/launchd/com.carr.calendar-eventkit.plist').exists(), \
+        'blocked EventKit capture must not be installed'
+    name = 'com.carr.outlook-research-copy.plist'
+    source = Path(mod.launchd_repo_path(name))
+    assert source == Path(REPO) / 'spec/outlook' / name, 'reuse the Outlook installer template'
+    with tempfile.TemporaryDirectory() as directory:
+        agents = Path(directory)
+        expected = plistlib.loads(source.read_bytes().replace(b'{{HOME}}', b'/synthetic/home'))
+        assert expected['ProgramArguments'] == ['/synthetic/home/carr-local/bin/outlook-research-copy']
+        assert expected['Umask'] == 63
+        assert not {'RunAtLoad', 'KeepAlive', 'StartInterval', 'StartCalendarInterval'} & expected.keys()
+        for label in ('outlook-research-copy', 'fleet-sync', 'job-cleaner', 'delivery-cadence-a05-sweep'):
+            path = agents / f'com.carr.{label}.plist'
+            path.write_bytes(plistlib.dumps({**expected, 'Label': f'com.carr.{label}'}))
+        before = {p.name: p.read_bytes() for p in agents.iterdir()}
+        with patch.object(mod, 'LAUNCHD_SRC', directory), contextlib.redirect_stdout(io.StringIO()) as output:
+            assert mod.reconcile_retired_launchd(False) == []
+        plan = output.getvalue()
+        assert name not in plan, plan
+        for label in ('fleet-sync', 'job-cleaner', 'delivery-cadence-a05-sweep'):
+            assert f'would retire  com.carr.{label}.plist' in plan, plan
+        assert before == {p.name: p.read_bytes() for p in agents.iterdir()}, 'dry run must not mutate agents'
+    print('PASS retired tasks and EventKit absent; Outlook copier kept; existing retirements preserved')
+
+
 def main():
+    retired_machine_config_regressions()
     assert all(Path(script).is_file() for source in (Path(REPO) / "ops/config/hooks.json", Path(REPO) / "ops/config/codex-hooks.json")
                for doc in [json.loads(Path(source).read_text().replace("{{REPO}}", REPO))]
                for script in mod.hook_block_script_paths(doc.get("hooks", doc))), "rendered Claude/Codex hook scripts must exist"
@@ -233,7 +276,7 @@ def main():
             f"task-{number:02d}": f"---\nname: task-{number:02d}\n---\nCARR managed {number}\n"
             for number in range(1, 17)
         }
-        primary_tasks["calendar-fetch-daily"] = TASK_SOURCE
+        primary_tasks["fixture-daily"] = TASK_SOURCE
         for name, body in primary_tasks.items():
             (tasks / f"{name}.SKILL.md").write_text(body, encoding="utf-8")
         original_primary = mod.IS_PRIMARY
@@ -247,7 +290,7 @@ def main():
             for name, body in primary_tasks.items()
         )
         nightly_task_rendered = (
-            Path(mod.TASKS_SRC) / "calendar-fetch-daily" / "SKILL.md"
+            Path(mod.TASKS_SRC) / "fixture-daily" / "SKILL.md"
         ).read_text(encoding="utf-8") == mod.concrete(TASK_SOURCE)
 
         mod.IS_PRIMARY = False
