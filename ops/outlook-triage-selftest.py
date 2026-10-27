@@ -24,6 +24,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -151,7 +152,10 @@ if name == 'pgrep':
         sys.exit(0)
     sys.exit(1)
 if name == 'osascript':
-    state['running'] = False
+    if state.get('osascript_quit_delay'):
+        import time
+        time.sleep(state['osascript_quit_delay'])
+    state['running'] = state.get('osascript_quit_ignored', False)
     save()
     sys.exit(0)
 if name == 'open':
@@ -227,7 +231,8 @@ elif tool == 'get_window_state':
 elif tool == 'invoke_menu':
     path = payload['path']
     if path == ['Outlook', 'Quit Outlook']:
-        state['running'] = False
+        state['running'] = (state.get('menu_quit_ignored', False) or
+                            payload['window_id'] != state.get('quit_window_id', payload['window_id']))
     elif path == ['View', 'Sidebar']:
         if not state.get('sidebar_stuck'):
             state['sidebar'] = not state['sidebar']
@@ -340,7 +345,7 @@ class FakeOutlookCase(unittest.TestCase):
     def run_triage(self, now=EVENING, limits=triage.Limits(), clock=None):
         with patch.dict(os.environ, self.env, clear=True), redirect_stdout(io.StringIO()), \
                 redirect_stderr(io.StringIO()):
-            outcome = triage.run(self.repo, self.home, now, Waits(0, 0, 0, 0, 0, 0, 0), limits,
+            outcome = triage.run(self.repo, self.home, now, Waits(2, 0, 0, 0, 0, 0, 0), limits,
                                  clock or (lambda: now))
         return outcome, json.loads(self.state.read_text())
 
@@ -367,6 +372,69 @@ class FakeOutlookCase(unittest.TestCase):
 
     def unread_labels(self, state):
         return {r['label'] for rows in state['lists'].values() for r in rows if r['unread']}
+
+
+class PreflightQuitTest(FakeOutlookCase):
+    def prepare(self, waits=Waits(2, 0, 0, 0.01, 0, 0, 0)):
+        from lib.outlook_ui import prepare_outlook
+        with patch.dict(os.environ, self.env, clear=True):
+            return prepare_outlook(waits)
+
+    def test_quit_uses_mailbox_when_unassigned_window_is_first(self):
+        self.given(windows=[UNTITLED_OFFSCREEN, ORDINARY], quit_window_id=13)
+        self.assertIsNone(self.prepare())
+        menus = [json.loads(call[2]) for call in self.called('cua-driver')
+                 if call[1] == 'invoke_menu']
+        self.assertEqual(menus[0]['window_id'], 13)
+        self.assertEqual(self.called('osascript'), [])
+
+
+    def test_successful_menu_that_leaves_outlook_running_falls_back(self):
+        self.given(windows=[ORDINARY], menu_quit_ignored=True)
+        self.assertIsNone(self.prepare())
+        self.assertEqual(len(self.called('osascript')), 1)
+        self.assertEqual(len(self.called('open')), 1)
+
+    def test_no_ordinary_window_uses_graceful_quit(self):
+        self.given(windows=[UNTITLED_OFFSCREEN, FULL_SCREEN])
+        self.assertIsNone(self.prepare())
+        self.assertEqual(len(self.called('osascript')), 1)
+        self.assertFalse(any(call[1] == 'invoke_menu' for call in self.called('cua-driver')))
+
+    def test_failed_menu_uses_graceful_quit(self):
+        from lib.outlook_ui import CuaError, cua
+        self.given(windows=[ORDINARY])
+        def unavailable_menu(tool, arguments):
+            if tool == 'invoke_menu':
+                raise CuaError('menu unavailable')
+            return cua(tool, arguments)
+        with patch('lib.outlook_ui.cua', side_effect=unavailable_menu):
+            self.assertIsNone(self.prepare())
+        self.assertEqual(len(self.called('osascript')), 1)
+
+    def test_refused_quit_times_out_without_relaunch(self):
+        self.given(windows=[ORDINARY], menu_quit_ignored=True, osascript_quit_ignored=True)
+        outcome = self.prepare(Waits(0.4, 0, 0, 0.01, 0, 0, 0))
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'outlook_quit_timeout'))
+        self.assertEqual(len(self.called('osascript')), 1)
+        self.assertEqual(self.called('open'), [])
+        self.assertTrue(json.loads(self.state.read_text())['running'])
+
+    def test_hanging_graceful_quit_cannot_extend_quit_deadline(self):
+        self.given(windows=[ORDINARY], menu_quit_ignored=True, osascript_quit_delay=5)
+        started = time.monotonic()
+        outcome = self.prepare(Waits(0.4, 0, 0, 0.01, 0, 0, 0))
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'outlook_quit_timeout'))
+        self.assertEqual(self.called('open'), [])
+
+    def test_possible_draft_prevents_both_quit_routes(self):
+        self.given(windows=[UNTITLED_OFFSCREEN, ORDINARY, COMPOSE])
+        outcome = self.prepare()
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+        self.assertEqual(self.called('osascript') + self.called('open'), [])
+        self.assertFalse(any(call[1] == 'invoke_menu' for call in self.called('cua-driver')))
+        self.assertTrue(json.loads(self.state.read_text())['running'])
 
 
 class ComposeWindowTest(unittest.TestCase):
@@ -649,7 +717,7 @@ class OutlookTriageTest(FakeOutlookCase):
     def test_output_carries_counts_not_names(self):
         self.given([FILE_A, VENDOR, NEWS, UNREAD])
         with patch.dict(os.environ, self.env, clear=True), redirect_stdout(io.StringIO()) as out:
-            triage.run(self.repo, self.home, EVENING, Waits(0, 0, 0, 0, 0, 0, 0), triage.Limits(),
+            triage.run(self.repo, self.home, EVENING, Waits(2, 0, 0, 0, 0, 0, 0), triage.Limits(),
                        lambda: EVENING)
         self.assertRegex(out.getvalue(), r'^outlook-triage succeeded filed moved=2 left=2\s*$')
 
@@ -710,7 +778,7 @@ class RefreshTest(FakeOutlookCase):
         write_settings(self.home, self.repo, account=ACCOUNT, driver=str(self.tmp / 'bin/cua-driver'))
         with patch.dict(os.environ, self.env, clear=True):
             outcome = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                          waits=Waits(0, 0, 0, 0, 0, 0, 0),
+                                          waits=Waits(2, 0, 0, 0, 0, 0, 0),
                                           now_fn=lambda: EVENING.replace(hour=10))
         self.assertEqual(outcome.state, 'succeeded')
         state = json.loads(self.state.read_text())
@@ -738,7 +806,7 @@ class RefreshTest(FakeOutlookCase):
                         redirect_stderr(output), redirect_stdout(output):
                     result = outlook_refresh.run(
                         self.repo, EVENING.replace(hour=10),
-                        waits=Waits(0, 0, 0, 0, 0, 0, 0))
+                        waits=Waits(2, 0, 0, 0, 0, 0, 0))
                 self.assertEqual((result.state, result.reason), ('failed', reason))
                 self.assertEqual(output.getvalue(),
                                  f'outlook-refresh {error.__name__}: {message}\n')
@@ -750,7 +818,7 @@ class RefreshTest(FakeOutlookCase):
         write_settings(self.home, self.repo, account='wrong@example.test', driver=str(self.tmp / 'bin/cua-driver'))
         with patch.dict(os.environ, self.env, clear=True):
             result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                         waits=Waits(0, 0, 0, 0, 0, 0, 0))
+                                         waits=Waits(2, 0, 0, 0, 0, 0, 0))
         self.assertEqual(result.reason, 'wrong_account')
         self.assertEqual(json.loads(self.state.read_text())['selections'], [])
         self.given([self.READ_BODY], idle_seconds=1)
