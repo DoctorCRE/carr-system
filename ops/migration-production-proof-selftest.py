@@ -7,6 +7,7 @@ import hashlib
 import shutil
 import tempfile
 import os
+import runpy
 from pathlib import Path
 import subprocess
 import sys
@@ -112,11 +113,13 @@ class ProofTests(unittest.TestCase):
 
 
     def test_reconstruction_failure_reports_post_pending_grants_not_run(self):
-        repository = repository_ledger()
+        parse_snapshot = runpy.run_path(str(ROOT / 'ops/migration-safety-gate.py'))['ledger_rows']
+        repository = parse_snapshot((ROOT / 'db/schema.sql').read_text())
         for failure in ([RuntimeError('reference failed')],
                         [dict(grants={}, ledger={}, dump=''), RuntimeError('replay failed')]):
             with self.subTest(failure=failure), \
                  patch.object(proof, 'production_dsn', return_value='fixture'), \
+                 patch.object(proof, 'repository_ledger', return_value=repository), \
                  patch.object(proof, 'read_source', return_value=(repository, '', {})), \
                  patch.object(proof.comparison, 'find_pg18', return_value=Path('/bin')), \
                  patch.object(proof, 'build_schema', side_effect=failure):
