@@ -96,14 +96,22 @@ class ParityTest(unittest.TestCase):
         artifacts = {path.name: path.read_bytes() for path in sorted(out.glob('*')) if path.is_file()}
         return result, fake.calls, artifacts, module.status_line(result).encode()
 
-    def test_mail_record_calls_are_byte_identical_to_baseline_without_calendar_writes(self):
+    def test_mail_record_calls_preserve_baseline_and_add_captured_email_context(self):
         before = self.exercise(baseline_module())
         after = self.exercise()
         calendar_activity = current.key('log-activity', 'C-901',
                                         f'past-visit|{self.fixtures.ts(-timedelta(hours=5))}')
         before_calls = [(verb, args) for verb, args in before[1]
                         if args.get('idempotency_key') != calendar_activity]
-        self.assertEqual(json.dumps(before_calls).encode(), json.dumps(after[1]).encode())
+        after_calls = [(verb, {k: v for k, v in args.items() if k != 'email_context'})
+                       for verb, args in after[1]]
+        self.assertEqual(json.dumps(before_calls).encode(), json.dumps(after_calls).encode())
+        captured = [args['email_context'] for verb, args in after[1]
+                    if verb == 'log-activity' and args.get('kind') in ('email_in', 'email_out')]
+        self.assertEqual([context['sender']['email'] for context in captured],
+                         ['pat@example.test', self.settings.account, 'pat@example.test'])
+        self.assertEqual([[p['email'] for p in context['recipients']] for context in captured],
+                         [[self.settings.account], ['lee@example.test'], [self.settings.account]])
 
     def test_studio_settings_preserve_mail_artifacts_and_quarantine_calendar(self):
         result, calls, artifacts, status = self.exercise()
