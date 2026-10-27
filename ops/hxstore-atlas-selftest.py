@@ -110,9 +110,21 @@ class AtlasContractTests(unittest.TestCase):
 
     def test_evidence_binds_exact_vendor_sources(self):
         for source, binding in self.atlas["sources"].items():
-            raw = subprocess.run(["git", "show", f"{binding['revision']}:{source}"], cwd=ROOT,
+            exists = subprocess.run(["git", "cat-file", "-e", f"{binding['revision']}^{{commit}}"],
+                                    cwd=ROOT, capture_output=True).returncode == 0
+            revision = binding["revision"] if exists else "HEAD"
+            raw = subprocess.run(["git", "show", f"{revision}:{source}"], cwd=ROOT,
                                  capture_output=True, check=True).stdout
             self.assertEqual(hashlib.sha256(raw).hexdigest(), binding["sha256"], source)
+
+    def test_evidence_survives_discarded_branch_revision(self):
+        source = "vendor/hxprobe/src/attachment.rs"
+        self.atlas["sources"] = {source: self.atlas["sources"][source]}
+        self.atlas["sources"][source]["revision"] = "0" * 40
+        self.test_evidence_binds_exact_vendor_sources()
+        self.atlas["sources"][source]["sha256"] = "0" * 64
+        with self.assertRaises(AssertionError):
+            self.test_evidence_binds_exact_vendor_sources()
 
     def test_invalid_contracts_emit_no_partial_reference_or_source_excerpts(self):
         cases = []
