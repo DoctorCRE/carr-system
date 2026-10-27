@@ -606,11 +606,25 @@ class CopyRecordFromProvider(unittest.TestCase):
         self.fake.check["check_suite"] = {"id": OTHER_SUITE}
         self.assertEqual(rw.read_copy_record(REPO_SLUG, RUN_ID)["recorded_digest_source"]["check_run_id"], 555)
 
+    def test_g1_a_check_in_the_merge_queue_suite_for_this_main_head_is_accepted(self):
+        # Live 2026-10-27: since the merge queue went on (2026-10-24), main's head
+        # commit is first built on gh-readonly-queue/main/pr-N, and GitHub files the
+        # nightly's Check in THAT suite (same sha). Runs 40289691526 and 40472598294
+        # were refused for it, leaving no selectable copy newer than 10-25.
+        self.fake.check["check_suite"] = {"id": OTHER_SUITE}
+        self.fake.suites[OTHER_SUITE]["head_branch"] = (
+            "gh-readonly-queue/main/pr-2473-9e5aa1478fefddac0257b69151d8c50012f9b7e5")
+        self.assertEqual(rw.read_copy_record(REPO_SLUG, RUN_ID)["recorded_digest_source"]["check_run_id"], 555)
+
     def test_g1_a_check_in_a_suite_not_bound_to_this_run_fails_closed(self):
         self.fake.check["check_suite"] = {"id": OTHER_SUITE}
         cases = [
             lambda s: s.update(app={"id": 1, "slug": "someone-else"}),
             lambda s: s.update(head_branch="feature"),
+            # only main's own queue: another base branch's queue, or a lookalike, is refused
+            lambda s: s.update(head_branch="gh-readonly-queue/release/pr-1-" + "c" * 40),
+            lambda s: s.update(head_branch="gh-readonly-queue/main"),
+            lambda s: s.update(head_branch="feature/gh-readonly-queue/main/pr-1-" + "c" * 40),
             lambda s: s.update(head_sha="b" * 40),
         ]
         for mutate in cases:
