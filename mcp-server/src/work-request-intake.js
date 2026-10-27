@@ -772,24 +772,46 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
         if (!["verified_partner", "sponsored_agent"].includes(authorizationClass))
           throw new ToolError({ error: "sponsored_actor_required", authorization_class: authorizationClass });
         return withEnvelope(c, actor, "complete-work-request", { ...args, _server_actor_id: actor.id }, async () => {
-          let result;
+          const current = (await c.query('select id, state, version, acceptance_criteria from ops.work_request where ref=$1 for update', [args.human_ref])).rows[0];
+          if (!current) throw new ToolError({ error: "work_request_not_found" });
+          if (["confirmed_closed", "declined", "superseded", "failed"].includes(current.state))
+            throw new ToolError({ error: "work_request_terminal_state" });
+          if (Number(current.version) !== args.base_version) throw new ToolError({ error: "version_conflict" });
+          if (!["captured", "triaged", "ready", "verification"].includes(current.state))
+            throw new ToolError({ error: "work_request_not_completable" });
+          const capsule = {
+            acceptance_predicates: current.acceptance_criteria.map(criterion => {
+              const lines = Array.isArray(args.criterion_evidence) ? args.criterion_evidence.filter(line => line?.id === criterion.id) : [];
+              return lines.length === 1 && typeof lines[0].evidence === "string" && lines[0].evidence.trim()
+                ? `${criterion.id}: ${lines[0].evidence}` : "";
+            }),
+            change_ref: Array.isArray(args.change_refs) && args.change_refs.every(change =>
+              /^https:\/\/github[.]com\/(DoctorCRE\/carr-system|jbookout\/doctorcre-app)\/pull\/[1-9][0-9]*$/.test(change?.pr_url || "") &&
+              /^[0-9a-fA-F]{40}$/.test(change?.merge_commit_sha || "")) ? args.change_refs
+              .map(change => `${change.pr_url}#${change.merge_commit_sha}`).join("\n") : "",
+            criterion_evidence: args.criterion_evidence, change_refs: args.change_refs,
+            user_facing: args.user_facing, user_journey_ref: args.user_journey_ref, attested_by: actor.id,
+          };
+          if (capsule.acceptance_predicates.some(line => !line) || args.criterion_evidence?.length !== current.acceptance_criteria.length)
+            capsule.acceptance_predicates = [];
+          let row;
           try {
-            result = await c.query(`select * from ops.complete_work_request($1::text,$2::integer,$3::jsonb,$4::jsonb,$5::boolean,$6::text,$7::text,$8::uuid)
-              /* work-request-intake:complete */`, [args.human_ref, args.base_version, JSON.stringify(args.change_refs ?? null),
-              JSON.stringify(args.criterion_evidence ?? null), args.user_facing, args.user_journey_ref ?? null, actor.slug, args.idempotency_key]);
+            row = (await c.query(`update ops.work_request set state='confirmed_closed', completion_kind='built',
+              completion_evidence=$3::jsonb, verification_accepted_at=now(), closed_at=now(), version=version+1, updated_at=now()
+              where id=$1 and version=$2 and state in ('captured','triaged','ready','verification')
+              returning id as work_request_id, ref, state, version, closed_at /* work-request-intake:complete */`,
+              [current.id, args.base_version, JSON.stringify(capsule)])).rows[0];
           } catch (error) {
-            const detail = String(error?.message || "");
-            const name = /^([a-z_]+):/.exec(detail)?.[1];
-            if (name === "work_request_version_conflict")
-              throw new ToolError({ error: "version_conflict", human_ref: args.human_ref, resolution: "Re-read the Work Request card and use its current version." });
-            if (["work_request_not_found", "work_request_terminal_state", "work_request_not_completable", "missing_criterion_evidence", "missing_change_ref",
-              "missing_user_journey_ref", "sponsored_actor_required", "completion_capsule_refused"].includes(name))
-              throw new ToolError({ error: name, human_ref: args.human_ref, detail });
-            throw error;
+            if (error?.code !== "23514") throw error;
+            const detail = String(error.message);
+            const name = detail.includes("no acceptance predicates") ? "missing_criterion_evidence"
+              : detail.includes("no change reference") ? "missing_change_ref"
+              : detail.includes("EXERCISED user") ? "missing_user_journey_ref" : "completion_capsule_refused";
+            throw new ToolError({ error: name, human_ref: args.human_ref });
           }
-          const row = result.rows[0];
+          if (!row) throw new ToolError({ error: "version_conflict" });
           await writeEvent(c, actor, "complete-work-request", "ops_work_request", row.work_request_id, {
-            field: "state", old: { state: row.previous_state, version: args.base_version },
+            field: "state", old: { state: current.state, version: args.base_version },
             new: { state: row.state, version: Number(row.version), completion_kind: "built" }, idempotency_key: args.idempotency_key,
           });
           return { ok: true, human_ref: row.ref, state: row.state, version: Number(row.version), completion_kind: "built", closed_at: row.closed_at };

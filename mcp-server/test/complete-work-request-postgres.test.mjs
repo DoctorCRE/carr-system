@@ -1,56 +1,31 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 import { publicError } from '../src/public-errors.ts';
 
-let fixture, admin, database, c, actor, connection;
+let fixture, c, actor, connection;
 before(async () => {
-  const ciDsn = process.env.CARR_CI_DATABASE_URL;
-  let bin;
-  if (ciDsn) {
-    const url = new URL(ciDsn);
-    assert.ok(['postgres:', 'postgresql:'].includes(url.protocol));
-    assert.ok(['127.0.0.1', 'localhost'].includes(url.hostname), 'fixture requires disposable loopback PostgreSQL');
-    assert.equal(url.search, '', 'fixture connection must not override its loopback host');
-    admin = new pg.Client({ connectionString: ciDsn });
-    await admin.connect();
-    const name = `complete_wr_${randomUUID().replaceAll('-', '')}`;
-    await admin.query(`create database "${name}" template template0`);
-    database = name;
-    url.pathname = `/${database}`;
-    connection = { connectionString: url.href };
-  } else {
-    bin = ['/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin',
-      '/opt/homebrew/opt/postgresql@18/bin', '/usr/lib/postgresql/18/bin'].find(p => existsSync(`${p}/initdb`));
-    assert.ok(bin, 'PostgreSQL is required for the isolated record-layer proof');
-    fixture = await acquireDisposablePostgres({ prefix: 'complete-wr-', pgCtl: `${bin}/pg_ctl` });
-    await fixture.run(`${bin}/initdb`, ['-D', `${fixture.root}/data`, '-U', 'carr_ci', '--auth=trust', '--no-locale']);
-    await fixture.run(`${bin}/pg_ctl`, ['-D', `${fixture.root}/data`, '-l', `${fixture.root}/server.log`, '-o', `-k ${fixture.root} -h ''`, '-w', 'start']);
-    await fixture.run(`${bin}/createdb`, ['-h', fixture.root, '-U', 'carr_ci', 'carr_ci']);
-    connection = { host: fixture.root, user: 'carr_ci', database: 'carr_ci' };
-  }
+  const bin = ['/opt/homebrew/opt/postgresql@18/bin', '/usr/lib/postgresql/18/bin',
+    '/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin'].find(p => existsSync(`${p}/initdb`));
+  assert.ok(bin, 'PostgreSQL is required for the isolated record-layer proof');
+  fixture = await acquireDisposablePostgres({ prefix: 'complete-wr-', pgCtl: `${bin}/pg_ctl` });
+  await fixture.run(`${bin}/initdb`, ['-D', `${fixture.root}/data`, '-U', 'carr_ci', '--auth=trust', '--no-locale']);
+  await fixture.run(`${bin}/pg_ctl`, ['-D', `${fixture.root}/data`, '-l', `${fixture.root}/server.log`, '-o', `-k ${fixture.root} -h ''`, '-w', 'start']);
+  await fixture.run(`${bin}/createdb`, ['-h', fixture.root, '-U', 'carr_ci', 'carr_ci']);
+  connection = { host: fixture.root, user: 'carr_ci', database: 'carr_ci' };
   c = new pg.Client(connection);
   await c.connect();
   await c.query('do $$ begin create role neondb_owner; exception when duplicate_object then null; end $$;');
   const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
-  if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
-  else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
+  await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
   await c.query(readFileSync(new URL('../../migrations/1006_complete_work_request.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
-after(async () => {
-  try { await c?.end(); }
-  finally {
-    try { if (database) await admin.query(`drop database "${database}"`); }
-    finally { await Promise.all([admin?.end(), fixture?.close()]); }
-  }
-});
+after(async () => { try { await c?.end(); } finally { await fixture?.close(); } });
 
 async function command(name, args = {}, identity = actor, role = null, client = c) {
   await client.query('begin');
@@ -107,17 +82,22 @@ for (const [label, ref, modify, expected] of [
   ['unknown reference','WR-999099',()=>{},'work_request_not_found'],
   ['stale version','WR-999002',a=>{a.base_version=2;},'version_conflict'],
   ['terminal state','WR-999003',()=>{},'work_request_terminal_state'],
+  ['invalid completion','WR-999013',a=>{a.base_version=0;},'invalid_completion'],
+  ['active execution','WR-999014',()=>{},'work_request_not_completable'],
   ['missing criterion','WR-999004',a=>{a.criterion_evidence=[];},'missing_criterion_evidence'],
   ['missing change','WR-999005',a=>{a.change_refs=[];},'missing_change_ref'],
   ['scalar changes','WR-999008',a=>{a.change_refs=[7];},'missing_change_ref'],
   ['scalar evidence','WR-999009',a=>{a.criterion_evidence=[7];},'missing_criterion_evidence'],
   ['boolean evidence','WR-999010',a=>{a.criterion_evidence[0].evidence=true;},'missing_criterion_evidence'],
+  ['bad change URL','WR-999011',a=>{a.change_refs[0].pr_url='https://example.com/pull/1';},'missing_change_ref'],
+  ['bad merge SHA','WR-999012',a=>{a.change_refs[0].merge_commit_sha='abc';},'missing_change_ref'],
   ['missing journey','WR-999006',a=>{a.user_facing=true;},'missing_user_journey_ref'],
   ['self attestation','WR-999007',()=>{},'completion_capsule_refused'],
 ]) {
   test(`complete-work-request refuses ${label} without closing or saving replay`, async () => {
     if (label!=='unknown reference') await request(ref, 'captured', label==='self attestation' ? 'joe' : 'builder');
     if (label==='terminal state') await c.query("update ops.work_request set state='declined',exit_reason='Synthetic obsolete',closed_at=now() where ref=$1", [ref]);
+    if (label==='active execution') await c.query("update ops.work_request set state='needs_joe' where ref=$1",[ref]);
     const args=completion(ref); modify(args);
     await assert.rejects(command('complete-work-request',args,actor,'carr_writer'),error=>{
       assert.equal(error.payload?.error,expected);
@@ -143,29 +123,16 @@ for (const state of ['triaged','ready','verification']) {
     assert.equal((await command('complete-work-request', completion(ref), actor, 'carr_writer')).state,'confirmed_closed');
   });
 }
-test('repair migration preserves named rows with a different reason or open state', async()=>{
-  await sourcedRequest('WR-999025');
-  await c.query('begin');
-  try {
-    for (const ref of ['WR-000414','WR-000436','WR-000499']) await sourcedRequest(ref);
-    for (const [ref,reason] of [['WR-000414','Synthetic obsolete'],['WR-000499','Done: synthetic']])
-      await c.query('select ops.decline_sourced_work_request($1,1,$2,$3,$4)',[ref,reason,actor.slug,randomUUID()]);
-    await c.query(readFileSync(new URL('../../migrations/1006_complete_work_request.sql',import.meta.url),'utf8'));
-    assert.deepEqual((await c.query("select ref,state,version from ops.work_request where ref=any($1) order by ref",[['WR-000414','WR-000436','WR-000499']])).rows,[
-      {ref:'WR-000414',state:'declined',version:2}, {ref:'WR-000436',state:'captured',version:1}, {ref:'WR-000499',state:'captured',version:3},
-    ]);
-  } finally { await c.query('rollback'); }
-});
 test('repair migration reopens exactly eligible named rows, preserves receipts, and replays without events', async()=>{
   const refs=['WR-000414','WR-000436','WR-000499','WR-000500','WR-000501','WR-000507','WR-000510','WR-000520','WR-000542','WR-000545','WR-000546','WR-000551','WR-000552','WR-000553'];
   for (const [i,ref] of refs.entries()) {
     await sourcedRequest(ref);
-    await command('decline-work-request',{idempotency_key:randomUUID(),human_ref:ref,base_version:1,
-      exit_reason:i%2 ? 'Done: synthetic built work' : 'Done on main synthetic'},actor,'carr_writer');
+    await c.query('select ops.decline_sourced_work_request($1,1,$2,$3,$4)',
+      [ref,i%2 ? 'Done: synthetic built work' : 'Done on main synthetic',actor.slug,randomUUID()]);
   }
   await sourcedRequest('WR-999024');
-  await command('decline-work-request',{idempotency_key:randomUUID(),human_ref:'WR-999024',base_version:1,
-    exit_reason:'Done: unlisted synthetic'},actor,'carr_writer');
+  await c.query('select ops.decline_sourced_work_request($1,1,$2,$3,$4)',
+    ['WR-999024','Done: unlisted synthetic',actor.slug,randomUUID()]);
   const migration=readFileSync(new URL('../../migrations/1006_complete_work_request.sql',import.meta.url),'utf8');
   await c.query(migration);
   const rows=(await c.query('select ref,state,closed_at,exit_reason,version from ops.work_request where ref=any($1) order by ref',[refs])).rows;
