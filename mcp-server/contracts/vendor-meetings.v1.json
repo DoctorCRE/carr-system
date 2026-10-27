@@ -1,6 +1,6 @@
 {
   "schema": "vendor-meetings.v1",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "operation": "read-vendor-meetings",
   "write": false,
   "audience": "Authenticated Joe or Dell. Shared canonical facts, never caller-supplied identity or tenant.",
@@ -17,7 +17,8 @@
     "items": "At most limit meeting candidates",
     "has_more": "Whether a subsequent page exists in this snapshot",
     "next_cursor": "Opaque cursor or null",
-    "consistency": "live_keyset; restart after record changes"
+    "consistency": "live_keyset; restart after record changes",
+    "calendar": "Own authenticated partner's calendar metadata. State is ready, empty, partial or unavailable. Includes observed_at, notes and source freshness when available. Does not return unrelated meetings. Missing, malformed or failed reads remain unavailable; calendar failures preserve the vendor page."
   },
   "candidate": {
     "vendor_id": "Exact live vendor UUID",
@@ -31,9 +32,11 @@
     "reason": "Recorded vendor offers text. No inferred meeting benefit.",
     "missing": "Unmet requirements from named_contact, company, category, meeting_reason, verified_office, contact_permission, workable_vendor, in_market",
     "office": "Verified {street_address,city,state,finding_id,source,observed_at,expires_on} or null",
-    "research": "{status,finding_id,observed_at,expires_on}. Status is not_researched, needs_review or office_verified. It describes the latest address finding, not an invented enrichment job."
+    "research": "{status,finding_id,observed_at,expires_on}. Status is not_researched, needs_review or office_verified. It describes the latest address finding, not an invented enrichment job.",
+    "possible_meetings": "Upcoming or ongoing meetings in the next seven days whose organizer or attendee email exactly matches this contact email after trimming and case normalization. Returns the shared calendar projection fields including start, end, title, location, organizer, attendees, all_day, recurring, time_changed and schedule_conflict. No company, domain or name matching. Invitations do not prove attendance or a confirmed relationship. An empty list does not prove availability when calendar coverage is partial or unavailable."
   },
   "identity": "Uses v_vendor_assignment_context. Person vendors select themselves. Organization vendors select only existing live people whose org_id is that organization. An organization without a person remains in Research with contact null.",
+  "calendar_scope": "Reads only calendar-agenda board_snapshot rows for the server-derived organization tenant and authenticated partner slug. Shared vendor facts do not grant access to another partner's calendar. Reuses the morning brief parser, seven-day horizon, overlap calculation, known-gap notes and 18-hour stale threshold. Calendar context does not change vendor readiness or keyset pagination.",
   "office_evidence": {
     "store": "Existing record-finding, subject_kind party, subject the exact contact's party ref, kind address. No new write path.",
     "value": {
