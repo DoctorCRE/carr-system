@@ -243,7 +243,7 @@ test('a recorded weekly call updates every confidently discussed card and leaves
   let review;
   for (let i = 0; i < (SONNET ? 600 : 240); i++) {
     review = await companionCall(port, `/api/post-call?session=${encodeURIComponent(path.basename(session))}`);
-    if (review.report?.automatic?.finished_at || review.status?.state === 'blocked') break;
+    if (review.report?.automatic?.finished_at) break;
     await new Promise(r => setTimeout(r, 500));
   }
   const logs = () => ['capture-bridge.log', 'call-mode.log'].map(f => existsSync(path.join(root, f)) ? readFileSync(path.join(root, f), 'utf8') : '').join('\n');
