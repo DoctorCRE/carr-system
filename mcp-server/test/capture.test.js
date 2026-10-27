@@ -43,6 +43,7 @@ class CaptureFake {
     this.queryCount += 1;
     const sql = text.replace(/\s+/g, " ").trim();
     if (sql === "select pg_advisory_xact_lock(hashtextextended($1, 0))") return { rows: [] };
+    if (sql.includes("call-outcome:resolve-session-lock") || sql.includes("call-outcome:resolve-undo-check")) return { rows: [] };
     if (sql.includes("dealroom:field-lock")) return { rows: [] };
     if (sql === "select next_date::text as next_date from deal where id=$1")
       return { rows: [{ next_date: this.nextDate ?? null }] };
@@ -184,7 +185,8 @@ class CaptureFake {
     if (sql.includes("capture:resolve-read")) {
       const row = this.candidates.find(candidate => candidate.id === params[0]);
       return { rows: row ? [{ id: row.id, kind: row.kind, payload: row.payload,
-        status: row.status, resulting_ref: row.resulting_ref }] : [] };
+        status: row.status, resulting_ref: row.resulting_ref,
+        evidence_quote: row.evidence_quote, post_call: row.post_call ?? false }] : [] };
     }
     if (sql.includes("capture:resolve-skip")) {
       const row = this.candidates.find(candidate => candidate.id === params[0]);
@@ -528,6 +530,17 @@ test("post-call phase proposals pin the server phase base and preserve it on rep
   await assert.rejects(() => TOOLS["resolve-candidate"].handler(db, joe, {
     idempotency_key: "phase-automatic-refused", candidate_id: db.candidates[2].id, accept: true, automatic: true,
   }), error => error instanceof ToolError && error.payload.error === "automatic_apply_not_allowed");
+});
+
+test("a call change below the confidence bar stays a pending card when auto-apply is requested", async () => {
+  const db = new CaptureFake();
+  db.candidates.push({ id: "60000000-0000-0000-0000-000000000009", kind: "phase_move", status: "pending",
+    post_call: true, evidence_quote: "move it", payload: { deal: ids.deal, field: "phase", value: "legal" } });
+  await assert.rejects(() => TOOLS["resolve-candidate"].handler(db, joe, {
+    idempotency_key: "below-bar", candidate_id: db.candidates[0].id, accept: true, automatic: true,
+  }), error => error instanceof ToolError && error.payload.error === "below_confidence_bar");
+  assert.equal(db.candidates[0].status, "pending");
+  assert.equal(db.events.length, 0);
 });
 
 test("resolve accept executes once as confirmer; reject only skips; double resolve is inert", async () => {

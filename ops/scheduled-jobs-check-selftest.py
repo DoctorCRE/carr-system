@@ -442,6 +442,23 @@ class ReportTests(unittest.TestCase):
 
 
 class ManifestTests(unittest.TestCase):
+    def test_retained_headless_executors_are_missing_until_installed(self):
+        labels = {"com.carr.headless.deal-history-research-weekly",
+                  "com.carr.headless.restore-rehearse-weekly"}
+        manifest = jobs.native_manifest()
+        snapshot = healthy_snapshot(manifest, "primary", 1000)
+        self.assertEqual([r for r in jobs.report(manifest, snapshot, 1000)
+                          if r["label"] in labels], [])
+        for label in labels:
+            snapshot["plists"].pop(label, None)
+            snapshot["launchctl_print"].pop(label, None)
+        snapshot["launchctl_list"] = "\n".join(
+            line for line in snapshot["launchctl_list"].splitlines()
+            if not any(line.endswith(label) for label in labels))
+        rows = jobs.report(manifest, snapshot, 1000)
+        self.assertEqual({(r["label"], r["code"]) for r in rows if r["label"] in labels},
+                         {(label, "missing_job") for label in labels})
+
     def test_retired_markdown_refresh_is_not_scheduled(self):
         labels = {job["label"] for job in jobs.native_manifest()["jobs"]}
         self.assertNotIn("com.carr.rules-refresh", labels)

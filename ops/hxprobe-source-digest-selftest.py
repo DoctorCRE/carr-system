@@ -20,7 +20,13 @@ class ReceiptTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        self.crate = Path(temp.name)
+        self.root = Path(temp.name)
+        self.crate = self.root / 'vendor/hxprobe'
+        self.crate.mkdir(parents=True)
+        (self.root / 'spec/outlook').mkdir(parents=True)
+        (self.root / 'ops').mkdir()
+        (self.root / 'spec/outlook/hxstore-atlas.json').write_text('{}\n')
+        (self.root / 'ops/hxstore-atlas.py').write_text('# generator\n')
         (self.crate / 'src').mkdir()
         (self.crate / 'src/main.rs').write_text('fn main() {}\n')
         (self.crate / 'Cargo.toml').write_text('[package]\nname = "hxprobe"\n')
@@ -43,6 +49,15 @@ class ReceiptTests(unittest.TestCase):
     def test_new_build_input_is_covered_without_a_list_edit(self):
         (self.crate / 'build.rs').write_text('fn main() {}\n')
         self.assertEqual(self.check(), 1)
+
+    def test_external_build_inputs_stale_the_receipt(self):
+        for path in ('spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py'):
+            with self.subTest(path=path):
+                source = self.root / path
+                source.write_text(source.read_text() + 'changed\n')
+                self.assertEqual(self.check(), 1)
+                gate.write(self.crate)
+                self.assertEqual(self.check(), 0)
 
     def test_receipt_without_a_digest_is_red(self):
         (self.crate / 'BUILD-SHA256').write_text(f'{BINARY_LINE}\n')

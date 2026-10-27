@@ -16,7 +16,7 @@ both together after the macOS release build:
 ops/hxprobe-source-digest-selftest.py runs the check in the CI gates class.
 
 Every file in the crate counts except the receipt itself, documentation, and
-Cargo's target directory, so a new build input is covered without a list edit.
+Cargo's target directory. The atlas and generator used by build.rs also count.
 """
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ from pathlib import Path
 CRATE = Path(__file__).resolve().parents[1] / 'vendor/hxprobe'
 RECEIPT = 'BUILD-SHA256'
 NOT_SOURCE = {RECEIPT, 'UPSTREAM.md', 'LICENSE', '.gitignore', '.DS_Store'}
+EXTERNAL_INPUTS = ('spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py')
 LINE = re.compile(r'^Source digest: ([0-9a-f]{64})$', re.MULTILINE)
 
 
@@ -39,6 +40,10 @@ def digest(crate: Path) -> str:
         if not path.is_file() or relative.parts[0] == 'target' or path.name in NOT_SOURCE:
             continue
         entries.append(f'{relative.as_posix()}\0{hashlib.sha256(path.read_bytes()).hexdigest()}\n')
+    root = crate.parent.parent
+    for external_input in EXTERNAL_INPUTS:
+        path = root / external_input
+        entries.append(f'{external_input}\0{hashlib.sha256(path.read_bytes()).hexdigest()}\n')
     return hashlib.sha256(''.join(entries).encode()).hexdigest()
 
 

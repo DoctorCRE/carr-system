@@ -47,7 +47,7 @@ import { invoiceAutomation } from "./invoice-automation.js";
 import { emailDealProgressTools } from "./email-deal-progress.ts";
 import { emailNextStepTools } from "./email-next-step.ts";
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
-import { CALENDAR_AGENDA_BOARD, calendarSection } from "./brief-calendar.js";
+import { CALENDAR_AGENDA_BOARD, calendarSection, addCalendarDealSuggestions } from "./brief-calendar.js";
 import { emailLeadProposalTools } from "./email-lead-proposal.ts";
 import { leadAutomationTools } from "./lead-automation.js";
 import { workflowCutoverTools } from "./workflow-cutover.v5.js";
@@ -62,6 +62,7 @@ import { tourArtifactTools } from "./tour-artifacts.js";
 import { DEAL_ROOM_FIELDS, assertDealRoomField, stripDealPlaceholders } from "./dealroom.js";
 import { authenticatedIdentity, authorizationClassForActor, organizationTenantForActor,
          permittedActionOwnerSlugs, personalScopeForActor } from "./identity.js";
+import { automaticApplyHold } from "./call-auto-apply.js";
 import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
 import { isPersonalRecordOwner } from "./personal-record-ownership.ts";
 import { assertRegisteredOperation, mutationManifestIdentity, MutationRegistryRefusal } from "./mutation-registry.js";
@@ -342,7 +343,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || verb === "dismiss-email-proposal" || ["set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || verb === "dismiss-email-proposal" || verb === "undo-call" || ["set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
@@ -3710,6 +3711,7 @@ export const TOOLS = {
             where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=$3`,
           [organizationTenantForActor(actor), scope.sponsor, CALENDAR_AGENDA_BOARD]);
         calendar = calendarSection(result.rows[0]?.snapshot_json);
+        if (calendar?.sources && calendar.items.length) await addCalendarDealSuggestions(c, calendar, scope.sponsor);
       } catch {
         calendar = { state: "unavailable", reason: "source_unavailable", items: [] };
       }
@@ -9721,6 +9723,12 @@ registerTools({
       accept: { type: "boolean" }, note: { type: "string" }, automatic: { type: "boolean" },
     }, required: ["idempotency_key", "candidate_id", "accept"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "resolve-candidate", args, async () => {
+      await c.query(`select s.id from capture_session s join capture_candidate p on p.session_id=s.id
+        where p.id=$1 for update of s /* call-outcome:resolve-session-lock */`, [args.candidate_id]);
+      if (args.automatic === true && (await c.query(`select 1 from event e join capture_candidate p
+        on p.session_id::text=e.new_value->>'session_id' where p.id=$1 and e.verb='undo-call'
+        and e.field='call_undo' limit 1 /* call-outcome:resolve-undo-check */`, [args.candidate_id])).rows.length)
+        throw new ToolError({ error: "call_already_undone" });
       const { candidate, resolution } = await prepareCaptureCandidate(c, actor, args, {
         table: "capture_candidate",
         read: `select c.id, c.kind, c.payload, c.status, c.resulting_ref, c.evidence_quote, s.post_call
@@ -9736,6 +9744,9 @@ registerTools({
           !["next_step", "phase_move"].includes(candidate.kind)))
         throw new ToolError({ error: "automatic_apply_not_allowed", kind: candidate.kind,
           hint: "only a partner's own Call Mode may apply a post-call next step or phase automatically" });
+      const hold = automatic ? automaticApplyHold(candidate) : null;
+      if (hold) throw new ToolError({ error: "below_confidence_bar", kind: candidate.kind, reason: hold,
+        hint: "leave it as a card for Joe or Dell; nothing was changed" });
 
       const verbByKind = {
         phase_move: "patch-deal-field",
@@ -9940,6 +9951,119 @@ registerTools({
       await writeEvent(c, actor, "review-call-outcome", "actor", actor.id, {
         new: { session_id: args.session_id, reviewed: true }, idempotency_key: args.idempotency_key });
       return { ok: true, session_id: args.session_id, reviewed: true };
+    }),
+  },
+
+  "undo-call": {
+    write: true, humanOnly: true,
+    description: "Undo every still-applied automatic change from one filed pipeline call in one atomic action, retaining transcript and event evidence. Restores plans, dates and untouched tasks; refuses the entire call if newer work would be overwritten. Pending and human-confirmed proposals remain unchanged. Phase start-date projection requires the phase-undo projection migration; multiple phase moves on one deal are refused.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      idempotency_key: { type: "string" }, session_id: { type: "string" },
+    }, required: ["idempotency_key", "session_id"] },
+    handler: async (c, actor, args) => withEnvelope(c, actor, "undo-call", args, async () => {
+      if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: "partner_required" });
+      const session = (await c.query("select id,post_call from capture_session where id=$1 for update", [args.session_id])).rows[0];
+      if (!session?.post_call) throw new ToolError({ error: "not_found", table: "capture_session", id: args.session_id });
+      const prior = (await c.query(`select new_value from event where verb='undo-call' and field='call_undo'
+        and new_value->>'session_id'=$1 order by recorded_at desc,id desc limit 1`, [session.id])).rows[0];
+      if (prior) return { ok: true, session_id: session.id, already: "undone", ...prior.new_value };
+      const candidates = (await c.query(`select p.id,p.kind,p.evidence_quote,p.undone_at,e.subject_id as deal_id
+        from capture_candidate p left join lateral (
+          select subject_id from event where subject_type='deal' and idempotency_key='capture:' || p.id::text
+            and field=case when p.kind='phase_move' then 'phase' else 'next_step' end
+          order by recorded_at,id limit 1
+        ) e on true where p.session_id=$1 and p.applied_automatically order by p.id for update of p`,
+        [session.id])).rows.filter(row => !row.undone_at);
+      if (candidates.some(row => !row.deal_id)) throw new ToolError({ error: "applied_change_not_found" });
+      const changes = [];
+      const deals = [...new Set(candidates.map(row => row.deal_id))].sort();
+      for (const dealId of deals) {
+        const own = candidates.filter(row => row.deal_id === dealId);
+        if (own.some(row => !["phase_move", "next_step"].includes(row.kind)))
+          throw new ToolError({ error: "unsupported_call_change", deal_id: dealId });
+        if (own.filter(row => row.kind === "phase_move").length > 1)
+          throw new ToolError({ error: "phase_history_undo_unavailable", deal_id: dealId,
+            hint: "This call moved the same deal through several phases. Review its phase history before editing it." });
+        if (own.some(row => row.kind === "phase_move") && !(await c.query(`select
+          position('revert-deal-field' in pg_get_viewdef('v_deal_room_phase_start'::regclass)) > 0 as undo_supported`)).rows[0].undo_supported)
+          throw new ToolError({ error: "phase_start_undo_unavailable", deal_id: dealId,
+            hint: "Phase undo requires the phase-start undo projection migration before this call can be restored." });
+        await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0))", [dealId]);
+        for (const field of ["phase", "next_date", "next_step"]) await lockDealField(c, dealId, field);
+        await c.query("select id from deal where id=$1 for update", [dealId]);
+        const keys = own.map(row => `capture:${row.id}`);
+        const journal = (await c.query(`select id,field,old_value,new_value,idempotency_key from event
+          where subject_type='deal' and subject_id=$1 and idempotency_key=any($2::text[])
+          and field in ('phase','next_date','next_step','next_action') order by recorded_at,id`, [dealId,keys])).rows;
+        if (own.some(row => !journal.some(event => event.idempotency_key === `capture:${row.id}`
+          && event.field === (row.kind === 'phase_move' ? 'phase' : 'next_step'))))
+          throw new ToolError({ error: "applied_change_not_found", deal_id: dealId });
+        const fields = [...new Set(journal.map(row => row.field))];
+        const newer = (await c.query(`select 1 from event e where e.subject_type='deal' and e.subject_id=$1
+          and (e.field=any($3::text[]) or e.verb in ('set-next-action','complete-action'))
+          and not (coalesce(e.idempotency_key,'')=any($2::text[]))
+          and (e.recorded_at,e.id) > (select b.recorded_at,b.id from event b where b.id=$4)
+          limit 1`, [dealId,keys,fields,journal[0].id])).rows.length;
+        if (newer) throw new ToolError({ error: "newer_change_exists", deal_id: dealId });
+        const actionIds = [...new Set(journal.flatMap(row => [
+          ...(row.new_value?.superseded_action_ids ?? []), ...(row.new_value?.replaced_action_ids ?? []),
+        ]))];
+        const createdIds = journal.flatMap(row => row.new_value?.next_action_id ? [row.new_value.next_action_id] : []);
+        const sourceRefs = own.map(row => `capture_candidate:${row.id}`);
+        const items = (await c.query(`select n.id,n.status,
+          (select count(*) from event e where e.subject_type='deal' and e.subject_id=$1
+            and e.field in ('deal_item','deal_item_instruction') and e.new_value->>'item_id'=n.id::text) as events
+          from next_action n where n.subject_type='deal' and n.subject_id=$1 and n.source_ref=any($2::text[])
+          for update of n`, [dealId,sourceRefs])).rows;
+        await c.query('select id from next_action where id=any($1::uuid[]) order by id for update', [actionIds]);
+        await c.query('select id from capture_post_call_action where id=any($1::uuid[]) order by id for update', [actionIds]);
+        const touched = (await c.query(`select 1 from next_action n where n.id=any($1::uuid[])
+          and (n.status<>'dropped' or n.updated_at > (select min(recorded_at) from event where id=any($2::uuid[])
+            and (new_value->'superseded_action_ids' ? n.id::text or new_value->'replaced_action_ids' ? n.id::text)))
+          union all select 1 from capture_post_call_action n where n.id=any($1::uuid[])
+          and (n.status<>'dropped' or n.updated_at > (select min(recorded_at) from event where id=any($2::uuid[])
+            and (new_value->'superseded_action_ids' ? n.id::text or new_value->'replaced_action_ids' ? n.id::text)))
+          limit 1`, [actionIds,journal.map(row=>row.id)])).rows.length;
+        if (touched || items.some(item => item.status !== 'open' || Number(item.events) > 1))
+          throw new ToolError({ error: "newer_change_exists", deal_id: dealId });
+        const reopenIds = actionIds.filter(id => !createdIds.includes(id));
+        await c.query(`update next_action set status='dropped',updated_by=$2,updated_at=clock_timestamp()
+          where id=any($1::uuid[])`, [[...createdIds,...items.map(item=>item.id)],actor.id]);
+        await c.query(`update next_action set status='open',updated_by=$2,updated_at=clock_timestamp()
+          where id=any($1::uuid[])`, [reopenIds,actor.id]);
+        await c.query(`update capture_post_call_action set status='open',updated_at=clock_timestamp()
+          where id=any($1::uuid[])`, [reopenIds]);
+        const restored = {};
+        for (const field of ['phase','next_date','next_step']) {
+          const first = journal.find(row=>row.field===field);
+          if (!first) continue;
+          const value = field==='next_step' && Object.hasOwn(first.old_value ?? {},'board_next_step')
+            ? first.old_value.board_next_step : first.old_value?.[field] ?? null;
+          restored[field] = value;
+          if (field==='next_step') {
+            if (value !== null) await c.query(`insert into deal_note(deal_id,kind,text,actor_id,created_at)
+              values($1,'next_step',$2,$3,clock_timestamp())`, [dealId,value,actor.id]);
+          } else await c.query(`update deal set ${field}=$2,updated_by=$3 where id=$1`, [dealId,value,actor.id]);
+          await writeEvent(c,actor,field==='phase' ? 'revert-deal-field' : 'undo-call', 'deal',dealId,{
+            field, old: journal.filter(row=>row.field===field).at(-1).new_value,
+            new: { [field]: value, ...(field==='next_step' && value===null ? {superseded_action_ids:[]} : {}) },
+            recorded_at_after_lock:true,idempotency_key:args.idempotency_key,
+          });
+        }
+        for (const candidate of own) {
+          const evidence = { candidate_id:candidate.id,kind:candidate.kind,deal_id:dealId,
+            evidence_quote:candidate.evidence_quote,event_ids:journal.filter(row=>row.idempotency_key===`capture:${candidate.id}`).map(row=>row.id),
+            restored,reopened_action_ids:reopenIds,dropped_item_ids:items.map(item=>item.id) };
+          await c.query('update capture_candidate set undone_at=clock_timestamp(),undone_by=$2 where id=$1',[candidate.id,actor.id]);
+          await writeEvent(c,actor,'undo-call','deal',dealId,{field:'call_change_undo',
+            new:{session_id:session.id,...evidence},recorded_at_after_lock:true,idempotency_key:args.idempotency_key});
+          changes.push(evidence);
+        }
+      }
+      const receipt = { session_id:session.id,undone:true,changes };
+      await writeEvent(c,actor,'undo-call','actor',actor.id,{field:'call_undo',new:receipt,
+        recorded_at_after_lock:true,idempotency_key:args.idempotency_key});
+      return {ok:true,...receipt};
     }),
   },
 

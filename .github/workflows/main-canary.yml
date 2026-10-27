@@ -183,6 +183,7 @@ jobs:
           # next step uploads it when the class fails, so a stale snapshot is
           # one download and one commit away from fixed.
           CARR_SHADOW_ARTIFACT_DIR: ${{ runner.temp }}/migration-shadow
+          CARR_CI_PROGRAM_RECORDS: ${{ runner.temp }}/ci-programs.json
         run: |
           if [ "${{ matrix.classes }}" = gates ]; then
             ops/ci.sh --strict --only gates --gate-shard "${{ matrix.gate_shard }}/2"
@@ -198,12 +199,14 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Retain failed CI logs
-        if: ${{ failure() }}
+      - name: Retain per-program records and failed CI logs
+        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: failed-ci-canary-${{ strategy.job-index }}
-          path: ${{ runner.temp }}/carr-ci.*/*.log.redacted
+          name: ci-canary-${{ strategy.job-index }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/carr-ci.*/*.log.redacted
+            ${{ runner.temp }}/ci-programs.json
           if-no-files-found: ignore
           retention-days: 14
 

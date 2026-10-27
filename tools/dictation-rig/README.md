@@ -89,7 +89,7 @@ The post-call extraction/report/draft layer is specified in
 `specs/post-call-workflow-2026-08-10.md`. When a weekly transcript is ready,
 the post-call worker fetches missing context through the existing local verb
 route. It reads active deal IDs from `deal-room-board`, then their exact index
-from `get-call-context`. A failed fetch leaves a reason in `post-call.json` and
+from `get-call-context`. A failed fetch leaves a reason in the session's post-call result (written by `bin/post_call.py`), and
 the existing capture-poll sweep retries it. Deal Room can still supply context
 through `POST /api/call-context`; the first stored index wins and processing
 runs once. Confident next-step and phase changes follow the existing automatic
