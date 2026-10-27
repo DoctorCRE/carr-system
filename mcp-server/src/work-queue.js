@@ -15,18 +15,22 @@ export function queueCardId(ref, ordinal, number) {
 
 // Stage and PR links are never stored: a PR belongs to a job through a "Card: WRn.Sm.Jk" line in its body.
 export const PULL_REQUEST_TTL_MS = 60_000;
-// Building and queued are the only stages a job can stall in without anyone else holding it. Codex jobs run in
-// hours, so a full day with no dispatch pickup or push means stalled; review and merge wait on others, never stale.
+// Building is the only stage a job can stall in without anyone else holding it. Codex jobs run in hours, so a day
+// with no push to the open draft means stalled. Queued jobs wait their priority turn (dispatch-job starts nothing),
+// and review and merge wait on others, so none of those is ever stale.
 export const STALE_AFTER_MS = 24 * 3_600_000;
 const CARD_LINE = /^Card:[ \t]*(WR\d+\.S\d+\.J\d+)\b/gmu;
 const unavailablePullRequests = async repos => repos.map(repo => ({ repo, state: 'unavailable', reason: 'no_github_reader', prs: [] }));
 
 // One GitHub search per repository per TTL, shared by every caller in this isolate; failures are cached too.
+// `since` bounds it to PRs updated on or after the oldest visible job's day: a card ID does not exist until
+// dispatch-job mints it, so any PR carrying one was created or edited after that, and older PRs cannot fill the window.
 export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...a), now = Date.now, ttlMs = PULL_REQUEST_TTL_MS }) {
   const memo = new Map();
-  async function search(repo) {
+  async function search(repo, since) {
     if (!token) return { repo, state: 'unavailable', reason: 'credential_not_configured', prs: [] };
-    const query = new URLSearchParams({ q: `repo:${repo} is:pr in:body "Card: WR"`, sort: 'updated', order: 'desc', per_page: '100' });
+    const bound = since ? ` updated:>=${since.slice(0, 10)}` : '';
+    const query = new URLSearchParams({ q: `repo:${repo} is:pr in:body "Card: WR"${bound}`, sort: 'updated', order: 'desc', per_page: '100' });
     try {
       const response = await fetchImpl(`https://api.github.com/search/issues?${query}`, { headers: {
         accept: 'application/vnd.github+json', authorization: `Bearer ${token}`, 'user-agent': 'carr-mcp-work-queue', 'x-github-api-version': '2022-11-28' } });
@@ -40,10 +44,10 @@ export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...
       return { repo, state: 'ok', observed_at: new Date(now()).toISOString(), truncated: body.total_count > body.items.length, prs };
     } catch { return { repo, state: 'unavailable', reason: 'github_unreachable', prs: [] }; }
   }
-  return repos => Promise.all(repos.map(repo => {
+  return (repos, since) => Promise.all(repos.map(repo => {
     const hit = memo.get(repo);
     if (hit && now() - hit.at < ttlMs) return hit.value;
-    const value = search(repo);
+    const value = search(repo, since);
     memo.set(repo, { at: now(), value });
     return value;
   }));
@@ -69,13 +73,14 @@ export function queueView(rows, sources, at) {
     const { cards, ...fact } = pr;
     byCard.set(card, [...(byCard.get(card) ?? []), { ...fact, card_id: `${card}.${addressFormat.repositories[pr.repo]}#${pr.number}` }]);
   }
+  // An unreadable repository may hold the newer push, so a stall is only claimed when every source answered.
+  const complete = sources.every(source => source.state === 'ok');
   const jobs = rows.map(({ work_request_id, created_at, ...row }) => {
     const card_id = queueCardId(row.work_request, row.slice_ordinal, row.j_number);
     const prs = byCard.get(card_id) ?? [];
     const stage = jobStage(prs);
-    const since = stage === 'queued' ? new Date(created_at).getTime()
-      : stage === 'build' ? Math.max(...prs.filter(pr => pr.state === 'open').map(pr => Date.parse(pr.updated_at))) : NaN;
-    return { ...row, card_id, created_at: new Date(created_at).toISOString(), stage, stale: at - since >= STALE_AFTER_MS, prs };
+    const since = stage === 'build' ? Math.max(...prs.filter(pr => pr.state === 'open').map(pr => Date.parse(pr.updated_at))) : NaN;
+    return { ...row, card_id, created_at: new Date(created_at).toISOString(), stage, stale: complete && at - since >= STALE_AFTER_MS, prs };
   });
   return { jobs, github: sources.map(({ prs, ...source }) => source) };
 }
@@ -163,8 +168,11 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       handler: async (c, actor, args) => {
         validate(args, {}, []);
-        const sources = await (c.pullRequests ?? unavailablePullRequests)(Object.keys(addressFormat.repositories));
-        return { ok: true, stale_after_hours: STALE_AFTER_MS / 3_600_000, ...queueView(await ordered(c, actor), sources, Date.now()) };
+        const rows = await ordered(c, actor);
+        const oldest = rows.reduce((min, row) => Math.min(min, new Date(row.created_at).getTime()), Infinity);
+        const sources = await (c.pullRequests ?? unavailablePullRequests)(Object.keys(addressFormat.repositories),
+          Number.isFinite(oldest) ? new Date(oldest).toISOString() : undefined);
+        return { ok: true, stale_after_hours: STALE_AFTER_MS / 3_600_000, ...queueView(rows, sources, Date.now()) };
       } },
   };
 }

@@ -68,7 +68,7 @@ test('stage is derived from the least advanced open PR, then merged, then closed
   assert.equal(jobStage([pr('closed')]), 'closed');
 });
 
-test('only queued and building jobs go stale after 24 hours; review and merged never do', () => {
+test('only building jobs go stale after 24 hours; a queued backlog job waits its turn and is never stale', () => {
   const at = Date.parse('2026-10-28T12:00:00Z');
   const old = new Date(at - STALE_AFTER_MS).toISOString(), fresh = new Date(at - STALE_AFTER_MS + 1).toISOString();
   const row = (j, created_at = old) => ({ work_request_id: 'x', work_request: 'WR-000557', work_request_title: 'Queue', slice_ordinal: 4, j_number: j, created_at });
@@ -77,7 +77,7 @@ test('only queued and building jobs go stale after 24 hours; review and merged n
     pr(30, ['WR557.S4.J3'], { draft: true }), pr(31, ['WR557.S4.J4'], { draft: true, updated_at: fresh }),
     pr(32, ['WR557.S4.J5']), pr(33, ['WR557.S4.J6'], { state: 'merged' })] }], at);
   assert.deepEqual(view.jobs.map(job => [job.card_id, job.stage, job.stale]), [
-    ['WR557.S4.J1', 'queued', true], ['WR557.S4.J2', 'queued', false], ['WR557.S4.J3', 'build', true],
+    ['WR557.S4.J1', 'queued', false], ['WR557.S4.J2', 'queued', false], ['WR557.S4.J3', 'build', true],
     ['WR557.S4.J4', 'build', false], ['WR557.S4.J5', 'review', false], ['WR557.S4.J6', 'merged', false]]);
   assert.equal(view.jobs[4].prs[0].card_id, 'WR557.S4.J5.app#32');
   assert.equal(view.jobs[0].work_request_title, 'Queue');
@@ -89,4 +89,35 @@ test('the shared isolate source without a credential reports unavailable instead
   const sources = await isolatePullRequests(undefined)(REPOS);
   assert.deepEqual(sources.map(source => source.state), ['unavailable', 'unavailable']);
   assert.equal(isolatePullRequests(undefined), isolatePullRequests(undefined), 'one source per isolate and credential');
+});
+
+test('while any repository is unreadable nothing is stale, because a missing PR is not evidence of a stall', () => {
+  const at = Date.parse('2026-10-28T12:00:00Z'), old = new Date(at - 3 * STALE_AFTER_MS).toISOString();
+  const row = j => ({ work_request_id: 'x', work_request: 'WR-000557', work_request_title: 'Queue', slice_ordinal: 1, j_number: j, created_at: old });
+  const draft = { repo: 'DoctorCRE/carr-system', number: 7, cards: ['WR557.S1.J2'], updated_at: old, draft: true, state: 'open' };
+  for (const down of [{ state: 'unavailable', reason: 'github_http_403', prs: [] }, { state: 'unavailable', reason: 'credential_not_configured', prs: [] }]) {
+    const view = queueView([row(1), row(2)], [{ repo: 'DoctorCRE/carr-system', state: 'ok', prs: [draft] }, { repo: 'jbookout/doctorcre-app', ...down }], at);
+    assert.deepEqual(view.jobs.map(job => [job.card_id, job.stage, job.stale]), [['WR557.S1.J1', 'queued', false], ['WR557.S1.J2', 'build', false]]);
+  }
+});
+
+test('a truncated search never makes an old job stale', () => {
+  const at = Date.parse('2026-10-28T12:00:00Z'), old = new Date(at - 30 * STALE_AFTER_MS).toISOString();
+  const view = queueView([{ work_request_id: 'x', work_request: 'WR-000557', work_request_title: 'Queue', slice_ordinal: 1, j_number: 1, created_at: old }],
+    [{ repo: 'DoctorCRE/carr-system', state: 'ok', truncated: true, prs: [] }], at);
+  assert.deepEqual(view.jobs.map(job => [job.stage, job.stale]), [['queued', false]]);
+});
+
+test('the search only spans PRs updated since the oldest visible job, since no earlier PR can carry its minted card ID', async () => {
+  let clock = 0;
+  const queries = [];
+  const fetchImpl = async url => { queries.push(new URL(url).searchParams.get('q')); return new Response(JSON.stringify({ total_count: 0, items: [] })); };
+  const read = createPullRequestSource({ token: 'synthetic', fetchImpl, now: () => clock });
+  await read(REPOS.slice(0, 1), '2026-10-20T15:30:00.000Z');
+  assert.deepEqual(queries, ['repo:DoctorCRE/carr-system is:pr in:body "Card: WR" updated:>=2026-10-20']);
+  await read(REPOS.slice(0, 1), '2026-10-21T00:00:00.000Z');
+  assert.equal(queries.length, 1, 'still one search per repository per window when the bound moves');
+  clock = PULL_REQUEST_TTL_MS;
+  await read(REPOS.slice(0, 1));
+  assert.deepEqual(queries.at(-1), 'repo:DoctorCRE/carr-system is:pr in:body "Card: WR"', 'an empty queue searches without a bound');
 });
