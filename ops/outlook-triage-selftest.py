@@ -383,6 +383,9 @@ class ComposeWindowTest(unittest.TestCase):
                       HELPER | {'on_current_space': False},
                       HELPER | {'on_current_space': True},
                       HELPER | {'title': 'subject-000'},
+                      HELPER | {'title': ''}, HELPER | {'title': None},
+                      {k: v for k, v in HELPER.items() if k != 'is_on_screen'},
+                      {k: v for k, v in HELPER.items() if k != 'on_current_space'},
                       window(16, '', 500, 500)):
             with self.subTest(draft=draft):
                 self.assertTrue(is_compose_window(draft))
