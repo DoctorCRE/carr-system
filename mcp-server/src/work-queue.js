@@ -4,7 +4,7 @@ import { organizationTenantForActor } from './identity.js';
 import { readableWorkRequestSql } from './work-request-read.ts';
 
 const text = (max = 100) => ({ type: 'string', minLength: 1, maxLength: max });
-const positive = { type: 'integer', minimum: 1, maximum: 2147483647 };
+const positive = { type: 'integer', minimum: 1, maximum: 0x7fffffff };
 const base = { idempotency_key: { type: 'string', format: 'uuid' }, work_request: text() };
 const slice = { ...positive, default: 1 };
 export function queueCardId(ref, ordinal, number) {

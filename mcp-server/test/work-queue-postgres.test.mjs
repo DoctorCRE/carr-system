@@ -112,8 +112,8 @@ test('refusals preserve the queue and name the rejected operation', async () => 
   for (const [name, args, error] of [
     ['dispatch-job', job('WR-999999'), 'work_request_not_found'],
     ['dispatch-job', job('WR-000014', { slice: 9 }), 'slice_not_found'],
-    ['dispatch-job', job('WR-000014', { slice: 2147483648 }), 'invalid_work_queue_fields'],
-    ['prioritize-job', { ...plan, job: 2147483648, position: 1 }, 'invalid_work_queue_fields'],
+    ['dispatch-job', job('WR-000014', { slice: 2 ** 31 }), 'invalid_work_queue_fields'],
+    ['prioritize-job', { ...plan, job: 2 ** 31, position: 1 }, 'invalid_work_queue_fields'],
     ['plan-work-request-slices', { ...plan, slices: null }, 'invalid_slice_plan'],
     ['dispatch-job', job('WR-000014', { card_title: 'Too many card words' }), 'invalid_card_title'],
     ['dispatch-job', job('WR-000014', { description: 'First sentence. Second sentence.' }), 'invalid_job_description'],
@@ -130,7 +130,7 @@ test('concurrent dispatch and same-key retries mint once, and rollback leaves no
   const work_request = await request('WR-000016');
   const clients = await Promise.all(Array.from({ length: 3 }, async () => { const client = new pg.Client(connection); await client.connect(); return client; }));
   try {
-    const args = job(work_request, { idempotency_key: 'abcdefab-1234-4567-89ab-abcdefabcdef' });
+    const args = job(work_request);
     const results = await Promise.all([command('dispatch-job', args, clients[0]), command('dispatch-job', args, clients[1]), command('dispatch-job', job(work_request), clients[2])]);
     assert.equal(results[0].card_id, results[1].card_id);
     assert.deepEqual(new Set(results.map(row => row.card_id)), new Set(['WR16.S1.J1', 'WR16.S1.J2']));
