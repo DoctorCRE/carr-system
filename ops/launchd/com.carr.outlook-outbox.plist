@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.carr.outlook-outbox</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{COPY_HELPER}}</string>
+    <string>--run-outbox</string>
+  </array>
+  <key>WorkingDirectory</key><string>{{REPO}}</string>
+  <key>Umask</key><integer>63</integer>
+  <key>StartInterval</key><integer>60</integer>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>{{EXECUTABLE_PATH}}</string></dict>
+  <key>StandardOutPath</key><string>{{REPO}}/out/outlook-outbox-launchd.log</string>
+  <key>StandardErrorPath</key><string>{{REPO}}/out/outlook-outbox-launchd.log</string>
+</dict>
+</plist>
