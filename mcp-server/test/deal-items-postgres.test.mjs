@@ -1,7 +1,7 @@
 // Test persisted deal items, board projections, and item-level writes in PostgreSQL.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
@@ -43,6 +43,7 @@ before(async () => {
   const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
   if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
   else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
+  await c.query(readFileSync(new URL('../../migrations/1002_notification_morning_midnight.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic physician',$1,$1) returning id", [actor.id])).rows[0].id;
   await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
@@ -263,6 +264,18 @@ test('accepting an ordinary captured next step creates structured sourced items'
   assert.ok(items.some(i => i.source_ref === `capture_candidate:${candidate}` && i.title === 'Vendor Introductions'));
 });
 
+
+test('morning release includes the previous day window at 00:30 Chicago', async () => {
+  await c.query('begin');
+  try {
+    await c.query(`insert into ops.notification_preference(actor, timezone, quiet_hours_start, quiet_hours_end)
+      values($1, 'America/Chicago', '04:30', '23:30')`, [actor.id]);
+    const definition = (await c.query("select pg_get_functiondef('ops.notification_morning_release_at(uuid)'::regprocedure) as definition")).rows[0].definition;
+    await c.query(definition.replaceAll('now()', "'2026-10-27 05:30:00+00'::timestamptz"));
+    const result = (await c.query('select ops.notification_morning_release_at($1) as release', [actor.id])).rows[0];
+    assert.equal(result.release.toISOString(), '2026-10-27T05:30:00.000Z');
+  } finally { await c.query('rollback'); }
+});
 
 test('due checklist pings reach only the owner feed and replay without duplicate delivery', async () => {
   await c.query('begin');
