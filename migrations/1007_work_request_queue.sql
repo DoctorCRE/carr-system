@@ -1,5 +1,4 @@
 -- rollback: forward fix only; preserve minted slice and job identities.
-begin;
 create table ops.work_request_slice (
   work_request_id uuid not null references ops.work_request(id),
   ordinal integer not null check (ordinal > 0),
@@ -24,4 +23,3 @@ create index work_request_job_priority on ops.work_request_job(priority, work_re
 grant select on ops.work_request_slice, ops.work_request_job to carr_reader, carr_writer;
 grant insert on ops.work_request_slice, ops.work_request_job to carr_writer;
 grant update(priority) on ops.work_request_job to carr_writer;
-commit;

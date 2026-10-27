@@ -8,7 +8,7 @@ import re
 from collections import Counter
 from pathlib import Path
 
-ADDRESS_FORMAT = json.loads(Path(__file__).with_name('progress-address.v1.json').read_text())
+ADDRESS_FORMAT = json.loads((Path(__file__).resolve().parents[1] / 'mcp-server/src/progress-address.v1.json').read_text())
 REPOSITORIES = ADDRESS_FORMAT['repositories']
 
 

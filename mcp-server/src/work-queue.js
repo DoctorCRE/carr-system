@@ -1,5 +1,5 @@
 // Store lean Work Request slice and job facts with stable IDs and priority order.
-import addressFormat from '../../lib/progress-address.v1.json' with { type: 'json' };
+import addressFormat from './progress-address.v1.json' with { type: 'json' };
 import { organizationTenantForActor } from './identity.js';
 import { readableWorkRequestSql } from './work-request-read.ts';
 
