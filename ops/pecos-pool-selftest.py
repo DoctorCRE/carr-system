@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Test the PECOS pool builder: quarterly imports, resumable runs and output CSVs.
 import csv
 import json
 import shutil
