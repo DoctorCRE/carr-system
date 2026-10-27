@@ -644,7 +644,7 @@
     "unused-export:src/work-portfolio.js:SOURCE_DIGEST_KEYS",
     "unused-export:src/work-portfolio.js:portfolioAcceptedDigest",
     "unused-export:src/work-portfolio.js:portfolioChildPreimage",
-    "unused-export:src/work-shape.js:SHAPE_DISPOSITIONS",
+    "unused-export:src/work-shape.ts:SHAPE_DISPOSITIONS",
     "unused-export:src/workspace-business-read.js:BUSINESS_API_PREFIX",
     "unused-export:src/workspace-business-read.js:DATASETS",
     "unused-export:src/workspace-business-read.js:DEFAULT_SCOPE",
