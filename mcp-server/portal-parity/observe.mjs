@@ -55,7 +55,9 @@ async function runStep(page, step, state) {
 
 // Element state that an interaction can change. Text and values come back raw
 // and are digested in Node before they become facts.
-function snapshot([selector, withText]) {
+// `style` names computed properties (custom properties included) and
+// `geometry` adds the rounded box, for rows about layout rather than content.
+function snapshot([selector, { text: withText, style = [], geometry = false }]) {
   const nodes = [...document.querySelectorAll(selector)].slice(0, 60);
   return {
     count: document.querySelectorAll(selector).length,
@@ -69,6 +71,8 @@ function snapshot([selector, withText]) {
       checked: el.checked ?? null,
       value: typeof el.value === 'string' ? el.value : null,
       aria: ['aria-pressed', 'aria-current', 'aria-expanded', 'aria-selected'].map(a => el.getAttribute(a)).join('|'),
+      style: style.map(name => getComputedStyle(el).getPropertyValue(name).trim()).join('|'),
+      box: geometry ? (({ x, y, width, height }) => [x, y, width, height].map(Math.round).join(','))(el.getBoundingClientRect()) : '',
     })),
   };
 }
@@ -182,8 +186,8 @@ export async function observeBrowserProbe(browser, base, probe, aliases, { cooki
       }
     } else if (probe.kind === 'interaction') {
       for (const [index, entry] of probe.observe.entries()) {
-        const { selector, text = true } = typeof entry === 'string' ? { selector: entry } : entry;
-        const shot = await page.evaluate(snapshot, [selector, text]);
+        const { selector, text = true, style, geometry } = typeof entry === 'string' ? { selector: entry } : entry;
+        const shot = await page.evaluate(snapshot, [selector, { text, style, geometry }]);
         if (!shot.count) throw new Missing(selector);
         for (const node of shot.nodes) {
           node.text = digest(node.text);

@@ -1107,6 +1107,19 @@ fixture served twice, it reports PASS for every probe; one deliberate DOM change
 reports exactly that row as FAIL; `--rows` runs only the named rows; the probe
 file's IDs equal this document's inventory IDs. Check: harness self-test in CI.
 
+*Recorded deviation (WR227.S5, until S10).* No template renders the synthetic
+fixture before S10, so the CI self-test serves a small synthetic page built from
+the fixture's values and runs 16 of the 456 rows against it (gate, section, tool,
+link and media kinds); the other rows are proved only by running each reference
+site against itself at the Studio, from the read-only `carr-share` Worker source
+copies. S10 reopens this: once the template renders the fixture, CI runs every
+row the fixture can feed. The harness exit code follows the Result rule above: a
+`--rows` run exits 0 when FAIL = 0 and reports UNRUN rows (a `replaced` row whose
+feeds lie outside the slice is UNRUN); a run without `--rows` also needs UNRUN = 0,
+because the release needs every row accounted for. Each allowed difference lists
+in the probe file the aspects it may differ in; any other difference, a missing
+target or an error is FAIL.
+
 **S6. Stage 0: source fidelity and the live gate baseline.** A partner runs Stage 0
 for REF-A and REF-V, typing each password at the prompt. Acceptance: every
 released file hashes equal to the source copy; the live gate baseline is recorded

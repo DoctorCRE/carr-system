@@ -12,26 +12,27 @@ import { runParity } from '../portal-parity/harness.mjs';
 const ROOT = new URL('../../', import.meta.url);
 const PROBES = new URL('client-portal/parity/probes.v1.json', ROOT).pathname;
 const PKG = JSON.parse(await readFile(new URL('client-portal/fixtures/example-health.market-study.json', ROOT), 'utf8'));
-const ROWS = 'V-G01,V-S01,V-S03,V-S10,V-T01,V-L01..V-L08,V-L13,V-A10';
+const ROWS = 'V-G01,V-S01,V-S03,V-S10,V-T01,V-T03,V-L01..V-L08,V-L13,V-A10';
 const LOGO = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="#002f6c"/></svg>';
 const esc = text => String(text).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
-function targetPage(pkg, { extraAction = '' } = {}) {
+function targetPage(pkg, { extraAction = '', css = '', header = true } = {}) {
   const views = { home: pkg.market.home_title, purchases: 'Purchase Options', tour: 'Tour List', demographics: 'Local Demographics', sources: 'Sources' };
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(pkg.client.display_name)}</title>
 <style>body{margin:0;font:16px sans-serif}.scroll-progress{height:4px;background:#f57f29}.site-header{display:flex;gap:24px;padding:12px}
-.site-nav{display:flex;gap:12px}.home-actions{padding:16px}.button{display:inline-block;padding:8px 14px;background:#002f6c;color:#fff}</style></head>
+.site-nav{display:flex;gap:12px}.home-actions{padding:16px}.button{display:inline-block;padding:8px 14px;background:#002f6c;color:#fff}${css}</style></head>
 <body><div class="scroll-progress" aria-hidden="true"></div><a class="skip-link" href="#main-content">Skip to content</a>
-<div class="site-header"><div class="brand-link"><a class="carr-link" href="https://carr.us/" target="_blank" rel="noopener" aria-label="CARR website, opens in a new tab"><img class="brand-logo" src="carr-logo.svg" alt="CARR"></a>
+${header ? '' : '<!--'}<div class="site-header"><div class="brand-link"><a class="carr-link" href="https://carr.us/" target="_blank" rel="noopener" aria-label="CARR website, opens in a new tab"><img class="brand-logo" src="carr-logo.svg" alt="CARR"></a>
 <a class="client-brand-link" href="#home"><span class="brand-wordmark client-logo-fallback"><strong>${esc(pkg.client.wordmark.line1)}</strong> <small>${esc(pkg.client.wordmark.line2)}</small></span></a></div>
-<nav class="site-nav" aria-label="Main navigation">${Object.keys(views).map(v => `<a href="#${v}">${v}</a>`).join('')}</nav></div>
+<nav class="site-nav" aria-label="Main navigation">${Object.keys(views).map(v => `<a href="#${v}">${v}</a>`).join('')}</nav></div>${header ? '' : '-->'}
 <main id="main-content"><h1 id="sticky-page-title" aria-live="polite"></h1>
 <div id="home" class="site-view"><h2>${esc(pkg.market.headline)}</h2><p>${esc(pkg.market.intro)}</p>
 <div class="home-actions"><a class="button" href="#purchases">Review Purchase Options</a>${extraAction}</div></div>
 ${Object.keys(views).slice(1).map(v => `<div id="${v}" class="site-view" hidden><p>${esc(v)}</p></div>`).join('')}</main>
 <script>const titles=${JSON.stringify(views)};function show(){const key=(location.hash||'#home').slice(1);const target=document.getElementById(key)||document.getElementById('home');
 document.querySelectorAll('.site-view').forEach(v=>v.hidden=v!==target);document.querySelectorAll('.site-nav a').forEach(a=>a.setAttribute('aria-current',a.hash==='#'+target.id?'page':'false'));
-document.getElementById('sticky-page-title').textContent=titles[target.id];}addEventListener('hashchange',show);show();</script></body></html>`;
+document.getElementById('sticky-page-title').textContent=titles[target.id];}addEventListener('hashchange',show);show();
+const header=document.querySelector('.site-header');if(header)new ResizeObserver(()=>document.documentElement.style.setProperty('--site-header-height',Math.ceil(header.getBoundingClientRect().height)+'px')).observe(header);</script></body></html>`;
 }
 
 // Serves one target folder at /portal/, with the bare-path redirect the gate rows expect.
@@ -54,15 +55,15 @@ async function serve(t, html) {
   return `http://127.0.0.1:${server.address().port}/portal/`;
 }
 
-const run = (reference, candidate, rows = ROWS) => runParity({ stage: 2, site: 'REF-V', probesFile: PROBES, reference, candidate, rows });
+const run = (reference, candidate, rows = ROWS, probesFile = PROBES) => runParity({ stage: 2, site: 'REF-V', probesFile, reference, candidate, rows });
 
 test('the synthetic target served twice passes every selected probe', async t => {
   const page = targetPage(PKG);
   const result = await run(await serve(t, page), await serve(t, page));
   assert.deepEqual(result.results.filter(r => r.verdict !== 'PASS'), []);
-  assert.equal(result.results.length, 15);
+  assert.equal(result.results.length, 16);
   assert.ok(result.ok);
-  assert.match(result.lines.at(-1), /^REF-V stage 2: rows=15 PASS=15 ALLOWED=0 FAIL=0 UNRUN=0$/);
+  assert.match(result.lines.at(-1), /^REF-V stage 2: rows=16 PASS=16 ALLOWED=0 FAIL=0 UNRUN=0$/);
 });
 
 test('one deliberate DOM change fails exactly that row', async t => {
@@ -84,4 +85,39 @@ test('a probe whose target the reference lacks fails instead of comparing two ab
   const page = targetPage(PKG);
   const result = await run(await serve(t, page), await serve(t, page), 'V-S13');
   assert.deepEqual(result.results, [{ id: 'V-S13', verdict: 'FAIL', aspects: ['reference-lacks-target'] }]);
+});
+
+test('the header-height tracker row compares the tracked height, not only classes and text', async t => {
+  const reference = await serve(t, targetPage(PKG));
+  const candidate = await serve(t, targetPage(PKG, { css: '.site-header{padding:40px 12px}' }));
+  const result = await run(reference, candidate, 'V-T03');
+  assert.equal(result.results[0].verdict, 'FAIL');
+});
+
+test('a target hidden on both sides fails as missing instead of comparing two empty sections', async t => {
+  const page = targetPage(PKG, { css: '.home-actions{display:none}' });
+  const result = await run(await serve(t, page), await serve(t, page), 'V-S10');
+  assert.deepEqual(result.results, [{ id: 'V-S10', verdict: 'FAIL', aspects: ['reference-lacks-target'] }]);
+});
+
+test('a difference seen only in the screenshot fails past the pixel threshold', async t => {
+  const reference = await serve(t, targetPage(PKG));
+  const candidate = await serve(t, targetPage(PKG, { css: '.button{background:#f57f29}' }));
+  const result = await run(reference, candidate, 'V-S10');
+  assert.equal(result.results[0].verdict, 'FAIL');
+  assert.ok(result.results[0].aspects.every(aspect => aspect.startsWith('screenshot@')), result.results[0].aspects.join());
+});
+
+test('an allowed difference never excuses a target the reference lacks', async t => {
+  const reference = await serve(t, targetPage(PKG, { header: false }));
+  const candidate = await serve(t, targetPage(PKG));
+  const result = await run(reference, candidate, 'V-S02');
+  assert.deepEqual(result.results, [{ id: 'V-S02', verdict: 'FAIL', aspects: ['reference-lacks-target'] }]);
+  // Even a declaration that excuses every aspect cannot excuse a missing target.
+  const doc = JSON.parse(await readFile(PROBES, 'utf8'));
+  doc.allowed_differences.AD5 = ['*'];
+  const loose = path.join(await mkdtemp(path.join(tmpdir(), 'parity-probes-')), 'probes.json');
+  await writeFile(loose, JSON.stringify(doc));
+  const excusedAll = await run(reference, candidate, 'V-S02', loose);
+  assert.deepEqual(excusedAll.results, [{ id: 'V-S02', verdict: 'FAIL', aspects: ['reference-lacks-target'] }]);
 });

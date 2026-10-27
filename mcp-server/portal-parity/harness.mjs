@@ -22,11 +22,16 @@ function differences(reference, candidate) {
   return [...keys].filter(key => reference.facts[key] !== candidate.facts[key]);
 }
 
-function verdictFor(probe, aspects) {
+const glob = pattern => new RegExp(`^${pattern.split('*').map(part => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`);
+
+// A declared allowed difference excuses only the aspects the probe file lists
+// for it. A missing target or an error is never an allowed difference.
+function verdictFor(probe, aspects, declared) {
   if (!aspects.length) return { verdict: 'PASS', aspects };
-  const lacking = aspects.some(aspect => aspect.startsWith('reference-'));
-  if (probe.allowed?.length && !lacking) return { verdict: 'ALLOWED', allowed: probe.allowed, aspects };
-  return { verdict: 'FAIL', aspects: [...new Set(aspects)] };
+  const excusable = (probe.allowed ?? []).flatMap(id => declared[id]).map(glob);
+  const unexcused = [...new Set(aspects)].filter(aspect => /-lacks-target$|-error$/.test(aspect) || !excusable.some(re => re.test(aspect)));
+  if (!unexcused.length) return { verdict: 'ALLOWED', allowed: probe.allowed, aspects };
+  return { verdict: 'FAIL', aspects: unexcused };
 }
 
 function cookieFor(base, pair) {
@@ -35,7 +40,9 @@ function cookieFor(base, pair) {
   return [{ name: pair.slice(0, at), value: pair.slice(at + 1), url: base }];
 }
 
-function summarize(results, stage) {
+// The design doc's pass rules: "A slice passes when FAIL = 0 on its own --rows
+// set"; a full run passes when every row is accounted for (no UNRUN) and FAIL = 0.
+function summarize(results, stage, { slice }) {
   const lines = results.map(r => [r.id, r.verdict, r.allowed?.join('+'), r.reason, r.aspects?.length && r.verdict !== 'PASS' ? r.aspects.join(',') : '']
     .filter(Boolean).join(' '));
   const summary = {};
@@ -48,7 +55,7 @@ function summarize(results, stage) {
   for (const [site, s] of Object.entries(summary)) {
     lines.push(`${site} stage ${stage}: rows=${s.rows} PASS=${s.PASS} ALLOWED=${s.ALLOWED} FAIL=${s.FAIL} UNRUN=${s.UNRUN}`);
   }
-  const ok = results.length > 0 && results.every(r => r.verdict === 'PASS' || r.verdict === 'ALLOWED');
+  const ok = results.length > 0 && !results.some(r => r.verdict === 'FAIL') && (slice || !results.some(r => r.verdict === 'UNRUN'));
   return { lines, summary, ok };
 }
 
@@ -92,8 +99,10 @@ async function stageTwo(doc, probes, options) {
     reference: { base: slash(options.reference), overrides: options.aliases },
     candidate: { base: slash(options.candidate), overrides: options.candidateAliases },
   };
+  // A side that refuses the password has no session: its session rows report
+  // UNRUN and its sign-in row shows the refusal, instead of aborting the run.
   for (const side of Object.values(sides)) {
-    side.cookie = options.password ? await signIn(side.base, options.password) : undefined;
+    side.cookie = options.password ? await signIn(side.base, options.password).catch(() => undefined) : undefined;
   }
   const baseline = options.baselineFile ? JSON.parse(await readFile(options.baselineFile, 'utf8')) : null;
   const browser = probes.some(p => BROWSER_KINDS.has(p.kind) && !p.retired) ? await launchParityBrowser({ headed: Boolean(options.headed) }) : null;
@@ -109,7 +118,7 @@ async function stageTwo(doc, probes, options) {
         const [reference, candidate] = await Promise.all(['reference', 'candidate'].map(side => (side === 'reference' && baseline?.[probe.id])
           ? baseline[probe.id] : observeHttp(sides[side].base, probe, aliasFor(side), { cookie: sides[side].cookie, password: options.password })));
         if (reference.unrun || candidate.unrun) { results.set(probe.id, { id: probe.id, verdict: 'UNRUN', reason: 'needs-session' }); continue; }
-        results.set(probe.id, { id: probe.id, ...verdictFor(probe, differences(reference, candidate)) });
+        results.set(probe.id, { id: probe.id, ...verdictFor(probe, differences(reference, candidate), doc.allowed_differences) });
         continue;
       }
       const [reference, candidate] = await Promise.all(['reference', 'candidate'].map(side => observeBrowserProbe(
@@ -125,7 +134,7 @@ async function stageTwo(doc, probes, options) {
           for (const [width, png] of Object.entries(observed.shots ?? {})) await writeFile(path.join(options.artifacts, `${probe.id}-${side}-${width}.png`), png);
         }
       }
-      results.set(probe.id, { id: probe.id, ...verdictFor(probe, aspects) });
+      results.set(probe.id, { id: probe.id, ...verdictFor(probe, aspects, doc.allowed_differences) });
     }
   } finally { await browser?.close(); }
   const pkg = options.packageFile ? JSON.parse(await readFile(options.packageFile, 'utf8')) : null;
@@ -153,7 +162,7 @@ export async function runParity(options) {
   else if (stage === 1) results = await stageOne(doc, probes, options);
   else if (stage === 2) results = await stageTwo(doc, probes, options);
   else throw new Error('--stage must be 0, 1 or 2');
-  const { lines, summary, ok } = summarize(results, stage);
+  const { lines, summary, ok } = summarize(results, stage, { slice: options.rows !== undefined });
   if (options.report) await writeFile(options.report, `${JSON.stringify({ stage, site: options.site ?? 'both', results, summary }, null, 1)}\n`);
   return { lines: [...prefix, ...lines], results, summary, ok: ok && extraOk };
 }

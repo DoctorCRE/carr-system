@@ -33,8 +33,14 @@ function checkProbe(probe, aliases) {
 export async function loadProbes(file) {
   const doc = JSON.parse(await readFile(file, 'utf8'));
   if (doc.schema !== 'carr.portal-parity-probes.v1') throw new Error('probe file schema must be carr.portal-parity-probes.v1');
+  for (const [id, aspects] of Object.entries(doc.allowed_differences ?? {})) {
+    if (!/^AD\d+$/.test(id) || !Array.isArray(aspects)) throw new Error(`allowed difference ${id} must list the aspects it may differ in`);
+  }
   const seen = new Set();
   for (const probe of doc.probes) {
+    for (const id of [...(probe.allowed ?? []), ...(probe.retired ? [probe.retired] : [])]) {
+      if (!doc.allowed_differences?.[id]) fail(probe.id, `allowed difference ${id} is not declared with its aspects`);
+    }
     if (seen.has(probe.id)) fail(probe.id, 'duplicate id');
     seen.add(probe.id);
     checkProbe(probe, doc.aliases);

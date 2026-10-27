@@ -94,7 +94,7 @@ test('Stage 1 passes rows whose fields the package maps and fails a row whose fi
 
 // A gated site in the shape of the reference gates: bare redirect, password
 // form, session cookie, and released files.
-async function gatedSite(files) {
+async function gatedSite(files, { signInStatus = 303, cookieAttributes = 'Path=/; Max-Age=604800; HttpOnly; Secure; SameSite=Lax' } = {}) {
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://x');
     if (url.pathname === '/portal') { response.writeHead(301, { Location: '/portal/' }).end(); return; }
@@ -102,7 +102,8 @@ async function gatedSite(files) {
     if (request.method === 'POST') {
       let body = ''; for await (const chunk of request) body += chunk;
       if (new URLSearchParams(body).get('password') !== 'example-health') { response.writeHead(401, { 'Content-Type': 'text/html' }).end('no'); return; }
-      response.writeHead(303, { Location: '/portal/', 'Set-Cookie': '__Host-portal-example-health=ok; Path=/; Max-Age=604800; HttpOnly; Secure; SameSite=Lax' }).end();
+      if (signInStatus !== 303) { response.writeHead(signInStatus).end(); return; }
+      response.writeHead(303, { Location: '/portal/', 'Set-Cookie': `__Host-portal-example-health=ok; ${cookieAttributes}` }).end();
       return;
     }
     if (request.headers.cookie !== '__Host-portal-example-health=ok') {
@@ -152,10 +153,52 @@ test('Stage 2 gate rows compare against the recorded baseline; retired and fault
   assert.match(same.lines.join('\n'), /^A-G01 ALLOWED AD8 retired$/m);
   const fault = await runParity({ stage: 2, site: 'REF-A', probesFile: PROBES, reference: base, candidate: base, rows: 'A-G15' });
   assert.deepEqual(fault.results, [{ id: 'A-G15', verdict: 'UNRUN', reason: 'fault:secrets-unconfigured' }]);
-  assert.equal(fault.ok, false);
   const dir = await mkdtemp(path.join(tmpdir(), 'parity-baseline-'));
   const baselineFile = path.join(dir, 'baseline.json');
   await writeFile(baselineFile, JSON.stringify({ 'A-G14': { facts: { 'r0.status': 410 } } }));
   const drift = await runParity({ stage: 2, site: 'REF-A', probesFile: PROBES, reference: base, candidate: base, baselineFile, rows: 'A-G14' });
   assert.equal(drift.results[0].verdict, 'FAIL');
+});
+
+test('an allowed difference excuses only the aspects it declares: a 500 sign-in fails AD2', async t => {
+  const reference = await gatedSite({ 'index.html': 'home' });
+  const broken = await gatedSite({ 'index.html': 'home' }, { signInStatus: 500 });
+  const renamed = await gatedSite({ 'index.html': 'home' }, { cookieAttributes: 'Path=/; Max-Age=600; HttpOnly; Secure; SameSite=Strict' });
+  t.after(() => { reference.server.close(); broken.server.close(); renamed.server.close(); });
+  const run = candidate => runParity({ stage: 2, site: 'REF-A', probesFile: PROBES, reference: reference.base, candidate,
+    password: 'example-health', rows: 'A-G04' });
+  const failed = await run(broken.base);
+  assert.equal(failed.results[0].verdict, 'FAIL');
+  assert.ok(failed.results[0].aspects.includes('r0.status'));
+  assert.match(failed.lines[0], /^A-G04 FAIL .*r0\.status/);
+  const cookieOnly = await run(renamed.base);
+  assert.deepEqual([cookieOnly.results[0].verdict, cookieOnly.results[0].allowed], ['ALLOWED', ['AD2']]);
+});
+
+// A two-row probe file, so the full-run rule can be shown without 456 rows.
+async function miniProbes() {
+  const doc = JSON.parse(await readFile(PROBES, 'utf8'));
+  doc.probes = doc.probes.filter(p => ['A-G14', 'A-G15'].includes(p.id));
+  const dir = await mkdtemp(path.join(tmpdir(), 'parity-mini-'));
+  await writeFile(path.join(dir, 'probes.json'), JSON.stringify(doc));
+  return path.join(dir, 'probes.json');
+}
+
+test('exit rule follows the doc: a --rows slice passes on FAIL = 0; a full run must account for every row', async t => {
+  const { server, base } = await gatedSite({ 'index.html': 'home' });
+  t.after(() => server.close());
+  const probesFile = await miniProbes();
+  const slice = await runParity({ stage: 2, probesFile, reference: base, candidate: base, rows: 'A-G14,A-G15' });
+  assert.deepEqual(slice.results.map(r => r.verdict), ['PASS', 'UNRUN']);
+  assert.equal(slice.ok, true, 'UNRUN rows are reported but do not fail a slice');
+  const full = await runParity({ stage: 2, probesFile, reference: base, candidate: base });
+  assert.deepEqual(full.results.map(r => r.verdict), ['PASS', 'UNRUN']);
+  assert.equal(full.ok, false, 'a full run counts an UNRUN row as not accounted for');
+});
+
+test('a replaced row whose feeds lie outside the slice is UNRUN and leaves the slice passing', async () => {
+  const run = await runParity({ stage: 2, probesFile: PROBES, reference: 'http://127.0.0.1:9/', candidate: 'http://127.0.0.1:9/',
+    packageFile: FIXTURE, rows: 'A-A01' });
+  assert.deepEqual(run.results, [{ id: 'A-A01', verdict: 'UNRUN', reason: 'feeds-not-in-run' }]);
+  assert.equal(run.ok, true);
 });

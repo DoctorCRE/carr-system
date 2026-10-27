@@ -19,6 +19,37 @@
   "roads-layer-match": "roads[^/]*\\.geojson$",
   "anchors-layer-match": "context-anchors[^/]*\\.geojson$"
  },
+ "allowed_differences": {
+  "AD1": [
+   "sha256",
+   "type",
+   "observed-*"
+  ],
+  "AD2": [
+   "r*.cookie"
+  ],
+  "AD3": [
+   "status",
+   "type",
+   "sha256"
+  ],
+  "AD4": [
+   "status",
+   "type",
+   "sha256"
+  ],
+  "AD5": [
+   "text",
+   "count",
+   "screenshot@*"
+  ],
+  "AD6": [],
+  "AD7": [
+   "r*.csp",
+   "r*.content-type"
+  ],
+  "AD8": []
+ },
  "probes": [
   {
    "id": "A-G01",
@@ -1148,8 +1179,18 @@
     }
    ],
    "observe": [
-    "html",
-    ".development-tile"
+    {
+     "selector": "html",
+     "text": false,
+     "style": [
+      "--scroll-progress",
+      "--landmark-shift"
+     ]
+    },
+    {
+     "selector": ".development-tile",
+     "text": false
+    }
    ],
    "motion": true
   },
@@ -1164,7 +1205,18 @@
     }
    ],
    "observe": [
-    "html"
+    {
+     "selector": "html",
+     "text": false,
+     "style": [
+      "--site-header-height"
+     ]
+    },
+    {
+     "selector": ".site-header",
+     "text": false,
+     "geometry": true
+    }
    ]
   },
   {
@@ -1305,7 +1357,20 @@
     }
    ],
    "observe": [
-    "#purchase-map .pin-stem"
+    {
+     "selector": "#purchase-map .pin-stem",
+     "text": false,
+     "style": [
+      "width",
+      "transform"
+     ],
+     "geometry": true
+    },
+    {
+     "selector": "#purchase-map .locator-pin",
+     "text": false,
+     "geometry": true
+    }
    ]
   },
   {
@@ -4558,8 +4623,18 @@
     }
    ],
    "observe": [
-    "html",
-    ".development-tile"
+    {
+     "selector": "html",
+     "text": false,
+     "style": [
+      "--scroll-progress",
+      "--landmark-shift"
+     ]
+    },
+    {
+     "selector": ".development-tile",
+     "text": false
+    }
    ],
    "motion": true
   },
@@ -4574,7 +4649,18 @@
     }
    ],
    "observe": [
-    "html"
+    {
+     "selector": "html",
+     "text": false,
+     "style": [
+      "--site-header-height"
+     ]
+    },
+    {
+     "selector": ".site-header",
+     "text": false,
+     "geometry": true
+    }
    ]
   },
   {
@@ -4687,7 +4773,20 @@
     }
    ],
    "observe": [
-    "#purchase-map .pin-stem"
+    {
+     "selector": "#purchase-map .pin-stem",
+     "text": false,
+     "style": [
+      "width",
+      "transform"
+     ],
+     "geometry": true
+    },
+    {
+     "selector": "#purchase-map .locator-pin",
+     "text": false,
+     "geometry": true
+    }
    ],
    "fields": [
     "/properties/*/locator/preferred_offset"
