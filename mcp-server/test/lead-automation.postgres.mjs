@@ -38,8 +38,33 @@ try {
   await tools['advance-leads'].handler(c,actor,{});
   equal((await c.query('select count(*)::int n from lead_contact_draft where lead_id=$1',[lead])).rows[0].n,1);
   equal((await tools['lead-approval-queue'].handler(c)).drafts.find(d=>d.id===draft.id).party_id,party);
-  await assert.rejects(()=>tools['approve-lead-draft'].handler(c,{...actor,human:false},{draft_id:draft.id}),/human_approval/);checks++;
-  equal((await tools['approve-lead-draft'].handler(c,actor,{draft_id:draft.id})).sent,false);
+  await assert.rejects(()=>tools['approve-lead-draft'].handler(c,{...actor,human:false},{draft_id:draft.id,revision:1}),/human_approval/);checks++;
+  equal(draft.revision,1);
+  // Approval names the revision the partner read; an edit invalidates it.
+  await assert.rejects(()=>tools['approve-lead-draft'].handler(c,actor,{draft_id:draft.id,revision:2}),/stale_draft_revision/);checks++;
+  await assert.rejects(()=>tools['edit-lead-draft'].handler(c,{...actor,human:false},{draft_id:draft.id,base_revision:1,body:'x'}),/human_approval/);checks++;
+  await assert.rejects(()=>tools['edit-lead-draft'].handler(c,actor,{draft_id:draft.id,base_revision:1}),/draft_unchanged/);checks++;
+  await assert.rejects(()=>tools['edit-lead-draft'].handler(c,actor,{draft_id:draft.id,base_revision:1,body:'  '}),/invalid_draft_content/);checks++;
+  const edited=await tools['edit-lead-draft'].handler(c,actor,{draft_id:draft.id,base_revision:1,body:'Synthetic edited body'});
+  equal([edited.revision,edited.body,edited.approved,edited.sent],[2,'Synthetic edited body',false,false]);
+  await assert.rejects(()=>tools['edit-lead-draft'].handler(c,actor,{draft_id:draft.id,base_revision:1,body:'Other'}),/stale_draft_revision/);checks++;
+  equal((await tools['approve-lead-draft'].handler(c,actor,{draft_id:draft.id,revision:2})).revision,2);
+  const reedited=await tools['edit-lead-draft'].handler(c,actor,{draft_id:draft.id,base_revision:2,subject:'Synthetic subject'});
+  equal([reedited.revision,reedited.subject],[3,'Synthetic subject']);
+  equal((await c.query('select approved_at,approved_by from lead_contact_draft where id=$1',[draft.id])).rows[0],{approved_at:null,approved_by:null});
+  // A batch approves exactly the displayed drafts at their displayed revisions, or none.
+  const siblingLead=randomUUID();
+  await c.query(`insert into lead(id,registry_ref,party_id,stage,event_confidence,est_lease_event,created_at,created_by,updated_by)
+    values($1,$2,$3,'qualified','high',current_date+90,now()-interval '7 days',$4,$4)`,[siblingLead,'L-SYNTH-'+randomUUID(),party,actor.id]);
+  const sibling=(await c.query(`insert into lead_contact_draft(lead_id,party_id,subject,body,scheduled_for,time_zone,created_by)
+    values($1,$2,'Synthetic sibling','Synthetic sibling body',now(),'America/Chicago',$3) returning id`,[siblingLead,party,actor.id])).rows[0];
+  await assert.rejects(()=>tools['approve-lead-drafts'].handler(c,actor,{drafts:[{draft_id:draft.id,revision:3},{draft_id:sibling.id,revision:2}]}),/stale_draft_batch/);checks++;
+  equal((await c.query('select count(*)::int n from lead_contact_draft where id=any($1) and approved_at is not null',[[draft.id,sibling.id]])).rows[0].n,0);
+  await assert.rejects(()=>tools['approve-lead-drafts'].handler(c,actor,{drafts:[{draft_id:draft.id,revision:3},{draft_id:draft.id,revision:3}]}),/duplicate_draft/);checks++;
+  const batch=await tools['approve-lead-drafts'].handler(c,actor,{drafts:[{draft_id:draft.id,revision:3},{draft_id:sibling.id,revision:1}]});
+  equal([batch.approved.map(d=>d.draft_id).sort(),batch.sent],[[draft.id,sibling.id].sort(),false]);
+  await c.query('delete from lead_contact_draft where id=$1',[sibling.id]);
+  Object.assign(draft,(await c.query('select * from lead_contact_draft where id=$1',[draft.id])).rows[0]);
   equal((await c.query('select stage from lead where id=$1',[lead])).rows[0].stage,'qualified');
   // The clock is fixed by this transaction. Make the already-approved synthetic
   // draft due, then capture its exact outgoing content. No provider is invoked.
