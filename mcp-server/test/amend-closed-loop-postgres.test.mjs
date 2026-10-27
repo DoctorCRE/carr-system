@@ -46,7 +46,7 @@ async function loadForUpdateRemovedMutant() {
   assert.equal(source.split(targetLock).length - 1, 1, "target-lock mutant anchor must occur once");
   const mutated = relinkMutant(source.replace(anchor, "`, [id]);")
     .replace(targetLock, 'const lock = "";'));
-  const path = join(mutantWork, `${Date.now()}-tools.mjs`);
+  const path = join(mutantWork, `${randomUUID()}-tools.mjs`);
   writeFileSync(path, mutated);
   return import(pathToFileURL(path).href);
 }
@@ -117,7 +117,7 @@ function holdVersionReadsUntilOverlap(admin, clientA, clientB) {
       return original(text, params).then(async (result) => {
         state.reads[name] = result.rows[0]?.version;
         returned[name] = true;
-        const deadline = Date.now() + TIMEOUT_MS;
+        const deadline = performance.now() + TIMEOUT_MS;
         for (;;) {
           if (returned[otherName]) { state.bothReadObserved = true; return result; }
           const waiting = await admin.query(
@@ -128,7 +128,7 @@ function holdVersionReadsUntilOverlap(admin, clientA, clientB) {
                 and $2::int = any(pg_blocking_pids(pid))`,
             [other.processID, client.processID]);
           if (waiting.rows.length) { state.lockWaitObserved = true; return result; }
-          if (Date.now() > deadline)
+          if (performance.now() > deadline)
             throw new Error(`session ${name} read version ${state.reads[name]} and session ${otherName} ` +
               `neither read nor blocked on the row lock within ${TIMEOUT_MS}ms`);
           await new Promise((resolve) => setTimeout(resolve, 2));

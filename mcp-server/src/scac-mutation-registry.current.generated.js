@@ -648,6 +648,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": true,
     "delegates_to": []
   },
+  "complete-work-request": {
+    "ingress_key": "mcp-tool:complete-work-request",
+    "source_locator": "mcp-server/src/work-request-intake.js",
+    "schema_digest": "ba6119c8b5476f08d8d5e20df152395f3c89b81732ce898cc783b4f7adc933b0",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "confirm-email-deal-progress": {
     "ingress_key": "mcp-tool:confirm-email-deal-progress",
     "source_locator": "mcp-server/src/email-deal-progress.ts",
@@ -1284,7 +1294,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "list-email-proposals": {
     "ingress_key": "mcp-tool:list-email-proposals",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "59d38926efd041da521815c82385ad3adb0ba41b1e6296cbd419d37f14520190",
+    "schema_digest": "8ee52b5fd73e1b7f997d9e0529923031e7693148c427730d614f1908163bd00f",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -1374,7 +1384,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "log-activity": {
     "ingress_key": "mcp-tool:log-activity",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "f4631b7df0c325de5d0fd0f2f75f2e21265dcedf91c718a789363e38ff920e33",
+    "schema_digest": "76b94ef2b15a64a695edc87bc655ab997fbe851eb60b9101fe51421ea4aa4975",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -1584,6 +1594,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
     "schema_digest": "f59bcb06c9d95f7fc1c4a8f911fff15ede2d109147ae3548ad89e84ca1a769a7",
     "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "outbox-for-sender": {
+    "ingress_key": "mcp-tool:outbox-for-sender",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
     "human_only": false,
     "human_caller_only": false,
     "authority_only": false,
@@ -2365,7 +2385,17 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-email-proposal": {
     "ingress_key": "mcp-tool:record-email-proposal",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "d053ef06d1b93756dca0e7680244994bb447b94583e2e68f392919eb90ec3944",
+    "schema_digest": "ccd9d376c7932ff3f820ef288c7b93ceb4f6993933224cda4541c86d4af28c3b",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "record-email-sent": {
+    "ingress_key": "mcp-tool:record-email-sent",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "493d000661838396e6f053f7b7e13e24d1adb4a5e3157cfb9e07dedbb6487c46",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -3116,6 +3146,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": false,
     "human_only": false,
     "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "submit-email-draft": {
+    "ingress_key": "mcp-tool:submit-email-draft",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "26ae09ec7ce0a1d98425fc1ed901bec8ab69f262cd76fdf0055372f06e707c92",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },

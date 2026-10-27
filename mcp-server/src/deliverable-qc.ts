@@ -1,3 +1,5 @@
+// Render proof is external JSON; every field used for a decision is checked below.
+type RenderProof = Record<string, any>;
 /** Pure inspection. A clean result means only that no configured blocker was
  * found; it is intentionally not an approval, publication, or dismissal. */
 
@@ -5,10 +7,12 @@ export const DELIVERABLE_QC_VERSION = "1.1.0";
 export const DELIVERABLE_QC_RULESET_VERSION = "1.2.0";
 
 export class DeliverableQcError extends Error {
-  constructor(code, details = {}) { super(code); this.name = "DeliverableQcError"; this.code = code; this.details = details; }
+  declare code: string;
+  declare details: Record<string, unknown>;
+  constructor(code: string, details: Record<string, unknown> = {}) { super(code); this.name = "DeliverableQcError"; this.code = code; this.details = details; }
 }
 
-function finding(ruleId, category, message, details = {}) {
+function finding(ruleId: string, category: string, message: string, details: Record<string, unknown> = {}) {
   return Object.freeze({ findingVersion: DELIVERABLE_QC_VERSION, ruleId, category, severity: "block", message, details: Object.freeze(details) });
 }
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
@@ -18,14 +22,14 @@ const PUBLIC_PROPERTY_REF = /^property:public:[A-Za-z0-9_-]{16,128}$/;
  * Inspect machine-observed PDF/render proof. This verifies evidence supplied by
  * a renderer/probe; it does not render, approve, publish, or dismiss findings.
  */
-export function inspectTourPdfProof(input) {
+export function inspectTourPdfProof(input: RenderProof) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new DeliverableQcError("deliverable_qc_invalid_input", { field: "input" });
   const expected = input.expected && typeof input.expected === "object" && !Array.isArray(input.expected) ? input.expected : {};
   const observed = input.observed && typeof input.observed === "object" && !Array.isArray(input.observed) ? input.observed : {};
   const findings = [];
-  const expectedRefs = Array.isArray(expected.property_refs) ? expected.property_refs : [];
-  const expectedMarkers = Array.isArray(expected.markers) ? expected.markers : [];
-  const pages = Array.isArray(observed.pages) ? observed.pages : [];
+  const expectedRefs: string[] = Array.isArray(expected.property_refs) ? expected.property_refs : [];
+  const expectedMarkers: string[] = Array.isArray(expected.markers) ? expected.markers : [];
+  const pages: RenderProof[] = Array.isArray(observed.pages) ? observed.pages : [];
   const expectedPageCount = expected.page_count;
 
   if (!Number.isInteger(expectedPageCount) || expectedPageCount < 1 || expectedPageCount !== expectedRefs.length || expectedPageCount !== expectedMarkers.length || observed.page_count !== expectedPageCount || pages.length !== expectedPageCount)
@@ -50,18 +54,18 @@ export function inspectTourPdfProof(input) {
   if (!SHA256.test(observed.artifact_digest || "") || observed.r2_readback_digest !== observed.artifact_digest)
     findings.push(finding("QC-PDF-READBACK-001", "artifact_integrity", "R2 readback digest does not match the rendered PDF artifact digest."));
 
-  const expectedFonts = Array.isArray(expected.font_digests) ? expected.font_digests : [];
-  const fonts = Array.isArray(observed.fonts) ? observed.fonts : [];
+  const expectedFonts: string[] = Array.isArray(expected.font_digests) ? expected.font_digests : [];
+  const fonts: RenderProof[] = Array.isArray(observed.fonts) ? observed.fonts : [];
   const observedFontDigests = fonts.map(font => font?.digest);
   if (!expectedFonts.length || fonts.length !== expectedFonts.length || fonts.some(font => font?.embedded !== true || !SHA256.test(font?.digest || "")) || observedFontDigests.some((value, index) => value !== expectedFonts[index]))
     findings.push(finding("QC-PDF-FONT-001", "font", "Every expected font must be embedded with an exact pinned digest.", { expected: expectedFonts, observed: observedFontDigests }));
 
-  const expectedAssets = Array.isArray(expected.asset_digests) ? expected.asset_digests : [];
-  const observedAssets = Array.isArray(observed.asset_digests) ? observed.asset_digests : [];
+  const expectedAssets: string[] = Array.isArray(expected.asset_digests) ? expected.asset_digests : [];
+  const observedAssets: string[] = Array.isArray(observed.asset_digests) ? observed.asset_digests : [];
   if (expectedAssets.length !== observedAssets.length || expectedAssets.some((value, index) => !SHA256.test(value) || observedAssets[index] !== value))
     findings.push(finding("QC-PDF-ASSET-001", "asset_parity", "Rendered PDF assets do not exactly match the expected ordered digest set.", { expected: expectedAssets, observed: observedAssets }));
 
-  const links = Array.isArray(observed.link_checks) ? observed.link_checks : [];
+  const links: RenderProof[] = Array.isArray(observed.link_checks) ? observed.link_checks : [];
   if (links.some(link => !link || typeof link.url !== "string" || !link.url.startsWith("https://") || !Number.isInteger(link.status) || link.status < 200 || link.status >= 400))
     findings.push(finding("QC-PDF-LINK-001", "link", "PDF contains a non-HTTPS or failed link check."));
 

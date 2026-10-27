@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Offline contracts for the local production ledger proof."""
 import importlib.util
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 import io
+from functools import partial
 import hashlib
 import shutil
 import tempfile
 import os
+import runpy
 from pathlib import Path
 import subprocess
 import sys
@@ -44,7 +46,58 @@ def repository_ledger():
     return proof.repository_ledger(ROOT, proof.MigrationBaseline.load(ROOT))
 
 
+def snapshot_ledger():
+    parse = proof.runpy.run_path(str(ROOT / 'ops/migration-safety-gate.py'))['ledger_rows']
+    return parse((ROOT / 'db/schema.sql').read_text())
+
+
+@contextmanager
+def snapshot_repository():
+    applied = snapshot_ledger()
+    baseline = dict(proof.MigrationBaseline.load(ROOT).migrations)
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory)
+        (repo / 'db').mkdir()
+        (repo / 'db/migration-baseline.json').write_bytes((ROOT / 'db/migration-baseline.json').read_bytes())
+        (repo / 'tools').mkdir()
+        for name in ('migrate.py', 'migration_baseline.py', 'migration_number_contract.py'):
+            shutil.copyfile(ROOT / 'tools' / name, repo / 'tools' / name)
+        (repo / 'migrations').mkdir()
+        for migration in (ROOT / 'migrations').glob('*.sql'):
+            if migration.name not in baseline and migration.name in applied:
+                shutil.copyfile(migration, repo / 'migrations' / migration.name)
+        with patch.object(proof, 'repository_ledger', return_value=applied), \
+             patch.object(proof, 'build_schema', side_effect=partial(proof.build_schema, repo=repo)):
+            yield repo
+
+
 class ProofTests(unittest.TestCase):
+    def setUp(self):
+        if self._testMethodName not in {
+            'test_committed_snapshot_schema_only_round_trip_with_zero_pending',
+            'test_compacted_runner_is_read_only_and_preserves_original_ledger_timestamps',
+            'test_live_proof_accepts_production_owner_with_zero_pending',
+            'test_live_proof_rejects_explicit_select_drift',
+        }:
+            return
+        parse_snapshot = runpy.run_path(str(ROOT / 'ops/migration-safety-gate.py'))['ledger_rows']
+        ledger = parse_snapshot((ROOT / 'db/schema.sql').read_text())
+        directory = tempfile.TemporaryDirectory(prefix='snapshot-proof-repository-')
+        self.addCleanup(directory.cleanup)
+        repo = Path(directory.name)
+        for folder in ('tools', 'db', 'migrations'):
+            (repo / folder).mkdir()
+        for name in ('migrate.py', 'migration_baseline.py', 'migration_number_contract.py'):
+            shutil.copyfile(ROOT / 'tools' / name, repo / 'tools' / name)
+        shutil.copyfile(ROOT / 'db/migration-baseline.json', repo / 'db/migration-baseline.json')
+        baseline = dict(proof.MigrationBaseline.load(ROOT).migrations)
+        for name in ledger.keys() - baseline.keys():
+            shutil.copyfile(ROOT / 'migrations' / name, repo / 'migrations' / name)
+        build_schema = proof.build_schema
+        self.enterContext(patch.object(proof, 'repository_ledger', return_value=ledger))
+        self.enterContext(patch.object(proof, 'build_schema',
+            side_effect=lambda *args, **kwargs: build_schema(*args, **dict({'repo': repo}, **kwargs))))
+
     def test_baseline_requires_every_original_row_before_pending_suffix(self):
         baseline = proof.MigrationBaseline.load(ROOT)
         covered = dict(baseline.migrations)
@@ -92,7 +145,7 @@ class ProofTests(unittest.TestCase):
 
     def test_snapshot_drift_refuses(self):
         read_text = Path.read_text
-        applied = repository_ledger()
+        applied = snapshot_ledger()
         snapshot = (ROOT / 'db/schema.sql').read_text()
         filename = next(iter(applied))
         row = next(line for line in snapshot.splitlines() if line.startswith(filename + '\t'))
@@ -103,6 +156,7 @@ class ProofTests(unittest.TestCase):
         ]:
             with self.subTest(kind=kind), \
                  patch.object(proof, 'production_dsn') as credentials, \
+                 patch.object(proof, 'repository_ledger', return_value=applied), \
                  patch.object(Path, 'read_text', autospec=True,
                               side_effect=lambda path, *args, **kwargs: drifted
                               if path == ROOT / 'db/schema.sql' else read_text(path, *args, **kwargs)):
@@ -112,11 +166,12 @@ class ProofTests(unittest.TestCase):
 
 
     def test_reconstruction_failure_reports_post_pending_grants_not_run(self):
-        repository = repository_ledger()
+        repository = snapshot_ledger()
         for failure in ([RuntimeError('reference failed')],
                         [dict(grants={}, ledger={}, dump=''), RuntimeError('replay failed')]):
             with self.subTest(failure=failure), \
                  patch.object(proof, 'production_dsn', return_value='fixture'), \
+                 patch.object(proof, 'repository_ledger', return_value=repository), \
                  patch.object(proof, 'read_source', return_value=(repository, '', {})), \
                  patch.object(proof.comparison, 'find_pg18', return_value=Path('/bin')), \
                  patch.object(proof, 'build_schema', side_effect=failure):
@@ -236,13 +291,13 @@ class ProofTests(unittest.TestCase):
         def capture_source(dsn, bins):
             sources.append(read_source(dsn, bins, include_acl=True))
             return read_source(dsn, bins)
-        with patch.object(proof, 'read_source', side_effect=capture_source):
+        with snapshot_repository(), patch.object(proof, 'read_source', side_effect=capture_source):
             reference = proof.build_schema(ROOT / 'db/schema.sql', bins)
-        self.assertEqual(len(reference['ledger']), len(repository_ledger()))
+        self.assertEqual(reference['ledger'], snapshot_ledger())
         self.assertEqual(proof.ledger_proof(
-            repository_ledger(),
+            snapshot_ledger(),
             reference['ledger'])['pending'], [])
-        with tempfile.TemporaryDirectory() as directory:
+        with snapshot_repository(), tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / 'schema.sql'
             source.write_text(sources[0][1], newline='')
             rebuilt = proof.build_schema(source, bins,
@@ -263,15 +318,7 @@ class ProofTests(unittest.TestCase):
                 with psycopg.connect(dsn) as conn:
                     return conn.execute('select filename, sha256, applied_at from schema_migrations order by filename').fetchall()
             before = ledger()
-            with tempfile.TemporaryDirectory() as directory:
-                repo = Path(directory)
-                (repo / 'db').mkdir()
-                (repo / 'db/migration-baseline.json').write_bytes((ROOT / 'db/migration-baseline.json').read_bytes())
-                (repo / 'migrations').mkdir()
-                baseline = dict(proof.MigrationBaseline.load(ROOT).migrations)
-                for migration in (ROOT / 'migrations').glob('*.sql'):
-                    if migration.name not in baseline:
-                        shutil.copyfile(migration, repo / 'migrations' / migration.name)
+            with snapshot_repository() as repo:
                 program = ("import sys; from pathlib import Path; "
                            "sys.path.insert(0, sys.argv[1]); import migrate; "
                            "migrate.MIGRATIONS_DIR=Path(sys.argv[2])/'migrations'; "
@@ -286,7 +333,7 @@ class ProofTests(unittest.TestCase):
 
         with patch.object(proof, 'read_source', side_effect=check_no_op):
             proof.build_schema(ROOT / 'db/schema.sql', bins)
-        self.assertEqual(observed, [len(repository_ledger())])
+        self.assertEqual(observed, [len(snapshot_ledger())])
 
     @unittest.skipUnless(POSTGRES, 'database fixture runs in the migration lane')
     def test_live_proof_accepts_production_owner_with_zero_pending(self):
@@ -312,11 +359,12 @@ class ProofTests(unittest.TestCase):
         def production_source(dsn, bins, include_acl=False):
             return captured[0] if dsn == 'captured-production' else read_source(dsn, bins, include_acl)
 
-        with patch.object(proof, 'production_dsn', return_value='captured-production'), \
+        with snapshot_repository(), \
+             patch.object(proof, 'production_dsn', return_value='captured-production'), \
              patch.object(proof, 'read_source', side_effect=production_source):
             result = proof.live_proof(ledger_only=False)
         self.assertTrue(result['ledger']['ok'], result['ledger'])
-        self.assertEqual(result['ledger']['applied'], len(repository_ledger()))
+        self.assertEqual(result['ledger']['applied'], len(snapshot_ledger()))
         self.assertEqual(result['ledger']['pending'], [])
         self.assertTrue(result['equivalence']['ok'], result['equivalence'])
         self.assertTrue(result['grants']['ok'], result['grants'])
@@ -344,7 +392,8 @@ class ProofTests(unittest.TestCase):
         def production_source(dsn, bins, include_acl=False):
             return captured[0] if dsn == 'captured-production' else read_source(dsn, bins, include_acl)
 
-        with patch.object(proof, 'production_dsn', return_value='captured-production'), \
+        with snapshot_repository(), \
+             patch.object(proof, 'production_dsn', return_value='captured-production'), \
              patch.object(proof, 'read_source', side_effect=production_source):
             result = proof.live_proof(ledger_only=False)
         self.assertTrue(result['ledger']['ok'], result['ledger'])

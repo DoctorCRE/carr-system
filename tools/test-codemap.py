@@ -227,6 +227,7 @@ class CodemapTests(unittest.TestCase):
         checker = self.repo / "ops/ci.sh"
         shutil.copyfile(ROOT / "ops/ci.sh", checker)
         checker.chmod(0o755)
+        shutil.copyfile(ROOT / "ops/ci-gates.py", self.repo / "ops/ci-gates.py")
         shutil.copyfile(ROOT / "ops/ci-secret-scan.py", self.repo / "ops/ci-secret-scan.py")
         (self.repo / "hooks/gate-integrity.py").write_text("raise SystemExit(0)\n")
         self.baseline()

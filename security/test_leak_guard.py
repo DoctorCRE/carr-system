@@ -190,6 +190,44 @@ class LeakGuardTest(unittest.TestCase):
         result = push()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_sha256_worktree_push_to_claude_and_job_branches(self):
+        repo = self.root.with_name(self.root.name + '-sha256')
+        receiver = self.root.with_name(self.root.name + '-sha256-remote.git')
+        subprocess.run(['git', 'init', '-q', '--object-format=sha256', str(repo)], check=True)
+        subprocess.run(['git', 'init', '-q', '--bare', '--object-format=sha256', str(receiver)], check=True)
+        (repo / 'sample.txt').write_text('safe\n')
+        subprocess.run(['git', '-C', str(repo), 'add', 'sample.txt'], check=True)
+        subprocess.run(['git', '-C', str(repo), '-c', 'core.hooksPath=/dev/null',
+                        '-c', 'user.name=Synthetic', '-c',
+                        'user.email=synthetic@example.invalid', 'commit', '-qm', 'base'], check=True)
+        for namespace in ('claude', 'job'):
+            branch = namespace + '/push-check'
+            subprocess.run(['git', '-C', str(repo), 'push', '-q', str(receiver),
+                            'HEAD:refs/heads/' + branch], check=True)
+        for namespace in ('claude', 'job'):
+            branch = namespace + '/push-check'
+            worktree = repo.with_name(repo.name + '-' + namespace)
+            subprocess.run(['git', '-C', str(repo), 'worktree', 'add', '-qb', branch,
+                            str(worktree)], check=True)
+            (worktree / 'sample.txt').write_text('clean change\n')
+            subprocess.run(['git', '-C', str(worktree), 'add', 'sample.txt'], check=True)
+            subprocess.run(['git', '-C', str(worktree), '-c', 'core.hooksPath=/dev/null',
+                            '-c', 'user.name=Synthetic', '-c',
+                            'user.email=synthetic@example.invalid', 'commit', '-qm', 'clean'], check=True)
+        hooks = repo / '.git' / 'fixture-hooks'
+        hooks.mkdir()
+        hook = hooks / 'pre-push'
+        hook.write_text('#!/bin/sh\nroot="$(git rev-parse --show-toplevel)"\nexec python3 "' + str(SCRIPT) +
+                        '" --root "$root" --pre-push --generic-only --remote "$2"\n')
+        hook.chmod(0o700)
+        subprocess.run(['git', '-C', str(repo), 'config', 'core.hooksPath', str(hooks)], check=True)
+        for namespace in ('claude', 'job'):
+            branch = namespace + '/push-check'
+            worktree = repo.with_name(repo.name + '-' + namespace)
+            push = subprocess.run(['git', '-C', str(worktree), 'push', str(receiver),
+                                   'HEAD:refs/heads/' + branch], env=self.env, capture_output=True, text=True)
+            self.assertEqual(push.returncode, 0, push.stdout + push.stderr)
+
     def test_malformed_push_ref_names_the_bad_line(self):
         bad = 'refs/heads/feature not-an-object refs/heads/feature ' + '0' * 40
         result = subprocess.run(['python3', str(SCRIPT), '--root', str(self.root),

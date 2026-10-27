@@ -87,11 +87,11 @@ import { neon, Pool } from "@neondatabase/serverless";
 import { mcpApiHandler, dispatch } from "./mcp.js";
 import { handleAuthorize, handleCallback, handleConsent } from "./google-oidc.js";
 export { OAuthConsentState } from "./oauth-consent-state.js";
-import { sharedOAuthFetch, mcpOriginRefusal, isSharedOAuthPath } from "./oauth-policy.js";
+import { sharedOAuthFetch, mcpOriginRefusal, isSharedOAuthPath } from "./oauth-policy.ts";
 import { agentActorForToken, authenticatedIdentity, continuityActorForTokenMaps,
          serveReviewRequest, unattendedActorForToken,
          hermesActorForTokenMaps, hermesCosActorForToken } from "./identity.js";
-import { pipelineChanges } from "./dealroom.js";
+import { pipelineChanges } from "./dealroom.ts";
 import { authorizeProgram6Action, createDealroomHandler, isDealroomRequest, isLegacyDealroomRequest } from "./dealroom-web.js";
 import { createProgram6RoutineController } from "./program6-routine-controller.js";
 import { appendRoomTurn, DEFAULT_ROOM, OBSERVATORY_ROOM, readRoomLatest, readRoomQueue, readRoomTurns } from "./partner-room.js";
