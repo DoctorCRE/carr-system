@@ -67,6 +67,7 @@ one is not, and it is named.
 """
 import os
 import re
+import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -92,17 +93,20 @@ EXEMPT = {
 
 
 def sources():
-    for rel_dir, prefixes in (("ops", ("-selftest.py",)), ("tools", ("test-",))):
-        d = os.path.join(ROOT, rel_dir)
-        if not os.path.isdir(d):
-            continue
-        for name in sorted(os.listdir(d)):
-            if not name.endswith(".py"):
-                continue
-            hit = (any(name.endswith(p) for p in prefixes if p.startswith("-"))
-                   or any(name.startswith(p) for p in prefixes if not p.startswith("-")))
-            if hit:
-                yield os.path.join(rel_dir, name), os.path.join(d, name)
+    """The executed gate inventory: exactly what ops/ci.sh hands the gates class.
+
+    This used to be its own ops/*-selftest.py + tools/test-*.py walk, which
+    missed tools/test_*.py, tools/*-selftest.py, room-bridge and doc-drift
+    suites that CI runs (WR-000545). Asking ci.sh removes the second list.
+    """
+    listed = subprocess.run(["bash", os.path.join(ROOT, "ops", "ci.sh"), "--gate-programs"],
+                            cwd=ROOT, capture_output=True, text=True, timeout=60)
+    if listed.returncode != 0 or not listed.stdout.strip():
+        raise SystemExit("FAIL  selftest-git-isolation: ops/ci.sh --gate-programs returned "
+                         f"no inventory (exit {listed.returncode})")
+    for rel in listed.stdout.split():
+        if rel.endswith(".py"):
+            yield rel, os.path.join(ROOT, rel)
 
 
 def main():

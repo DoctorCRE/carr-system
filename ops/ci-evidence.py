@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Build and verify CI evidence, including per-program execution records."""
 # doctrine: engineering-workflow-sop
 from __future__ import annotations
 
@@ -144,15 +145,48 @@ def resolve(github, sha, tree, contract, groups):
     return {'reused': False}
 
 
-def git(value):
-    return subprocess.check_output(['git', 'rev-parse', value], cwd=ROOT, text=True).strip()
+def program_records(rows, output, *, environ=os.environ, root=ROOT):
+    """Bind ci.sh's per-program rows to the tested source (WR-000542).
+
+    Rows are class, name, exit, start, end. Every attempt keeps its own rows in
+    execution order, so a retried program still shows its first failure. A
+    record already at `output` for the same run, attempt, job and source is
+    extended (local-pg-ci adds its acceptance programs after ci.sh exits).
+    """
+    programs = []
+    for line in (rows.read_text().splitlines() if rows.is_file() else []):
+        klass, name, code, start, end = line.split('\t')
+        elapsed = float(end.replace(',', '.')) - float(start.replace(',', '.'))
+        programs.append({'class': klass, 'program': name, 'exit': int(code),
+                         'elapsed_s': round(elapsed, 3)})
+    number = lambda key: int(environ[key]) if environ.get(key, '').isdigit() else None
+    header = {'schema': 'carr-ci-programs/v1', 'run_id': number('GITHUB_RUN_ID'),
+              'run_attempt': number('GITHUB_RUN_ATTEMPT'), 'job': environ.get('GITHUB_JOB'),
+              'tested_sha': git('HEAD', root), 'tree_sha': git('HEAD^{tree}', root),
+              'contract': contract_digest(root)}
+    if output.is_file():
+        previous = json.loads(output.read_text())
+        if {k: previous.get(k) for k in header} == header:
+            programs = previous['programs'] + programs
+    output.write_text(json.dumps({**header, 'programs': programs}, indent=2) + '\n')
+    return header | {'programs': programs}
+
+
+def git(value, root=ROOT):
+    return subprocess.check_output(['git', 'rev-parse', value], cwd=root, text=True).strip()
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['record', 'resolve', 'verdict', 'drift-verdict'])
+    parser.add_argument('action', choices=['record', 'resolve', 'verdict', 'drift-verdict', 'programs'])
     parser.add_argument('--output')
+    parser.add_argument('--rows', type=Path)
     args = parser.parse_args()
+    if args.action == 'programs':
+        if not (args.output and args.rows):
+            parser.error('programs needs --rows and --output')
+        program_records(args.rows, Path(args.output))
+        return 0
     if args.action in ('verdict', 'drift-verdict'):
         try:
             return hosted_verdict(drift=args.action == 'drift-verdict')
