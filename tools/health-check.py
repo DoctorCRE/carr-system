@@ -112,8 +112,8 @@ def _reader_args(argv):
         # A parent shell may carry this old ambient variable.  Normal health must
         # not pass it to any child or let a child silently choose a Drive reader.
         os.environ.pop("CARR_VAULT", None)
-    if section not in ("all", "exports", "jobs", "registry", "credentials", "grok-session", "tailscale", "headless", "costs", "uptime"):
-        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|grok-session|tailscale|headless|costs|uptime")
+    if section not in ("all", "exports", "jobs", "registry", "credentials", "tailscale", "headless", "costs", "uptime"):
+        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|tailscale|headless|costs|uptime")
     if fixture and recovery:
         raise SystemExit("health-check: --fixture is for hermetic canonical tests only")
     # --act executes every red row's bound action (tools/health_breach.py). It
@@ -155,22 +155,6 @@ def _cloudflare_rows():
 
 
 
-
-
-def _grok_session_row():
-    try:
-        sys.path.insert(0, os.path.join(REPO_ROOT, "ops"))
-        from grok_session import health_row
-        line = health_row()
-        # Joe 2026-10-26: a signed-out Grok is not a failure; switch to a comparable model.
-        # Only a refused sign-in downgrades to WARN. A broken check or incident write stays red.
-        if line.startswith("FAIL Grok session") and "authentication refused" in line and "FAILED" not in line:
-            return "WARN" + line[len("FAIL"):], 0
-        return line, int(line.startswith("FAIL") or "FAILED" in line)
-    except Exception as exc:
-        return (f"UNAVAILABLE Grok session — {type(exc).__name__} · on breach: "
-                "owner orchestrator · remediation restore the Grok reader/lock storage · "
-                "verify rerun health · auto-clear on successful read", 1)
 
 
 if CANONICAL_SECTION == "costs":
@@ -1122,7 +1106,7 @@ def _canonical_health():
             rc = _red('system_costs', _cost_line, hard_error=_cost_snapshot['state'] == 'unavailable'
                       and 'system_costs' not in PROVISIONING_PENDING)
     try:
-        snap = {} if CANONICAL_SECTION in ("grok-session", "uptime") else _canonical_snapshot()
+        snap = {} if CANONICAL_SECTION == "uptime" else _canonical_snapshot()
     except Exception as exc:
         print(f"canonical health: REFUSED ({type(exc).__name__}: {exc})")
         _red("canonical_health_refused", f"{type(exc).__name__}: {exc}", hard_error=True)
@@ -1419,13 +1403,6 @@ def _canonical_health():
                   f" · {len(_loose['managed_artifacts'])} managed artifact(s)")
             if _needs_attention:
                 rc = _red("repo_loose_work", f"{len(_actionable)} actionable path(s)", count=len(_actionable))
-
-    if CANONICAL_SECTION in ("all", "credentials", "grok-session"):
-        _grok_line, _grok_rc = _grok_session_row()
-        print("  " + _grok_line)
-        if _grok_rc:
-            rc = _red("grok_session", _grok_line,
-                      hard_error=_grok_line.startswith("UNAVAILABLE"), time_rolling=True)
 
     if CANONICAL_SECTION in ("all", "credentials"):
         _GREEN_EVIDENCE["cloudflare_token"] = set()
