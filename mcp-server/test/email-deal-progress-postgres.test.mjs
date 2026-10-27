@@ -1367,3 +1367,18 @@ test('outbox orders frozen submissions oldest first and router retries never ove
   assert.equal(outbox[1].body, 'First drafted, second submitted.');
   assert.equal(outbox[1].sha256, submitted.sha256);
 });
+
+
+test('each partner router queues only its captured mailbox provenance', async () => {
+  const sources = {};
+  for (const owner of ['joe', 'dell']) {
+    sources[owner] = (await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+      kind: 'email_in', summary: 'Email from Synthetic Sender: Shared message', detail: quote,
+      email_source: { mailbox_owner: owner, sender_email: 'sender@example.test' } }, machineFor(owner))).activity_id;
+  }
+  for (const owner of ['joe', 'dell']) {
+    const queue = await command('email-router-queue', { limit: 200 }, machineFor(owner), 'carr_reader');
+    const captured = queue.emails.filter(item => Object.values(sources).includes(item.activity_id));
+    assert.deepEqual(captured.map(item => [item.activity_id, item.mailbox_owner]), [[sources[owner], owner]]);
+  }
+});
