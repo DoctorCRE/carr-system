@@ -1,3 +1,4 @@
+// Define practice verticals and calculate space plans and checklists.
 import { z } from 'zod';
 import { allowanceSource, envelope, rangeSchema, numberType, evidenceClass, publicSource } from './evidence.mjs';
 

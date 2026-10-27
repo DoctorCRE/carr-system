@@ -1,3 +1,4 @@
+// Test rule lookup and replacement safeguards, including PostgreSQL behavior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';

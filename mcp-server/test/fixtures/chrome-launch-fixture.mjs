@@ -1,3 +1,4 @@
+// Simulate Chrome startup, DevTools responses, and shutdown scenarios.
 import { createServer } from "node:http";
 import { writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";

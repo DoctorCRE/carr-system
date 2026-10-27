@@ -1,3 +1,4 @@
+// Tests complete-set review migration authority and round limits.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 

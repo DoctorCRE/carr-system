@@ -1,3 +1,4 @@
+// Test the bundled MCP worker in a local workerd runtime.
 import test from 'node:test';
 import { PUBLIC_TOOLS } from '../src/modern.mjs';
 import assert from 'node:assert/strict';

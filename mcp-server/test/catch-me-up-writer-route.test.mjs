@@ -1,3 +1,4 @@
+// Tests catch-up timeline verbs on the writer route.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';

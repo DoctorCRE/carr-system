@@ -1,3 +1,4 @@
+// Tests uptime incident identity, replay, and concurrent loop creation.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TOOLS } from '../src/tools.js';

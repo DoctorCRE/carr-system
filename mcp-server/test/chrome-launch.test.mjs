@@ -1,3 +1,4 @@
+// Tests disposable Chrome launch and cleanup helpers.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, execFile, execFileSync } from "node:child_process";

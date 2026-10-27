@@ -1,3 +1,4 @@
+// Tests work inventory census reads, coverage, pagination, and authorization.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

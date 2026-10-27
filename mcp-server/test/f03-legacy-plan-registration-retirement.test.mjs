@@ -1,3 +1,4 @@
+// Test retirement of legacy plan registration while preserving reads.
 import { readMigration } from "./migration-source.testhelper.mjs";
 // V5-F03: new engineering-slice-plan.v1 registrations are retired at the
 // registration doors only (migration 0616 and the register-engineering-slice-plan

@@ -1,3 +1,4 @@
+// Tests selection and cleanup of disposable Chromium binaries.
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";

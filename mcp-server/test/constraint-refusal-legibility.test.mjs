@@ -1,3 +1,4 @@
+// Tests readable translations of PostgreSQL constraint refusals.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { pgConstraintError, describeConstraint, ToolError } from "../src/tools.js";
