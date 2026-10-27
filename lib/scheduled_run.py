@@ -54,7 +54,9 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from zoneinfo import ZoneInfo
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(REPO, "hooks"))
@@ -88,6 +90,56 @@ HEAD_LINES = 3
 SCAN_BYTES_CAP = 8_000_000
 
 LAUNCH_MARKER = re.compile(r'<scheduled-task\s+name="([^"]+)"')
+SOCIAL_BATCH_MARKER = re.compile(
+    r"SOCIAL_BATCH_RESULT state=(succeeded|failed) week_start=(\d{4}-\d{2}-\d{2}) "
+    r"queue_count=(\d+|unknown) complete=(true|false) failure_class=(none|no_output|zero_drafts|zero_duration)"
+)
+
+
+def social_batch_result(records: list[dict], started_at: str | None) -> dict:
+    """Read the social task's machine-readable queue observation, or fail closed."""
+    marker = None
+    for record in records:
+        message = record.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                value = block.get("content")
+                if isinstance(value, str):
+                    for line in value.splitlines():
+                        if line.startswith("SOCIAL_BATCH_RESULT "):
+                            marker = SOCIAL_BATCH_MARKER.fullmatch(line)
+    if marker:
+        state, week_start, count, complete, failure = marker.groups()
+        try:
+            week = date.fromisoformat(week_start)
+        except ValueError:
+            week = None
+        count_value = None if count == "unknown" else int(count)
+        valid_failure = (failure in {"no_output", "zero_duration"} and count == "unknown"
+                         and complete == "false" and week is not None
+                         and week.isoformat() == week_start and week.weekday() == 0)
+        if (complete == "true" and count_value is not None and week is not None
+                and week.isoformat() == week_start and week.weekday() == 0
+                and ((count_value == 0 and state == "failed" and failure == "zero_drafts")
+                     or (count_value > 0 and state == "succeeded" and failure == "none"))):
+            return {"week_start": week_start, "queue_count": count_value,
+                    "queue_complete": True, "failure": None if count_value else "zero_drafts"}
+        if valid_failure and state == "failed":
+            return {"week_start": week_start, "queue_count": None,
+                    "queue_complete": False, "failure": failure}
+
+    try:
+        launched = datetime.fromisoformat((started_at or "").replace("Z", "+00:00"))
+    except ValueError:
+        launched = datetime.now(timezone.utc)
+    local_day = launched.astimezone(ZoneInfo("America/Chicago")).date()
+    days = (7 - local_day.weekday()) % 7 or 7
+    week_start = (local_day + timedelta(days=days)).isoformat()
+    return {"week_start": week_start, "queue_count": None,
+            "queue_complete": False, "failure": "no_output"}
 
 
 def log(msg: str) -> None:
@@ -279,6 +331,20 @@ def compute_outcome(records: list[dict], raw_text: str = "") -> tuple[str, str |
     denied, reason = detect_gate_denial(raw_text)
     if denied:
         return "failed", "gate_denied", f"a PreToolUse gate denied a call: {reason}"[:300]
+    task = launched_task(records)
+    if task == "social-batch-weekly":
+        started_at = launch_timestamp(records)
+        result = social_batch_result(records, started_at)
+        if result["failure"]:
+            failure_class = "social_batch_" + result["failure"]
+            return "failed", failure_class, f"social-batch-weekly failed: {result['failure'].replace('_', ' ')}"
+        trailing_error, err_reason = detect_trailing_tool_error(records)
+        if trailing_error:
+            detail = "session ended on an unrecovered tool error"
+            if err_reason:
+                detail += f": {err_reason}"
+            return "failed", "tool_error", detail[:300]
+        return "succeeded", None, f"social batch verified {result['queue_count']} posts for week starting {result['week_start']}"
     trailing_error, err_reason = detect_trailing_tool_error(records)
     if trailing_error:
         detail = "session ended on an unrecovered tool error"
@@ -348,6 +414,19 @@ def record_from_transcript(transcript_path: str, correlation: str | None = None,
     state, failure_class, detail = compute_outcome(records, raw_text)
     started_at = launch_timestamp(records)
     ended_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    if task == "social-batch-weekly":
+        observation = social_batch_result(records, started_at)
+        try:
+            sys.path.insert(0, os.path.dirname(__file__))
+            import job_watchdog
+            config = job_watchdog.load_config(os.path.join(REPO, "ops/config/job-watchdog.json"))
+            root = Path(os.environ.get("CARR_REPO_ROOT") or REPO).resolve()
+            job_watchdog.report_social_batch(root, config, **{
+                **observation, "failure": None if observation["queue_complete"] else observation["failure"],
+            })
+        except Exception as exc:  # noqa: BLE001 — evidence must not block the stop hook
+            log(f"FAIL social watchdog report: {exc}")
 
     argv = build_run_args(task, state, failure_class, started_at, ended_at,
                            detail, correlation, source_ref)

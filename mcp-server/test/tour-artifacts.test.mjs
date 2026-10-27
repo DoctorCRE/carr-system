@@ -1,3 +1,4 @@
+// Tests Tour render requests, result evidence, and human acceptance.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { tourArtifactTools, trustedTourRendererResult } from "../src/tour-artifacts.js";

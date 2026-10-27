@@ -659,7 +659,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
       },
     },
     "answer-work-request-for-joe": {
-      write: true, humanOnly: true, authorityOnly: true,
+      write: true, humanOnly: true, humanCallerOnly: true, authorityOnly: true,
       description: "HUMAN-ONLY, DIRECT HUMAN ONLY (no sponsored-agent route): record Joe's answer on one needs_joe Work Request and make its sole allowed transition, needs_joe to triaged. scope_confirmed must be exactly true, pinned to base_version, and the row must carry non-empty acceptance_criteria -- together these satisfy the needs_joe -> triaged guard's 'scope and acceptance criteria revalidated' half. It never assigns, dispatches, approves, executes, or advances any later state.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
         idempotency_key: { type: "string", pattern: "^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$" },

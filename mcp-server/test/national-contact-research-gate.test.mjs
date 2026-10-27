@@ -1,3 +1,4 @@
+// Tests research requirements for national account and market deal creation.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError } from "../src/tools.js";

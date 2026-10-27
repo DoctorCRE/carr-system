@@ -1,3 +1,4 @@
+// Test sourced deal checklist reminders, eligibility, and retry behavior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -37,8 +38,9 @@ function database(overrides = {}) {
       return { rows: [{ id: event.id }] };
     }
     if (sql.includes("verb='ping-deal-checklist'")) return { rows: events
-      .filter(e => e.subject_id === values[0] && e.idempotency_key === values[1]
-        && e.new_value.checklist_item_id === values[2]).slice(-1).map(e => ({ id: e.id })) };
+      .filter(e => e.subject_id === values[0] && e.new_value.checklist_item_id === values[1]
+        && e.new_value.due_on === values[2] && e.new_value.recipient === values[3])
+      .slice(-1).map(e => ({ id: e.id })) };
     if (sql.includes('ops.mint_notification')) {
       if (client.mintFailure) throw new Error('notification store unavailable');
       const [eventSource, eventRef, subjectType, subjectRef, reason, severity, deepLink, key, recipient, bypass, hold] = values;
@@ -75,7 +77,7 @@ test('Doc queues due checklist reminders for the recorded partner without exposi
   assert.equal(n.severity, 'action_required');
   assert.equal(n.deepLink, '/notifications');
   assert.equal(n.bypass, false);
-  assert.equal(n.hold, false);
+  assert.equal(n.hold, true, 'nightly reminders wait for the recipient morning window');
   assert.doesNotMatch(n.reason, /Synthetic renewal|fixture:lease/);
   assert.deepEqual(n.source.new_value, { checklist_item_id: 'critical-date:late', due_on: '2000-01-01', recipient: 'dell' });
   assert.equal(n.source.subject_id, dealId);
@@ -94,11 +96,13 @@ test('retries preserve notification identity and changed owner or due date gets 
   assert.equal(retry.deduplicated, 1);
   assert.equal(retry.notifications[0].notification_id, first.notifications[0].notification_id);
   assert.equal(c.notifications.size, 1);
+  assert.equal(c.events.length, 1, 'fresh sweep keys reuse the reminder source event');
   c.dates[0].due_on = '2000-01-02';
   assert.equal((await ping(c)).queued, 1);
   c.deal.owner = 'joe';
   assert.equal((await ping(c)).queued, 1);
   assert.equal(c.notifications.size, 3);
+  assert.equal(c.events.length, 3, 'only a changed due date or recipient creates another source event');
 });
 
 test('today is due in Chicago and cleared, future or unsourced deadlines produce no reminders', async () => {
@@ -142,6 +146,9 @@ test('stale doctrine refuses checklist reminders and failed mints do not record 
   await assert.rejects(ping(failed), /notification store unavailable/);
   assert.equal(failed.notifications.size, 0);
   assert.equal(failed.receipts.size, 0);
+  failed.mintFailure = false;
+  assert.equal((await ping(failed)).queued, 1);
+  assert.equal(failed.events.length, 1, 'retry repairs an existing source event without duplicating it');
 });
 
 test('the ping contract accepts no caller-provided recipient, date or checklist', () => {
@@ -181,7 +188,7 @@ test('stored open checklist deadlines join critical dates without exposing their
   assert.deepEqual(result.notifications.map(n => n.checklist_item_id),
     ['critical-date:late', 'deal-item:late', 'deal-item:today']);
   const notifications = [...c.notifications.values()];
-  assert.ok(notifications.every(n => n.recipient === 'dell' && !n.bypass && !n.hold));
+  assert.ok(notifications.every(n => n.recipient === 'dell' && !n.bypass && n.hold));
   assert.ok(notifications.every(n => !/Synthetic vendor|private-source/.test(n.reason)));
   assert.deepEqual(notifications[1].source.new_value,
     { checklist_item_id: 'deal-item:late', due_on: '2000-01-01', recipient: 'dell' });
@@ -200,6 +207,7 @@ test('stored item reminders deduplicate across requests and stop after completio
   assert.equal(retry.queued, 0);
   assert.equal(retry.deduplicated, 1);
   assert.equal(retry.notifications[0].notification_id, first.notifications[0].notification_id);
+  assert.equal(c.events.length, 1, 'two sweeps write one event for the stored item');
   c.items[0].due_on = '2000-01-02';
   assert.equal((await ping(c)).queued, 1);
   c.deal.owner = 'joe';
@@ -207,4 +215,5 @@ test('stored item reminders deduplicate across requests and stop after completio
   c.items[0].status = 'done';
   assert.deepEqual((await ping(c)).notifications, []);
   assert.equal(c.notifications.size, 3);
+  assert.equal(c.events.length, 3, 'only a changed due date or recipient creates another source event');
 });

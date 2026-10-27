@@ -635,7 +635,9 @@ CREATE FUNCTION ops.acknowledge_dispatch(p_dispatch_ref uuid, p_stage text, p_ev
     SET search_path TO 'pg_catalog', 'ops', 'public', 'pg_temp'
     AS $$
 declare v_actor uuid; v_slug text; v_id bigint; v_stage text;
+        v_link public.room_dispatch_link%rowtype;
         v_prior public.room_dispatch_ack%rowtype;
+        v_session_party boolean;
 begin
   v_actor := ops.portfolio_writer_actor_id();
   select a.slug into v_slug from public.actor a where a.id = v_actor;
@@ -646,14 +648,28 @@ begin
     return jsonb_build_object('ok', false, 'reason_id', 'dispatch_ref_required');
   end if;
   v_stage := nullif(btrim(coalesce(p_stage, '')), '');
-  -- The relation's own check would refuse this anyway; refusing here gives the
-  -- caller a reason_id instead of a constraint error.
   if v_stage is null or v_stage not in ('received', 'acknowledged') then
     return jsonb_build_object('ok', false, 'reason_id', 'dispatch_stage_invalid');
   end if;
-  if not exists (select 1 from public.room_dispatch_link l
-                  where l.dispatch_ref = p_dispatch_ref) then
+  select * into v_link from public.room_dispatch_link l
+   where l.dispatch_ref = p_dispatch_ref;
+  if v_link.id is null then
     return jsonb_build_object('ok', false, 'reason_id', 'dispatch_link_not_found');
+  end if;
+
+  -- WHO MAY WRITE THIS STAGE, before anything is inserted or read back.
+  v_session_party :=
+       exists (select 1 from public.claude_continuity_leaf l
+                where l.session_id = v_link.session_id
+                  and (l.owner_actor_id = v_actor or l.surface_principal_actor_id = v_actor))
+    or exists (select 1 from public.codex_continuity_checkpoint c
+                where c.native_task_id = v_link.session_id and c.owner_actor_id = v_actor)
+    or exists (select 1 from ops.capability_agent_session s
+                where s.id::text = v_link.session_id
+                  and (s.executor_actor_id = v_actor or s.created_by_actor_id = v_actor));
+  if not (v_session_party
+          or (v_stage = 'received' and v_slug = v_link.written_by)) then
+    return jsonb_build_object('ok', false, 'reason_id', 'dispatch_ack_not_authorized');
   end if;
 
   insert into public.room_dispatch_ack(dispatch_ref, stage, by_actor, evidence)
@@ -681,7 +697,7 @@ end $$;
 -- Name: FUNCTION acknowledge_dispatch(p_dispatch_ref uuid, p_stage text, p_evidence text); Type: COMMENT; Schema: ops; Owner: -
 --
 
-COMMENT ON FUNCTION ops.acknowledge_dispatch(p_dispatch_ref uuid, p_stage text, p_evidence text) IS 'WR-000119: appends one public.room_dispatch_ack row for a dispatch and a stage. by_actor is the DERIVED caller and there is no actor argument anywhere, so an acknowledgement is first-hand by construction; the unique (dispatch_ref, stage) constraint makes a restated acknowledgement one row rather than two.';
+COMMENT ON FUNCTION ops.acknowledge_dispatch(p_dispatch_ref uuid, p_stage text, p_evidence text) IS 'WR-000119/WR-000528: appends one public.room_dispatch_ack row for a dispatch and a stage. by_actor is the DERIVED caller. Only the link''s minting desk (received) or an identity a session book records as owning the target session (received or acknowledged) may write; anyone else is refused with dispatch_ack_not_authorized before the insert and before deduplication. The unique (dispatch_ref, stage) constraint makes an authorized restatement one row.';
 
 
 --
@@ -65950,11 +65966,10 @@ CREATE FUNCTION public.capture_call_context(requested_deal_ids uuid[]) RETURNS T
     SET search_path TO 'pg_catalog', 'public', 'pg_temp'
     AS $$
   select d.id, d.name, d.owner, d.operating_state, dp.party_id, p.ref, p.name, p.email, dp.role
-    from public.deal d
+    from public.v_open_deal_room_board d
     left join public.deal_participant dp on dp.deal_id=d.id and dp.to_at is null
     left join public.party p on p.id=dp.party_id
    where d.id = any(requested_deal_ids)
-     and d.outcome is null
      and d.operating_state = 'active'
 $$;
 
@@ -84348,6 +84363,46 @@ CREATE VIEW public.v_deal_room_board AS
 
 
 --
+-- Name: v_open_deal_room_board; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_open_deal_room_board AS
+ SELECT id,
+    name,
+    type,
+    phase,
+    owner,
+    attention,
+    next_date,
+    next_step,
+    market,
+    segment,
+    client_id,
+    client_ref,
+    client_name,
+    account_client_id,
+    account_client_ref,
+    account_name,
+    account_owner,
+    market_agent,
+    market_agent_party_id,
+    last_touch,
+    last_review_at,
+    workspace_kind,
+    operating_state,
+    parking_reason,
+    parking_note,
+    parked_at,
+    parked_by,
+    invoiced_on,
+    closed_on,
+    lane,
+    outcome
+   FROM public.v_deal_room_board
+  WHERE ((outcome IS NULL) AND (closed_on IS NULL) AND (invoiced_on IS NULL) AND (phase <> ALL (ARRAY['closed'::text, 'invoiced'::text])));
+
+
+--
 -- Name: v_deal_room_account; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -84368,7 +84423,7 @@ CREATE VIEW public.v_deal_room_account AS
      JOIN public.party p ON ((p.id = c.party_id)))
      LEFT JOIN public.national_account_owner nao ON ((nao.account_client_id = c.id)))
      LEFT JOIN public.actor a ON ((a.id = nao.owner_actor_id)))
-     LEFT JOIN public.v_deal_room_board b ON ((b.account_client_id = c.id)))
+     LEFT JOIN public.v_open_deal_room_board b ON ((b.account_client_id = c.id)))
   WHERE ((c.client_type = 'national_account'::text) AND (c.merged_into IS NULL))
   GROUP BY c.id, c.roster_ref, p.name, a.slug;
 
@@ -111996,6 +112051,9 @@ grant select on table public.v_negotiation_deal to dot_reader;
 grant select on table public.v_negotiation_position to carr_reader;
 grant select on table public.v_negotiation_position to carr_writer;
 grant select on table public.v_negotiation_position to dot_reader;
+grant select on table public.v_open_deal_room_board to carr_reader;
+grant select on table public.v_open_deal_room_board to carr_writer;
+grant select on table public.v_open_deal_room_board to dot_reader;
 grant select on table public.v_orphaned_edge to dot_reader;
 grant select on table public.v_orphaned_role to dot_reader;
 grant select on table public.v_partner_room_turn to carr_reader;
@@ -114375,6 +114433,9 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0986_decline_requires_its_receipt.sql	293e6e21f95341bf47a2b8a10a9ab0f4f27024358843fa7182056d4fe96f7868	1970-01-01 00:00:00+00
 0987_email_proposal.sql	c0ab5328442e86d95e28c629575002b6b73ef28dd0d183f7ddee253bcaea77fd	1970-01-01 00:00:00+00
 0988_drop_siep_program_leftovers.sql	9c20dcac261bbf29cdd68184c9688e3333cfe95e9134f0e1fa461d402bf8695c	1970-01-01 00:00:00+00
+0989_call_context_open_deals.sql	4c486dfbbd5f52fdf04d4335c048cded481b9676284a0a323ea85395a3f27752	1970-01-01 00:00:00+00
+0993_dispatch_ack_recipient_authority.sql	95fe5c0e20addde14c24639b75bf1e2968272db7aed1c8049e0cde3fc978af09	1970-01-01 00:00:00+00
+0995_ci_gates_control_test_ref.sql	8c43f588b209af987d5fe5fa64586c43caa0addb203ce943afeb49a8d5ed2938	1970-01-01 00:00:00+00
 \.
 
 
@@ -114877,7 +114938,7 @@ COPY public.vendor_relationship_level (level, label, note) FROM stdin;
 -- never dump arbitrary ops.enforcement_control_catalog rows.
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('calendar_intake','tools/calendar-intake-gate.py; bin/calendar-eventkit-capture.sh','ops/calendar-intake-gate-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('candidate_match','pipelines/import_candidate_pool.py','ops/candidate-match-threshold-selftest.py','judgment_ambient','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('ci_gates','ops/ci.sh','ops/hermes-autonomy-check-selftest.py','surfacing','t','2026-08-19T03:38:59.844809Z'::timestamptz,'2026-08-22T11:37:19.935580Z'::timestamptz) on conflict (control_key) do nothing;
+insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('ci_gates','ops/ci.sh','ops/ci-selftest.py','surfacing','t','2026-08-19T03:38:59.844809Z'::timestamptz,'2026-10-26T21:40:44.079675Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('client_asset_packet','lib/client_asset_controls.py; pipelines/build-space-search.py','ops/client-asset-controls-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('deal_guard','mcp-server/src/tools.js; migrations/0079_deal_room_api.sql; migrations/0091_deal_reconciliation_read.sql','mcp-server/test/dealroom.test.js','transactional_schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('delegation_names_model_and_effort','bin/codex-job','tools/test-codex-job.py','deny_gate','t','2026-10-23T12:23:51.659721Z'::timestamptz,'2026-10-23T12:23:51.659721Z'::timestamptz) on conflict (control_key) do nothing;

@@ -84,24 +84,29 @@ jobs:
           python-version-file: .python-version
 
       - name: Install Python dependencies from the lock
+        if: matrix.classes != 'dependency'
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.lock
 
       - name: Install Node dependencies
+        if: matrix.classes != 'dependency'
         run: |
-          npm --prefix mcp-server ci
-          npm --prefix practice-plugin ci
+          npm --prefix mcp-server ci --no-audit
+          npm --prefix practice-plugin ci --no-audit
 
       - name: Identify the runner image for the zsh archive
+        if: matrix.classes != 'dependency'
         id: zsh-image
         run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
       - name: Restore zsh package archives
+        if: matrix.classes != 'dependency'
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: ${{ runner.temp }}/zsh-debs/*.deb
           key: zsh-ubuntu24-${{ runner.arch }}-${{ steps.zsh-image.outputs.version }}-${{ hashFiles('ops/ci-zsh.sh') }}
       - name: Install zsh
+        if: matrix.classes != 'dependency'
         # bin/run-scheduled.sh has a #!/bin/zsh shebang and its test
         # invokes it by that interpreter. Use the runner's installed shell
         # when available; otherwise try its indexes before refreshing them.
@@ -119,37 +124,16 @@ jobs:
           ZSH_ARCHIVE_DIR: ${{ runner.temp }}/zsh-debs
         run: ops/ci-zsh.sh
 
-      - name: Install PostgreSQL 17
-        if: contains(matrix.classes, 'unit') || contains(matrix.classes, 'gates') || matrix.classes == 'migration'
-        run: |
-          set -euo pipefail
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-            "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-17 postgresql-17-pgvector
-          /usr/lib/postgresql/17/bin/initdb --version
-          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
-
-      - name: Install PostgreSQL 18 server for the migration shadow
-        # ops/migration-shadow.py builds its own loopback cluster on production's
-        # major (18) from the base branch's db/schema.sql and applies this
-        # change's migrations to it. No main cluster is created, so nothing
-        # competes with the service container's port.
+      - name: Disable automatic PostgreSQL clusters for migration fixtures
         if: contains(matrix.classes, 'migration')
         run: |
-          set -euo pipefail
-          sudo install -d /usr/share/postgresql-common/pgdg /etc/postgresql-common/createcluster.d
+          sudo install -d /etc/postgresql-common/createcluster.d
           echo "create_main_cluster = false" | sudo tee /etc/postgresql-common/createcluster.d/no-main-cluster.conf > /dev/null
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-            "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-18 postgresql-18-pgvector
-          /usr/lib/postgresql/18/bin/initdb --version
+
+      - name: Install PostgreSQL 17
+        if: contains(matrix.classes, 'unit') || contains(matrix.classes, 'gates') || matrix.classes == 'migration'
+        timeout-minutes: 5
+        run: bash ops/ci-postgres.sh
 
       - name: Create the Neon admin role the migrations expect
         # Migration 0005 grants the privilege bundles to neondb_owner, which

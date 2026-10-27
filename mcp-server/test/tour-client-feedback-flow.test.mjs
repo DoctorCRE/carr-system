@@ -1,3 +1,4 @@
+// Tests authenticated broker access to client feedback.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createTourInternalWebHandler } from "../src/tour-internal-web.js";

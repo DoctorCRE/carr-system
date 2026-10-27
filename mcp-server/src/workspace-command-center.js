@@ -1,3 +1,4 @@
+// Read command center summaries and destinations.
 import { organizationTenantForActor } from "./identity.js";
 
 export const COMMAND_CENTER_PATH = "/api/v1/command-center";
@@ -62,7 +63,7 @@ export async function readCommandCenterSummary({ client, actor, tenant = organiz
           count(*) filter (where workspace_kind = 'team' and coalesce(operating_state, 'active') = 'active' and attention = true) as team_flagged,
           count(*) filter (where owner = $1::text and workspace_kind = 'team' and coalesce(operating_state, 'active') = 'active') as mine_active,
           count(*) filter (where owner = $1::text and workspace_kind = 'team' and coalesce(operating_state, 'active') = 'active' and attention = true) as mine_flagged
-        from v_deal_room_board`, [actor.slug]),
+        from v_open_deal_room_board`, [actor.slug]),
       client.query(`select
           count(*) filter (where organization_tenant_id = $1::text and state = $2::text) as needs_viewer,
           count(*) filter (where organization_tenant_id = $1::text and state in ('claimed', 'in_progress', 'verification', 'awaiting_release', 'released') and executor_actor is not null and executor_actor not in ('joe', 'dell')) as doc_at_work,
@@ -91,7 +92,7 @@ export async function readCommandCenterSummary({ client, actor, tenant = organiz
   // must not be published as a fresh aggregate.
   if ([teamActive, teamFlagged, mineActive, mineFlagged].some((value) => value === null)) throw typedError("FRESHNESS_UNKNOWN");
   if (teamFlagged > teamActive || mineFlagged > mineActive || mineActive > teamActive || mineFlagged > teamFlagged) throw typedError("FRESHNESS_UNKNOWN");
-  const dealSource = source({ source: "v_deal_room_board", sourceRef: "v_deal_room_board", observedAt, validUntil, correlationId });
+  const dealSource = source({ source: "v_open_deal_room_board", sourceRef: "v_open_deal_room_board", observedAt, validUntil, correlationId });
   const workSafe = [needsViewer, docAtWork, changedCount, legacyHeld, legacyRecent].every((value) => value !== null) && legacyHeld === 0 && legacyRecent === 0;
   const workSource = source({ source: "ops.work_request", sourceRef: "ops.work_request", observedAt, validUntil, correlationId, freshness: workSafe ? "fresh" : "unknown" });
   const needs = [
@@ -117,6 +118,6 @@ export async function readCommandCenterSummary({ client, actor, tenant = organiz
     recent_calls: [],
     doc_at_work: workSafe ? [{ kind: "active_nonhuman_work", count: docAtWork, source: workSource }] : [workUnavailable],
     recent_activity: workSafe ? [{ kind: "changed_work", count: changedCount, observed_at: work.changed_at || observedAt, source: workSource }] : [workUnavailable],
-    source: source({ source: "command_center", sourceRef: "v_deal_room_board+ops.work_request", observedAt, validUntil, correlationId }),
+    source: source({ source: "command_center", sourceRef: "v_open_deal_room_board+ops.work_request", observedAt, validUntil, correlationId }),
   };
 }

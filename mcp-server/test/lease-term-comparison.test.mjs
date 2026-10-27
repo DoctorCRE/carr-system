@@ -1,3 +1,4 @@
+// Test lease term comparison calculations and read-only tool dispatch.
 import test from "node:test";
 import assert from "node:assert/strict";
 

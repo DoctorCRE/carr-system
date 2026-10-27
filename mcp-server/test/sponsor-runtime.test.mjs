@@ -1,3 +1,4 @@
+// Test sponsor-specific rule visibility at runtime.
 import { readMigration } from "./migration-source.testhelper.mjs";
 // Sponsor/runtime separation tests. These are intentionally pure/mock based:
 // they prove that no caller argument selects a personal brain before a deploy.

@@ -1,3 +1,4 @@
+// Test historical loop owner repair and close-loop behavior.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 

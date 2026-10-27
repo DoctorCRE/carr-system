@@ -1,3 +1,4 @@
+// Validate and canonicalize exact-effect contracts.
 import { authorizationClassForActor, organizationTenantForActor,
   personalScopeForActor } from "./identity.js";
 import { partnerAuthoritySlugForActor } from "./partner-authority.js";

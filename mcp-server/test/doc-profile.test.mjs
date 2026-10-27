@@ -1,3 +1,4 @@
+// Test Doc tool discovery, authorization, and input restrictions.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { dispatch, allowedIn, profileForActor, mcpApiHandler, callTool } from "../src/mcp.js";
@@ -8,7 +9,7 @@ import { Pool } from "@neondatabase/serverless";
 const READS = ["catch-me-up", "today-triage", "find", "find-and-catch-up",
   "deal-board", "get-deal-room", "vendor-assignment-context", "who-do-we-know", "counterparty-history",
   "lead-board", "schedule-board", "search-tour-properties", "read-doctrine",
-  "search-doctrine", "recall-memory"];
+  "search-doctrine", "recall-memory", "read-vendor-meetings"];
 const WRITES = ["ping-deal-checklist", "add-deal-note", "log-activity", "set-next-step", "add-critical-date", "log-capture"];
 const ACKNOWLEDGEMENTS = ['whats-new'];
 const actor = () => authenticatedIdentity.connectionForGrant({ slug: "joe" });
@@ -162,6 +163,7 @@ test("Doc initialization describes brokerage usage without the engineering brief
   assert.match(result.instructions, /^When .*what is new.*what they missed.*cold.*whats-new first/i);
   assert.match(result.instructions, /idempotency_key/);
   assert.doesNotMatch(result.instructions, /DELEGATION LATCH|standing-context FIRST/);
+  assert.match(result.instructions, /who .*should meet.*read-vendor-meetings/i);
 });
 
 test("the Doc OAuth adapter requires a resolved partner grant, never a purpose-bound machine grant", async () => {

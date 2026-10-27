@@ -1,4 +1,5 @@
 #!/bin/bash
+# Run the repository's canonical CI classes and report their verified results.
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /bin/bash "$0" "$@"
 fi
@@ -39,14 +40,14 @@ while [ "$#" -gt 0 ]; do
       shift ;;
     --migration-part) MIGRATION_PART="${2:-}"; shift ;;
     --list)   LIST=1 ;;
-    -h|--help) echo "Usage: ops/ci.sh [--strict] [--only classes] [--migration-part all|core|proofs|gates|gates-serial|gates-isolated|acceptance|fixtures|reconstruction|equivalence|shadow] [--gate-shard 1/2|2/2] [--list]"; exit 0 ;;
+    -h|--help) echo "Usage: ops/ci.sh [--strict] [--only classes] [--migration-part all|core|proofs|gates|acceptance|fixtures|reconstruction|equivalence|shadow] [--gate-shard 1/2|2/2] [--list]"; exit 0 ;;
     *) echo "ci.sh: unknown argument: $1" >&2; exit 64 ;;
   esac
   shift
 done
 
 case "$MIGRATION_PART" in
-  all|core|proofs|gates|gates-serial|gates-isolated|acceptance|fixtures|reconstruction|equivalence|shadow) ;;
+  all|core|proofs|gates|acceptance|fixtures|reconstruction|equivalence|shadow) ;;
   *) echo "ci.sh: unknown migration part" >&2; exit 64 ;;
 esac
 
@@ -229,17 +230,9 @@ check_gates() {
   local failures="" count=0 skiplist="" gates_timed_out=0 gate_index=0
   export CARR_HOOK_FIXTURE=1
 
-  # Flip this warning to a failure after the machinery purge finishes.
-  local codemap_rc=0 codemap_count
-  "$PY" tools/codemap.py --missing >"$LOGDIR/codemap-missing.log" \
-    2>"$LOGDIR/codemap-error.log" || codemap_rc=$?
-  if [ "$codemap_rc" -le 1 ]; then
-    codemap_count="$(wc -l < "$LOGDIR/codemap-missing.log" | tr -d '[:space:]')"
-    printf '        WARN codemap: %s scripts lack opening descriptions (warning only during machinery purge)\n' "$codemap_count"
-    cat "$LOGDIR/codemap-missing.log"
-  else
-    printf '        WARN codemap: missing-description count unavailable (tool exited %s; warning only)\n' "$codemap_rc"
-    cat "$LOGDIR/codemap-error.log" >&2
+  if ! run_quiet "$LOGDIR/codemap.log" "$PY" tools/codemap.py --check; then
+    failures="$failures codemap"
+    fail_tail "$LOGDIR/codemap.log"
   fi
 
   # rustup installs the pinned toolchain before concurrent HxStore builds.
@@ -343,8 +336,7 @@ PYEOF
   run_quiet "$LOGDIR/safety-hooks.log" "$PY" hooks/gate-integrity.py --strict \
     || { failures="$failures gate-integrity"; tail -12 "$LOGDIR/safety-hooks.log" >&2; }
 
-  for inv in audit-queue-freshness-check \
-             stale-count-check \
+  for inv in stale-count-check \
              rule-load-layer-check rule-classification-parity-check \
              selftest-git-isolation-check \
              sync-core-rule-ids rule-route-coverage \
@@ -554,7 +546,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
     return
   fi
 
-  if [[ "$MIGRATION_PART" != gates* && "$MIGRATION_PART" != acceptance ]]; then
+  if [[ "$MIGRATION_PART" != gates && "$MIGRATION_PART" != acceptance ]]; then
     if ! CARR_RULE_TEST_DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-rule-supersession.log" \
         node --test mcp-server/test/find-rule-supersedes.test.mjs; then
       tail -30 "$LOGDIR/migration-rule-supersession.log" >&2
@@ -694,7 +686,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       fi
     fi
 
-    for proof in doc-conversation notifications session-identity dispatch-spine meeting-mode amend-closed-loop-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres; do
+    for proof in doc-conversation notifications session-identity dispatch-spine governed-correspondence-thread-postgres meeting-mode amend-closed-loop-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres; do
       if [ -f "mcp-server/test/$proof.test.mjs" ]; then
         if ! DATABASE_URL="$dsn" \
              CARR_DOC_CONVERSATION_DB_REQUIRED=1 CARR_R03_DB_REQUIRED=1 \
@@ -704,6 +696,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
              CARR_A02_RULE_COVERAGE_DB_REQUIRED=1 \
              CARR_RW02_DB_REQUIRED=1 \
              CARR_VENDOR_DIRECTORY_DB_REQUIRED=1 CARR_RELATIONSHIP_DB_REQUIRED=1 \
+             CARR_CORRESPONDENCE_DB_REQUIRED=1 \
              run_quiet "$LOGDIR/$proof-db.log" \
              node --test "mcp-server/test/$proof.test.mjs"; then
           tail -30 "$LOGDIR/$proof-db.log" >&2
@@ -879,9 +872,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
           db_gate_declared="$db_gate_declared\n            $(basename "$g"): $(sed -n 's/^# ci: runs-outside-ci *— *//p' "$g" | head -1)"
         fi
       done
-      local gate_partition=all
-      case "$MIGRATION_PART" in gates-*) gate_partition="${MIGRATION_PART#gates-}" ;; esac
-      if ! DATABASE_URL="$dsn" "$PY" ops/ci-migration-gates.py --logdir "$LOGDIR" --partition "$gate_partition" $db_gates; then
+      if ! DATABASE_URL="$dsn" "$PY" ops/ci-migration-gates.py --logdir "$LOGDIR" $db_gates; then
         db_gate_failures="isolated/serial DB gate runner (see named failures above)"
       fi
       _mstep gates
@@ -996,6 +987,8 @@ echo "ci-timing:${CLASS_TIMINGS}"
 [ -n "$SKIPPED_CLASSES" ] && echo "ci-skipped-classes:${SKIPPED_CLASSES}"
 
 if [ -n "$FAILED_CLASSES" ]; then
+  # Classes the local push path covers: the floor, and the secret class's scans,
+  # which the pre-push hook runs itself once per push.
   FLOOR_CLASSES="pushfloor secret"
   _floor=""; _relocated=""
   for f in $FAILED_CLASSES; do

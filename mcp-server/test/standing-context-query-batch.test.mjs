@@ -1,3 +1,4 @@
+// Test batched standing-context reads and payloads.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { executeRegisteredTool } from "../src/tools.js";

@@ -228,7 +228,7 @@ check("core partition remains strict and runs the full acceptance manifest",
       result == 0 and any(event[-3:] == ("--strict", "--migration-part", "core") for event in core_events)
       and any(event[-1].endswith("mcp-server/test/codex-continuity.test.mjs") for event in core_events)
       and any("--verify-only" in event for event in core_events))
-for part in ("proofs", "gates", "gates-serial", "gates-isolated", "acceptance"):
+for part in ("proofs", "gates", "acceptance"):
     start = len(events)
     try:
         with patch.object(mod, "find_postgres_binaries", return_value=fake_bins), \

@@ -1,3 +1,4 @@
+// Test Deal Room records, collaboration, conflicts, and retries.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -547,7 +548,7 @@ test("the two base statements hold together as written, since no test can run th
 
   const board = tools.slice(tools.indexOf('"deal-room-board": {'),
     tools.indexOf("dealroom:board-field-base") + 200);
-  assert.match(board, /from v_deal_room_board b\b/, "the outer relation is aliased, so b.id resolves");
+  assert.match(board, /from v_open_deal_room_board b\b/, "the outer relation is aliased, so b.id resolves");
   assert.match(board, /from v_deal_room_event e\b/,
     "the reader must use the granted deal-scoped event view");
   assert.doesNotMatch(board, /from (?:public\.)?event e\b/,

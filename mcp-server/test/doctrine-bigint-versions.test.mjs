@@ -1,7 +1,9 @@
+// Test safe doctrine version handling across reads and writes.
 import test from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
 import { TOOLS, ToolError } from "../src/tools.js";
+import { publicError } from "../src/public-errors.ts";
 
 const actor = { id: "10000000-0000-4000-8000-000000000002", slug: "joe", human: true };
 const id = "20000000-0000-4000-8000-000000000001";
@@ -101,4 +103,33 @@ test("snapshot and rule resolution normalize only declared section version field
   assert.equal(snapshot.sections[0].version, "2");
   const rules = await TOOLS["resolve-doctrine-rules"].handler(db, actor, {});
   assert.equal(rules.operative[0].current_version, 2);
+});
+
+test("read-doctrine names an unsafe version in a synthetic refinement-plan snapshot", async () => {
+  const db = database();
+  const query = db.query.bind(db);
+  db.query = async (sql, params) => {
+    if (sql.includes("from doctrine_snapshot")) return { rows: [{ generation: "3", snapshot_json: {
+      document: { id: "synthetic-plan", slug: "synthetic-refinement-plan", title: "Synthetic refinement plan",
+        content_class: "reference", visibility: "shared" },
+      sections: [{ section_id: id, section_key: "plan", title: "Synthetic plan", ordinal: 0,
+        version: "9007199254740993", status: "active", body: { text: "Synthetic plan body" } }],
+      edges_out: [],
+    } }] };
+    if (sql.includes("select generation")) return { rows: [{ generation: "3" }] };
+    return query(sql, params);
+  };
+
+  let failure;
+  try {
+    await TOOLS["read-doctrine"].handler(db, actor, { document: "synthetic-refinement-plan" });
+  } catch (error) {
+    failure = error;
+  }
+  assert.ok(failure instanceof ToolError);
+  const payload = publicError(failure, { env: { CORRELATION_ID: "d170d000-0000-4000-8000-000000000031" },
+    inputSchema: TOOLS["read-doctrine"].inputSchema });
+  assert.equal(payload.error, "doctrine_version_invalid");
+  assert.match(payload.hint, /version.*safely/i);
+  assert.equal(payload.correlation_id, "d170d000-0000-4000-8000-000000000031");
 });
