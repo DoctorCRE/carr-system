@@ -151,11 +151,11 @@ test("sparse evidence and unclear classifications return explicit abstentions", 
 
 test("vendor refusal is retried by the SDK within the budget and malformed JSON is not disclosed", async () => {
   let attempts = 0;
-  const started = Date.now();
+  const started = performance.now();
   const advice = await needsJoeAdvisory(queue, { apiKey: "synthetic-key", now: NOW,
     fetchImpl: async () => { attempts++; return new Response("synthetic private error", { status: 503 }); } });
   assert.ok(attempts >= 2 && attempts <= 3, `attempts ${attempts}`);
-  assert.ok(Date.now() - started < 1600);
+  assert.ok(performance.now() - started < 1600);
   assert.equal(advice.status, "unavailable");
   assert.equal(advice.reason, "jev_unavailable");
   assert.equal(JSON.stringify(advice).includes("synthetic private error"), false);
@@ -178,14 +178,14 @@ test("a 429 is retried by the SDK default policy and then answers", async () => 
 
 test("a stalled vendor is aborted within the caller's budget", async () => {
   let aborted = false;
-  const started = Date.now();
+  const started = performance.now();
   const advice = await needsJoeAdvisory(queue, { apiKey: "synthetic-key", now: NOW,
     fetchImpl: async (_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => {
       aborted = true;
       reject(new Error("synthetic timeout"));
     }, { once: true })) });
   assert.equal(aborted, true);
-  assert.ok(Date.now() - started < 1600);
+  assert.ok(performance.now() - started < 1600);
   assert.equal(advice.status, "unavailable");
   assert.equal(advice.reason, "jev_unavailable");
 });
