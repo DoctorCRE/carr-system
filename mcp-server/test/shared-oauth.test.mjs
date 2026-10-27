@@ -7,7 +7,7 @@ import { createServer } from "node:http";
 import { launchTestChrome } from "./helpers/chrome-launch.mjs";
 import { findDisposableChromium } from "./helpers/chromium-binary.mjs";
 import { handleAuthorize, s256 } from "../src/google-oidc.js";
-import * as policy from "../src/oauth-policy.js";
+import * as policy from "../src/oauth-policy.ts";
 import { OAuthConsentState } from "../src/oauth-consent-state.js";
 
 // Substitute only the deployment identity allow-list with synthetic accounts.
@@ -18,7 +18,7 @@ const syntheticOidc = await import(`data:text/javascript;base64,${Buffer.from(oi
 const propsForSlug = (slug, extra) => ({ slug, ...extra });
 const agentSlugForClient = () => null;
 const verifiedAgentSlugForClient = () => null;`)
-  .replace('"./oauth-policy.js"', JSON.stringify(new URL("../src/oauth-policy.js", import.meta.url).href))
+  .replace('"./oauth-policy.ts"', JSON.stringify(new URL("../src/oauth-policy.ts", import.meta.url).href))
   .replace('"./oauth-consent-state.js"', JSON.stringify(new URL("../src/oauth-consent-state.js", import.meta.url).href))
 ).toString("base64")}`);
 

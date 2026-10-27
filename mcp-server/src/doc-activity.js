@@ -1,6 +1,6 @@
 // Project and expose document activity entries.
 import { organizationTenantForActor, personalScopeForActor } from './identity.js';
-import { validDealRoomValue, dealRoomEvidenceValue } from './dealroom.js';
+import { validDealRoomValue, dealRoomEvidenceValue } from './dealroom.ts';
 
 export const DOC_ACTIVITY_SCHEMA = 'doc-activity.v1';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

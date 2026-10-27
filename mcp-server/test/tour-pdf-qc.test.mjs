@@ -1,7 +1,7 @@
 // Tests PDF quality proof checks and separation from approval authority.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { inspectTourPdfProof } from "../src/deliverable-qc.js";
+import { inspectTourPdfProof } from "../src/deliverable-qc.ts";
 
 const digest = character => `sha256:${character.repeat(64)}`;
 const refs = ["property:public:AlphaHealthCenter01", "property:public:ZetaMedicalPlaza0001"];

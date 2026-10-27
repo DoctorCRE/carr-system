@@ -20,7 +20,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 
-import { closedCallable } from "./closed-callable.js";
+import { closedCallable } from "./closed-callable.ts";
 import { bearerCredential } from "./bearer.ts";
 
 /** Google identities permitted to be issued a token. Everything else is refused. */

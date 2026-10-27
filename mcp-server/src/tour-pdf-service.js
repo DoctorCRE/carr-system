@@ -1,7 +1,7 @@
 // Prepare, store, and verify rendered tour PDFs.
 import latoRegular from "../assets/lato-regular.ttf";
 import latoBold from "../assets/lato-bold.ttf";
-import { inspectTourPdfProof, DELIVERABLE_QC_RULESET_VERSION } from "./deliverable-qc.js";
+import { inspectTourPdfProof, DELIVERABLE_QC_RULESET_VERSION } from "./deliverable-qc.ts";
 import { inspectStoredTourPacketPdf, renderTourPacketPdf, TOUR_PDF_RENDERER_VERSION, TOUR_PDF_TEMPLATE_VERSION } from "./tour-pdf-renderer.js";
 
 const encoder = new TextEncoder();
