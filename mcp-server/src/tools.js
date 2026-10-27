@@ -3725,7 +3725,7 @@ export const TOOLS = {
         schema: "morning-brief-coverage.v1", count_scope: "returned_rows_only",
         required_sections: Object.entries(sections).map(([key, value]) => ({
           key, path: `/sections/${key}`, state: value.state,
-          counts: Object.fromEntries(["items", "accounts", "providers"]
+          counts: Object.fromEntries(["items", "accounts", "providers", "follow_up_reviews"]
             .filter(name => Array.isArray(value[name]))
             .map(name => [name, value.state === "unavailable" ? null : value[name].length])),
           incomplete_sources: Object.entries(value.sources || {})
