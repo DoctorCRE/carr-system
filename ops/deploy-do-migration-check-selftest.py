@@ -1,3 +1,4 @@
+"""Selftests for the automatic Durable Object migration deploy check."""
 import json
 import subprocess
 import sys
