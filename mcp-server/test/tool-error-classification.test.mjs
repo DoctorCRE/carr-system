@@ -327,10 +327,10 @@ test("every tools.js ToolError code is classified", t => {
   // Dynamic producers need review when their enclosing functions change.
   assert.deepEqual(fingerprints, [
     "090b814f8e6237373e71306c7e3f5493252cf7c730241328ad3bc254b3170a8e",
-    "11e6a3d0f7aa7dedbaf8e9f48f49a0162189093622fc8c194a697fd16a1c0ab1",
     "195bc5561ebbcfe865e46d0b5b6dcbd7d493d8db604ba7988a11762123fe4211",
     "59ca89a7c09faa9d51104039816f63ec7c2f7a251f953cc016b32a2140338f17",
     "63297ba38d2a4a75876550533ee4c75c46905a9de278fae6cefced31f58caed6",
+    "9188b4821f8dff7e0f7aaa57691fd5af53132c97b64245ad211cf71bc38a7c9f",
     "a2b254f60a6c0186b71b352bd2f4d483268dadfc918b415d0c9a5a6154a6653e",
     "a51a7e48501621ccd17585ed3b6fc0364e758a8ae05371b31fdc8acbcc0947e7",
     "aee5b46a1bbeed53b669b4e5b6f6f17d5b38fafd2821b81789b0041e0fb7b81e",

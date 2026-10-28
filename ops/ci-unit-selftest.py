@@ -40,6 +40,14 @@ class UnitClassTests(unittest.TestCase):
         return subprocess.run(['bash', str(self.root / 'ops/ci.sh'), '--strict', '--only', 'unit'],
                               cwd=self.root, env=self.env, capture_output=True, text=True, timeout=30)
 
+    def test_local_without_database_skips_but_strict_and_hosted_execute(self):
+        for flags, hosted, expected in (([], '', 0), (['--strict'], '', 1), ([], 'true', 1)):
+            result = subprocess.run(['bash', str(self.root / 'ops/ci.sh'), *flags, '--only', 'unit'],
+                cwd=self.root, env={**self.env, 'GITHUB_ACTIONS': hosted, 'CARR_CI_DATABASE_URL': ''},
+                capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+            self.assertEqual('SKIP-for-local' in result.stdout, expected == 0)
+
     def package(self, name, body="test('executes', () => {});"):
         path = self.root / name
         (path / 'test').mkdir(parents=True)

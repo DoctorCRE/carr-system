@@ -1364,7 +1364,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "list-email-proposals": {
     "ingress_key": "mcp-tool:list-email-proposals",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "763e1b84c0c1bf7812acfd2646545fdad6b1a900a0bb2260b8901951aa8bacab",
+    "schema_digest": "bb574ff2f070c15332dcebaf05b524ba694521d6b66d050feb10eb95ae0cfe5f",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -1835,7 +1835,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "propose-email-lead": {
     "ingress_key": "mcp-tool:propose-email-lead",
     "source_locator": "mcp-server/src/email-lead-proposal.ts",
-    "schema_digest": "31ba38aa5047ef64f62c3c105e7f9c28ca3bf8219e385de931a5ac5942a5f3c8",
+    "schema_digest": "d045d96cb653e76fa11df0c5e763c48772c64e01589d9ee899bab6726ef02153",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -3622,6 +3622,15 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "grantee": "carr_writer",
       "privilege": "update",
       "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:public.email_lead_exclusion:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "public.email_lead_exclusion",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
     }
   ],
   "secdef_execute": [
@@ -4934,6 +4943,7086 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.settle_job_cost(p_reservation_id uuid, p_job_id uuid, p_lease_token uuid, p_input_tokens integer, p_output_tokens integer, p_actual_cost_usd numeric)",
       "volatility": "v",
       "ingress_key": "db-function-acl:ops.settle_job_cost(p_reservation_id uuid, p_job_id uuid, p_lease_token uuid, p_input_tokens integer, p_output_tokens integer, p_actual_cost_usd numeric):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v10(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v10(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v10(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v10(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v10(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v10(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v10(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v10(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v100(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v100(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v100(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v100(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v100(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v100(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v100(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v100(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v101(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v101(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v101(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v101(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v101(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v101(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v101(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v101(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v102(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v102(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v102(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v102(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v102(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v102(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v102(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v102(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v103(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v103(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v103(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v103(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v103(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v103(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v103(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v103(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v104(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v104(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v104(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v104(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v104(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v104(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v104(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v104(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v105(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v105(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v105(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v105(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v105(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v105(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v105(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v105(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v106(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v106(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v106(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v106(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v106(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v106(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v106(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v106(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v107(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v107(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v107(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v107(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v107(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v107(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v107(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v107(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v108(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v108(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v108(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v108(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v108(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v108(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v108(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v108(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v109(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v109(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v109(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v109(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v109(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v109(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v109(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v109(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v11(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v11(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v11(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v11(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v11(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v11(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v11(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v11(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v110(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v110(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v110(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v110(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v110(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v110(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v110(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v110(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v111(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v111(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v111(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v111(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v111(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v111(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v111(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v111(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v112(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v112(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v112(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v112(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v112(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v112(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v112(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v112(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v113(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v113(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v113(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v113(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v113(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v113(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v113(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v113(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v114(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v114(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v114(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v114(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v114(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v114(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v114(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v114(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v115(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v115(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v115(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v115(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v115(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v115(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v115(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v115(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v116(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v116(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v116(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v116(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v116(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v116(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v116(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v116(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v117(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v117(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v117(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v117(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v117(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v117(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v117(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v117(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v118(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v118(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v118(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v118(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v118(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v118(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v118(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v118(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v12(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v12(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v12(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v12(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v12(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v12(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v12(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v12(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v13(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v13(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v13(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v13(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v13(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v13(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v13(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v13(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v14(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v14(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v14(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v14(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v14(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v14(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v14(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v14(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v15(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v15(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v15(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v15(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v15(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v15(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v15(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v15(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v16(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v16(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v16(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v16(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v16(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v16(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v16(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v16(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v17(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v17(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v17(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v17(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v17(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v17(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v17(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v17(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v18(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v18(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v18(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v18(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v18(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v18(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v18(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v18(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v19(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v19(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v19(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v19(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v19(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v19(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v19(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v19(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v2(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v2(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v2(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v2(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v2(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v2(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v2(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v2(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v20(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v20(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v20(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v20(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v20(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v20(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v20(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v20(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v21(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v21(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v21(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v21(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v21(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v21(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v21(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v21(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v22(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v22(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v22(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v22(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v22(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v22(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v22(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v22(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v23(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v23(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v23(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v23(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v23(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v23(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v23(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v23(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v24(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v24(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v24(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v24(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v24(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v24(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v24(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v24(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v25(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v25(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v25(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v25(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v25(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v25(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v25(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v25(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v26(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v26(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v26(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v26(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v26(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v26(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v26(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v26(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v27(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v27(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v27(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v27(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v27(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v27(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v27(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v27(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v28(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v28(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v28(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v28(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v28(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v28(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v28(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v28(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v29(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v29(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v29(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v29(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v29(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v29(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v29(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v29(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v3(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v3(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v3(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v3(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v3(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v3(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v3(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v3(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v30(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v30(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v30(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v30(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v30(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v30(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v30(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v30(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v31(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v31(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v31(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v31(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v31(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v31(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v31(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v31(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v32(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v32(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v32(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v32(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v32(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v32(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v32(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v32(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v33(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v33(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v33(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v33(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v33(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v33(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v33(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v33(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v34(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v34(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v34(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v34(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v34(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v34(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v34(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v34(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v35(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v35(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v35(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v35(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v35(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v35(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v35(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v35(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v36(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v36(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v36(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v36(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v36(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v36(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v36(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v36(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v37(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v37(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v37(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v37(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v37(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v37(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v37(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v37(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v38(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v38(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v38(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v38(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v38(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v38(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v38(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v38(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v39(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v39(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v39(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v39(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v39(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v39(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v39(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v39(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v4(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v4(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v4(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v4(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v4(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v4(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v4(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v4(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v40(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v40(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v40(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v40(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v40(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v40(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v40(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v40(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v41(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v41(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v41(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v41(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v41(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v41(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v41(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v41(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v42(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v42(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v42(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v42(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v42(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v42(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v42(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v42(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v43(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v43(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v43(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v43(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v43(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v43(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v43(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v43(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v44(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v44(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v44(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v44(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v44(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v44(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v44(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v44(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v45(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v45(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v45(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v45(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v45(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v45(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v45(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v45(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v46(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v46(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v46(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v46(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v46(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v46(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v46(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v46(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v47(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v47(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v47(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v47(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v47(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v47(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v47(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v47(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v48(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v48(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v48(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v48(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v48(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v48(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v48(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v48(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v49(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v49(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v49(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v49(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v49(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v49(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v49(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v49(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v5(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v5(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v5(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v5(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v5(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v5(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v5(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v5(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v50(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v50(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v50(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v50(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v50(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v50(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v50(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v50(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v51(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v51(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v51(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v51(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v51(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v51(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v51(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v51(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v52(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v52(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v52(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v52(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v52(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v52(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v52(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v52(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v53(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v53(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v53(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v53(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v53(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v53(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v53(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v53(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v54(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v54(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v54(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v54(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v54(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v54(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v54(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v54(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v55(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v55(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v55(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v55(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v55(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v55(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v55(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v55(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v56(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v56(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v56(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v56(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v56(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v56(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v56(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v56(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v57(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v57(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v57(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v57(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v57(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v57(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v57(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v57(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v58(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v58(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v58(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v58(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v58(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v58(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v58(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v58(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v59(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v59(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v59(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v59(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v59(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v59(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v59(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v59(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v6(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v6(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v6(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v6(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v6(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v6(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v6(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v6(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v60(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v60(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v60(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v60(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v60(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v60(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v60(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v60(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v61(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v61(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v61(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v61(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v61(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v61(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v61(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v61(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v62(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v62(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v62(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v62(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v62(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v62(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v62(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v62(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v63(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v63(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v63(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v63(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v63(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v63(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v63(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v63(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v64(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v64(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v64(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v64(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v64(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v64(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v64(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v64(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v65(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v65(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v65(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v65(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v65(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v65(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v65(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v65(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v66(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v66(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v66(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v66(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v66(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v66(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v66(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v66(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v67(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v67(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v67(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v67(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v67(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v67(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v67(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v67(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v68(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v68(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v68(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v68(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v68(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v68(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v68(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v68(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v69(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v69(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v69(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v69(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v69(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v69(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v69(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v69(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v7(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v7(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v7(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v7(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v7(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v7(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v7(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v7(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v70(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v70(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v70(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v70(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v70(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v70(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v70(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v70(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v71(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v71(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v71(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v71(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v71(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v71(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v71(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v71(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v72(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v72(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v72(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v72(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v72(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v72(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v72(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v72(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v73(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v73(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v73(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v73(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v73(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v73(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v73(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v73(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v74(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v74(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v74(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v74(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v74(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v74(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v74(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v74(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v75(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v75(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v75(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v75(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v75(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v75(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v75(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v75(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v76(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v76(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v76(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v76(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v76(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v76(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v76(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v76(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v77(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v77(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v77(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v77(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v77(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v77(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v77(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v77(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v78(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v78(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v78(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v78(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v78(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v78(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v78(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v78(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v79(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v79(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v79(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v79(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v79(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v79(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v79(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v79(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v8(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v8(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v8(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v8(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v8(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v8(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v8(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v8(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v80(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v80(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v80(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v80(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v80(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v80(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v80(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v80(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v81(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v81(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v81(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v81(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v81(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v81(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v81(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v81(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v82(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v82(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v82(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v82(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v82(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v82(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v82(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v82(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v83(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v83(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v83(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v83(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v83(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v83(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v83(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v83(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v84(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v84(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v84(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v84(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v84(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v84(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v84(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v84(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v85(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v85(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v85(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v85(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v85(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v85(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v85(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v85(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v86(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v86(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v86(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v86(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v86(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v86(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v86(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v86(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v87(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v87(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v87(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v87(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v87(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v87(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v87(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v87(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v88(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v88(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v88(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v88(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v88(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v88(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v88(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v88(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v89(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v89(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v89(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v89(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v89(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v89(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v89(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v89(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v9(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v9(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v9(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v9(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v9(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v9(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v9(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v9(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v90(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v90(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v90(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v90(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v90(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v90(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v90(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v90(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v91(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v91(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v91(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v91(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v91(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v91(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v91(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v91(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v92(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v92(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v92(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v92(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v92(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v92(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v92(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v92(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v93(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v93(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v93(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v93(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v93(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v93(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v93(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v93(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v94(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v94(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v94(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v94(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v94(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v94(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v94(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v94(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v95(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v95(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v95(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v95(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v95(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v95(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v95(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v95(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v96(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v96(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v96(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v96(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v96(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v96(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v96(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v96(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v97(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v97(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v97(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v97(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v97(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v97(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v97(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v97(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v98(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v98(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v98(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v98(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v98(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v98(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v98(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v98(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v99(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v99(p_expected_digest text, p_ingress_key text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v99(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v99(p_expected_digest text, p_ingress_key text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v99(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v99(p_expected_digest text, p_ingress_key text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_mutation_registration_v99(p_expected_digest text, p_ingress_key text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_mutation_registration_v99(p_expected_digest text, p_ingress_key text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, public, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_policy_epoch_status(p_request_epoch bigint, p_request_epoch_digest text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_policy_epoch_status(p_request_epoch bigint, p_request_epoch_digest text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, public, ops, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_policy_epoch_status(p_request_epoch bigint, p_request_epoch_digest text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_policy_epoch_status(p_request_epoch bigint, p_request_epoch_digest text):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, public, ops, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_policy_epoch_status(p_request_epoch bigint, p_request_epoch_digest text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_policy_epoch_status(p_request_epoch bigint, p_request_epoch_digest text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, public, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.scac_policy_epoch_status(p_request_epoch bigint, p_request_epoch_digest text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.scac_policy_epoch_status(p_request_epoch bigint, p_request_epoch_digest text):carr_writer:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
