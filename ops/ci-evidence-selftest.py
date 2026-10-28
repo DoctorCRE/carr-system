@@ -35,9 +35,9 @@ class HostedVerdict(unittest.TestCase):
                 self.assertEqual(evidence.hosted_verdict(), 0)
             self.assertIn('classes: PASSED', summary.read_text())
 
-    def test_path_skipped_fixtures_require_successful_scope_and_explicit_output(self):
+    def test_full_scope_rejects_skipped_fixtures_regardless_of_legacy_output(self):
         with tempfile.TemporaryDirectory() as directory:
-            for fixtures, expected in (('false', 0), ('true', 1), ('', 1)):
+            for fixtures, expected in (('false', 1), ('true', 1), ('', 1)):
                 needs = {'scope': {'result': 'success', 'outputs': {'full': 'true', 'fixtures': fixtures}},
                          'classes': {'result': 'success'}, 'migration-fixtures': {'result': 'skipped'}}
                 with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',

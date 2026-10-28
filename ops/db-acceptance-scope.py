@@ -36,11 +36,6 @@ FULL_PATTERNS = (
 )
 
 
-def needs_fixtures(paths):
-    return any(fnmatch.fnmatchcase(path, pattern) for path in paths
-               for pattern in ('migrations/*', 'db/*', 'tools/migrate.py', 'ops/ci-migration*'))
-
-
 def relative_imports(roots: list[Path], root: Path) -> frozenset[str]:
     """Follow literal local imports without executing proof code."""
     pending, seen = list(roots), set()
@@ -132,14 +127,11 @@ def main() -> int:
     if os.environ.get('GITHUB_STEP_SUMMARY'):
         with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
             summary.write('Database migration proof: ' + status + '\n')
-    fixtures = paths is None or needs_fixtures(paths)
-    fixture_line = f'fixtures={str(fixtures).lower()}'
-    print(fixture_line)
     line = f'full={"true" if full else "false"}'
     print(line)
     if os.environ.get('GITHUB_OUTPUT'):
         with open(os.environ['GITHUB_OUTPUT'], 'a') as handle:
-            handle.write(line + '\n' + fixture_line + '\n')
+            handle.write(line + '\n')
     return 0
 
 

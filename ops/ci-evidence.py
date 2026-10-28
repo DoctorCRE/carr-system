@@ -61,7 +61,7 @@ def hosted_verdict(*, drift=False):
         if full not in ('true', 'false'):
             print('CI verdict: scope receipt unavailable; refusing success')
             return 1
-        if full == 'false' or scope.get('outputs', {}).get('fixtures') == 'false':
+        if full == 'false':
             allowed['migration-fixtures'].add('skipped')
     lines = [f"{name}: {'PASSED' if result == 'success' else str(result).upper()}"
              for name, result in results.items()]

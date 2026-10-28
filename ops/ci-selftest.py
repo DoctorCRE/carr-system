@@ -345,13 +345,11 @@ def test_database_scope_receipts():
     scope = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(scope)
     for path in ("migrations/9999_probe.sql", "mcp-server/test/new-proof.sql",
-                 "ops/new-db-gate.py", ".github/workflows/ci.yml"):
+                 "ops/new-db-gate.py", ".github/workflows/ci.yml",
+                 "mcp-server/src/proof.js", "lib/proof.py",
+                 "ops/db_acceptance_programs.py", "requirements.lock"):
         check(f"database scope runs {path}", scope.needs_full([path]))
     check("database scope skips app-only change", not scope.needs_full(["web/app.js"]))
-    for path, expected in (("migrations/9999.sql", True), ("db/schema.sql", True),
-                           ("tools/migrate.py", True), ("ops/ci-migration-selftest.py", True),
-                           ("ops/ci-unit.py", False), ("tools/outlook.py", False)):
-        check(f"migration fixtures path {path}", scope.needs_fixtures([path]) == expected)
 
     with tempfile.TemporaryDirectory() as directory:
         event = pathlib.Path(directory) / "event.json"
