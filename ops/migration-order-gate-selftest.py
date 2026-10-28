@@ -16,6 +16,7 @@ silently when it cannot read the base.
 Run: .venv/bin/python ops/migration-order-gate-selftest.py
 """
 import importlib.util
+import json
 import os
 import pathlib
 import re
@@ -135,11 +136,18 @@ def add(repo: pathlib.Path, name: str, message: str) -> None:
     git(repo, "commit", "-q", "-m", message)
 
 
-def run_gate(repo: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
+def run_gate(repo: pathlib.Path, *args: str,
+             event: dict | None = None) -> subprocess.CompletedProcess:
     gate_env = dict(env)
-    gate_env.pop("GITHUB_BASE_REF", None)
-    return subprocess.run([sys.executable, str(GATE), "--repo", str(repo), *args],
-                          env=gate_env, capture_output=True, text=True)
+    for key in ("GITHUB_BASE_REF", "GITHUB_EVENT_NAME", "GITHUB_EVENT_PATH"):
+        gate_env.pop(key, None)
+    with tempfile.TemporaryDirectory() as tmp:
+        if event is not None:
+            path = pathlib.Path(tmp) / "event.json"
+            path.write_text(json.dumps(event["payload"]))
+            gate_env.update(GITHUB_EVENT_NAME=event["name"], GITHUB_EVENT_PATH=str(path))
+        return subprocess.run([sys.executable, str(GATE), "--repo", str(repo), *args],
+                              env=gate_env, capture_output=True, text=True)
 
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -223,6 +231,71 @@ with tempfile.TemporaryDirectory() as tmp:
           mog.default_base({}) == "origin/main")
     check("an empty GITHUB_BASE_REF defaults to origin/main",
           mog.default_base({"GITHUB_BASE_REF": ""}) == "origin/main")
+    check("a merge_group run takes the group's base_sha, not origin/main",
+          mog.default_base({"GITHUB_EVENT_NAME": "merge_group"},
+                           {"merge_group": {"base_sha": "abc123"}}) == "abc123")
+
+
+# ── merge-queue replay: #2503 then #2560 (2026-10-28, WR-000570) ───────────
+# #2503 (1020) and #2560 (1018) sat in the merge queue together. #2560's merge
+# group was built on #2503's group, so its first parent already held 1020,
+# while origin/main still stopped at 1017. Judged against origin/main both
+# files looked "added" and above 1017, so the queue passed 1018 under 1020 and
+# every production deploy then refused a reordered ledger until #2595 moved it
+# to 1024. In a merge_group run the base is the group's base_sha.
+print("merge-queue replay (#2560/#2503)")
+with tempfile.TemporaryDirectory() as tmp:
+    repo = pathlib.Path(tmp) / "queue"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    for name in ("1015_team_memory_store", "1016_list_client_portals", "1017_work_request_queue"):
+        add(repo, f"migrations/{name}.sql", name)
+    git(repo, "update-ref", "refs/remotes/origin/main", "main")
+
+    git(repo, "checkout", "-q", "-b", "pr-2503", "main")
+    for name in ("1020_email_deal_matching", "1022_email_send_result_time",
+                 "1023_email_thread_filing_events"):
+        add(repo, f"migrations/{name}.sql", name)
+    git(repo, "checkout", "-q", "-b", "pr-2560", "main")
+    add(repo, "migrations/1018_work_request_job_start.sql", "#2560")
+
+    # The queue: group 1 = main + #2503, group 2 = group 1 + #2560.
+    git(repo, "checkout", "-q", "--detach", "main")
+    git(repo, "merge", "-q", "--no-ff", "--no-edit", "pr-2503")
+    group1 = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "merge", "-q", "--no-ff", "--no-edit", "pr-2560")
+    group2 = git(repo, "rev-parse", "HEAD").strip()
+
+    def queue_event(base_sha: str, head_sha: str) -> dict:
+        return {"name": "merge_group", "payload": {"merge_group": {
+            "base_sha": base_sha, "head_sha": head_sha, "base_ref": "refs/heads/main"}}}
+
+    r = run_gate(repo, event=queue_event(group1, group2))
+    out = r.stdout + r.stderr
+    check("merge group: 1018 under the group base's 1023 fails", r.returncode == 1, out)
+    check("merge group: the refusal names the offending file",
+          "1018_work_request_job_start.sql" in out, out)
+    check("merge group: the refusal names the next free slot (1024)",
+          "1024_work_request_job_start.sql" in out, out)
+
+    r = run_gate(repo, event=queue_event(git(repo, "rev-parse", "main").strip(), group1))
+    check("merge group: #2503's own group (1020..1023 over 1017) passes",
+          r.returncode == 0, r.stdout + r.stderr)
+
+    # The #2595 fix: 1018 renamed to 1024 before re-entering the queue.
+    git(repo, "checkout", "-q", "pr-2560")
+    git(repo, "mv", "migrations/1018_work_request_job_start.sql",
+        "migrations/1024_work_request_job_start.sql")
+    git(repo, "commit", "-q", "-m", "#2595 renumber")
+    git(repo, "checkout", "-q", "--detach", group1)
+    git(repo, "merge", "-q", "--no-ff", "--no-edit", "pr-2560")
+    fixed = git(repo, "rev-parse", "HEAD").strip()
+    r = run_gate(repo, event=queue_event(group1, fixed))
+    check("merge group: the #2595 rename to 1024 passes", r.returncode == 0, r.stdout + r.stderr)
+
+    r = run_gate(repo, event={"name": "merge_group", "payload": {}})
+    check("merge group: an event without base_sha exits 2, never 0",
+          r.returncode == 2, r.stdout + r.stderr)
 
 
 # ── the wiring: a gate nothing runs is decoration ──────────────────────────
@@ -236,6 +309,8 @@ ci_yml = (REPO / ".github" / "workflows" / "ci.yml").read_text()
 pr_types = ci_yml.split("pull_request:", 1)[1].split("\n", 3)[1] if "pull_request:" in ci_yml else ""
 check("CI re-runs on synchronize (the update-branch re-check path)",
       "synchronize" in pr_types, pr_types)
+check("CI runs on merge_group (the merge-queue re-check path)",
+      re.search(r"^  merge_group:", ci_yml, re.MULTILINE) is not None)
 check("the gates class runs in a CI matrix group",
       re.search(r'-\s*"[^"\n]*\bgates\b[^"\n]*"', ci_yml) is not None)
 
