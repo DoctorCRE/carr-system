@@ -78,6 +78,8 @@ test("governance-queue lists team-memory convention proposals with the adopt-rul
     { ...section, body_text: 'Convention: Assess when asked.\nCard: {"id":"K01","placement":"CORE"}\nWhy: notes.' },
     { ...section, section_id: "x", section_key: "conventions/proposed/loose",
       body_text: "Proposed convention: free prose" },
+    { ...section, section_id: "y", body_text: "Convention: Stay in the territory.\nPacks: client-deal, source-study\nSource: x" },
+    { ...section, section_id: "z", body_text: "Convention: Stay in the territory.\nSource: x" },
   ] };
   const calls = [];
   const client = {
@@ -88,7 +90,7 @@ test("governance-queue lists team-memory convention proposals with the adopt-rul
     },
   };
   const result = await TOOLS["governance-queue"].handler(client, actor, {});
-  const [adoptable, malformed] = result.pending_convention_proposals;
+  const [adoptable, malformed, packed, packless] = result.pending_convention_proposals;
   assert.equal(adoptable.adoptable, true);
   assert.equal(adoptable.statement, "Assess when asked.");
   assert.equal(adoptable.card_id, "K01");
@@ -96,7 +98,10 @@ test("governance-queue lists team-memory convention proposals with the adopt-rul
     { verb: "adopt-rule", section_id: section.section_id, base_version: 2 });
   assert.equal(malformed.adoptable, false);
   assert.match(malformed.problem, /Convention:/);
-  assert.equal(result.counts.pending_convention_proposals, 2);
-  assert.equal(result.counts.total, 2);
+  assert.deepEqual([packed.adoptable, packed.card_id, packed.packs], [true, null, ["client-deal", "source-study"]]);
+  assert.equal(packless.adoptable, false, "a convention with no card and no Packs line is not adoptable");
+  assert.match(packless.problem, /Packs:/);
+  assert.equal(result.counts.pending_convention_proposals, 4);
+  assert.equal(result.counts.total, 4);
   assert.ok(!calls.some(sql => /doctrine_section/.test(sql)), "the lane rides the one definer read");
 });

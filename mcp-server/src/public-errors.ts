@@ -53,6 +53,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["convention_proposal_not_found", "Choose an active proposal from governance-queue pending_convention_proposals."],
   ["convention_proposal_malformed", "Rewrite the proposal so its first line is 'Convention: <statement>' with an optional 'Card: <json>' line, then adopt it."],
   ["convention_card_already_active", "An active rule already carries this card id; retire it before adopting a replacement."],
+  ["convention_pack_unknown", "The proposal names a pack outside the existing pack index; name only packs listed by standing-context."],
   ["rule_adoption_requires_app_approval", "Adopt conventions in the DoctorCRE app's approval queue; chat and agent sessions cannot adopt them."],
   ["rule_adoption_requires_joe","Rule activation runs on Joe's approval chain; Joe adopts this proposal in person."],
   ["rule_id_required", "Supply a rule ID."],

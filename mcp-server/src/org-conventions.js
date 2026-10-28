@@ -18,13 +18,19 @@ function parseProposal(text) {
   const statement = /^Convention: ([^\n]+)/.exec(String(text ?? ""))?.[1]?.trim();
   if (!statement) return { adoptable: false, problem: "first line must be 'Convention: <statement>'" };
   const cardText = /\nCard: (\{[^\n]*\})[ \t]*(?:\n|$)/.exec(text)?.[1];
-  if (cardText === undefined) return { adoptable: true, statement, card: null };
+  const packsText = /\nPacks: ([^\n]*)/.exec(text)?.[1];
+  if (cardText === undefined) {
+    const packs = [...new Set((packsText ?? "").split(",").map((p) => p.trim()).filter(Boolean))].sort();
+    if (!packs.length) return { adoptable: false, problem: "a convention without a card needs a 'Packs: <pack>, <pack>' line" };
+    return { adoptable: true, statement, card: null, packs };
+  }
+  if (packsText !== undefined) return { adoptable: false, problem: "a card is delivered by the core block; drop its Packs line" };
   let card;
   try { card = JSON.parse(cardText); } catch { return { adoptable: false, problem: "Card line is not JSON" }; }
   if (!card || typeof card !== "object" || Array.isArray(card) || !card.id || "wording" in card
       || !PLACEMENTS.has(card.placement))
     return { adoptable: false, problem: "Card needs an id and a placement and must not carry wording" };
-  return { adoptable: true, statement, card };
+  return { adoptable: true, statement, card, packs: [] };
 }
 
 // governance-queue's pending_convention_proposals lane, read by
@@ -35,7 +41,7 @@ export function conventionProposals(rows = []) {
     const parsed = parseProposal(body_text);
     return { ...row, base_version: Number(row.base_version), adoptable: parsed.adoptable,
       ...(parsed.adoptable
-        ? { statement: parsed.statement, card_id: parsed.card?.id ?? null,
+        ? { statement: parsed.statement, card_id: parsed.card?.id ?? null, packs: parsed.packs,
             approve_with: { verb: "adopt-rule", section_id: row.section_id, base_version: Number(row.base_version) } }
         : { problem: parsed.problem }) };
   });
@@ -45,6 +51,7 @@ const ADOPT_REFUSALS = new Map([
   ["convention_proposal_not_found", "convention_proposal_not_found"],
   ["convention_proposal_malformed", "convention_proposal_malformed"],
   ["convention_card_already_active", "convention_card_already_active"],
+  ["convention_pack_unknown", "convention_pack_unknown"],
   ["version_conflict", "version_conflict"],
 ]);
 
@@ -70,14 +77,14 @@ export function orgConventionTools({ withEnvelope, writeEvent }) {
       throw error;
     }
     await writeEvent(c, actor, "adopt-rule", "rule", adopted.rule_id,
-      { new: { section_id: args.section_id, card_id: adopted.card_id, load_layer: adopted.load_layer },
+      { new: { section_id: args.section_id, card_id: adopted.card_id, load_layer: adopted.load_layer, packs: adopted.packs },
         idempotency_key: args.idempotency_key });
     return adopted;
   });
   return {
     "adopt-rule": {
       write: true, humanOnly: true, humanCallerOnly: true, authorityOnly: true,
-      description: "A partner adopts one team-memory convention proposal (conventions/proposed/<slug>, listed by governance-queue) as an active rule, in person: the rule's statement and card come from the proposal, Joe's approval chain activates it, and the proposal retires in the same transaction. Only the app's signed-in approval surface can call it; machine identities and chat connector sessions are refused.",
+      description: "A partner adopts one team-memory convention proposal (conventions/proposed/<slug>, listed by governance-queue) as an active rule, in person: the rule's statement and card come from the proposal, a card-less convention is delivered by the existing packs its Packs line names, Joe's approval chain activates it, and the proposal retires in the same transaction. Only the app's signed-in approval surface can call it; machine identities and chat connector sessions are refused.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
         idempotency_key: { type: "string" },
         section_id: { type: "string", description: "the proposal section from governance-queue pending_convention_proposals" },

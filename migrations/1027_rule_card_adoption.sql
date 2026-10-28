@@ -86,6 +86,8 @@ declare
   v_card jsonb;
   v_rule uuid;
   v_layer text;
+  v_packs_text text;
+  v_packs text[];
   v_approval jsonb;
   v_generation bigint;
   v_attach uuid;
@@ -114,8 +116,9 @@ begin
     raise exception 'version_conflict';
   end if;
 
-  -- Proposal body: "Convention: <statement>" on the first line, an optional
-  -- "Card: <json object>" line, then free notes that are never adopted.
+  -- Proposal body: "Convention: <statement>" on the first line, then either a
+  -- "Card: <json object>" line or a "Packs: <pack>, <pack>" line, then free
+  -- notes that are never adopted.
   v_text := v_section.body->>'text';
   v_statement := btrim(substring(v_text from '^Convention: ([^\n]+)'));
   if coalesce(v_statement,'')='' then
@@ -138,22 +141,38 @@ begin
     end if;
   end if;
 
+  -- A card is delivered by the generated core block or the rule-card hook, so
+  -- it names no packs. A convention without a card names the existing packs
+  -- that deliver it; there is no default pack and no new pack.
+  v_packs_text := substring(v_text from '\nPacks: ([^\n]*)');
+  if v_card is not null then
+    if v_packs_text is not null then
+      raise exception 'convention_proposal_malformed';
+    end if;
+  else
+    select array_agg(distinct btrim(p) order by btrim(p)) into v_packs
+      from regexp_split_to_table(coalesce(v_packs_text,''), ',') p
+     where btrim(p)<>'';
+    if v_packs is null then
+      raise exception 'convention_proposal_malformed';
+    end if;
+    if exists (select 1 from unnest(v_packs) n where not exists
+                 (select 1 from ops.rule_pack rp where rp.pack=n)) then
+      raise exception 'convention_pack_unknown';
+    end if;
+  end if;
+
   insert into public.rule(statement,taught_by,status,card)
   values (v_statement,v_actor,'proposed',v_card) returning id into v_rule;
-  -- Delivery, never the capped shared layer0 boot recitation:
-  --  * a card is carried by the generated CLAUDE.md/AGENTS.md block (CORE)
-  --    or by the rule-card hook when its triggers fire;
-  --  * a convention without a card joins the existing engineering-git pack,
-  --    which the per-call pack hook loads on the git, commit, PR, CI and test
-  --    work every agent session in this system does. The pack must exist
-  --    (rule_load_layer_packs_exist), so this never invents a pack.
+  -- Delivery, never the capped shared layer0 boot recitation: a card on the
+  -- control layer, a card-less convention on the pack layer of its named packs.
   v_layer := case when v_card is null then 'pack' else 'control' end;
   insert into ops.rule_load_layer(rule_id,short_id,load_layer,packs,scope,why,source,map_digest)
   values (v_rule,left(v_rule::text,8),v_layer,
-          case when v_card is null then array['engineering-git'] else '{}'::text[] end,'shared',
+          coalesce(v_packs,'{}'::text[]),'shared',
           case when v_card is null then null
                else 'adopted rule card; delivered by the generated core block or the rule-card hook' end,
-          'ops.adopt_rule',encode(public.digest(coalesce(v_card::text,'')||v_statement,'sha256'),'hex'));
+          'ops.adopt_rule',encode(public.digest(coalesce(v_card::text,array_to_string(v_packs,','))||v_statement,'sha256'),'hex'));
   v_approval := ops.approve_rule(v_rule,'human_only',array['human_authority_runtime'],
                                  p_idempotency_key,p_reason);
 
@@ -203,7 +222,7 @@ begin
         content_hash=excluded.content_hash,built_at=excluded.built_at;
 
   return jsonb_build_object('ok',true,'rule_id',v_rule,'card_id',v_card->>'id',
-    'load_layer',v_layer,'approval',v_approval,'retired_section_id',p_section_id,
+    'load_layer',v_layer,'packs',to_jsonb(coalesce(v_packs,'{}'::text[])),'approval',v_approval,'retired_section_id',p_section_id,
     'attach_id',v_attach,'generation',v_generation);
 end $$;
 revoke all on function ops.adopt_rule(uuid,bigint,text,text) from public;

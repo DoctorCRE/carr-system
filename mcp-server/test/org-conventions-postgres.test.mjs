@@ -60,16 +60,19 @@ before(async () => {
 // The empty fixture has no rule packs and no active rules, which the
 // production policy-integrity check refuses at commit. Seed one active,
 // pack-delivered rule through the real approval chain, as production holds.
+const PACK_INDEX = ['client-deal', 'delegation-council', 'engineering-git', 'governance-rules', 'joe-comms',
+  'joe-development', 'records-intake', 'scheduled-automation', 'source-study', 'surface-doctrine', 'vendor-intros'];
 async function seedDeliveredRule() {
   await c.query('begin');
-  // engineering-git exists in production; adopt_rule puts card-less conventions on it.
-  await c.query(`insert into ops.rule_pack(pack,title,description,triggers,source)
-    values('engineering-git','Repo, git, gates, migrations and deploys','Synthetic copy of the production pack',
-      '{git,commit}','org-conventions-postgres') on conflict (pack) do nothing`);
+  // The production pack index; adopt_rule refuses any other name.
+  for (const pack of PACK_INDEX)
+    await c.query(`insert into ops.rule_pack(pack,title,description,triggers,source)
+      values($1,$1,'Synthetic copy of the production pack','{x}','org-conventions-postgres') on conflict (pack) do nothing`,
+      [pack]);
   const id = (await c.query(`insert into rule(statement,taught_by,status) values('Synthetic delivered rule.',$1,'proposed')
     returning id`, [joe.id])).rows[0].id;
   await c.query(`insert into ops.rule_load_layer(rule_id,short_id,load_layer,packs,scope,why,source,map_digest)
-    values($1::uuid,left($1::text,8),'pack','{engineering-git}','shared',null,'org-conventions-postgres',repeat('0',64))`, [id]);
+    values($1::uuid,left($1::text,8),'pack',$2,'shared',null,'org-conventions-postgres',repeat('0',64))`, [id, PACK_INDEX]);
   await c.query('set local session authorization carr_authority_joe');
   await c.query(`select ops.approve_rule($1,'human_only',array['human_authority_runtime'],$2,'Synthetic fixture rule')`,
     [id, randomUUID()]);
@@ -176,26 +179,48 @@ test('an adopted card cannot be adopted twice, and a stale base_version is refus
   await refused(adopt(joe, { ...k02, base_version: k02.base_version + 1 }, 'carr_authority_joe'), 'version_conflict');
 });
 
-test('an adopted card-less convention is delivered to a claude_code session on the engineering-git pack', async () => {
-  const org = queue.find(p => !p.section_key.startsWith('conventions/proposed/card-'));
-  const out = await adopt(joe, org, 'carr_authority_joe');
+test('a deal convention is delivered to a session that declares client-deal, and not without it', async () => {
+  const territory = proposal('team-territory');
+  assert.deepEqual(territory.packs, ['client-deal', 'source-study']);
+  const out = await adopt(joe, territory, 'carr_authority_joe');
   assert.equal(out.card_id, null);
   assert.equal(out.load_layer, 'pack');
+  assert.deepEqual(out.packs, ['client-deal', 'source-study']);
   const rule = (await c.query('select status, card from rule where id=$1', [out.rule_id])).rows[0];
   assert.deepEqual(rule, { status: 'active', card: null });
   const plan = async packs => (await c.query('select selected from ops.rule_delivery_plan($1,$2) where rule_id=$3',
     ['joe', packs, out.rule_id])).rows[0]?.selected;
-  assert.equal(await plan(['engineering-git']), true, 'the scoped boot hands it over with the pack');
+  assert.equal(await plan(['client-deal']), true, 'the scoped boot hands it over with the deal pack');
   assert.equal(await plan([]), false, 'it is pack-delivered, not layer0');
-  // The session-side read: a claude_code session's standing-context with the
-  // pack it declares for repo work carries the adopted statement.
-  const context = await executeRegisteredTool(c, claudeForJoe, 'standing-context', { packs: ['engineering-git'] });
-  assert.deepEqual(context.rule_delivery?.packs_not_found ?? [], []);
+  assert.equal(await plan(['engineering-git']), false, 'repo work does not carry a deal convention');
+  // The session-side read: standing-context with the pack the session declares.
   const shortId = out.rule_id.slice(0, 8);
-  assert.ok(context.shared_rules.some(r => r.id === shortId), 'the session is handed the convention');
-  assert.ok(!context.rule_delivery.would_omit.includes(shortId),
-    'the scoped (enforced-mode) selector keeps it, so it is not a silent drop');
-  assert.deepEqual(context.rule_delivery.pack_index.find(p => p.pack === 'engineering-git').rules, 2);
+  const context = async packs => executeRegisteredTool(c, claudeForJoe, 'standing-context', { packs });
+  const deal = await context(['client-deal']);
+  assert.deepEqual(deal.rule_delivery?.packs_not_found ?? [], []);
+  assert.ok(deal.shared_rules.some(r => r.id === shortId), 'a deal session is handed the convention');
+  assert.ok(!deal.rule_delivery.would_omit.includes(shortId), 'the scoped selector keeps it');
+  assert.equal(deal.rule_delivery.pack_index.find(p => p.pack === 'client-deal').rules, 2);
+  for (const packs of [[], ['engineering-git']])
+    assert.ok((await context(packs)).rule_delivery.would_omit.includes(shortId),
+      `without client-deal (packs ${JSON.stringify(packs)}) the scoped selector drops it`);
+});
+
+test('a card-less proposal must name existing packs: no Packs line or an unknown pack is refused', async () => {
+  const { attach_id } = await call(joe, 'attach-memory', { surface: 'claude_code' });
+  const write = (key, body_text) => call(joe, 'write-doctrine-section', { document: 'team-memory',
+    section_key: `conventions/proposed/${key}`, body_text, base_version: 0, attach_id });
+  const packless = await write('packless', 'Convention: Synthetic packless convention.\nSource: test');
+  const unknown = await write('unknown-pack', 'Convention: Synthetic convention.\nPacks: client-deal, deals-everywhere');
+  const listed = (await call(joe, 'governance-queue', {})).pending_convention_proposals;
+  assert.equal(listed.find(p => p.section_id === packless.section_id).adoptable, false);
+  const before = await ruleCount();
+  await refused(adopt(joe, { section_id: packless.section_id, base_version: 1 }, 'carr_authority_joe'),
+    'convention_proposal_malformed');
+  await refused(adopt(joe, { section_id: unknown.section_id, base_version: 1 }, 'carr_authority_joe'),
+    'convention_pack_unknown');
+  assert.equal(await ruleCount(), before);
+  assert.equal((await c.query(`select count(*) from ops.rule_pack where pack='deals-everywhere'`)).rows[0].count, '0');
 });
 
 test('two proposals with one card id adopted concurrently: the second gets the named refusal', async () => {

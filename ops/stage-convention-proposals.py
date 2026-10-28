@@ -29,12 +29,18 @@ STATUS = ('Status: a proposal. It binds nobody until a partner adopts it in pers
           'through governance-queue (adopt-rule).')
 
 
-def body(statement, card=None, source=''):
+def body(statement, card=None, source='', packs=()):
+    """A card is delivered by the core block; a card-less convention by the
+    existing packs its Packs line names (ops.adopt_rule refuses any other)."""
     if '\n' in statement or not statement.strip():
         raise ValueError(f'a convention statement is one non-empty line: {statement!r}')
+    if (card is None) == (not packs):
+        raise ValueError('a proposal carries either a card or its delivery packs')
     lines = [f'Convention: {statement.strip()}']
     if card is not None:
         lines.append('Card: ' + json.dumps(card, ensure_ascii=False, separators=(',', ':')))
+    else:
+        lines.append('Packs: ' + ', '.join(packs))
     return '\n'.join(lines + [f'Source: {source}', STATUS])
 
 
@@ -53,7 +59,8 @@ def plan(cards_path=CARDS, ledger_path=LEDGER):
             continue
         out.append({'section_key': f'{PREFIX}{name}', 'title': f'Convention: {name}',
                     'body_text': body(row['statement'], None,
-                                      f'{row["class"]} file {name} of the frozen private memory folder')})
+                                      f'{row["class"]} file {name} of the frozen private memory folder',
+                                      row['packs'])})
     keys = [p['section_key'] for p in out]
     if len(keys) != len(set(keys)):
         raise ValueError('duplicate proposal keys')

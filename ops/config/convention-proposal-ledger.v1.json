@@ -7,34 +7,52 @@
       "class": "ORG",
       "covered_by": [],
       "statement": "Automated jobs run as invisible headless background processes (launchd or Actions on the subscription), never as Claude app sidebar sessions, routines or scheduled tasks, which Joe called \"just noise in my app\".",
+      "packs": [
+        "scheduled-automation"
+      ],
       "notes": "Memory cites rule 62da1507, which is not in the active rule list."
     },
     "batch-joe-blockers": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "When work cannot progress without Joe, park it, move to other work, and keep one list of Joe-needed items so \"all the things that need my involvement can be done in a short session when I'm at my desk\"."
+      "statement": "When work cannot progress without Joe, park it, move to other work, and keep one list of Joe-needed items so \"all the things that need my involvement can be done in a short session when I'm at my desk\".",
+      "packs": [
+        "delegation-council"
+      ]
     },
     "briefs-ban-env-dumps": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "Every delegated brief forbids commands that print environment variables or process environments (env, printenv, set, export -p, ps with environment flags), after a job leaked tokens into its log."
+      "statement": "Every delegated brief forbids commands that print environment variables or process environments (env, printenv, set, export -p, ps with environment flags), after a job leaked tokens into its log.",
+      "packs": [
+        "delegation-council"
+      ]
     },
     "briefs-name-pstack-pocock": {
       "class": "DUP",
       "covered_by": [],
       "statement": "Every dispatch brief names the pstack and Pocock skills explicitly, and the PR or review report lists the skills actually used.",
+      "packs": [
+        "delegation-council"
+      ],
       "notes": "No full covering source. Partial: 8400cd3d and L01/L03 require grilling and poteto-mode but not naming skills in every brief or listing them in the PR."
     },
     "bug-inventory": {
       "class": "ORG",
       "covered_by": [],
       "statement": "Every bug, defect, incident or CI failure goes into one Work Request queue that is worked to closure, because \"this was never meant to only be a log. its supposed to be a place where the log actually gets worked.\"",
+      "packs": [
+        "governance-rules"
+      ],
       "notes": "Partly covered by 19ebbeb3 (record and fix or file a WR) but not the single worked queue."
     },
     "build-it-myself-when-asked": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "When Joe asks the session directly to build something, the session builds and verifies it itself rather than delegating it to Codex (\"i asked you to do it\"), using Codex only for steps only Codex tools can do."
+      "statement": "When Joe asks the session directly to build something, the session builds and verifies it itself rather than delegating it to Codex (\"i asked you to do it\"), using Codex only for steps only Codex tools can do.",
+      "packs": [
+        "delegation-council"
+      ]
     },
     "builders-never-touch-live-checkout": {
       "class": "DUP",
@@ -46,56 +64,89 @@
     "carr-system-stays-public": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "carr-system stays public because \"I can't make Carr system private bc you are widely inefficient with GitHub action minutes\"; handle exposure by scrubbing the tree and cut CI minutes, re-running only failed jobs."
+      "statement": "carr-system stays public because \"I can't make Carr system private bc you are widely inefficient with GitHub action minutes\"; handle exposure by scrubbing the tree and cut CI minutes, re-running only failed jobs.",
+      "packs": [
+        "engineering-git"
+      ]
     },
     "check-platform-before-building": {
       "class": "ORG",
       "covered_by": [],
       "statement": "Before proposing or building infrastructure, name the platform feature (GitHub, launchd, the vendor tool) that could do it and the concrete gap that rules it out; \"If GitHub already does it better that is the dumbest thing I've ever heard.\"",
+      "packs": [
+        "engineering-git"
+      ],
       "notes": "Partly covered by L02 and L04 (research what we own, weigh existing controls) but not the name-the-platform-feature test."
     },
     "claude-models-for-jobs": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "Claude models run build jobs alongside Codex, using the cheapest model that does the job well, because \"the goal is to get as much work done as possible and make good use of all my tokens\", not to burn usage."
+      "statement": "Claude models run build jobs alongside Codex, using the cheapest model that does the job well, because \"the goal is to get as much work done as possible and make good use of all my tokens\", not to burn usage.",
+      "packs": [
+        "delegation-council"
+      ]
     },
     "client-portal-standard-site": {
       "class": "ORG",
       "covered_by": [],
       "statement": "Each client gets a password-protected portal at share.doctorcre.com/<client> as a \"very standardaized process bc every client will get one\", where \"only the contained info is different per deal\".",
+      "packs": [
+        "client-deal",
+        "surface-doctrine"
+      ],
       "notes": "Passwords part covered by ac0a6579; the standard portal convention is not."
     },
     "client-sites-flexible-and-spend-safe": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "Client sites share only a login gate and publish tooling, never a fixed page template, and every Cloudflare piece carries hard limits that prevent runaway spend, because billing alerts arrive too late and \"that simply cannot happen to me.\""
+      "statement": "Client sites share only a login gate and publish tooling, never a fixed page template, and every Cloudflare piece carries hard limits that prevent runaway spend, because billing alerts arrive too late and \"that simply cannot happen to me.\"",
+      "packs": [
+        "client-deal",
+        "surface-doctrine"
+      ]
     },
     "client-sites-on-share-doctorcre": {
       "class": "DUP",
       "covered_by": [],
       "statement": "All client sites host on Joe's own share.doctorcre.com (\"all sites should host on my site\"), not on Codex Sites.",
+      "packs": [
+        "client-deal",
+        "surface-doctrine"
+      ],
       "notes": "No full covering source. ac0a6579 assumes share.doctorcre.com but only rules on passwords."
     },
     "close-done-wrs-with-completion-verb": {
       "class": "DUP",
       "covered_by": [],
       "statement": "Shipped Work Requests close through the completion verb as confirmed closed; decline is only for work that will not be done.",
+      "packs": [
+        "governance-rules"
+      ],
       "notes": "No covering rule or card found."
     },
     "commit-email-private": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "Every commit uses the GitHub noreply alias, never Joe's personal email, because the repos are public and Joe said \"I want it kept private.\""
+      "statement": "Every commit uses the GitHub noreply alias, never Joe's personal email, because the repos are public and Joe said \"I want it kept private.\"",
+      "packs": [
+        "engineering-git"
+      ]
     },
     "compliance-out-of-scope": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "Do not build compliance gates, warnings or caveats into the system, because \"compliance is handled by our broker and our counsel scott. we dont need you to handle it.\""
+      "statement": "Do not build compliance gates, warnings or caveats into the system, because \"compliance is handled by our broker and our counsel scott. we dont need you to handle it.\"",
+      "packs": [
+        "client-deal"
+      ]
     },
     "decide-dont-ask-design": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "On engineering or design forks, the session picks its recommended option, logs the decision with what lost, and proceeds; question boxes are kept for items only Joe can decide."
+      "statement": "On engineering or design forks, the session picks its recommended option, logs the decision with what lost, and proceeds; question boxes are kept for items only Joe can decide.",
+      "packs": [
+        "governance-rules"
+      ]
     },
     "do-dashboard-steps-in-joes-chrome": {
       "class": "DUP",
@@ -108,40 +159,63 @@
       "class": "DUP",
       "covered_by": [],
       "statement": "Before asking Joe a question, check whether the session's own evidence already decides it; if so decide and close it, and never repeat a pending question at the end of every update.",
+      "packs": [
+        "governance-rules"
+      ],
       "notes": "No covering rule or card found."
     },
     "flash-off-until-maintenance": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "The local Flash model stays off by default; \"flash should only be woken up when i ask for it.\""
+      "statement": "The local Flash model stays off by default; \"flash should only be woken up when i ask for it.\"",
+      "packs": [
+        "delegation-council",
+        "scheduled-automation"
+      ]
     },
     "grill-runs-autonomous": {
       "class": "DUP",
       "covered_by": [],
       "statement": "In desk and builder jobs the grilling skill runs in autonomous mode, with the agent answering its own frontier questions and recording them, because \"I don't want every job needing an interview session with me.\"",
+      "packs": [
+        "delegation-council"
+      ],
       "notes": "No covering source. 8400cd3d says grilling one question at a time and does not state autonomous mode."
     },
     "independent-taste-score-before-merge": {
       "class": "ORG",
       "covered_by": [],
       "statement": "A UI slice merges only after a separate agent scores it on signed-in staging with real data at desktop and phone widths in both themes, never on the builder's own scores.",
+      "packs": [
+        "engineering-git",
+        "surface-doctrine"
+      ],
       "notes": "Partly related to 6a4e6283 (maker never grades client-facing work) but not this merge gate."
     },
     "jev-used-as-shipped": {
       "class": "ORG",
       "covered_by": [],
       "statement": "Use Jev directly as its vendor docs prescribe wherever a classification helps, once per real decision, with no wrapper machinery: \"just use the tool ... the way it was intended.\"",
+      "packs": [
+        "delegation-council"
+      ],
       "notes": "661d7757 covers Jev for review work only, not the no-wrapper convention."
     },
     "keep-orchestrating-without-joe": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "The orchestrator never ends a turn idle: every external run gets a harness-tracked waiter and results are acted on the same turn, because \"i need you to be working and orchestrating without my involvement.\""
+      "statement": "The orchestrator never ends a turn idle: every external run gets a harness-tracked waiter and results are acted on the same turn, because \"i need you to be working and orchestrating without my involvement.\"",
+      "packs": [
+        "delegation-council"
+      ]
     },
     "living-readiness-checklist": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "The system-readiness checklist is a living target, never frozen (\"This is a living organism\"), and every system fix names the checklist item, the earlier mistake it corrects, or the app task it unblocks."
+      "statement": "The system-readiness checklist is a living target, never frozen (\"This is a living organism\"), and every system fix names the checklist item, the earlier mistake it corrects, or the app task it unblocks.",
+      "packs": [
+        "scheduled-automation"
+      ]
     },
     "main-moved-is-not-rereview": {
       "class": "ORG",
@@ -153,7 +227,10 @@
     "maximize-work-not-tokens": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "New jobs run at medium or light reasoning effort by need, never extra high, because \"i want the most amount of work done, not just burning tokens for no reason.\""
+      "statement": "New jobs run at medium or light reasoning effort by need, never extra high, because \"i want the most amount of work done, not just burning tokens for no reason.\"",
+      "packs": [
+        "delegation-council"
+      ]
     },
     "never-ignore-bugs": {
       "class": "ORG",
@@ -166,49 +243,79 @@
       "class": "ORG",
       "covered_by": [],
       "statement": "New background jobs, schedules, watchdogs, retry layers, queues, waiters or wrappers are rejected unless a real failure happened and the platform cannot handle it, and added machinery files need an explicit approve.",
+      "packs": [
+        "engineering-git",
+        "scheduled-automation"
+      ],
       "notes": "Partly covered by L04 and fc4d7753 (prove need, smallest structure)."
     },
     "orchestrator-owns-merges": {
       "class": "DUP",
       "covered_by": [],
       "statement": "The PR author turns on GitHub native auto-merge through the merge queue on green required CI; never a custom merge daemon.",
+      "packs": [
+        "engineering-git"
+      ],
       "notes": "No covering rule or card found. c363bd8b covers batching overlapping PRs only."
     },
     "orchestrator-reviews-audit-deletions": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "Audit-chosen deletion PRs open as drafts and the orchestrator verifies them before they merge, because \"I don't need to approve them I need you to approve them\"; Joe gets a summary, not an approval ask."
+      "statement": "Audit-chosen deletion PRs open as drafts and the orchestrator verifies them before they merge, because \"I don't need to approve them I need you to approve them\"; Joe gets a summary, not an approval ask.",
+      "packs": [
+        "engineering-git"
+      ]
     },
     "outlook-intake-stays-live": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "The Outlook mail intake stays in production while it is improved (\"I'd like that to stay in operation while we continue to improve the outlook route\"); upgrades ship only through a merged PR and the installer."
+      "statement": "The Outlook mail intake stays in production while it is improved (\"I'd like that to stay in operation while we continue to improve the outlook route\"); upgrades ship only through a merged PR and the installer.",
+      "packs": [
+        "joe-comms"
+      ]
     },
     "outlook-lane-owned-by-orchestrator": {
       "class": "DUP",
       "covered_by": [],
       "statement": "The orchestrator owns the Outlook lane, and each partner's Outlook automation runs on that partner's own machine.",
+      "packs": [
+        "delegation-council",
+        "joe-comms"
+      ],
       "notes": "No covering rule or card found. c66dc739 covers local mail store reading only."
     },
     "owners-contacted-are-not-leads": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "A property owner Joe is trying to reach on a deal is a contact, not a lead (\"hes not a lead\"); help him reach them and do not propose lead writes."
+      "statement": "A property owner Joe is trying to reach on a deal is a contact, not a lead (\"hes not a lead\"); help him reach them and do not propose lead writes.",
+      "packs": [
+        "client-deal",
+        "records-intake"
+      ]
     },
     "paired-prs-server-first": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "In a paired PR, the consumer (app) PR never auto-merges before its server PR is live in production."
+      "statement": "In a paired PR, the consumer (app) PR never auto-merges before its server PR is live in production.",
+      "packs": [
+        "engineering-git"
+      ]
     },
     "post-call-e2e-review": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "After each filed call, review the app from the human side, checking Home and every deal the call touched against the call report, because \"e2e testing should occur after that call to work through all the changes and missing changes\"."
+      "statement": "After each filed call, review the app from the human side, checking Home and every deal the call touched against the call report, because \"e2e testing should occur after that call to work through all the changes and missing changes\".",
+      "packs": [
+        "client-deal"
+      ]
     },
     "product-backlog-is-work-requests": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "Fill work slots from open product Work Requests and never report an empty backlog without querying them, because \"There is no way that we don't have anything to work on\"."
+      "statement": "Fill work slots from open product Work Requests and never report an empty backlog without querying them, because \"There is no way that we don't have anything to work on\".",
+      "packs": [
+        "delegation-council"
+      ]
     },
     "proposed-rules-are-not-live": {
       "class": "DUP",
@@ -222,6 +329,9 @@
       "class": "ORG",
       "covered_by": [],
       "statement": "Memories and taught rules quote Joe word for word, and any extension or scope limit the session adds is labeled \"my reading\".",
+      "packs": [
+        "governance-rules"
+      ],
       "notes": "K12 covers capturing corrections, not the quote-versus-reading labeling."
     },
     "read-tool-docs-first": {
@@ -234,27 +344,43 @@
     "removals-are-immediate": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "Approved removals take effect immediately on the machines and their deletion PRs merge on green CI with no review: \"Just make the change and let's move on\"."
+      "statement": "Approved removals take effect immediately on the machines and their deletion PRs merge on green CI with no review: \"Just make the change and let's move on\".",
+      "packs": [
+        "engineering-git"
+      ]
     },
     "report-main-clashes-with-cause": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "Report every PR that clashes with main, naming the clashing file and cause, and route repeat causes to a root fix: \"If main is clashing that's an issue I need to know so we can address the root cause.\""
+      "statement": "Report every PR that clashes with main, naming the clashing file and cause, and route repeat causes to a root fix: \"If main is clashing that's an issue I need to know so we can address the root cause.\"",
+      "packs": [
+        "engineering-git"
+      ]
     },
     "requeue-dropped-prs": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "Re-queue an approved, green PR that the merge queue dropped for an unrelated failure without asking Joe each time; a PR dropped for its own failure is fixed first."
+      "statement": "Re-queue an approved, green PR that the merge queue dropped for an unrelated failure without asking Joe each time; a PR dropped for its own failure is fixed first.",
+      "packs": [
+        "engineering-git"
+      ]
     },
     "review-before-automerge-large-prs": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "\"PRs over ~150 net lines or touching launchd/Outlook/production paths wait for an APPROVE before auto-merge; small ones merge on green CI\", and the reviewer can be any qualified model."
+      "statement": "\"PRs over ~150 net lines or touching launchd/Outlook/production paths wait for an APPROVE before auto-merge; small ones merge on green CI\", and the reviewer can be any qualified model.",
+      "packs": [
+        "engineering-git"
+      ]
     },
     "review-round-cap": {
       "class": "ORG",
       "covered_by": [],
       "statement": "\"Cap reviews at 3 rounds for overnight work\" and \"After 3 rounds stop and rethink the approach.\"",
+      "packs": [
+        "delegation-council",
+        "engineering-git"
+      ],
       "notes": "A15 (stop same-shape rework) is related but not this cap."
     },
     "search-both-macs-sessions": {
@@ -284,34 +410,53 @@
     "skill-use-verified-not-claimed": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "Whether pstack and Pocock skills were used is answered from session-log evidence (skill file opened, test red to green), never from self-reported Skills lines in reports or PRs."
+      "statement": "Whether pstack and Pocock skills were used is answered from session-log evidence (skill file opened, test red to green), never from self-reported Skills lines in reports or PRs.",
+      "packs": [
+        "delegation-council"
+      ]
     },
     "team-territory": {
       "class": "ORG",
       "covered_by": [],
       "statement": "All market research, lead sweeps and market jobs stay inside the team territory, South Alabama through the Florida Panhandle, after Joe asked \"how do you not know my territory?\"",
+      "packs": [
+        "client-deal",
+        "source-study"
+      ],
       "notes": "Territory text lives in doctrine carr-profile (served by standing-context), not in a rule. Memory's 'Alabama work routes to Dell' is stale against active rule 08c4eda2."
     },
     "tiny-changes-skip-review": {
       "class": "ORG",
       "covered_by": [],
       "statement": "A tiny mechanical commit on an already-reviewed PR gets a self-check and green CI, then merges with no new review round: \"Do not run through all the bullshit again just for a tiny change.\"",
+      "packs": [
+        "engineering-git"
+      ],
       "notes": "A04 skips the second look for mechanical fixes, not the review round."
     },
     "use-tools-as-intended": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "When Joe says to use a tool, set it up the way its own quick-start does and run shipped packages whole, with no custom harness around it: \"I just said use e2e testing. Remove all that shit and run it the way it was intended.\""
+      "statement": "When Joe says to use a tool, set it up the way its own quick-start does and run shipped packages whole, with no custom harness around it: \"I just said use e2e testing. Remove all that shit and run it the way it was intended.\"",
+      "packs": [
+        "delegation-council"
+      ]
     },
     "v1-to-v2-sequence": {
       "class": "ORG",
       "covered_by": [],
-      "statement": "DoctorCRE app versions follow Joe's scheme: V1 adds the progress board, V2 is his V1 comments plus e2e findings, V3 is a real visual and window-management build, then point releases."
+      "statement": "DoctorCRE app versions follow Joe's scheme: V1 adds the progress board, V2 is his V1 comments plus e2e findings, V3 is a real visual and window-management build, then point releases.",
+      "packs": [
+        "surface-doctrine"
+      ]
     },
     "work-calendar-only-in-outlook": {
       "class": "ORG",
       "covered_by": [],
       "statement": "Work calendar jobs read only the Outlook local store, never Apple Calendar or EventKit, because \"the only place the work calendar exists is inside my outlook email desktop app\".",
+      "packs": [
+        "joe-comms"
+      ],
       "notes": "CONFLICT: active rule 49533583 still directs sessions to read Apple Calendar and Apple Mail; this memory is newer."
     }
   }

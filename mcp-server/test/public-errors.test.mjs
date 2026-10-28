@@ -66,7 +66,7 @@ for (const [code, extra] of [
   ["missing_user_journey_ref", {}], ["completion_capsule_refused", {}], ["sponsored_actor_required", {}],
   ["memory_attach_required", {}], ["memory_read_only", {}],
   ["convention_proposal_not_found", {}], ["convention_proposal_malformed", {}],
-  ["convention_card_already_active", {}], ["rule_adoption_requires_joe", {}],
+  ["convention_card_already_active", {}], ["convention_pack_unknown", {}], ["rule_adoption_requires_joe", {}],
   ["rule_adoption_requires_app_approval", {}],
   ["decision_id_required", { field: "decision_id" }], ["decision_id_malformed", { field: "decision_id", got: privateText }],
   ["decision_not_found", { field: "decision_id", got: "00000000" }],

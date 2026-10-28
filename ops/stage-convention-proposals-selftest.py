@@ -20,6 +20,12 @@ spec.loader.exec_module(stage)
 # The grammar ops.adopt_rule (migration 1027) and org-conventions.js parse.
 CONVENTION = re.compile(r'^Convention: ([^\n]+)')
 CARD = re.compile(r'\nCard: (\{[^\n]*\})[ \t]*(?:\n|$)')
+PACKS = re.compile(r'\nPacks: ([^\n]*)')
+# The production pack index (standing-context rule_delivery.pack_index,
+# 2026-10-28). ops.adopt_rule refuses any other name.
+PACK_INDEX = {'client-deal', 'delegation-council', 'engineering-git', 'governance-rules',
+              'joe-comms', 'joe-development', 'records-intake', 'scheduled-automation',
+              'source-study', 'surface-doctrine', 'vendor-intros'}
 
 
 class StageTests(unittest.TestCase):
@@ -53,6 +59,26 @@ class StageTests(unittest.TestCase):
                              'statement plus card metadata rebuilds the card exactly')
         for p in self.plan:
             self.assertNotIn('—', CONVENTION.match(p['body_text'])[1])
+
+    def test_every_card_less_convention_names_existing_packs(self):
+        by_key = {p['section_key']: p['body_text'] for p in self.plan}
+        for card in self.cards:
+            self.assertIsNone(PACKS.search(by_key[f"conventions/proposed/card-{card['id'].lower()}"]))
+        uncovered = {name: row for name, row in self.ledger.items() if not row['covered_by']}
+        self.assertEqual(len(uncovered), 45)
+        for name, row in uncovered.items():
+            text = by_key[f'conventions/proposed/{name}']
+            self.assertIsNone(CARD.search(text), name)
+            packs = [p.strip() for p in PACKS.search(text)[1].split(',')]
+            self.assertTrue(packs, name)
+            self.assertEqual(packs, row['packs'], name)
+            self.assertLessEqual(set(packs), PACK_INDEX, name)
+        practice = {'team-territory', 'owners-contacted-are-not-leads', 'compliance-out-of-scope',
+                    'client-portal-standard-site', 'client-sites-on-share-doctorcre',
+                    'client-sites-flexible-and-spend-safe', 'post-call-e2e-review'}
+        for name in practice:
+            self.assertIn('client-deal', uncovered[name]['packs'], name)
+        self.assertIn('joe-comms', uncovered['work-calendar-only-in-outlook']['packs'])
 
     def test_stage_writes_only_missing_keys_with_the_callers_attach(self):
         calls = []
@@ -102,7 +128,13 @@ class StageTests(unittest.TestCase):
 
     def test_statement_must_be_one_line(self):
         with self.assertRaises(ValueError):
-            stage.body('two\nlines')
+            stage.body('two\nlines', packs=['client-deal'])
+
+    def test_a_proposal_carries_a_card_or_packs_never_neither(self):
+        with self.assertRaises(ValueError):
+            stage.body('No delivery.')
+        with self.assertRaises(ValueError):
+            stage.body('Both.', {'id': 'K99', 'placement': 'CORE'}, packs=['client-deal'])
 
 
 if __name__ == '__main__':
