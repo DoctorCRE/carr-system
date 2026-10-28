@@ -3866,6 +3866,21 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.reap_expired_runs(p_service_id uuid, p_environment text, p_run_key text, p_limit integer)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.reap_expired_runs(p_service_id uuid, p_environment text, p_run_key text, p_limit integer):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
     }
   ],
   "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d",
