@@ -60,7 +60,8 @@ def unwired_checks(catalog, mutate=lambda root: None):
             matched = False
             if logdir:
                 logs = Path(logdir.group(1))
-                matched = any(row["exit"] == 1 and (logs / (row["program"] + ".log")).is_file()
+                matched = any(row["exit"] == 1 and "selftest" not in row["program"]
+                              and (logs / (row["program"] + ".log")).is_file()
                               and marker in (logs / (row["program"] + ".log")).read_text()
                               for row in rows)
             if not matched:
@@ -98,6 +99,15 @@ class EnforcementWiringTest(unittest.TestCase):
             source = runner.read_text().replace('        self.py(\n            "migration-triggers",',
                 '        if False: self.py(\n            "migration-triggers",')
             runner.write_text(source)
+        self.assertEqual(["example: ops/trigger-grant-check.py"], unwired_checks(self.catalog, mutate))
+
+    def test_selftest_execution_does_not_prove_checker_wiring(self):
+        def mutate(root):
+            runner = root / "ops/ci-migration.py"
+            runner.write_text(runner.read_text().replace('        self.py(\n            "migration-triggers",',
+                '        if False: self.py(\n            "migration-triggers",'))
+            (root / "ops/proxy-selftest.py").write_text(
+                'import subprocess, sys\nraise SystemExit(subprocess.call([sys.executable, "ops/trigger-grant-check.py"]))\n')
         self.assertEqual(["example: ops/trigger-grant-check.py"], unwired_checks(self.catalog, mutate))
 
     def test_inactive_class_is_not_reachable(self):
