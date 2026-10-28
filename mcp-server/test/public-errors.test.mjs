@@ -314,3 +314,17 @@ test('Call Mode refusal exposes only bounded UUIDs and no diagnostic payload', a
       `d170d000-0000-4000-8000-${String(i).padStart(12, '0')}`),
   })).invalid_deal_ids.length, 50);
 });
+
+test("rule ID refusals expose fixed hints without internal details", async t => {
+  t.mock.method(console, "error", () => {});
+  const { publicError } = await import("../src/public-errors.ts");
+  for (const [code, hint] of [
+    ["rule_id_required", "Supply a rule ID."],
+    ["rule_id_malformed", "Supply a full rule UUID or a valid short rule ID."],
+    ["rule_not_found", "Choose an existing rule ID."],
+    ["ambiguous_rule_id", "Use a longer rule ID to identify one rule."],
+  ]) {
+    assert.deepEqual(publicError(new ToolError({ error: code, hint: privateText, got: privateText }),
+      { env: { CORRELATION_ID: correlationId } }), { error: code, correlation_id: correlationId, hint });
+  }
+});
