@@ -156,9 +156,6 @@ LAUNCHD_ALT_REPO = {
     "com.carr.outlook-research-copy.plist": os.path.join(
         REPO, "spec", "outlook", "com.carr.outlook-research-copy.plist"
     ),
-    "com.carr.call-mode.plist": os.path.join(
-        REPO, "tools", "dictation-rig", "launchd", "com.carr.call-mode.plist"
-    ),
 }
 # Outlook jobs run from the separate checkout named in ~/.config/carr/outlook.json
 # and ship only through these installers, which also build and pin the helper
