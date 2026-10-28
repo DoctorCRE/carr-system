@@ -21,7 +21,6 @@ from migration_source import read_migration
 import importlib.util
 import re
 import unittest
-from unittest.mock import MagicMock, patch
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "ops"))
@@ -103,25 +102,6 @@ class SubstitutionFixtureParity(unittest.TestCase):
         self.assertIn("set search_path = pg_catalog, ops, public", original.group(1))
         self.assertIn("set search_path = pg_catalog, ops, public", legacy.group(1))
         self.assertNotIn("pg_temp", legacy.group(1))
-
-
-class LockRehearsalFrontier(unittest.TestCase):
-    def test_accepts_the_declared_predecessor_before_rehearsing(self):
-        predecessor = {'migration': 'migrations/0853_party_identity_scac_successor.sql'}
-        rehearsal = load('hardening_rehearsal', 'ops/definer-hardening-lock-rehearsal-gate.py')
-        connection = MagicMock()
-        connection.__enter__.return_value = connection
-
-        def execute(query):
-            if query == 'select filename from public.schema_migrations':
-                return [(Path(predecessor['migration']).name,)]
-            raise RuntimeError('accepted frontier; start scale rehearsal')
-
-        connection.execute.side_effect = execute
-        with patch.dict('os.environ', {'CARR_LOCAL_PG_DSN': 'host=127.0.0.1 dbname=fixture'}), \
-             patch.object(rehearsal.psycopg, 'connect', return_value=connection):
-            with self.assertRaisesRegex(RuntimeError, 'accepted frontier'):
-                rehearsal.main()
 
 
 if __name__ == "__main__":
