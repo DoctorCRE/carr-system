@@ -330,7 +330,7 @@ class InstallerTest(unittest.TestCase):
         for relative in ('bin', 'tools', 'ops/launchd', 'lib', '.venv/bin', 'vendor/hxprobe', 'spec/outlook'):
             (self.repo / relative).mkdir(parents=True)
         for relative in ('ops/hxprobe-source-digest.py', 'bin/install-outlook-intake.sh', 'bin/install-outlook-triage.sh',
-                         'tools/outlook-intake-copy.c', 'lib/outlook_settings.py',
+                         'tools/outlook-intake-copy.c', 'lib/outlook_settings.py', 'lib/outlook_helper.py',
                          'ops/launchd/com.carr.outlook-intake.plist',
                          'ops/launchd/com.carr.outlook-refresh.plist',
                          'ops/launchd/com.carr.outlook-outbox.plist',
@@ -356,16 +356,44 @@ class InstallerTest(unittest.TestCase):
                    'binary_sha256': hashlib.sha256(decoder.read_bytes()).hexdigest()}
         (self.vendor / '.carr-build.json').write_text(json.dumps(receipt))
 
-    def install(self, name='intake', check=True):
+        self.sign_tools = self.root / 'signing tools'
+        self.sign_tools.mkdir()
+        self.sign_log = self.root / 'signing-calls'
+        codesign = self.sign_tools / 'codesign'
+        codesign.write_text('''#!/usr/bin/python3
+import json
+import os
+from pathlib import Path
+import sys
+with open(os.environ['SIGN_LOG'], 'a') as log:
+    log.write(json.dumps(sys.argv[1:]) + '\\n')
+if '-s' in sys.argv:
+    if '--force' not in sys.argv:
+        sys.exit('already signed; replacement requires --force')
+    if os.environ.get('SIGN_FAIL'):
+        sys.stderr.write('specified item could not be found in the keychain')
+        sys.exit(1)
+else:
+    print(os.environ.get('REQUIREMENT', 'designated => identifier "outlook-intake-copy" and certificate leaf = H"012345"'), file=sys.stderr)
+''')
+        codesign.chmod(0o700)
+
+    def install(self, name='intake', check=True, signing_env=None):
+        if name == 'intake' and self.config.exists():
+            values = json.loads(self.config.read_text())
+            if str(self.sign_tools) not in values['executable_path'].split(':'):
+                values['executable_path'] = f"{self.sign_tools}:{values['executable_path']}"
+                self.config.write_text(json.dumps(values))
         command = ['/bin/zsh', '-f', '-c', 'export HOME="$1"; exec /bin/zsh -f "$2"',
                    'installer-test', str(self.home), str(self.repo / f'bin/install-outlook-{name}.sh')]
-        return subprocess.run(command, capture_output=True, text=True, check=check, env=fixture_env())
+        return subprocess.run(command, capture_output=True, text=True, check=check,
+                              env={**fixture_env(), 'SIGN_LOG': str(self.sign_log), **(signing_env or {})})
 
     def test_installer_uses_settings_without_a_machine_role_and_preserves_the_granted_binary(self):
         result = self.install()
         self.assertTrue(self.helper.is_file())
         self.assertEqual(stat.S_IMODE(self.helper.stat().st_mode), 0o700)
-        self.assertIn(f'Full Disk Access must be re-granted for {self.helper}', result.stdout)
+        self.assertIn(f'ad-hoc helper rebuilds need a Full Disk Access re-grant for {self.helper}', result.stdout)
         self.assertFalse((self.home / 'Library/LaunchAgents').exists())
         for service in ('intake', 'refresh'):
             rendered = plistlib.loads((self.repo / f'out/com.carr.outlook-{service}.plist').read_bytes())
@@ -402,7 +430,7 @@ class InstallerTest(unittest.TestCase):
         source.write_text(source.read_text().replace('snapshot failed', 'fixture snapshot failed'))
         result = self.install()
         self.assertNotEqual(self.helper.read_bytes(), before)
-        warning = f'Full Disk Access must be re-granted for {self.helper}'
+        warning = f'ad-hoc helper rebuilds need a Full Disk Access re-grant for {self.helper}'
         self.assertEqual(sum(warning in line for line in result.stdout.splitlines()), 1)
         before_bytes = self.helper.read_bytes()
         before_mtime = self.helper.stat().st_mtime_ns
@@ -419,7 +447,42 @@ class InstallerTest(unittest.TestCase):
         result = self.install()
         scope = subprocess.run([str(self.helper), '--scope'], capture_output=True, text=True, check=True)
         self.assertEqual(scope.stdout.splitlines()[0], values['profile'])
-        self.assertIn(f'Full Disk Access must be re-granted for {self.helper}', result.stdout)
+        self.assertIn(f'ad-hoc helper rebuilds need a Full Disk Access re-grant for {self.helper}', result.stdout)
+
+    def test_certificate_identity_rebuilds_without_an_access_warning(self):
+        self.install()
+        values = json.loads(self.config.read_text())
+        values['signing_identity'] = 'Fixture Signing Identity'
+        self.config.write_text(json.dumps(values))
+        result = self.install()
+        self.assertNotIn('re-grant', result.stdout)
+        calls = [json.loads(line) for line in self.sign_log.read_text().splitlines()]
+        self.assertEqual(calls[0][:-1], ['--force', '-s', '-', '--identifier', 'outlook-intake-copy'])
+        self.assertEqual(calls[1][:-1], ['--force', '-s', 'Fixture Signing Identity',
+                                       '--identifier', 'outlook-intake-copy'])
+        self.helper.with_suffix('.pin').unlink()
+        result = self.install()
+        self.assertNotIn('re-grant', result.stdout)
+        self.assertEqual(self.sign_log.read_text().count('"-d", "-r-"'), 2)
+        load_settings(self.home).verify_helper()
+
+    def test_signing_failure_preserves_existing_helper_and_pin(self):
+        self.install()
+        before = self.helper.read_bytes(), self.helper.with_suffix('.pin').read_text()
+        values = json.loads(self.config.read_text())
+        values['signing_identity'] = 'Fixture Signing Identity'
+        self.config.write_text(json.dumps(values))
+        for env, message in (({'SIGN_FAIL': '1'}, 'keychain'),
+                             ({'REQUIREMENT': 'designated => cdhash H"123"'}, 'certificate designated requirement'),
+                             ({'REQUIREMENT': ''}, 'certificate designated requirement'),
+                             ({'REQUIREMENT': 'designated => certificate leaf = H"123" or cdhash H"123"'},
+                              'certificate designated requirement')):
+            with self.subTest(env=env):
+                result = self.install(check=False, signing_env=env)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
+                self.assertNotIn('re-grant', result.stdout)
+                self.assertEqual((self.helper.read_bytes(), self.helper.with_suffix('.pin').read_text()), before)
 
     def test_outbox_is_rendered_only_when_enabled_and_never_loaded(self):
         self.install()

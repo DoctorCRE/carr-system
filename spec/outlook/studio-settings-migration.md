@@ -53,7 +53,8 @@ No installer runs as part of this source change. The later installation for anot
 ## Settings schema
 
 Every field in the command is required. Unknown or duplicate fields are rejected.
-There are no identity, address, profile or credential fallbacks.
+There are no owner, address, profile or credential fallbacks.
+Optional `signing_identity` names this Mac's code-signing certificate. Omit it for ad-hoc signing.
 
 | Fields | Type and meaning |
 | --- | --- |
@@ -74,3 +75,23 @@ There are no identity, address, profile or credential fallbacks.
 Outlook uses the configured MCP file with the existing local client profile. Ambient MCP token and break-glass overrides are removed for this route.
 The exporter uses the configured database credential file. Its other callers retain their existing credential selection behavior.
 The shared services catalog retains its declared owner. Outlook jobs use the private settings owner for their record actions. Registry sync never reads per-machine settings; primary deployment placements stay unchanged.
+
+## Keep Full Disk Access across helper rebuilds
+
+Complete all steps on each Mac. Keep the same certificate and helper path for later rebuilds.
+The certificate is local to that Mac. Do not commit its name or export its private key.
+Without `signing_identity`, the installer uses ad-hoc signing and warns that rebuilds need a Full Disk Access re-grant.
+The installer rejects a configured identity that cannot sign or produces a cdhash designated requirement.
+
+1. Open Keychain Access on the intake Mac.
+2. Select **Keychain Access > Certificate Assistant > Create a Certificate**.
+3. Create one self-signed root certificate with **Certificate Type > Code Signing** and a unique name for this Mac.
+4. Set `signing_identity` in `~/.config/carr/outlook.json` to that certificate's exact name.
+5. Run `./bin/install-outlook-intake.sh` from the source checkout.
+6. Re-grant the configured `copy_helper` Full Disk Access in **System Settings > Privacy & Security > Full Disk Access**.
+7. Delete the configured helper's `.pin` file to request one deliberate rebuild.
+8. Run `./bin/install-outlook-intake.sh` again.
+9. Confirm the rebuilt helper retains Full Disk Access without another grant through the next successful scheduled intake copy.
+
+For step 7, `.pin` replaces the helper's filename suffix. For `outlook-intake-copy`, the pin is `outlook-intake-copy.pin`.
+Do not create another certificate for the rebuild check. Certificate replacement changes the helper's identity.
