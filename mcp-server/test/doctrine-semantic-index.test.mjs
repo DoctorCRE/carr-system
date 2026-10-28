@@ -1,4 +1,4 @@
-// Prove search_doctrine_semantic reads the cosine index and keeps the old ranking on a fixed embedding set.
+// Retiring doctrine_embedding_cosine_idx must not change semantic search: the function scans exactly.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readMigration } from './migration-source.testhelper.mjs';
@@ -40,64 +40,31 @@ async function seed(c, sections, chunkCounts, rand) {
   return chunkSets.length;
 }
 
-async function withOldBody(c) {
-  const original = readMigration('0978_doctrine_title_topic_ranking.sql');
-  const start = original.indexOf('create or replace function public.search_doctrine_semantic(');
-  await c.query(original.slice(start).replace('public.search_doctrine_semantic(', 'public.search_doctrine_semantic_old('));
-}
-
-const call = (c, fn, vectors, limit = 20) => c.query(
-  `select ${fn}($1,$2::uuid,$3::text[],$4,$5,$6::vector[]) as result`,
+const call = (c, vectors, limit = 20) => c.query(
+  `select search_doctrine_semantic($1,$2::uuid,$3::text[],$4,$5,$6::vector[]) as result`,
   ['sundial', ACTOR, ['reference'], limit, null, vectors.map(v => JSON.stringify(v))]).then(r => r.rows[0].result);
-const ids = result => result.hits.map(hit => hit.section_id);
+const indexCount = c => c.query(`select count(*)::int as n from pg_indexes where indexname='doctrine_embedding_cosine_idx'`).then(r => r.rows[0].n);
 
-test('new body returns the old results while every chunk fits the index candidate window', async () => {
+test('retiring the cosine index leaves semantic search results exactly equal', async () => {
   const { doctrineEmbeddingDatabase } = await import('./helpers/doctrine-embedding-postgres.mjs');
   const fixture = await doctrineEmbeddingDatabase();
   try {
     const c = fixture.client, rand = prng(7);
-    const chunks = await seed(c, 120, [1, 2, 3, 4, 6], rand);
-    assert.ok(chunks < 1000, 'fixture stays inside the 1000-chunk window');
-    await withOldBody(c);
-    for (const queryCount of [1, 2, 3]) for (let trial = 0; trial < 4; trial++) {
-      const vectors = Array.from({ length: queryCount }, () => unitVector(rand));
-      const before = await call(c, 'search_doctrine_semantic_old', vectors);
-      const after = await call(c, 'search_doctrine_semantic', vectors);
-      assert.ok(before.hits.length >= 10, 'the comparison has real hits');
-      assert.deepEqual(ids(after), ids(before));
-      assert.equal(after.visible, before.visible);
-      assert.equal(after.embedded, before.embedded);
-      assert.deepEqual(after.hits.map(h => h.provenance.semantic_similarity),
-        before.hits.map(h => h.provenance.semantic_similarity));
-    }
-  } finally { await fixture.close(); }
-});
-
-test('beyond the window the top ranks stay the same and the plan reads doctrine_embedding_cosine_idx', async () => {
-  const { doctrineEmbeddingDatabase } = await import('./helpers/doctrine-embedding-postgres.mjs');
-  const fixture = await doctrineEmbeddingDatabase();
-  try {
-    const c = fixture.client, rand = prng(11);
     const chunks = await seed(c, 300, [1, 2, 3, 4, 6, 12], rand);
-    assert.ok(chunks > 1000, 'fixture is larger than one candidate window');
+    assert.ok(chunks > 1000, 'fixture is larger than an index candidate window would be');
     await c.query('analyze doctrine_embedding');
-    await withOldBody(c);
-    let overlap = 0, top3 = 0, trials = 0;
-    for (let trial = 0; trial < 10; trial++) {
-      const vectors = [unitVector(rand)];
-      const before = await call(c, 'search_doctrine_semantic_old', vectors);
-      const after = await call(c, 'search_doctrine_semantic', vectors);
-      const old = ids(before).slice(0, 10), now = new Set(ids(after).slice(0, 10));
-      overlap += old.filter(id => now.has(id)).length / 10;
-      top3 += old.slice(0, 3).every((id, i) => ids(after)[i] === id) ? 1 : 0;
-      trials++;
+    assert.equal(await indexCount(c), 1, 'fixture starts with the index');
+    const queries = [];
+    for (const queryCount of [1, 2, 3]) for (let trial = 0; trial < 4; trial++)
+      queries.push(Array.from({ length: queryCount }, () => unitVector(rand)));
+    const before = [];
+    for (const q of queries) before.push(await call(c, q));
+    await c.query(readMigration('1035_retire_doctrine_embedding_cosine_idx.sql'));
+    assert.equal(await indexCount(c), 0, 'migration removes the index');
+    for (const [i, q] of queries.entries()) {
+      const after = await call(c, q);
+      assert.ok(after.hits.length >= 10, 'the comparison has real hits');
+      assert.deepEqual(after, before[i]);
     }
-    assert.ok(overlap / trials >= 0.9, `top-10 overlap ${overlap / trials}`);
-    assert.ok(top3 / trials >= 0.9, `top-3 identical in ${top3}/${trials}`);
-    await c.query('set enable_seqscan = off'); // the fixture is small enough that the planner prefers a scan; production's 29k rows do not
-    const plan = await c.query(`explain (format json)
-      select e.revision_id from doctrine_embedding e where e.model=$1
-       order by e.embedding operator(public.<=>) $2::vector limit 1000`, [MODEL, JSON.stringify(unitVector(rand))]);
-    assert.ok(JSON.stringify(plan.rows[0]['QUERY PLAN']).includes('"Index Name":"doctrine_embedding_cosine_idx"'), 'ordered nearest-neighbour shape uses the cosine index');
   } finally { await fixture.close(); }
 });
