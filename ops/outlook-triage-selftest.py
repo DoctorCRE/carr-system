@@ -220,9 +220,10 @@ elif tool == 'get_window_state':
         label = ('Focused Inbox Selected;  Other Inbox Unselected' if state['tab'] == 'focused'
                  else 'Other Inbox Selected;  Focused Inbox Unselected')
         add('AXCheckBox', label, 4, top, value='0')
-    table = add('AXTable', 'Message List', 4, top)
+    table = add('AXTable', 'Message List', 4, top, ['message_list'])
     add('AXCell', 'Today, Expanded', 6, table)
-    for r in current()[:state.get("visible_limit", len(current()))]:
+    offset = 0 if state.get('search') else state.get('offsets', {}).get(state['tab'] or 'only', 0)
+    for r in current()[offset:offset + state.get("visible_limit", len(current()))]:
         row = add('AXRow', '', 5, table, selected=r['label'] == state.get('selected'))
         shown = ('Unread, ' if r['unread'] else '') + r['label']
         add('AXCell', shown, 6, row, ['row', r['label']], selected=r['label'] == state.get('selected'))
@@ -255,6 +256,34 @@ elif tool == 'invoke_menu':
         state['tab'] = 'focused'
     elif path == ['File', 'New', 'Main Window'] and 'after_new_window' in state:
         state['windows'] = state['after_new_window']
+    save()
+    print(json.dumps({'effect': 'unverifiable'}))
+elif tool == 'scroll':
+    snap, _, index = payload.get('element_token', '').partition(':')
+    if snap != state['tokens']['snap'] or state['tokens']['map'].get(index) != ['message_list']:
+        fail('scroll must target the fresh Message List token')
+    amount = 50 if payload['direction'] == 'up' else 1
+    if payload.get('by') != 'line' or payload.get('amount') != amount:
+        fail('unexpected scroll granularity')
+    tab = state['tab'] or 'only'
+    offsets = state.setdefault('offsets', {})
+    limit = state.get('visible_limit', len(current()))
+    step = max(1, limit - 1)
+    offset = offsets.get(tab, 0) + (step if payload['direction'] == 'down' else -step * amount)
+    if not state.get('scroll_stuck'):
+        offsets[tab] = max(0, min(max(0, len(current()) - limit), offset))
+    replacement = state.pop('replace_on_first_scroll', None)
+    if replacement:
+        lists()[tab][1] = replacement
+    if payload['direction'] == 'down':
+        state['scanned_down'] = True
+        for label in state.pop('read_on_scroll', []):
+            mark_read(label)
+    elif state.get('scanned_down') and offsets.get(tab, 0) == 0:
+        replacement = state.pop('replace_on_restore', None)
+        if replacement:
+            lists()[tab][-1] = replacement
+    state['scrolls'] = state.get('scrolls', 0) + 1
     save()
     print(json.dumps({'effect': 'unverifiable'}))
 elif tool in ('click', 'type_text'):
@@ -956,26 +985,130 @@ class RefreshTest(FakeOutlookCase):
     READ_BODY = msg('sender-news', 'subject-010', email='news@news.test')
     UNREAD_BODY = msg('folder-A, client-001', 'subject-011', '8:15 AM', unread=True, email='c1@client.test')
 
-    def test_busy_inbox_skips_refresh_without_changing_hidden_unread_mail(self):
+    def test_busy_inbox_refreshes_with_hidden_unread_mail_kept_unread(self):
         from lib import outlook_refresh
         hidden = msg('sender-hidden', 'subject-hidden', unread=True)
         self.given(tabs={'focused': [self.READ_BODY, self.UNREAD_BODY, hidden],
                          'other': [UNREAD]}, visible_limit=2)
         path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
-        before_queue = path.read_bytes()
         before_unread = self.unread_labels(json.loads(self.state.read_text()))
         with patch.dict(os.environ, self.env, clear=True):
             result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
                                         waits=Waits(2, 0, 0, 0, 0, 0, 0))
-        self.assertEqual((result.state, result.reason), ('skipped', 'unread_set_unverified'))
-        self.assertEqual(result.detail, 'badge=3 visible_unread=2 visible_rows=3 coverage=unconfirmed')
+        self.assertEqual((result.state, result.reason), ('succeeded', 'refreshed'))
         state = json.loads(self.state.read_text())
         self.assertEqual(self.unread_labels(state), before_unread)
-        self.assertEqual(state['selections'], [])
+        self.assertEqual(state['selections'], [self.READ_BODY['label']])
         self.assertEqual(state['moved'], [])
         self.assertNotIn('Mark Unread', state['presses'])
-        self.assertEqual(path.read_bytes(), before_queue)
-        self.assertEqual(triage.EXIT[result.state], 78)
+        self.assertIn('opened_at', json.loads(path.read_text())[0])
+        self.assertGreater(state['scrolls'], 0)
+        self.assertEqual(state['offsets'], {'focused': 0, 'other': 0})
+
+    def test_list_scrolling_preserves_selection_and_every_read_flag(self):
+        from lib.outlook_ui import Window
+        hidden = msg('sender-hidden', 'subject-hidden', unread=True)
+        self.given([self.READ_BODY, self.UNREAD_BODY, hidden, UNREAD],
+                   selected=self.READ_BODY['label'], visible_limit=2)
+        before = json.loads(self.state.read_text())
+        with patch.dict(os.environ, self.env, clear=True):
+            rows = Window(4242, 13, Waits(2, 0, 0, 0, 0, 0, 0)).scan_rows(lambda: True)
+        state = json.loads(self.state.read_text())
+        self.assertEqual(len(rows), 4)
+        for key in ('lists', 'selected', 'selections', 'moved', 'presses'):
+            self.assertEqual(state.get(key), before.get(key), key)
+        self.assertEqual(state['offsets'], {'only': 0})
+        self.assertGreater(state['scrolls'], 0)
+
+    def test_busy_inbox_deduplicates_overlapping_pages_and_both_tabs(self):
+        from lib import outlook_refresh
+        hidden = msg('sender-hidden', 'subject-hidden', unread=True)
+        self.given(tabs={'focused': [self.READ_BODY, self.UNREAD_BODY, hidden],
+                         'other': [self.UNREAD_BODY, UNREAD]}, visible_limit=2, badge=3)
+        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+        before = self.unread_labels(json.loads(self.state.read_text()))
+        with patch.dict(os.environ, self.env, clear=True):
+            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0))
+        self.assertEqual((result.state, result.reason), ('succeeded', 'refreshed'))
+        state = json.loads(self.state.read_text())
+        self.assertEqual(self.unread_labels(state), before)
+        self.assertEqual(state['selections'], [self.READ_BODY['label']])
+        self.assertIn('opened_at', json.loads(path.read_text())[0])
+        self.assertEqual(state['offsets'], {'focused': 0, 'other': 0})
+
+    def test_incomplete_ambiguous_and_changing_scans_skip_without_opening_mail(self):
+        from lib import outlook_refresh
+        hidden = msg('sender-hidden', 'subject-hidden', unread=True)
+        cases = [
+            ({'scroll_stuck': True}, 'coverage_incomplete'),
+            ({'read_on_scroll': [hidden['label']]}, 'coverage_changed'),
+            ({'replace_on_restore': ARRIVAL}, 'coverage_changed'),
+            ({'replace_on_first_scroll': ARRIVAL}, 'coverage_changed'),
+        ]
+        for options, reason in cases:
+            with self.subTest(reason=reason, options=options):
+                self.given([self.READ_BODY, self.UNREAD_BODY, hidden], visible_limit=2, **options)
+                path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+                queue = path.read_bytes()
+                with patch.dict(os.environ, self.env, clear=True):
+                    result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                                waits=Waits(2, 0, 0, 0, 0, 0, 0))
+                self.assertEqual((result.state, result.reason), ('skipped', 'unread_set_unverified'))
+                self.assertIn('coverage=' + reason, result.detail)
+                state = json.loads(self.state.read_text())
+                self.assertEqual(state['selections'], [])
+                self.assertEqual(state['moved'], [])
+                self.assertEqual(path.read_bytes(), queue)
+                self.assertEqual(state['offsets'].get('only', 0), 0)
+                self.assertNotIn('sender-', result.detail)
+                self.assertNotIn('subject-', result.detail)
+
+    def test_ambiguous_identity_below_first_page_skips_and_restores_top(self):
+        from lib import outlook_refresh
+        self.given([self.READ_BODY, self.UNREAD_BODY, UNREAD, UNREAD], visible_limit=2)
+        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+        before = path.read_bytes()
+        with patch.dict(os.environ, self.env, clear=True):
+            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0))
+        self.assertEqual((result.state, result.reason), ('skipped', 'unread_set_unverified'))
+        self.assertIn('coverage=coverage_identity_ambiguous', result.detail)
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state['selections'], [])
+        self.assertEqual(state['offsets'], {'only': 0})
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_coverage_deadline_skips_and_restores_top_before_any_action(self):
+        from lib.outlook_ui import Window
+        hidden = msg('sender-hidden', 'subject-hidden', unread=True)
+        self.given([self.READ_BODY, self.UNREAD_BODY, hidden, UNREAD], visible_limit=2)
+        before = json.loads(self.state.read_text())
+        closed = lambda: json.loads(self.state.read_text()).get('scrolls', 0) >= 2
+        with patch.dict(os.environ, self.env, clear=True):
+            result = triage.preserve_unread(Window(4242, 13, Waits(2, 0, 0, 0, 0, 0, 0)),
+                                           triage.Report(), lambda tabs: self.fail('action ran'), closed)
+        self.assertEqual((result.state, result.reason), ('skipped', 'unread_set_unverified'))
+        self.assertIn('coverage=coverage_deadline', result.detail)
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state['lists'], before['lists'])
+        self.assertEqual(state['selections'], [])
+        self.assertEqual(state['offsets'], {'only': 0})
+
+    def test_coverage_page_limit_skips_and_restores_a_long_list(self):
+        from lib.outlook_ui import Window
+        self.given([self.READ_BODY] + [msg('sender-news', f'subject-{n}', unread=True)
+                                     for n in range(60)], visible_limit=2)
+        before = json.loads(self.state.read_text())
+        with patch.dict(os.environ, self.env, clear=True):
+            result = triage.preserve_unread(Window(4242, 13, Waits(2, 0, 0, 0, 0, 0, 0)),
+                                           triage.Report(), lambda tabs: self.fail('action ran'), lambda: False)
+        self.assertEqual((result.state, result.reason), ('skipped', 'unread_set_unverified'))
+        self.assertIn('coverage=coverage_page_limit', result.detail)
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state['lists'], before['lists'])
+        self.assertEqual(state['selections'], [])
+        self.assertEqual(state['offsets'], {'only': 0})
 
     def test_failed_tab_switch_reports_requested_and_observed_tabs(self):
         from lib import outlook_refresh
