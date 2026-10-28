@@ -976,7 +976,8 @@ class IntakeTest(unittest.TestCase):
         with patch.object(intake, 'load_settings', return_value=load_settings(self.home)), patch.object(type(load_settings(self.home)), 'require_repo'), patch.object(intake, 'run', return_value=outcome), patch.object(email_router, 'step', return_value=0), patch('sys.stdout', new_callable=StringIO) as stdout:
             self.assertEqual(intake.main(), 1)
         receipt = stdout.getvalue().split('outlook-intake-receipt ', 1)[1]
-        self.assertEqual(json.loads(receipt), {'state': 'failed', 'reason': 'writes_failed', 'counts': {'writes_failed': 3}})
+        self.assertEqual(json.loads(receipt), {'state': 'failed', 'reason': 'writes_failed',
+                                                'counts': {'run': {'writes_failed': 3}, 'backlog': {}}})
 
     def test_main_runs_the_router_after_intake_releases_its_lock_without_changing_the_result(self):
         write_settings(self.home, ROOT, model='sonnet')
@@ -2709,6 +2710,66 @@ class IntakeTest(unittest.TestCase):
         state = json.loads((self.out() / intake.STATE).read_text())
         self.assertNotIn('intent', state['mail_unresolved'][ident(m)])
 
+    def test_receipt_splits_run_deltas_from_backlog_totals(self):
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=1)),
+                                  mail('stranger@example.test', -timedelta(minutes=10), subject='New inquiry')])
+        receipt = json.loads(intake.receipt_line(result).split(' ', 1)[1])
+        self.assertEqual((receipt['state'], receipt['reason']), (result.state, result.reason))
+        self.assertEqual(set(receipt['counts']), {'run', 'backlog'})
+        run, backlog = receipt['counts']['run'], receipt['counts']['backlog']
+        self.assertEqual((run['emails'], run['logged']), (2, 1))
+        for standing in ('unresolved_addresses', 'unresolved_messages', 'unmatched', 'hydration_pending',
+                         'calendar_copies_in_store', 'calendar_expired_total', 'mapping_missing'):
+            self.assertIn(standing, backlog)
+            self.assertNotIn(standing, run)
+        for old in ('calendar_lifecycle_unsupported', 'calendar_unresolved_expired'):
+            self.assertNotIn(old, {**run, **backlog})
+        self.assertEqual(result.counts['decoder_alarm'], run['decoder_alarm'])
+
+    def test_lead_outcomes_are_counted_from_the_disposition_on_every_run(self):
+        self.fake.intent_reply = read('new_matter', 'Wants a clinic suite.')
+        m = mail('new.doctor@practice.test', -timedelta(hours=2), name='Dana Doctor')
+        self.assertEqual(self.run_intake([m]).counts['lead_proposed'], 1)
+        again = self.run_intake([m])
+        self.assertEqual(len(self.fake.writes('propose-email-lead')), 1)
+        self.assertEqual(again.counts['lead_proposed'], 1, 'a standing proposal is still reported')
+        receipt = json.loads(intake.receipt_line(again).split(' ', 1)[1])
+        self.assertEqual(receipt['counts']['run']['lead_proposed'], 1)
+
+    def test_a_refused_lead_stays_counted_on_later_runs(self):
+        self.fake.intent_reply = read('new_matter', 'Wants a clinic suite.')
+        original = self.fake.carr
+
+        def carr(verb, args):
+            if verb == 'propose-email-lead':
+                raise intake.CarrError(code='invalid_request')
+            return original(verb, args)
+
+        self.fake.carr = carr
+        m = mail('new.doctor@practice.test', -timedelta(hours=2))
+        self.assertEqual(self.run_intake([m]).counts['lead_refused'], 1)
+        self.assertEqual(self.run_intake([m]).counts['lead_refused'], 1)
+
+    def test_known_party_outcomes_repeat_on_later_runs(self):
+        self.fake.intent_reply = read('new_matter', 'Asks about a renewal.')
+        self.fake.lead_reply = {'ok': True, 'proposed': False, 'reason': 'known_party'}
+        m = mail('known@example.test', -timedelta(hours=1))
+        self.run_intake([m])
+        self.assertEqual(self.run_intake([m]).counts['lead_known_party'], 1)
+
+    def test_logged_counts_an_email_filed_on_at_least_one_record(self):
+        original = self.fake.carr
+
+        def carr(verb, args):
+            if verb == 'log-activity' and args['ref'] == LEAD.ref:
+                raise intake.CarrError(code='subject_unresolved')
+            return original(verb, args)
+
+        self.fake.carr = carr
+        result = self.run_intake([mail(OWNER, -timedelta(hours=1), recipients='pat@example.test, lee@example.test')])
+        self.assertEqual(result.counts['logged'], 1)
+        self.assertEqual(result.counts['writes_failed'], 1)
+
     def test_a_sender_already_on_a_party_is_reported_not_proposed_again(self):
         self.fake.intent_reply = read('new_matter', 'Asks about a renewal.')
         self.fake.lead_reply = {'ok': True, 'proposed': False, 'reason': 'known_party'}
@@ -2757,7 +2818,7 @@ class IntakeTest(unittest.TestCase):
             self.assertEqual(result.counts['lead_refused'], 1)
             result = self.run_intake([m])
             self.assertEqual(result.state, 'succeeded')
-            self.assertEqual(result.counts['lead_refused'], 0)
+            self.assertEqual(result.counts['lead_refused'], 1, 'a refusal stays reported on later runs')
         for code in ('email_lead_input_invalid', 'email_lead_deal_invalid', 'email_lead_party_invalid'):
             self.assertEqual(intake._reply_error({'error': code}), 'invalid_request')
 
