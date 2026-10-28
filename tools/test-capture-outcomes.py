@@ -1,6 +1,7 @@
 """Synthetic capture outages must remain visible without releasing recordings."""
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import subprocess
@@ -33,6 +34,33 @@ class CaptureOutcomesTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.log.stop()
         self.tmp.cleanup()
+
+    def test_publish_binds_partner_evidence_receipt_and_retry_key_to_stored_source(self) -> None:
+        quote = "Move Synthetic Dental into legal"
+        report = {"deal_updates": [{"deal_id": "synthetic-deal", "candidate_id": "activity-existing",
+                  "summary": "Phase proposal", "evidence": quote,
+                  "phase_move": {"value": "legal", "started_on": None}}]}
+        requests = []
+
+        def request(_method, _url, body, _headers):
+            requests.append(body)
+            return 200, {"candidate_ids": ["phase-receipt"]}
+
+        for extra in ("", " Another sentence."):
+            bridge.post_call.write_private(self.session / bridge.post_call.REPORT_FILE, report)
+            bridge.post_call.write_private(self.session / "transcript.json",
+                                           {"segments": [{"speaker": "Joe", "text": quote + extra}]})
+            shaped = bridge.post_call.sanitized_candidates(self.session)
+            with patch.object(bridge, "http_request", side_effect=request):
+                self.assertTrue(bridge.post_batch(self.cfg, self.session, "/capture/candidates",
+                                                shaped["legacy_items"], shaped["bindings"], "legacy"))
+        first, second = requests
+        source = first["evidence_sources"][0]
+        self.assertEqual(source["speaker"], "joe")
+        self.assertEqual(source["quote_sha256"], hashlib.sha256(quote.encode()).hexdigest())
+        self.assertNotEqual(source["source_sha256"], second["evidence_sources"][0]["source_sha256"])
+        self.assertNotEqual(first["idempotency_key"], second["idempotency_key"])
+        self.assertNotIn("segments", json.dumps(first))
 
     def test_poll_distinguishes_verified_pending_from_unavailable(self) -> None:
         with patch.object(bridge, "http_request", return_value=(200, {"state": "recording", "meeting_record": None})):

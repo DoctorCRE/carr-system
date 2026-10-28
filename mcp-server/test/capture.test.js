@@ -389,6 +389,55 @@ test("candidate batches are atomic at validation, idempotent, and never auto-wri
   assert.equal(typeof queue.candidates[0].created_at, "string");
 });
 
+test("post-call evidence receipts persist independently of model payload and bind retries", async () => {
+  const db = new CaptureFake();
+  const r = rig(db);
+  const claimedResponse = await r.handler.fetch(claimRequest(validPostCallClaim),
+    { CAPTURE_TOKENS: '{"mac-studio":"device-secret"}' });
+  const token = (await claimedResponse.json()).session_token;
+  const source = { quote_sha256: "a".repeat(64), source_sha256: "b".repeat(64), speaker: "joe" };
+  const item = { kind: "phase_move", payload: { deal: ids.deal, field: "phase", value: "legal" },
+    evidence_quote: "Move Deal Alpha into legal", confidence: 1 };
+  const batch = { session_token: token, idempotency_key: "00000571-0000-4000-8000-000000000101",
+    items: [item], evidence_sources: [source] };
+  const response = await post(r.handler, "/capture/candidates", batch);
+  assert.equal(response.status, 200);
+  assert.deepEqual(db.candidates[0].payload.evidence_source, source);
+  const replay = await post(r.handler, "/capture/candidates", batch);
+  assert.equal(replay.status, 200);
+  assert.equal(db.candidates.length, 1);
+  const changed = await post(r.handler, "/capture/candidates", {
+    ...batch, evidence_sources: [{ ...source, speaker: "dell" }],
+  });
+  assert.equal(changed.status, 409);
+  assert.equal((await changed.json()).error, "key_reuse");
+  const injected = await post(r.handler, "/capture/candidates", {
+    ...batch, idempotency_key: "00000571-0000-4000-8000-000000000102",
+    items: [{ ...item, payload: { ...item.payload, evidence_source: source } }],
+  });
+  assert.equal(injected.status, 400);
+  assert.equal(db.candidates.length, 1);
+});
+
+test("capture refuses malformed evidence receipts and ordinary-session attestations", async () => {
+  const { db, r, token } = await claimed();
+  const item = { kind: "phase_move", payload: { deal: ids.deal, field: "phase", value: "legal" },
+    evidence_quote: "Move Deal Alpha into legal", confidence: 1 };
+  const source = { quote_sha256: "a".repeat(64), source_sha256: "b".repeat(64), speaker: "joe" };
+  const batch = { session_token: token, idempotency_key: "00000571-0000-4000-8000-000000000103", items: [item] };
+  for (const evidence_sources of [{}, [], [source, source], [false],
+    [{ ...source, speaker: "client" }], [{ ...source, quote_sha256: "invalid" }],
+    [{ ...source, source_sha256: null }], [{ ...source, text: "raw call text" }]]) {
+    const response = await post(r.handler, "/capture/candidates", { ...batch, evidence_sources });
+    assert.equal(response.status, 400, JSON.stringify(evidence_sources));
+    assert.equal((await response.json()).error, "invalid_evidence_sources");
+  }
+  const response = await post(r.handler, "/capture/candidates", { ...batch, evidence_sources: [source] });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error, "not_post_call_session");
+  assert.equal(db.candidates.length, 0);
+});
+
 test("post-call note activities require exact active deal UUIDs and reject malformed phase moves", async () => {
   const db = new CaptureFake();
   const r = rig(db);
