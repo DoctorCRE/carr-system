@@ -410,9 +410,11 @@ class PreflightQuitTest(FakeOutlookCase):
         self.given(windows=strips + [ORDINARY], after_launch=strips + [ORDINARY])
         self.assertIsNone(self.prepare())
 
-    def test_mailbox_with_suffixed_compose_preserves_restart(self):
+    def test_mailbox_with_suffixed_compose_prevents_restart(self):
         self.given(windows=[ORDINARY, COMPOSE | {'title': f'Draft • {ACCOUNT}'}])
-        self.assertIsNone(self.prepare())
+        outcome = self.prepare()
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+        self.assert_no_restart()
 
     def test_lone_draft_is_refused_without_quitting(self):
         self.given(windows=[COMPOSE | {'title': f'Draft • {ACCOUNT}'}])
@@ -554,6 +556,36 @@ class PreflightQuitTest(FakeOutlookCase):
                 self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
                 self.assert_no_restart()
 
+    def test_unreadable_untitled_size_does_not_identify_a_draft(self):
+        unknown = window(15, '', 501, 500, False)
+        self.given(windows=[ORDINARY, unknown], unresolved_window_ids=[15])
+        self.assertIsNone(self.prepare())
+        self.assertEqual(len(self.called('open')), 1)
+
+    def test_unreadable_titled_draft_prevents_restart(self):
+        from lib.outlook_ui import cua
+        self.given(windows=[ORDINARY, COMPOSE | {'title': f'Draft • {ACCOUNT}'}])
+        def unreadable_draft(tool, arguments):
+            if tool == 'get_window_state' and arguments['window_id'] == 14:
+                return {'elements': [], 'degraded_reason': 'ax_window_unresolved'}
+            return cua(tool, arguments)
+        with patch('lib.outlook_ui.cua', side_effect=unreadable_draft):
+            outcome = self.prepare()
+        self.assertIsNotNone(outcome)
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+        self.assert_no_restart()
+
+    def test_unknown_controls_do_not_identify_a_draft(self):
+        from lib.outlook_ui import cua
+        self.given(windows=[ORDINARY, UNTITLED_OFFSCREEN])
+        def unknown_window(tool, arguments):
+            if tool == 'get_window_state' and arguments['window_id'] == 15:
+                return {'elements': [{'role': 'AXButton', 'label': 'Help'}]}
+            return cua(tool, arguments)
+        with patch('lib.outlook_ui.cua', side_effect=unknown_window):
+            self.assertIsNone(self.prepare())
+        self.assertEqual(len(self.called('open')), 1)
+
     def test_offscreen_unassigned_shape_with_draft_controls_prevents_restart(self):
         self.given(windows=[ORDINARY, UNTITLED_OFFSCREEN], draft_window_ids=[15])
         outcome = self.prepare()
@@ -576,7 +608,7 @@ class PreflightQuitTest(FakeOutlookCase):
     def test_unresolved_mailbox_candidate_prevents_restart(self):
         self.given(windows=[ORDINARY], unresolved_window_ids=[13])
         outcome = self.prepare()
-        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'no_usable_main_window'))
         self.assert_no_restart()
 
     def test_draft_opened_after_menu_quit_prevents_fallback_and_relaunch(self):
@@ -594,22 +626,12 @@ class ComposeWindowTest(unittest.TestCase):
     def test_observed_untitled_offscreen_window_does_not_block_preflight(self):
         self.assertFalse(is_compose_window(UNTITLED_OFFSCREEN))
 
-    def test_subjectless_and_resized_drafts_still_block_preflight(self):
-        for title in ('', None, 'UNTITLED', 'subject-000'):
+    def test_titled_drafts_are_identified_without_size_only_inference(self):
+        for title in ('', None, 'UNTITLED', 'subject-000', f'Draft • {ACCOUNT}'):
             for width, height in ((917, 911), (500, 501), (501, 500)):
                 with self.subTest(title=title, width=width, height=height):
                     draft = window(16, title, width, height, None) | {'is_on_screen': False}
-                    self.assertTrue(is_compose_window(draft))
-        for draft in (UNTITLED_OFFSCREEN | {'is_on_screen': True},
-                      UNTITLED_OFFSCREEN | {'on_current_space': False},
-                      UNTITLED_OFFSCREEN | {'on_current_space': True},
-                      UNTITLED_OFFSCREEN | {'title': 'subject-000'},
-                      UNTITLED_OFFSCREEN | {'title': 'UNTITLED'}, UNTITLED_OFFSCREEN | {'title': None},
-                      {k: v for k, v in UNTITLED_OFFSCREEN.items() if k != 'is_on_screen'},
-                      {k: v for k, v in UNTITLED_OFFSCREEN.items() if k != 'on_current_space'},
-                      window(16, '', 500, 500)):
-            with self.subTest(draft=draft):
-                self.assertTrue(is_compose_window(draft))
+                    self.assertEqual(is_compose_window(draft), bool(title))
 
 
 class OutlookTriageTest(FakeOutlookCase):
@@ -781,7 +803,8 @@ class OutlookTriageTest(FakeOutlookCase):
         self.assertEqual(self.settled().read_text(), 'skipped user_active\n')
 
     def test_observed_untitled_offscreen_window_allows_triage(self):
-        self.given([FILE_A], windows=[TOOLBAR, ORDINARY, UNTITLED_OFFSCREEN])
+        self.given([FILE_A], windows=[TOOLBAR, ORDINARY, UNTITLED_OFFSCREEN],
+                   unresolved_window_ids=[15], after_launch=[TOOLBAR, ORDINARY, UNTITLED_OFFSCREEN])
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('succeeded', 'filed'))
         self.assertEqual(state['moved'], [[FILE_A['label'], 'folder-A']])
@@ -928,6 +951,21 @@ class RefreshTest(FakeOutlookCase):
                 self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
                 self.assertNotIn('opened_at', json.loads(path.read_text())[0])
                 self.assert_no_restart()
+
+    def test_unreadable_untitled_offscreen_window_allows_refresh(self):
+        from lib import outlook_refresh
+        self.given([self.READ_BODY], windows=[TOOLBAR, ORDINARY, UNTITLED_OFFSCREEN],
+                   unresolved_window_ids=[15], after_launch=[TOOLBAR, ORDINARY, UNTITLED_OFFSCREEN])
+        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+        with patch.dict(os.environ, self.env, clear=True):
+            outcome = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                          waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                                          now_fn=lambda: EVENING.replace(hour=10))
+        self.assertEqual((outcome.state, outcome.reason), ('succeeded', 'refreshed'))
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state['selections'], [self.READ_BODY['label']])
+        self.assertEqual(state['moved'], [])
+        self.assertIn('opened_at', json.loads(path.read_text())[0])
 
     def test_refresh_worker_placement_and_entry_share_intake_host(self):
         catalog = json.loads((ROOT / 'ops/config/services.json').read_text())['services']

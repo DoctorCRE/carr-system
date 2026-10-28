@@ -140,18 +140,16 @@ def is_main_window(window: dict) -> bool:
 
 
 def is_compose_window(window: dict) -> bool:
-    """Protect possible drafts, except the observed unassigned off-screen window.
-
-    The 500x500 window has an empty title and unknown purpose; AX did not resolve it.
-    Keep all other sizeable non-mailbox windows protected, even without a subject.
-    """
+    """Identify titled drafts, retaining the observed unassigned-window exemption."""
     bounds = window.get('bounds') or {}
     if (window.get('title') == '' and bounds.get('width') == 500
             and bounds.get('height') == 500 and window.get('is_on_screen') is False
             and 'on_current_space' in window and window['on_current_space'] is None):
         return False
-    return (not is_main_window(window) and bounds.get('width', 0) >= 400
-            and bounds.get('height', 0) >= 400)
+    title = window.get('title') or ''
+    return bool(re.match(r'^(?:Draft|Compose|New (?:Mail|Message))(?: • |$)', title, re.I)
+                or (title and not is_main_window(window) and bounds.get('width', 0) >= 400
+                    and bounds.get('height', 0) >= 400))
 
 
 def is_ordinary_main_window(window: dict) -> bool:
@@ -207,8 +205,8 @@ def _compose_window_open(pid: int, windows: list[dict]) -> bool:
                                          'include_screenshot': False, 'max_elements': LIST_WALK})
         controls = {(element.get('role'), element.get('label'))
                     for element in state.get('elements') or []}
-        if (str(state.get('degraded_reason') or '').startswith('ax_window_unresolved')
-                or not {('AXButton', 'New Mail'), ('AXTable', 'Message List')} <= controls):
+        if (not str(state.get('degraded_reason') or '').startswith('ax_window_unresolved')
+                and ({('AXButton', 'Send'), ('AXTextField', 'Subject')} & controls)):
             return True
     return False
 
