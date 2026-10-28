@@ -1,0 +1,22 @@
+{
+  "schema": "carr-email-thread-filings.v1",
+  "version": "1.0.0",
+  "card": "WR441.S10.J2",
+  "transport": "Authenticated MCP list-email-thread-filings and undo-email-thread-filing",
+  "read": {
+    "access": "Verified human partners see only filings owned by their captured mailbox, or by the deal owner when mailbox ownership is absent.",
+    "fields": {
+      "event_id": "Filing event UUID, supplied to undo",
+      "deal": "Filed deal UUID",
+      "activity_id": "Source activity UUID",
+      "recorded_at": "Filing event timestamp",
+      "summary": "Source activity summary",
+      "subject": "Source email subject, null when unavailable",
+      "sender_name": "Source email sender display name, null when unavailable",
+      "occurred_at": "Source email timestamp",
+      "activity_version": "Activity version recorded at filing, null for legacy events"
+    }
+  },
+  "undo": "Send event_id and a new idempotency_key to undo-email-thread-filing. The server checks the recorded version and later filing events. Legacy events have no recorded version; the server still checks later events and the current deal. Refusals leave the filing intact.",
+  "consumer_adoption": "The app must pin the producer and update contracts/carr-interface.v1.json before displaying these fields. Do not infer missing email fields or activity versions."
+}

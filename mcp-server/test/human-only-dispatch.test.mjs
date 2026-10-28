@@ -127,6 +127,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "set-prospect-engagement-status",
     "submit-email-draft",
     "undo-call",
+    "undo-email-thread-filing",
     "undo-invoice-close",
     "undo-lead-move",
   ]);

@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -14,7 +15,8 @@ from datetime import date
 from local_jobs import append, command, locked, path_at, read_latest, stamp, tail
 
 SOURCE = Path(__file__).resolve().parents[1]
-KINDS = {"job_failed", "disk_low"}
+KINDS = {"job_failed", "job_degraded", "disk_low"}
+RECEIPT = re.compile(r"^([a-z][a-z-]*-receipt) (\{.*\})$")
 SOCIAL_BATCH_REPORT_KEY = "job_failed:social-batch-weekly:batch-output"
 SOCIAL_BATCH_FAILURES = {"no_output", "zero_drafts", "zero_duration"}
 
@@ -40,28 +42,55 @@ def collect(root, config):
         if label not in statuses:
             continue
         code = statuses[label]
-        log_line = ""
-        if code:
-            for key in ("StandardErrorPath", "StandardOutPath"):
-                configured = definition.get(key)
-                if not configured:
-                    continue
-                log = Path(configured.replace("{{REPO}}", str(root)).replace("{{HOME}}", str(Path.home()))).expanduser()
-                try:
-                    lines = [line.strip() for line in tail(log, config["thresholds"]["log_tail_bytes"]).splitlines() if line.strip()]
-                except OSError:
-                    continue
-                if lines:
-                    log_line = lines[-1]
-                    break
-        jobs.append({"label": label, "exit_code": code, "log_line": log_line})
+        log_line, degraded = "", None
+        for key in ("StandardErrorPath", "StandardOutPath"):
+            configured = definition.get(key)
+            if not configured:
+                continue
+            log = Path(configured.replace("{{REPO}}", str(root)).replace("{{HOME}}", str(Path.home()))).expanduser()
+            try:
+                lines = [line.strip() for line in tail(log, config["thresholds"]["log_tail_bytes"]).splitlines() if line.strip()]
+            except OSError:
+                continue
+            if lines:
+                log_line = lines[-1] if code else ""
+                degraded = degraded_receipt(lines)
+                break
+        jobs.append({"label": label, "exit_code": code, "log_line": log_line, "degraded": degraded})
     total, _, free = shutil.disk_usage(root)
     return {"jobs": jobs, "disk_free_percent": free / total * 100}
+
+
+def degraded_receipt(lines):
+    """The latest receipt of each kind; a degraded one names its reason and rates.
+
+    A degraded job keeps exiting 0 after its first alarm, so its exit status
+    alone would clear the finding while the degradation continues.
+    """
+    latest = {}
+    for line in lines:
+        match = RECEIPT.match(line)
+        if match:
+            try:
+                latest[match.group(1)] = json.loads(match.group(2))
+            except ValueError:
+                continue
+    for receipt in latest.values():
+        if isinstance(receipt, dict) and receipt.get("state") == "degraded":
+            counts = receipt.get("counts") if isinstance(receipt.get("counts"), dict) else {}
+            rates = ", ".join(f"{k[:-3].removeprefix('decoder_')} {v / 100:.1f}%" for k, v in counts.items()
+                              if k.endswith("_bp") and type(v) is int)
+            return f"({receipt.get('reason')}): {rates or 'no rates reported'}"
+    return None
 
 
 def detect(facts):
     found = []
     for job in facts["jobs"]:
+        if job.get("degraded"):
+            label = job["label"]
+            found.append({"key": f"job_degraded:{label}", "kind": "job_degraded", "subject": label,
+                          "reason": f"{label} degraded {job['degraded']}"})
         if job["exit_code"]:
             label, code = job["label"], job["exit_code"]
             found.append({"key": f"job_failed:{label}:exit_{code}", "kind": "job_failed",

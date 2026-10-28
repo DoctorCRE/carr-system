@@ -135,13 +135,16 @@ jobs:
           if applied and applied not in declared:
               raise SystemExit(f"production applied Durable Object migration {applied!r}, which wrangler.toml does not declare")
           print(f"pending={'true' if declared and applied != declared[-1] else 'false'}")
+          print(f"applied={applied or ''}")
           PY
 
-      - name: Refuse an unapproved Durable Object migration
+      - name: Check automatic Durable Object migration eligibility
         if: steps.do_migration.outputs.pending == 'true' && !inputs.apply_durable_object_migration
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          APPLIED_TAG: ${{ steps.do_migration.outputs.applied }}
         run: |
-          echo "::error::wrangler.toml declares a Durable Object migration production has not applied. 'versions upload' cannot apply it. Check that the routes in mcp-server/wrangler.toml match production's custom domains, then run this workflow by hand with apply_durable_object_migration ticked."
-          exit 1
+          python ops/deploy-do-migration-check.py mcp-server/wrangler.toml "$APPLIED_TAG" "$ACCOUNT_ID" https://api.cloudflare.com/client/v4
 
       # Migrate only after every check that can still stop the deploy, so a
       # refused run never leaves the database ahead of the serving Worker.
@@ -151,7 +154,7 @@ jobs:
         run: python tools/migrate.py --apply --yes
 
       - name: Deploy with the Durable Object migration (100% of traffic)
-        if: steps.do_migration.outputs.pending == 'true' && inputs.apply_durable_object_migration
+        if: steps.do_migration.outputs.pending == 'true'
         id: full_deploy
         uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
         with:

@@ -3,6 +3,7 @@
 import importlib.util
 import io
 import json
+import re
 from pathlib import Path
 import sys
 import subprocess
@@ -16,13 +17,14 @@ from lib.rule_cards import CardSelector, load_cards
 
 
 class CardTests(unittest.TestCase):
-    def test_durable_corrections_use_guidance_pull_requests(self):
-        wording = next(c['wording'] for c in load_cards() if c['id'] == 'K12')
-        for phrase in ('CLAUDE.md', 'AGENTS.md', 'skill', 'PR',
-                       'proposals bind nobody until merged',
-                       'quote both, offer a skill'):
-            self.assertIn(phrase, wording)
-        self.assertNotIn('teach', wording)
+    def test_durable_corrections_become_team_memory_proposals(self):
+        cards = {c['id']: c['wording'] for c in load_cards()}
+        for card in ('K12', 'A10'):
+            self.assertIn('team-memory convention', cards[card])
+            self.assertIn('until Joe or Dell adopts', cards[card])
+            self.assertNotIn(' in a PR', cards[card])
+        self.assertIn('quote both, offer a skill', cards['K12'])
+        self.assertNotIn('teach', cards['K12'])
 
     def test_runnable_steps_use_real_values_and_warn_before_secret_output(self):
         wording = next(c['wording'] for c in load_cards() if c['id'] == 'K09')
@@ -33,6 +35,16 @@ class CardTests(unittest.TestCase):
     def test_boot_pages_match_card_source(self):
         subprocess.run([sys.executable, str(REPO / 'ops/sync-core-rule-cards.py'), '--check'],
                        check=True, cwd=REPO)
+
+    def test_boot_pages_carry_the_server_attach_line(self):
+        source = (REPO / 'mcp-server/src/doctrine.js').read_text()
+        line = json.loads(re.search(r'^export const MEMORY_ATTACH_LINE = (".+");$', source, re.M)[1])
+        self.assertIn('attach-memory', line)
+        for page in ('CLAUDE.md', 'AGENTS.md'):
+            with self.subTest(page=page):
+                text = (REPO / page).read_text()
+                self.assertIn(line + '\n', text)
+                self.assertNotIn('No boot fetch is required', text)
 
     def test_guidance_checker_rejects_missing_paths(self):
         script = REPO / 'ops/sync-core-rule-cards.py'

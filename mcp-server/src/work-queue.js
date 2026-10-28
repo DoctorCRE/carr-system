@@ -16,6 +16,87 @@ export function queueCardId(ref, ordinal, number) {
     .replace('{work_request}', work_request).replace('{slice}', ordinal).replace('{job}', number);
 }
 
+// A PR belongs to a job through a "Card: WRn.Sm.Jk" line in its body, and stage is derived from those PRs live.
+// The one stored fact is a job's first observed merged or closed state (`finished`), so the search only has to
+// span unfinished jobs and a finished job keeps its stage after its PR leaves GitHub's 100-result window.
+export const PULL_REQUEST_TTL_MS = 60_000;
+// Building is the only stage a job can stall in without anyone else holding it. Codex jobs run in hours, so a day
+// with no push to the open draft means stalled. Queued jobs wait their priority turn (dispatch-job starts nothing),
+// and review and merge wait on others, so none of those is ever stale.
+export const STALE_AFTER_MS = 24 * 3_600_000;
+const CARD_LINE = /^Card:[ \t]*(WR\d+\.S\d+\.J\d+)\b/gmu;
+const unavailablePullRequests = async repos => repos.map(repo => ({ repo, state: 'unavailable', reason: 'no_github_reader', prs: [] }));
+
+// One GitHub search per repository per TTL, shared by every caller in this isolate; failures are cached too.
+// `since` bounds it to PRs updated on or after the oldest unfinished job's day: a card ID does not exist until
+// dispatch-job mints it, so any PR carrying one was created or edited after that, and older PRs cannot fill the window.
+// The cache is keyed by repository and bound day, so no caller receives a narrower window than it asked for.
+export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...a), now = Date.now, ttlMs = PULL_REQUEST_TTL_MS }) {
+  const memo = new Map();
+  async function search(repo, since) {
+    if (!token) return { repo, state: 'unavailable', reason: 'credential_not_configured', prs: [] };
+    const bound = since ? ` updated:>=${since.slice(0, 10)}` : '';
+    const query = new URLSearchParams({ q: `repo:${repo} is:pr in:body "Card: WR"${bound}`, sort: 'updated', order: 'desc', per_page: '100' });
+    try {
+      const response = await fetchImpl(`https://api.github.com/search/issues?${query}`, { headers: {
+        accept: 'application/vnd.github+json', authorization: `Bearer ${token}`, 'user-agent': 'carr-mcp-work-queue', 'x-github-api-version': '2022-11-28' } });
+      if (!response.ok) return { repo, state: 'unavailable', reason: `github_http_${response.status}`, prs: [] };
+      const body = await response.json();
+      const prs = body.items.flatMap(item => {
+        const cards = [...new Set([...String(item.body ?? '').matchAll(CARD_LINE)].map(match => match[1]))];
+        return cards.length ? [{ repo, number: item.number, url: item.html_url, title: item.title, draft: item.draft === true, updated_at: item.updated_at,
+          state: item.pull_request?.merged_at ? 'merged' : item.state === 'open' ? 'open' : 'closed', cards }] : [];
+      });
+      return { repo, state: 'ok', observed_at: new Date(now()).toISOString(), truncated: body.total_count > body.items.length, prs };
+    } catch { return { repo, state: 'unavailable', reason: 'github_unreachable', prs: [] }; }
+  }
+  return (repos, since) => Promise.all(repos.map(repo => {
+    const key = `${repo} ${since?.slice(0, 10) ?? ''}`;
+    const hit = memo.get(key);
+    if (hit && now() - hit.at < ttlMs) return hit.value;
+    const value = search(repo, since);
+    for (const [old, entry] of memo) if (now() - entry.at >= ttlMs) memo.delete(old);
+    memo.set(key, { at: now(), value });
+    return value;
+  }));
+}
+
+let isolateSource;
+export function isolatePullRequests(token) {
+  if (!isolateSource || isolateSource.token !== token) isolateSource = { token, read: createPullRequestSource({ token }) };
+  return isolateSource.read;
+}
+
+export function jobStage(prs) {
+  const open = prs.filter(pr => pr.state === 'open');
+  if (open.some(pr => !pr.draft)) return 'review';
+  if (open.length) return 'build';
+  if (prs.some(pr => pr.state === 'merged')) return 'merged';
+  return prs.length ? 'closed' : 'queued';
+}
+
+export function queueView(rows, sources, at) {
+  const byCard = new Map();
+  for (const pr of sources.flatMap(source => source.prs)) for (const card of pr.cards) {
+    const { cards, ...fact } = pr;
+    byCard.set(card, [...(byCard.get(card) ?? []), { ...fact, card_id: `${card}.${addressFormat.repositories[pr.repo]}#${pr.number}` }]);
+  }
+  // A stall is only claimed when every repository answered in full: an unreadable or truncated one may hold the newer push.
+  const complete = sources.every(source => source.state === 'ok' && !source.truncated);
+  const finishes = [];
+  const jobs = rows.map(({ work_request_id, created_at, finished, ...row }) => {
+    const card_id = queueCardId(row.work_request, row.slice_ordinal, row.j_number);
+    const live = byCard.get(card_id) ?? [];
+    const prs = live.length || !finished ? live : finished.prs;
+    const stage = live.length || !finished ? jobStage(live) : finished.stage;
+    if (complete && !finished && (stage === 'merged' || stage === 'closed'))
+      finishes.push({ key: [work_request_id, row.slice_ordinal, row.j_number], finished: { stage, prs } });
+    const since = stage === 'build' ? Math.max(...prs.filter(pr => pr.state === 'open').map(pr => Date.parse(pr.updated_at))) : NaN;
+    return { ...row, card_id, created_at: new Date(created_at).toISOString(), stage, stale: complete && at - since >= STALE_AFTER_MS, prs };
+  });
+  return { jobs, finishes, github: sources.map(({ prs, ...source }) => source) };
+}
+
 export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
   const refuse = error => { throw new ToolError({ error }); };
   const validate = (args, properties, required) => {
@@ -34,7 +115,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
     if (!row) refuse('work_request_not_found');
     return row;
   };
-  const ordered = async (c, actor) => (await c.query(`select j.*,w.ref as work_request from ops.work_request_job j
+  const ordered = async (c, actor) => (await c.query(`select j.*,w.ref as work_request,w.title as work_request_title from ops.work_request_job j
     join ops.work_request w on w.id=j.work_request_id where w.organization_tenant_id=$1
     and ${readableWorkRequestSql('w')} order by j.priority,w.ref,j.slice_ordinal,j.j_number`, [organizationTenantForActor(actor)])).rows;
   const command = (name, description, extra, required, run, schema = {}) => {
@@ -112,12 +193,20 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         }
         return { card_id: queueCardId(wr.ref, args.slice || 1, args.job), priority: slots[args.position - 1] };
       }),
-    'work-queue': { write: false, description: 'Read all visible job facts in priority order with stable card IDs. The board resolves PRs and stages live.',
+    'work-queue': { write: false, description: 'Read all visible jobs in priority order with stable card IDs, Work Request titles, and stage, PRs, and staleness derived from Card lines on GitHub pull requests.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       handler: async (c, actor, args) => {
         validate(args, {}, []);
-        return { ok: true, jobs: (await ordered(c, actor)).map(({ work_request_id, ...row }) => ({ ...row,
-          card_id: queueCardId(row.work_request, row.slice_ordinal, row.j_number) })) };
+        const rows = await ordered(c, actor);
+        const oldest = rows.filter(row => !row.finished).reduce((min, row) => Math.min(min, new Date(row.created_at).getTime()), Infinity);
+        const sources = await (c.pullRequests ?? unavailablePullRequests)(Object.keys(addressFormat.repositories),
+          Number.isFinite(oldest) ? new Date(oldest).toISOString() : undefined);
+        const { finishes, ...view } = queueView(rows, sources, Date.now());
+        // One conditional single-row update per newly finished job, on the reader route's optional side connection:
+        // it runs only on the first observation, writes no audit row, and a lost write is redone by the next read.
+        for (const { key, finished } of finishes) c.sideWrite?.(`update ops.work_request_job set finished=$4::jsonb
+          where work_request_id=$1 and slice_ordinal=$2 and j_number=$3 and finished is null`, [...key, JSON.stringify(finished)]);
+        return { ok: true, stale_after_hours: STALE_AFTER_MS / 3_600_000, ...view };
       } },
   };
 }

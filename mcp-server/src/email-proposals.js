@@ -151,6 +151,58 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         return { ok: true, status: 'confirmed', deal: target.id, activity_id: row.activity_id };
       }),
     },
+    'list-email-thread-filings': {
+      write: false,
+      description: 'List the authenticated partner’s automatic email thread filings with source subject, sender name, email time, event ID and recorded activity version (null for legacy events). Undo uses event_id and an idempotency key.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      handler: async (c, actor) => {
+        if (actor.human !== true || !['joe','dell'].includes(actor.slug)) fail('partner_confirmation_required');
+        const { rows } = await c.query(`select e.id as event_id,e.subject_id as deal,
+          e.new_value->>'activity_id' as activity_id,e.recorded_at,a.summary,
+          a.email_context->>'subject' as subject,a.email_context->'sender'->>'name' as sender_name,
+          a.occurred_at,(e.new_value->>'activity_version')::integer as activity_version
+          from v_email_thread_filing_event e join activity a on a.id::text=e.new_value->>'activity_id'
+          where e.verb='inherit-email-thread' and (a.email_source->>'mailbox_owner'=$1 or
+            (a.email_source->>'mailbox_owner' is null and exists
+              (select 1 from deal d where d.id=e.subject_id and d.owner=$1)))
+          and not exists (select 1 from v_email_thread_filing_event u where u.verb='undo-email-thread-filing'
+            and u.new_value->>'event_id'=e.id::text)
+          order by e.mutation_order desc`, [actor.slug]);
+        return { filings: rows };
+      },
+    },
+    'undo-email-thread-filing': {
+      write: true, humanOnly: true, humanCallerOnly: true,
+      description: 'Undo one automatic thread filing and suppress automatic re-filing of the email.',
+      inputSchema: { type: 'object', additionalProperties: false, required: ['idempotency_key','event_id'],
+        properties: { idempotency_key: { type: 'string', minLength: 1, maxLength: 200 },
+          event_id: { type: 'string', format: 'uuid' } } },
+      handler: (c, actor, args) => withEnvelope(c, actor, 'undo-email-thread-filing', args, async () => {
+        if (actor.human !== true || !['joe','dell'].includes(actor.slug)) fail('partner_confirmation_required');
+        const filing = (await c.query(`select e.id,e.subject_id,e.new_value,e.mutation_order,
+          a.email_source->>'mailbox_owner' as mailbox_owner,
+          (select d.owner from deal d where d.id=e.subject_id) as deal_owner
+          from v_email_thread_filing_event e join activity a on a.id::text=e.new_value->>'activity_id'
+          where e.id=$1 and e.verb='inherit-email-thread' for update of a`, [args.event_id])).rows[0];
+        if (!filing) fail('email_thread_filing_not_found');
+        const owner = filing.mailbox_owner ?? filing.deal_owner;
+        if (!owner) fail('email_thread_filing_owner_unknown');
+        if (owner !== actor.slug) fail('email_thread_filing_not_found');
+        const activity = (await c.query('select deal_id,version from activity where id=$1', [filing.new_value.activity_id])).rows[0];
+        const later = (await c.query(`select 1 from v_email_thread_filing_event where mutation_order>$1 and
+          verb in ('inherit-email-thread','confirm-email-filing','undo-email-thread-filing')
+          and new_value->>'activity_id'=$2 limit 1`, [filing.mutation_order,filing.new_value.activity_id])).rows.length;
+        if (later || activity.deal_id !== filing.subject_id ||
+            (filing.new_value.activity_version != null && activity.version !== filing.new_value.activity_version))
+          fail('email_thread_filing_changed');
+        await c.query('update activity set deal_id=null,version=version+1,updated_by=$2,updated_at=now() where id=$1',
+          [filing.new_value.activity_id,actor.id]);
+        await writeEvent(c, actor, 'undo-email-thread-filing', 'deal', filing.subject_id,
+          { new: { event_id: filing.id, activity_id: filing.new_value.activity_id }, cause: 'human_correction',
+            idempotency_key: args.idempotency_key, recorded_at_after_lock: true });
+        return { ok: true, activity_id: filing.new_value.activity_id };
+      }),
+    },
     'inherit-email-thread': {
       write: true,
       description: 'File a reply only when server-revalidated filed thread continuity and recipient safety hold. Deal participation and client deal counts never authorize filing.',
@@ -162,6 +214,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const rows = (await c.query(`select id as activity_id,deal_id as deal,summary,email_context,occurred_at,kind
           from activity where id=any($1::uuid[]) order by id for update`, [[args.activity_id,args.thread_activity_id]])).rows;
         const people = await contacts(c);
+        if ((await c.query("select 1 from v_email_thread_filing_event where verb='undo-email-thread-filing' and new_value->>'activity_id'=$1 limit 1", [args.activity_id.toLowerCase()])).rows.length) fail('email_thread_filing_suppressed');
         const current = rows.find(r => r.activity_id === args.activity_id.toLowerCase());
         const prior = rows.find(r => r.activity_id === args.thread_activity_id.toLowerCase());
         if (!current || !prior || !prior.deal || current.kind !== 'email_in' ||
@@ -189,10 +242,11 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const deal = (await c.query(`select id,client_id from deal where id=$1 and phase<>'closed' and invoiced_on is null for share`, [prior.deal])).rows[0];
         if (!deal || [a.sender,...a.recipients].some(p => !p.internal && !previous.has(p.email)))
           fail('email_thread_recipient_changed');
-        await c.query(`update activity set deal_id=$2,version=version+1,updated_by=$3,updated_at=now() where id=$1 and deal_id is null`,
-          [current.activity_id,prior.deal,actor.id]);
+        const updated = (await c.query(`update activity set deal_id=$2,version=version+1,updated_by=$3,updated_at=now() where id=$1 and deal_id is null returning version`,
+          [current.activity_id,prior.deal,actor.id])).rows[0];
+        if (!updated) fail('email_thread_not_continuous');
         await writeEvent(c, actor, 'inherit-email-thread', 'deal', prior.deal,
-          { new: { activity_id: current.activity_id, thread_activity_id: prior.activity_id },
+          { new: { activity_id: current.activity_id, thread_activity_id: prior.activity_id, activity_version: updated.version },
             cause: 'observed', idempotency_key: args.idempotency_key });
         return { ok: true, deal: prior.deal, activity_id: current.activity_id };
       }),
@@ -339,6 +393,12 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           evidence_quote: args.evidence_quote, task_text: step || args.kind === 'possible_new_deal' ? args.text?.trim() ?? null : null,
           sender_role: matching ? args.sender_role : null, next_date: step ? args.next_date : null,
           owner: draft ? source.email_source.mailbox_owner : step ? args.owner || 'joe' : null };
+        if (row.kind === 'file_to_deal') {
+          await c.query('select id from activity where id=$1 for update', [row.activity_id]);
+          if ((await c.query(`select 1 from v_email_thread_filing_event where verb='undo-email-thread-filing'
+            and subject_id=$1 and new_value->>'activity_id'=$2 limit 1`, [row.deal_id,row.activity_id])).rows.length)
+            fail('email_thread_filing_suppressed');
+        }
         const existing = (await c.query(`select 1 from email_proposal where kind=$1 and deal_id is not distinct from $2::uuid
           and activity_id=$3 for update`, [row.kind,row.deal_id,row.activity_id])).rows.length > 0;
         if (!existing && !draft) await show(c, actor, row);
@@ -444,7 +504,10 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             next_cursor: more ? emails.at(-1).activity_id : null };
         }
         const { rows } = await c.query(`select a.id as activity_id,a.summary,a.detail as body,a.occurred_at,
-            a.email_context,a.email_source->>'mailbox_owner' as mailbox_owner,(select jsonb_build_object('party_id',p.id,'name',p.name,'email',null,
+            a.email_context,a.email_source->>'mailbox_owner' as mailbox_owner,
+            coalesce((select jsonb_agg(distinct e.subject_id) from v_email_thread_filing_event e
+              where e.verb='undo-email-thread-filing' and e.new_value->>'activity_id'=a.id::text), '[]'::jsonb) as suppressed_deals,
+            (select jsonb_build_object('party_id',p.id,'name',p.name,'email',null,
               'address_unavailable',true,'unknown',false,'internal',false) from party p where p.id=coalesce(
               (select party_id from client where id=a.client_id),(select party_id from vendor where id=a.vendor_id),
               (select party_id from lead where id=a.lead_id))) as recorded_sender,d.id as deal,d.name as deal_name,d.phase,d.deal_type
