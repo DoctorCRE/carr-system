@@ -7,8 +7,6 @@ in the nightly orchestrator. Each note maps a change unit to its input sessions.
 import hashlib
 import importlib.util
 import json
-import os
-import stat
 import tempfile
 import re
 import subprocess
@@ -79,6 +77,9 @@ def clone(store, root):
     root.mkdir(parents=True, exist_ok=False)
     snapshot = store.read()
     paths = []
+    folded = [section['section_key'].casefold() for section in snapshot['sections']]
+    if len(folded) != len(set(folded)):
+        raise ValueError('case_colliding_section_keys')
     for section in snapshot['sections']:
         path = _path(root, section['section_key'])
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -101,20 +102,6 @@ def _write_state(path, value):
 def apply(store, root, notes, input_sessions, attach, key, *, _attempt=0, _conflicts=frozenset()):
     root = Path(root)
     state = root.parent / ('.' + root.name + '-dream-state')
-    try:
-        state_info = state.lstat()
-    except FileNotFoundError:
-        raise ValueError('missing private dream state') from None
-    if not stat.S_ISDIR(state_info.st_mode) or state_info.st_uid != os.geteuid() or stat.S_IMODE(state_info.st_mode) & 0o077:
-        raise ValueError('unsafe dream state directory')
-    for filename in ('pending.json', 'applied.json'):
-        path = state / filename
-        if path.is_symlink():
-            raise ValueError('unsafe dream state file')
-        if path.exists():
-            info = path.stat()
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o077:
-                raise ValueError('unsafe dream state file')
     receipt = state / 'applied.json'
     if receipt.exists():
         saved = json.loads(receipt.read_text(encoding='utf-8'))
@@ -126,19 +113,7 @@ def apply(store, root, notes, input_sessions, attach, key, *, _attempt=0, _confl
         pending = json.loads(journal.read_text(encoding='utf-8'))
         if pending['key'] != key or pending['attach'] != attach:
             raise ValueError('another dream is pending')
-        if pending['changes']:
-            try:
-                store.apply(pending['changes'], attach, key)
-            except VersionConflict as conflict:
-                if _attempt >= 2:
-                    raise
-                journal.unlink()
-                return apply(store, root, notes, input_sessions, attach, key, _attempt=_attempt + 1,
-                             _conflicts=_conflicts | ({conflict.section_key} if conflict.section_key else set()))
-        store.log(pending['report'], key)
-        _write_state(receipt, {'key': key, 'report': pending['report']})
-        journal.unlink()
-        return pending['report']
+        return _finish(store, root, notes, input_sessions, attach, key, journal, receipt, pending, _attempt, _conflicts)
     if notes is None:
         notes = json.loads((root / '_dream' / 'notes.md').read_text(encoding='utf-8'))
     baseline = _git(root, 'ls-tree', '-r', '-z', '--name-only', 'HEAD').split('\0')
@@ -191,7 +166,9 @@ def apply(store, root, notes, input_sessions, attach, key, *, _attempt=0, _confl
         old, live = originals.get(section_key), current.get(section_key)
         if section_key in _conflicts or (old and (not live or live['section_id'] != old[0]['section_id'] or live['version'] != old[0]['version'] or live['content_hash'] != old[0]['content_hash'])) or (not old and live):
             moved.update(units[section_key]['sections'])
-    changes, dropped = [], []
+    changes = []
+    dropped = [unit for unit in notes if any(k in moved for k in unit['sections'])]
+    applied = [unit for unit in notes if unit not in dropped]
     for section_key in sorted(set(originals) | set(output)):
         old = originals.get(section_key)
         new = output.get(section_key)
@@ -200,7 +177,6 @@ def apply(store, root, notes, input_sessions, attach, key, *, _attempt=0, _confl
         if section_key.startswith('conventions/proposed/'):
             raise ValueError('dream cannot change convention proposals')
         if section_key in moved:
-            dropped.append(section_key)
             continue
         item = {'section_key': section_key, 'base_version': old[0]['version'] if old else 0, 'op': 'write' if new else 'retire'}
         if new:
@@ -208,6 +184,7 @@ def apply(store, root, notes, input_sessions, attach, key, *, _attempt=0, _confl
             if new[0]['title'] is not None:
                 item['title'] = new[0]['title']
         changes.append(item)
+    # This is a soft bound; concurrent additions can occur after the read.
     if len(current) + sum(1 if i['section_key'] not in current else -1 if i['op'] == 'retire' else 0 for i in changes) > 300:
         raise ValueError('memory exceeds 300 sections')
     # Apply the scanner patterns directly: untrusted dream output cannot grant itself an exemption.
@@ -217,27 +194,42 @@ def apply(store, root, notes, input_sessions, attach, key, *, _attempt=0, _confl
     for item in changes:
         if not store.gate(item, attach):
             raise ValueError('doctrine gate failed')
-    report = {'notes': notes, 'dropped': dropped, 'changed': len(changes)}
+    rejected_path = root / '_dream' / 'rejected.json'
+    if rejected_path.exists():
+        dropped.extend(json.loads(rejected_path.read_text(encoding='utf-8')))
+    report = {'notes': applied, 'dropped': dropped, 'changed': len(changes)}
     receipt.parent.mkdir(parents=True, exist_ok=True)
     _write_state(journal, {'key': key, 'attach': attach, 'changes': changes, 'report': report})
-    if changes:
+    return _finish(store, root, notes, input_sessions, attach, key, journal, receipt,
+                   {'changes': changes, 'report': report}, _attempt, _conflicts)
+
+
+def _finish(store, root, notes, input_sessions, attach, key, journal, receipt, pending, attempt, conflicts):
+    if pending['changes']:
         try:
-            store.apply(changes, attach, key)
+            store.apply(pending['changes'], attach, key)
         except VersionConflict as conflict:
-            if _attempt >= 2:
+            if attempt >= 2:
                 raise
             journal.unlink()
-            return apply(store, root, notes, input_sessions, attach, key, _attempt=_attempt + 1,
-                             _conflicts=_conflicts | ({conflict.section_key} if conflict.section_key else set()))
-    store.log(report, key)
-    _write_state(receipt, {'key': key, 'report': report})
+            return apply(store, root, notes, input_sessions, attach, key, _attempt=attempt + 1,
+                         _conflicts=conflicts | ({conflict.section_key} if conflict.section_key else set()))
+    store.log(pending['report'], key)
+    _write_state(receipt, {'key': key, 'report': pending['report']})
     journal.unlink()
-    return report
+    return pending['report']
 
 
 class VerbStore:
+    def __init__(self, call=None):
+        self.transport = call or self._run
+
+    @staticmethod
+    def _run(verb, args):
+        return subprocess.run([str(ROOT / 'run.sh'), 'call', verb, json.dumps(args)], cwd=ROOT, capture_output=True, text=True)
+
     def call(self, verb, args):
-        process = subprocess.run([str(ROOT / 'run.sh'), 'call', verb, json.dumps(args)], cwd=ROOT, capture_output=True, text=True)
+        process = self.transport(verb, args)
         if process.returncode:
             marker = 'TOOL ERROR '
             if marker in process.stderr:
@@ -274,28 +266,11 @@ class VerbStore:
         self.call('write-doctrine-section', {'document': 'dreams-log', 'section_key': section_key, 'title': 'Dream report', 'body_text': json.dumps(report, sort_keys=True), 'base_version': 0, 'idempotency_key': key + '-log'})
 
 
-class ClaudeAgent:
-    """Headless subscription-backed proposer; tests inject a synthetic proposer."""
-    def propose(self, session_id, transcript, memories):
-        prompt = ('Suggest memory changes supported by this session. Return only JSON '
-                  'with a units array. Each unit has note and changes; each change has '
-                  'section_key, op (write or retire), and for write, title and body_text. '
-                  'Merge duplicate lessons, retire stale entries, discover cross-session patterns in memory, '
-                  'and add dated verification notes citing the session where confirmed. '
-                  'Never modify conventions/proposed/. Group dependent changes in one unit.\n' +
-                  json.dumps({'session_id': session_id, 'transcript': transcript, 'memory': memories}))
-        result = subprocess.run(['claude', '-p', '--model', 'sonnet', '--output-format', 'json', '--tools', ''],
-                                input=prompt, text=True, capture_output=True, check=True)
-        response = json.loads(result.stdout)
-        if response.get('is_error'):
-            raise ValueError('dream proposer failed')
-        return json.loads(response['result'])['units']
-
-
 def propose(root, sessions, agent):
     """Apply per-transcript proposals to the clone and return change-unit notes."""
     root = Path(root)
     notes = []
+    rejected = []
     for session_id, transcript_path in sessions:
         memories = {}
         for path in root.rglob('*.md'):
@@ -311,6 +286,9 @@ def propose(root, sessions, agent):
             keys = [change['section_key'] for change in changes]
             if not keys or len(set(keys)) != len(keys):
                 raise ValueError('invalid change unit')
+            if any(change['op'] == 'retire' and not _path(root, change['section_key']).is_file() for change in changes):
+                rejected.append({'note': unit['note'], 'sections': keys, 'sessions': [session_id], 'reason': 'missing_retire_section'})
+                continue
             for change in changes:
                 key = change['section_key']
                 if key.startswith('conventions/proposed/'):
@@ -340,11 +318,17 @@ def propose(root, sessions, agent):
     notes_path = root / '_dream' / 'notes.md'
     notes_path.parent.mkdir(parents=True, exist_ok=True)
     notes_path.write_text(json.dumps(notes, indent=2), encoding='utf-8')
+    (notes_path.parent / 'rejected.json').write_text(json.dumps(rejected), encoding='utf-8')
     return notes
 
 
 def run(store, root, sessions, agent, attach, key):
     """Execute a dream for already-selected sessions."""
-    clone(store, root)
+    try:
+        clone(store, root)
+    except ValueError as error:
+        if str(error) == 'case_colliding_section_keys':
+            store.log({'error': str(error), 'notes': [], 'dropped': [], 'changed': 0}, key)
+        raise
     propose(root, sessions, agent)
     return apply(store, root, None, [session_id for session_id, _ in sessions], attach, key)

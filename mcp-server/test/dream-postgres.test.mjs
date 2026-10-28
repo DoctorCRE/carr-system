@@ -55,17 +55,23 @@ test('dream applies a synthetic memory consolidation in one doctrine change set'
       try {
         if (request.verb === 'change-doctrine-sections') {
           const current = await call('read-doctrine', { document: 'team-memory' });
-          assert.deepEqual(current.sections, before.sections, 'input remains unchanged before apply');
-          changes++;
+          if (changes === 0) assert.deepEqual(current.sections, before.sections, 'input remains unchanged before apply');
+          if (changes++ === 0) {
+            const target = current.sections.find(s => s.section_key === 'duplicate/1');
+            await call('write-doctrine-section', { document: 'team-memory', attach_id, section_key: target.section_key, body_text: 'concurrent edit', base_version: target.version });
+          }
         }
         child.stdin.write(JSON.stringify(await call(request.verb, request.args)) + '\n');
-      } catch (error) { child.stdin.write(JSON.stringify({ error: String(error) }) + '\n'); }
+      } catch (error) { child.stdin.write(JSON.stringify(error.payload || { error: String(error) }) + '\n'); }
     }
     await finished;
-    assert.equal(changes, 1);
-    assert.equal(report.changed, 6);
+    assert.equal(changes, 2);
+    assert.equal(report.changed, 5);
+    assert.deepEqual(report.dropped, [{ sections: ['duplicate/1'], sessions: ['synthetic-a'], note: 'duplicate' }]);
+    const log = await call('read-doctrine', { document: 'dreams-log' });
+    assert.deepEqual(JSON.parse(log.sections[0].body.text), report);
     const after = await call('read-doctrine', { document: 'team-memory' });
-    assert.deepEqual(after.sections.filter(s => s.section_key.startsWith('duplicate/')).map(s => s.section_key), ['duplicate/0']);
+    assert.deepEqual(after.sections.filter(s => s.section_key.startsWith('duplicate/')).map(s => s.section_key), ['duplicate/0', 'duplicate/1']);
     assert.equal(after.sections.some(s => s.section_key === 'stale'), false);
     assert.match(after.sections.find(s => s.section_key === 'confirmed').body.text, /Verified from session synthetic-a/);
     const row = (await c.query("select review_after from doctrine_section where section_key='confirmed'")).rows[0];

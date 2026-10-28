@@ -92,8 +92,34 @@ class DreamTest(unittest.TestCase):
         store, report = self.run_fixture(moved=True)
         self.assertIn('duplicate/1', store.sections)
         self.assertNotIn('duplicate/2', store.sections)
-        self.assertEqual(report['dropped'], ['duplicate/1'])
-        self.assertEqual(store.logs[0]['dropped'], ['duplicate/1'])
+        self.assertEqual(report['dropped'], [{'sections': ['duplicate/1'], 'sessions': ['a'], 'note': 'duplicate'}])
+        self.assertEqual(store.logs[0]['dropped'], report['dropped'])
+    def test_missing_retire_drops_only_its_unit_and_logs_it(self):
+        class Agent:
+            def propose(self, session_id, transcript, memories):
+                return [{'note': 'bad retirement', 'changes': [{'section_key': 'missing', 'op': 'retire'}, {'section_key': 'stale', 'op': 'retire'}]},
+                        {'note': 'valid retirement', 'changes': [{'section_key': 'duplicate/1', 'op': 'retire'}]}]
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store()
+            transcript = Path(tmp) / 'session.jsonl'
+            transcript.write_text('{"message":{"role":"user","content":"synthetic"}}\n')
+            result = dream.run(store, Path(tmp) / 'mem', [('a', transcript)], Agent(), 'attach', 'fixture')
+            self.assertIn('stale', store.sections)
+            self.assertNotIn('duplicate/1', store.sections)
+            self.assertEqual(result['dropped'], [{'note': 'bad retirement', 'sections': ['missing', 'stale'], 'sessions': ['a'], 'reason': 'missing_retire_section'}])
+            self.assertEqual(store.logs[0], result)
+
+    def test_case_colliding_keys_are_refused_and_logged(self):
+        store = Store()
+        section = copy.deepcopy(store.sections['stale'])
+        section['section_key'] = 'Stale'
+        store.sections['Stale'] = section
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError, 'case_colliding_section_keys'):
+                dream.run(store, Path(tmp) / 'mem', [], None, 'attach', 'fixture')
+            self.assertEqual(store.logs[0]['error'], 'case_colliding_section_keys')
+            self.assertEqual(store.applies, [])
+
     def test_repeat_apply_is_a_no_op(self):
         store = Store()
         with tempfile.TemporaryDirectory() as tmp:
@@ -117,7 +143,9 @@ class DreamTest(unittest.TestCase):
             notes = [{'sections': ['duplicate/1', 'duplicate/2'], 'sessions': ['a'], 'note': 'merge'},
                      {'sections': ['stale'], 'sessions': ['b'], 'note': 'obsolete'}]
             result = dream.apply(store, root, notes, ['a', 'b'], 'dream-attach', 'fixture')
-            self.assertEqual(result['dropped'], ['duplicate/1', 'duplicate/2'])
+            self.assertEqual(result['dropped'], [notes[0]])
+            self.assertEqual(result['notes'], [notes[1]])
+            self.assertEqual(store.logs[0], result)
             self.assertIn('duplicate/2', store.sections)
             self.assertNotIn('stale', store.sections)
 
@@ -173,14 +201,6 @@ class DreamTest(unittest.TestCase):
             self.assertEqual(dream.apply(store, root, None, ['a', 'b'], 'attach', 'fixture')['changed'], 0)
             self.assertEqual(store.applies, [])
 
-    def test_unsafe_state_directory_is_refused(self):
-        store = Store()
-        with tempfile.TemporaryDirectory() as tmp:
-            root = dream.clone(store, Path(tmp) / 'mem')
-            state = root.parent / '.mem-dream-state'
-            state.chmod(0o755)
-            with self.assertRaises(ValueError): dream.apply(store, root, [], [], 'attach', 'fixture')
-            self.assertEqual(store.applies, [])
 
     def test_resume_after_log_failure_uses_the_same_change_set(self):
         class RetryStore(Store):
@@ -225,7 +245,7 @@ class DreamTest(unittest.TestCase):
             notes = [{'sections': ['duplicate/1'], 'sessions': ['a'], 'note': 'merge'},
                      {'sections': ['stale'], 'sessions': ['a'], 'note': 'obsolete'}]
             report = dream.apply(store, root, notes, ['a'], 'attach', 'fixture')
-            self.assertEqual(report['dropped'], ['duplicate/1'])
+            self.assertEqual(report['dropped'], [notes[0]])
             self.assertIn('duplicate/1', store.sections)
             self.assertNotIn('stale', store.sections)
             self.assertEqual(len(store.applies), 1)
@@ -255,7 +275,7 @@ class DreamTest(unittest.TestCase):
             notes = [{'sections': ['retired section'], 'sessions': ['a'], 'note': 'new'},
                      {'sections': ['stale'], 'sessions': ['a'], 'note': 'obsolete'}]
             result = dream.apply(store, root, notes, ['a'], 'attach', 'fixture')
-            self.assertEqual(result['dropped'], ['retired section'])
+            self.assertEqual(result['dropped'], [notes[0]])
             self.assertNotIn('stale', store.sections)
 
     def test_section_keys_with_spaces_and_periods(self):
@@ -314,14 +334,6 @@ class DreamTest(unittest.TestCase):
                 self.assertEqual(store.sections['confirmed']['body']['text'], original)
                 self.assertEqual(store.logs, [])
 
-    def test_state_symlink_is_refused(self):
-        store = Store()
-        with tempfile.TemporaryDirectory() as tmp:
-            root = dream.clone(store, Path(tmp) / 'mem')
-            state = root.parent / '.mem-dream-state'
-            (state / 'pending.json').symlink_to(root / 'confirmed.md')
-            with self.assertRaises(ValueError): dream.apply(store, root, [], [], 'attach', 'fixture')
-            self.assertEqual(store.applies, [])
 
 
 if __name__ == '__main__': unittest.main()

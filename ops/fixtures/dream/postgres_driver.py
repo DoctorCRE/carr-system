@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import sys
+import subprocess
 from pathlib import Path
 
 repo = Path(__file__).resolve().parents[3]
@@ -14,34 +15,12 @@ def call(verb, args):
     print(json.dumps({'verb': verb, 'args': args}), flush=True)
     result = json.loads(sys.stdin.readline())
     if 'error' in result:
-        raise RuntimeError(result['error'])
-    return result
-
-
-class Store:
-    def read(self):
-        return call('read-doctrine', {'document': 'team-memory'})
-
-    def gate(self, item, attach):
-        section = next((s for s in self.read()['sections'] if s['section_key'] == item['section_key']), None)
-        args = {'document': 'team-memory', 'op': item['op'], 'attach_id': attach}
-        if section:
-            args['section_id'] = section['section_id']
-        if item['op'] == 'write':
-            args['body_text'] = item['body_text']
-        return call('dry-run-doctrine-gates', args)['result'] == 'pass'
-
-    def apply(self, items, attach, key):
-        return call('change-doctrine-sections', {'document': 'team-memory', 'attach_id': attach,
-                    'idempotency_key': key, 'items': items})
-
-    def log(self, report, key):
-        return call('write-doctrine-section', {'document': 'dreams-log', 'section_key': 'fixture',
-                    'body_text': json.dumps(report), 'base_version': 0, 'idempotency_key': key + '-log'})
+        return subprocess.CompletedProcess([], 1, '', 'TOOL ERROR ' + json.dumps(result))
+    return subprocess.CompletedProcess([], 0, json.dumps(result), '')
 
 
 attach, root = sys.argv[1:]
-store = Store()
+store = dream.VerbStore(call=call)
 root = dream.clone(store, Path(root))
 for i in range(1, 5):
     (root / f'duplicate/{i}.md').unlink()
