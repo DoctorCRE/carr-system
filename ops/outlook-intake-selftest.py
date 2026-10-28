@@ -60,7 +60,8 @@ def mail(sender, sent, subject='Suite question', body='Can we meet Thursday?', n
 
 
 def ident(m):
-    return intake.mail_identity(m['copy_key'], m['sender'], m['subject'], m['sent_unix'])[1]
+    return intake.mail_identity(m['copy_key'], m['sender'], m['subject'], m['sent_unix'],
+                                (m.get('local_keys') or '').split(',') if m.get('local_keys') else None)[1]
 
 
 def event(goid, start, minutes=60, subject='Site visit', attendees=(), organizer=('Owner', OWNER)):
@@ -1404,6 +1405,77 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual([args['email_context']['subject']
                           for _, args in self.fake.writes('log-activity')], subjects)
 
+    def seed_legacy_mail_keys(self, original, keys):
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        state.setdefault('mail_keys', {})[ident(original)] = keys
+        path.write_text(json.dumps(state))
+
+    def test_existing_receipt_is_not_replayed_when_keyed_messages_split(self):
+        original = mail('pat@example.test', -timedelta(hours=2), subject='Suite review',
+                        copy_key='normalized-suite-review')
+        self.run_intake([original])
+        self.seed_legacy_mail_keys(original, ['9100'])
+        reply = {**original, 'subject': 'Re: Suite review', 'local_keys': '9101',
+                 'sent_unix': original['sent_unix'] + 30}
+        keyed = {**original, 'local_keys': '9100'}
+        self.run_intake([reply, keyed])
+        self.assertEqual([args['email_context']['subject']
+                          for _, args in self.fake.writes('log-activity')], ['Suite review', 'Re: Suite review'])
+        self.run_intake([keyed, reply])
+        self.assertEqual(len(self.fake.writes('log-activity')), 2)
+
+    def test_missing_original_does_not_give_its_ambiguous_receipt_to_a_reply(self):
+        original = mail('pat@example.test', -timedelta(hours=2), subject='Suite review',
+                        copy_key='normalized-suite-review')
+        self.run_intake([original])
+        self.seed_legacy_mail_keys(original, ['9100', '9101'])
+        reply = {**original, 'subject': 'Re: Suite review', 'local_keys': '9101'}
+        result = self.run_intake([reply])
+        self.assertEqual((result.state, result.reason), ('failed', 'decode_failed'))
+        self.assertEqual([args['email_context']['subject']
+                          for _, args in self.fake.writes('log-activity')], ['Suite review'])
+        self.assertEqual(self.mail_keys()[ident(original)], ['9100', '9101'])
+
+    def test_legacy_key_binding_stays_with_original_after_it_leaves(self):
+        original = mail('pat@example.test', -timedelta(hours=2), subject='Suite review',
+                        copy_key='normalized-suite-review', kind='preview', body='Preview')
+        self.run_intake([original])
+        self.seed_legacy_mail_keys(original, ['9100'])
+        keyed = {**original, 'local_keys': '9100'}
+        reply = {**original, 'subject': 'Re: Suite review', 'local_keys': '9101',
+                 'sent_unix': original['sent_unix'] + 30, 'body_kind': 'full', 'body': 'A distinct reply body'}
+        self.run_intake([keyed, reply])
+        self.assertEqual(self.mail_keys()[ident(original)], ['9100'])
+        self.run_intake([reply])
+        notes = [args for _, args in self.fake.writes('log-activity') if args['kind'] == 'note']
+        self.assertEqual(notes, [])
+
+    def test_ambiguous_legacy_key_binding_refuses_new_writes(self):
+        original = mail('pat@example.test', -timedelta(hours=2), subject='Suite review',
+                        copy_key='normalized-suite-review')
+        self.run_intake([original])
+        self.seed_legacy_mail_keys(original, ['9100', '9101'])
+        result = self.run_intake([{**original, 'local_keys': '9100'},
+                                  {**original, 'local_keys': '9101', 'subject': 'Re: Suite review'}])
+        self.assertEqual((result.state, result.reason), ('failed', 'decode_failed'))
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+
+    def test_existing_preview_hydrates_from_its_keyed_row(self):
+        original = mail('pat@example.test', -timedelta(hours=2), subject='Suite review',
+                        copy_key='normalized-suite-review', kind='preview', body='Preview')
+        self.run_intake([original])
+        self.seed_legacy_mail_keys(original, ['9100'])
+        full = {**original, 'local_keys': '9100', 'body_kind': 'full', 'body': 'Complete original body'}
+        reply = {**full, 'local_keys': '9101', 'subject': 'Re: Suite review',
+                 'body': 'A distinct reply body', 'sent_unix': full['sent_unix'] + 30}
+        self.run_intake([reply, full])
+        notes = [args for _, args in self.fake.writes('log-activity') if args['kind'] == 'note']
+        self.assertEqual([args['detail'] for args in notes], ['Complete original body'])
+        self.assertEqual(notes[0]['email_context']['source_activity_id'],
+                         str(uuid.uuid5(uuid.NAMESPACE_URL,
+                             self.fake.writes('log-activity')[0][1]['idempotency_key'])))
+
     def test_duplicate_copies_collapse_and_the_full_body_wins(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1), body='the whole', kind='preview',
                               copy_key='k1'),
@@ -1427,21 +1499,19 @@ class IntakeTest(unittest.TestCase):
         self.run_intake([unknown, internal_only])
         self.assertEqual(self.mail_keys(), {ident(unknown): ['77'], ident(internal_only): ['78']})
 
-    def test_identical_template_emails_joined_as_copies_keep_both_local_keys(self):
-        # Two distinct store items with the same sender, subject and opening
-        # (the WR-000502 twins) still collapse here; the record names both
-        # keys so slice B2 can split them.
+    def test_identical_template_emails_keep_distinct_decoder_keys(self):
         first = mail('pat@example.test', -timedelta(hours=2), copy_key='template', local_keys='9102')
-        second = mail('pat@example.test', -timedelta(hours=2) + timedelta(minutes=5), copy_key='template',
-                      local_keys='9101')
+        second = mail('pat@example.test', -timedelta(hours=2), copy_key='template', local_keys='9101')
         self.run_intake([first, second])
-        self.assertEqual(len(self.fake.writes('log-activity')), 1)
-        self.assertEqual(self.mail_keys(), {ident(first): ['9101', '9102']})
+        self.assertEqual(len(self.fake.writes('log-activity')), 2)
+        self.assertEqual(self.mail_keys(), {ident(first): ['9102'], ident(second): ['9101']})
 
     def test_a_decoder_row_that_merged_two_store_items_keeps_both_keys(self):
         m = mail('pat@example.test', -timedelta(hours=1), local_keys='9101,9102')
         self.run_intake([m])
         self.assertEqual(self.mail_keys(), {ident(m): ['9101', '9102']})
+        self.assertEqual(self.run_intake([m]).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
 
     def test_a_decoder_without_local_keys_logs_mail_and_records_no_keys(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1))])

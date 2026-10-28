@@ -219,9 +219,12 @@ def _hash(text: str) -> str:
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
 
-def mail_identity(copy_key: str | None, sender: str, subject: str, sent_unix: int) -> tuple[str, str]:
-    """(copy hash, intake id). hxprobe's copy_key is the identity all copies of one email share."""
-    ck = _hash(copy_key or f'{sender.lower()}\x1f{subject.lower()}')[:20]
+def mail_identity(copy_key: str | None, sender: str, subject: str, sent_unix: int,
+                  local_keys: list[str] | None = None) -> tuple[str, str]:
+    """Use decoder store-item identity when available, otherwise its content heuristic."""
+    identity = ('hxstore-local\x1f' + ','.join(sorted(set(local_keys)))) if local_keys else (
+        copy_key or f'{sender.lower()}\x1f{subject.lower()}')
+    ck = _hash(identity)[:20]
     return ck, f'{ck}:{sent_unix}'
 
 
@@ -473,21 +476,37 @@ def _decode(home: Path, out: Path, decode: Callable[[Path, Path, Path], None]):
         _remove(work)
 
 
-def _best_copies(mails: list[dict]) -> list[dict]:
-    """One row per email: hxprobe collapses copies; any it left are joined here, full body first."""
+def _best_copies(mails: list[dict], state: dict | None = None) -> list[dict]:
+    """Preserve keyed decoder rows; collapse only rows without store-item identity."""
     rows = []
     for m in mails:
-        m['ck'], m['ident'] = mail_identity(m['copy_key'], m['sender'], m['subject'] or '', m['sent_unix'])
         m['local_keys'] = sorted(set((m['local_keys'] or '').split(',')) - {''})
+        m['ck'], m['ident'] = mail_identity(m['copy_key'], m['sender'], m['subject'] or '',
+                                          m['sent_unix'], m['local_keys'])
         m['full'] = m['body_kind'] == 'full' and bool((m['body'] or '').strip())
         m['text'] = (m['body'] or '').strip() or (m['preview'] or '').strip()
         rows.append(m)
+    claimed = set()
+    for ident, keys in sorted((state or {}).get('mail_keys', {}).items()):
+        candidates = [m for m in rows if set(m['local_keys']) & set(keys) and id(m) not in claimed]
+        if candidates:
+            ck = ident.rsplit(':', 1)[0]
+            exact = [m for m in candidates if m['ck'] == ck and m['local_keys'] == sorted(keys)]
+            # A historical multi-key receipt cannot identify its original item.
+            if not exact and (len(keys) > 1 or len(candidates) > 1):
+                raise DecodeError('ambiguous legacy mail identity')
+            prior = (exact or candidates)[0]
+            prior['ck'], prior['ident'] = ck, ident
+            claimed.add(id(prior))
     rows.sort(key=lambda m: (m['ck'], m['sent_unix']))
     out: list[dict] = []
     for m in rows:
-        last = out[-1] if out else None
+        if m['local_keys']:
+            m['first_sent'] = m['sent_unix']
+            out.append(m)
+            continue
+        last = out[-1] if out and not out[-1]['local_keys'] else None
         if last and last['ck'] == m['ck'] and m['sent_unix'] - last['first_sent'] <= COPY_WINDOW:
-            m['local_keys'] = last['local_keys'] = sorted(set(last['local_keys']) | set(m['local_keys']))
             m['row_ids'] = last['row_ids'] = sorted(set(last.get('row_ids', [])) | set(m.get('row_ids', [])))
             m['folders'] = last['folders'] = sorted(set(last.get('folders', [])) | set(m.get('folders', [])))
             attachments = {a['id']: a for a in last.get('attachments', []) + m.get('attachments', [])}
@@ -1464,7 +1483,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         _save(out, state)
         return Outcome('failed', 'calendar_decode_empty', work.counts)
 
-    mails = _best_copies(mails)
+    mails = _best_copies(mails, state)
     state['hydration_check_at'] = int((now + REFRESH_INTERVAL).timestamp())
     work = Run(ports, state, now, out, settings)
     work.counts['mail_other_accounts'] = meta['mail_other_accounts']
