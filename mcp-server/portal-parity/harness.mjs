@@ -112,10 +112,13 @@ async function stageTwo(doc, probes, options) {
     reference: { base: slash(options.reference), overrides: options.aliases },
     candidate: { base: slash(options.candidate), overrides: options.candidateAliases },
   };
-  // A side that refuses the password has no session: its session rows report
-  // UNRUN and its sign-in row shows the refusal, instead of aborting the run.
+  // Without a password no side has a session and session rows report UNRUN. With
+  // one, a side that refuses sign-in fails its session rows with the refusal, and
+  // its sign-in row still runs and shows the refused status.
   for (const side of Object.values(sides)) {
-    side.cookie = options.password ? await signIn(side.base, options.password).catch(() => undefined) : undefined;
+    if (!options.password) continue;
+    await signIn(side.base, options.password).then(cookie => { side.cookie = cookie; },
+      error => { side.refusal = error.status ? `status-${error.status}` : 'unreachable'; });
   }
   const baseline = options.baselineFile ? JSON.parse(await readFile(options.baselineFile, 'utf8')) : null;
   const browser = probes.some(p => BROWSER_KINDS.has(p.kind) && !p.retired) ? await launchParityBrowser({ headed: Boolean(options.headed) }) : null;
@@ -130,6 +133,12 @@ async function stageTwo(doc, probes, options) {
         if (probe.fault) { results.set(probe.id, { id: probe.id, verdict: 'UNRUN', reason: `fault:${probe.fault}` }); continue; }
         const [reference, candidate] = await Promise.all(['reference', 'candidate'].map(side => (side === 'reference' && baseline?.[probe.id])
           ? baseline[probe.id] : observeHttp(sides[side].base, probe, aliasFor(side), { cookie: sides[side].cookie, password: options.password })));
+        const refused = ['reference', 'candidate'].filter(side => ({ reference, candidate })[side].unrun && sides[side].refusal);
+        if (refused.length) {
+          results.set(probe.id, { id: probe.id, verdict: 'FAIL', reason: refused.map(side => `${side}-sign-in-refused`).join('+'),
+            aspects: refused.map(side => `${side}-sign-in-${sides[side].refusal}`) });
+          continue;
+        }
         if (reference.unrun || candidate.unrun) { results.set(probe.id, { id: probe.id, verdict: 'UNRUN', reason: 'needs-session' }); continue; }
         results.set(probe.id, { id: probe.id, ...verdictFor(probe, differences(reference, candidate), doc.allowed_differences) });
         continue;

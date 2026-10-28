@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // ./run.sh portal-parity: compare a candidate portal with a reference site, row by row.
+import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { runParity } from './harness.mjs';
 
-const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const REPO = realpathSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'));
 const USAGE = `usage: ./run.sh portal-parity --site <REF-A|REF-V> --stage <0|1|2> --reference <url> --candidate <url>
   [--probes <file>] [--rows <ids>] [--aliases <file>] [--candidate-aliases <file>] [--package <file>]
   [--source <dir>] [--manifest <file>] [--baseline <file>] [--baseline-out <file>] [--report <file>] [--artifacts <dir>] [--sign-in | --password-stdin] [--headed]
@@ -39,9 +40,19 @@ async function prompt(question) {
   });
 }
 
-// Local run data must never land in the public repository.
+// The real path of a file that may not exist yet: its nearest existing
+// ancestor resolved through symlinks, with the rest appended.
+function realPath(file) {
+  try { return realpathSync(file); } catch {
+    const parent = path.dirname(file);
+    return parent === file ? file : path.join(realPath(parent), path.basename(file));
+  }
+}
+
+// Local run data must never land in the public repository, through a symlink either.
 function outsideRepo(file, flag) {
-  if (file && path.resolve(file).startsWith(`${REPO}${path.sep}`)) throw new Error(`${flag} must point outside the repository`);
+  const real = file && realPath(path.resolve(file));
+  if (real && (real === REPO || real.startsWith(`${REPO}${path.sep}`))) throw new Error(`${flag} must point outside the repository`);
   return file;
 }
 
@@ -53,14 +64,14 @@ async function main() {
   });
   if (values.help || !values.stage) { console.log(USAGE); return values.help ? 0 : 2; }
   if (values.site && !['REF-A', 'REF-V'].includes(values.site)) throw new Error('--site must be REF-A or REF-V');
-  const readAliases = async file => (file ? JSON.parse(await readFile(outsideRepo(file, '--aliases'), 'utf8')) : undefined);
+  const readAliases = async (file, flag) => (file ? JSON.parse(await readFile(outsideRepo(file, flag), 'utf8')) : undefined);
   const needsPassword = values.stage === '0' || values['sign-in'];
   const password = values['password-stdin'] ? await readStdinLine()
     : needsPassword ? await prompt('Site password (not echoed): ') : undefined;
   const run = await runParity({
     stage: values.stage, site: values.site, reference: values.reference, candidate: values.candidate,
     probesFile: values.probes ?? path.join(REPO, 'client-portal/parity/probes.v1.json'), rows: values.rows,
-    aliases: await readAliases(values.aliases), candidateAliases: await readAliases(values['candidate-aliases']),
+    aliases: await readAliases(values.aliases, '--aliases'), candidateAliases: await readAliases(values['candidate-aliases'], '--candidate-aliases'),
     packageFile: values.package, sourceDir: values.source, manifest: values.manifest, baselineFile: values.baseline,
     baselineOut: outsideRepo(values['baseline-out'], '--baseline-out'), report: outsideRepo(values.report, '--report'),
     artifacts: outsideRepo(values.artifacts, '--artifacts'), password: password || undefined, headed: values.headed,
