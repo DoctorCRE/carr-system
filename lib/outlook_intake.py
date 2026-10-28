@@ -1470,7 +1470,7 @@ def _retry_owner_key_collisions(state: dict, owner: str) -> None:
         scoped = key('set-next-action', args['ref'], f'{owner}|{source}')
         args['idempotency_key'] = scoped
         requests.setdefault(scoped, {**request, 'payload': json.dumps(args), 'key_owner': owner,
-                                    'disposition': 'retry', 'error_code': None, 'retry_at': None})
+                                    'source_kind': 'mail', 'disposition': 'retry', 'error_code': None, 'retry_at': None})
         del requests[legacy]
 
 

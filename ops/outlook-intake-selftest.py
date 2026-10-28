@@ -1174,6 +1174,8 @@ class IntakeTest(unittest.TestCase):
         [(_, args)] = self.fake.writes('set-next-action')
         self.assertEqual(args['idempotency_key'], intake.key('set-next-action', 'C-901', f'dell|next|{ident(m)}'))
         self.assertEqual(args['description'], 'Reply')
+        saved = json.loads(path.read_text())['requests'][args['idempotency_key']]
+        self.assertEqual(saved['source_kind'], 'mail')
         self.fake.calls.clear()
         self.assertEqual(self.run_intake([], touch=False).state, 'succeeded')
         self.assertEqual(self.fake.writes('set-next-action'), [])
