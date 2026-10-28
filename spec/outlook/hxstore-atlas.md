@@ -2160,6 +2160,101 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 
 - [`vendor/hxprobe/src/attachment.rs` at `bc8538ac6845ddd716efa18791361ab04e9c5694`](https://github.com/DoctorCRE/carr-system/blob/bc8538ac6845ddd716efa18791361ab04e9c5694/vendor/hxprobe/src/attachment.rs), `parse`.
 
+## Category definition object (object.class.0069)
+
+```json
+{
+  "parent": "store",
+  "identifier": {
+    "kind": "record_type",
+    "value": 105
+  },
+  "wire_type": "serialized_object",
+  "decoder": "category::Index::observe",
+  "confidence": "inferred",
+  "first_seen_version": null,
+  "notes": "Own key at +10/+30 and owner key at +22/+38, reference kind 0x2c at +18. Observed only as the six default categories, once per owner (four owners in the 2026-10-28 Studio research copies). Message-to-category assignment is not decoded."
+}
+```
+
+- [`vendor/hxprobe/src/category.rs` at `4669c7d5a1eabaf6d6cf156212567530cb17e3ac`](https://github.com/DoctorCRE/carr-system/blob/4669c7d5a1eabaf6d6cf156212567530cb17e3ac/vendor/hxprobe/src/category.rs), `observe`.
+
+## Category envelope (category.envelope)
+
+```json
+{
+  "parent": "object.class.0069",
+  "identifier": {
+    "kind": "envelope_tag",
+    "value": 180
+  },
+  "wire_type": "u16le",
+  "decoder": "category::Index::observe",
+  "confidence": "inferred",
+  "first_seen_version": null,
+  "notes": "Ten-byte envelope length includes its header. Typed class signature is checked."
+}
+```
+
+- [`vendor/hxprobe/src/category.rs` at `4669c7d5a1eabaf6d6cf156212567530cb17e3ac`](https://github.com/DoctorCRE/carr-system/blob/4669c7d5a1eabaf6d6cf156212567530cb17e3ac/vendor/hxprobe/src/category.rs), `observe`.
+
+## Category owning list object (category.owner)
+
+```json
+{
+  "parent": "object.class.0069",
+  "identifier": {
+    "kind": "byte_offset",
+    "value": 22
+  },
+  "wire_type": "u64le",
+  "decoder": "category::Index::observe",
+  "confidence": "inferred",
+  "first_seen_version": null,
+  "notes": "Repeated at +38. Its class 0049 object is not yet linked to a folder account_id. An owner conflict across revisions drops the category."
+}
+```
+
+- [`vendor/hxprobe/src/category.rs` at `4669c7d5a1eabaf6d6cf156212567530cb17e3ac`](https://github.com/DoctorCRE/carr-system/blob/4669c7d5a1eabaf6d6cf156212567530cb17e3ac/vendor/hxprobe/src/category.rs), `observe`.
+
+## Category colour index (category.color)
+
+```json
+{
+  "parent": "object.class.0069",
+  "identifier": {
+    "kind": "byte_offset",
+    "value": 126
+  },
+  "wire_type": "u32le",
+  "decoder": "category::Index::observe",
+  "confidence": "inferred",
+  "first_seen_version": null,
+  "notes": "OlCategoryColor numbering, 0 to 25. All 24 observed definitions carry Outlook's default colour for their default name (red 1, orange 2, yellow 4, green 5, blue 8, purple 9). Revision disagreement stays unknown."
+}
+```
+
+- [`vendor/hxprobe/src/category.rs` at `4669c7d5a1eabaf6d6cf156212567530cb17e3ac`](https://github.com/DoctorCRE/carr-system/blob/4669c7d5a1eabaf6d6cf156212567530cb17e3ac/vendor/hxprobe/src/category.rs), `observe`.
+
+## Category display name (category.name)
+
+```json
+{
+  "parent": "object.class.0069",
+  "identifier": {
+    "kind": "string_run_selector",
+    "value": "trailing_name"
+  },
+  "wire_type": "utf16le_z",
+  "decoder": "category::Index::observe",
+  "confidence": "inferred",
+  "first_seen_version": null,
+  "notes": "Same trailing layout as folder names: binary sort key, single-byte NUL, then the UTF-16 name. Revision disagreement stays unknown."
+}
+```
+
+- [`vendor/hxprobe/src/category.rs` at `4669c7d5a1eabaf6d6cf156212567530cb17e3ac`](https://github.com/DoctorCRE/carr-system/blob/4669c7d5a1eabaf6d6cf156212567530cb17e3ac/vendor/hxprobe/src/category.rs), `observe`.
+
 ## Source bindings
 
 ```json
@@ -2195,6 +2290,10 @@ Null means the first Outlook version is unknown. The pinned source revision esta
   "vendor/hxprobe/src/attachment.rs": {
     "revision": "bc8538ac6845ddd716efa18791361ab04e9c5694",
     "sha256": "796850d32e1169eecd7e70094072b438ccb0530a4b7fa7d5dd70c65edee3461b"
+  },
+  "vendor/hxprobe/src/category.rs": {
+    "revision": "4669c7d5a1eabaf6d6cf156212567530cb17e3ac",
+    "sha256": "4257b130938feadb51c3a2c40a340936cc963d9783b22efec6b126dc83a5f510"
   }
 }
 ```
