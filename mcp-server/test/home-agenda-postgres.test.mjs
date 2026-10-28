@@ -46,8 +46,10 @@ test('Home agenda real SQL preserves eligibility, nullable dates, holds and read
       create view v_deal_room_action as
         select n.id, n.subject_id as deal_id, a.slug as owner, n.description, n.due_on, n.status, n.updated_at
         from next_action n join actor a on a.id=n.owner_id where n.subject_type='deal';
+      create table deck_source (kind text, id uuid, stale boolean);
+      create view v_deck_item as select * from deck_source;
       grant usage on schema public to carr_reader;
-      grant select on v_deal_room_board, v_open_deal_room_board, v_client_engagement_status, v_deal_room_critical_date, v_deal_room_action to carr_reader;
+      grant select on v_deal_room_board, v_open_deal_room_board, v_client_engagement_status, v_deal_room_critical_date, v_deal_room_action, v_deck_item to carr_reader;
     `);
     await c.query(readFileSync(new URL('../../migrations/0927_deal_action_hold_date.sql', import.meta.url), 'utf8'));
     const actionView = readFileSync(new URL('../../db/schema.sql', import.meta.url), 'utf8').match(/CREATE VIEW public\.v_deal_room_action AS[\s\S]*?;/)[0];
@@ -84,6 +86,10 @@ test('Home agenda real SQL preserves eligibility, nullable dates, holds and read
       assert.deepEqual(account.next_actions.map(a => [a.id,a.due_on,a.hold_until]), [[id(103),null,'2026-10-25'],[id(105),'2026-10-23',null]]);
       assert.deepEqual(result.deals[0].critical_dates, []);
       assert.deepEqual(result.deals[0].next_actions, []);
+      await c.query('reset role');
+      await c.query("insert into deck_source values ('next_action',$1,true)", [id(103)]);
+      await c.query('set role carr_reader');
+      assert.deepEqual((await read()).deals[1].next_actions.map(a => a.id), [id(105)], 'a stale automation action leaves Home');
       await assert.rejects(c.query('select * from next_action'), e => e.code === '42501');
     });
     await t.test('stored items retain sources, bullets, completion and creation order without leaking between deals', async t => {
