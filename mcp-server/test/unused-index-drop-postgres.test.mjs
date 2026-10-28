@@ -8,17 +8,18 @@ import pg from 'pg';
 import { TOOLS } from '../src/tools.js';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 
-const MIGRATION = new URL('../../migrations/1046_drop_unused_indexes.sql', import.meta.url);
+const MIGRATION = new URL('../../migrations/1055_drop_unused_indexes.sql', import.meta.url);
 
 const DROPPED = [
   'public.event_decision_text_trgm',
   'public.retrieval_query_log_miss_idx',
   'public.building_addr_trgm',
   'ops.release_correlation_idx', 'public.session_work_kind_idx',
-  'public.session_work_last_seen_idx', 'public.session_work_open_loop_idx',
+  'public.session_work_open_loop_idx',
 ];
 
 const KEPT = [
+  'public.session_work_last_seen_idx',
   'public.doctrine_section_title_search_idx', 'public.doctrine_document_title_search_idx',
   'public.retrieval_phrase_trgm_idx', 'public.retrieval_phrase_fts_idx',
   'public.doctrine_edge_source_idx', 'public.party_link_from_idx', 'public.deal_conflict_open_idx',
@@ -72,7 +73,7 @@ after(async () => {
 const present = async names =>
   (await c.query('select n from unnest($1::text[]) n where to_regclass(n) is not null', [names])).rows.map(r => r.n);
 
-test('migration 1046 drops exactly the reviewed indexes inside one transaction', async () => {
+test('migration 1055 drops exactly the reviewed indexes inside one transaction', async () => {
   assert.deepEqual(await present(DROPPED), DROPPED, 'snapshot must still carry every index the migration drops');
   const constraints = await c.query(`select oid, conindid from pg_constraint order by oid`);
   const candidates = await c.query(`select i.indexrelid::regclass::text as name
