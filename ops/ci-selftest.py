@@ -345,9 +345,12 @@ def test_database_scope_receipts():
     scope = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(scope)
     for path in ("migrations/9999_probe.sql", "mcp-server/test/new-proof.sql",
-                 "ops/new-db-gate.py", ".github/workflows/ci.yml"):
+                 "ops/new-db-gate.py", ".github/workflows/ci.yml",
+                 "mcp-server/src/proof.js", "lib/proof.py",
+                 "ops/db_acceptance_programs.py", "requirements.lock"):
         check(f"database scope runs {path}", scope.needs_full([path]))
     check("database scope skips app-only change", not scope.needs_full(["web/app.js"]))
+
     with tempfile.TemporaryDirectory() as directory:
         event = pathlib.Path(directory) / "event.json"
         event.write_text('{}')
@@ -387,7 +390,6 @@ def test_hosted_migration_ownership():
                                          "CI_DRAFT": draft, "GITHUB_STEP_SUMMARY": str(pathlib.Path(directory) / "summary"),
                                          "CI_NEEDS": json.dumps({"scope": {"result": "success", "outputs": {"full": full}},
                                                                  "classes": {"result": classes},
-                                                                 "fallow": {"result": "success"},
                                                                  "migration-fixtures": {"result": fixtures}})})
             check(f"aggregate scope={full!r} fixtures={fixtures} classes={classes}", result.returncode == expected)
     record = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Record the tested tree and class contract")
@@ -1101,7 +1103,7 @@ def test_hosted_draft_lifecycle():
             ["node", "-e", script, json.dumps([expression, context])], text=True))
 
     for filename, lanes, verdict_name, command in (
-            ("ci.yml", ("scope", "classes", "migration-fixtures", "fallow"),
+            ("ci.yml", ("scope", "classes", "migration-fixtures"),
              "checks", "verdict"),
             ("doc-drift.yml", ("check",), "verdict", "drift-verdict")):
         wf = _hosted_workflow(filename)
@@ -1112,6 +1114,17 @@ def test_hosted_draft_lifecycle():
         check(f"{filename}: all non-PR full-suite triggers survive",
               {"merge_group", "schedule", "workflow_dispatch"} <= set(events))
         jobs = wf["jobs"]
+        if filename == "doc-drift.yml":
+            baseline = next(st for st in jobs['check']['steps'] if st.get('name', '').startswith('Summarize drift'))
+            for event in ('pull_request', 'merge_group', 'schedule', 'workflow_dispatch'):
+                check(f"drift baseline event {event}", bool(evaluate(baseline['if'],
+                    {'github': {'event_name': event}})) == (event in ('schedule', 'workflow_dispatch')))
+        else:
+            weekly = _hosted_workflow('fallow.yml')
+            check("Fallow runs weekly outside the PR aggregate",
+                  set(weekly['on']) == {'schedule', 'workflow_dispatch'}
+                  and weekly['on']['schedule'] == [{'cron': '20 6 * * 1'}]
+                  and 'fallow' not in jobs)
         verdict = jobs.get(verdict_name, {})
         check(f"{filename}: verdict always evaluates and waits for every lane",
               verdict.get("if") == "${{ always() }}" and set(verdict.get("needs", [])) == set(lanes))

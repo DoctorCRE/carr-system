@@ -48,8 +48,15 @@ def check(logdir, python):
         with (logdir / 'programs.tsv').open('a') as records:
             records.write(f'secret\t{name}\t{rc}\t{start:.6f}\t{time.time():.6f}\n')
         if rc:
-            sys.stderr.buffer.write(log.read_bytes())
-            sys.stderr.flush()
+            diagnostics = []
+            for line in log.read_text(errors='replace').splitlines()[:20]:
+                finding = re.fullmatch(r'\s*(.+?:[0-9]+)\s+([A-Za-z0-9_-]+)(?:\s.*)?', line)
+                if finding:
+                    diagnostics.append(f'{finding[1]} {finding[2]}')
+            redacted = subprocess.run([python, 'ops/ci-secret-scan.py', '--redact'],
+                input='\n'.join(diagnostics), text=True, capture_output=True)
+            if redacted.returncode == 0:
+                print(redacted.stdout, file=sys.stderr)
             print(failure)
             return 1
     print('no shaped credential in ' + scope)

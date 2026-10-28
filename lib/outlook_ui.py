@@ -35,7 +35,8 @@ from lib.outlook_settings import load_settings
 EXIT = {'succeeded': 0, 'skipped': 78, 'timed_out': 124, 'failed': 1}
 SIDEBAR = ['View', 'Sidebar']
 QUIT = ['Outlook', 'Quit Outlook']
-TABS = re.compile(r'Focused Inbox (Selected|Unselected);\s*Other Inbox (Selected|Unselected)')
+# Outlook names the selected tab first: "Other Inbox Selected;  Focused Inbox Unselected".
+TABS = re.compile(r'(Focused|Other) Inbox Selected;\s*(?:Focused|Other) Inbox Unselected')
 SWITCH = {'focused': ['View', 'Switch to Focused'], 'other': ['View', 'Switch to Other']}
 LIST_WALK = 1500
 PANE_WALK = {'max_elements': 1500, 'max_depth': 3}
@@ -538,5 +539,5 @@ def _tab(elements: list[dict]) -> str | None:
     for e in elements:
         match = TABS.search(e.get('label') or '')
         if e.get('role') == 'AXCheckBox' and match:
-            return 'focused' if match.group(1) == 'Selected' else 'other'
+            return match.group(1).lower()
     return None

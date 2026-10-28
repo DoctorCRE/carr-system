@@ -19,6 +19,7 @@ import { mcpOriginRefusal } from "./oauth-policy.ts";
 import { DOC_TOOL_NAMES, DOC_INSTRUCTIONS, docToolAnnotations } from "./doc-profile.ts";
 import { isolatePullRequests } from "./work-queue.js";
 import { MEMORY_ATTACH_LINE } from "./doctrine.js";
+import { toolCallContent } from "./untrusted-text.js";
 import { TOOLS, ToolError, executeRegisteredTool, assertRegisteredToolInput, UNATTENDED_AUTHORITY_VERBS,
   auditIdentity, assertNoCallerAuthorityFields, coerceArgsToSchema,
   pgConstraintError, describeConstraint } from "./tools.js";
@@ -1042,7 +1043,7 @@ export async function dispatch(request, env, ctx, actor, sessionKey) {
         env.ctx = ctx;
         try {
           const result = await callTool(env, scopedActor, rpc.params?.name, rpc.params?.arguments, profile);
-          return reply({ content: [{ type: "text", text: JSON.stringify(result) }] });
+          return reply({ content: toolCallContent(result) });
         } catch (e) {
           const name = rpc.params?.name === "call-verb"
             ? rpc.params?.arguments?.verb : rpc.params?.name;

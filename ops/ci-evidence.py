@@ -52,7 +52,7 @@ def hosted_verdict(*, drift=False):
             summary.write(message + '\n')
         return 1
     needs = json.loads(os.environ['CI_NEEDS'])
-    lanes = ('check',) if drift else ('scope', 'classes', 'migration-fixtures', 'fallow')
+    lanes = ('check',) if drift else ('scope', 'classes', 'migration-fixtures')
     results = {name: needs[name]['result'] for name in lanes}
     allowed = {name: {'success'} for name in lanes}
     if not drift:
@@ -86,10 +86,10 @@ def contract_digest(root=ROOT):
 def can_reuse(run, jobs, receipt, *, tree, head_tree, tested_tree, contract, groups):
     required = {'ops/ci.sh --strict', *('ops/ci.sh --strict --only ' + g for g in groups)}
     green = {j.get('name') for j in jobs if j.get('conclusion') == 'success'}
-    return (run.get('name') == 'CI' and run.get('event') == 'pull_request'
+    return (run.get('name') == 'CI' and run.get('event') in ('pull_request', 'merge_group')
             and run.get('status') == 'completed' and run.get('conclusion') == 'success'
             and required <= green and receipt.get('schema') == 'carr-ci-evidence/v1'
-            and receipt.get('event') == 'pull_request' and receipt.get('draft') is False
+            and receipt.get('event') == run.get('event') and receipt.get('draft') is False
             and receipt.get('run_id') == run.get('id')
             and receipt.get('run_attempt') == run.get('run_attempt', 1)
             and receipt.get('head_sha') == run.get('head_sha')
@@ -120,6 +120,7 @@ class GitHub:
 
 
 def resolve(github, sha, tree, contract, groups):
+    candidates = []
     for pr in github.api(f'commits/{sha}/pulls'):
         if not pr.get('merged_at') or pr['base']['ref'] != 'main':
             continue
@@ -130,18 +131,29 @@ def resolve(github, sha, tree, contract, groups):
         if not runs:
             continue
         run = max(runs, key=lambda r: (r['id'], r.get('run_attempt', 1)))
+        candidates.append((run, head, pr['number']))
+    seen = set()
+    for run in github.api('actions/workflows/ci.yml/runs?event=merge_group&per_page=100')['workflow_runs']:
+        head = run['head_sha']
+        if head not in seen:
+            candidates.append((run, head, None))
+            seen.add(head)
+    for run, head, pr_number in candidates:
         if run.get('status') != 'completed' or run.get('conclusion') != 'success':
+            continue
+        head_tree = github.tree(head)
+        if head_tree != tree:
             continue
         receipt = github.receipt(run)
         if receipt is None:
             continue
         jobs = github.api(f'actions/runs/{run["id"]}/jobs?per_page=100')['jobs']
-        if can_reuse(run, jobs, receipt, tree=tree, head_tree=github.tree(head),
+        if can_reuse(run, jobs, receipt, tree=tree, head_tree=head_tree,
                      tested_tree=github.tree(receipt['tested_sha']),
                      contract=contract, groups=groups):
             return {'reused': True, 'source_run_id': run['id'],
                     'source_run_attempt': run.get('run_attempt', 1),
-                    'source_pr': pr['number'], 'source_head_sha': head,
+                    'source_pr': pr_number, 'source_head_sha': head,
                     'source_tested_sha': receipt['tested_sha']}
     return {'reused': False}
 

@@ -257,16 +257,7 @@ def launch_timestamp(records: list[dict], n: int = HEAD_LINES) -> str | None:
 # backslash-escaped. re-serializing a parsed record with json.dumps() does not
 # recover the first form's raw text and DOUBLE-escapes the second, so this
 # scans the untouched raw file text instead of anything re-encoded.
-# The reason capture deliberately does NOT try to consume escaped characters
-# inside the value (no `\\.` alternative): this text may itself be escaped one
-# level deep (a hook's JSON captured as a string inside another JSON string),
-# so a backslash here is ambiguous between "an escaped char in the reason" and
-# "the escaped terminating quote one level up". Stopping at the first quote or
-# backslash gives a clean (if occasionally truncated) reason instead of
-# occasionally over-consuming into the surrounding JSON — acceptable for a
-# best-effort, human-readable `detail` line capped at 300 chars regardless.
 DENY_MARKER = re.compile(r'\\?"permissionDecision\\?"\s*:\s*\\?"deny\\?"')
-DENY_REASON = re.compile(r'\\?"permissionDecisionReason\\?"\s*:\s*\\?"([^"\\]{0,200})')
 
 
 def load_raw(path: str, cap: int = SCAN_BYTES_CAP) -> str:
@@ -277,24 +268,12 @@ def load_raw(path: str, cap: int = SCAN_BYTES_CAP) -> str:
         return ""
 
 
-def detect_gate_denial(raw_text: str) -> tuple[bool, str]:
-    """A PreToolUse gate DENY anywhere in the transcript's raw text. These are
-    emitted as a JSON permissionDecision by every gate in hooks/
-    (guard-unattended.py, model-floor-gate.py, escalation-gate.py, ...), so a
-    plain regex over the untouched file text is exact rather than a semantic
-    guess — see DENY_MARKER's comment for why raw text, not a re-serialized
-    record."""
-    if DENY_MARKER.search(raw_text):
-        reason = DENY_REASON.search(raw_text)
-        return True, (reason.group(1) if reason else "a PreToolUse gate denied a call")
-    return False, ""
-
-
 def detect_trailing_tool_error(records: list[dict]) -> tuple[bool, str]:
     """True if the LAST tool_result in the transcript is an error with nothing
-    recorded after it — the run's last action failed and it never got a chance
-    to recover or was not given one before Stop fired."""
-    last_error_reason = ""
+    recorded after it, with the failed tool's name. The result text is never
+    returned: it can carry whatever the tool read (ops.run.detail is durable)."""
+    names: dict[str, str] = {}
+    failed_tool = ""
     saw_anything_after_error = False
     found_error = False
     for rec in records:
@@ -306,31 +285,28 @@ def detect_trailing_tool_error(records: list[dict]) -> tuple[bool, str]:
             continue
         hit = False
         for block in content:
-            if isinstance(block, dict) and block.get("type") == "tool_result":
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use":
+                names[str(block.get("id"))] = str(block.get("name") or "")[:80]
+            if block.get("type") == "tool_result":
                 if block.get("is_error") is True:
                     found_error = True
                     saw_anything_after_error = False
                     hit = True
-                    inner = block.get("content")
-                    if isinstance(inner, str):
-                        last_error_reason = inner[:200]
-                    elif isinstance(inner, list):
-                        for b in inner:
-                            if isinstance(b, dict) and b.get("type") == "text":
-                                last_error_reason = str(b.get("text", ""))[:200]
-                                break
+                    failed_tool = names.get(str(block.get("tool_use_id")), "")
                 elif found_error:
                     saw_anything_after_error = True
         if not hit and found_error:
             saw_anything_after_error = True
-    return (found_error and not saw_anything_after_error), last_error_reason
+    return (found_error and not saw_anything_after_error), failed_tool
 
 
 def compute_outcome(records: list[dict], raw_text: str = "") -> tuple[str, str | None, str]:
-    """(state, failure_class, detail) — deterministic, see module docstring."""
-    denied, reason = detect_gate_denial(raw_text)
-    if denied:
-        return "failed", "gate_denied", f"a PreToolUse gate denied a call: {reason}"[:300]
+    """(state, failure_class, detail) — deterministic, see module docstring.
+    detail holds the failure class and tool name only, never tool output."""
+    if DENY_MARKER.search(raw_text):
+        return "failed", "gate_denied", "a PreToolUse gate denied a call"
     task = launched_task(records)
     if task == "social-batch-weekly":
         started_at = launch_timestamp(records)
@@ -338,19 +314,11 @@ def compute_outcome(records: list[dict], raw_text: str = "") -> tuple[str, str |
         if result["failure"]:
             failure_class = "social_batch_" + result["failure"]
             return "failed", failure_class, f"social-batch-weekly failed: {result['failure'].replace('_', ' ')}"
-        trailing_error, err_reason = detect_trailing_tool_error(records)
-        if trailing_error:
-            detail = "session ended on an unrecovered tool error"
-            if err_reason:
-                detail += f": {err_reason}"
-            return "failed", "tool_error", detail[:300]
-        return "succeeded", None, f"social batch verified {result['queue_count']} posts for week starting {result['week_start']}"
-    trailing_error, err_reason = detect_trailing_tool_error(records)
+    trailing_error, tool = detect_trailing_tool_error(records)
     if trailing_error:
-        detail = "session ended on an unrecovered tool error"
-        if err_reason:
-            detail += f": {err_reason}"
-        return "failed", "tool_error", detail[:300]
+        return "failed", "tool_error", "session ended on an unrecovered tool error" + (f" in {tool}" if tool else "")
+    if task == "social-batch-weekly":
+        return "succeeded", None, f"social batch verified {result['queue_count']} posts for week starting {result['week_start']}"
     return "succeeded", None, "scheduled session reached Stop with no deny or trailing tool error"
 
 

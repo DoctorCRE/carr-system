@@ -46,13 +46,19 @@ class CodexJobTests(unittest.TestCase):
         self.codex.write_text(f'#!{sys.executable}\n')
         self.codex.chmod(0o755)
 
-    def launch(self, body, repo=None):
+    def launch(self, body, repo=None, flags=()):
         self.codex.write_text(f'#!{sys.executable}\n' + body)
         job_env = dict(self.git_env, PATH=str(self.codex.parent) + os.pathsep + os.defpath,
                        TMPDIR=str(self.root))
         return subprocess.Popen([sys.executable, '-c', WRAPPER, str(ROOT / 'bin/codex-job'),
-                                 str(ROOT / '.venv'), str(repo or self.origin), 'test/job', 'brief'],
+                                 str(ROOT / '.venv'), str(repo or self.origin), 'test/job', 'brief', *flags],
                                 env=job_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def test_hung_job_exits_at_configured_deadline(self):
+        job = self.launch('import time; time.sleep(60)', flags=('--timeout-seconds', '1'))
+        _, errors = job.communicate(timeout=15)
+        self.assertEqual(job.returncode, 124, errors.decode())
+        self.assertIn(b'Retained checkout:', errors)
 
     def test_no_descendant_survives_any_job_exit(self):
         for outcome in (0, 7, signal.SIGTERM, signal.SIGINT):
@@ -195,6 +201,22 @@ while True: time.sleep(1)
                 finally:
                     for parent in parents:
                         shutil.rmtree(parent)
+
+    def test_job_log_is_private_and_ignored(self):
+        log = self.root / 'job.log'
+        log.write_text('')
+        log.chmod(0o644)
+        with log.open('ab') as sink:
+            job = subprocess.Popen([sys.executable, '-c', WRAPPER, str(ROOT / 'bin/codex-job'),
+                                    str(ROOT / '.venv'), str(self.origin), 'test/job', 'brief'],
+                                   env=dict(self.git_env, PATH=str(self.codex.parent) + os.pathsep + os.defpath,
+                                            TMPDIR=str(self.root)), stdout=subprocess.PIPE, stderr=sink)
+            job.communicate(timeout=10)
+        self.assertEqual(job.returncode, 0)
+        self.assertEqual(log.stat().st_mode & 0o777, 0o600)
+        for path in ('scratchpad/jobs/logs/x.log', 'out/calendar-archive/x.ics'):
+            ignored = subprocess.run(['git', '-C', str(ROOT), 'check-ignore', '-q', path])
+            self.assertEqual(ignored.returncode, 0, path)
 
 
 if __name__ == '__main__':

@@ -114,6 +114,13 @@ class WatchdogTests(unittest.TestCase):
             watchdog.scan(self.root, self.config)
         self.assertEqual(watchdog.digest(self.root, self.config), "")
 
+    def test_a_split_receipt_reports_rates_from_the_run_counts(self):
+        line = "outlook-intake-receipt " + json.dumps(
+            {"counts": {"run": {"decoder_alarm": 1, "decoder_sender_bp": 4000, "emails": 3},
+                        "backlog": {"unmatched": 2}},
+             "reason": "decoder_degraded", "state": "degraded"}, sort_keys=True)
+        self.assertEqual(watchdog.degraded_receipt([line]), "(decoder_degraded): sender 40.0%")
+
     def test_disk_clears_at_ten_percent(self):
         for free, count in ((9.99, 1), (10, 0), (50, 0)):
             with self.subTest(free=free):

@@ -216,9 +216,10 @@ elif tool == 'get_window_state':
                 if unread:
                     add('AXStaticText', str(unread), 6, row, value=str(unread))
     if state['tab'] and state['folder'] == 'Inbox':
-        focused = 'Selected' if state['tab'] == 'focused' else 'Unselected'
-        other = 'Unselected' if state['tab'] == 'focused' else 'Selected'
-        add('AXCheckBox', f'Focused Inbox {focused};  Other Inbox {other}', 4, top, value='0')
+        # Live Outlook names the selected tab first (read 2026-10-28).
+        label = ('Focused Inbox Selected;  Other Inbox Unselected' if state['tab'] == 'focused'
+                 else 'Other Inbox Selected;  Focused Inbox Unselected')
+        add('AXCheckBox', label, 4, top, value='0')
     table = add('AXTable', 'Message List', 4, top)
     add('AXCell', 'Today, Expanded', 6, table)
     for r in current():
@@ -706,6 +707,12 @@ class OutlookTriageTest(FakeOutlookCase):
         self.assertEqual(outcome.state, 'succeeded')
         self.assertEqual([m[1] for m in state['moved']], ['folder-A', 'folder-C'])
         self.assertEqual(self.unread_labels(state), {UNREAD['label']})
+
+    def test_reads_both_tabs_when_outlook_opens_on_other(self):
+        self.given(tabs={'focused': [NEWS, FILE_A], 'other': [FIRM, NEWS, UNREAD]}, tab='other')
+        outcome, state = self.run_triage()
+        self.assertEqual(outcome.state, 'succeeded')
+        self.assertEqual(sorted(m[1] for m in state['moved']), ['folder-A', 'folder-C'])
 
     def test_selects_the_inbox_before_reading_and_never_files_another_folder(self):
         self.given([FILE_A, NEWS], folder='Sent Items', elsewhere=[ELSEWHERE, VENDOR])
