@@ -12,4 +12,6 @@ Skill map (one owner per process; use only these): test-first = mattpocock-skill
 
 Reviewers post 'VERDICT: APPROVE|CHANGES' first and 'Reviewed-SHA: <head>'. The job that authored a PR never posts a VERDICT comment on it; the orchestrator runs reviews.
 
+Before `git push` and `gh pr create`, run `./run.sh pre-pr --body <PR body file>` and fix every line it prints.
+
 Local verification requires `ops/ci.sh --only "pushfloor secret"` plus relevant selftests. The hosted required `ops/ci.sh --strict` check must pass. Unit skips locally without CARR_CI_DATABASE_URL.
