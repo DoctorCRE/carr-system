@@ -652,6 +652,12 @@
       "sha256": "1d3039f808bfba7848b99c47d54c6ad1ec342e2a08824ae34ab3d005d7a32b39",
       "rule": "generic-api-key",
       "reason": "Historical synthetic UUID idempotency fixture introduced by 9067df46 in PR #2607, replaced in 3e3c9dcd by patterned UUIDs. Pushed history is retained without force-push. Qualification binds only this path, these exact historical file bytes and this detector."
+    },
+    {
+      "path": "db/schema.sql",
+      "sha256": "370981c239bb5f52b9011287b1d42ea3d6e458cc48cb1f8589e2d6cdded94f73",
+      "rule": "pii-email",
+      "reason": "Pushed PR history (d3cafe75) holds a regenerated schema dump with a partner work address; 7cba9c4f reverted the file, so only this historical blob carries it."
     }
   ]
 }
