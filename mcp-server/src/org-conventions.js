@@ -14,7 +14,7 @@ const PLACEMENTS = new Set(["CORE", "PROMPT", "TOOL", "PLANNING"]);
 
 // The same grammar ops.adopt_rule enforces: "Convention: <statement>" on the
 // first line, an optional "Card: <json object>" line, then free notes.
-export function parseProposal(text) {
+function parseProposal(text) {
   const statement = /^Convention: ([^\n]+)/.exec(String(text ?? ""))?.[1]?.trim();
   if (!statement) return { adoptable: false, problem: "first line must be 'Convention: <statement>'" };
   const cardText = /\nCard: (\{[^\n]*\})[ \t]*(?:\n|$)/.exec(text)?.[1];
