@@ -239,9 +239,12 @@ def _hash(text: str) -> str:
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
 
-def mail_identity(copy_key: str | None, sender: str, subject: str, sent_unix: int) -> tuple[str, str]:
-    """(copy hash, intake id). hxprobe's copy_key is the identity all copies of one email share."""
-    ck = _hash(copy_key or f'{sender.lower()}\x1f{subject.lower()}')[:20]
+def mail_identity(copy_key: str | None, sender: str, subject: str, sent_unix: int,
+                  local_keys: list[str] | None = None) -> tuple[str, str]:
+    """Use decoder store-item identity when available, otherwise its content heuristic."""
+    identity = ('hxstore-local\x1f' + ','.join(sorted(set(local_keys)))) if local_keys else (
+        copy_key or f'{sender.lower()}\x1f{subject.lower()}')
+    ck = _hash(identity)[:20]
     return ck, f'{ck}:{sent_unix}'
 
 
@@ -522,21 +525,34 @@ def _parties(m: dict, domain: str) -> list[tuple[str, str | None]]:
     return [(m['sender'].lower(), _clean_name(m['sender_name'], m['subject']))]
 
 
-def _best_copies(mails: list[dict]) -> list[dict]:
-    """One row per email: hxprobe collapses copies; any it left are joined here, full body first."""
+def _best_copies(mails: list[dict], state: dict | None = None) -> list[dict]:
+    """Preserve keyed decoder rows; collapse only rows without store-item identity."""
     rows = []
     for m in mails:
-        m['ck'], m['ident'] = mail_identity(m['copy_key'], m['sender'], m['subject'] or '', m['sent_unix'])
         m['local_keys'] = sorted(set((m['local_keys'] or '').split(',')) - {''})
+        m['ck'], m['ident'] = mail_identity(m['copy_key'], m['sender'], m['subject'] or '',
+                                          m['sent_unix'], m['local_keys'])
         m['full'] = m['body_kind'] == 'full' and bool((m['body'] or '').strip())
         m['text'] = (m['body'] or '').strip() or (m['preview'] or '').strip()
         rows.append(m)
+    claimed = set()
+    for ident, keys in sorted((state or {}).get('mail_keys', {}).items()):
+        candidates = [m for m in rows if set(m['local_keys']) & set(keys) and id(m) not in claimed]
+        if candidates:
+            ck = ident.rsplit(':', 1)[0]
+            for prior in candidates:
+                prior['legacy_merged_suppressed'] = len(keys) > 1 or len(candidates) > 1
+                prior['ck'], prior['ident'] = ck, ident
+                claimed.add(id(prior))
     rows.sort(key=lambda m: (m['ck'], m['sent_unix']))
     out: list[dict] = []
     for m in rows:
-        last = out[-1] if out else None
+        if m['local_keys']:
+            m['first_sent'] = m['sent_unix']
+            out.append(m)
+            continue
+        last = out[-1] if out and not out[-1]['local_keys'] else None
         if last and last['ck'] == m['ck'] and m['sent_unix'] - last['first_sent'] <= COPY_WINDOW:
-            m['local_keys'] = last['local_keys'] = sorted(set(last['local_keys']) | set(m['local_keys']))
             if _flag_of(last) != _flag_of(m):  # copies that disagree on the flag leave it unknown
                 m['flag_status'] = last['flag_status'] = None
             m['row_ids'] = last['row_ids'] = sorted(set(last.get('row_ids', [])) | set(m.get('row_ids', [])))
@@ -1345,7 +1361,8 @@ def _prune(state: dict, now: datetime) -> None:
     state['mail_done'] = {ck: ts for ck, ts in ((ck, [t for t in v if t >= horizon])
                                                  for ck, v in state.get('mail_done', {}).items()) if ts}
     state['mail_keys'] = {ident: k for ident, k in state.get('mail_keys', {}).items()
-                          if int(ident.rsplit(':', 1)[1]) >= horizon}
+                          if ident in unresolved or ident in state.get('pending_full', {}) or ident in state.get('flags', {})
+                          or int(ident.rsplit(':', 1)[1]) >= horizon}
     state['requests'] = {k: r for k, r in state.get('requests', {}).items()
                          if not r['acknowledged'] or r['created_at'] >= horizon}
     for name in ('events_logged', 'events_balled'):
@@ -1666,9 +1683,10 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         _save(out, state)
         return Outcome('failed', 'calendar_decode_empty', work.counts)
 
-    mails = _best_copies(mails)
+    mails = _best_copies(mails, state)
     state['hydration_check_at'] = int((now + REFRESH_INTERVAL).timestamp())
     work = Run(ports, state, now, out, settings)
+    work.counts['legacy_merged_suppressed'] = sum(bool(m.get('legacy_merged_suppressed')) for m in mails)
     work.counts['mail_other_accounts'] = meta['mail_other_accounts']
     work.counts['decoder_alarm'] = alarm
     work.counts.update(health_counts(health))

@@ -67,7 +67,8 @@ def mail(sender, sent, subject='Suite question', body='Can we meet Thursday?', n
 
 
 def ident(m):
-    return intake.mail_identity(m['copy_key'], m['sender'], m['subject'], m['sent_unix'])[1]
+    return intake.mail_identity(m['copy_key'], m['sender'], m['subject'], m['sent_unix'],
+                                (m.get('local_keys') or '').split(',') if m.get('local_keys') else None)[1]
 
 
 def event(goid, start, minutes=60, subject='Site visit', attendees=(), organizer=('Owner', OWNER),
@@ -1602,6 +1603,138 @@ class IntakeTest(unittest.TestCase):
             event('name-soon', timedelta(days=2), attendees=[('Rae Named', 'rae@example.test')])])
         self.assertEqual(self.fake.writes(), [])
 
+    def test_distinct_decoder_messages_preserve_each_subject(self):
+        subjects = ['Suite review', 'Re: Suite review', 'Fw: Suite review', 'Fwd: Suite review']
+        mails = [mail('pat@example.test', -timedelta(hours=2) + timedelta(seconds=i * 30),
+                      subject=subject, copy_key='normalized-suite-review', local_keys=str(9100 + i))
+                 for i, subject in enumerate(subjects)]
+        self.run_intake(mails)
+        self.assertEqual([args['email_context']['subject']
+                          for _, args in self.fake.writes('log-activity')], subjects)
+
+    def seed_legacy_mail_keys(self, original, keys):
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        state.setdefault('mail_keys', {})[ident(original)] = keys
+        path.write_text(json.dumps(state))
+
+    def test_existing_receipt_is_not_replayed_when_keyed_messages_split(self):
+        original = mail('pat@example.test', -timedelta(hours=2), subject='Suite review',
+                        copy_key='normalized-suite-review')
+        self.run_intake([original])
+        self.seed_legacy_mail_keys(original, ['9100'])
+        reply = {**original, 'subject': 'Re: Suite review', 'local_keys': '9101',
+                 'sent_unix': original['sent_unix'] + 30}
+        keyed = {**original, 'local_keys': '9100'}
+        self.run_intake([reply, keyed])
+        self.assertEqual([args['email_context']['subject']
+                          for _, args in self.fake.writes('log-activity')], ['Suite review', 'Re: Suite review'])
+        self.run_intake([keyed, reply])
+        self.assertEqual(len(self.fake.writes('log-activity')), 2)
+
+    def test_missing_original_suppresses_reply_under_legacy_merged_receipt(self):
+        original = mail('pat@example.test', -timedelta(hours=2), subject='Suite review',
+                        copy_key='normalized-suite-review')
+        self.run_intake([original])
+        self.seed_legacy_mail_keys(original, ['9100', '9101'])
+        reply = {**original, 'subject': 'Re: Suite review', 'local_keys': '9101'}
+        result = self.run_intake([reply])
+        self.assertEqual((result.state, result.reason), ('succeeded', 'processed'))
+        self.assertEqual(result.counts['legacy_merged_suppressed'], 1)
+        self.assertEqual([args['email_context']['subject']
+                          for _, args in self.fake.writes('log-activity')], ['Suite review'])
+        self.assertEqual(self.mail_keys()[ident(original)], ['9100', '9101'])
+
+    def test_legacy_key_binding_stays_with_original_after_it_leaves(self):
+        original = mail('pat@example.test', -timedelta(hours=2), subject='Suite review',
+                        copy_key='normalized-suite-review', kind='preview', body='Preview')
+        self.run_intake([original])
+        self.seed_legacy_mail_keys(original, ['9100'])
+        keyed = {**original, 'local_keys': '9100'}
+        reply = {**original, 'subject': 'Re: Suite review', 'local_keys': '9101',
+                 'sent_unix': original['sent_unix'] + 30, 'body_kind': 'full', 'body': 'A distinct reply body'}
+        self.run_intake([keyed, reply])
+        self.assertEqual(self.mail_keys()[ident(original)], ['9100'])
+        self.run_intake([reply])
+        notes = [args for _, args in self.fake.writes('log-activity') if args['kind'] == 'note']
+        self.assertEqual(notes, [])
+
+    def test_legacy_merged_receipt_suppresses_overlaps_and_files_new_mail(self):
+        original = mail('pat@example.test', -timedelta(hours=2), subject='Suite review',
+                        copy_key='normalized-suite-review')
+        self.run_intake([original])
+        self.seed_legacy_mail_keys(original, ['9100', '9101'])
+        new = mail('lee@example.test', -timedelta(hours=1), subject='New matter', local_keys='9200')
+        rows = [{**original, 'local_keys': '9100'},
+                {**original, 'local_keys': '9101', 'subject': 'Re: Suite review'}, new]
+        for _ in range(2):
+            result = self.run_intake(rows)
+            self.assertEqual(result.state, 'succeeded')
+            self.assertEqual(result.counts['legacy_merged_suppressed'], 2)
+        self.assertEqual([args['email_context']['subject']
+                          for _, args in self.fake.writes('log-activity')], ['Suite review', 'New matter'])
+
+    def test_decoder_merged_receipt_suppresses_later_split_rows(self):
+        original = mail('pat@example.test', -timedelta(hours=2), local_keys='9100,9101')
+        self.run_intake([original])
+        new = mail('lee@example.test', -timedelta(hours=1), subject='New matter', local_keys='9200')
+        result = self.run_intake([{**original, 'local_keys': '9100'},
+                                  {**original, 'local_keys': '9101', 'subject': 'Re: Suite question'}, new])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['legacy_merged_suppressed'], 2)
+        self.assertEqual(len(self.fake.writes('log-activity')), 2)
+
+    def test_existing_preview_hydrates_from_its_keyed_row(self):
+        original = mail('pat@example.test', -timedelta(hours=2), subject='Suite review',
+                        copy_key='normalized-suite-review', kind='preview', body='Preview')
+        self.run_intake([original])
+        self.seed_legacy_mail_keys(original, ['9100'])
+        full = {**original, 'local_keys': '9100', 'body_kind': 'full', 'body': 'Complete original body'}
+        reply = {**full, 'local_keys': '9101', 'subject': 'Re: Suite review',
+                 'body': 'A distinct reply body', 'sent_unix': full['sent_unix'] + 30}
+        self.run_intake([reply, full])
+        notes = [args for _, args in self.fake.writes('log-activity') if args['kind'] == 'note']
+        self.assertEqual([args['detail'] for args in notes], ['Complete original body'])
+        self.assertEqual(notes[0]['email_context']['source_activity_id'],
+                         str(uuid.uuid5(uuid.NAMESPACE_URL,
+                             self.fake.writes('log-activity')[0][1]['idempotency_key'])))
+
+    def test_legacy_unmatched_mail_files_when_contact_arrives_after_twenty_days(self):
+        original = mail('later@example.test', -timedelta(hours=2), copy_key='waiting-for-contact')
+        self.assertEqual(self.run_intake([original]).state, 'succeeded')
+        self.seed_legacy_mail_keys(original, ['9100'])
+        keyed = {**original, 'local_keys': '9100'}
+        self.fake.now = NOW + timedelta(days=12)
+        self.assertEqual(self.run_intake([keyed]).state, 'succeeded')
+        self.assertEqual(self.fake.writes('log-activity'), [])
+        self.fake.now = NOW + timedelta(days=20)
+        self.fake.contacts_rows.append(intake.Contact('later@example.test', 'C-903', 'Later Contact'))
+        result = self.run_intake([keyed], touch=False)
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual([(args['ref'], args['detail']) for _, args in self.fake.writes('log-activity')],
+                         [('C-903', original['body'])])
+        self.assertEqual(result.counts['unresolved_messages'], 0)
+        self.assertEqual(self.run_intake([keyed]).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+
+    def test_legacy_preview_hydrates_after_identity_link_horizon(self):
+        original = mail('pat@example.test', -timedelta(hours=2), copy_key='waiting-for-body',
+                        kind='preview', body='Preview')
+        self.assertEqual(self.run_intake([original]).state, 'succeeded')
+        self.seed_legacy_mail_keys(original, ['9100'])
+        keyed = {**original, 'local_keys': '9100'}
+        self.fake.now = NOW + timedelta(days=12)
+        self.assertEqual(self.run_intake([keyed]).state, 'succeeded')
+        self.fake.now = NOW + timedelta(days=20)
+        full = {**keyed, 'body_kind': 'full', 'body': 'Complete original body'}
+        result = self.run_intake([full])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['hydration_pending'], 0)
+        notes = [args for _, args in self.fake.writes('log-activity') if args['kind'] == 'note']
+        self.assertEqual([args['detail'] for args in notes], ['Complete original body'])
+        self.assertEqual(self.run_intake([full]).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 2)
+
     def test_duplicate_copies_collapse_and_the_full_body_wins(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1), body='the whole', kind='preview',
                               copy_key='k1'),
@@ -1625,21 +1758,19 @@ class IntakeTest(unittest.TestCase):
         self.run_intake([unknown, internal_only])
         self.assertEqual(self.mail_keys(), {ident(unknown): ['77'], ident(internal_only): ['78']})
 
-    def test_identical_template_emails_joined_as_copies_keep_both_local_keys(self):
-        # Two distinct store items with the same sender, subject and opening
-        # (the WR-000502 twins) still collapse here; the record names both
-        # keys so slice B2 can split them.
+    def test_identical_template_emails_keep_distinct_decoder_keys(self):
         first = mail('pat@example.test', -timedelta(hours=2), copy_key='template', local_keys='9102')
-        second = mail('pat@example.test', -timedelta(hours=2) + timedelta(minutes=5), copy_key='template',
-                      local_keys='9101')
+        second = mail('pat@example.test', -timedelta(hours=2), copy_key='template', local_keys='9101')
         self.run_intake([first, second])
-        self.assertEqual(len(self.fake.writes('log-activity')), 1)
-        self.assertEqual(self.mail_keys(), {ident(first): ['9101', '9102']})
+        self.assertEqual(len(self.fake.writes('log-activity')), 2)
+        self.assertEqual(self.mail_keys(), {ident(first): ['9102'], ident(second): ['9101']})
 
     def test_a_decoder_row_that_merged_two_store_items_keeps_both_keys(self):
         m = mail('pat@example.test', -timedelta(hours=1), local_keys='9101,9102')
         self.run_intake([m])
         self.assertEqual(self.mail_keys(), {ident(m): ['9101', '9102']})
+        self.assertEqual(self.run_intake([m]).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
 
     def test_a_decoder_without_local_keys_logs_mail_and_records_no_keys(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
@@ -2956,6 +3087,37 @@ class IntakeTest(unittest.TestCase):
         self.flag_state(self.flagged(flag='flagged'))
         self.run_intake([self.flagged(flag='complete', done=self.OCT28)])
         self.assertEqual(self.flag_calls()[-1][0], 'complete-deal-item')
+
+    def test_legacy_flag_completed_after_twenty_days_completes_its_todo(self):
+        self.legacy_flag_closes_after_twenty_days('complete', 'complete-deal-item')
+
+    def test_legacy_flag_cleared_after_twenty_days_drops_its_todo(self):
+        self.legacy_flag_closes_after_twenty_days('none', 'drop-action')
+
+    def legacy_flag_closes_after_twenty_days(self, status, verb):
+        m = mail('pat@example.test', -timedelta(hours=1), subject=f'Follow up {status}',
+                 flag='flagged', due=self.OCT29)
+        self.fake.now = NOW
+        self.filed_deal(m)
+        self.assertEqual(self.run_intake([m], touch=False).state, 'succeeded')
+        self.seed_legacy_mail_keys(m, ['9100'])
+        item_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f'outlook-flag:joe:{ident(m)}'))
+        self.fake.email_queue = []
+        keyed = {**m, 'local_keys': '9100'}
+        self.fake.now = NOW + timedelta(days=12)
+        self.assertEqual(self.run_intake([keyed]).state, 'succeeded')
+        self.fake.now = NOW + timedelta(days=20)
+        closed = {**keyed, 'flag_status': status, 'flag_completed_unix': self.OCT28}
+        result = self.run_intake([closed])
+        self.assertEqual(result.state, 'succeeded')
+        calls = self.flag_calls()
+        self.assertEqual(calls[-1][0], verb)
+        self.assertEqual(calls[-1][1]['item_id' if status == 'complete' else 'action_id'], item_id)
+        self.assertEqual(result.counts['flags_unfiled'], 0)
+        self.assertEqual(result.counts['flags_unmatched'], 0)
+        count = len(calls)
+        self.assertEqual(self.run_intake([closed]).state, 'succeeded')
+        self.assertEqual(len(self.flag_calls()), count)
 
     def test_a_flag_closes_without_its_activity_on_the_current_links_page(self):
         m = self.flagged(flag='flagged')
