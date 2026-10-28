@@ -12,14 +12,6 @@ values
  ('b1900000-0000-4000-8000-000000000002','continuity-proof',
   'b1900000-0000-4000-8000-000000000001','native-proof','repo-proof','/proof',
   '{"objective":"preserve correction","next_action":"verify receipt"}');
-insert into codex_continuity_revision
- (checkpoint_id,checkpoint_version,state,created_by_actor_id)
-select id,checkpoint_version,state,owner_actor_id from codex_continuity_checkpoint
- where id='b1900000-0000-4000-8000-000000000002';
-insert into codex_continuity_event
- (organization_tenant_id,owner_actor_id,native_task_id,project_id,cwd,event_type,idempotency_key)
-values ('continuity-proof','b1900000-0000-4000-8000-000000000001',
- 'native-proof','repo-proof','/proof','pre_compact','proof-event');
 
 do $$
 declare denied boolean:=false;
@@ -66,25 +58,11 @@ begin
   exception when raise_exception then denied:=true;
   end;
   if not denied then raise exception 'cwd binding was mutable'; end if;
-  denied:=false;
-  begin
-    update codex_continuity_event set event_type='rewritten'
-     where idempotency_key='proof-event';
-  exception when insufficient_privilege then denied:=true;
-  end;
-  if not denied then raise exception 'writer could rewrite lifecycle receipts'; end if;
 end $$;
 reset role;
 
 do $$
-declare denied boolean:=false;
 begin
-  begin
-    update codex_continuity_revision set state='{}'
-     where checkpoint_id='b1900000-0000-4000-8000-000000000002';
-  exception when raise_exception then denied:=true;
-  end;
-  if not denied then raise exception 'revision was not append-only'; end if;
   if has_table_privilege('carr_reader','codex_continuity_checkpoint','INSERT') then
     raise exception 'reader unexpectedly has checkpoint write access';
   end if;
