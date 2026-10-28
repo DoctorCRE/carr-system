@@ -17,6 +17,7 @@ import { budgetedAi } from "./ai-budget.js";
 import { publicError } from "./public-errors.ts";
 import { mcpOriginRefusal } from "./oauth-policy.ts";
 import { DOC_TOOL_NAMES, DOC_INSTRUCTIONS, docToolAnnotations } from "./doc-profile.ts";
+import { MEMORY_ATTACH_LINE } from "./doctrine.js";
 import { TOOLS, ToolError, executeRegisteredTool, assertRegisteredToolInput, UNATTENDED_AUTHORITY_VERBS,
   auditIdentity, assertNoCallerAuthorityFields, coerceArgsToSchema,
   pgConstraintError, describeConstraint } from "./tools.js";
@@ -991,9 +992,9 @@ export async function dispatch(request, env, ctx, actor, sessionKey) {
           instructions: profile === "doc" ? DOC_INSTRUCTIONS :
            "CARR's record layer AND the doctrine store — the ONE source of truth for Joe Bookout's " +
            "healthcare-CRE practice (partner Dell McCraney; business only, personal life is Life AI). " +
-           "OPENING ACT, every session: call standing-context FIRST — it returns the taught rules " +
-           "with the counts to recite in your first response, open action-required items, and the " +
-           "doctrine pointer. There are NO doctrine files: read via doctrine-index / search-doctrine / " +
+           MEMORY_ATTACH_LINE + " Its org-conventions store carries the taught-rule counts to " +
+           "recite in your first response; standing-context returns the rule text, open " +
+           "action-required items and the doctrine pointer. There are NO doctrine files: read via doctrine-index / search-doctrine / " +
            "read-doctrine; state via catch-me-up / today-triage. Discovery advertises a compact core. " +
            "For any other verb, use list-verbs with a filter to fetch its schema, then call-verb. " +
            "Reuse discovered schemas in this session; do not load the complete catalog at startup. " +

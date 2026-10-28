@@ -27,6 +27,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const TEAM_MEMORY = "team-memory";
 const MEMORY_SURFACES = ["claude_code", "codex", "routine", "dot", "dream", "app"];
 const MEMORY_ACCESS = ["read_only", "read_write"];
+// The one attach instruction (S6): the MCP instructions embed it and
+// ops/sync-core-rule-cards.py renders it into CLAUDE.md and AGENTS.md.
+export const MEMORY_ATTACH_LINE = "OPENING ACT, every session: call attach-memory first, with surface claude_code for Claude Code or codex for a Codex job (pass the job log named on the brief's first line as transcript_ref). Check its team-memory index before starting and read any section that bears on your task with doctrine-sections; as you learn or rule something out, write it with write-doctrine-section document=team-memory and your attach_id.";
 const TERRITORY_SECTION_ID = "aa3868ef-d0a2-4bc2-9954-525ad418636b";
 
 /** Read the count banner emitted by the generated personal/shared rule renders. */

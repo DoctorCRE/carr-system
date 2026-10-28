@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { allowedIn, profileForActor, mcpApiHandler, callTool } from "../src/mcp.js";
 import { dispatch } from "./helpers/budgeted-dispatch.mjs";
 import { TOOLS } from "../src/tools.js";
+import { MEMORY_ATTACH_LINE } from "../src/doctrine.js";
 import { authenticatedIdentity } from "../src/identity.js";
 import { Pool } from "@neondatabase/serverless";
 
@@ -151,7 +152,8 @@ test("ordinary /mcp keeps its tool contracts and boot instructions behind compac
     });
   }
   const initialized = (await rpc("/mcp", "initialize")).result;
-  assert.match(initialized.instructions, /call standing-context FIRST/);
+  assert.ok(initialized.instructions.includes(MEMORY_ATTACH_LINE), "the generated attach line opens every session");
+  assert.doesNotMatch(initialized.instructions, /standing-context FIRST/);
   assert.match(initialized.instructions, /list-verbs with a filter.*call-verb/);
   assert.match(initialized.instructions, /idempotency_key.*base_version/);
   assert.equal(initialized.serverInfo.name, "carr-record-layer");
@@ -163,7 +165,7 @@ test("Doc initialization describes brokerage usage without the engineering brief
   assert.match(result.instructions, /brokerage colleague/i);
   assert.match(result.instructions, /^When .*what is new.*what they missed.*cold.*whats-new first/i);
   assert.match(result.instructions, /idempotency_key/);
-  assert.doesNotMatch(result.instructions, /DELEGATION LATCH|standing-context FIRST/);
+  assert.doesNotMatch(result.instructions, /DELEGATION LATCH|standing-context FIRST|attach-memory/);
   assert.match(result.instructions, /who .*should meet.*read-vendor-meetings/i);
 });
 

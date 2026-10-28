@@ -3,6 +3,7 @@
 import importlib.util
 import io
 import json
+import re
 from pathlib import Path
 import sys
 import subprocess
@@ -33,6 +34,16 @@ class CardTests(unittest.TestCase):
     def test_boot_pages_match_card_source(self):
         subprocess.run([sys.executable, str(REPO / 'ops/sync-core-rule-cards.py'), '--check'],
                        check=True, cwd=REPO)
+
+    def test_boot_pages_carry_the_server_attach_line(self):
+        source = (REPO / 'mcp-server/src/doctrine.js').read_text()
+        line = json.loads(re.search(r'^export const MEMORY_ATTACH_LINE = (".+");$', source, re.M)[1])
+        self.assertIn('attach-memory', line)
+        for page in ('CLAUDE.md', 'AGENTS.md'):
+            with self.subTest(page=page):
+                text = (REPO / page).read_text()
+                self.assertIn(line + '\n', text)
+                self.assertNotIn('No boot fetch is required', text)
 
     def test_guidance_checker_rejects_missing_paths(self):
         script = REPO / 'ops/sync-core-rule-cards.py'
