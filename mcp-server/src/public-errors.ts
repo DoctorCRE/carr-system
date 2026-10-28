@@ -76,6 +76,8 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["slice_not_found", "Choose a slice from the recorded plan."],
   ["invalid_card_title", "Supply a card title of two or three plain words."],
   ["invalid_job_description", "Describe the job in one sentence."],
+  ["job_already_started", "This job already has a runner; choose the next unstarted queue job."],
+  ["job_repository_mismatch", "Start this job in its recorded repository."],
   ["job_not_found", "Choose an existing job under this Work Request and slice."],
   ["priority_out_of_range", "Choose a position within the visible queue."],
   ["key_reuse", "Use a fresh idempotency_key for changed arguments."],
