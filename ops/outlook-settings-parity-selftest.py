@@ -115,6 +115,8 @@ class ParityTest(unittest.TestCase):
         for (old_verb, old_args), (verb, args) in zip(before_calls, after_calls, strict=True):
             self.assertEqual(verb, old_verb)
             expected, actual = dict(old_args), dict(args)
+            if verb == 'set-next-action':
+                self.assertNotEqual(actual.pop('idempotency_key'), expected.pop('idempotency_key'))
             if verb == 'log-activity':
                 self.assertNotEqual(actual.pop('idempotency_key'), expected.pop('idempotency_key'))
                 if args['kind'] == 'email_in':
