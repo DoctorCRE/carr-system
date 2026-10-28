@@ -209,11 +209,16 @@ def check(floor, diff_range, gates_deferred):
 
 def pull_request_files(span):
     """The changed-file records the review gate reads from GitHub, built from git."""
+    result = subprocess.run(["git", "diff", "--name-status", "-z", "-M", span],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    if result.returncode:
+        return []
+    fields = iter(result.stdout.decode(errors="surrogateescape").split("\0")[:-1])
     files = []
-    for line in git_lines("diff", "--name-status", "-M", span) or []:
-        status, *paths = line.split("\t")
-        files.append({"filename": paths[-1], "previous_filename": paths[0]} if status[0] in "RC"
-                     else {"filename": paths[0]})
+    for status in fields:
+        path = next(fields)
+        files.append({"filename": next(fields), "previous_filename": path} if status[0] in "RC"
+                     else {"filename": path})
     return files
 
 

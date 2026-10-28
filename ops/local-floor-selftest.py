@@ -351,6 +351,48 @@ class PrePrTests(RepositoryFixture):
         self.commit("docs/note.md")
         self.assertEqual(self.pre_pr("no card\n").returncode, 0)
 
+    def test_unicode_docs_only_branch_needs_no_card(self):
+        self.git("reset", "-q", "--hard", self.base)
+        self.write("café.md", "note\n")
+        self.commit("café.md")
+        result = self.pre_pr("no card\n")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
+
+    def test_quoted_docs_only_branch_needs_no_card(self):
+        self.git("reset", "-q", "--hard", self.base)
+        self.write('quoted"name.md', "note\n")
+        self.commit('quoted"name.md')
+        result = self.pre_pr("no card\n")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
+
+    def test_renamed_docs_only_branch_needs_no_card(self):
+        self.git("reset", "-q", "--hard", self.base)
+        self.write('quoted"name.md', "note\n")
+        self.commit('quoted"name.md')
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("mv", 'quoted"name.md', "café.md")
+        self.write("other.md", "another note\n")
+        self.commit("café.md", "other.md")
+        self.assertIn("R100", self.git("diff", "--name-status", "-M", "origin/main..HEAD").stdout)
+        result = self.pre_pr("no card\n")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
+
+    def test_code_renamed_to_markdown_still_needs_card(self):
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("mv", "app.py", "app.md")
+        self.commit("app.md")
+        result = self.pre_pr("no card\n")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(len(result.stdout.splitlines()), 1)
+        self.assertIn("Card:", result.stdout)
+        self.assertEqual(result.stderr, "")
+
     def test_no_body_and_no_pull_request_says_to_pass_one(self):
         result = self.pre_pr(None)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
