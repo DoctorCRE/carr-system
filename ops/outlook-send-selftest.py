@@ -1050,6 +1050,26 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual(receipt['reason'], 'aborted_before_dispatch')
         self.assertEqual(self.sent, [])
 
+    def test_aborted_reply_resubmission_sends_once_and_blocks_another(self):
+        original = self.ports.open_form
+        def abort_form(item):
+            form = original(item)
+            def abort(**kwargs):
+                raise send_mod.UserActive('user_active')
+            form.press = abort
+            return form
+        self.ports.open_form = abort_form
+        self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
+        self.assertEqual(self.calls[-1][1]['reason'], 'aborted_before_dispatch')
+        self.ports.open_form = original
+        self.draft['version'] = 4
+        counts = self.worker.run(self.settings, self.ports)
+        self.assertEqual(counts['sent'], 1, self.calls[-1][1].get('reason'))
+        self.draft['version'] = 6
+        self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.calls[-1][1]['reason'], 'duplicate_key:key_already_pressed')
+
     def test_ambiguous_latch_expires_without_resending(self):
         self.settings.send_state.mkdir(parents=True)
         draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)

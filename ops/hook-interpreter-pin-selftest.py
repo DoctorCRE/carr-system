@@ -67,12 +67,11 @@ FORBIDDEN = ("/usr/bin/env python3", "/usr/bin/env python ")
 failures: list[str] = []
 
 
-def check(name, cond, detail=""):
-    if cond:
-        print(f"  ok   {name}")
-    else:
-        print(f"  FAIL {name} {detail}")
-        failures.append(name)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(ok="  ok   {label}", fail="  FAIL {label} {detail}", detail=None, failures=failures)
 
 
 def commands(config):

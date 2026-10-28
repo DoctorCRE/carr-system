@@ -43,12 +43,11 @@ FAILURES: list[str] = []
 BEFORE: tuple = ()
 
 
-def check(name, condition, detail=""):
-    if condition:
-        print(f"  ok    {name}")
-    else:
-        print(f"  FAIL  {name} {detail}")
-        FAILURES.append(name)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(fail="  FAIL  {label} {detail}", detail=None, failures=FAILURES)
 
 
 def git(cwd, *args, env=None):

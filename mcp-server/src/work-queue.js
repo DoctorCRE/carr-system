@@ -47,7 +47,7 @@ export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...
         return cards.length ? [{ repo, number: item.number, url: item.html_url, title: item.title, draft: item.draft === true, updated_at: item.updated_at,
           state: item.pull_request?.merged_at ? 'merged' : item.state === 'open' ? 'open' : 'closed', cards }] : [];
       });
-      return { repo, state: 'ok', observed_at: new Date(now()).toISOString(), truncated: body.total_count > body.items.length, prs };
+      return { repo, state: 'ok', observed_at: new Date(now()).toISOString(), truncated: body.incomplete_results === true || body.total_count > body.items.length, prs };
     } catch { return { repo, state: 'unavailable', reason: 'github_unreachable', prs: [] }; }
   }
   return (repos, since) => Promise.all(repos.map(repo => {
@@ -81,7 +81,7 @@ export function queueView(rows, sources, at) {
     const { cards, ...fact } = pr;
     byCard.set(card, [...(byCard.get(card) ?? []), { ...fact, card_id: `${card}.${addressFormat.repositories[pr.repo]}#${pr.number}` }]);
   }
-  // A stall is only claimed when every repository answered in full: an unreadable or truncated one may hold the newer push.
+  // A stall is only claimed when every repository answered in full: an unreadable or truncated (including GitHub's incomplete_results) one may hold the newer push.
   const complete = sources.every(source => source.state === 'ok' && !source.truncated);
   const finishes = [];
   const jobs = rows.map(({ work_request_id, created_at, finished, ...row }) => {

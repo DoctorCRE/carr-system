@@ -309,8 +309,9 @@ RULE_VERB = re.compile(r"\b(teach|activate-rule|retire-rule|amend-rule|supersede
 
 USE_INSTEAD = ("Use a verb: log-decision (a settled call and why), add-loop (an open item), "
                "record-finding (research/verification), update-loop / close-loop. "
-               "Propose standing guidance as an edit to CLAUDE.md, AGENTS.md or a skill "
-               "in a PR; proposals bind nobody until merged.")
+               "Propose standing guidance as a team-memory convention (write-doctrine-section "
+               "document=team-memory section_key=conventions/proposed/<slug>); it binds nobody "
+               "until adopted in person through governance-queue (adopt-rule).")
 
 
 def log(msg):

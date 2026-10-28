@@ -21,14 +21,11 @@ passed: int = 0
 failures: list[str] = []
 
 
-def check(name: str, cond: object, detail: str = "") -> None:
-    global passed
-    if cond:
-        passed += 1
-        print(f"  ok    {name}")
-    else:
-        failures.append(name)
-        print(f"  FAIL  {name}" + (f" — {detail}" if detail else ""))
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(failures=failures, counters={"passed": "pass"}, ns=globals())
 
 
 def snapshot(tables: str, rows: list[tuple[str, str, str]], seq: int = 7) -> str:

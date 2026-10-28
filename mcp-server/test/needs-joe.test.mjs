@@ -212,7 +212,7 @@ test("the existing governance lanes are unchanged", async () => {
   const { result } = await read();
   assert.deepEqual(result.pending_rule_approvals, governance.pending_rule_approvals);
   assert.deepEqual(result.counts, {
-    pending_rule_approvals: 1, pending_guidance_import_batches: 0,
+    pending_convention_proposals: 0, pending_rule_approvals: 1, pending_guidance_import_batches: 0,
     pending_retrieval_proposals: 1, total: 2,
   });
 });

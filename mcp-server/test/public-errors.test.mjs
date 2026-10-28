@@ -65,6 +65,9 @@ for (const [code, extra] of [
   ["invalid_completion", {}], ["missing_criterion_evidence", {}], ["missing_change_ref", {}],
   ["missing_user_journey_ref", {}], ["completion_capsule_refused", {}], ["sponsored_actor_required", {}],
   ["memory_attach_required", {}], ["memory_read_only", {}],
+  ["convention_proposal_not_found", {}], ["convention_proposal_malformed", {}],
+  ["convention_card_already_active", {}], ["convention_pack_unknown", {}], ["rule_adoption_requires_joe", {}],
+  ["rule_adoption_requires_app_approval", {}],
   ["decision_id_required", { field: "decision_id" }], ["decision_id_malformed", { field: "decision_id", got: privateText }],
   ["decision_not_found", { field: "decision_id", got: "00000000" }],
   ["ambiguous_decision_id", { field: "decision_id", got: "0", candidates: [{ decision_id: privateText, title: privateText }] }],
@@ -80,6 +83,12 @@ for (const code of ["email_source_owner_mismatch", "email_proposal_confidence_in
   const payload = await failure(t, new ToolError({ error: code, detail: privateText }));
   assert.equal(payload.error, code);
   assert.ok(payload.hint);
+});
+
+test("MCP exposes the non-resubmittable draft refusal with a fixed hint", async t => {
+  const payload = await failure(t, new ToolError({ error: "email_draft_failure_not_resubmittable", reason: privateText, hint: privateText }));
+  assert.equal(payload.error, "email_draft_failure_not_resubmittable");
+  assert.equal(payload.hint, "This failed draft cannot be resubmitted. Review the failure before creating a new draft.");
 });
 
 test("MCP preserves invalid base version without exposing diagnostics", async t => {

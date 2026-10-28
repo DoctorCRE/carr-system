@@ -19,10 +19,17 @@ spec.loader.exec_module(gate)
 failed: list[str] = []
 
 
-def check(name: str, condition: bool, detail: str = "") -> None:
-    print(("  ok   " if condition else "  FAIL ") + name + (f" {detail}" if detail else ""))
-    if not condition:
-        failed.append(name)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(
+    ok="  ok   {label}",
+    fail="  FAIL {label}",
+    detail=" {detail}",
+    detail_on_ok=True,
+    failures=failed,
+)
 
 
 proposals = {"unknown": [{"email": "new@example.com"}]}

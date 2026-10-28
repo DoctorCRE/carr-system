@@ -53,8 +53,8 @@ def ts(delta: timedelta) -> int:
 
 
 def mail(sender, sent, subject='Suite question', body='Can we meet Thursday?', name=None,
-         recipients=OWNER, kind='full', copy_key=None, local_keys=None):
-    return dict(sender=sender, sender_name=name, recipients=recipients, subject=subject,
+         recipients=OWNER, kind='full', copy_key=None, local_keys=None, flag=None, due=None, done=None):
+    return dict(flag_status=flag, flag_due_unix=due, flag_completed_unix=done, sender=sender, sender_name=name, recipients=recipients, subject=subject,
                 body=body, body_kind=kind, sent_unix=ts(sent),
                 copy_key=copy_key or f'{sender}\x1f{subject.lower()}\x1f{body.lower()}', local_keys=local_keys)
 
@@ -64,10 +64,12 @@ def ident(m):
                                 (m.get('local_keys') or '').split(',') if m.get('local_keys') else None)[1]
 
 
-def event(goid, start, minutes=60, subject='Site visit', attendees=(), organizer=('Owner', OWNER)):
+def event(goid, start, minutes=60, subject='Site visit', attendees=(), organizer=('Owner', OWNER),
+          lifecycle=None):
     return dict(goid=goid, start_unix=ts(start), end_unix=ts(start + timedelta(minutes=minutes)),
                 subject=subject, location='Example Room', organizer_name=organizer[0],
-                organizer_email=organizer[1], body='Agenda', attendees=list(attendees))
+                organizer_email=organizer[1], body='Agenda', attendees=list(attendees),
+                lifecycle=lifecycle)
 
 
 def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identities=None, decoded=None):
@@ -85,9 +87,9 @@ def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identiti
                      m['body_kind'], m['sent_unix'], m['copy_key']))
         if keyed:
             con.execute('UPDATE messages SET local_keys = ? WHERE id = last_insert_rowid()', (m.get('local_keys'),))
-    for field in ('conversation_id', 'cc'):
+    for field in ('conversation_id', 'cc', 'flag_status', 'flag_due_unix', 'flag_completed_unix'):
         if any(m.get(field) is not None for m in mails):
-            con.execute(f'ALTER TABLE messages ADD COLUMN {field} TEXT')
+            con.execute(f'ALTER TABLE messages ADD COLUMN {field} {"INTEGER" if field.endswith("_unix") else "TEXT"}')
             for row_id, m in enumerate(mails, 1):
                 con.execute(f'UPDATE messages SET {field}=? WHERE id=?', (m.get(field), row_id))
     for e in events:
@@ -95,6 +97,9 @@ def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identiti
                           'organizer_name,organizer_email,body) VALUES (?,?,?,?,?,?,?,?,?,?)',
                           (e['goid'], e['start_unix'], e['end_unix'], '', '', e['subject'], e['location'],
                            e['organizer_name'], e['organizer_email'], e['body']))
+        if e.get('lifecycle'):
+            con.execute('UPDATE events SET lifecycle_status=?, lifecycle_reason=? WHERE id=?',
+                        (*e['lifecycle'], cur.lastrowid))
         for name, email in e['attendees']:
             con.execute('INSERT INTO event_attendees VALUES (?,?,?)', (cur.lastrowid, name, email))
     con.executemany('INSERT INTO meta VALUES (?,?)',
@@ -149,6 +154,8 @@ class Fake:
             if source:
                 self.hydrated_bodies[source] = args['detail']
             return {'ok': True, 'activity_id': str(uuid.uuid5(uuid.NAMESPACE_URL, args['idempotency_key']))}
+        if verb == 'record-deal-item':
+            return {'ok': True, 'item': {'id': str(uuid.uuid5(uuid.NAMESPACE_URL, args['source_ref'])), 'due_on': args['due_on']}}
         if verb == 'find':
             return {'parties': self.parties.get(args['query'], []), 'deals': []}
         if verb == 'catch-me-up':
@@ -878,6 +885,17 @@ class IntakeTest(unittest.TestCase):
         self.assertTrue(all(r['disposition'] == 'calendar_unsupported' and not r['acknowledged']
                             for r in state['requests'].values()))
 
+    def test_decoded_canceled_candidates_leave_the_unsupported_count(self):
+        result = self.run_intake(events=[
+            event('live', timedelta(days=1)),
+            event('gone', timedelta(days=2), lifecycle=('canceled', 'outlook_canceled_subject'))])
+        self.assertEqual(result.counts['calendar_lifecycle_unsupported'], 1)
+        self.assertEqual(result.counts['calendar_lifecycle_canceled'], 1)
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertEqual(sorted(e['status'] for e in state['calendar_evidence'].values()),
+                         ['canceled', 'unsupported'])
+        self.assertEqual(self.fake.writes(), [], 'a decoded lifecycle is reported, not acted on')
+
     def test_internal_calendar_candidates_are_not_unresolved_meetings(self):
         result = self.run_intake(events=[event('internal', timedelta(days=1),
                                               attendees=[('Partner', PARTNER)])])
@@ -1134,6 +1152,181 @@ class IntakeTest(unittest.TestCase):
             self.assertEqual(self.fake.writes('log-activity'), [('log-activity', args)])
         self.assertNotEqual(captured[0]['idempotency_key'], captured[1]['idempotency_key'])
         self.assertEqual([a['email_source']['mailbox_owner'] for a in captured], ['joe', 'dell'])
+
+    def test_shared_email_next_actions_are_scoped_to_the_owner(self):
+        m = mail('pat@example.test', -timedelta(hours=1))
+        self.fake.model_reply = {'next_step': 'Reply', 'due_on': None}
+        keys = []
+        for owner in ('joe', 'dell'):
+            shutil.rmtree(self.out(), ignore_errors=True)
+            self.fake.calls.clear()
+            write_settings(self.home, self.repo, owner=owner)
+            self.assertEqual(self.run_intake([m]).state, 'succeeded')
+            [(_, args)] = self.fake.writes('set-next-action')
+            keys.append(args['idempotency_key'])
+        self.assertNotEqual(*keys)
+
+    def test_legacy_blocked_action_recovers_once_under_owner_key(self):
+        m = mail('pat@example.test', -timedelta(hours=1))
+        write_settings(self.home, self.repo, owner='dell')
+        self.fake.model_reply = {'next_step': 'Reply', 'due_on': None}
+        self.fake.fail_verbs.add('set-next-action')
+        self.assertEqual(self.run_intake([m]).state, 'failed')
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        old = intake.key('set-next-action', 'C-901', f'next|{ident(m)}')
+        [current] = [k for k, r in state['requests'].items() if r['verb'] == 'set-next-action']
+        request = state['requests'].pop(current)
+        payload = json.loads(request['payload'])
+        payload['idempotency_key'] = old
+        request.pop('key_owner', None)
+        request.pop('source_kind', None)
+        request.update(payload=json.dumps(payload), disposition='blocked', error_code='key_reuse', retry_at=None)
+        state['requests'][old] = request
+        path.write_text(json.dumps(state))
+        self.fake.calls.clear()
+        self.fake.fail_verbs.clear()
+        result = self.run_intake([], touch=False)
+        self.assertEqual(result.state, 'succeeded', result)
+        [(_, args)] = self.fake.writes('set-next-action')
+        self.assertEqual(args['idempotency_key'], intake.key('set-next-action', 'C-901', f'dell|next|{ident(m)}'))
+        self.assertEqual(args['description'], 'Reply')
+        saved = json.loads(path.read_text())['requests'][args['idempotency_key']]
+        self.assertEqual(saved['source_kind'], 'mail')
+        self.fake.calls.clear()
+        self.assertEqual(self.run_intake([], touch=False).state, 'succeeded')
+        self.assertEqual(self.fake.writes('set-next-action'), [])
+
+    def test_orphan_legacy_blocked_action_retries_only_once(self):
+        m = mail('pat@example.test', -timedelta(hours=1))
+        self.fake.model_reply = {'next_step': 'Reply', 'due_on': None}
+        self.fake.fail_verbs.add('set-next-action')
+        self.run_intake([m])
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        state['steps'] = {}
+        [current] = [k for k, r in state['requests'].items() if r['verb'] == 'set-next-action']
+        request = state['requests'].pop(current)
+        legacy = intake.key('set-next-action', 'C-901', f'next|{ident(m)}')
+        args = json.loads(request['payload'])
+        args['idempotency_key'] = legacy
+        request.pop('key_owner', None)
+        request.update(payload=json.dumps(args), disposition='blocked', error_code='key_reuse', retry_at=None)
+        state['requests'][legacy] = request
+        path.write_text(json.dumps(state))
+        self.fake.fail_verbs.clear()
+        self.fake.calls.clear()
+        original = self.fake.carr
+        def server(verb, args):
+            if verb == 'set-next-action':
+                self.fake.calls.append((verb, args))
+                raise intake.CarrError(code='key_reuse')
+            return original(verb, args)
+        self.fake.carr = server
+        self.assertEqual(self.run_intake([], touch=False).state, 'failed')
+        [(_, retried)] = self.fake.writes('set-next-action')
+        self.assertNotEqual(retried['idempotency_key'], legacy)
+        self.fake.calls.clear()
+        self.assertEqual(self.run_intake([], touch=False).reason, 'request_blocked')
+        self.assertEqual(self.fake.writes('set-next-action'), [])
+
+    def test_legacy_acknowledged_action_is_not_rewritten(self):
+        m = mail('pat@example.test', -timedelta(hours=1))
+        self.fake.model_reply = {'next_step': 'Reply', 'due_on': None}
+        self.fake.fail_verbs.add('set-next-action')
+        self.run_intake([m])
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        [scoped] = [k for k, r in state['requests'].items() if r['verb'] == 'set-next-action']
+        request = state['requests'].pop(scoped)
+        legacy = intake.key('set-next-action', 'C-901', f'next|{ident(m)}')
+        args = json.loads(request['payload'])
+        args['idempotency_key'] = legacy
+        request.pop('key_owner', None)
+        request.update(payload=json.dumps(args), acknowledged=True, disposition='acknowledged', error_code=None)
+        state['requests'][legacy] = request
+        path.write_text(json.dumps(state))
+        self.fake.fail_verbs.clear()
+        self.fake.calls.clear()
+        self.assertEqual(self.run_intake([], touch=False).state, 'succeeded')
+        self.assertEqual(self.fake.writes('set-next-action'), [])
+        saved = json.loads(path.read_text())['requests']
+        self.assertEqual(saved[legacy], request)
+        self.assertNotIn(scoped, saved)
+
+    def test_new_owner_key_refusal_stays_blocked_without_rekeying_again(self):
+        m = mail('pat@example.test', -timedelta(hours=1))
+        self.fake.model_reply = {'next_step': 'Reply', 'due_on': None}
+        original = self.fake.carr
+        def server(verb, args):
+            if verb == 'set-next-action':
+                self.fake.calls.append((verb, args))
+                raise intake.CarrError(code='key_reuse')
+            return original(verb, args)
+        self.fake.carr = server
+        self.assertEqual(self.run_intake([m]).state, 'failed')
+        self.fake.calls.clear()
+        self.assertEqual(self.run_intake([], touch=False).reason, 'request_blocked')
+        self.assertEqual(self.fake.writes('set-next-action'), [])
+
+    def test_flag_keys_and_items_are_scoped_to_the_mailbox(self):
+        keys, sources = [], []
+        for owner, due in (('joe', self.OCT28), ('dell', self.OCT29)):
+            shutil.rmtree(self.out(), ignore_errors=True)
+            self.fake.calls.clear()
+            write_settings(self.home, self.repo, owner=owner)
+            m = self.flagged(flag='flagged', due=due)
+            self.filed_deal(m)
+            self.assertEqual(self.run_intake([m]).state, 'succeeded')
+            [(_, args)] = self.fake.writes('record-deal-item')
+            keys.append(args['idempotency_key'])
+            sources.append(args['source_ref'])
+        self.assertNotEqual(*keys)
+        self.assertNotEqual(*sources)
+
+    def test_legacy_pending_flag_replays_its_frozen_payload(self):
+        m = self.flagged(flag='flagged', due=self.OCT29)
+        self.filed_deal(m)
+        self.fake.fail_verbs.add('record-deal-item')
+        self.assertEqual(self.run_intake([m]).state, 'failed')
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        [scoped] = [k for k, r in state['requests'].items() if r['verb'] == 'record-deal-item']
+        request = state['requests'].pop(scoped)
+        legacy = intake.key('record-deal-item', 'deal-1', f'{ident(m)}|flagged')
+        args = json.loads(request['payload'])
+        args.update(idempotency_key=legacy, source_ref=f'outlook-flag:{ident(m)}')
+        request['payload'] = json.dumps(args)
+        state['requests'][legacy] = request
+        path.write_text(json.dumps(state))
+        self.fake.calls.clear()
+        self.fake.fail_verbs.clear()
+        self.fake.now += timedelta(minutes=2)
+        self.assertEqual(self.run_intake([m], touch=False).state, 'succeeded')
+        self.assertEqual(self.fake.writes('record-deal-item'), [('record-deal-item', args)])
+
+    def test_lead_proposals_from_different_mailboxes_have_distinct_keys(self):
+        keys = []
+        self.fake.intent_reply = {'business': True, 'summary': 'Needs office space'}
+        for owner, subject in (('joe', 'Office request'), ('dell', 'Lease request')):
+            shutil.rmtree(self.out(), ignore_errors=True)
+            self.fake.calls.clear()
+            write_settings(self.home, self.repo, owner=owner)
+            result = self.run_intake([mail('unknown@example.test', -timedelta(hours=1), subject=subject)])
+            self.assertEqual(result.state, 'succeeded', result)
+            [(_, args)] = self.fake.writes('propose-email-lead')
+            keys.append(args['idempotency_key'])
+        self.assertNotEqual(*keys)
+
+    def test_simultaneous_different_agendas_use_distinct_keys(self):
+        keys = []
+        for title in ('Joe meeting', 'Dell meeting'):
+            self.fake.agenda_version = 0
+            self.fake.agenda = None
+            self.fake.board_calls.clear()
+            self.assertEqual(self.run_intake(events=[event(self.gid(1), timedelta(hours=4), subject=title)]).state, 'succeeded')
+            keys.append(next(args['idempotency_key'] for verb, args in self.fake.board_calls if verb == 'publish-board-snapshot'))
+        self.assertNotEqual(*keys)
 
     def test_legacy_pending_mail_write_replays_its_original_key_and_payload(self):
         m = mail('pat@example.test', -timedelta(hours=1))
@@ -1754,7 +1947,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual((args['ref'], args['description'], args['due_on']),
                          ('C-901', 'Send the floor plan', '2026-10-22'))
         self.assertEqual(args['idempotency_key'],
-                         str(uuid.uuid5(uuid.NAMESPACE_URL, f'set-next-action|C-901|next|{ident(m)}')))
+                         str(uuid.uuid5(uuid.NAMESPACE_URL, f'set-next-action|C-901|joe|next|{ident(m)}')))
         self.assertIn('no prior ball', self.report_text())
 
     def test_a_ball_newer_than_the_email_is_kept(self):
@@ -1800,7 +1993,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual((result.counts['balls_kept'], result.counts['balls_set']), (1, 0))
         self.assertEqual(self.fake.actions['C-901', 'joe'], human)
         request = json.loads((self.out() / intake.STATE).read_text())['requests'][
-            intake.key('set-next-action', 'C-901', f'next|{ident(m)}')]
+            intake.key('set-next-action', 'C-901', f'joe|next|{ident(m)}')]
         self.assertEqual(request['disposition'], 'superseded')
         self.fake.now += timedelta(minutes=30)
         self.run_intake([m], touch=False)
@@ -1843,7 +2036,7 @@ class IntakeTest(unittest.TestCase):
         second = mail('pat@example.test', -timedelta(hours=1), subject='Second')
         self.run_intake([mail('pat@example.test', -timedelta(hours=2), subject='First'), second])
         keys = [a['idempotency_key'] for _, a in self.fake.writes('set-next-action')]
-        self.assertEqual(keys[-1], str(uuid.uuid5(uuid.NAMESPACE_URL, f'set-next-action|C-901|next|{ident(second)}')))
+        self.assertEqual(keys[-1], str(uuid.uuid5(uuid.NAMESPACE_URL, f'set-next-action|C-901|joe|next|{ident(second)}')))
 
     def test_a_model_failure_logs_the_activity_fails_the_run_and_retries_the_step(self):
         mails = [mail('pat@example.test', -timedelta(hours=1))]
@@ -1904,7 +2097,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.run_intake([m]).state, 'failed')
         path = self.out() / intake.STATE
         state = json.loads(path.read_text())
-        request = state['requests'][intake.key('set-next-action', 'C-901', f'next|{ident(m)}')]
+        request = state['requests'][intake.key('set-next-action', 'C-901', f'joe|next|{ident(m)}')]
         args = json.loads(request['payload'])
         del args['expected_action']
         del args['owner']
@@ -2607,6 +2800,208 @@ class IntakeTest(unittest.TestCase):
         self.fake.board_conflicts = 2
         self.fake.now += timedelta(minutes=30)
         self.assertEqual(self.run_intake(events=[event(self.gid(3), timedelta(hours=6))]).counts['calendar_agenda_failed'], 1)
+
+    # follow-up flags (WR-000440)
+
+    OCT29 = int(datetime(2026, 10, 29, tzinfo=timezone.utc).timestamp())  # midnight UTC; 7 PM Oct 28 in Chicago
+    OCT28 = OCT29 - 86_400
+
+    def filed_deal(self, m, deal='deal-1'):
+        """Log the mail, then let the server confirm its filing on a deal."""
+        self.assertEqual(self.run_intake([m]).state, 'succeeded')
+        logged = self.fake.writes('log-activity')[0][1]['idempotency_key']
+        self.fake.email_queue = [{'activity_id': str(uuid.uuid5(uuid.NAMESPACE_URL, logged)), 'deal': deal,
+                                  'body': '', 'occurred_at': NOW.isoformat()}]
+
+    def flag_calls(self):
+        return [(v, a) for v, a in self.fake.calls if v in ('record-deal-item', 'complete-deal-item', 'drop-action')]
+
+    def flagged(self, **flag):
+        return mail('pat@example.test', -timedelta(hours=1), subject='Send the lease', **flag)
+
+    def test_flagged_email_on_a_deal_files_a_todo_with_a_date_only_due_day(self):
+        self.filed_deal(self.flagged(flag='flagged', due=self.OCT29))
+        self.assertEqual(self.run_intake([self.flagged(flag='flagged', due=self.OCT29)], touch=False).state, 'succeeded')
+        [(verb, args)] = self.flag_calls()
+        self.assertEqual((verb, args['deal'], args['due_on']), ('record-deal-item', 'deal-1', '2026-10-29'))
+        self.assertEqual(args['bullets'][0]['date'], '2026-10-29')
+        self.assertIn('Send the lease', args['bullets'][0]['text'])
+        self.assertEqual(intake._flag_day(self.OCT29), '2026-10-29')
+        self.assertEqual(intake._flag_day(self.OCT28), '2026-10-28')
+
+    def test_flag_without_a_due_date_files_a_todo_with_none(self):
+        self.filed_deal(self.flagged(flag='flagged'))
+        self.run_intake([self.flagged(flag='flagged')], touch=False)
+        self.assertIsNone(self.flag_calls()[0][1]['due_on'])
+        self.assertIsNone(intake._flag_day(None))
+        self.assertIsNone(intake._flag_day(253_402_300_799 * 2))  # DateTime.MaxValue sentinel
+
+    def test_completed_flag_completes_the_todo(self):
+        m = self.flagged(flag='flagged', due=self.OCT29)
+        self.filed_deal(m)
+        self.run_intake([m], touch=False)
+        done = self.flagged(flag='complete', due=self.OCT29, done=self.OCT28)
+        self.assertEqual(self.run_intake([done]).state, 'succeeded')
+        verbs = [v for v, _ in self.flag_calls()]
+        self.assertEqual(verbs, ['record-deal-item', 'complete-deal-item'])
+        item = self.fake.calls and next(a for v, a in self.flag_calls() if v == 'complete-deal-item')
+        self.assertEqual(item['item_id'], str(uuid.uuid5(uuid.NAMESPACE_URL, f'outlook-flag:joe:{ident(m)}')))
+
+    def test_unflagging_drops_the_todo_with_its_source(self):
+        m = self.flagged(flag='flagged')
+        self.filed_deal(m)
+        self.run_intake([m], touch=False)
+        self.assertEqual(self.run_intake([self.flagged(flag='none')]).state, 'succeeded')
+        verb, args = self.flag_calls()[-1]
+        self.assertEqual(verb, 'drop-action')
+        self.assertIn(f'outlook-flag:{ident(m)}', args['reason'])
+        self.assertNotIn('complete-deal-item', [v for v, _ in self.flag_calls()])
+
+    def test_unknown_or_disagreeing_flags_change_nothing(self):
+        m = self.flagged(flag='flagged')
+        self.filed_deal(m)
+        self.run_intake([m], touch=False)
+        for flag in ('weird', None):
+            self.run_intake([self.flagged(flag=flag)])
+        self.assertEqual([v for v, _ in self.flag_calls()], ['record-deal-item'])
+        merged = intake._best_copies([{**self.flagged(flag='flagged'), 'row_ids': [1], 'folders': [], 'attachments': []},
+                                      {**self.flagged(flag='complete'), 'row_ids': [2], 'folders': [], 'attachments': []}])
+        self.assertIsNone(merged[0]['flag_status'])
+
+    def test_a_flag_never_seen_flagged_is_not_filed_as_complete(self):
+        m = self.flagged(flag='complete', done=self.OCT28)
+        self.filed_deal(m)
+        outcome = self.run_intake([m], touch=False)
+        self.assertEqual(self.flag_calls(), [])
+        self.assertEqual(outcome.counts['flags_untracked'], 1)
+
+    def test_flag_on_an_email_with_no_deal_is_counted_not_filed(self):
+        m = self.flagged(flag='flagged')
+        self.filed_deal(m, deal=None)
+        outcome = self.run_intake([m], touch=False)
+        self.assertEqual(self.flag_calls(), [])
+        self.assertEqual(outcome.counts['flags_unmatched'], 1)
+        stranger = mail('nobody@example.test', -timedelta(hours=1), subject='Cold email', flag='flagged')
+        self.assertEqual(self.run_intake([stranger]).counts['flags_unfiled'], 1)
+        self.assertEqual(self.flag_calls(), [])
+
+    def test_replaying_the_same_flag_state_writes_nothing_twice(self):
+        m = self.flagged(flag='flagged', due=self.OCT29)
+        self.filed_deal(m)
+        for _ in range(3):
+            self.run_intake([m], touch=False)
+        self.assertEqual(len(self.flag_calls()), 1)
+
+    def flag_state(self, m):
+        """File a flagged to-do, then let more than the intake prune horizon pass with the flag still set."""
+        self.filed_deal(m)
+        self.run_intake([m], touch=False)
+        self.fake.now = NOW + timedelta(days=12)
+        self.fake.email_queue = []  # the links page no longer shows the activity
+        self.assertEqual(self.run_intake([m]).state, 'succeeded')
+
+    def test_a_flag_cleared_long_after_filing_still_drops_the_todo(self):
+        m = self.flagged(flag='flagged', due=self.OCT29)
+        self.flag_state(m)
+        outcome = self.run_intake([self.flagged(flag='none')])
+        self.assertEqual(self.flag_calls()[-1][0], 'drop-action')
+        self.assertEqual(outcome.counts['flags_unfiled'], 0)
+        self.assertEqual(outcome.counts['flags_unmatched'], 0)
+
+    def test_a_flag_completed_long_after_filing_still_completes_the_todo(self):
+        self.flag_state(self.flagged(flag='flagged'))
+        self.run_intake([self.flagged(flag='complete', done=self.OCT28)])
+        self.assertEqual(self.flag_calls()[-1][0], 'complete-deal-item')
+
+    def test_a_flag_closes_without_its_activity_on_the_current_links_page(self):
+        m = self.flagged(flag='flagged')
+        self.filed_deal(m)
+        self.run_intake([m], touch=False)
+        self.fake.email_queue = []
+        outcome = self.run_intake([self.flagged(flag='none')])
+        self.assertEqual(self.flag_calls()[-1][0], 'drop-action')
+        self.assertEqual(outcome.counts['flags_unmatched'], 0)
+
+    def test_a_failed_close_does_not_block_later_flags_on_the_next_run(self):
+        mails = [self.flagged(flag='flagged'),
+                 mail('pat@example.test', -timedelta(hours=2), subject='Other', flag='flagged')]
+        self.run_intake(mails)
+        self.fake.email_queue = [
+            {'activity_id': str(uuid.uuid5(uuid.NAMESPACE_URL, a['idempotency_key'])),
+             'deal': 'deal-1', 'body': '', 'occurred_at': NOW.isoformat()}
+            for v, a in self.fake.writes('log-activity')]
+        self.run_intake(mails, touch=False)
+        first, second = sorted(mails, key=ident)
+        self.fake.fail_verbs.add('drop-action')
+        self.assertEqual(self.run_intake([{**first, 'flag_status': 'none'}, second]).state, 'failed')
+        self.fake.now += timedelta(minutes=2)
+        self.run_intake([{**first, 'flag_status': 'none'}, {**second, 'flag_status': 'complete'}])
+        self.assertEqual([v for v, a in self.flag_calls()].count('complete-deal-item'), 1)
+
+    def test_a_todo_already_closed_in_the_app_settles_without_blocking_other_flags(self):
+        first, second = self.flagged(flag='flagged'), mail('pat@example.test', -timedelta(hours=2), subject='Other', flag='flagged')
+        self.assertEqual(self.run_intake([first, second]).state, 'succeeded')
+        logged = [a['idempotency_key'] for v, a in self.fake.writes('log-activity')]
+        self.fake.email_queue = [{'activity_id': str(uuid.uuid5(uuid.NAMESPACE_URL, k)), 'deal': 'deal-1', 'body': '',
+                                  'occurred_at': NOW.isoformat()} for k in logged]
+        self.run_intake([first, second], touch=False)
+        original = self.fake.carr
+
+        def refuse_close(verb, args):
+            if verb in ('drop-action', 'complete-deal-item'):
+                self.fake.calls.append((verb, args))
+                raise intake.CarrError(code='action_not_open' if verb == 'drop-action' else 'deal_item_not_open')
+            return original(verb, args)
+
+        self.fake.carr = refuse_close
+        cleared = [self.flagged(flag='none'), mail('pat@example.test', -timedelta(hours=2), subject='Other', flag='complete', done=self.OCT28)]
+        for _ in range(2):
+            outcome = self.run_intake(cleared)
+            self.assertEqual(outcome.state, 'succeeded')
+        verbs = [v for v, _ in self.flag_calls() if v != 'record-deal-item']
+        self.assertEqual(sorted(verbs), ['complete-deal-item', 'drop-action'])  # both tried once, none retried
+        self.assertEqual(outcome.counts['flags_closed_elsewhere'], 0)  # settled on the first run
+
+    def test_a_flag_close_version_conflict_is_blocked_without_claiming_it_closed(self):
+        m = self.flagged(flag='flagged')
+        self.filed_deal(m)
+        self.run_intake([m], touch=False)
+        original = self.fake.carr
+
+        def edited_item(verb, args):
+            if verb == 'drop-action':
+                self.fake.calls.append((verb, args))
+                return {'ok': False, 'error': 'version_conflict'}
+            return original(verb, args)
+
+        self.fake.carr = edited_item
+        for _ in range(2):
+            outcome = self.run_intake([self.flagged(flag='none')])
+            self.assertEqual(outcome.state, 'failed')
+            self.assertEqual(outcome.counts['flags_closed_elsewhere'], 0)
+            self.assertEqual(outcome.counts['flags_cleared'], 0)
+            self.assertEqual(outcome.counts.get('error_version_conflict'), 1)
+            self.fake.now += timedelta(minutes=2)
+        self.assertEqual([v for v, a in self.flag_calls()].count('drop-action'), 1)
+
+    def test_a_failed_flag_filing_does_not_block_a_later_flag_closing(self):
+        closing = self.flagged(flag='flagged')
+        self.filed_deal(closing)
+        self.run_intake([closing], touch=False)
+        filing = mail('pat@example.test', -timedelta(minutes=20), subject='New flag', flag='flagged')
+        self.fake.fail_verbs.add('record-deal-item')
+        self.run_intake([closing, filing])
+        logged = self.fake.writes('log-activity')[-1][1]['idempotency_key']
+        self.fake.email_queue.append({
+            'activity_id': str(uuid.uuid5(uuid.NAMESPACE_URL, logged)), 'deal': 'deal-1',
+            'body': '', 'occurred_at': NOW.isoformat()})
+        self.assertEqual(self.run_intake([closing, filing]).state, 'failed')
+        self.fake.now += timedelta(minutes=2)
+        self.run_intake([{**closing, 'flag_status': 'complete'}, filing])
+        self.assertEqual([v for v, a in self.flag_calls()].count('complete-deal-item'), 1)
+
+
+
 class AttachmentMetadataTest(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
