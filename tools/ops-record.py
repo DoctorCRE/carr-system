@@ -314,6 +314,22 @@ def cmd_sync_registry(args) -> int:
 
 
 # ── run ──────────────────────────────────────────────────────────────────────
+RUN_REAP_BATCH = 500
+
+
+def _reap_expired_runs(conn, cur, service_id, environment, run_key) -> None:
+    """Keep ops.run bounded from the one path that grows it (migration 1038).
+
+    A savepoint, so a reaper failure never costs the run row just written."""
+    try:
+        with conn.transaction():
+            cur.execute("select ops.reap_expired_runs(%s, %s, %s, %s)",
+                        (service_id, environment, run_key, RUN_REAP_BATCH))
+    except Exception as e:                                   # noqa: BLE001
+        print(f"ops-record: run retention skipped: {str(e).splitlines()[0][:200]}",
+              file=sys.stderr)
+
+
 def cmd_run(args) -> int:
     if args.state in ("failed", "timed_out") and not args.failure_class:
         # The database refuses this too. Failing here first gives the caller a
@@ -482,6 +498,7 @@ def cmd_run(args) -> int:
                     environment=args.environment, source_kind="run",
                     source_id=run_id, source_label=args.key, state=args.state,
                     failure_class=args.failure_class, detail=args.detail)
+            _reap_expired_runs(conn, cur, sid, args.environment, args.key)
     except SystemExit:
         raise
     except Exception as e:                                   # noqa: BLE001
