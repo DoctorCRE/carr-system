@@ -135,7 +135,8 @@ test("the census returns every kind, enumerates hidden statuses and orders deter
   assert.equal(payload.source.freshness, "fresh");
   assert.equal(payload.source.correlation_id, CORRELATION);
   assert.equal(payload.source.observed_at, "2026-09-16T12:00:00.000Z");
-  assert.equal(payload.source.valid_until, "2026-09-16T12:01:00.000Z");
+  assert.ok(Date.parse(payload.source.valid_until) > Date.parse("2026-09-16T12:01:00Z"));
+  assert.equal(payload.source.valid_until, "2026-09-16T12:02:00.000Z");
 });
 
 test("a row scoped to another tenant never reaches the response", async () => {

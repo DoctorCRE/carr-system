@@ -279,6 +279,9 @@ function count(row) {
   return Number.isInteger(value) && value >= 0 ? value : null;
 }
 
+// Two refresh periods cover the app's 60-second polling floor.
+const SNAPSHOT_VALIDITY_MS = 120_000;
+
 function sourceBlock({ sourceRef, observedAt, validUntil, correlationId, freshness, explanation }) {
   return {
     source: "work_inventory_census", source_ref: sourceRef,
@@ -329,7 +332,7 @@ export async function readWorkInventoryCensus({
 
   const observedAtDate = now();
   const observedAt = observedAtDate.toISOString();
-  const validUntil = new Date(observedAtDate.valueOf() + 60_000).toISOString();
+  const validUntil = new Date(observedAtDate.valueOf() + SNAPSHOT_VALIDITY_MS).toISOString();
 
   const legs = WORK_INVENTORY_LEGS.filter((leg) => selectedKinds.includes(leg.kind));
   const cursorAt = decodedCursor ? decodedCursor.updated_at : null;
@@ -414,7 +417,7 @@ export async function readWorkInventoryCensus({
     ? `This census is INCOMPLETE, not empty: ${unavailable.join(", ")} could not be read. The remaining sources are current as of this request.`
     : partial.length > 0
       ? `This census returned every row it could enumerate, but ${partial.join(", ")} could not be counted in full, so a total is not claimed.`
-      : "Fresh because every source answered a no-store request-time canonical read; valid for 60 seconds.";
+      : "Fresh because every source answered a no-store request-time canonical read; valid for 120 seconds.";
 
   return {
     viewer: actor.slug,
