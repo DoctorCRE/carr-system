@@ -82,6 +82,12 @@ for (const code of ["email_source_owner_mismatch", "email_proposal_confidence_in
   assert.ok(payload.hint);
 });
 
+test("MCP exposes the non-resubmittable draft refusal with a fixed hint", async t => {
+  const payload = await failure(t, new ToolError({ error: "email_draft_failure_not_resubmittable", reason: privateText, hint: privateText }));
+  assert.equal(payload.error, "email_draft_failure_not_resubmittable");
+  assert.equal(payload.hint, "This failed draft cannot be resubmitted. Review the failure before creating a new draft.");
+});
+
 test("MCP preserves a missing_required refusal and names only declared fields", async t => {
   // Regression: #2194's closed allowlist omitted missing_required, so every
   // verb called without a required argument answered unhandled_verb_failure
