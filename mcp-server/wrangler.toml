@@ -218,6 +218,10 @@ class_name = "OAuthConsentState"
 name = "AI_NEURON_BUDGET"
 class_name = "AiNeuronBudget"
 
+[[durable_objects.bindings]]
+name = "VERB_REQUEST_BUDGET"
+class_name = "VerbRequestBudget"
+
 [[migrations]]
 tag = "oauth-consent-v1"
 new_sqlite_classes = ["OAuthConsentState"]
@@ -225,6 +229,10 @@ new_sqlite_classes = ["OAuthConsentState"]
 [[migrations]]
 tag = "ai-neuron-budget-v1"
 new_sqlite_classes = ["AiNeuronBudget"]
+
+[[migrations]]
+tag = "verb-request-budget-v1"
+new_sqlite_classes = ["VerbRequestBudget"]
 
 [observability]
 enabled = true
@@ -315,3 +323,27 @@ head_sampling_rate = 0.01
 # Wrangler does not inherit `ai` into a named environment.
 [env.staging.ai]
 binding = "AI"
+
+[[env.staging.durable_objects.bindings]]
+name = "VERB_REQUEST_BUDGET"
+class_name = "VerbRequestBudget"
+
+[[ratelimits]]
+name = "VERB_REQUEST_BUDGET_HUMAN"
+namespace_id = "56401"
+simple = { limit = 120, period = 60 }
+
+[[ratelimits]]
+name = "VERB_REQUEST_BUDGET_AGENT"
+namespace_id = "56402"
+simple = { limit = 2400, period = 60 }
+
+[[env.staging.ratelimits]]
+name = "VERB_REQUEST_BUDGET_HUMAN"
+namespace_id = "56403"
+simple = { limit = 120, period = 60 }
+
+[[env.staging.ratelimits]]
+name = "VERB_REQUEST_BUDGET_AGENT"
+namespace_id = "56404"
+simple = { limit = 2400, period = 60 }

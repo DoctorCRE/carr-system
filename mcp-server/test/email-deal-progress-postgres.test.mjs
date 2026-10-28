@@ -50,6 +50,10 @@ before(async () => {
     await c.query(readFileSync(new URL('../../migrations/1020_email_deal_matching.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select to_regclass('public.v_email_reply_partner') as relation")).rows[0].relation)
     await c.query(readFileSync(new URL('../../migrations/1010_email_reply_recipients.sql', import.meta.url), 'utf8'));
+  if (!(await c.query("select 1 from information_schema.columns where table_schema='public' and table_name='email_proposal' and column_name='result_recorded_at'")).rows.length)
+    await c.query(readFileSync(new URL('../../migrations/1022_email_send_result_time.sql', import.meta.url), 'utf8'));
+  if (!(await c.query("select to_regclass('public.v_email_thread_filing_event') as relation")).rows[0].relation)
+    await c.query(readFileSync(new URL('../../migrations/1023_email_thread_filing_events.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic physician',$1,$1) returning id", [actor.id])).rows[0].id;
   await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
@@ -1528,13 +1532,17 @@ test('only the sending Mac records matching Sent Items confirmation once and rem
   await refuses(recordSent({ base_version: 1 }), 'version_conflict');
   await refuses(recordSent({ sha256: 'b'.repeat(64) }), 'email_draft_submission_mismatch');
   await refuses(recordSent({ sent_item_id: undefined }), 'email_draft_sent_confirmation_required');
+  const beforeResult = (await c.query('select clock_timestamp() as time')).rows[0].time;
   const result = await recordSent();
+  const afterResult = (await c.query('select clock_timestamp() as time')).rows[0].time;
   assert.equal(result.status, 'sent');
   assert.equal((await recordSent()).replayed, true);
   await refuses(recordSent({ idempotency_key: randomUUID() }), 'email_draft_not_approved');
   assert.deepEqual((await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader')).drafts, []);
   const sent = (await command('list-email-proposals', { status: 'sent' }, actor, 'carr_reader')).proposals[0];
   assert.equal(sent.send_result.sent_item_id, 'synthetic-sent-item');
+  assert.equal(sent.send_result.status, 'sent');
+  assert.ok(new Date(sent.result_recorded_at) >= beforeResult && new Date(sent.result_recorded_at) <= afterResult);
 });
 
 test('failed delivery requires a reason and is recorded once without an automatic resend', async () => {
@@ -1545,7 +1553,15 @@ test('failed delivery requires a reason and is recorded once without an automati
     status: 'failed', sha256: submitted.sha256 };
   await refuses(command('record-email-sent', args, machineFor('joe')), 'email_draft_failure_reason_required');
   args.reason = 'Synthetic Outlook did not confirm the sent item.';
+  const beforeResult = (await c.query('select clock_timestamp() as time')).rows[0].time;
   assert.equal((await command('record-email-sent', args, machineFor('joe'), 'carr_writer')).status, 'failed');
+  const afterResult = (await c.query('select clock_timestamp() as time')).rows[0].time;
+  const failed = (await command('list-email-proposals', { status: 'failed' }, actor, 'carr_reader')).proposals[0];
+  assert.equal(failed.send_result.status, 'failed');
+  assert.ok(new Date(failed.result_recorded_at) >= beforeResult && new Date(failed.result_recorded_at) <= afterResult);
+  await c.query('update email_proposal set result_recorded_at=null where id=$1', [proposal.proposal_id]);
+  const legacy = (await command('list-email-proposals', { status: 'failed' }, actor, 'carr_reader')).proposals[0];
+  assert.equal(legacy.result_recorded_at, null);
   assert.equal((await command('record-email-sent', args, machineFor('joe'), 'carr_writer')).replayed, true);
   assert.deepEqual((await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader')).drafts, []);
 });
@@ -1681,4 +1697,70 @@ test('each partner router queues only its captured mailbox provenance', async ()
     const captured = queue.emails.filter(item => Object.values(sources).includes(item.activity_id));
     assert.deepEqual(captured.map(item => [item.activity_id, item.mailbox_owner]), [[sources[owner], owner]]);
   }
+});
+
+async function automaticThreadFiling() {
+  const context = { subject: 'Synthetic thread', conversation_id: randomUUID(),
+    sender: { email: 'sender@example.test', internal: false }, recipients: [] };
+  const prior = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
+    summary: 'Synthetic thread', detail: quote, occurred_at: new Date(NOW - 60000).toISOString(), email_context: context });
+  await c.query('update activity set deal_id=$2 where id=$1', [prior.activity_id, deal]);
+  const reply = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
+    summary: 'Synthetic reply', detail: quote, email_context: context });
+  await command('inherit-email-thread', { idempotency_key: randomUUID(), activity_id: reply.activity_id,
+    thread_activity_id: prior.activity_id }, router(), 'carr_writer');
+  const filings = await command('list-email-thread-filings', {}, actor, 'carr_reader');
+  const filing = filings.filings.find(item => item.activity_id === reply.activity_id);
+  assert.ok(filing);
+  return { prior, reply, filing };
+}
+test('a partner can undo an automatic thread filing and the router cannot refile it', async () => {
+  const { prior, reply, filing } = await automaticThreadFiling();
+  await command('undo-email-thread-filing', { idempotency_key: randomUUID(), event_id: filing.event_id }, actor, 'carr_writer');
+  assert.equal((await c.query('select deal_id from activity where id=$1', [reply.activity_id])).rows[0].deal_id, null);
+  await assert.rejects(command('inherit-email-thread', { idempotency_key: randomUUID(), activity_id: reply.activity_id,
+    thread_activity_id: prior.activity_id }, router(), 'carr_writer'), e => e.payload?.error === 'email_thread_filing_suppressed');
+});
+test('undo refuses an activity changed away and back', async () => {
+  const { reply, filing } = await automaticThreadFiling();
+  await c.query('update activity set deal_id=null, version=version+1 where id=$1', [reply.activity_id]);
+  await c.query('update activity set deal_id=$2, version=version+1 where id=$1', [reply.activity_id, deal]);
+  await assert.rejects(command('undo-email-thread-filing', { idempotency_key: randomUUID(), event_id: filing.event_id }),
+    e => e.payload?.error === 'email_thread_filing_changed');
+});
+test('a non-partner cannot undo an automatic filing', async () => {
+  const { filing } = await automaticThreadFiling();
+  await assert.rejects(command('undo-email-thread-filing', { idempotency_key: randomUUID(), event_id: filing.event_id }, router()),
+    e => e.payload?.error === 'human_only_verb_requires_verified_partner');
+});
+test('a legacy filing cannot be undone after another filing event', async () => {
+  const { reply, filing } = await automaticThreadFiling();
+  await c.query("update event set new_value=new_value-'activity_version' where id=$1", [filing.event_id]);
+  await c.query(`insert into event(occurred_at,actor_id,verb,subject_type,subject_id,new_value,cause)
+    values(now(),$1,'confirm-email-filing','deal',$2,$3,'human_stated')`,
+    [actor.id,deal,JSON.stringify({ activity_id: reply.activity_id })]);
+  await assert.rejects(command('undo-email-thread-filing', { idempotency_key: randomUUID(), event_id: filing.event_id }),
+    e => e.payload?.error === 'email_thread_filing_changed');
+});
+
+test('legacy undo belongs to the deal owner and replay is idempotent', async () => {
+  const { reply, filing } = await automaticThreadFiling();
+  await c.query("update event set new_value=new_value-'activity_version' where id=$1", [filing.event_id]);
+  const dell = { ...(await c.query("select id,slug from actor where slug='dell'")).rows[0], human: true };
+  await assert.rejects(command('undo-email-thread-filing', { idempotency_key: randomUUID(), event_id: filing.event_id }, dell),
+    e => e.payload?.error === 'email_thread_filing_not_found');
+  const args = { idempotency_key: randomUUID(), event_id: filing.event_id };
+  const first = await command('undo-email-thread-filing', args);
+  assert.deepEqual(await command('undo-email-thread-filing', args), { ...first, replayed: true });
+  assert.equal((await c.query('select deal_id from activity where id=$1', [reply.activity_id])).rows[0].deal_id, null);
+  assert.equal((await c.query("select count(*)::int as n from event where verb='undo-email-thread-filing' and new_value->>'event_id'=$1", [filing.event_id])).rows[0].n, 1);
+});
+
+test('legacy undo refuses when the deal owner is unknown', async () => {
+  const { filing } = await automaticThreadFiling();
+  await c.query('update deal set owner=null where id=$1', [deal]);
+  try {
+    await assert.rejects(command('undo-email-thread-filing', { idempotency_key: randomUUID(), event_id: filing.event_id }),
+      e => e.payload?.error === 'email_thread_filing_owner_unknown');
+  } finally { await c.query("update deal set owner='joe' where id=$1", [deal]); }
 });

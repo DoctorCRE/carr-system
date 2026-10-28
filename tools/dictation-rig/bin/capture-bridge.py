@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -78,6 +79,11 @@ def log_line(message: str) -> None:
             f.write(line)
     except OSError:
         pass
+
+
+def refusal_code(response: dict[str, Any]) -> str:
+    code = response.get("error")
+    return code if isinstance(code, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", code) else "unparsed"
 
 
 def iso_now_utc() -> str:
@@ -301,7 +307,7 @@ def claim_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         return Outcome.UNAVAILABLE
 
     if status != 200:
-        log_line(f"ERROR claim rejected session={name} status={status}")
+        log_line(f"ERROR claim rejected session={name} status={status} error={refusal_code(resp)}")
         return Outcome.UNAVAILABLE
 
     session_token = str(resp.get("session_token") or "").strip()
@@ -366,7 +372,7 @@ def status_cmd(cfg: dict[str, str], session_dir: Path, state: str, detail: str |
     url = f"{cfg['base_url']}/capture/status"
 
     try:
-        status, _resp = http_request("POST", url, body, None)
+        status, resp = http_request("POST", url, body, None)
     except BridgeNetworkError as exc:
         log_line(f"ERROR status network failure session={name} state={state}: {exc}")
         return Outcome.UNAVAILABLE
@@ -375,11 +381,11 @@ def status_cmd(cfg: dict[str, str], session_dir: Path, state: str, detail: str |
         log_line(f"STATUS posted session={name} state={state}")
     elif status == 409:
         log_line(
-            f"STATUS rejected(409) session={name} state={state} "
+            f"STATUS rejected(409) session={name} state={state} error={refusal_code(resp)} "
             "(backward transition or terminal state already reached)"
         )
     else:
-        log_line(f"ERROR status rejected session={name} state={state} status={status}")
+        log_line(f"ERROR status rejected session={name} state={state} status={status} error={refusal_code(resp)}")
         return Outcome.UNAVAILABLE
     return 0
 
@@ -414,7 +420,7 @@ def post_batch(
         return False
     ids = response.get("candidate_ids")
     if status != 200 or not isinstance(ids, list):
-        log_line(f"ERROR publish rejected session={session_dir.name} lane={lane} status={status}")
+        log_line(f"ERROR publish rejected session={session_dir.name} lane={lane} status={status} error={refusal_code(response)}")
         return False
     try:
         post_call.apply_candidate_ids(session_dir, bindings, ids)
@@ -536,7 +542,7 @@ def file_post_call_report(
         log_line(f"ERROR report filing network failure session={session_dir.name}: {exc}")
         return False, ""
     if status != 200 or response.get("filed") is not True:
-        log_line(f"ERROR report filing rejected session={session_dir.name} status={status}")
+        log_line(f"ERROR report filing rejected session={session_dir.name} status={status} error={refusal_code(response)}")
         return False, ""
     return True, digest
 

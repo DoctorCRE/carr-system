@@ -2,7 +2,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { dispatch, allowedIn } from "../src/mcp.js";
+import { allowedIn } from "../src/mcp.js";
+import { dispatch } from "./helpers/budgeted-dispatch.mjs";
 import { TOOLS } from "../src/tools.js";
 import { authenticatedIdentity } from "../src/identity.js";
 

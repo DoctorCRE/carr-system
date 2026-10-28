@@ -1,7 +1,7 @@
 // Tests public error projection and internal diagnostic handling.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dispatch } from "../src/mcp.js";
+import { dispatch } from "./helpers/budgeted-dispatch.mjs";
 import { ToolError, coerceArgsToSchema, pgConstraintError, TOOLS } from "../src/tools.js";
 import { Pool } from "@neondatabase/serverless";
 
@@ -65,6 +65,9 @@ for (const [code, extra] of [
   ["invalid_completion", {}], ["missing_criterion_evidence", {}], ["missing_change_ref", {}],
   ["missing_user_journey_ref", {}], ["completion_capsule_refused", {}], ["sponsored_actor_required", {}],
   ["memory_attach_required", {}], ["memory_read_only", {}],
+  ["decision_id_required", { field: "decision_id" }], ["decision_id_malformed", { field: "decision_id", got: privateText }],
+  ["decision_not_found", { field: "decision_id", got: "00000000" }],
+  ["ambiguous_decision_id", { field: "decision_id", got: "0", candidates: [{ decision_id: privateText, title: privateText }] }],
 ]) test(`MCP preserves the public ${code} contract`, async t => {
   const payload = await failure(t, new ToolError({ error: code, ...extra,
     detail: privateText, hint: privateText, nested: { stack: privateText } }));
@@ -77,6 +80,14 @@ for (const code of ["email_source_owner_mismatch", "email_proposal_confidence_in
   const payload = await failure(t, new ToolError({ error: code, detail: privateText }));
   assert.equal(payload.error, code);
   assert.ok(payload.hint);
+});
+
+test("MCP preserves invalid base version without exposing diagnostics", async t => {
+  const payload = await failure(t, new ToolError({ error: "invalid_base_version",
+    got: privateText, current_version: 3, detail: privateText }));
+  assert.equal(payload.error, "invalid_base_version");
+  assert.equal(payload.hint, "Supply an integer base_version from a fresh read.");
+  assert.equal(Object.hasOwn(payload, "current_version"), false);
 });
 
 test("MCP preserves a missing_required refusal and names only declared fields", async t => {
@@ -310,4 +321,18 @@ test('Call Mode refusal exposes only bounded UUIDs and no diagnostic payload', a
     invalid_deal_ids: Array.from({ length: 60 }, (_, i) =>
       `d170d000-0000-4000-8000-${String(i).padStart(12, '0')}`),
   })).invalid_deal_ids.length, 50);
+});
+
+test("rule ID refusals expose fixed hints without internal details", async t => {
+  t.mock.method(console, "error", () => {});
+  const { publicError } = await import("../src/public-errors.ts");
+  for (const [code, hint] of [
+    ["rule_id_required", "Supply a rule ID."],
+    ["rule_id_malformed", "Supply a full rule UUID or a valid short rule ID."],
+    ["rule_not_found", "Choose an existing rule ID."],
+    ["ambiguous_rule_id", "Use a longer rule ID to identify one rule."],
+  ]) {
+    assert.deepEqual(publicError(new ToolError({ error: code, hint: privateText, got: privateText }),
+      { env: { CORRELATION_ID: correlationId } }), { error: code, correlation_id: correlationId, hint });
+  }
 });

@@ -23,6 +23,11 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["email_proposal_not_pending", "Re-read the proposal before confirming."],
   ["email_proposal_stale", "Re-read and review the current proposal before confirming."],
   ["email_sender_contact_required", "Create the sender contact before confirming the filing."],
+  ["partner_confirmation_required", "A verified partner must confirm this action."],
+  ["email_thread_filing_owner_unknown", "The filing owner is unknown, so it cannot be undone."],
+  ["email_thread_filing_not_found", "Choose an available automatic filing."],
+  ["email_thread_filing_changed", "The email filing has changed. Review it before making changes."],
+  ["email_thread_filing_suppressed", "This email was previously unfiled by a partner."],
   ["email_thread_not_continuous", "Review the email and choose a deal."],
   ["email_thread_ambiguous", "Review the email and choose a deal."],
   ["email_thread_recipient_changed", "Review the email and choose a deal."],
@@ -32,6 +37,8 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["next_action_conflict", "Re-read get-next-action with ref and owner. Review the current action before retrying set-next-action with its id and version, or null if absent, in expected_action."],
   ["needs_confirm", "Ask the human to confirm before resubmitting with confirm:true."],
   ["not_found", "The requested record was not found."],
+  ["unsupported_decision_about", "The about field accepts lead, client, vendor, party, and deal references or names; Work Request references are not supported. Omit about and name the Work Request in the rationale."],
+  ["decision_about_work_request_not_found", "The Work Request in the about field was not found. Check its reference, or omit about and name the Work Request in the rationale."],
   ["work_request_not_found", "Re-read the Work Request reference before retrying."],
   ["work_request_terminal_state", "The Work Request is already terminal. Re-read its card before choosing another action."],
   ["work_request_not_completable", "Complete only a captured, triaged, ready, or verification Work Request."],
@@ -43,6 +50,14 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["sponsored_actor_required", "An authenticated partner or sponsored agent must perform this operation."],
   ["memory_attach_required", "Call attach-memory first, then pass the attach_id it returned to this actor when writing or retiring team-memory."],
   ["memory_read_only", "This attach is read_only. Call attach-memory with access read_write, then retry with the new attach_id."],
+  ["rule_id_required", "Supply a rule ID."],
+  ["rule_id_malformed", "Supply a full rule UUID or a valid short rule ID."],
+  ["rule_not_found", "Choose an existing rule ID."],
+  ["ambiguous_rule_id", "Use a longer rule ID to identify one rule."],
+  ["decision_id_required", "Provide a decision id: the full uuid or its 8-character short form."],
+  ["decision_id_malformed", "Use the full decision uuid or the 8-character short form this system prints."],
+  ["decision_not_found", "No decision id begins with that prefix. Check decision-history; log-decision returns the decision_id, not the event_id."],
+  ["ambiguous_decision_id", "That prefix matches more than one decision. Pass more characters or the full decision id."],
   ["doctrine_doc_not_found", "The document was not found. Use doctrine-index to choose a current document id or slug for the document argument."],
   ["needs_disambiguation", "Choose an exact record reference from the candidates before retrying."],
   ["decline_claims_completion", "Use complete-work-request to close built work. Decline only work that will not be built."],
@@ -66,6 +81,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["value_not_in_declared_vocabulary", "Use a value from the field's documented vocabulary."],
   ["missing_idempotency_key", "Supply a fresh idempotency_key for this operation."],
   ["missing_base_version", "Re-read the record and supply its base_version."],
+  ["invalid_base_version", "Supply an integer base_version from a fresh read."],
   ["missing_plan_base", "Review this older call proposal before applying it."],
   ["newer_change_exists", "The record changed after this proposal. Review its current state before deciding."],
   ["invalid_work_queue_fields", "Use only the documented queue fields and positive 32-bit slice, job, and position numbers."],
@@ -176,6 +192,9 @@ export function publicError(error: unknown, { env, inputSchema, fallback = "unha
   const code = PUBLIC_ERRORS.has(payload?.error) ? payload!.error : fallback;
   const result: PublicError = { error: code, correlation_id: correlationId,
     hint: PUBLIC_ERRORS.get(code) || "The operation failed. Quote the correlation_id when reporting it." };
+  if (["unsupported_decision_about", "decision_about_work_request_not_found"].includes(code) &&
+      typeof payload?.ref === "string" && /^WR-(?:[0-9]{1,12}|AI-[0-9]{3}|SIEP-[0-9A-Z]{2,3})$/i.test(payload.ref))
+    result.hint += ` Reference: ${payload.ref}.`;
   if (code === "needs_disambiguation") {
     result.candidates = publicCandidates(payload?.candidates);
     if (Array.isArray(payload?.retired_aliases))

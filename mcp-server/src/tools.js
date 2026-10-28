@@ -346,7 +346,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread"].includes(verb) || verb === "undo-call" || ["set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing"].includes(verb) || verb === "undo-call" || ["set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
@@ -665,6 +665,21 @@ function preferredMergeSurvivor(rows) {
     if (as[i] !== bs[i]) return as[i] > bs[i] ? a : b;
   }
   return new Date(a.created_at).getTime() <= new Date(b.created_at).getTime() ? a : b;
+}
+
+async function resolveDecisionAbout(client, actor, about) {
+  const refs = (Array.isArray(about) ? about : [about])
+    .map(r => String(r || "").trim()).filter(Boolean);
+  for (const ref of refs) {
+    if (/^WR-/i.test(ref)) {
+      const found = await client.query(
+        "select 1 from ops.work_request where ref = $1 and organization_tenant_id = $2", [ref.toUpperCase(), organizationTenantForActor(actor)]);
+      if (!found.rows.length) throw new ToolError({ error: "decision_about_work_request_not_found", field: "about", ref });
+      throw new ToolError({ error: "unsupported_decision_about", field: "about", ref });
+    }
+    await resolveSubject(client, ref);
+  }
+  return refs;
 }
 
 // [loop #278] The ONE place a decision gets mirrored onto the record it governs.
@@ -4256,15 +4271,7 @@ export const TOOLS = {
       summary: { type: "string" }, detail: { type: "string" },
       email_context: { type: 'object', additionalProperties: false,
         required: ['subject', 'conversation_id', 'sender', 'recipients'], properties: {
-          subject: { type: 'string' }, conversation_id: { type: ['string', 'null'] },
-          sender: { type: 'object', additionalProperties: false, required: ['email', 'internal'],
-            properties: { email: { type: 'string' }, name: { type: ['string', 'null'] }, internal: { type: 'boolean' } } },
-          recipients: { type: 'array', items: { type: 'object', additionalProperties: false,
-            required: ['email', 'kind', 'internal'], properties: { email: { type: 'string' },
-              name: { type: ['string', 'null'] }, kind: { enum: ['to', 'cc'] }, internal: { type: 'boolean' } } } },
-        } },
-      email_context: { type: 'object', additionalProperties: false,
-        required: ['subject', 'conversation_id', 'sender', 'recipients'], properties: {
+          source_activity_id: { type: 'string', format: 'uuid' },
           subject: { type: 'string' }, conversation_id: { type: ['string', 'null'] },
           sender: { type: 'object', additionalProperties: false, required: ['email', 'internal'],
             properties: { email: { type: 'string' }, name: { type: ['string', 'null'] }, internal: { type: 'boolean' } } },
@@ -6992,15 +6999,7 @@ export const TOOLS = {
       // record this loop exists to stop creating. Resolution happens twice on the happy
       // path (here to validate, again inside mirrorDecision to write); that is a couple
       // of indexed reads against correctness, which is not a trade worth making.
-      const aboutRefs = args.about
-        ? (Array.isArray(args.about) ? args.about : [args.about]).map(r => String(r || "").trim()).filter(Boolean)
-        : [];
-      for (const ref of aboutRefs) {
-        if (/^WR-/i.test(ref))
-          throw new ToolError({ error: "unsupported_decision_about", field: "about", ref,
-            hint: "Work Request refs are not supported in about. Use a lead, client, vendor, party or deal ref. For a system-wide ruling, omit about and name the Work Request in the rationale." });
-        await resolveSubject(c, ref);
-      }
+      const aboutRefs = await resolveDecisionAbout(c, actor, args.about);
 
       // [idea 68, 0085] BOTH HALVES OF A PRICE OR NEITHER. A cost with no
       // quality number is a complaint and a quality number with no cost is a
@@ -7118,6 +7117,8 @@ export const TOOLS = {
           where subject_id = $1 and verb = 'log-decision' limit 1`, [decisionId])).rows[0];
       if (!cur) throw new ToolError({ error: "decision_not_found", decision_id: args.decision_id,
         hint: "pass the decision_id log-decision returned, not the event_id" });
+
+      await resolveDecisionAbout(c, actor, args.about);
 
       const nv = cur.new_value || {};
       const quote = args.human_quote !== undefined ? args.human_quote : cur.human_quote;

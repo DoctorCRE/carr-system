@@ -981,7 +981,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "email-router-queue": {
     "ingress_key": "mcp-tool:email-router-queue",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "46af38141c2bc3ec08b0ee019d1a9c43a8f97caa53ec955ee10419075768881c",
+    "schema_digest": "ae5bfa6b767b760d97145f87d94706a1392c2a5b061a136f45b7dcd510bd7b80",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -1351,6 +1351,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "list-email-thread-filings": {
+    "ingress_key": "mcp-tool:list-email-thread-filings",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "list-fact-conflicts": {
     "ingress_key": "mcp-tool:list-fact-conflicts",
     "source_locator": "mcp-server/src/fact-observations.ts",
@@ -1434,7 +1444,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "log-activity": {
     "ingress_key": "mcp-tool:log-activity",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "a093317c9918c8049860dadae33817f3360227456d13862a6192df732a76d121",
+    "schema_digest": "007833d9bc988d15629f78d26e387ab3f340a1aba83b59c17af7571bc2d4d152",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -3306,6 +3316,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": true,
     "human_only": false,
     "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "undo-email-thread-filing": {
+    "ingress_key": "mcp-tool:undo-email-thread-filing",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "924711896f731da725114452205f966ca8461ee0a65888e70fdc235b72e7f856",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },
