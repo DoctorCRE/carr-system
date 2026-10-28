@@ -491,13 +491,10 @@ def _best_copies(mails: list[dict], state: dict | None = None) -> list[dict]:
         candidates = [m for m in rows if set(m['local_keys']) & set(keys) and id(m) not in claimed]
         if candidates:
             ck = ident.rsplit(':', 1)[0]
-            exact = [m for m in candidates if m['ck'] == ck and m['local_keys'] == sorted(keys)]
-            # A historical multi-key receipt cannot identify its original item.
-            if not exact and (len(keys) > 1 or len(candidates) > 1):
-                raise DecodeError('ambiguous legacy mail identity')
-            prior = (exact or candidates)[0]
-            prior['ck'], prior['ident'] = ck, ident
-            claimed.add(id(prior))
+            for prior in candidates:
+                prior['legacy_merged_suppressed'] = len(keys) > 1 or len(candidates) > 1
+                prior['ck'], prior['ident'] = ck, ident
+                claimed.add(id(prior))
     rows.sort(key=lambda m: (m['ck'], m['sent_unix']))
     out: list[dict] = []
     for m in rows:
@@ -1486,6 +1483,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     mails = _best_copies(mails, state)
     state['hydration_check_at'] = int((now + REFRESH_INTERVAL).timestamp())
     work = Run(ports, state, now, out, settings)
+    work.counts['legacy_merged_suppressed'] = sum(bool(m.get('legacy_merged_suppressed')) for m in mails)
     work.counts['mail_other_accounts'] = meta['mail_other_accounts']
     work.counts['decoder_alarm'] = alarm
     work.counts.update(health_counts(health))
