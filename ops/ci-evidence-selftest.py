@@ -151,7 +151,7 @@ class Reuse(unittest.TestCase):
             self.assertFalse(self.eligible())
         self.jobs.pop()
         self.assertFalse(self.eligible())
-    def test_non_pr_incomplete_or_red_runs_refuse(self):
+    def test_untrusted_incomplete_or_red_runs_refuse(self):
         for key,value in [('event','workflow_dispatch'),('status','in_progress'),
                           ('conclusion','failure'),('name','untrusted')]:
             old=self.run[key];self.run[key]=value
@@ -171,6 +171,8 @@ class Reuse(unittest.TestCase):
                 if path.endswith('/pulls'):
                     return [{'merged_at':'2026-10-05', 'number': 11,
                              'base':{'ref':'main'},'head':{'sha':'b'*40}}]
+                if 'event=merge_group' in path:
+                    return {'workflow_runs': []}
                 if '/runs?' in path:
                     return {'workflow_runs': self.runs}
                 return {'jobs': test.jobs}
@@ -182,6 +184,45 @@ class Reuse(unittest.TestCase):
         for conclusion in ('failure', 'cancelled', 'skipped'):
             gh.runs = [self.run, dict(self.run, id=43, conclusion=conclusion)]
             self.assertEqual(evidence.resolve(gh,'f'*40,self.tree,'d'*64,['gates','migration']), {'reused':False})
+
+    def test_merge_group_resolver_reuses_only_successful_identical_tree(self):
+        self.run['event'] = self.receipt['event'] = 'merge_group'
+        self.receipt['tested_sha'] = self.run['head_sha']
+        test = self
+        class GH:
+            head_tree = test.tree
+            runs = [test.run]
+            def api(self, path):
+                if path.endswith('/pulls'):
+                    return []
+                if path == 'actions/workflows/ci.yml/runs?event=merge_group&per_page=100':
+                    return {'workflow_runs': self.runs}
+                if path == 'actions/runs/42/jobs?per_page=100':
+                    return {'jobs': test.jobs}
+                raise AssertionError(path)
+            def tree(self, sha):
+                test.assertEqual(sha, test.run['head_sha'])
+                return self.head_tree
+            def receipt(self, run): return test.receipt
+        gh = GH()
+        def resolve():
+            return evidence.resolve(gh, 'f'*40, self.tree, 'd'*64, ['gates', 'migration'])
+        self.assertEqual(resolve(), {'reused': True, 'source_run_id': 42,
+            'source_run_attempt': 2, 'source_pr': None,
+            'source_head_sha': 'b'*40, 'source_tested_sha': 'b'*40})
+        gh.head_tree = 'e'*40
+        self.assertEqual(resolve(), {'reused': False})
+        gh.head_tree = self.tree
+        self.receipt['event'] = 'pull_request'
+        self.assertEqual(resolve(), {'reused': False})
+        self.receipt['event'] = 'merge_group'
+        for conclusion in ('failure', 'cancelled', 'skipped'):
+            with self.subTest(conclusion=conclusion):
+                self.run['conclusion'] = conclusion
+                self.assertEqual(resolve(), {'reused': False})
+        self.run['conclusion'] = 'success'
+        gh.runs = [dict(self.run, id=43, conclusion='failure'), self.run]
+        self.assertEqual(resolve(), {'reused': False})
 
     def test_unavailable_github_evidence_runs_classes_without_disclosing_credentials(self):
         root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory())) / "ci-evidence-selftest"
