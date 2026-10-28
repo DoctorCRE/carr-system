@@ -38,6 +38,7 @@ mod header;
 mod identity;
 mod lz;
 mod locate;
+mod message;
 mod study;
 mod observe;
 mod record;
@@ -224,6 +225,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     let mut folders = folder::Index::default();
     let mut events = calendar::Index::default();
     let mut attachments = attachment::Index::default();
+    let mut objects = message::Index::default();
     let mut categories = category::Index::default();
     let mut details = detail::Index::default();
     let mut sidecars = files_dir.map(|d| body::Sidecars::open(std::path::Path::new(d))).unwrap_or_default();
@@ -232,6 +234,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             folders.observe(o, &b.data);
             events.observe(&b.data);
             attachments.observe(&b.data);
+            objects.observe(&b.data);
             categories.observe(&b.data);
             details.observe(&b.data);
         }
@@ -363,6 +366,39 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              response      TEXT,              -- 'no_response'; NULL if unverified
              response_code INTEGER NOT NULL
          );
+         -- One row per message object key, from what its cached revisions agree on.
+         CREATE TABLE message_objects (
+             local_key          INTEGER PRIMARY KEY, -- message_keys.local_key
+             conversation_id    TEXT,    -- 32 hex: ConversationIndex GUID, the thread
+             conversation_depth INTEGER, -- 0 for a thread start, +1 per reply level
+             in_reply_to        TEXT,    -- parent Message-ID without angle brackets
+             subject            TEXT,    -- '' when the store holds an empty subject
+             -- 'listed' (rows in recipients), 'none' (no recipient objects) or
+             -- 'conflict' (cached revisions of a recipient disagree; none exported).
+             recipients_status  TEXT NOT NULL
+         );
+         CREATE TABLE recipients (
+             local_key INTEGER NOT NULL REFERENCES message_objects(local_key),
+             kind      TEXT,              -- 'to', 'cc', or NULL for an unmapped kind_code
+             kind_code INTEGER NOT NULL,
+             position  INTEGER NOT NULL,  -- 1-based order within kind_code
+             address   TEXT NOT NULL,
+             name      TEXT NOT NULL,
+             PRIMARY KEY (local_key, kind_code, position)
+         );
+         -- Each conversation with its message count and latest message.
+         CREATE VIEW threads AS
+           SELECT o.conversation_id,
+                  count(*) AS messages,
+                  (SELECT l.local_key FROM message_objects l
+                     LEFT JOIN message_keys lk ON lk.local_key = l.local_key
+                     LEFT JOIN messages lm ON lm.id = lk.message_id
+                    WHERE l.conversation_id = o.conversation_id
+                    ORDER BY lm.sent_unix DESC, l.conversation_depth DESC, l.local_key DESC
+                    LIMIT 1) AS latest_local_key
+             FROM message_objects o
+            WHERE o.conversation_id IS NOT NULL
+            GROUP BY o.conversation_id;
          -- Counts a caller checks before trusting the export.
          CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
          CREATE VIRTUAL TABLE messages_fts USING fts5(
@@ -585,6 +621,13 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     let with_folder = best.iter().filter(|r| !r.folder_ids.is_empty()).count();
     let multi_folder = best.iter().filter(|r| r.folder_ids.len() > 1).count();
     println!("  {} folders; {with_folder}/{stored} messages linked ({multi_folder} with multiple observed folders)", folders.folders.len());
+    let message_objects = objects.messages();
+    println!(
+        "  {} message objects; {} with a conversation, {} with recipients",
+        message_objects.len(),
+        message_objects.values().filter(|m| m.conversation_id.is_some()).count(),
+        message_objects.values().filter(|m| m.recipients.as_ref().is_some_and(|r| !r.is_empty())).count()
+    );
     let tx = db.transaction().expect("tx");
     {
         let mut ins_folder = tx
@@ -630,6 +673,38 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 .execute(rusqlite::params![a.id as i64, a.message_key as i64, a.name, a.name_verified as i64,
                                            a.content_type, a.size as i64, a.path, a.content_id])
                 .expect("insert attachment");
+        }
+        let mut ins_object = tx
+            .prepare(
+                "INSERT INTO message_objects(local_key,conversation_id,conversation_depth,in_reply_to,subject,
+                                             recipients_status) VALUES (?1,?2,?3,?4,?5,?6)",
+            )
+            .expect("prepare message objects");
+        let mut ins_recipient = tx
+            .prepare(
+                "INSERT INTO recipients(local_key,kind,kind_code,position,address,name) VALUES (?1,?2,?3,?4,?5,?6)",
+            )
+            .expect("prepare recipients");
+        for (key, m) in &message_objects {
+            let status = match &m.recipients {
+                None => "conflict",
+                Some(r) if r.is_empty() => "none",
+                Some(_) => "listed",
+            };
+            let conversation = m.conversation_id.map(|g| g.iter().map(|b| format!("{b:02x}")).collect::<String>());
+            ins_object
+                .execute(rusqlite::params![*key as i64, conversation, m.conversation_depth.map(|d| d as i64),
+                                           m.in_reply_to, m.subject, status])
+                .expect("insert message object");
+            let mut positions: BTreeMap<u32, i64> = BTreeMap::new();
+            for r in m.recipients.iter().flatten() {
+                let position = positions.entry(r.kind).or_default();
+                *position += 1;
+                ins_recipient
+                    .execute(rusqlite::params![*key as i64, message::kind_name(r.kind), r.kind, *position,
+                                               r.address, r.name])
+                    .expect("insert recipient");
+            }
         }
         let mut ins = tx
             .prepare(
@@ -756,6 +831,13 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             ("detail_objects", details.objects),
             ("messages_with_detail", best.iter().filter(|r| details.for_keys(&r.local_keys).is_some()).count()),
             ("messages_with_key", best.iter().filter(|r| !r.local_keys.is_empty()).count()),
+            ("message_objects", message_objects.len()),
+            ("message_objects_with_conversation",
+             message_objects.values().filter(|m| m.conversation_id.is_some()).count()),
+            ("message_objects_with_recipients",
+             message_objects.values().filter(|m| m.recipients.as_ref().is_some_and(|r| !r.is_empty())).count()),
+            ("recipients", message_objects.values().flat_map(|m| m.recipients.iter().flatten()).count()),
+            ("recipient_conflicts", message_objects.values().filter(|m| m.recipients.is_none()).count()),
         ] {
             ins_meta.execute(rusqlite::params![key, value as i64]).expect("insert meta");
         }
