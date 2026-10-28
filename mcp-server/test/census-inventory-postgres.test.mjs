@@ -62,7 +62,7 @@ after(async () => {
   }
 });
 
-const MIGRATION_NAME = '1052_system_work_census_inventory.sql';
+const MIGRATION_NAME = '1054_system_work_census_inventory.sql';
 const MIGRATION = readFileSync(new URL(`../../migrations/${MIGRATION_NAME}`, import.meta.url), 'utf8');
 const OBSERVED_AT = '2026-10-28T12:00:00.000Z';
 const hex = char => char.repeat(64);
