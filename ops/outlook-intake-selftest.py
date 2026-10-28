@@ -53,8 +53,8 @@ def ts(delta: timedelta) -> int:
 
 
 def mail(sender, sent, subject='Suite question', body='Can we meet Thursday?', name=None,
-         recipients=OWNER, kind='full', copy_key=None, local_keys=None):
-    return dict(sender=sender, sender_name=name, recipients=recipients, subject=subject,
+         recipients=OWNER, kind='full', copy_key=None, local_keys=None, flag=None, due=None, done=None):
+    return dict(flag_status=flag, flag_due_unix=due, flag_completed_unix=done, sender=sender, sender_name=name, recipients=recipients, subject=subject,
                 body=body, body_kind=kind, sent_unix=ts(sent),
                 copy_key=copy_key or f'{sender}\x1f{subject.lower()}\x1f{body.lower()}', local_keys=local_keys)
 
@@ -84,9 +84,9 @@ def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identiti
                      m['body_kind'], m['sent_unix'], m['copy_key']))
         if keyed:
             con.execute('UPDATE messages SET local_keys = ? WHERE id = last_insert_rowid()', (m.get('local_keys'),))
-    for field in ('conversation_id', 'cc'):
+    for field in ('conversation_id', 'cc', 'flag_status', 'flag_due_unix', 'flag_completed_unix'):
         if any(m.get(field) is not None for m in mails):
-            con.execute(f'ALTER TABLE messages ADD COLUMN {field} TEXT')
+            con.execute(f'ALTER TABLE messages ADD COLUMN {field} {"INTEGER" if field.endswith("_unix") else "TEXT"}')
             for row_id, m in enumerate(mails, 1):
                 con.execute(f'UPDATE messages SET {field}=? WHERE id=?', (m.get(field), row_id))
     for e in events:
@@ -148,6 +148,8 @@ class Fake:
             if source:
                 self.hydrated_bodies[source] = args['detail']
             return {'ok': True, 'activity_id': str(uuid.uuid5(uuid.NAMESPACE_URL, args['idempotency_key']))}
+        if verb == 'record-deal-item':
+            return {'ok': True, 'item': {'id': str(uuid.uuid5(uuid.NAMESPACE_URL, args['source_ref'])), 'due_on': args['due_on']}}
         if verb == 'find':
             return {'parties': self.parties.get(args['query'], []), 'deals': []}
         if verb == 'catch-me-up':
@@ -2476,6 +2478,99 @@ class IntakeTest(unittest.TestCase):
         self.fake.board_conflicts = 2
         self.fake.now += timedelta(minutes=30)
         self.assertEqual(self.run_intake(events=[event(self.gid(3), timedelta(hours=6))]).counts['calendar_agenda_failed'], 1)
+
+    # follow-up flags (WR-000440)
+
+    OCT29 = int(datetime(2026, 10, 29, tzinfo=timezone.utc).timestamp())  # midnight UTC; 7 PM Oct 28 in Chicago
+    OCT28 = OCT29 - 86_400
+
+    def filed_deal(self, m, deal='deal-1'):
+        """Log the mail, then let the server confirm its filing on a deal."""
+        self.assertEqual(self.run_intake([m]).state, 'succeeded')
+        logged = self.fake.writes('log-activity')[0][1]['idempotency_key']
+        self.fake.email_queue = [{'activity_id': str(uuid.uuid5(uuid.NAMESPACE_URL, logged)), 'deal': deal,
+                                  'body': '', 'occurred_at': NOW.isoformat()}]
+
+    def flag_calls(self):
+        return [(v, a) for v, a in self.fake.calls if v in ('record-deal-item', 'complete-deal-item', 'drop-action')]
+
+    def flagged(self, **flag):
+        return mail('pat@example.test', -timedelta(hours=1), subject='Send the lease', **flag)
+
+    def test_flagged_email_on_a_deal_files_a_todo_with_a_date_only_due_day(self):
+        self.filed_deal(self.flagged(flag='flagged', due=self.OCT29))
+        self.assertEqual(self.run_intake([self.flagged(flag='flagged', due=self.OCT29)], touch=False).state, 'succeeded')
+        [(verb, args)] = self.flag_calls()
+        self.assertEqual((verb, args['deal'], args['due_on']), ('record-deal-item', 'deal-1', '2026-10-29'))
+        self.assertEqual(args['bullets'][0]['date'], '2026-10-29')
+        self.assertIn('Send the lease', args['bullets'][0]['text'])
+        self.assertEqual(intake._flag_day(self.OCT29), '2026-10-29')
+        self.assertEqual(intake._flag_day(self.OCT28), '2026-10-28')
+
+    def test_flag_without_a_due_date_files_a_todo_with_none(self):
+        self.filed_deal(self.flagged(flag='flagged'))
+        self.run_intake([self.flagged(flag='flagged')], touch=False)
+        self.assertIsNone(self.flag_calls()[0][1]['due_on'])
+        self.assertIsNone(intake._flag_day(None))
+        self.assertIsNone(intake._flag_day(253_402_300_799 * 2))  # DateTime.MaxValue sentinel
+
+    def test_completed_flag_completes_the_todo(self):
+        m = self.flagged(flag='flagged', due=self.OCT29)
+        self.filed_deal(m)
+        self.run_intake([m], touch=False)
+        done = self.flagged(flag='complete', due=self.OCT29, done=self.OCT28)
+        self.assertEqual(self.run_intake([done]).state, 'succeeded')
+        verbs = [v for v, _ in self.flag_calls()]
+        self.assertEqual(verbs, ['record-deal-item', 'complete-deal-item'])
+        item = self.fake.calls and next(a for v, a in self.flag_calls() if v == 'complete-deal-item')
+        self.assertEqual(item['item_id'], str(uuid.uuid5(uuid.NAMESPACE_URL, f'outlook-flag:{ident(m)}')))
+
+    def test_unflagging_drops_the_todo_with_its_source(self):
+        m = self.flagged(flag='flagged')
+        self.filed_deal(m)
+        self.run_intake([m], touch=False)
+        self.assertEqual(self.run_intake([self.flagged(flag='none')]).state, 'succeeded')
+        verb, args = self.flag_calls()[-1]
+        self.assertEqual(verb, 'drop-action')
+        self.assertIn(f'outlook-flag:{ident(m)}', args['reason'])
+        self.assertNotIn('complete-deal-item', [v for v, _ in self.flag_calls()])
+
+    def test_unknown_or_disagreeing_flags_change_nothing(self):
+        m = self.flagged(flag='flagged')
+        self.filed_deal(m)
+        self.run_intake([m], touch=False)
+        for flag in ('weird', None):
+            self.run_intake([self.flagged(flag=flag)])
+        self.assertEqual([v for v, _ in self.flag_calls()], ['record-deal-item'])
+        merged = intake._best_copies([{**self.flagged(flag='flagged'), 'row_ids': [1], 'folders': [], 'attachments': []},
+                                      {**self.flagged(flag='complete'), 'row_ids': [2], 'folders': [], 'attachments': []}])
+        self.assertIsNone(merged[0]['flag_status'])
+
+    def test_a_flag_never_seen_flagged_is_not_filed_as_complete(self):
+        m = self.flagged(flag='complete', done=self.OCT28)
+        self.filed_deal(m)
+        outcome = self.run_intake([m], touch=False)
+        self.assertEqual(self.flag_calls(), [])
+        self.assertEqual(outcome.counts['flags_untracked'], 1)
+
+    def test_flag_on_an_email_with_no_deal_is_counted_not_filed(self):
+        m = self.flagged(flag='flagged')
+        self.filed_deal(m, deal=None)
+        outcome = self.run_intake([m], touch=False)
+        self.assertEqual(self.flag_calls(), [])
+        self.assertEqual(outcome.counts['flags_unmatched'], 1)
+        stranger = mail('nobody@example.test', -timedelta(hours=1), subject='Cold email', flag='flagged')
+        self.assertEqual(self.run_intake([stranger]).counts['flags_unfiled'], 1)
+        self.assertEqual(self.flag_calls(), [])
+
+    def test_replaying_the_same_flag_state_writes_nothing_twice(self):
+        m = self.flagged(flag='flagged', due=self.OCT29)
+        self.filed_deal(m)
+        for _ in range(3):
+            self.run_intake([m], touch=False)
+        self.assertEqual(len(self.flag_calls()), 1)
+
+
 class AttachmentMetadataTest(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
