@@ -7,6 +7,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -99,6 +100,8 @@ with tempfile.TemporaryDirectory() as raw:
                "--aggregate-only", "--defer-unmatched", "--dispatch"]
     p = subprocess.run(command, cwd=root, capture_output=True, text=True)
     check("unknown attendee is durably queued and dispatched", p.returncode == 0 and queue.exists() and (root / "dispatch.json").exists())
+    sent = json.loads((root / "dispatch.json").read_text())
+    check("dispatch sends a UUID idempotency_key", str(uuid.UUID(sent["idempotency_key"])) == sent["idempotency_key"])
     proposal_path.write_text(json.dumps({"unknown": []}))  # eight days later, outside rolling window
     p = subprocess.run(command, cwd=root, capture_output=True, text=True)
     check("rolled-out attendee remains pending until all receipts exist", p.returncode == 0 and queue.exists() and "new@example.com" in queue.read_text())
