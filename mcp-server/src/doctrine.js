@@ -27,6 +27,17 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const TEAM_MEMORY = "team-memory";
 const MEMORY_SURFACES = ["claude_code", "codex", "routine", "dot", "dream", "app"];
 const MEMORY_ACCESS = ["read_only", "read_write"];
+// Audit 3 F3: unattended surfaces read team memory by default; a session that
+// needs to write asks for read_write. A section whose body gives an order is
+// served in the attach index only once a partner has adopted it. Adoption
+// reuses #2611's door: ops.adopt_rule runs as an `app` session, and `app` is
+// the surface a partner writes from in person, so last_writer_surface = app
+// is the adopted state. Proposals under conventions/proposed/ are never adopted.
+const READ_ONLY_BY_DEFAULT = new Set(["codex", "routine", "dream"]);
+const ADOPTING_SURFACE = "app";
+const DIRECTIVE_RE = /\b(always|never|skip|merge|do not|must)\b/i;
+const awaitsAdoption = s => s.last_writer_surface !== ADOPTING_SURFACE &&
+  (s.section_key.startsWith("conventions/proposed/") || DIRECTIVE_RE.test(s.body_text ?? ""));
 // The one attach instruction (S6): the MCP instructions embed it and
 // ops/sync-core-rule-cards.py renders it into CLAUDE.md and AGENTS.md.
 export const MEMORY_ATTACH_LINE = "OPENING ACT, every session: call attach-memory once, first, with surface claude_code for a Claude Code session (terminal or Desktop) or codex for a Codex job (pass the job log named on the brief's first line as transcript_ref); a claude.ai or other chat app does not attach and calls standing-context instead. Check its team-memory index before starting, read any section that bears on your task with doctrine-sections, and skip work a current section records as done or ruled out, citing it; as you learn or rule something out, write it with write-doctrine-section document=team-memory and your attach_id.";
@@ -1590,21 +1601,21 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
       inputSchema: { type: "object", properties: {
         idempotency_key: { type: "string" },
         surface: { type: "string", enum: MEMORY_SURFACES, description: "the agent surface attaching" },
-        access: { type: "string", enum: MEMORY_ACCESS, description: "team-memory access; read_write (default) or read_only" },
+        access: { type: "string", enum: MEMORY_ACCESS, description: "team-memory access; read_write by default for claude_code, dot and app, read_only by default for codex, routine and dream" },
         native_session_id: { type: "string", description: "the surface's own session id, if it has one" },
         transcript_ref: { type: "string", description: "where this session's transcript will be, if known" },
         host: { type: "string", description: "the machine running the session" } },
         required: ["idempotency_key", "surface"] },
       handler: async (c, actor, args) => withEnvelope(c, actor, "attach-memory", args, async () => {
-        const access = args.access ?? "read_write";
+        const access = args.access ?? (READ_ONLY_BY_DEFAULT.has(args.surface) ? "read_only" : "read_write");
         const scope = personalScopeForActor(actor);
         if (scope.status === "error") throw new ToolError({ error: scope.error });
         const { boot } = await ruleBoot(c, scope);
         const doc = await resolveDoc(c, TEAM_MEMORY);
         const generation = Number((await c.query(`select generation from doctrine_meta where id=1`)).rows[0].generation);
-        const index = (await c.query(
+        const rows = (await c.query(
           `select s.id as section_id, s.section_key, s.title, s.current_version as version, s.body_hash as content_hash,
-                  s.review_after, m.surface as last_writer_surface
+                  s.review_after, m.surface as last_writer_surface, r.body->>'text' as body_text
              from doctrine_section s
              left join doctrine_revision r on r.id = s.current_revision_id
              left join memory_session m on m.attach_id =
@@ -1612,6 +1623,8 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
                     then r.session_key::uuid end
             where s.document_id = $1 and s.status = 'active'
             order by s.section_key`, [doc.id])).rows.map(sectionVersions);
+        const index = rows.filter(s => !awaitsAdoption(s)).map(({ body_text, ...line }) => line);
+        const withheld = rows.length - index.length;
         const attached = (await c.query(
           `insert into memory_session (surface, native_session_id, transcript_ref, host, actor_id,
              access, attached_generation, attached_index_digest)
@@ -1627,6 +1640,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
             read_with: "standing-context rule_ids / search-doctrine",
             propose_with: `write-doctrine-section document=${TEAM_MEMORY} section_key=conventions/proposed/<slug> attach_id=${attached}` },
           { name: TEAM_MEMORY, access, document: TEAM_MEMORY, generation, index,
+            withheld_pending_adoption: withheld,
             instructions: access === "read_write"
               ? `Check the index before starting. Read with doctrine-sections. Write lessons as you learn them with write-doctrine-section document=${TEAM_MEMORY} attach_id=${attached} base_version=<version>. On version_conflict re-read, then write once.`
               : `Check the index before starting. Read with doctrine-sections. This attach is read_only; attach_id=${attached} cannot write.` } ] };
