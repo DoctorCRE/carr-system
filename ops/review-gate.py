@@ -84,9 +84,11 @@ def run(event, repo):
     latest = api(f"{root}/pulls/{number}")
     if latest["head"]["sha"] == sha and latest.get("body") == pr.get("body"):
         description = ("No skip-CI title; small safe diff or current-head approval required" if card_ok else
-                       "Missing Card line; format: Card: WR557.S3.J1")
+                       "Missing PR body line: Card: WR<number>.S<number>.J<number>")
         status(sha, "success" if passed else "failure", description)
+        print(description)
+        return int(not passed)
 
 
 if __name__ == "__main__":
-    run(json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text()), os.environ["GITHUB_REPOSITORY"])
+    raise SystemExit(run(json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text()), os.environ["GITHUB_REPOSITORY"]))

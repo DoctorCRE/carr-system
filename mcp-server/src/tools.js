@@ -3953,6 +3953,33 @@ export const TOOLS = {
     },
   },
 
+  "email-match-contacts": {
+    write: false,
+    description: "The Outlook intake's contact list: every address written in a live party's email field, in any market, as {address, ref, name, exact}. ref is the party's client, lead or vendor ref, one row per live role, or its P- ref when it holds none. Merged-away and deleted parties never appear. exact=false marks a role address (info, front desk, office...) sharing its field with other addresses: it may serve many people.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+    handler: async (c) => {
+      const ROLE = /^(?:front-?desk|info|office|admin|contact|reception|billing|hello|team|support|scheduling|appointments?|sales|inquiries|enquiries|referrals?|records|staff|help|general)(?:[-.+].*)?$/u;
+      const rows = (await c.query(`
+        select coalesce(r.ref, p.ref) as ref, coalesce(nullif(btrim(p.name), ''), org.name, '') as name, p.email
+          from party p
+          left join party org on org.id = p.org_id
+          left join lateral (
+            select roster_ref as ref from client where party_id = p.id and merged_into is null
+            union all select registry_ref from lead where party_id = p.id
+            union all select vendor_ref from vendor where party_id = p.id and merged_into is null) r on true
+         where p.merged_into is null and p.deleted_at is null and p.email like '%@%'
+           and coalesce(r.ref, p.ref) is not null
+         order by 1`)).rows;
+      const contacts = rows.flatMap(({ ref, name, email }) => {
+        const found = [...new Set((email.match(/[\p{L}\p{M}\p{N}_.+'-]+@[\p{L}\p{M}\p{N}_-]+(?:\.[\p{L}\p{M}\p{N}_-]+)+/gu) ?? [])
+          .map(address => address.toLowerCase()))];
+        return found.map(address => ({ address, ref, name,
+          exact: found.length === 1 || !ROLE.test(address.split('@')[0].replaceAll('_', '-')) }));
+      });
+      return { schema_version: "email-match-contacts.v1", contacts };
+    },
+  },
+
   "mail-contact-policy": {
     write: false,
     description: "Read existing party do-not-contact and lead suppression instructions for exact email addresses. Returns one blocked boolean per normalized address, including unknown addresses. This is suppression evidence only, never permission to send. No contact details or reasons leave the record layer.",
@@ -9823,7 +9850,7 @@ registerTools({
           !["next_step", "phase_move"].includes(candidate.kind)))
         throw new ToolError({ error: "automatic_apply_not_allowed", kind: candidate.kind,
           hint: "only a partner's own Call Mode may apply a post-call next step or phase automatically" });
-      const hold = automatic ? automaticApplyHold(candidate) : null;
+      const hold = automatic ? await automaticApplyHold(candidate) : null;
       if (hold) throw new ToolError({ error: "below_confidence_bar", kind: candidate.kind, reason: hold,
         hint: "leave it as a card for Joe or Dell; nothing was changed" });
 
@@ -9838,6 +9865,7 @@ registerTools({
       if (!verb) throw new ToolError({ error: "unknown_candidate_kind", kind: candidate.kind });
       const innerArgs = { ...candidate.payload, idempotency_key: captureKey(candidate.id) };
       delete innerArgs.plan_base;
+      delete innerArgs.evidence_source;
       if (candidate.kind === "meeting_record") innerArgs.kind = "meeting";
       if (candidate.kind === "phase_move") {
         // The partners' own words on the call are the evidence for the move,

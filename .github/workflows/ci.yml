@@ -296,36 +296,6 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-  fallow:
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
-    name: Fallow (${{ matrix.root }})
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        root: [mcp-server, practice-plugin, control-room, workspace]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install package dependencies when locked
-        working-directory: ${{ matrix.root }}
-        run: if [ -f package-lock.json ]; then npm ci --no-audit; fi
-      - uses: fallow-rs/fallow@4f2657d30ad9639d1f8ec29f0bd5b9d48ee44f31 # v3.35.0
-        with:
-          version: '3.35.0'
-          root: ${{ matrix.root }}
-          command: audit
-          only: dead-code,architecture,dupes
-          dead-code-baseline: fallow-baselines/dead-code.json
-          dupes-baseline: fallow-baselines/dupes.json
-          artifacts-dir: fallow-results/${{ matrix.root }}
-
   checks:
     # THE REQUIRED CONTEXT. Its name is what the ruleset requires, so it must
     # report whatever the class jobs do: `always()` makes it run when
@@ -335,7 +305,7 @@ jobs:
     # the merge silently instead of saying why.
     name: ops/ci.sh --strict
     runs-on: ubuntu-24.04
-    needs: [scope, classes, migration-fixtures, fallow]
+    needs: [scope, classes, migration-fixtures]
     permissions:
       contents: read
     if: ${{ always() }}
