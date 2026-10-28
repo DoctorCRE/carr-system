@@ -10,12 +10,11 @@
 -- Renewal-radar candidates are left out: their sealed daily snapshot owns that membership.
 
 create function carr_is_partner_actor(p_actor uuid) returns boolean
-  language sql stable security definer set search_path = pg_catalog, public, pg_temp
+  language sql stable set search_path = pg_catalog, public, pg_temp
   as $$ select exists (select 1 from public.actor a where a.id = p_actor
-          and (a.kind = 'human' or a.slug in ('joe-local', 'dell-local'))) $$;
-revoke all on function carr_is_partner_actor(uuid) from public;
+          and a.slug in ('joe', 'dell', 'joe-local', 'dell-local')) $$;
 grant execute on function carr_is_partner_actor(uuid) to carr_reader, carr_writer, carr_jobs, carr_authority;
-comment on function carr_is_partner_actor(uuid) is 'WR577: the one partner rule for Clear the deck. Human partners and their call-mode doors are partners; system, merge-queue and intake actors are automation.';
+comment on function carr_is_partner_actor(uuid) is 'WR577: the one partner rule for Clear the deck. The partners (joe, dell) and their call-mode doors (joe-local, dell-local) are partners; system, merge-queue and intake actors are automation. Reads only actor id and slug, which every runtime role may read.';
 
 alter table next_action add column confirmed_at timestamptz, add column confirmed_by uuid references actor(id);
 alter table loop_item add column confirmed_at timestamptz, add column confirmed_by uuid references actor(id);
@@ -76,7 +75,7 @@ alter table candidate_pool enable trigger prospect_pool_touch;
 -- From now on a partner create or edit of a live row confirms it at once. A drop
 -- (status expired) is a decision, not a confirmation.
 create function carr_confirm_partner_touch() returns trigger
-  language plpgsql security definer set search_path = pg_catalog, public, pg_temp
+  language plpgsql set search_path = pg_catalog, public, pg_temp
   as $$
 declare
   v_actor uuid := case when tg_op = 'INSERT' then new.created_by else new.updated_by end;

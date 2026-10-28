@@ -4,7 +4,7 @@
   "card": "WR577.S1.J1",
   "transport": "Authenticated MCP clear-the-deck and clear-the-deck-apply",
   "rule": {
-    "partner": "A human partner or a partner door (joe-local, dell-local); public.carr_is_partner_actor is the one rule. System, merge-queue and intake actors are automation.",
+    "partner": "joe, dell and their call-mode doors joe-local and dell-local; public.carr_is_partner_actor is the one rule. System, merge-queue and intake actors are automation.",
     "confirmed": "Any partner create, edit, history event or keep stamps confirmed_by and confirmed_at once. A confirmed row never goes stale.",
     "eligible": "Open next actions, open loops (open_loop, team_loop, action_required) and pool candidates made by automation and never confirmed. Renewal-radar candidates are excluded because their sealed daily snapshot owns that membership.",
     "days": { "next_action": 30, "loop": 30, "candidate": 60 },
