@@ -83,7 +83,7 @@ for (const [verb, material] of [
     await assert.rejects(TOOLS[verb].handler(store, { ...actor, slug: 'dell', id: 'dell-id' }, request),
       error => error.payload?.error === 'key_reuse');
     await assert.rejects(TOOLS[verb].handler(store, { ...actor, slug: 'dell', id: 'dell-id' },
-      { ...material, base_version: 1, idempotency_key: 'other-intent' }), error => error.payload?.error === 'version_conflict');
+      { ...material, base_version: 1, idempotency_key: '167e0cd4-21bf-58ca-b666-e7b3e1c68c32' }), error => error.payload?.error === 'version_conflict');
     assert.equal(store.effects, 1);
   });
   test(`${verb}: missing expected version refuses before effects`, async () => {

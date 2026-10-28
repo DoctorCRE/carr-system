@@ -1,0 +1,42 @@
+// WR-000571 — the shared write envelope accepts only UUID idempotency keys.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { TOOLS } from "../src/tools.js";
+import { publicError } from "../src/public-errors.ts";
+
+const actor = { id: "00000000-0000-4000-8000-000000000010", slug: "synthetic-builder",
+  display: "Synthetic builder", human: false, via: "local-token", client_id: "codex" };
+
+function store() {
+  const calls = [];
+  return { calls, async query(text, params = []) {
+    const sql = text.replace(/\s+/g, " ").trim();
+    calls.push(sql);
+    if (sql.startsWith("select request_hash, response")) return { rows: [] };
+    if (sql.startsWith("insert into tool_call")) return { rows: [] };
+    throw new Error(`Unexpected synthetic query: ${sql}`);
+  } };
+}
+const args = (idempotency_key) => ({ idempotency_key, subject: "repo:jbookout/doctorcre-app",
+  kind: "research_report", internal: true, epistemic_status: "observed", source: "/synthetic",
+  observed_at: "2026-01-01T00:00:00+00:00", value: {} });
+
+for (const bad of ["synthetic-fixed-key", "calcap-123", "12345", " 00000000-0000-4000-8000-000000000001", "not-a-uuid-at-all-0000-000000000000"]) {
+  test(`write envelope refuses non-UUID idempotency_key ${JSON.stringify(bad)} before any query`, async () => {
+    const db = store();
+    await assert.rejects(TOOLS["record-finding"].handler(db, actor, args(bad)),
+      (e) => {
+        const shown = publicError(e, { inputSchema: TOOLS["record-finding"].inputSchema, fallback: "x" });
+        return shown.error === "invalid_idempotency_key" && shown.fields?.includes("idempotency_key")
+          && shown.hint.includes("idempotency_key");
+      });
+    assert.deepEqual(db.calls, []);
+  });
+}
+
+test("write envelope still runs with a UUID idempotency_key", async () => {
+  const db = store();
+  await assert.rejects(TOOLS["record-finding"].handler(db, actor, args("0b0f6a52-3c5e-4d7a-9a41-8f2d1c9e7b10")),
+    (e) => !/idempotency/.test(String(e.error)));
+  assert.ok(db.calls.some((s) => s.startsWith("select request_hash, response")));
+});

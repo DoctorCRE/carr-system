@@ -28,6 +28,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError } from "../src/tools.js";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const ids = {
   joe: "10000000-0000-0000-0000-000000000002",
@@ -94,7 +95,7 @@ const call = (db, args) => TOOLS["update-loop"].handler(db, joe, args);
 
 test("update-loop: a renumber writes the column and reports from/to", async () => {
   const db = new RenumberFake();
-  const res = await call(db, { idempotency_key: "rn-1", loop_id: ids.keep, base_version: 3,
+  const res = await call(db, { idempotency_key: "14d8511a-d21e-5405-b52c-da9174272b0c", loop_id: ids.keep, base_version: 3,
     number: "363", renumber_reason: "RENUMBERED, NOT ABANDONED — #95 now names the newsletter row only." });
   assert.equal(res.ok, true);
   assert.equal(res.number, "363");
@@ -107,7 +108,7 @@ test("update-loop: a renumber writes the column and reports from/to", async () =
 
 test("update-loop: the event carries the OLD number, so the change is traceable", async () => {
   const db = new RenumberFake();
-  await call(db, { idempotency_key: "rn-2", loop_id: ids.keep, base_version: 3,
+  await call(db, { idempotency_key: "cace436a-4389-51f0-96a3-9ab8a5a62e1f", loop_id: ids.keep, base_version: 3,
     number: "363", renumber_reason: "RENUMBERED, NOT ABANDONED — bookkeeping only." });
   const ev = db.events.at(-1);
   assert.equal(ev.old_value.number, "95");
@@ -118,7 +119,7 @@ test("update-loop: the event carries the OLD number, so the change is traceable"
 test("update-loop: RULE 7105955b — a renumber without a reason is refused", async () => {
   const db = new RenumberFake();
   await assert.rejects(
-    () => call(db, { idempotency_key: "rn-3", loop_id: ids.keep, base_version: 3, number: "363" }),
+    () => call(db, { idempotency_key: "c397d70a-cacc-52dd-8c6b-a4a4d0c75a3f", loop_id: ids.keep, base_version: 3, number: "363" }),
     (err) => {
       assert.ok(err instanceof ToolError);
       assert.equal(err.payload.error, "renumber_reason_required");
@@ -132,7 +133,7 @@ test("update-loop: a number another OPEN row of the same kind holds is refused, 
     { id: ids.other, kind: "open_loop", number: "88" },
   ] });
   await assert.rejects(
-    () => call(db, { idempotency_key: "rn-4", loop_id: ids.keep, base_version: 3,
+    () => call(db, { idempotency_key: "3ffa75e0-7ab7-5963-b8bb-d69a41ea603e", loop_id: ids.keep, base_version: 3,
       number: "88", renumber_reason: "RENUMBERED, NOT ABANDONED — trying to collide." }),
     (err) => {
       assert.ok(err instanceof ToolError);
@@ -149,7 +150,7 @@ test("update-loop: the same number on a DIFFERENT kind is not a collision", asyn
   const db = new RenumberFake({ siblings: [
     { id: ids.other, kind: "idea", number: "363" },
   ] });
-  const res = await call(db, { idempotency_key: "rn-5", loop_id: ids.keep, base_version: 3,
+  const res = await call(db, { idempotency_key: "f5dba5cc-5391-5554-9e54-f7896cb783ae", loop_id: ids.keep, base_version: 3,
     number: "363", renumber_reason: "RENUMBERED, NOT ABANDONED — idea #363 is a different series." });
   assert.equal(res.number, "363");
 });
@@ -158,7 +159,7 @@ test("update-loop: a non-numeric number is refused — the renders sort on this 
   const db = new RenumberFake();
   for (const bad of ["95a", "ninety-five", "#", "12.5"]) {
     await assert.rejects(
-      () => call(db, { idempotency_key: `rn-bad-${bad}`, loop_id: ids.keep, base_version: 3,
+      () => call(db, { idempotency_key: derivedIdempotencyKey("test", `rn-bad-${bad}`), loop_id: ids.keep, base_version: 3,
         number: bad, renumber_reason: "RENUMBERED, NOT ABANDONED — should not land." }),
       (err) => {
         assert.ok(err instanceof ToolError);
@@ -171,7 +172,7 @@ test("update-loop: a non-numeric number is refused — the renders sort on this 
 
 test("update-loop: a leading # is tolerated, because that is how a human writes it", async () => {
   const db = new RenumberFake();
-  const res = await call(db, { idempotency_key: "rn-6", loop_id: ids.keep, base_version: 3,
+  const res = await call(db, { idempotency_key: "4fe48953-aa15-5a5c-b4bf-90d204a577bf", loop_id: ids.keep, base_version: 3,
     number: "#363", renumber_reason: "RENUMBERED, NOT ABANDONED — hash form." });
   assert.equal(res.number, "363");
 });
@@ -179,7 +180,7 @@ test("update-loop: a leading # is tolerated, because that is how a human writes 
 test("update-loop: renumbering to the number it already has is a no-op, not a false collision", async () => {
   const db = new RenumberFake();
   await assert.rejects(
-    () => call(db, { idempotency_key: "rn-7", loop_id: ids.keep, base_version: 3,
+    () => call(db, { idempotency_key: "49f8541d-0e58-55fc-8496-4c6ee24f5313", loop_id: ids.keep, base_version: 3,
       number: "95", renumber_reason: "RENUMBERED, NOT ABANDONED — same value." }),
     (err) => {
       assert.ok(err instanceof ToolError);

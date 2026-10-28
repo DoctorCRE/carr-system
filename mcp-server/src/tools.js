@@ -47,6 +47,7 @@ import { incidentTools } from "./incident.js";
 import { resourceObservationTools } from "./resource-observation.v5.ts";
 import { invoiceAutomation } from "./invoice-automation.js";
 import { emailDealProgressTools } from "./email-deal-progress.ts";
+import { derivedIdempotencyKey } from "./derived-key.ts";
 import { emailNextStepTools } from "./email-next-step.ts";
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
 import { addCalendarMeetingPrep } from "./calendar-meeting-prep.js";
@@ -314,10 +315,14 @@ export function auditIdentity(actor) {
   };
 }
 
+const UUID_KEY = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+
 async function withEnvelope(client, actor, verb, args, fn) {
   const key = args.idempotency_key;
   if (!key) throw new ToolError({ error: "missing_idempotency_key",
     hint: "generate a UUID per intended action; retries reuse the SAME key" });
+  if (typeof key !== "string" || !UUID_KEY.test(key))
+    throw new ToolError({ error: "invalid_idempotency_key", field: "idempotency_key" });
   const identity = auditIdentity(actor);
   // SIEP-11: replay authority is the exact operation manifest, never the bare
   // caller key. Binding the canonical operation and server-derived principal
@@ -2476,7 +2481,12 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
 // they closed and which ball they opened, so the card goes back exactly. Any
 // later edit to the step, its date or one of its checklist items is newer work
 // and refuses the undo instead of being overwritten.
-async function undoAppliedNextStep(c, actor, dealId, candidate, key, args) {
+// A call proposal's write is filed under one derived UUID. Calls applied before
+// the envelope took only UUIDs were filed under `capture:<id>`; undo still reads those.
+const captureKey = id => derivedIdempotencyKey("capture-candidate", id);
+const captureKeys = id => [`capture:${id}`, captureKey(id)];
+
+async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args) {
   // Same lock order as resolve-candidate's apply: the checklist first, so a
   // partner completing one of the call's items waits for (or beats) the undo.
   await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0)) /* call-outcome:undo-items-lock */", [dealId]);
@@ -2485,15 +2495,15 @@ async function undoAppliedNextStep(c, actor, dealId, candidate, key, args) {
   await versionGuard(c, "deal", dealId, args.base_version);
   const events = (await c.query(
     `select field, old_value, new_value, recorded_at from event
-      where subject_type='deal' and subject_id=$1 and idempotency_key=$2 and field in ('next_step','next_date','next_action')
-      order by recorded_at, id /* call-outcome:undo-step-events */`, [dealId, key])).rows;
+      where subject_type='deal' and subject_id=$1 and idempotency_key=any($2::text[]) and field in ('next_step','next_date','next_action')
+      order by recorded_at, id /* call-outcome:undo-step-events */`, [dealId, keys])).rows;
   const first = field => events.find(row => row.field === field);
   const applied = events.filter(row => row.field === "next_step" && row.new_value?.next_action_id).at(-1);
   if (!first("next_step") || !first("next_date") || !applied) throw new ToolError({ error: "applied_change_not_found" });
   const newer = (await c.query(
     `select 1 from event where subject_type='deal' and subject_id=$1 and field in ('next_step','next_date')
-        and recorded_at > (select max(recorded_at) from event where subject_type='deal' and subject_id=$1 and idempotency_key=$2)
-      limit 1 /* call-outcome:undo-step-newer */`, [dealId, key])).rows;
+        and recorded_at > (select max(recorded_at) from event where subject_type='deal' and subject_id=$1 and idempotency_key=any($2::text[]))
+      limit 1 /* call-outcome:undo-step-newer */`, [dealId, keys])).rows;
   const items = (await c.query(
     `select n.id, n.status, (select count(*) from event e where e.subject_type='deal' and e.subject_id=$1
         and e.field in ('deal_item','deal_item_instruction') and e.new_value->>'item_id' = n.id::text) as events
@@ -5494,7 +5504,7 @@ export const TOOLS = {
       const stage = args.status === "inactive" ? "nurture_drip" : "opportunity";
       if (!leads.length) {
         const created = await TOOLS["new-lead"].handler(c,actor,{
-          idempotency_key: `${args.idempotency_key}:lead`,party_id:current.party_id,stage });
+          idempotency_key: derivedIdempotencyKey("prospect-lead", args.idempotency_key),party_id:current.party_id,stage });
         leads = [{id:created.lead_id,client_id:null,stage,suppressed:false,version:1}];
       }
       for (const lead of leads) {
@@ -5507,7 +5517,7 @@ export const TOOLS = {
         if (!protectedLead(lead) && lead.stage !== stage) {
           const version = (await c.query("select version from lead where id=$1",[lead.id])).rows[0].version;
           await TOOLS["update-lead"].handler(c,actor,{
-            idempotency_key:`${args.idempotency_key}:stage:${lead.id}`,lead:lead.id,base_version:version,
+            idempotency_key:derivedIdempotencyKey("prospect-lead-stage",`${args.idempotency_key}:${lead.id}`),lead:lead.id,base_version:version,
             fields:{stage},stage_review:{reason:args.reason.trim(),evidence_ids:[],human_quote:args.human_quote} });
         }
       }
@@ -9799,7 +9809,7 @@ registerTools({
       };
       const verb = verbByKind[candidate.kind];
       if (!verb) throw new ToolError({ error: "unknown_candidate_kind", kind: candidate.kind });
-      const innerArgs = { ...candidate.payload, idempotency_key: `capture:${candidate.id}` };
+      const innerArgs = { ...candidate.payload, idempotency_key: captureKey(candidate.id) };
       delete innerArgs.plan_base;
       if (candidate.kind === "meeting_record") innerArgs.kind = "meeting";
       if (candidate.kind === "phase_move") {
@@ -9818,6 +9828,9 @@ registerTools({
         await lockDealField(c, subject.id, "next_step");
         if (automatic) {
           const base = candidate.payload.plan_base;
+          const siblingKeys = (await c.query(`select id from capture_candidate
+            where session_id=$1 and status='confirmed' and applied_automatically /* capture:automatic-plan-siblings */`,
+            [candidate.session_id])).rows.flatMap(row => captureKeys(row.id));
           if (!base || !Object.hasOwn(base, "next_step") || !Object.hasOwn(base, "next_date"))
             throw new ToolError({ error: "missing_plan_base", hint: "Review this older call proposal before applying it." });
           const changed = await c.query(
@@ -9825,10 +9838,8 @@ registerTools({
               join event e on e.subject_type='deal' and e.subject_id=$1 and e.field=b.key
               where (b.value is null or (e.recorded_at,e.id) >
                 (select recorded_at,id from event where id=b.value::uuid))
-                and not exists(select 1 from capture_candidate sibling
-                  where sibling.session_id=$3 and sibling.status='confirmed' and sibling.applied_automatically
-                    and e.idempotency_key='capture:' || sibling.id::text)
-              limit 1 /* capture:automatic-plan-conflict */`, [subject.id, JSON.stringify(base), candidate.session_id]);
+                and not (e.idempotency_key = any($3::text[]))
+              limit 1 /* capture:automatic-plan-conflict */`, [subject.id, JSON.stringify(base), siblingKeys]);
           if (changed.rows.length) throw new ToolError({ error: "newer_change_exists", field: changed.rows[0].field,
             hint: "The plan changed after this call proposal was filed. Review it before applying." });
         }
@@ -9844,7 +9855,7 @@ registerTools({
           const { status, ...facts } = item;
           const stored = await executeRegisteredTool(c, actor, 'record-deal-item', {
             ...facts, deal: result.deal_id,
-            idempotency_key: `capture:${candidate.id}:item:${index}`,
+            idempotency_key: derivedIdempotencyKey("capture-candidate-item", `${candidate.id}:${index}`),
           });
           result.items.push(stored.item);
         }
@@ -10028,13 +10039,15 @@ registerTools({
       const prior = (await c.query(`select new_value from event where verb='undo-call' and field='call_undo'
         and new_value->>'session_id'=$1 order by recorded_at desc,id desc limit 1`, [session.id])).rows[0];
       if (prior) return { ok: true, session_id: session.id, already: "undone", ...prior.new_value };
-      const candidates = (await c.query(`select p.id,p.kind,p.evidence_quote,p.undone_at,e.subject_id as deal_id
-        from capture_candidate p left join lateral (
-          select subject_id from event where subject_type='deal' and idempotency_key='capture:' || p.id::text
-            and field=case when p.kind='phase_move' then 'phase' else 'next_step' end
-          order by recorded_at,id limit 1
-        ) e on true where p.session_id=$1 and p.applied_automatically order by p.id for update of p`,
-        [session.id])).rows.filter(row => !row.undone_at);
+      const applied = (await c.query(`select p.id,p.kind,p.evidence_quote,p.undone_at from capture_candidate p
+        where p.session_id=$1 and p.applied_automatically order by p.id for update of p`, [session.id])).rows;
+      const candidates = [];
+      for (const row of applied.filter(row => !row.undone_at)) {
+        const written = (await c.query(`select subject_id from event where subject_type='deal' and idempotency_key=any($1::text[])
+          and field=$2 order by recorded_at,id limit 1 /* call-outcome:undo-call-deal */`,
+          [captureKeys(row.id), row.kind === 'phase_move' ? 'phase' : 'next_step'])).rows[0];
+        candidates.push({ ...row, deal_id: written?.subject_id });
+      }
       if (candidates.some(row => !row.deal_id)) throw new ToolError({ error: "applied_change_not_found" });
       const changes = [];
       const deals = [...new Set(candidates.map(row => row.deal_id))].sort();
@@ -10052,11 +10065,11 @@ registerTools({
         await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0))", [dealId]);
         for (const field of ["phase", "next_date", "next_step"]) await lockDealField(c, dealId, field);
         await c.query("select id from deal where id=$1 for update", [dealId]);
-        const keys = own.map(row => `capture:${row.id}`);
+        const keys = own.flatMap(row => captureKeys(row.id));
         const journal = (await c.query(`select id,field,old_value,new_value,idempotency_key from event
           where subject_type='deal' and subject_id=$1 and idempotency_key=any($2::text[])
           and field in ('phase','next_date','next_step','next_action') order by recorded_at,id`, [dealId,keys])).rows;
-        if (own.some(row => !journal.some(event => event.idempotency_key === `capture:${row.id}`
+        if (own.some(row => !journal.some(event => captureKeys(row.id).includes(event.idempotency_key)
           && event.field === (row.kind === 'phase_move' ? 'phase' : 'next_step'))))
           throw new ToolError({ error: "applied_change_not_found", deal_id: dealId });
         const fields = [...new Set(journal.map(row => row.field))];
@@ -10113,7 +10126,7 @@ registerTools({
         }
         for (const candidate of own) {
           const evidence = { candidate_id:candidate.id,kind:candidate.kind,deal_id:dealId,
-            evidence_quote:candidate.evidence_quote,event_ids:journal.filter(row=>row.idempotency_key===`capture:${candidate.id}`).map(row=>row.id),
+            evidence_quote:candidate.evidence_quote,event_ids:journal.filter(row=>captureKeys(candidate.id).includes(row.idempotency_key)).map(row=>row.id),
             restored,reopened_action_ids:reopenIds,dropped_item_ids:items.map(item=>item.id) };
           await c.query('update capture_candidate set undone_at=clock_timestamp(),undone_by=$2 where id=$1',[candidate.id,actor.id]);
           await writeEvent(c,actor,'undo-call','deal',dealId,{field:'call_change_undo',
@@ -10143,19 +10156,19 @@ registerTools({
       if (!candidate.applied_automatically) throw new ToolError({ error: "not_applied_automatically" });
       if (candidate.undone_at) return { ok: true, candidate_id: candidate.id, already: "undone" };
       const dealId = candidate.payload.deal;
-      const key = `capture:${candidate.id}`;
+      const keys = captureKeys(candidate.id);
       let reverted;
       if (candidate.kind === "phase_move") {
         await lockDealField(c, dealId, "phase");
         await versionGuard(c, "deal", dealId, args.base_version);
         const applied = (await c.query(
-          `select id from event where subject_type='deal' and subject_id=$1 and field='phase' and idempotency_key=$2
-            order by recorded_at desc, id desc limit 1 /* call-outcome:undo-phase */`, [dealId, key])).rows[0];
+          `select id from event where subject_type='deal' and subject_id=$1 and field='phase' and idempotency_key=any($2::text[])
+            order by recorded_at desc, id desc limit 1 /* call-outcome:undo-phase */`, [dealId, keys])).rows[0];
         if (!applied) throw new ToolError({ error: "applied_change_not_found" });
         reverted = await executeRegisteredTool(c, actor, "revert-deal-field",
-          { event_id: applied.id, idempotency_key: `${args.idempotency_key}:phase` });
+          { event_id: applied.id, idempotency_key: derivedIdempotencyKey("call-undo-phase", args.idempotency_key) });
       } else if (candidate.kind === "next_step") {
-        reverted = await undoAppliedNextStep(c, actor, dealId, candidate, key, args);
+        reverted = await undoAppliedNextStep(c, actor, dealId, candidate, keys, args);
       } else throw new ToolError({ error: "not_applied_automatically" });
       await c.query("update capture_candidate set undone_at=now(), undone_by=$2 where id=$1 /* call-outcome:undo */",
         [candidate.id, actor.id]);

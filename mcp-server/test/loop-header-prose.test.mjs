@@ -33,6 +33,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError } from "../src/tools.js";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const ids = {
   joe: "10000000-0000-0000-0000-000000000002",
@@ -109,7 +110,7 @@ const call = (db, args) => TOOLS["edit-loop-header"].handler(db, joe, args);
 
 test("edit-loop-header: the stale pointer is replaced, and the OLD text survives in the event", async () => {
   const db = new HeaderFake({ version: 2 });
-  const res = await call(db, { idempotency_key: "hdr-fix-1", block_id: ids.hot,
+  const res = await call(db, { idempotency_key: "2e856511-2c42-5b14-af26-cf07715a0f3c", block_id: ids.hot,
     base_version: 2, prose_md: FIXED });
 
   assert.equal(res.ok, true);
@@ -130,7 +131,7 @@ test("edit-loop-header: the stale pointer is replaced, and the OLD text survives
 
 test("edit-loop-header: resolves by file + section when no block_id is given", async () => {
   const db = new HeaderFake({ version: 2 });
-  const res = await call(db, { idempotency_key: "hdr-fix-2", file: "open-loops.md",
+  const res = await call(db, { idempotency_key: "10a3b89a-1f1e-509d-9851-57a41082b487", file: "open-loops.md",
     section: "hot", base_version: 2, prose_md: FIXED });
   assert.equal(res.block_id, ids.hot);
   assert.equal(db.blocks[0].prose_md, FIXED);
@@ -146,7 +147,7 @@ test("edit-loop-header: a file substring matching two renders returns candidates
       block_key: "hot", version: 1, prose_md: "backlog prose" },
   ] });
   await assert.rejects(
-    () => call(db, { idempotency_key: "hdr-amb", file: "open-loops", section: "hot",
+    () => call(db, { idempotency_key: "f099a690-a273-523d-882b-8f6f25d2a020", file: "open-loops", section: "hot",
       base_version: 2, prose_md: FIXED }),
     (err) => {
       assert.ok(err instanceof ToolError);
@@ -161,7 +162,7 @@ test("edit-loop-header: a BLANK header is refused — blanking is a deletion, no
   for (const blank of ["", "   ", "\n\n"]) {
     const db = new HeaderFake({ version: 2 });
     await assert.rejects(
-      () => call(db, { idempotency_key: `hdr-blank-${blank.length}`, block_id: ids.hot,
+      () => call(db, { idempotency_key: derivedIdempotencyKey("test", `hdr-blank-${blank.length}`), block_id: ids.hot,
         base_version: 2, prose_md: blank }),
       (err) => {
         assert.ok(err instanceof ToolError);
@@ -176,7 +177,7 @@ test("edit-loop-header: a BLANK header is refused — blanking is a deletion, no
 test("edit-loop-header: a byte-identical rewrite is refused rather than logging a change that did not happen", async () => {
   const db = new HeaderFake({ version: 2 });
   await assert.rejects(
-    () => call(db, { idempotency_key: "hdr-noop", block_id: ids.hot,
+    () => call(db, { idempotency_key: "8a7e5d48-8c93-5f9a-9f77-fa2675212ebf", block_id: ids.hot,
       base_version: 2, prose_md: STALE }),
     (err) => {
       assert.ok(err instanceof ToolError);
@@ -189,7 +190,7 @@ test("edit-loop-header: a byte-identical rewrite is refused rather than logging 
 test("edit-loop-header: a stale base_version refuses — a concurrent writer is never silently overwritten", async () => {
   const db = new HeaderFake({ version: 4 });
   await assert.rejects(
-    () => call(db, { idempotency_key: "hdr-conflict", block_id: ids.hot,
+    () => call(db, { idempotency_key: "446c30a6-c343-5e5b-9080-6ea20479e1f0", block_id: ids.hot,
       base_version: 2, prose_md: FIXED }),
     (err) => {
       assert.ok(err instanceof ToolError);
@@ -202,7 +203,7 @@ test("edit-loop-header: a stale base_version refuses — a concurrent writer is 
 test("edit-loop-header: a missing base_version refuses, so nobody edits doctrine without reading it", async () => {
   const db = new HeaderFake({ version: 2 });
   await assert.rejects(
-    () => call(db, { idempotency_key: "hdr-nobase", block_id: ids.hot, prose_md: FIXED }),
+    () => call(db, { idempotency_key: "d360ff69-6a07-52ba-9fb0-80a73bc70b37", block_id: ids.hot, prose_md: FIXED }),
     (err) => {
       assert.ok(err instanceof ToolError);
       assert.equal(err.payload.error, "missing_base_version");
@@ -214,7 +215,7 @@ test("edit-loop-header: a missing base_version refuses, so nobody edits doctrine
 test("edit-loop-header: neither block_id nor file+section is a refusal, not a broad match", async () => {
   const db = new HeaderFake({ version: 2 });
   await assert.rejects(
-    () => call(db, { idempotency_key: "hdr-noref", file: "open-loops.md", prose_md: FIXED }),
+    () => call(db, { idempotency_key: "ed20a98d-8c09-5f6c-be1d-835269a7b0fe", file: "open-loops.md", prose_md: FIXED }),
     (err) => {
       assert.ok(err instanceof ToolError);
       assert.equal(err.payload.error, "need_block_id_or_file_and_section");
@@ -225,7 +226,7 @@ test("edit-loop-header: neither block_id nor file+section is a refusal, not a br
 test("edit-loop-header: an unknown block_id is not_found rather than a silent no-op", async () => {
   const db = new HeaderFake({ version: 2 });
   await assert.rejects(
-    () => call(db, { idempotency_key: "hdr-missing",
+    () => call(db, { idempotency_key: "5571ef5b-7b1e-5823-bcfd-ba13606af3eb",
       block_id: "00000000-0000-0000-0000-00000000dead", base_version: 1, prose_md: FIXED }),
     (err) => {
       assert.ok(err instanceof ToolError);

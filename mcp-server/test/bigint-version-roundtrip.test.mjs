@@ -34,14 +34,14 @@ test("a published board version can be read and passed straight back to publish"
   });
   const read = await TOOLS["read-progress-board"].handler(fake, joe, { board_id: "project" });
   const args = {
-    idempotency_key: "board-round-trip", board_id: "project",
+    idempotency_key: "18312413-26a0-52e6-a202-7bb70d659fae", board_id: "project",
     base_version: read.snapshot.version, snapshot: read.snapshot.snapshot_json,
   };
   const out = await TOOLS["publish-board-snapshot"].handler(fake, joe, args);
   fake.receipts.get(args.idempotency_key).response.snapshot.version = "3";
   const replay = await TOOLS["publish-board-snapshot"].handler(fake, joe, args);
   const next = await TOOLS["publish-board-snapshot"].handler(fake, joe, {
-    ...args, idempotency_key: "board-after-replay", base_version: replay.snapshot.version,
+    ...args, idempotency_key: "d7bc9101-69e8-5bb7-bca9-e25c4cdb4df4", base_version: replay.snapshot.version,
   });
   assert.equal(read.snapshot.version, 2);
   assert.equal(read.snapshot.snapshot_json.version, "display-value");
@@ -57,7 +57,7 @@ test("a published board version can be read and passed straight back to publish"
 test("a question revision at MAX_SAFE_INTEGER refuses an unsafe increment before database use", async () => {
   const fake = { query: async () => { throw new Error("database must not be queried"); } };
   await assert.rejects(() => TOOLS["revise-board-question"].handler(fake, joe, {
-    idempotency_key: "revision-exhausted", board_id: "project", question_id: "q1",
+    idempotency_key: "1a2a62de-5e87-5ed7-a5cf-b50c91ab37ee", board_id: "project", question_id: "q1",
     base_version: 9007199254740991, prompt: "Updated?", asker_ref: "orchestrator:project",
   }), error => error instanceof ToolError && error.payload.error === "board_base_version_invalid");
 });

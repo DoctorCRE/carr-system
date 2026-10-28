@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import pg from "pg";
 import { TOOLS, ToolError } from "../src/tools.js";
 import { publicError } from "../src/public-errors.ts";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const actor = { id: "10000000-0000-4000-8000-000000000002", slug: "joe", human: true };
 const id = "20000000-0000-4000-8000-000000000001";
@@ -33,7 +34,7 @@ test("doctrine-sections returns a numeric version that writes back unchanged", a
   assert.equal(read.sections[0].current_version, 2);
   assert.equal(read.sections[0].body.version, "opaque");
   const write = await TOOLS["write-doctrine-section"].handler(db, actor, {
-    idempotency_key: "doctrine-roundtrip", document: "test-doc", section_key: "test",
+    idempotency_key: "713de79c-6bdd-5cab-80b9-80356bf887a9", document: "test-doc", section_key: "test",
     base_version: read.sections[0].current_version, body_text: "Updated synthetic text",
   });
   assert.equal(write.version, 3);
@@ -44,7 +45,7 @@ for (const verb of ["write-doctrine-section", "set-doctrine-refs", "retire-doctr
     const db = database("9007199254740993");
     const base = { section_key: "test", body_text: "Updated", base_version: 9007199254740992 };
     await assert.rejects(() => TOOLS[verb].handler(db, actor, {
-      idempotency_key: `unsafe-${verb}`, document: "test-doc", section_id: id,
+      idempotency_key: derivedIdempotencyKey("test", `unsafe-${verb}`), document: "test-doc", section_id: id,
       reason: "Synthetic regression", ...base, items: [base],
     }), error => error instanceof ToolError && /version_invalid/.test(error.payload.error));
     assert.equal(db.mutations.some(sql => /update doctrine_section|insert into doctrine_revision/.test(sql)), false);
@@ -53,7 +54,7 @@ for (const verb of ["write-doctrine-section", "set-doctrine-refs", "retire-doctr
     const db = database("9007199254740993");
     const base = { section_key: "test", body_text: "Updated", base_version: 2 };
     await assert.rejects(() => TOOLS[verb].handler(db, actor, {
-      idempotency_key: `unsafe-stored-${verb}`, document: "test-doc", section_id: id,
+      idempotency_key: derivedIdempotencyKey("test", `unsafe-stored-${verb}`), document: "test-doc", section_id: id,
       reason: "Synthetic regression", ...base, items: [base],
     }), error => error instanceof ToolError && error.payload.error === "doctrine_version_invalid");
     assert.equal(db.mutations.some(sql => /update doctrine_section|insert into doctrine_revision/.test(sql)), false);
@@ -68,7 +69,7 @@ test("doctrine-sections refuses unsafe stored versions and preserves the safe ma
 });
 
 test("doctrine creation accepts zero and refuses an exhausted revision", async () => {
-  const args = { idempotency_key: "doctrine-zero", document: "test-doc", section_key: "test", body_text: "Updated" };
+  const args = { idempotency_key: "beb70adb-520d-5423-92cc-22990df36813", document: "test-doc", section_key: "test", body_text: "Updated" };
   const out = await TOOLS["write-doctrine-section"].handler(database("0"), actor, { ...args, base_version: 0 });
   assert.equal(out.version, 1);
   const db = database("9007199254740991");
@@ -79,7 +80,7 @@ test("doctrine creation accepts zero and refuses an exhausted revision", async (
 
 test("doctrine conflict reports normalize the current and last-writer versions", async () => {
   await assert.rejects(() => TOOLS["set-doctrine-refs"].handler(database("2"), actor, {
-    idempotency_key: "conflict", section_id: id, base_version: 1,
+    idempotency_key: "17173c45-5ee2-518b-a16d-148cc694df38", section_id: id, base_version: 1,
   }), error => {
     assert.equal(error.payload.error, "version_conflict");
     assert.equal(error.payload.current_version, 2);

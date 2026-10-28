@@ -70,7 +70,7 @@ class Fake {
 
 const verb = TOOLS["update-document-status"];
 const mark = (fake, args = {}, actor = joe) => verb.handler(fake, actor, {
-  idempotency_key: "k-" + Math.random().toString(36).slice(2),
+  idempotency_key: crypto.randomUUID(),
   document_id: ids.doc, status: "sent", ...args,
 });
 
@@ -160,7 +160,7 @@ test("draft and handed_to_joe are not gated — only the send is", async () => {
 test("a status-free update (recording lint results) is not gated", async () => {
   const fake = new Fake({ kind: "docx" });
   const out = await verb.handler(fake, joe, {
-    idempotency_key: "k-lint", document_id: ids.doc, lint_passed: true,
+    idempotency_key: "cc76bb31-6edb-5937-ad53-48a937f84265", document_id: ids.doc, lint_passed: true,
   });
   assert.equal(out.ok, true, "this verb is also where lint and leak-check results land");
 });

@@ -7,6 +7,7 @@ import { pipelineChanges } from "../src/dealroom.ts";
 import { TOOLS } from "../src/tools.js";
 import { docActivityEntry } from "../src/doc-activity.js";
 import { CHECKLIST_SOURCES } from '../src/deal-checklist.ts';
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const ids = {
   deal: "10000000-0000-0000-0000-000000000001",
@@ -427,7 +428,7 @@ test("cursor pages are stable, strictly ordered, gap-free, and placeholder-free"
 test("presence lease upserts and expires at read time with a fake clock", async () => {
   const db = new FakeClient();
   await call("presence-lease", db, actors.joe,
-    { idempotency_key: "lease-1", deal: "Deal Alpha", field: "phase" });
+    { idempotency_key: "4004e017-5e02-53c7-a7fa-3a3ba6a0908c", deal: "Deal Alpha", field: "phase" });
   assert.equal(db.leases.size, 1);
   assert.equal(db.events.length, 0);
 
@@ -436,7 +437,7 @@ test("presence lease upserts and expires at read time with a fake clock", async 
   assert.deepEqual(polled.presence.map(p => [p.actor, p.field]), [["joe", "phase"]]);
 
   await call("presence-lease", db, actors.joe,
-    { idempotency_key: "lease-2", deal: "Deal Alpha", field: "phase" });
+    { idempotency_key: "30a41835-b0c1-5edc-abb1-1fe249cec1c0", deal: "Deal Alpha", field: "phase" });
   assert.equal(db.leases.size, 1);
   db.tick(2999);
   polled = await body(await pipelineChanges(new Request("https://example.test/pipeline/changes"), db, actors.dell));
@@ -449,9 +450,9 @@ test("presence lease upserts and expires at read time with a fake clock", async 
 test("concurrent edits to different fields both land without conflict", async () => {
   const db = new FakeClient();
   const phase = await call("patch-deal-field", db, actors.joe,
-    { idempotency_key: "patch-phase", deal: "Deal Alpha", field: "phase", value: "negotiation", base_event_id: null });
+    { idempotency_key: "f64e4b21-17d9-51d6-b3d4-3076cf67adf5", deal: "Deal Alpha", field: "phase", value: "negotiation", base_event_id: null });
   const attention = await call("patch-deal-field", db, actors.dell,
-    { idempotency_key: "patch-attention", deal: "Deal Alpha", field: "attention", value: true, base_event_id: null });
+    { idempotency_key: "8b308f0e-e722-57ae-ae26-f787b70999df", deal: "Deal Alpha", field: "attention", value: true, base_event_id: null });
   assert.equal(phase.ok, true);
   assert.equal(attention.ok, true);
   assert.equal(db.deals.get(ids.deal).phase, "negotiation");
@@ -463,9 +464,9 @@ test("concurrent edits to different fields both land without conflict", async ()
 test("same-field conflict retains both actors and values; resolve uses normal attributed path", async () => {
   const db = new FakeClient();
   await call("patch-deal-field", db, actors.joe,
-    { idempotency_key: "owner-a", deal: "Deal Alpha", field: "owner", value: "joe", base_event_id: null });
+    { idempotency_key: "8ee7fa18-61f4-541a-adc1-ac15e5a624c1", deal: "Deal Alpha", field: "owner", value: "joe", base_event_id: null });
   const collided = await call("patch-deal-field", db, actors.dell,
-    { idempotency_key: "owner-b", deal: "Deal Alpha", field: "owner", value: "dell", base_event_id: null });
+    { idempotency_key: "ccfc971d-3dc7-5229-9ef5-ff6a575ff51e", deal: "Deal Alpha", field: "owner", value: "dell", base_event_id: null });
   assert.equal(collided.ok, false);
   assert.deepEqual({ value_a: collided.conflict.value_a, actor_a: collided.conflict.actor_a,
     value_b: collided.conflict.value_b, actor_b: collided.conflict.actor_b },
@@ -473,7 +474,7 @@ test("same-field conflict retains both actors and values; resolve uses normal at
   assert.equal(db.deals.get(ids.deal).owner, "joe");
 
   const resolved = await call("resolve-conflict", db, actors.joe,
-    { idempotency_key: "resolve-owner", conflict_id: collided.conflict.id, winner: "b" });
+    { idempotency_key: "de7f40c4-86d3-5100-854b-d32f157736ed", conflict_id: collided.conflict.id, winner: "b" });
   assert.equal(resolved.ok, true);
   assert.equal(db.deals.get(ids.deal).owner, "dell");
   assert.equal(db.conflicts[0].status, "resolved");
@@ -486,16 +487,16 @@ test("same-field conflict retains both actors and values; resolve uses normal at
 test("a conflict cannot overwrite a third edit to the same field", async () => {
   const db = new FakeClient();
   const first = await call("patch-deal-field", db, actors.joe,
-    { idempotency_key: "third-a", deal: "Deal Alpha", field: "owner", value: "joe", base_event_id: null });
+    { idempotency_key: "d9bf3c81-a4be-55ff-8ec3-1f110c94492c", deal: "Deal Alpha", field: "owner", value: "joe", base_event_id: null });
   const crossed = await call("patch-deal-field", db, actors.dell,
-    { idempotency_key: "third-b", deal: "Deal Alpha", field: "owner", value: "dell", base_event_id: null });
+    { idempotency_key: "1857989b-b263-5fc7-9aeb-49499c0d1e2d", deal: "Deal Alpha", field: "owner", value: "dell", base_event_id: null });
   assert.equal(crossed.ok, false);
   const third = await call("patch-deal-field", db, actors.joe,
-    { idempotency_key: "third-c", deal: "Deal Alpha", field: "owner", value: "dell", base_event_id: first.event_id });
+    { idempotency_key: "5f51779f-cec6-51ff-99c5-a58b9452a9f0", deal: "Deal Alpha", field: "owner", value: "dell", base_event_id: first.event_id });
   assert.equal(third.ok, true);
   await assert.rejects(
     call("resolve-conflict", db, actors.dell,
-      { idempotency_key: "third-resolve", conflict_id: crossed.conflict.id, winner: "a" }),
+      { idempotency_key: "995abb4b-f252-5699-80e2-168642e4911e", conflict_id: crossed.conflict.id, winner: "a" }),
     (error) => error.payload?.error === "newer_change_exists" || error.error === "newer_change_exists",
   );
   assert.equal(db.deals.get(ids.deal).owner, "dell");
@@ -508,12 +509,12 @@ test("a retry under the same key replays; a fresh key over the same intent confl
   // server change cannot quietly remove it.
   const db = new FakeClient();
   const args = { deal: "Deal Alpha", field: "attention", value: true, base_event_id: null };
-  const first = await call("patch-deal-field", db, actors.joe, { idempotency_key: "flag-1", ...args });
+  const first = await call("patch-deal-field", db, actors.joe, { idempotency_key: "594759a5-067a-5a37-8e88-8bbbde666426", ...args });
   assert.equal(first.ok, true);
   assert.equal(db.events.length, 1);
 
   db.tick(1000);
-  const replay = await call("patch-deal-field", db, actors.joe, { idempotency_key: "flag-1", ...args });
+  const replay = await call("patch-deal-field", db, actors.joe, { idempotency_key: "594759a5-067a-5a37-8e88-8bbbde666426", ...args });
   assert.equal(replay.replayed, true);
   assert.deepEqual({ ...replay, replayed: undefined }, { ...first, replayed: undefined },
     "the recorded answer comes back, not a new one");
@@ -522,7 +523,7 @@ test("a retry under the same key replays; a fresh key over the same intent confl
 
   // The same intent, from the same stale base, under a NEW key is a different
   // operation — and the event the first one wrote is now an intervening change.
-  const fresh = await call("patch-deal-field", db, actors.joe, { idempotency_key: "flag-2", ...args });
+  const fresh = await call("patch-deal-field", db, actors.joe, { idempotency_key: "6ff71ee6-09c8-590c-8f59-36367d4509de", ...args });
   assert.equal(fresh.ok, false);
   assert.equal(db.conflicts.length, 1);
   assert.deepEqual([fresh.conflict.actor_a, fresh.conflict.actor_b], ["joe", "joe"]);
@@ -530,7 +531,7 @@ test("a retry under the same key replays; a fresh key over the same intent confl
 
   // And a key already spent on different arguments is refused rather than replayed.
   await assert.rejects(call("patch-deal-field", db, actors.joe,
-    { idempotency_key: "flag-1", ...args, value: false }), /key_reuse/);
+    { idempotency_key: "594759a5-067a-5a37-8e88-8bbbde666426", ...args, value: false }), /key_reuse/);
 });
 
 
@@ -589,7 +590,7 @@ test("a write that names no base still fails closed, which is why the board read
   db.addEvent({ field: "phase", new_value: { phase: "research" }, actor: actors.dell });
   db.tick(60000);
 
-  const blind = await call("patch-deal-field", db, actors.joe, { idempotency_key: "blind-1",
+  const blind = await call("patch-deal-field", db, actors.joe, { idempotency_key: "bda42a6a-5167-564b-b3f3-782cc4843ad7",
     deal: "Deal Alpha", field: "phase", value: "closing", base_event_id: null });
   assert.equal(blind.ok, false);
   assert.equal(db.deals.get(ids.deal).phase, "research", "the record is untouched");
@@ -599,7 +600,7 @@ test("a write that names no base still fails closed, which is why the board read
 test("parking is a reversible operating state and never changes phase or outcome", async () => {
   const db = new FakeClient();
   const parked = await call("patch-deal-field", db, actors.joe, {
-    idempotency_key: "park-alpha", deal: "Deal Alpha", field: "operating_state",
+    idempotency_key: "f56ca4cf-89b1-5272-8748-1b0216888012", deal: "Deal Alpha", field: "operating_state",
     value: { state: "parked", reason: "prospect_never_active", note: "Intake did not advance" },
     base_event_id: null,
   });
@@ -613,7 +614,7 @@ test("parking is a reversible operating state and never changes phase or outcome
     { state: "parked", reason: "prospect_never_active", note: "Intake did not advance" });
 
   const restored = await call("revert-deal-field", db, actors.dell, {
-    idempotency_key: "restore-alpha", event_id: db.events[0].id,
+    idempotency_key: "dbf0d6d1-f81d-54b3-9857-ebfb79c7324f", event_id: db.events[0].id,
   });
   assert.equal(restored.ok, true);
   assert.equal(db.deals.get(ids.deal).operating_state, "active");
@@ -621,7 +622,7 @@ test("parking is a reversible operating state and never changes phase or outcome
   assert.equal(db.deals.get(ids.deal).phase, "research");
 
   await assert.rejects(call("patch-deal-field", new FakeClient(), actors.joe, {
-    idempotency_key: "park-without-reason", deal: "Deal Alpha", field: "operating_state",
+    idempotency_key: "73c52480-d34a-5e15-a2b3-40a5c26b7960", deal: "Deal Alpha", field: "operating_state",
     value: { state: "parked" }, base_event_id: null,
   }), /parking_reason_required/);
 });
@@ -637,7 +638,7 @@ test("undo refuses foreign tenant, other personal scope, unknown scope and missi
     const event = db.addEvent({ field: "phase", old_value: { phase: "research" },
       new_value: { phase: "legal" }, ...eventScope });
     await assert.rejects(call("revert-deal-field", db, actors.joe,
-      { event_id: event.id, idempotency_key: "scoped-undo" }),
+      { event_id: event.id, idempotency_key: "8babe58f-fbe7-5149-92ae-8136dc8dc13e" }),
     error => error.payload?.error === "event_not_revertible");
     assert.equal(db.events.length, 1);
     assert.equal(db.toolCalls.size, 0);
@@ -646,14 +647,14 @@ test("undo refuses foreign tenant, other personal scope, unknown scope and missi
   const event = db.addEvent({ field: "phase", old_value: { phase: "research" },
     new_value: { phase: "legal" }, personal_scope: "dell-personal" });
   const result = await call("revert-deal-field", db, actors.dell,
-    { event_id: event.id, idempotency_key: "own-scoped-undo" });
+    { event_id: event.id, idempotency_key: "c032d769-7b6b-55e7-8cef-f0d4d36fbc4e" });
   assert.equal(result.reverted_event_id, event.id);
 });
 
 test("undo waits for a same-field writer and refuses its newer committed edit", async () => {
   const db = new FakeClient();
   const first = await call("patch-deal-field", db, actors.joe, {
-    idempotency_key: "undo-race-first", deal: "Deal Alpha", field: "phase",
+    idempotency_key: "4c4e696e-2828-58e7-aaad-41bac6a6c9b6", deal: "Deal Alpha", field: "phase",
     value: "negotiation", base_event_id: null,
   });
   assert.equal(first.ok, true);
@@ -684,12 +685,12 @@ test("undo waits for a same-field writer and refuses its newer committed edit", 
   };
 
   const patch = call("patch-deal-field", db, actors.dell, {
-    idempotency_key: "undo-race-second", deal: "Deal Alpha", field: "phase",
+    idempotency_key: "a4832f53-87dc-592a-8813-54aa68580df1", deal: "Deal Alpha", field: "phase",
     value: "legal", base_event_id: firstEvent,
   });
   await patchPaused;
   const undo = call("revert-deal-field", db, actors.joe, {
-    idempotency_key: "undo-race-undo", event_id: firstEvent,
+    idempotency_key: "9909dc40-8c9c-5fb7-9427-c38634234862", event_id: firstEvent,
   });
   await lockQueued;
   resumePatch();
@@ -703,7 +704,7 @@ test("undo waits for a same-field writer and refuses its newer committed edit", 
 test("undo follows a stale patch that records a conflict against its target event", async () => {
   const db = new FakeClient();
   await call("patch-deal-field", db, actors.joe, {
-    idempotency_key: "stale-race-first", deal: "Deal Alpha", field: "phase",
+    idempotency_key: "6907b416-0215-54d6-b576-2441b4042490", deal: "Deal Alpha", field: "phase",
     value: "negotiation", base_event_id: null,
   });
   const firstEvent = db.events[0].id;
@@ -731,12 +732,12 @@ test("undo follows a stale patch that records a conflict against its target even
   };
 
   const stalePatch = call("patch-deal-field", db, actors.dell, {
-    idempotency_key: "stale-race-patch", deal: "Deal Alpha", field: "phase",
+    idempotency_key: "aa0a38bb-807b-5e2b-b385-82d0252725c9", deal: "Deal Alpha", field: "phase",
     value: "legal", base_event_id: null,
   });
   await conflictPaused;
   const undo = call("revert-deal-field", db, actors.joe, {
-    idempotency_key: "stale-race-undo", event_id: firstEvent,
+    idempotency_key: "ca7acb12-6251-51be-8f51-85f4696832bc", event_id: firstEvent,
   });
   await lockQueued;
   resumeConflict();
@@ -750,10 +751,10 @@ test("undo follows a stale patch that records a conflict against its target even
 test("next-step supersede leaves old rows intact and deal thread is stably newest-first", async () => {
   const db = new FakeClient();
   const oldStep = await call("set-next-step", db, actors.joe,
-    { base_version: db.deals.get(ids.deal).version, idempotency_key: "step-1", deal: "Deal Alpha", text: "Call landlord", next_date: "2026-08-10" });
+    { base_version: db.deals.get(ids.deal).version, idempotency_key: "f25aaac9-4672-5f95-84bc-7beb208b8d73", deal: "Deal Alpha", text: "Call landlord", next_date: "2026-08-10" });
   db.tick(1000);
   const newStep = await call("set-next-step", db, actors.dell,
-    { base_version: db.deals.get(ids.deal).version, idempotency_key: "step-2", deal: "Deal Alpha", text: "Review counter", next_date: "2026-08-11" });
+    { base_version: db.deals.get(ids.deal).version, idempotency_key: "ca702a3f-aff4-5075-9181-e8011c13a824", deal: "Deal Alpha", text: "Review counter", next_date: "2026-08-11" });
   assert.equal(db.notes.length, 2);
   assert.equal(newStep.supersedes, oldStep.next_step_id);
   assert.deepEqual(db.notes.map(n => n.text), ["Call landlord", "Review counter"]);
@@ -775,17 +776,17 @@ test("next-step supersede leaves old rows intact and deal thread is stably newes
 test("undo of a date edit cannot erase a later date set with the next step", async () => {
   const db = new FakeClient();
   await call("patch-deal-field", db, actors.joe, {
-    idempotency_key: "date-before-step", deal: "Deal Alpha", field: "next_date",
+    idempotency_key: "7dd03a67-103c-515c-87bb-db9923274c21", deal: "Deal Alpha", field: "next_date",
     value: "2026-08-10", base_event_id: null,
   });
   const firstDateEvent = db.events[0].id;
   db.tick(1000);
   await call("set-next-step", db, actors.dell, {
-    base_version: db.deals.get(ids.deal).version, idempotency_key: "step-after-date", deal: "Deal Alpha",
+    base_version: db.deals.get(ids.deal).version, idempotency_key: "b656ba9b-7449-5704-900c-8ef561a7e39e", deal: "Deal Alpha",
     text: "Review counter", next_date: "2026-08-11",
   });
   await assert.rejects(call("revert-deal-field", db, actors.joe, {
-    idempotency_key: "undo-old-date", event_id: firstDateEvent,
+    idempotency_key: "98e8e4c0-2c5c-53ed-aaaf-2bcef67efb69", event_id: firstDateEvent,
   }), error => error.payload?.error === "newer_change_exists");
   assert.equal(db.deals.get(ids.deal).next_date, "2026-08-11");
   assert.equal(db.events.at(-1).field, "next_date");
@@ -806,16 +807,16 @@ test("date undo reads PostgreSQL dates as calendar text, including after set-nex
       return result;
     };
     if (verb === "patch-deal-field") {
-      await call(verb, db, actors.joe, { idempotency_key: "date-patch",
+      await call(verb, db, actors.joe, { idempotency_key: "f77be64a-39f9-57c9-be58-0ac7ad62ce62",
         deal: "Deal Alpha", field: "next_date", value: "2026-08-11", base_event_id: null });
     } else {
-      await call(verb, db, actors.joe, { base_version: db.deals.get(ids.deal).version, idempotency_key: "date-step",
+      await call(verb, db, actors.joe, { base_version: db.deals.get(ids.deal).version, idempotency_key: "e08c8487-823a-5ddd-b002-52132e19f33c",
         deal: "Deal Alpha", text: "Call landlord", next_date: "2026-08-11" });
     }
     const event = db.events.find(row => row.field === "next_date");
     assert.deepEqual(event.old_value, { next_date: "2026-08-10" });
     const result = await call("revert-deal-field", db, actors.joe,
-      { idempotency_key: `undo-${verb}`, event_id: event.id });
+      { idempotency_key: derivedIdempotencyKey("test", `undo-${verb}`), event_id: event.id });
     assert.equal(result.ok, true);
     assert.equal(db.deals.get(ids.deal).next_date, "2026-08-10");
   }
@@ -824,17 +825,17 @@ test("date undo reads PostgreSQL dates as calendar text, including after set-nex
 test("undo of an owner edit cannot erase a later set-lead handoff", async () => {
   const db = new FakeClient();
   await call("patch-deal-field", db, actors.joe, {
-    idempotency_key: "owner-before-lead", deal: "Deal Alpha", field: "owner",
+    idempotency_key: "5d6f3e89-8d32-535f-bce3-44cfb49baf69", deal: "Deal Alpha", field: "owner",
     value: "dell", base_event_id: null,
   });
   const firstOwnerEvent = db.events[0].id;
   db.tick(1000);
   await call("set-lead", db, actors.dell, {
-    idempotency_key: "lead-after-owner", deal: "Deal Alpha",
+    idempotency_key: "4ea21f26-ed33-58b6-8c19-69843ea22148", deal: "Deal Alpha",
     new_lead: "joe", base_version: db.deals.get(ids.deal).version,
   });
   await assert.rejects(call("revert-deal-field", db, actors.joe, {
-    idempotency_key: "undo-old-owner", event_id: firstOwnerEvent,
+    idempotency_key: "b95976a0-b7e9-5053-83bb-3ccdcfa53f0b", event_id: firstOwnerEvent,
   }), error => error.payload?.error === "newer_change_exists");
   assert.equal(db.deals.get(ids.deal).owner, "joe");
   assert.equal(db.events.at(-1).field, "owner");
@@ -866,7 +867,7 @@ test("reconciliation reads provide a guarded Salesforce key and verify a closed 
   assert.equal(JSON.stringify(before).includes("sf_close_date_placeholder"), false);
 
   const updated = await call("update-deal", db, actors.joe, {
-    idempotency_key: "close-from-sf", deal: "Deal Alpha", base_version: before.base_version,
+    idempotency_key: "2b679d87-cbe3-5826-9b46-4d11f68c1052", deal: "Deal Alpha", base_version: before.base_version,
     fields: { phase: "closed", outcome: "won", closed_on: "2026-07-30" },
   });
   assert.deepEqual(updated, { ok: true, updated: ["phase", "outcome", "closed_on"], next_step_required: true,
@@ -878,7 +879,7 @@ test("reconciliation reads provide a guarded Salesforce key and verify a closed 
 
   await assert.rejects(
     call("update-deal", db, actors.dell, {
-      idempotency_key: "stale-close", deal: "Deal Alpha", base_version: before.base_version,
+      idempotency_key: "3f07a277-ac1b-599d-9743-ba8ad725d40c", deal: "Deal Alpha", base_version: before.base_version,
       fields: { outcome: "lost" },
     }),
     error => error?.payload?.error === "version_conflict",
@@ -893,7 +894,7 @@ test("update-deal auto-rebases a disjoint-field version race and still surfaces 
   const db = new FakeClient();
 
   const first = await call("update-deal", db, actors.joe, {
-    idempotency_key: "rebase-city", deal: "Deal Alpha", base_version: 1,
+    idempotency_key: "f2becc20-0526-508a-b567-2ef4339ac15e", deal: "Deal Alpha", base_version: 1,
     fields: { city: "Daphne" },
   });
   assert.deepEqual(first, { ok: true, updated: ["city"] });
@@ -903,7 +904,7 @@ test("update-deal auto-rebases a disjoint-field version race and still surfaces 
   // patches a COMPLETELY DIFFERENT field. This is the trivial race: nothing
   // Dell wrote conflicts with what Joe wrote.
   const rebased = await call("update-deal", db, actors.dell, {
-    idempotency_key: "rebase-notes", deal: "Deal Alpha", base_version: 1,
+    idempotency_key: "d5d61e49-e256-522b-be18-b8de3c09ea7c", deal: "Deal Alpha", base_version: 1,
     fields: { notes_path: "notes/deal-alpha.md" },
   });
   assert.equal(rebased.ok, true);
@@ -924,7 +925,7 @@ test("update-deal auto-rebases a disjoint-field version race and still surfaces 
   // cover an actual same-field collision.
   await assert.rejects(
     call("update-deal", db, actors.joe, {
-      idempotency_key: "same-field-conflict", deal: "Deal Alpha", base_version: 1,
+      idempotency_key: "a3057306-5a88-5acb-8321-2a602d4ccf78", deal: "Deal Alpha", base_version: 1,
       fields: { city: "Mobile" },
     }),
     error => error?.payload?.error === "version_conflict",
@@ -970,7 +971,7 @@ test("patch-deal-field carries the partner's quote and reason onto the event", a
   const quote = "Move Alpha to negotiation — they signed the LOI this morning.";
   const reason = "Partner directed the phase change on the 8:40 call.";
   const patched = await call("patch-deal-field", db, actors.joe, {
-    idempotency_key: "quote-1", deal: "Deal Alpha", field: "phase",
+    idempotency_key: "bdbf052c-7c92-5b31-bdfb-5b30efd84817", deal: "Deal Alpha", field: "phase",
     value: "negotiation", base_event_id: null,
     change_reason: reason, human_quote: quote,
   });
@@ -990,7 +991,7 @@ test("patch-deal-field without a quote stays an automation job", async () => {
   const db = new FakeClient();
   const reason = "Swept forward by the nightly stage reconciliation.";
   const reasonOnly = await call("patch-deal-field", db, actors.joe, {
-    idempotency_key: "quote-2", deal: "Deal Alpha", field: "phase",
+    idempotency_key: "606438ed-c9b3-5d72-befa-b8b5dd485eb8", deal: "Deal Alpha", field: "phase",
     value: "negotiation", base_event_id: null, change_reason: reason,
   });
   assert.equal(reasonOnly.ok, true);
@@ -999,7 +1000,7 @@ test("patch-deal-field without a quote stays an automation job", async () => {
   assert.equal(db.events[0].agent_rationale, reason);
 
   const bare = await call("patch-deal-field", db, actors.joe, {
-    idempotency_key: "quote-3", deal: "Deal Alpha", field: "attention",
+    idempotency_key: "1076f44b-93f4-5cad-a02e-09f266353431", deal: "Deal Alpha", field: "attention",
     value: true, base_event_id: null,
   });
   assert.equal(bare.ok, true);
@@ -1014,21 +1015,21 @@ test('feed eligibility matches writer-produced events for every reversible field
   for (const [field, value] of Object.entries(values)) {
     const db = new FakeClient();
     await call('patch-deal-field', db, actors.joe, {
-      idempotency_key: `feed-${field}`, deal: 'Deal Alpha', field, value, base_event_id: null,
+      idempotency_key: derivedIdempotencyKey("test", `feed-${field}`), deal: 'Deal Alpha', field, value, base_event_id: null,
     });
     const e = db.events[0];
     const feed = docActivityEntry({ ...e, has_old_value: true, is_latest: true });
     assert.equal(feed.undo.state, 'available', field);
     assert.deepEqual(feed.before, e.old_value[field]);
     assert.deepEqual(feed.after, e.new_value[field]);
-    await call('revert-deal-field', db, actors.joe, { event_id: e.id, idempotency_key: `undo-feed-${field}` });
+    await call('revert-deal-field', db, actors.joe, { event_id: e.id, idempotency_key: derivedIdempotencyKey("test", `undo-feed-${field}`) });
   }
   for (const [field, value] of Object.entries({ attention: 'true', owner: 'other', phase: '',
     next_date: 'tomorrow', operating_state: { state: 'parked', reason: 'unknown' } })) {
     const db = new FakeClient();
     const e = db.addEvent({ field, old_value: { [field]: value }, new_value: { [field]: value } });
     assert.equal(docActivityEntry({ ...e, has_old_value: true, is_latest: true }).undo.state, 'unavailable', field);
-    await assert.rejects(call('revert-deal-field', db, actors.joe, { event_id: e.id, idempotency_key: `bad-${field}` }));
+    await assert.rejects(call('revert-deal-field', db, actors.joe, { event_id: e.id, idempotency_key: derivedIdempotencyKey("test", `bad-${field}`) }));
   }
 });
 
@@ -1037,11 +1038,11 @@ test('direct phase control retains authenticated browser provenance without comp
   c.query = async (sql,params) => { if(sql.trim().startsWith('insert into event')) inserts.push(params); return query(sql,params); };
   const result = await TOOLS['patch-deal-field'].handler(c, {...actors.joe,via:'dealroom-cookie',client_id:'dealroom-pwa'}, {
     deal: ids.deal, field: 'phase', value: 'legal', base_event_id: null,
-    idempotency_key: 'demo-manual-phase',
+    idempotency_key: 'd513cf8e-3606-528a-8afb-bf2ecaa2cfb4',
   });
   assert.equal(result.ok, true);
   assert.equal(inserts[0][11], 'dealroom-cookie'); assert.equal(inserts[0][12], 'dealroom-pwa');
-  const event = c.events.find(e => e.idempotency_key === 'demo-manual-phase');
+  const event = c.events.find(e => e.idempotency_key === 'd513cf8e-3606-528a-8afb-bf2ecaa2cfb4');
   assert.equal(event.human_quote, null);
 });
 

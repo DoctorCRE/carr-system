@@ -159,7 +159,7 @@ test("close-loop: SAME-SESSION CREATE-THEN-CLOSE now succeeds (defect 1) even wh
   // own creation as the "intervening event".
   const db = new CloseLoopFake({ version: 1, baseVersionSentAsString: true });
   const result = await TOOLS["close-loop"].handler(db, joe, {
-    idempotency_key: "close-350-self-test",
+    idempotency_key: "3c805c71-93dd-5822-bb43-2f98f9b69f53",
     loop_id: ids.loop,
     base_version: "1", // string on purpose — reproduces the reported defect
     outcome: "Verified — this is what the fix makes possible.",
@@ -174,7 +174,7 @@ test("close-loop: SAME-SESSION CREATE-THEN-CLOSE now succeeds (defect 1) even wh
 test("close-loop: also succeeds when base_version arrives as a proper number (the ordinary case, unregressed)", async () => {
   const db = new CloseLoopFake({ version: 1 });
   const result = await TOOLS["close-loop"].handler(db, joe, {
-    idempotency_key: "close-350-ordinary",
+    idempotency_key: "9174084f-de1a-54ab-832a-c33abc9f51a5",
     loop_id: ids.loop,
     base_version: 1,
     outcome: "Ordinary close, numeric base_version.",
@@ -192,7 +192,7 @@ test("close-loop: a REAL version conflict still refuses, and never blames the lo
 
   await assert.rejects(
     () => TOOLS["close-loop"].handler(db, joe, {
-      idempotency_key: "close-350-real-conflict",
+      idempotency_key: "cccb9ac8-dd63-57a7-b73b-9527da045ad6",
       loop_id: ids.loop,
       base_version: 1,
       outcome: "Should not land.",
@@ -215,11 +215,11 @@ test("close-loop: a REAL version conflict still refuses, and never blames the lo
 test("close-loop: a bookkeeping close must name an open successor and say so first", async () => {
   const db = new CloseLoopFake({ version: 1 });
   await assert.rejects(() => TOOLS["close-loop"].handler(db, joe, {
-    idempotency_key: "close-bookkeeping-missing", loop_id: ids.loop, base_version: 1,
+    idempotency_key: "bdefeecc-9b77-5ec0-a448-0af94b572327", loop_id: ids.loop, base_version: 1,
     resolution: "dropped", outcome: "Superseded by the replacement loop.",
   }), e => e instanceof ToolError && e.payload.error === "successor_loop_required");
   const result = await TOOLS["close-loop"].handler(db, joe, {
-    idempotency_key: "close-bookkeeping-valid", loop_id: ids.loop, base_version: 1,
+    idempotency_key: "055325ca-9af3-5afe-9272-77659e749e66", loop_id: ids.loop, base_version: 1,
     resolution: "dropped", outcome: "Superseded, not abandoned: #351 carries the work forward.", successor_loop: ids.successor,
   });
   assert.deepEqual(result.successor_loop, { id: ids.successor, number: "351" });
@@ -244,7 +244,7 @@ test("add-loop: an illegal marker is refused with a clean, named error listing t
   const db = new AddLoopValidationFake();
   await assert.rejects(
     () => TOOLS["add-loop"].handler(db, joe, {
-      idempotency_key: "add-loop-wrench-self-test",
+      idempotency_key: "fc91043b-558b-5fdc-b824-f750be6d278f",
       kind: "open_loop", owner: "joe", body: "verb-fix self-test, close immediately",
       marker: "wrench",
       blocker: "capability", blocker_detail: "reproducing the marker defect on purpose",
@@ -302,7 +302,7 @@ class AddLoopHappyFake {
 test("add-loop: a legal marker and a legal domain reach a genuine ok:true (defect 2a does not over-refuse)", async () => {
   const db = new AddLoopHappyFake();
   const result = await TOOLS["add-loop"].handler(db, joe, {
-    idempotency_key: "add-loop-happy-path",
+    idempotency_key: "10091921-8513-5c21-86b1-5dfaf76dc6cb",
     kind: "open_loop", owner: "joe", body: "verb-fix self-test, close immediately",
     marker: "bell", domain: "system",
     blocker: "capability", blocker_detail: "coverage only, not a real block",

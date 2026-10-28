@@ -71,7 +71,7 @@ function basePlan({ org = { id: OLD_ORG, name: "Harbr Point Legal" }, others = [
 
 function call(fake, args) {
   return TOOLS["correct-party-identity"].handler(fake, joe, {
-    idempotency_key: "cpi-1", party: "P-0301", base_version: 4,
+    idempotency_key: "d3ebb8e6-aa05-5073-944f-c97bf24069a5", party: "P-0301", base_version: 4,
     source: "record-finding name observed 2026-10-08 https://example-it.test/team",
     evidence: { confirmed: true, confidence: "high", corroborating_field: "phone", corroborating_value: "850-555-0100" },
     ...args,
@@ -483,12 +483,12 @@ test("update-party-contact still resolves through the shared resolver and refuse
   plan["select phone from party where id=$1"] = [{ phone: null }];
   const fake = new Fake(plan);
   const out = await TOOLS["update-party-contact"].handler(fake, joe, {
-    idempotency_key: "upc-1", party: "P-0301", base_version: 4,
+    idempotency_key: "50208d82-654b-5c02-ac1c-ce94841fafd5", party: "P-0301", base_version: 4,
     fields: { phone: "850-555-0100" }, source: "practice website" });
   assert.equal(out.party_id, TARGET);
   assert.deepEqual(out.updated, ["phone"]);
   await assert.rejects(TOOLS["update-party-contact"].handler(new Fake(basePlan()), joe, {
-    idempotency_key: "upc-2", party: "P-0301", base_version: 4,
+    idempotency_key: "907f70a9-ab7f-5bb4-a60c-c6e50065ddc5", party: "P-0301", base_version: 4,
     fields: { name: "Alex Morgan" }, source: "practice website" }),
   e => e.payload.error === "no_updatable_fields" && /correct-party-identity/.test(e.payload.hint));
 });

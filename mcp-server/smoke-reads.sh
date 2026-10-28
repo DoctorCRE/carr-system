@@ -372,7 +372,7 @@ if [ "$PROBE_MODE" -eq 1 ]; then
 else
 _w_ok=1; _w_why=""
 for i in $(seq 1 "$REPS"); do
-  call log-activity '{"idempotency_key":"smoke-write-probe-permanent","ref":"V-CPA-006","kind":"note","summary":"smoke write probe — replayed, never duplicated"}'
+  call log-activity '{"idempotency_key":"a1ecf18b-1c33-53f6-87ae-53c18f0087b2","ref":"V-CPA-006","kind":"note","summary":"smoke write probe — replayed, never duplicated"}'
   if echo "$RESULT" | grep -q '"error"'; then _w_ok=0; _w_why="transport/protocol error"; break; fi
   if echo "$RESULT" | grep -q '"isError":true'; then _w_ok=0; _w_why="verb returned isError (resolveSubject under carr_writer?)"; break; fi
   if ! echo "$RESULT" | grep -q '\\"ok\\":true'; then _w_ok=0; _w_why="no ok:true in the envelope response"; break; fi
@@ -424,9 +424,9 @@ elif [ -z "${SMOKE_BALL_PROBE_REF:-}" ]; then
 else
 _c_ok=1; _c_why=""
 for i in $(seq 1 "$REPS"); do
-  call set-next-action '{"idempotency_key":"smoke-ball-probe-permanent","ref":"'"$SMOKE_BALL_PROBE_REF"'","description":"smoke probe fixture — permanent, replayed, never a real ball"}'
+  call set-next-action '{"idempotency_key":"791b6db5-bcd3-5344-bf4a-fc3c7f6e5e8d","ref":"'"$SMOKE_BALL_PROBE_REF"'","description":"smoke probe fixture — permanent, replayed, never a real ball"}'
   if ! echo "$RESULT" | grep -q '\\"ok\\":true'; then _c_ok=0; _c_why="the probe fixture ball could not be set"; break; fi
-  call complete-action '{"idempotency_key":"smoke-complete-probe-permanent","ref":"'"$SMOKE_BALL_PROBE_REF"'","outcome":"smoke probe — completed once, replayed for ever after"}'
+  call complete-action '{"idempotency_key":"331151a9-cd8f-5332-81ee-9dd9d6ccd04e","ref":"'"$SMOKE_BALL_PROBE_REF"'","outcome":"smoke probe — completed once, replayed for ever after"}'
   if echo "$RESULT" | grep -q '"error"'; then _c_ok=0; _c_why="transport/protocol error"; break; fi
   if echo "$RESULT" | grep -q '"isError":true'; then _c_ok=0; _c_why="verb returned isError (deployed? resolveSubject under carr_writer?)"; break; fi
   if ! echo "$RESULT" | grep -q '\\"ok\\":true'; then _c_ok=0; _c_why="no ok:true in the envelope response"; break; fi
@@ -523,7 +523,7 @@ if [ "$PROBE_MODE" -eq 1 ]; then
 else
 _a_ok=1; _a_why=""
 for i in $(seq 1 "$REPS"); do
-  call log-activity '{"idempotency_key":"smoke-analysis-probe-permanent","ref":"V-CPA-006","kind":"analysis","summary":"smoke analysis probe — replayed, never duplicated","detail":"ORDER 36 probe: proves the analysis slug clears both the Worker enum and the activity_kind ref table."}'
+  call log-activity '{"idempotency_key":"dfe68eda-6506-5222-9222-a8743112dcb5","ref":"V-CPA-006","kind":"analysis","summary":"smoke analysis probe — replayed, never duplicated","detail":"ORDER 36 probe: proves the analysis slug clears both the Worker enum and the activity_kind ref table."}'
   if echo "$RESULT" | grep -q '"error"'; then _a_ok=0; _a_why="transport/protocol error"; break; fi
   if echo "$RESULT" | grep -q '"isError":true'; then
     _a_ok=0; _a_why="verb returned isError — Worker not deployed with the analysis slug, or 0028 not applied (FK on activity_kind)"; break; fi
@@ -1063,7 +1063,7 @@ if [ "$CAP_MKT" -eq 1 ]; then
   # ── the migration gate. Every marketing verb calls require0066 first, so this
   # single call tells us whether the schema half has landed.
   CAP_0066=1
-  call measure-placement '{"idempotency_key":"smoke-0066-gate","placement":"smoke-nonexistent","source":"blotato_api"}'
+  call measure-placement '{"idempotency_key":"bb2b8a11-39ad-5e30-a1a3-e9f9441300f5","placement":"smoke-nonexistent","source":"blotato_api"}'
   if echo "$RESULT" | grep -q 'migration_not_applied'; then
     CAP_0066=0
     echo
@@ -1081,7 +1081,7 @@ if [ "$CAP_MKT" -eq 1 ]; then
     # forbidden pattern is what proves the ordering.
     refuses "measure-placement refuses to forge the scheduled pull's provenance" \
             measure-placement \
-            '{"idempotency_key":"smoke-0066-src","placement":"smoke-nonexistent","source":"blotato_api"}' \
+            '{"idempotency_key":"6921e5e7-03fb-538e-b573-b36b4336c649","placement":"smoke-nonexistent","source":"blotato_api"}' \
             'reserved_source' 'placement_not_found'
 
     # THE CENTRAL RAIL. An empty measurement call must not be quietly accepted:
@@ -1089,28 +1089,28 @@ if [ "$CAP_MKT" -eq 1 ]; then
     # has measured, which is the failure this verb was built to prevent.
     refuses "measure-placement refuses an EMPTY measurement (silence is not a result)" \
             measure-placement \
-            '{"idempotency_key":"smoke-0066-empty","placement":"smoke-nonexistent","source":"platform_native"}' \
+            '{"idempotency_key":"611d9ef7-13e1-5b01-a7af-1630b81ca6a9","placement":"smoke-nonexistent","source":"platform_native"}' \
             'nothing_to_record'
 
     # …and its opposite: "no data" and "here is the data" are two different acts
     # and may not be sent as one.
     refuses "measure-placement refuses metrics and unavailable in the same act" \
             measure-placement \
-            '{"idempotency_key":"smoke-0066-both","placement":"smoke-nonexistent","source":"platform_native","unavailable":true,"metrics":{"views_count":5}}' \
+            '{"idempotency_key":"c70ec784-2f3c-563a-8c9a-0606f320f281","placement":"smoke-nonexistent","source":"platform_native","unavailable":true,"metrics":{"views_count":5}}' \
             'ambiguous_measurement'
 
     # An unavailability with no reason is indistinguishable from apathy six months
     # later, and the three possible reasons lead to three different next moves.
     refuses "measure-placement refuses 'no data' with no reason" \
             measure-placement \
-            '{"idempotency_key":"smoke-0066-noreason","placement":"smoke-nonexistent","source":"platform_native","unavailable":true}' \
+            '{"idempotency_key":"a04eb216-5a61-5c2e-904e-92c3142f0ed3","placement":"smoke-nonexistent","source":"platform_native","unavailable":true}' \
             'reason_required'
 
     # A criterion that restates the objective is how a campaign gets declared a
     # success on vibes. Crude check, deliberately: it catches the copy-paste.
     refuses "open-campaign refuses a success criterion that just restates the goal" \
             open-campaign \
-            '{"idempotency_key":"smoke-0066-crit","name":"smoke probe never opened","goal":"grow awareness on X","success_criterion":"Grow awareness on X","starts_on":"2026-08-01","channels":["twitter"]}' \
+            '{"idempotency_key":"fe66c2e6-8762-5e0a-8283-70a2aa8d4cc3","name":"smoke probe never opened","goal":"grow awareness on X","success_criterion":"Grow awareness on X","starts_on":"2026-08-01","channels":["twitter"]}' \
             'criterion_restates_goal'
 
     # A channel nobody registered is a channel no rollup will ever see, so the
@@ -1119,13 +1119,13 @@ if [ "$CAP_MKT" -eq 1 ]; then
     # just gets guessed at.
     refuses "open-campaign refuses an unregistered channel and names the real ones" \
             open-campaign \
-            '{"idempotency_key":"smoke-0066-chan","name":"smoke probe never opened","goal":"reach practice owners in Pensacola","success_criterion":"three replies from practice owners by 2026-09-30","starts_on":"2026-08-01","channels":["tiktok"]}' \
+            '{"idempotency_key":"f45ecdc1-93cd-56e6-acff-2ed38795ba76","name":"smoke probe never opened","goal":"reach practice owners in Pensacola","success_criterion":"three replies from practice owners by 2026-09-30","starts_on":"2026-08-01","channels":["tiktok"]}' \
             'unknown_channel'
     # The pair: the SAME refusal must carry the live platform list, or it is a
     # dead end rather than a correction.
     refuses "…and that refusal carries the registered platform list" \
             open-campaign \
-            '{"idempotency_key":"smoke-0066-chan2","name":"smoke probe never opened","goal":"reach practice owners in Pensacola","success_criterion":"three replies from practice owners by 2026-09-30","starts_on":"2026-08-01","channels":["tiktok"]}' \
+            '{"idempotency_key":"e24a9ba4-aa1d-5851-8090-a0557fa9dc0a","name":"smoke probe never opened","goal":"reach practice owners in Pensacola","success_criterion":"three replies from practice owners by 2026-09-30","starts_on":"2026-08-01","channels":["tiktok"]}' \
             'instagram'
 
     # ATTACHING TO A CAMPAIGN THAT WAS NEVER STATED IS THE WHOLE DEFECT. 89 pieces
@@ -1133,13 +1133,13 @@ if [ "$CAP_MKT" -eq 1 ]; then
     # invented campaign, it is to make somebody write the objective down first.
     refuses "attach-to-campaign refuses a campaign nobody opened" \
             attach-to-campaign \
-            '{"idempotency_key":"smoke-0066-att","campaign":"Qwertzuiop Vraxmandel Campaign","items":["https://example.invalid/p/1"]}' \
+            '{"idempotency_key":"3c36e7b3-7ede-5335-95bd-08ae1a04ee49","campaign":"Qwertzuiop Vraxmandel Campaign","items":["https://example.invalid/p/1"]}' \
             'campaign_not_found'
 
     # And the absence claim must still be able to fire on the scoring side.
     refuses "score-campaign refuses to score a campaign nobody opened" \
             score-campaign \
-            '{"idempotency_key":"smoke-0066-score","campaign":"Qwertzuiop Vraxmandel Campaign","base_version":1,"verdict":"worked","evidence":"none — smoke probe"}' \
+            '{"idempotency_key":"aa475bef-319d-529c-8187-16af146dab91","campaign":"Qwertzuiop Vraxmandel Campaign","base_version":1,"verdict":"worked","evidence":"none — smoke probe"}' \
             'campaign_not_found'
   fi
 fi

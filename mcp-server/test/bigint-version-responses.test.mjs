@@ -2,6 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError } from "../src/tools.js";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const actor = { id: "10000000-0000-4000-8000-000000000002", slug: "joe", human: true };
 const id = "20000000-0000-4000-8000-000000000001";
@@ -50,7 +51,7 @@ class Database {
 }
 
 for (const [verb, input, path, family] of cases) {
-  const args = { ...input, ...(TOOLS[verb].write ? { idempotency_key: `safe-version-${verb}` } : {}) };
+  const args = { ...input, ...(TOOLS[verb].write ? { idempotency_key: derivedIdempotencyKey("test", `safe-version-${verb}`) } : {}) };
   const run = db => TOOLS[verb].handler(db, actor, args);
   test(`${verb} returns safe numeric versions and preserves opaque IDs`, async () => {
     for (const version of ["2", "9007199254740991"]) {

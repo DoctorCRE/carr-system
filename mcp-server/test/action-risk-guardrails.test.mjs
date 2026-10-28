@@ -11,7 +11,7 @@ const JOE = { id: "10000000-0000-0000-0000-000000000002", slug: "joe", display: 
 const AGENT = { id: "10000000-0000-0000-0000-000000000099", slug: "codex", display: "Codex", human: false, via: "test" };
 
 function payload(extra = {}) {
-  return { idempotency_key: "set-lead-guardrail", deal: "Synthetic Deal", new_lead: "dell", base_version: 1, ...extra };
+  return { idempotency_key: "2c907ffe-1df2-5965-b01d-f4c70e78b752", deal: "Synthetic Deal", new_lead: "dell", base_version: 1, ...extra };
 }
 
 async function rejected(fn) {
@@ -164,7 +164,7 @@ test("top-level reserved authority fields are rejected before a direct handler o
 test("the same top-level gate covers composite executeRegisteredTool dispatch", async () => {
   const db = { query: async () => { throw new Error("database must not be reached"); } };
   const out = await rejected(() => executeRegisteredTool(db, JOE, "set-next-step", {
-    idempotency_key: "composite-guard", text: "synthetic", profile: CANARY,
+    idempotency_key: "fbc1ea11-e7af-53ba-9042-807188b8a3ac", text: "synthetic", profile: CANARY,
   }));
   assert.deepEqual(out, { error: "caller_authority_field_forbidden" });
   assert.ok(!JSON.stringify(out).includes(CANARY));
@@ -214,10 +214,10 @@ test("set-lead is a human-only optimistic-concurrency mutation", async () => {
 
 test("two concurrent same-version set-lead transactions lock, then emit one event and one version_conflict", async () => {
   const shared = new SharedSetLeadTransaction();
-  const first = executeRegisteredTool(shared.client("first"), JOE, "set-lead", payload({ idempotency_key: "race-one" }));
+  const first = executeRegisteredTool(shared.client("first"), JOE, "set-lead", payload({ idempotency_key: "7b71f9c0-5e73-5783-b627-4520aeef8ad3" }));
   await shared.firstAtParticipant.promise;
 
-  const second = executeRegisteredTool(shared.client("second"), JOE, "set-lead", payload({ idempotency_key: "race-two" }));
+  const second = executeRegisteredTool(shared.client("second"), JOE, "set-lead", payload({ idempotency_key: "dc836be4-45c5-5f49-87bf-ce36ab01b4ad" }));
   await shared.secondWaiting.promise;
   assert.equal(shared.participantWrites.second, 0, "the waiting transaction must not mutate participants");
 
@@ -236,11 +236,11 @@ test("two concurrent same-version set-lead transactions lock, then emit one even
 
 test("a sequential stale proposal remains refused after the lock race", async () => {
   const db = new SetLeadFake(1);
-  const first = await executeRegisteredTool(db, JOE, "set-lead", payload({ idempotency_key: "sequential-one" }));
+  const first = await executeRegisteredTool(db, JOE, "set-lead", payload({ idempotency_key: "bd070faa-dad9-5aa4-9268-58114f305614" }));
   assert.deepEqual(first, { ok: true, new_lead: "dell" });
   assert.deepEqual([db.lastEvent.field, db.lastEvent.old.owner,
     db.lastEvent.next.owner, db.lastEvent.recordedAfterLock],
   ["owner", "joe", "dell", true]);
-  const stale = await rejected(() => executeRegisteredTool(db, JOE, "set-lead", payload({ idempotency_key: "sequential-two" })));
+  const stale = await rejected(() => executeRegisteredTool(db, JOE, "set-lead", payload({ idempotency_key: "8770dbb4-0084-5898-b7c7-f2456b91fd5a" })));
   assert.equal(stale.error, "version_conflict");
 });

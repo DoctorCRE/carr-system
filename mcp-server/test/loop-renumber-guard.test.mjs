@@ -73,7 +73,7 @@ async function errorOf(promise) {
 
 test("identifying a row BY NUMBER without changing it needs no renumber reason", async () => {
   const err = await errorOf(call({
-    idempotency_key: "k1", number: "395", base_version: 1,
+    idempotency_key: "d108ae34-7f7f-547a-b5fc-6f60c16922bc", number: "395", base_version: 1,
     blocker: "other_lane", blocker_detail: "the branch it waited on has merged",
   }));
   const code = err && (err.error ?? err.message);
@@ -83,7 +83,7 @@ test("identifying a row BY NUMBER without changing it needs no renumber reason",
 
 test("a leading # on the same number is still not a renumber", async () => {
   const err = await errorOf(call({
-    idempotency_key: "k2", number: "#395", base_version: 1,
+    idempotency_key: "13f577df-9c3d-5538-a9de-338e4881896f", number: "#395", base_version: 1,
     blocker_detail: "sharpened detail only",
   }));
   const code = err && (err.error ?? err.message);
@@ -92,7 +92,7 @@ test("a leading # on the same number is still not a renumber", async () => {
 
 test("genuinely CHANGING the number still demands its reason", async () => {
   const err = await errorOf(call({
-    idempotency_key: "k3", loop_id: ROW.id, base_version: 1, number: "812",
+    idempotency_key: "2482373f-62f0-5917-b518-f69e0666140f", loop_id: ROW.id, base_version: 1, number: "812",
   }));
   assert.equal(err && err.error, "renumber_reason_required",
     "rule 7105955b still binds when the number actually moves");
@@ -102,7 +102,7 @@ test("genuinely CHANGING the number still demands its reason", async () => {
 
 test("a changed number WITH its reason is accepted", async () => {
   const err = await errorOf(call({
-    idempotency_key: "k4", loop_id: ROW.id, base_version: 1, number: "812",
+    idempotency_key: "ae527173-c6a7-5aa1-b762-1e5601c55720", loop_id: ROW.id, base_version: 1, number: "812",
     renumber_reason: "collided with another open row of this kind",
   }));
   const code = err && (err.error ?? err.message);
@@ -111,7 +111,7 @@ test("a changed number WITH its reason is accepted", async () => {
 
 test("a non-numeric number is still refused before anything else", async () => {
   const err = await errorOf(call({
-    idempotency_key: "k5", loop_id: ROW.id, base_version: 1, number: "L-209",
+    idempotency_key: "911ee431-033e-52e9-803a-268152865359", loop_id: ROW.id, base_version: 1, number: "L-209",
   }));
   assert.equal(err && err.error, "bad_number",
     "the renders sort on this column, so a free-form ref must never reach it");

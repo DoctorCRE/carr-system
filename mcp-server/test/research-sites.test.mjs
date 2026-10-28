@@ -74,7 +74,7 @@ test("a machine identity adds a site: one insert, one audit event, the actor rec
       added_at: "2026-10-07T12:00:00Z" }],
   });
   const out = await TOOLS["add-research-site"].handler(fake, joeLocal, {
-    idempotency_key: "site-add-1", host: "Data.Example.org", topics: ["Demographics"],
+    idempotency_key: "00ffbe62-30ae-5c04-8773-e2257db9ce7e", host: "Data.Example.org", topics: ["Demographics"],
     url: "https://data.example.org/tables", note: "county tables",
   });
   assert.equal(out.ok, true);
@@ -88,7 +88,7 @@ test("a machine identity adds a site: one insert, one audit event, the actor rec
 test("a start url on a different host is refused before SQL", async () => {
   const fake = new Fake();
   await assert.rejects(() => TOOLS["add-research-site"].handler(fake, joe, {
-    idempotency_key: "site-add-url", host: "www.cbre.com", topics: ["cre-market"], url: "https://evil.example/x",
+    idempotency_key: "4f683628-51b5-5cae-afce-24fd05d021f8", host: "www.cbre.com", topics: ["cre-market"], url: "https://evil.example/x",
   }), e => e.payload.error === "research_site_url_invalid");
   assert.equal(fake.calls.length, 0);
 });
@@ -97,7 +97,7 @@ test("adding a host already in the index returns the row without writing", async
   const fake = new Fake({ "from research_site where host=$1 and removed_at is null":
     [{ id: "30000000-0000-0000-0000-000000000001", host: "www.cbre.com", topics: ["cre-market"] }] });
   const out = await TOOLS["add-research-site"].handler(fake, joe, {
-    idempotency_key: "site-add-dup", host: "www.cbre.com", topics: ["cre-market"] });
+    idempotency_key: "a1db7538-b2c4-5402-af26-a721421b8555", host: "www.cbre.com", topics: ["cre-market"] });
   assert.equal(out.already_listed, true);
   assert.ok(!fake.calls.some(([sql]) => sql.includes("insert into event")), "a no-op add wrote an audit event");
 });
@@ -120,7 +120,7 @@ test("a credential-bearing start url is refused before SQL and never echoed", as
   for (const url of CREDENTIAL_URLS) {
     const fake = new Fake();
     const error = await TOOLS["add-research-site"].handler(fake, joeLocal, {
-      idempotency_key: "site-add-cred", host: "data.example.org", topics: ["demographics"], url,
+      idempotency_key: "3132958f-4640-5e8d-872e-7f3f6b77f907", host: "data.example.org", topics: ["demographics"], url,
     }).then(() => null, e => e);
     assert.equal(error?.payload?.error, "research_site_url_credential", url);
     assert.equal(fake.calls.length, 0, `${url} reached SQL`);
@@ -128,7 +128,7 @@ test("a credential-bearing start url is refused before SQL and never echoed", as
   }
   // The same-host check refuses without echoing the url either.
   const other = await TOOLS["add-research-site"].handler(new Fake(), joe, {
-    idempotency_key: "site-add-other", host: "www.cbre.com", topics: ["cre-market"],
+    idempotency_key: "774b0a78-279f-5086-889f-50b2d27605c9", host: "www.cbre.com", topics: ["cre-market"],
     url: "https://evil.example/x?token=synthetic-value" }).then(() => null, e => e);
   assert.ok(!JSON.stringify(other.payload).includes("synthetic"));
   // A credential pasted as the host is not echoed.
@@ -148,7 +148,7 @@ test("a camelCase credential field in a start url is refused", async () => {
       `https://data.example.org/tables#${name}=synthetic-value`]) {
       const fake = new Fake();
       const error = await TOOLS["add-research-site"].handler(fake, joeLocal, {
-        idempotency_key: "site-add-camel", host: "data.example.org", topics: ["demographics"], url,
+        idempotency_key: "d732c9de-e897-5e81-828c-0aa31a6b5b65", host: "data.example.org", topics: ["demographics"], url,
       }).then(() => null, e => e);
       assert.equal(error?.payload?.error, "research_site_url_credential", url);
       assert.equal(fake.calls.length, 0, `${url} reached SQL`);
@@ -191,7 +191,7 @@ test("a public start url with ordinary query fields is stored as given", async (
     const fake = new Fake({ "insert into research_site": [{ id: "30000000-0000-0000-0000-000000000002",
       host: "data.example.org", added_at: "2026-10-11T12:00:00Z" }] });
     const out = await TOOLS["add-research-site"].handler(fake, joeLocal, {
-      idempotency_key: "site-add-public", host: "data.example.org", topics: ["demographics"], url });
+      idempotency_key: "f44a861d-adf6-51a2-a95e-00d6af76293d", host: "data.example.org", topics: ["demographics"], url });
     assert.equal(out.ok, true, url);
     assert.equal(fake.calls.find(([sql]) => sql.includes("insert into research_site"))[1][1], url);
   }
@@ -203,7 +203,7 @@ test("a concurrent add of the same absent host returns the winner's row, not a u
   const fake = new Fake({ "select id, host, topics, url, note from research_site":
     [{ id: "30000000-0000-0000-0000-000000000003", host: "data.example.org", topics: ["demographics"] }] });
   const out = await TOOLS["add-research-site"].handler(fake, joeLocal, {
-    idempotency_key: "site-add-race-2", host: "data.example.org", topics: ["demographics"] });
+    idempotency_key: "e0de714b-64c8-549c-8204-3b01178838d4", host: "data.example.org", topics: ["demographics"] });
   assert.equal(out.already_listed, true);
   assert.equal(out.id, "30000000-0000-0000-0000-000000000003");
   const insert = fake.calls.find(([sql]) => sql.includes("insert into research_site"));
@@ -226,7 +226,7 @@ test("any caller removes a site softly, recording who and why", async () => {
   const fake = new Fake({ "update research_site set removed_at": [{ id: "30000000-0000-0000-0000-000000000001",
     host: "www.cbre.com", removed_at: "2026-10-07T13:00:00Z" }] });
   const out = await TOOLS["remove-research-site"].handler(fake, joeLocal, {
-    idempotency_key: "site-remove-1", host: "www.cbre.com", reason: "moved" });
+    idempotency_key: "f8ff93c9-a59b-586f-9cc8-2ce3c47af056", host: "www.cbre.com", reason: "moved" });
   assert.equal(out.ok, true);
   const update = fake.calls.find(([sql]) => sql.includes("update research_site set removed_at"));
   assert.ok(update[0].includes("removed_at is null"));
@@ -236,7 +236,7 @@ test("any caller removes a site softly, recording who and why", async () => {
 
 test("removing an unlisted host says so", async () => {
   await assert.rejects(() => TOOLS["remove-research-site"].handler(new Fake(), joe, {
-    idempotency_key: "site-remove-missing", host: "not-listed.example", reason: "cleanup",
+    idempotency_key: "3e0d9a8c-5fb5-5053-9b5b-16a16b39523d", host: "not-listed.example", reason: "cleanup",
   }), e => e.payload.error === "research_site_not_listed");
 });
 
