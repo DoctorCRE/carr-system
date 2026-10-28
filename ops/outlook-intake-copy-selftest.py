@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Build and run the dedicated copier against synthetic files only."""
+import hashlib
 import json
 import importlib.util
 import os
@@ -312,6 +313,13 @@ class CopyTest(unittest.TestCase):
         self.assertTrue((self.work / 'Files').is_dir())
 
 
+def digest_gate():
+    spec = importlib.util.spec_from_file_location('fixture_digest', ROOT / 'ops/hxprobe-source-digest.py')
+    gate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gate)
+    return gate
+
+
 @unittest.skipUnless(sys.platform == 'darwin', 'the installer requires macOS zsh and plutil')
 class InstallerTest(unittest.TestCase):
     def setUp(self):
@@ -344,9 +352,9 @@ class InstallerTest(unittest.TestCase):
         decoder = self.vendor / 'hxprobe/target/release/hxprobe'
         decoder.write_text('#!/bin/sh\nexit 99\n')
         decoder.chmod(0o700)
-        sources = self.git(self.repo, 'rev-parse', 'HEAD:vendor/hxprobe', 'HEAD:spec/outlook/hxstore-atlas.json',
-                           'HEAD:ops/hxstore-atlas.py').split()
-        (self.vendor / '.carr-pin').write_text('source ' + ' '.join(sources) + '\n')
+        receipt = {'source_digest': digest_gate().digest(self.repo / 'vendor/hxprobe'),
+                   'binary_sha256': hashlib.sha256(decoder.read_bytes()).hexdigest()}
+        (self.vendor / '.carr-build.json').write_text(json.dumps(receipt))
 
     def install(self, name='intake', check=True):
         command = ['/bin/zsh', '-f', '-c', 'export HOME="$1"; exec /bin/zsh -f "$2"',
@@ -438,7 +446,7 @@ class InstallerTest(unittest.TestCase):
     def test_first_build_uses_configured_tools_for_another_owner(self):
         decoder = self.vendor / 'hxprobe/target/release/hxprobe'
         decoder.unlink()
-        (self.vendor / '.carr-pin').unlink()
+        (self.vendor / '.carr-build.json').unlink()
         tools = self.home / 'configured tools'
         tools.mkdir(parents=True)
         cargo = tools / 'cargo'
@@ -457,13 +465,7 @@ elif args[0] == 'build':
         rustc = tools / 'rustc'
         rustc.write_text(f'#!{sys.executable}\nprint("rustc synthetic-other-host")\n')
         rustc.chmod(0o700)
-        spec = importlib.util.spec_from_file_location('fixture_digest', ROOT / 'ops/hxprobe-source-digest.py')
-        gate = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(gate)
-        (self.repo / 'vendor/hxprobe/BUILD-SHA256').write_text('00' * 32 + '\n')
-        gate.write(self.repo / 'vendor/hxprobe')
-        self.git(self.repo, 'add', 'vendor/hxprobe/BUILD-SHA256')
-        self.git(self.repo, 'commit', '--quiet', '-m', 'synthetic source receipt')
+        gate = digest_gate()
         write_settings(self.home, self.repo, owner='dell', account='partner@example.test',
                        profile=str(self.home / 'Main Profile'), vendor=str(self.vendor),
                        copy_helper=str(self.helper), executable_path=f'{tools}:/usr/bin:/bin:/usr/sbin:/sbin')
