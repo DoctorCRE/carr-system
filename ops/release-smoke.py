@@ -345,7 +345,8 @@ class McpProbe:
         if not isinstance(result, dict) or result.get("isError"):
             return False, "mcp_tool_failed"
         content = result.get("content")
-        if (not isinstance(content, list) or len(content) != 1 or not isinstance(content[0], dict)
+        # The payload is the first item; a second may carry the untrusted-text notice.
+        if (not isinstance(content, list) or not 1 <= len(content) <= 2 or not isinstance(content[0], dict)
                 or content[0].get("type") != "text" or not isinstance(content[0].get("text"), str)):
             return False, "mcp_content_invalid"
         try:
