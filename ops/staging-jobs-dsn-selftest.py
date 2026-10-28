@@ -47,13 +47,9 @@ PASSES: list[str] = []
 FAILURES: list[str] = []
 
 
-def check(label: str, cond: bool, detail: str = "") -> None:
-    if cond:
-        PASSES.append(label)
-        print(f"  ok    {label}")
-    else:
-        FAILURES.append(label)
-        print(f"  FAIL  {label}" + (f"\n        {detail}" if detail else ""))
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(detail="\n        {detail}", failures=FAILURES, passes=PASSES)
 
 
 def stub_resolver(host: str = STAGING_HOST):

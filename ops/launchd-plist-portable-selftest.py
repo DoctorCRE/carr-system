@@ -61,14 +61,9 @@ failures: list[str] = []
 checked = 0
 
 
-def check(label: str, ok: bool, detail: str = "") -> None:
-    global checked
-    checked += 1
-    if ok:
-        print(f"  ok    {label}")
-    else:
-        print(f"  FAIL  {label}" + (f"  {detail}" if detail else ""))
-        failures.append(label)
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(detail="  {detail}", failures=failures, counters={"checked": "all"}, ns=globals())
 
 
 def main() -> int:

@@ -28,9 +28,15 @@ SEED_DSN = "DATABASE_URL=" + "postgres://prod:" + "hunter2hunter2" + "@ep-x.neon
 
 RESULTS: list[tuple] = []
 
-def check(label, ok, detail=""):
-    RESULTS.append((label, bool(ok), detail))
-    print(f"  {'PASS' if ok else 'FAIL'}  {label}" + (f"  ({detail})" if detail and not ok else ""))
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(
+    ok="  PASS  {label}",
+    detail="  ({detail})",
+    record=lambda label, ok, detail: RESULTS.append((label, bool(ok), detail)),
+)
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 

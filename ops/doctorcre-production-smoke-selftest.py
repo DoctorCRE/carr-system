@@ -17,9 +17,11 @@ sys.modules[spec.name] = smoke
 spec.loader.exec_module(smoke)
 
 
-def check(condition: bool, message: str) -> None:
-    if not condition:
-        raise AssertionError(message)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(ok=None, fail=None, detail=None)
 
 
 def reply(status: int, body: object = b"", location: str | None = None) -> Any:

@@ -78,13 +78,9 @@ PASSES: list[str] = []
 FAILURES: list[str] = []
 
 
-def check(name: str, condition: bool, detail: str = "") -> None:
-    if condition:
-        PASSES.append(name)
-        print(f"  ok    {name}")
-    else:
-        FAILURES.append(name)
-        print(f"  FAIL  {name}" + (f" — {detail}" if detail else ""))
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(failures=FAILURES, passes=PASSES)
 
 
 def write_fixture(records: list[str]) -> str:

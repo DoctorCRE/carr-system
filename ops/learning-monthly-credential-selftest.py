@@ -13,10 +13,11 @@ MONTHLY = REPO / "bin" / "learning-monthly.sh"
 FAILED: list[str] = []
 
 
-def check(label: str, value: bool, detail: str = "") -> None:
-    print(("  ok    " if value else "  FAIL  ") + label + (f" — {detail}" if detail else ""))
-    if not value:
-        FAILED.append(label)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(detail_on_ok=True, failures=FAILED)
 
 
 def run(script: Path, home: Path, vault: Path, capture: Path, extra: dict[str, str]) -> subprocess.CompletedProcess[str]:
