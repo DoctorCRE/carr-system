@@ -536,6 +536,13 @@ class PreflightQuitTest(FakeOutlookCase):
                 self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
                 self.assert_no_restart()
 
+    def test_offscreen_unassigned_shape_with_draft_controls_prevents_restart(self):
+        self.given(windows=[ORDINARY, UNTITLED_OFFSCREEN], draft_window_ids=[15])
+        outcome = self.prepare()
+        self.assertIsNotNone(outcome)
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+        self.assert_no_restart()
+
     def test_small_titled_and_untitled_drafts_prevent_restart_on_any_space(self):
         for title in ('subject-000', f'subject-000 • {ACCOUNT}', ''):
             for on_screen in (True, False):

@@ -198,12 +198,9 @@ def _compose_window_open(pid: int, windows: list[dict]) -> bool:
         if is_compose_window(window):
             return True
         bounds = window.get('bounds') or {}
-        if not is_main_window(window):
-            if bounds.get('width', 0) >= 400 and bounds.get('height', 0) >= 400:
-                continue
-            if (window.get('title') == '' and window.get('is_on_screen') is False
-                    and bounds.get('height') in (30, 32)):
-                continue
+        if (window.get('title') == '' and window.get('is_on_screen') is False
+                and bounds.get('height') in (30, 32)):
+            continue
         state = cua('get_window_state', {'pid': pid, 'window_id': window['window_id'],
                                          'include_screenshot': False, 'max_elements': LIST_WALK})
         controls = {(element.get('role'), element.get('label'))
