@@ -705,7 +705,7 @@ class OutlookTriageTest(FakeOutlookCase):
         self.assertEqual((state['moved'], state['selections']), ([], []))
 
     def test_files_read_email_by_each_rule_and_never_selects_unread(self):
-        self.given([FILE_A, VENDOR, FIRM, NEWS, UNCERTAIN, UNREAD])
+        self.given([FILE_A, VENDOR, FIRM, NEWS, UNREAD])
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('succeeded', 'filed'))
         self.assertEqual(state['moved'], [[FILE_A['label'], 'folder-A'],
@@ -719,7 +719,6 @@ class OutlookTriageTest(FakeOutlookCase):
         for row, rule in ((FILE_A, 'deal'), (VENDOR, 'vendor'), (FIRM, 'map')):
             self.assertIn(f'  {short(row["label"])} {rule}', report)
         self.assertIn('no_rule_matched: 1', report)
-        self.assertIn('uncertain: 1', report)
         self.assertIn('unread: 1', report)
         self.assertEqual(stat.S_IMODE(self.report_path().stat().st_mode), 0o600)
         self.assertEqual(self.settled().read_text(), 'succeeded filed\n')
@@ -984,6 +983,22 @@ def listed(message_id, row, sender_email, **extra):
 class RefreshTest(FakeOutlookCase):
     READ_BODY = msg('sender-news', 'subject-010', email='news@news.test')
     UNREAD_BODY = msg('folder-A, client-001', 'subject-011', '8:15 AM', unread=True, email='c1@client.test')
+
+    def test_conflicting_row_states_block_callback_even_when_badge_matches(self):
+        from lib.outlook_ui import Window
+        x = msg('sender-x', 'subject-x', unread=True)
+        y = msg('sender-y', 'subject-y', unread=True)
+        self.given(tabs={'focused': [x, y], 'other': [dict(x, unread=False)]}, badge=1)
+        calls = []
+        def action(tabs):
+            calls.append(tabs)
+            return triage.Outcome('succeeded', 'refreshed')
+        with patch.dict(os.environ, self.env, clear=True):
+            result = triage.preserve_unread(Window(4242, 13, Waits(2, 0, 0, 0, 0, 0, 0)),
+                                           triage.Report(), action, lambda: False)
+        self.assertEqual(calls, [])
+        self.assertEqual((result.state, result.reason), ('skipped', 'unread_set_unverified'))
+        self.assertIn('coverage=coverage_identity_ambiguous', result.detail)
 
     def test_busy_inbox_refreshes_with_hidden_unread_mail_kept_unread(self):
         from lib import outlook_refresh
@@ -1346,6 +1361,103 @@ class RefreshTest(FakeOutlookCase):
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'refresh_list_invalid'))
         self.assertEqual(state['moved'], [])
+
+
+class UnreadAgreementTest(unittest.TestCase):
+    class Window:
+        def __init__(self, tabs, badge, scans=None):
+            self.tabs, self.badge, self.scans = tabs, badge, scans
+            self.tab = next(iter(tabs))
+
+        def select_inbox(self):
+            self.tab = next(iter(self.tabs))
+
+        def inbox_badge(self):
+            return self.badge
+
+        def show_folder_pane(self, visible):
+            pass
+
+        def rows(self):
+            return self.tab, self.tabs[self.tab]
+
+        def switch_tab(self, tab):
+            self.tab = tab
+
+        def scan_rows(self, allowed):
+            return self.scans[self.tab]
+
+    def row(self, subject, unread=False, selected=False):
+        label = msg('sender-test', subject)['label']
+        return Row(('Unread, ' if unread else '') + label, 'token', selected)
+
+    def test_every_initial_observation_must_agree_before_callback(self):
+        x, read_x, y = self.row('x', True), self.row('x'), self.row('y', True)
+        cases = [
+            ({'focused': [x, y], 'other': [read_x]}, 1),
+            ({'focused': [read_x, y], 'other': [x]}, 2),
+            ({'focused': [x, y], 'other': [read_x]}, 3),
+            ({None: [x, y, read_x]}, 1),
+            ({None: [x, x]}, 1),
+            ({None: [Row('unknown', 'token', False)]}, 0),
+            ({'focused': [read_x], 'other': [self.row('x', selected=True)]}, 0),
+        ]
+        for tabs, badge in cases:
+            with self.subTest(tabs=tabs, badge=badge):
+                calls = []
+                outcome = triage.preserve_unread(self.Window(tabs, badge), triage.Report(),
+                                                 lambda rows: calls.append(rows), lambda: False)
+                self.assertEqual(calls, [])
+                self.assertEqual((outcome.state, outcome.reason), ('skipped', 'unread_set_unverified'))
+
+    def test_agreed_cross_tab_observations_allow_callback_once(self):
+        x = self.row('x', True)
+        calls = []
+        outcome = triage.preserve_unread(
+            self.Window({'focused': [x], 'other': [x]}, 1), triage.Report(),
+            lambda rows: calls.append(rows) or triage.Outcome('succeeded', 'refreshed'), lambda: False)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(outcome.state, 'succeeded')
+
+    def test_conflicting_scan_observations_block_callback(self):
+        x, y = self.row('x', True), self.row('y', True)
+        for scans in ({'focused': [x, y], 'other': [self.row('x')]},
+                      {'focused': [x, y], 'other': [self.row('y', True, selected=True)]}):
+            with self.subTest(scans=scans):
+                calls = []
+                outcome = triage.preserve_unread(
+                    self.Window({'focused': [x], 'other': []}, 2, scans), triage.Report(),
+                    lambda rows: calls.append(rows), lambda: False)
+                self.assertEqual(calls, [])
+                self.assertNotEqual(outcome.state, 'succeeded')
+
+    def test_top_normalization_cannot_discard_a_transient_state_conflict(self):
+        from lib.outlook_ui import Window
+        read_x, unread_x = self.row('x'), self.row('x', True)
+        class ChangingWindow(Window):
+            def __init__(self):
+                self.observations = iter([[read_x], [unread_x]])
+
+            def rows(self):
+                return None, next(self.observations, [read_x])
+
+            def _scroll_list(self, direction):
+                pass
+
+        with self.assertRaisesRegex(triage.UiError, 'coverage_changed'):
+            ChangingWindow().scan_rows(lambda: True)
+
+    def test_conflicting_post_action_observations_fail_the_run(self):
+        y = self.row('y', True)
+        window = self.Window({'focused': [y], 'other': []}, 1)
+        calls = []
+        def action(rows):
+            calls.append(rows)
+            window.tabs = {'focused': [self.row('x', True), y], 'other': [self.row('x')]}
+            return triage.Outcome('succeeded', 'refreshed')
+        outcome = triage.preserve_unread(window, triage.Report(), action, lambda: False)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'unread_set_changed'))
 
 
 class DecideTest(unittest.TestCase):
