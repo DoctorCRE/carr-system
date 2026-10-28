@@ -1142,6 +1142,7 @@ class Run:
                 progress.pop(stale, None)
             progress['read'] = read['applies_to']
             self.counts['lead_' + read['applies_to']] += 1
+            _save(self.out, self.state)
             args = {'idempotency_key': request_key, 'address': address,
                     'display_name': (name or '')[:200] or None, 'summary': read['summary'] or 'Not business.',
                     'first_seen_at': _iso(m['sent_unix']), 'message_ref': m['ident'],
