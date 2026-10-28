@@ -1492,6 +1492,42 @@ class IntakeTest(unittest.TestCase):
                          str(uuid.uuid5(uuid.NAMESPACE_URL,
                              self.fake.writes('log-activity')[0][1]['idempotency_key'])))
 
+    def test_legacy_unmatched_mail_files_when_contact_arrives_after_twenty_days(self):
+        original = mail('later@example.test', -timedelta(hours=2), copy_key='waiting-for-contact')
+        self.assertEqual(self.run_intake([original]).state, 'succeeded')
+        self.seed_legacy_mail_keys(original, ['9100'])
+        keyed = {**original, 'local_keys': '9100'}
+        self.fake.now = NOW + timedelta(days=12)
+        self.assertEqual(self.run_intake([keyed]).state, 'succeeded')
+        self.assertEqual(self.fake.writes('log-activity'), [])
+        self.fake.now = NOW + timedelta(days=20)
+        self.fake.contacts_rows.append(intake.Contact('later@example.test', 'C-903', 'Later Contact'))
+        result = self.run_intake([keyed], touch=False)
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual([(args['ref'], args['detail']) for _, args in self.fake.writes('log-activity')],
+                         [('C-903', original['body'])])
+        self.assertEqual(result.counts['unresolved_messages'], 0)
+        self.assertEqual(self.run_intake([keyed]).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+
+    def test_legacy_preview_hydrates_after_identity_link_horizon(self):
+        original = mail('pat@example.test', -timedelta(hours=2), copy_key='waiting-for-body',
+                        kind='preview', body='Preview')
+        self.assertEqual(self.run_intake([original]).state, 'succeeded')
+        self.seed_legacy_mail_keys(original, ['9100'])
+        keyed = {**original, 'local_keys': '9100'}
+        self.fake.now = NOW + timedelta(days=12)
+        self.assertEqual(self.run_intake([keyed]).state, 'succeeded')
+        self.fake.now = NOW + timedelta(days=20)
+        full = {**keyed, 'body_kind': 'full', 'body': 'Complete original body'}
+        result = self.run_intake([full])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['hydration_pending'], 0)
+        notes = [args for _, args in self.fake.writes('log-activity') if args['kind'] == 'note']
+        self.assertEqual([args['detail'] for args in notes], ['Complete original body'])
+        self.assertEqual(self.run_intake([full]).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 2)
+
     def test_duplicate_copies_collapse_and_the_full_body_wins(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1), body='the whole', kind='preview',
                               copy_key='k1'),
