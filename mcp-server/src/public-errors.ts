@@ -76,6 +76,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["value_not_in_declared_vocabulary", "Use a value from the field's documented vocabulary."],
   ["missing_idempotency_key", "Supply a fresh idempotency_key for this operation."],
   ["missing_base_version", "Re-read the record and supply its base_version."],
+  ["invalid_base_version", "Supply an integer base_version from a fresh read."],
   ["missing_plan_base", "Review this older call proposal before applying it."],
   ["newer_change_exists", "The record changed after this proposal. Review its current state before deciding."],
   ["invalid_work_queue_fields", "Use only the documented queue fields and positive 32-bit slice, job, and position numbers."],

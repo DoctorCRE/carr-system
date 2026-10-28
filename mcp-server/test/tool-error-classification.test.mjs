@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { parse } from "@babel/parser";
 import { ToolError } from "../src/tool-error.ts";
 import { publicError } from "../src/public-errors.ts";
+import { assertClosedTopLevel } from "../src/mutation-registry.js";
 
 // These existing refusals remain private until each has a reviewed public shape.
 const INTERNAL_ONLY = new Set([
@@ -98,7 +99,6 @@ const INTERNAL_ONLY = new Set([
   "inner_write_missing_ref",
   "internal_decision_parked",
   "invalid_base_event",
-  "invalid_base_version",
   "invalid_engagement_status",
   "invalid_expected_action",
   "invalid_history_cursor",
@@ -360,6 +360,43 @@ test("every tools.js ToolError code is classified", t => {
   const unclassified = [...codes].filter(code => !INTERNAL_ONLY.has(code) &&
     publicError(new ToolError({ error: code, field: "field" }), { inputSchema: { properties: { field: {} } } }).error !== code).sort();
   assert.deepEqual(unclassified, [], "classify each code as public or internal-only");
+});
+
+test("shared argument layer errors reach callers", t => {
+  t.mock.method(console, "error", () => {});
+  const source = readFileSync(new URL("../src/tools.js", import.meta.url), "utf8");
+  const tree = parse(source, { sourceType: "module" });
+  const names = ["assertRequiredArgs", "coerceArgsToSchema", "versionGuard", "assertDeclaredVocabularies", "pgConstraintError"];
+  for (const name of names) {
+    let fn;
+    walk(tree, node => { if (node.type === "FunctionDeclaration" && node.id?.name === name) fn = node; });
+    assert.ok(fn, `missing shared function ${name}`);
+    const body = source.slice(fn.start, fn.end);
+    const { codes, unresolved } = codesIn(body);
+    if (name === "assertRequiredArgs") {
+      assert.deepEqual(unresolved, ["payload"]);
+      const payload = fn.body.body.find(node => node.type === "VariableDeclaration" && node.declarations.some(d => d.id.name === "payload"));
+      assert.ok(payload, "missing required-argument payload");
+      const declaration = source.slice(payload.start, payload.end);
+      const extracted = codesIn(`new ToolError(${declaration.replace(/^const payload = /, "").replace(/;$/, "")})`);
+      for (const code of extracted.codes) codes.add(code);
+    } else assert.deepEqual(unresolved, [], `review dynamic codes in ${name}`);
+    assert.ok(codes.size, `no ToolError codes found in ${name}`);
+    for (const code of codes) {
+      const result = publicError(new ToolError({ error: code, field: "base_version", column: "base_version" }),
+        { inputSchema: { properties: { base_version: {} } } });
+      assert.notEqual(result.error, "unhandled_verb_failure", `${name}: ${code}`);
+    }
+  }
+  let forwarder;
+  walk(tree, node => { if (node.type === "FunctionDeclaration" && node.id?.name === "assertRegisteredToolInput") forwarder = node; });
+  assert.ok(forwarder, "missing shared function assertRegisteredToolInput");
+  assert.deepEqual(codesIn(source.slice(forwarder.start, forwarder.end)).unresolved, ["error.error"]);
+  assert.throws(() => assertClosedTopLevel("example", { inputSchema: { properties: {} } }, { unknown: true }), error => {
+    assert.equal(error.error, "unregistered_operation_fields");
+    assert.notEqual(publicError(new ToolError({ error: error.error, fields: error.fields })).error, "unhandled_verb_failure");
+    return true;
+  });
 });
 
 test("inventory parses multiline constructors and conditional codes", () => {

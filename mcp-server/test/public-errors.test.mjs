@@ -82,6 +82,14 @@ for (const code of ["email_source_owner_mismatch", "email_proposal_confidence_in
   assert.ok(payload.hint);
 });
 
+test("MCP preserves invalid base version without exposing diagnostics", async t => {
+  const payload = await failure(t, new ToolError({ error: "invalid_base_version",
+    got: privateText, current_version: 3, detail: privateText }));
+  assert.equal(payload.error, "invalid_base_version");
+  assert.equal(payload.hint, "Supply an integer base_version from a fresh read.");
+  assert.equal(Object.hasOwn(payload, "current_version"), false);
+});
+
 test("MCP preserves a missing_required refusal and names only declared fields", async t => {
   // Regression: #2194's closed allowlist omitted missing_required, so every
   // verb called without a required argument answered unhandled_verb_failure
