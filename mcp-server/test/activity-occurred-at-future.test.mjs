@@ -153,3 +153,15 @@ test("timeline compositions retain the authenticated read-only calendar-history 
     assert.equal(TOOLS[name].write, false);
   }
 });
+
+test('captured email context reaches the activity record', async () => {
+  const fake = new Fake();
+  const context = { subject: 'Synthetic new practice', conversation_id: 'test-thread',
+    sender: { email: 'vendor@example.test', name: 'Vendor', internal: false },
+    recipients: [{ email: 'doctor@example.test', name: null, kind: 'cc', internal: false }] };
+  await TOOLS['log-activity'].handler(fake, joe, {
+    idempotency_key: 'synthetic-email-context', ref: 'V-SUP-007', kind: 'email_in',
+    summary: 'Email from Vendor: Synthetic new practice', email_context: context,
+  });
+  assert.deepEqual(JSON.parse(fake.inserts[0][7]), context);
+});

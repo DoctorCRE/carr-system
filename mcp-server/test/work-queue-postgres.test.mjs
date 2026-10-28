@@ -45,8 +45,10 @@ before(async () => {
   else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
   if (!(await c.query("select 1 from schema_migrations where filename='1017_work_request_queue.sql'")).rows.length)
     await c.query(readFileSync(new URL('../../migrations/1017_work_request_queue.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select 1 from schema_migrations where filename='1019_work_request_job_finished.sql'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1019_work_request_job_finished.sql', import.meta.url), 'utf8'));
+  if (!(await c.query("select 1 from schema_migrations where filename='1018_work_request_job_start.sql'")).rows.length)
+    await c.query(readFileSync(new URL('../../migrations/1018_work_request_job_start.sql', import.meta.url), 'utf8'));
+  if (!(await c.query("select 1 from schema_migrations where filename='1021_work_request_job_finished.sql'")).rows.length)
+    await c.query(readFileSync(new URL('../../migrations/1021_work_request_job_finished.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => {
@@ -143,6 +145,53 @@ test('concurrent dispatch and same-key retries mint once, and rollback leaves no
     await c.query('rollback');
     assert.equal((await command('dispatch-job', retry)).card_id, 'WR16.S1.J3');
     assert.equal((await command('work-queue')).jobs.filter(row => row.work_request === work_request).length, 3);
+  } finally { await Promise.all(clients.map(client => client.end())); }
+});
+
+test('a runner records its start once without minting another card', async () => {
+  const work_request = await request('WR-000017');
+  const repository = 'DoctorCRE/carr-system';
+  await command('dispatch-job', job(work_request, { repository }));
+  const start = { work_request, slice: 1, job: 1, repository, runner_job_id: 'codex-job-synthetic', idempotency_key: randomUUID() };
+  const first = await command('dispatch-job', start);
+  assert.equal(first.card_id, 'WR17.S1.J1');
+  assert.equal(first.runner_job_id, 'codex-job-synthetic');
+  assert.deepEqual(await command('dispatch-job', start), { ...first, replayed: true });
+  const queued = (await command('work-queue')).jobs.filter(row => row.work_request === work_request);
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].runner_job_id, 'codex-job-synthetic');
+  assert.ok(queued[0].started_at);
+  await assert.rejects(command('dispatch-job', { ...start, runner_job_id: 'another-runner', idempotency_key: randomUUID() }),
+    failure => { assert.equal(failure.message, 'job_already_started'); assert.equal(publicError(failure).error, 'job_already_started'); return true; });
+});
+
+test('a runner can only claim a job bound to its repository', async () => {
+  const work_request = await request('WR-000019');
+  const repository = 'DoctorCRE/carr-system';
+  await command('dispatch-job', job(work_request, { repository }));
+  const start = { work_request, job: 1, repository, runner_job_id: 'bound-runner', idempotency_key: randomUUID() };
+  await assert.rejects(command('dispatch-job', { ...start, repository: 'jbookout/doctorcre-app' }),
+    failure => { assert.equal(failure.message, 'job_repository_mismatch'); assert.equal(publicError(failure).error, 'job_repository_mismatch'); return true; });
+  let queued = (await command('work-queue')).jobs.find(row => row.work_request === work_request);
+  assert.equal(queued.repository, repository);
+  assert.equal(queued.runner_job_id, null);
+  assert.equal((await command('dispatch-job', start)).card_id, 'WR19.S1.J1');
+  queued = (await command('work-queue')).jobs.find(row => row.work_request === work_request);
+  assert.equal(queued.runner_job_id, 'bound-runner');
+});
+
+test('concurrent runners cannot start the same queued job twice', async () => {
+  const work_request = await request('WR-000018');
+  const repository = 'DoctorCRE/carr-system';
+  await command('dispatch-job', job(work_request, { repository }));
+  const clients = await Promise.all(Array.from({ length: 2 }, async () => { const client = new pg.Client(connection); await client.connect(); return client; }));
+  try {
+    const results = await Promise.allSettled(clients.map((client, index) => command('dispatch-job',
+      { work_request, job: 1, repository, runner_job_id: `runner-${index}`, idempotency_key: randomUUID() }, client)));
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+    assert.equal(results.find(result => result.status === 'rejected').reason.message, 'job_already_started');
+    assert.equal((await command('work-queue')).jobs.find(row => row.work_request === work_request).runner_job_id,
+      results.find(result => result.status === 'fulfilled').value.runner_job_id);
   } finally { await Promise.all(clients.map(client => client.end())); }
 });
 

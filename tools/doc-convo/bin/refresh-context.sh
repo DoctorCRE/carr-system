@@ -10,7 +10,7 @@ set -euo pipefail
 
 TOOL_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 OUT="$TOOL_DIR/assets/hot-context.md"
-API="${CARR_MCP_URL:-https://api.practicecre.com/mcp}"
+API="${CARR_MCP_URL:-https://api.doctorcre.com/mcp}"
 ENVFILE="${CARR_MCP_ENV:-$HOME/.config/carr/mcp-tokens.env}"
 [ -f "$ENVFILE" ] && { set -a; . "$ENVFILE"; set +a; }
 TOKEN="${CARR_MCP_PROBE_TOKEN:-}"

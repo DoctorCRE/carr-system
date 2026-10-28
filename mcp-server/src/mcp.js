@@ -12,6 +12,7 @@
 // NO SEND CAPABILITY EXISTS OR WILL EXIST IN THIS WORKER.
 
 import { neon, Pool } from "@neondatabase/serverless";
+import { budgetedAi } from "./ai-budget.js";
 import { publicError } from "./public-errors.ts";
 import { mcpOriginRefusal } from "./oauth-policy.ts";
 import { DOC_TOOL_NAMES, DOC_INSTRUCTIONS, docToolAnnotations } from "./doc-profile.js";
@@ -790,7 +791,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
     // a refused write killed the answer (migration 0223). Anything using this
     // must treat the write as optional: losing it costs a record, never a reply.
     const client = {
-      ai: env.AI,
+      ai: budgetedAi(env),
       pullRequests: isolatePullRequests(env.GITHUB_TOKEN),
       query: async (text, params = []) => ({ rows: await retrySafeDatabaseOperation(() => sql.query(text, params)) }),
       sideWrite: env?.DATABASE_URL_WRITER
@@ -833,7 +834,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
     env.ctx?.waitUntil?.(cleanup);
     throw error;
   }
-  client.ai = env.AI;
+  client.ai = budgetedAi(env);
   const writerRead = tool.writerConnection === true && !tool.write;
   let readOk = true, readErrorKind = null;
   try {

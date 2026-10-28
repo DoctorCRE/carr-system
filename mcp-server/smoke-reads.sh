@@ -82,7 +82,7 @@
 
 set -uo pipefail
 
-API="${CARR_MCP_URL:-https://api.practicecre.com/mcp}"
+API="${CARR_MCP_URL:-https://api.doctorcre.com/mcp}"
 ENVFILE="${CARR_MCP_ENV:-$HOME/.config/carr/mcp-tokens.env}"
 [ -f "$ENVFILE" ] && { set -a; . "$ENVFILE"; set +a; }
 

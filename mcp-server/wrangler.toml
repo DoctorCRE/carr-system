@@ -137,6 +137,8 @@ name = "carr-mcp"
 account_id = "12ccca77eb49142a6be8eb84c0d6a3a0"
 main = "src/index.js"
 compatibility_date = "2026-07-01"
+workers_dev = false
+preview_urls = false
 
 # Required by workers-oauth-provider for Client ID Metadata Document support:
 # it disables the legacy same-zone fetch shortcut, which is the SSRF guard for
@@ -146,9 +148,8 @@ compatibility_flags = ["global_fetch_strictly_public", "nodejs_compat"]
 # Custom domains. api.* is the machine surface; reports.* is the isolated
 # client-link surface routed through the same Worker so its digest-only exchange
 # and reads remain same-origin. The apex stays free for the future public site.
-# doctorcre.com added 2026-08-01 (Joe's domain ruling): PRIMARY name
-# as of Dell's onboarding — practicecre.com stays live as an alias; its
-# retirement is a later, unhurried decision. Same Worker answers both.
+# api.doctorcre.com is primary. Retain the retiring alias until live traffic
+# reaches zero, then remove its route in a separate PR.
 routes = [
   { pattern = "api.practicecre.com", custom_domain = true },
   { pattern = "api.doctorcre.com", custom_domain = true },
@@ -168,6 +169,7 @@ fallthrough = true
 CARR_ENV = "production"
 APP_HOST = "app.doctorcre.com"
 LEGACY_DEALROOM_HOST = "dealroom.doctorcre.com"
+AI_DAILY_NEURON_BUDGET = "8000"
 # A reviewed, public deployment setting. Program 6 is enabled only through the
 # immutable release that fingerprints this exact config value; the shared
 # parser still fails closed for a missing or non-literal value.
@@ -212,12 +214,21 @@ id = "b033d3b5c454445080e9d0ab51ff8f3c"
 name = "OAUTH_CONSENT_STATE"
 class_name = "OAuthConsentState"
 
+[[durable_objects.bindings]]
+name = "AI_NEURON_BUDGET"
+class_name = "AiNeuronBudget"
+
 [[migrations]]
 tag = "oauth-consent-v1"
 new_sqlite_classes = ["OAuthConsentState"]
 
+[[migrations]]
+tag = "ai-neuron-budget-v1"
+new_sqlite_classes = ["AiNeuronBudget"]
+
 [observability]
 enabled = true
+head_sampling_rate = 0.1
 
 # Spend guard. Workers Paid has no hard spend cap, and without this every
 # invocation may burn up to the 30 s default CPU. Measured 2026-09-27..10-27
@@ -227,6 +238,11 @@ enabled = true
 # selftest.py check 6 keeps both bounded. Raise only from a new measured max.
 [limits]
 cpu_ms = 5000
+# Local code-path measurement: a 1 MB doctrine revision uses 163 AI batches;
+# a 100-stop Tour route uses one SQL call. 1,000 leaves room for OAuth, audit,
+# KV/R2 and redirects while bounding fanout. Unbounded doctrine inputs can
+# still exceed this cap; it is a per-invocation guard, not a monthly spend cap.
+subrequests = 1000
 
 [[r2_buckets]]
 binding = "carr_documents"
@@ -246,7 +262,8 @@ name = "carr-mcp-staging"
 main = "src/index.js"
 compatibility_date = "2026-07-01"
 compatibility_flags = ["global_fetch_strictly_public", "nodejs_compat"]
-workers_dev = true
+workers_dev = false
+preview_urls = false
 
 # `routes = []` IS LOAD-BEARING. Wrangler inherits `routes` into an env that
 # omits the key: on 2026-08-13 a staging deploy without this line took over the
@@ -260,6 +277,7 @@ routes = []
 CARR_ENV = "staging"
 APP_HOST = "carr-mcp-staging.joe-bookout-carr-us.workers.dev"
 DOCTORCRE_APP_HOST = "doctorcre-app-staging.joe-bookout-carr-us.workers.dev"
+AI_DAILY_NEURON_BUDGET = "1500"
 CARR_MCP_ALLOWED_ORIGINS = '["https://carr-mcp-staging.joe-bookout-carr-us.workers.dev","https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev"]'
 DEALROOM_PROGRAM6_ACTIONS_ENABLED = "true"
 WORKSPACE_COMMAND_CENTER_READ_ENABLED = "true"
@@ -286,8 +304,13 @@ id = "faa513fd07ec45d88abc5949f323aec5"
 name = "OAUTH_CONSENT_STATE"
 class_name = "OAuthConsentState"
 
+[[env.staging.durable_objects.bindings]]
+name = "AI_NEURON_BUDGET"
+class_name = "AiNeuronBudget"
+
 [env.staging.observability]
 enabled = true
+head_sampling_rate = 0.01
 
 # Wrangler does not inherit `ai` into a named environment.
 [env.staging.ai]

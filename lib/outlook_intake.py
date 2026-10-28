@@ -244,6 +244,19 @@ def _addresses(text: str | None) -> list[str]:
     return [a.lower() for a in re.findall(r'[\w.+\'-]+@[\w-]+(?:\.[\w-]+)+', text or '')]
 
 
+def email_context(mail: dict, domain: str) -> dict:
+    recipients = []
+    for field, kind in (('recipients', 'to'), ('cc', 'cc')):
+        for address in dict.fromkeys(_addresses(mail.get(field))):
+            recipients.append({'email': address, 'name': None, 'kind': kind,
+                               'internal': _internal(address, domain)})
+    return {'subject': mail.get('subject') or '',
+            'conversation_id': mail.get('conversation_id') or None,
+            'sender': {'email': mail['sender'].lower(), 'name': mail.get('sender_name'),
+                       'internal': _internal(mail['sender'], domain)},
+            'recipients': recipients}
+
+
 AUTOMATED_LOCAL = re.compile(r'^(?:no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounces?)(?:[-.+].*)?$')
 ROLE_LOCAL = re.compile(r'^(?:front-?desk|info|office|admin|contact|reception|billing|hello|team|support|'
                         r'scheduling|appointments?|sales|inquiries|enquiries|referrals?|records|staff|help|general)'
@@ -349,14 +362,16 @@ def _load(db: Path, account: str | None = None) -> tuple[dict, list[dict], list[
         # Decoders built before WR-000502 export no local_keys column.
         columns = {r['name'] for r in con.execute('PRAGMA table_info(messages)')}
         local_keys = 'local_keys' if 'local_keys' in columns else 'NULL AS local_keys'
+        context_columns = ', '.join(name if name in columns else f'NULL AS {name}'
+                                    for name in ('conversation_id', 'cc'))
         mails = [dict(r) for r in con.execute(
             'SELECT id, sender, sender_name, recipients, subject, body, preview, body_kind, sent_unix, copy_key, '
-            f'{local_keys} FROM messages WHERE sent_unix IS NOT NULL AND sender IS NOT NULL')]
+            f'{local_keys}, {context_columns} FROM messages WHERE sent_unix IS NOT NULL AND sender IS NOT NULL')]
         mail_count = len(mails)
         if account is not None:
             account = account.lower()
             mails = [m for m in mails if account == m['sender'].lower()
-                     or account in _addresses(m['recipients'])]
+                     or account in _addresses(m['recipients']) or account in _addresses(m.get('cc'))]
         meta['mail_other_accounts'] = mail_count - len(mails)
         for m in mails:
             message_id = m.pop('id')
@@ -732,6 +747,7 @@ class Run:
                 'idempotency_key': self.activity_key(ref, m['ident']), 'ref': ref, 'kind': kind,
                 'summary': f'{label}: {m["subject"] or "(no subject)"}', 'detail': m['text'],
                 'occurred_at': _iso(m['sent_unix']),
+                **({'email_context': email_context(m, self.settings.internal_domain)} if not outbound else {}),
                 **({'email_source': {'sender_email': m['sender'].lower(), 'mailbox_owner': self.settings.owner}}
                    if not outbound else {})}, who, '' if m['full'] else 'preview_only') for ref in refs]
             completed.extend(ref for ref, ok in zip(refs, results) if ok)
