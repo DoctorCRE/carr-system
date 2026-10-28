@@ -18,7 +18,7 @@ class BillingGateTests(unittest.TestCase):
         self.config = tomllib.loads((ROOT / "mcp-server/wrangler.toml").read_text())
 
     def test_shipped_configuration_is_bounded(self):
-        self.assertEqual(matrix.billing_failures(self.config), [])
+        self.assertEqual(matrix.worker_limit_failures(self.config), [])
 
     def test_shipped_ai_budgets_fit_the_shared_free_allowance(self):
         production = int(self.config["vars"]["AI_DAILY_NEURON_BUDGET"])
@@ -32,7 +32,7 @@ class BillingGateTests(unittest.TestCase):
 
     def test_uptime_worker_has_cpu_and_sampling_limits(self):
         config = tomllib.loads((ROOT / "mcp-server/wrangler.uptime.toml").read_text())
-        self.assertEqual(matrix.billing_failures(config), [])
+        self.assertEqual(matrix.worker_limit_failures(config), [])
 
     def test_every_environment_needs_cpu_and_sampling_limits(self):
         for name in ("production", "staging", "preview"):
@@ -44,23 +44,23 @@ class BillingGateTests(unittest.TestCase):
                         name, copy.deepcopy(config["env"]["staging"]))
                     table = "limits" if field == "cpu_ms" else "observability"
                     target.setdefault(table, {})[field] = value
-                    self.assertTrue(matrix.billing_failures(config))
+                    self.assertTrue(matrix.worker_limit_failures(config))
 
     def test_production_and_staging_keep_the_required_sampling_rates(self):
         self.config["observability"]["head_sampling_rate"] = 0.2
-        self.assertTrue(matrix.billing_failures(self.config))
+        self.assertTrue(matrix.worker_limit_failures(self.config))
 
     def test_named_production_cannot_hide_the_default_worker(self):
         self.config["env"]["production"] = copy.deepcopy(self.config["env"]["staging"])
         self.config["env"]["production"]["observability"]["head_sampling_rate"] = 0.1
         self.config["observability"]["head_sampling_rate"] = 1
-        self.assertTrue(matrix.billing_failures(self.config))
+        self.assertTrue(matrix.worker_limit_failures(self.config))
 
     def test_logs_override_cannot_disable_sampling(self):
         for target in (self.config, self.config["env"]["staging"]):
             with self.subTest(target=target["vars"]["CARR_ENV"]):
                 target["observability"]["logs"] = {"enabled": True, "head_sampling_rate": 1}
-                self.assertTrue(matrix.billing_failures(self.config))
+                self.assertTrue(matrix.worker_limit_failures(self.config))
                 del target["observability"]["logs"]
 
 

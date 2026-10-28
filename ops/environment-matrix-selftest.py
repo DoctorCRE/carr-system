@@ -91,7 +91,7 @@ def workflow_jobs(text: str) -> dict[str, str]:
     return jobs
 
 
-def billing_failures(config: dict) -> list[str]:
+def worker_limit_failures(config: dict) -> list[str]:
     """Validate effective CPU caps and explicit sampling for every Worker."""
     failures = []
     production_cpu = config.get("limits", {}).get("cpu_ms")
@@ -230,8 +230,8 @@ def main() -> int:
     uptime_path = REPO / "mcp-server" / "wrangler.uptime.toml"
     with uptime_path.open("rb") as fh:
         uptime = tomllib.load(fh)
-    billing = billing_failures(wrangler) + [f"uptime: {failure}" for failure in billing_failures(uptime)]
-    check("6. every Worker has bounded CPU and explicit log sampling", not billing, "; ".join(billing))
+    limit_failures = worker_limit_failures(wrangler) + [f"uptime: {failure}" for failure in worker_limit_failures(uptime)]
+    check("6. every Worker has bounded CPU and explicit log sampling", not limit_failures, "; ".join(limit_failures))
     ai_boundary = subprocess.run(
         ["node", str(REPO / "mcp-server/check-ai-boundary.mjs")],
         capture_output=True, text=True, cwd=REPO)
