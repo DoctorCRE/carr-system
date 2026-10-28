@@ -202,7 +202,7 @@ def delivery_receipt(payload, selection, task, *, dedupe=True):
     return context(text, event)
 
 
-def process(payload, *, runner=subprocess.run, dedupe=True):
+def process(payload, *, runner=subprocess.run, dedupe=True, cache=True):
     event = payload.get('hook_event_name')
     if event not in {'PreToolUse', 'UserPromptSubmit', 'Stop'}:
         return None
@@ -222,7 +222,8 @@ def process(payload, *, runner=subprocess.run, dedupe=True):
                    'tool_name': payload.get('tool_name', ''), 'tool_input': payload.get('tool_input', {})}
         if payload.get('last_assistant_message'):
             current['response'] = payload['last_assistant_message']
-        selection = lookup(current, runner=runner)
+        # One store read per session per CATALOG_SECONDS, not one per tool call (WR573.S1.J2).
+        selection = lookup(current, runner=runner, session_id=payload['session_id'] if cache else None)
         if not valid_local_identity(selection['identity']):
             return refused(event)
         return delivery_receipt(payload, selection, task, dedupe=dedupe)

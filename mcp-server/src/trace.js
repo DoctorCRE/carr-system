@@ -15,7 +15,7 @@
 // no client, no env, no cloudflare: import, so node --test exercises them
 // directly. recordWorkerFailure touches a database only through an injected
 // `query` function (text, params) => Promise<{rows}>, the exact convention
-// mcp.js's readCallInsertSQL/recordReadCall already use — so ITS logic is also
+// mcp.js's readCallCountSQL/recordReadCall already use — so ITS logic is also
 // unit-testable with a fake. THE ONE REMAINING SEAM, wrapNeonRows, is the
 // adapter between that internal {rows} contract and what neon(dsn).query()
 // ACTUALLY returns (a bare array — see its own comment for the production

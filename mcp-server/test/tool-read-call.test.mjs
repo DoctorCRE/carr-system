@@ -1,119 +1,117 @@
-// tool-read-call.test.mjs — coverage for Phase 1's read-call recording
-// (migration 0108, mcp.js's callTool read branch). withEnvelope() in tools.js
-// was the ONLY writer of tool_call, and it only ran inside WRITE handler
-// bodies — every read verb, including the boot call (standing-context),
-// reached executeRegisteredTool directly with no record left anywhere. This
-// file proves the fix: a read verb records exactly one row with correct
-// identity fields, a failed read still records (with ok:false), no response
-// body or argument value is ever stored, and a logging failure never
-// surfaces to the caller.
+// tool-read-call.test.mjs — coverage for read-call counting (0108's read
+// trace, a per-day counter since 1032). withEnvelope() in tools.js records
+// writes only, so this is the only trace a read verb leaves. This file proves a
+// read verb bumps exactly one counter keyed by (day, verb, sponsor, via, ok), a
+// failed read is still counted (ok:false), no response body or argument value
+// can reach the statement, the per-call actor lookup is gone, and a counting
+// failure never surfaces to the caller.
 //
 // Run with: node --test mcp-server/test/tool-read-call.test.mjs
 // (also picked up by `npm test`'s test/*.test.mjs glob).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ToolError } from "../src/tools.js";
-import { callTool, readCallInsertSQL, recordReadCall, scheduleWriterReadCall } from "../src/mcp.js";
+import { callTool, readCallCountSQL, recordReadCall, scheduleWriterReadCall } from "../src/mcp.js";
 
 const JOE = { slug: "joe", display: "Joe", human: true, via: "oauth-google", client_id: "claude" };
 
 // ────────────────────────────────────────────────────────────────────────
-// readCallInsertSQL — pure, no DB. Proves the statement shape and that it
+// readCallCountSQL — pure, no DB. Proves the statement shape and that it
 // structurally CANNOT carry an argument value or a response body: the
-// function's only inputs are (actor, verb, ok, errorKind).
+// function's only inputs are (actor, verb, ok).
 // ────────────────────────────────────────────────────────────────────────
 
-test("readCallInsertSQL: targets tool_read_call and carries the identity columns tool_call already uses", () => {
-  const { text, params } = readCallInsertSQL(JOE, "standing-context", true, null);
-  assert.match(text, /insert into tool_read_call/);
-  assert.match(text, /verb, actor_slug, actor_id, ok, error_kind, via, client_id/);
-  assert.match(text, /organization_tenant_id, sponsoring_human_slug, personal_scope, authorization_class/);
-  // params order: verb, actor_slug (also feeds the actor_id subquery via $2),
-  // ok, error_kind, via, client_id, org_tenant, sponsoring_slug, personal_scope, auth_class
-  assert.deepEqual(params, [
-    "standing-context", "joe", true, null, "oauth-google", "claude",
-    "carr-internal", "joe", "joe-personal", "verified_partner",
-  ]);
+test("readCallCountSQL: upserts one daily tool_read_count counter keyed by day, verb, sponsor, via and ok", () => {
+  const { text, params } = readCallCountSQL(JOE, "standing-context", true);
+  assert.match(text, /insert into tool_read_count as c \(day, verb, sponsoring_human_slug, via, ok, n, last_at\)/);
+  assert.match(text, /\(now\(\) at time zone 'UTC'\)::date/);
+  assert.match(text, /on conflict on constraint tool_read_count_key/);
+  assert.match(text, /do update set n = c\.n \+ 1, last_at = greatest\(c\.last_at, excluded\.last_at\)/);
+  assert.deepEqual(params, ["standing-context", "joe", "oauth-google", true]);
 });
 
-test("readCallInsertSQL: a failed call carries ok:false and a short error_kind, never a raw message", () => {
-  const { params } = readCallInsertSQL(JOE, "get-deal-room", false, "not_a_deal");
-  assert.equal(params[2], false);
-  assert.equal(params[3], "not_a_deal");
+test("readCallCountSQL: no per-call actor lookup and no tool_read_call row", () => {
+  const { text } = readCallCountSQL(JOE, "standing-context", true);
+  assert.doesNotMatch(text, /from actor|actor_id|tool_read_call/);
 });
 
-test("readCallInsertSQL: the function's own signature proves no argument value or response body can reach it", () => {
-  assert.equal(readCallInsertSQL.length, 4); // (actor, verb, ok, errorKind) — nothing else
+test("readCallCountSQL: a failed call is counted under ok:false", () => {
+  const { params } = readCallCountSQL(JOE, "get-deal-room", false);
+  assert.equal(params[3], false);
 });
 
-test("readCallInsertSQL: reads carry no idempotency_key — that column belongs to tool_call's write-replay contract only", () => {
-  const { text } = readCallInsertSQL(JOE, "find", true, null);
+test("readCallCountSQL: a caller with no sponsor or door label is still counted under null keys", () => {
+  const { params } = readCallCountSQL({ slug: "codex", human: false }, "find", true);
+  assert.deepEqual(params, ["find", null, null, true]);
+});
+
+test("readCallCountSQL: the function's own signature proves no argument value or response body can reach it", () => {
+  assert.equal(readCallCountSQL.length, 3); // (actor, verb, ok) — nothing else
+});
+
+test("readCallCountSQL: reads carry no idempotency_key — that column belongs to tool_call's write-replay contract only", () => {
+  const { text } = readCallCountSQL(JOE, "find", true);
   assert.doesNotMatch(text, /idempotency_key/);
   assert.doesNotMatch(text, /request_hash/);
   assert.doesNotMatch(text, /response/);
 });
 
 // ────────────────────────────────────────────────────────────────────────
-// recordReadCall — DI'd insert function, no network. Proves exactly one row
-// is written per call, a failed read still writes a row, and a logging
-// failure is swallowed rather than propagated.
+// recordReadCall — DI'd insert function, no network. Proves exactly one
+// statement per call, a failed read is still counted, and a counting failure
+// is swallowed rather than propagated.
 // ────────────────────────────────────────────────────────────────────────
 
-test("recordReadCall: a successful read records exactly one row with correct identity fields", async () => {
+test("recordReadCall: a successful read sends exactly one counter upsert", async () => {
   const calls = [];
   const insertFn = async (text, params) => { calls.push({ text, params }); return []; };
-  await recordReadCall(insertFn, JOE, "standing-context", true, null);
+  await recordReadCall(insertFn, JOE, "standing-context", true);
   assert.equal(calls.length, 1);
-  assert.match(calls[0].text, /insert into tool_read_call/);
-  assert.equal(calls[0].params[0], "standing-context"); // verb
-  assert.equal(calls[0].params[1], "joe");               // actor_slug
-  assert.equal(calls[0].params[2], true);                // ok
-  assert.equal(calls[0].params[3], null);                // error_kind
+  assert.match(calls[0].text, /insert into tool_read_count/);
+  assert.deepEqual(calls[0].params, ["standing-context", "joe", "oauth-google", true]);
 });
 
-test("recordReadCall: a failed read still records, with ok:false and the classified error_kind", async () => {
+test("recordReadCall: a failed read is still counted, with ok:false", async () => {
   const calls = [];
   const insertFn = async (text, params) => { calls.push({ text, params }); return []; };
-  await recordReadCall(insertFn, JOE, "get-deal-room", false, "not_a_deal");
+  await recordReadCall(insertFn, JOE, "get-deal-room", false);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].params[2], false);
-  assert.equal(calls[0].params[3], "not_a_deal");
+  assert.equal(calls[0].params[3], false);
 });
 
-test("recordReadCall: never stores a response body or an argument value — the insert function only ever sees what readCallInsertSQL built", async () => {
+test("recordReadCall: never stores a response body or an argument value — the insert function only ever sees what readCallCountSQL built", async () => {
   const calls = [];
   const insertFn = async (text, params) => { calls.push({ text, params }); return []; };
-  await recordReadCall(insertFn, JOE, "find", true, null);
+  await recordReadCall(insertFn, JOE, "find", true);
   const serialized = JSON.stringify(calls[0].params);
   assert.doesNotMatch(serialized, /deal_id|premises|secret|argument/);
 });
 
-test("recordReadCall: an insert failure is swallowed, never thrown — a logging failure must never surface as a read failure", async () => {
+test("recordReadCall: an insert failure is swallowed, never thrown — a counting failure must never surface as a read failure", async () => {
   const insertFn = async () => { throw new Error("network blip"); };
-  await assert.doesNotReject(recordReadCall(insertFn, JOE, "standing-context", true, null));
+  await assert.doesNotReject(recordReadCall(insertFn, JOE, "standing-context", true));
 });
 
-test("notification-feed writer read: one synthetic call yields one metadata-only audit row", async () => {
+test("notification-feed writer read: one synthetic call bumps one metadata-only counter", async () => {
   const rows = [], pending = [];
   const scheduled = scheduleWriterReadCall(
-    { writerConnection: true, write: false }, JOE, "notification-feed", true, null,
+    { writerConnection: true, write: false }, JOE, "notification-feed", true,
     promise => pending.push(promise), async (text, params) => { rows.push({ text, params }); },
   );
   assert.equal(scheduled, true);
   assert.equal(pending.length, 1);
   await Promise.all(pending);
   assert.equal(rows.length, 1);
-  assert.match(rows[0].text, /insert into tool_read_call/);
-  assert.deepEqual(rows[0].params.slice(0, 4), ["notification-feed", "joe", true, null]);
-  assert.equal(rows[0].params.length, 10, "only identity and outcome metadata reach the audit row");
+  assert.match(rows[0].text, /insert into tool_read_count/);
+  assert.deepEqual(rows[0].params, ["notification-feed", "joe", "oauth-google", true],
+    "only sponsor, door and outcome reach the counter");
 });
 
 test("mutating writer: synthetic calls never create a read-call row", async () => {
   const rows = [], pending = [];
   const insert = async () => { rows.push(true); };
   for (const tool of [{ write: true }, { writerConnection: true, write: true }]) {
-    assert.equal(scheduleWriterReadCall(tool, JOE, "acknowledge-notification", true, null,
+    assert.equal(scheduleWriterReadCall(tool, JOE, "acknowledge-notification", true,
       promise => pending.push(promise), insert), false);
   }
   assert.equal(pending.length, 0);

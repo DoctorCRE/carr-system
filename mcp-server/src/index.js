@@ -488,7 +488,7 @@ function agentActorFor(request, env) {
 // mcp-server/local-verb.mjs) used to open its OWN direct connection to the
 // production database and run a verb's handler code locally — bypassing this
 // Worker entirely, and with it the identity derivation above, the profile
-// gate in mcp.js, and the read-call instrumentation (0108's tool_read_call).
+// gate in mcp.js, and the read-call instrumentation (tool_read_count since 1032).
 // Proven live 2026-08-13: a standing-context call through that path left no
 // tool_read_call row; the same verb through this door does. local-verb.mjs is
 // now a thin HTTPS client of THIS Worker's /mcp endpoint, carrying the bearer

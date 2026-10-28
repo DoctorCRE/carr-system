@@ -7,7 +7,7 @@ import { NOW } from "./helpers/fixed-clock.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ToolError, executeRegisteredTool } from "../src/tools.js";
-import { readCallInsertSQL } from "../src/mcp.js";
+import { readCallCountSQL } from "../src/mcp.js";
 
 const JOE = { slug: "joe", display: "Joe", human: true, via: "oauth-google", client_id: "fixture" };
 const DELL = { slug: "dell", display: "Dell", human: true, via: "oauth-google", client_id: "fixture" };
@@ -327,10 +327,10 @@ test("a sealed true-zero renewal source is explicit empty, never unavailable or 
   assert.deepEqual(result.sections.renewals.items, []);
 });
 
-test("tool_read_call remains metadata-only for the composite response", () => {
+test("the read counter remains metadata-only for the composite response", () => {
   const output = { private_body: "Candidate Safe", sections: { renewals: { items: [{ display_name: "Renewal Safe" }] } } };
-  const receipt = readCallInsertSQL(JOE, "morning-brief", true, null);
-  assert.doesNotMatch(receipt.text, /response|argument|body|sponsor.*\$11/i);
+  const receipt = readCallCountSQL(JOE, "morning-brief", true);
+  assert.doesNotMatch(receipt.text, /response|argument|body|\$5/i);
   assert.doesNotMatch(JSON.stringify(receipt.params), /Candidate Safe|Renewal Safe|private_body/);
   assert.equal(output.sections.renewals.items.length, 1); // Guard against a vacuous metadata-only test.
 });

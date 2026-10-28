@@ -5,7 +5,7 @@
 // the production database and ran the verb's handler code locally — entirely
 // bypassing the deployed Worker's identity derivation (mcp-server/src/
 // identity.js), its profile gate (mcp.js's callTool), and its read-call
-// instrumentation (migration 0108's tool_read_call). Proven live 2026-08-13:
+// instrumentation (migration 0108's tool_read_call, tool_read_count since 1032). Proven live 2026-08-13:
 // a standing-context call through this path left no tool_read_call row; the
 // same verb through the real /mcp endpoint does.
 //

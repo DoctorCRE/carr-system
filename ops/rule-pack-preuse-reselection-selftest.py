@@ -29,6 +29,7 @@ class DeliveryTests(unittest.TestCase):
                    'prompt': 'Review this change'}
         payload.update(options.pop('payload', {}))
         runner = lambda command, **kwargs: subprocess.CompletedProcess(command, 0, json.dumps(source), '')
+        options.setdefault('cache', False)
         return hook.process(payload, runner=runner, dedupe=False, **options)
 
     def test_empty_lookup_has_no_stdout_but_keeps_a_valid_receipt(self):
@@ -88,12 +89,12 @@ class DeliveryTests(unittest.TestCase):
             raise OSError('store unreachable')
         payload = {'hook_event_name': 'PreToolUse', 'session_id': 's', 'tool_use_id': 't',
                    'tool_name': 'Write', 'tool_input': {'file_path': '/tmp/x', 'content': 'y'}, 'cwd': str(hook.REPO)}
-        out = hook.process(payload, runner=broken, dedupe=False)
+        out = hook.process(payload, runner=broken, dedupe=False, cache=False)
         specific = out['hookSpecificOutput']
         self.assertNotIn('permissionDecision', specific)
         self.assertIn('RULE LOOKUP UNAVAILABLE', specific['additionalContext'])
         self.assertFalse(json.loads(specific['additionalContext'])['complete'])
-        self.assertIsNone(hook.process(dict(payload, hook_event_name='Stop'), runner=broken, dedupe=False))
+        self.assertIsNone(hook.process(dict(payload, hook_event_name='Stop'), runner=broken, dedupe=False, cache=False))
 
     def test_stop_never_blocks_on_lookup_failure(self):
         """A blocked Stop re-opens the turn; Codex desks looped for hours on it (2026-10-18)."""
@@ -101,8 +102,8 @@ class DeliveryTests(unittest.TestCase):
             raise ValueError('unparseable catalog')
         base = {'hook_event_name': 'Stop', 'session_id': 's', 'turn_id': 't',
                 'last_assistant_message': 'done', 'cwd': str(hook.REPO)}
-        self.assertIsNone(hook.process(base, runner=crash, dedupe=False))
-        self.assertIsNone(hook.process(dict(base, session_id=''), runner=crash, dedupe=False))
+        self.assertIsNone(hook.process(base, runner=crash, dedupe=False, cache=False))
+        self.assertIsNone(hook.process(dict(base, session_id=''), runner=crash, dedupe=False, cache=False))
         mismatch = [dict(id='11111111', statement='Binding text', scope={'tools': ['Bash']}, personal_to='dell')]
         self.assertIsNone(self.invoke(mismatch, event='Stop'))
 
@@ -264,16 +265,16 @@ class DeliveryTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 1, '', 'secret provider detail')
         event = {'hook_event_name': 'PreToolUse', 'session_id': 'fixture',
                  'tool_use_id': 'call', 'tool_name': 'Bash', 'tool_input': {'command': 'git push'}}
-        output = hook.process(event, runner=unavailable)
+        output = hook.process(event, runner=unavailable, cache=False)
         self.assertNotIn('permissionDecision', output['hookSpecificOutput'])
         self.assertIn('RULE LOOKUP UNAVAILABLE', output['hookSpecificOutput']['additionalContext'])
         self.assertNotIn('secret', json.dumps(output))
         event['tool_input'] = {'command': './run.sh call standing-context \'{}\''}
-        self.assertIsNone(hook.process(event, runner=unavailable))
+        self.assertIsNone(hook.process(event, runner=unavailable, cache=False))
         event['tool_input'] = {'command': './run.sh call read-doctrine \'{"document":"engineering-workflow-sop"}\''}
-        self.assertIsNone(hook.process(event, runner=unavailable))
+        self.assertIsNone(hook.process(event, runner=unavailable, cache=False))
         event['tool_input']['command'] += ' && touch forbidden'
-        self.assertNotIn('permissionDecision', hook.process(event, runner=unavailable)['hookSpecificOutput'])
+        self.assertNotIn('permissionDecision', hook.process(event, runner=unavailable, cache=False)['hookSpecificOutput'])
 
 
 class CardDeliveryTests(unittest.TestCase):
@@ -294,7 +295,7 @@ class CardDeliveryTests(unittest.TestCase):
                 'tool_name': 'Bash', 'tool_input': {'command': 'git diff'}, 'prompt': 'Review this change'}
         base.update(payload or {})
         runner = lambda command, **kwargs: subprocess.CompletedProcess(command, 0, json.dumps(source), '')
-        return hook.process(base, runner=runner, dedupe=dedupe)
+        return hook.process(base, runner=runner, dedupe=dedupe, cache=False)
 
     def receipt(self, output):
         specific = output['hookSpecificOutput']
@@ -375,6 +376,76 @@ class CardDeliveryTests(unittest.TestCase):
             bad = dict(row, cards=cards)
             bad['receipt_id'] = hook.receipt_id(bad)
             self.assertFalse(validate_lookup_receipt(bad, repo=REPO))
+
+
+class CatalogCacheTests(unittest.TestCase):
+    """The hook reads standing-context once per session, not once per tool call (WR573.S1.J2)."""
+    RULE = dict(id='11111111', statement='Inspect the diff.', scope={'tools': ['Bash']}, personal_to=None)
+
+    def setUp(self):
+        raw = tempfile.TemporaryDirectory()
+        self.addCleanup(raw.cleanup)
+        self.root = Path(raw.name)
+        env = patch.dict(os.environ, {'CARR_RULE_SCOPE_CACHE_DIR': raw.name})
+        env.start()
+        self.addCleanup(env.stop)
+        self.calls = []
+        self.digest = 'a' * 64
+        self.rules = [self.RULE]
+
+    def runner(self, command, **kwargs):
+        self.calls.append(command)
+        return subprocess.CompletedProcess(command, 0, json.dumps({
+            'ok': True, 'schema': 'rule-scope-catalog/v1', 'corpus_digest': self.digest,
+            'identity': {'agent_principal_id': 'joe-local', 'runtime_principal': 'joe-local',
+                         'sponsoring_human_id': 'joe'}, 'rules': self.rules}), '')
+
+    def call(self, session='s1', n=0, cache=True):
+        payload = {'hook_event_name': 'PreToolUse', 'session_id': session, 'tool_use_id': f'call-{n}',
+                   'tool_name': 'Bash', 'tool_input': {'command': 'git diff'}, 'prompt': 'Review this change'}
+        return hook.process(payload, runner=self.runner, dedupe=False, cache=cache)
+
+    def test_one_fetch_per_session_per_corpus_digest(self):
+        outputs = [self.call(n=n) for n in range(25)]
+        self.assertEqual(len(self.calls), 1)
+        self.call(session='s2')
+        self.assertEqual(len(self.calls), 2, 'a second session reads its own catalog once')
+        self.assertTrue(all(json.loads(o['hookSpecificOutput']['additionalContext'])['rule_ids'] == ['11111111']
+                            for o in outputs))
+
+    def test_cached_output_is_identical_to_an_uncached_lookup(self):
+        warm = [self.call(n=n) for n in range(3)]
+        cold = [self.call(n=n, cache=False) for n in range(3)]
+        self.assertEqual(warm, cold)
+        self.assertEqual(len(self.calls), 4)
+
+    def test_changed_corpus_digest_replaces_the_catalog_at_the_next_read(self):
+        lookup = hook.lookup
+        event = {'hook_event_name': 'PreToolUse', 'tool_name': 'Bash', 'tool_input': {'command': 'git diff'}}
+        first = lookup(event, runner=self.runner, session_id='s1', now=1000.0)
+        self.digest, self.rules = 'b' * 64, []
+        within = lookup(event, runner=self.runner, session_id='s1', now=1000.0 + 599)
+        self.assertEqual((len(self.calls), within), (1, first))
+        after = lookup(event, runner=self.runner, session_id='s1', now=1000.0 + 600)
+        self.assertEqual((len(self.calls), after['corpus_digest'], after['rules']), (2, 'b' * 64, []))
+        lookup(event, runner=self.runner, session_id='s1', now=1000.0 + 601)
+        self.assertEqual(len(self.calls), 2, 'the new digest is read once, then reused')
+
+    def test_failed_or_corrupt_reads_are_never_served_from_cache(self):
+        def down(command, **kwargs):
+            self.calls.append(command)
+            return subprocess.CompletedProcess(command, 1, '', 'store down')
+        event = {'hook_event_name': 'PreToolUse', 'session_id': 's1', 'tool_use_id': 'c',
+                 'tool_name': 'Bash', 'tool_input': {'command': 'git diff'}}
+        out = hook.process(event, runner=down, dedupe=False)
+        self.assertIn('RULE LOOKUP UNAVAILABLE', out['hookSpecificOutput']['additionalContext'])
+        self.call()
+        self.assertEqual(len(self.calls), 2, 'an outage is not cached; the next call reads the store')
+        cached = next(self.root.glob('*.json'))
+        self.assertEqual(cached.stat().st_mode & 0o777, 0o600)
+        cached.write_text('{not json')
+        self.call(n=1)
+        self.assertEqual(len(self.calls), 3)
 
 
 if __name__ == '__main__':
