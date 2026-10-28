@@ -118,10 +118,25 @@ test('triage pages equal and null dates across kinds without dropping or repeati
     error instanceof ToolError && error.payload.error === 'triage_cursor_invalid');
   const broad = await call({});
   assert.equal(broad.total, 6);
-  assert.equal(broad.items[0].owner, 'claude');
+  assert.equal(broad.items[3].owner, 'claude');
   await db.query("delete from triage_fixture where id <> $1 or item_kind <> 'next_action'", [id(1)]);
   assert.deepEqual(await call({ owners: 'partners', cursor: first.next_cursor }),
     { items: [], total: 1, has_more: false, next_cursor: null });
+});
+
+test('recently due actions lead old overdue ones and dates stay soonest-first across pages', async () => {
+  const day = n => `2026-0${n}-01`;
+  const { soon, later } = (await db.query(`select (current_date + 2)::text as soon, (current_date + 9)::text as later`)).rows[0];
+  await rows([
+    [1, 'next_action', 'joe', day(1)], [2, 'next_action', 'joe', day(5)], [3, 'post_call_action', 'dell', day(3)],
+    [4, 'critical_date', null, later], [5, 'critical_date', null, soon], [6, 'ingest', null, null],
+  ]);
+  const first = await call({ owners: 'partners', limit: 2 });
+  const second = await call({ owners: 'partners', limit: 2, cursor: first.next_cursor });
+  const third = await call({ owners: 'partners', limit: 2, cursor: second.next_cursor });
+  assert.deepEqual([first, second, third].flatMap(page => page.items.map(row => row.id)),
+    [id(2), id(3), id(1), id(5), id(4), id(6)]);
+  assert.equal(third.has_more, false);
 });
 
 test('imminent critical dates survive more than one page of overdue critical dates', async () => {
@@ -157,10 +172,10 @@ test('invalid paging inputs are refused before SQL and empty queues remain compl
 
 test('malformed cursor dates and keys refuse before SQL', async () => {
   const noQuery = { query: () => assert.fail('malformed cursors must not reach SQL') };
-  const valid = { v: 1, owners: 'partners', on: '2026-01-01', rank: 1, due_on: null,
+  const valid = { v: 2, owners: 'partners', on: '2026-01-01', rank: 1, due_on: null,
     item_kind: 'next_action', id: id(1) };
   for (const patch of [
-    { v: 2 }, { owners: 'all' }, { on: '0000-01-01' }, { due_on: '0000-01-01' },
+    { v: 1 }, { owners: 'all' }, { on: '0000-01-01' }, { due_on: '0000-01-01' },
     { on: '2026-02-30' }, { due_on: '2026-01-01T00:00:00Z' }, { rank: 3 },
     { item_kind: 'unknown' }, { id: 'not-an-id' },
   ]) await assert.rejects(executeRegisteredTool(noQuery, JOE, 'today-triage',
