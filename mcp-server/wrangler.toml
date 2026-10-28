@@ -168,6 +168,7 @@ fallthrough = true
 CARR_ENV = "production"
 APP_HOST = "app.doctorcre.com"
 LEGACY_DEALROOM_HOST = "dealroom.doctorcre.com"
+AI_DAILY_NEURON_BUDGET = "8000"
 # A reviewed, public deployment setting. Program 6 is enabled only through the
 # immutable release that fingerprints this exact config value; the shared
 # parser still fails closed for a missing or non-literal value.
@@ -212,12 +213,21 @@ id = "b033d3b5c454445080e9d0ab51ff8f3c"
 name = "OAUTH_CONSENT_STATE"
 class_name = "OAuthConsentState"
 
+[[durable_objects.bindings]]
+name = "AI_NEURON_BUDGET"
+class_name = "AiNeuronBudget"
+
 [[migrations]]
 tag = "oauth-consent-v1"
 new_sqlite_classes = ["OAuthConsentState"]
 
+[[migrations]]
+tag = "ai-neuron-budget-v1"
+new_sqlite_classes = ["AiNeuronBudget"]
+
 [observability]
 enabled = true
+head_sampling_rate = 0.1
 
 # Spend guard. Workers Paid has no hard spend cap, and without this every
 # invocation may burn up to the 30 s default CPU. Measured 2026-09-27..10-27
@@ -260,6 +270,7 @@ routes = []
 CARR_ENV = "staging"
 APP_HOST = "carr-mcp-staging.joe-bookout-carr-us.workers.dev"
 DOCTORCRE_APP_HOST = "doctorcre-app-staging.joe-bookout-carr-us.workers.dev"
+AI_DAILY_NEURON_BUDGET = "1500"
 CARR_MCP_ALLOWED_ORIGINS = '["https://carr-mcp-staging.joe-bookout-carr-us.workers.dev","https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev"]'
 DEALROOM_PROGRAM6_ACTIONS_ENABLED = "true"
 WORKSPACE_COMMAND_CENTER_READ_ENABLED = "true"
@@ -286,8 +297,13 @@ id = "faa513fd07ec45d88abc5949f323aec5"
 name = "OAUTH_CONSENT_STATE"
 class_name = "OAuthConsentState"
 
+[[env.staging.durable_objects.bindings]]
+name = "AI_NEURON_BUDGET"
+class_name = "AiNeuronBudget"
+
 [env.staging.observability]
 enabled = true
+head_sampling_rate = 0.01
 
 # Wrangler does not inherit `ai` into a named environment.
 [env.staging.ai]
