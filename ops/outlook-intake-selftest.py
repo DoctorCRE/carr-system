@@ -1136,6 +1136,46 @@ class IntakeTest(unittest.TestCase):
         self.assertNotEqual(captured[0]['idempotency_key'], captured[1]['idempotency_key'])
         self.assertEqual([a['email_source']['mailbox_owner'] for a in captured], ['joe', 'dell'])
 
+    def test_shared_email_next_actions_are_scoped_to_the_owner(self):
+        m = mail('pat@example.test', -timedelta(hours=1))
+        self.fake.model_reply = {'next_step': 'Reply', 'due_on': None}
+        keys = []
+        for owner in ('joe', 'dell'):
+            shutil.rmtree(self.out(), ignore_errors=True)
+            self.fake.calls.clear()
+            write_settings(self.home, self.repo, owner=owner)
+            self.assertEqual(self.run_intake([m]).state, 'succeeded')
+            [(_, args)] = self.fake.writes('set-next-action')
+            keys.append(args['idempotency_key'])
+        self.assertNotEqual(*keys)
+
+    def test_legacy_blocked_action_recovers_once_under_owner_key(self):
+        m = mail('pat@example.test', -timedelta(hours=1))
+        write_settings(self.home, self.repo, owner='dell')
+        self.fake.model_reply = {'next_step': 'Reply', 'due_on': None}
+        self.fake.fail_verbs.add('set-next-action')
+        self.assertEqual(self.run_intake([m]).state, 'failed')
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        old = intake.key('set-next-action', 'C-901', f'next|{ident(m)}')
+        [current] = [k for k, r in state['requests'].items() if r['verb'] == 'set-next-action']
+        request = state['requests'].pop(current)
+        payload = json.loads(request['payload'])
+        payload['idempotency_key'] = old
+        request.update(payload=json.dumps(payload), disposition='blocked', error_code='key_reuse', retry_at=None)
+        state['requests'][old] = request
+        path.write_text(json.dumps(state))
+        self.fake.calls.clear()
+        self.fake.fail_verbs.clear()
+        result = self.run_intake([], touch=False)
+        self.assertEqual(result.state, 'succeeded', result)
+        [(_, args)] = self.fake.writes('set-next-action')
+        self.assertEqual(args['idempotency_key'], intake.key('set-next-action', 'C-901', f'dell|next|{ident(m)}'))
+        self.assertEqual(args['description'], 'Reply')
+        self.fake.calls.clear()
+        self.assertEqual(self.run_intake([], touch=False).state, 'succeeded')
+        self.assertEqual(self.fake.writes('set-next-action'), [])
+
     def test_legacy_pending_mail_write_replays_its_original_key_and_payload(self):
         m = mail('pat@example.test', -timedelta(hours=1))
         self.fake.fail_verbs.add('log-activity')
