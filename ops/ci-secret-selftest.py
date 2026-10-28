@@ -27,6 +27,12 @@ class SecretTest(unittest.TestCase):
                 'print(name+" diagnostic")\n'
                 'raise SystemExit(7 if os.environ["FAIL_CHILD"] == name else 0)\n')
 
+        scanner = self.root / 'ops/ci-secret-scan.py'
+        scanner.write_text('import sys,runpy\n'
+            'if "--redact" in sys.argv:\n'
+            f'    print(runpy.run_path({str(ci.REPO / "ops/ci-secret-scan.py")!r})["redact"](sys.stdin.read()), end="")\n'
+            '    raise SystemExit(0)\n' + scanner.read_text())
+
     def tearDown(self):
         self.fixture.__exit__(None, None, None)
 
@@ -73,13 +79,26 @@ class SecretTest(unittest.TestCase):
                 self.assertEqual(rc, 1, output)
                 self.assertEqual(len(trace), count)
                 self.assertIn(message, output)
-                self.assertIn(child + ' diagnostic', output)
+                self.assertNotIn(child + ' diagnostic', output)
                 directory = Path(re.search(r'ci-retained-logs: (.+)', output)[1])
                 self.assertEqual((directory / (log + '.log.rc')).read_text(), '7\n')
                 self.assertEqual(sorted(p.name for p in directory.glob('*.log')), [log + '.log'])
                 records = [s.split('\t')[:3] for s in (directory / 'programs.tsv').read_text().splitlines()]
                 self.assertEqual(records[-1], ['secret', log, '7'])
                 self.assertEqual(len(records), count)
+
+    def test_failure_diagnostics_omit_values_and_stop_at_twenty_lines(self):
+        secret = 'AKIA' + 'X' * 16
+        (self.root / 'security/leak_guard.py').write_text(
+            f"for i in range(25): print(f'fixtures/{secret}.py:{{i+1}} shaped-rule matched-value-never-print')\n"
+            "raise SystemExit(1)\n")
+        rc, output, _ = self.run_ci()
+        self.assertEqual(rc, 1, output)
+        self.assertNotIn(secret, output)
+        self.assertIn('.py:1 shaped-rule', output)
+        self.assertIn('.py:20 shaped-rule', output)
+        self.assertNotIn('.py:21', output)
+        self.assertNotIn('matched-value-never-print', output)
 
     def test_runner_crash_fails_closed(self):
         (self.root / 'ops/ci-secret.py').unlink()

@@ -78,6 +78,8 @@ def degraded_receipt(lines):
     for receipt in latest.values():
         if isinstance(receipt, dict) and receipt.get("state") == "degraded":
             counts = receipt.get("counts") if isinstance(receipt.get("counts"), dict) else {}
+            if isinstance(counts.get("run"), dict):
+                counts = counts["run"]
             rates = ", ".join(f"{k[:-3].removeprefix('decoder_')} {v / 100:.1f}%" for k, v in counts.items()
                               if k.endswith("_bp") and type(v) is int)
             return f"({receipt.get('reason')}): {rates or 'no rates reported'}"

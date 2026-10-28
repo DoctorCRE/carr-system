@@ -72,7 +72,7 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
     if (send._addresses([settings.partner_cc]) != (settings.partner_cc,)
             or not settings.partner_cc or settings.partner_cc == settings.account):
         raise ValueError('partner_copy_required')
-    counts = dict(sent=0, failed=0, deferred=0, receipt_failed=0)
+    counts = dict(sent=0, failed=0, deferred=0, receipt_failed=0, compose_window_open=0)
     ports.out.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(ports.out, 0o700)
     root = ports.out / 'outbox'
@@ -123,8 +123,10 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
                 result = send.send_submitted(draft.mail, idempotency_key=draft.key, ports=ports)
                 if (result.state in (send.State.NOT_IDLE, send.State.PRESSED_UNCONFIRMED,
                                      send.State.WINDOW_NOT_CLOSED)
-                        or result.reason in ('daily_cap', 'another_write_running')):
+                        or result.reason in ('daily_cap', 'another_write_running', 'compose_window_open')):
                     counts['deferred'] += 1
+                    if result.reason == 'compose_window_open':
+                        counts['compose_window_open'] += 1
                     continue
                 receipt = draft.receipt(result)
                 key = draft.key

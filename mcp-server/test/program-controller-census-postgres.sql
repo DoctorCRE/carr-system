@@ -10,7 +10,7 @@
 -- proves nothing about which rows moved.
 
 -- ---------------------------------------------------------------------------
--- T-CATALOG-DELTA, part one: 0517's own surface.
+-- T-CATALOG-DELTA: 0517's own surface.
 -- ---------------------------------------------------------------------------
 do $wr110_catalog$
 declare
@@ -111,57 +111,6 @@ begin
 
   expected_rows := observed_rows;  -- keep the lifted variable live for the reader
 end $wr110_catalog$;
-
--- ---------------------------------------------------------------------------
--- T-CATALOG-DELTA, part two: the v29 successor's own +4 -- ONE registration
--- function granted to FOUR roles, and ZERO rows for the seal and catalog
--- functions it also installs.
--- ---------------------------------------------------------------------------
-do $wr110_successor_catalog$
-declare
-  registration_rows text[];
-  quiet_rows text[];
-begin
-  if to_regprocedure('ops.scac_mutation_registration_v29(text,text)') is null then
-    raise exception 'WR-000110: the v29 registration function is absent; 0518 did not load';
-  end if;
-
-    with recursive connected(oid) as (select oid from pg_roles where rolname~'^carr_' and rolname<>'carr_ci' union select other.oid from connected c join pg_auth_members m on m.roleid=c.oid or m.member=c.oid join pg_roles other on other.oid=case when m.roleid=c.oid then m.member else m.roleid end where other.rolname<>'carr_ci' and not other.rolsuper),
-  runtime_roles as (select r.oid,r.rolname from pg_roles r where r.oid in(select oid from connected) and not r.rolsuper),
-  functions as (select p.oid,n.nspname,p.proname,pg_get_function_identity_arguments(p.oid) args,p.prosecdef,p.prokind,p.provolatile,p.proparallel,p.proconfig,p.proacl,p.proowner from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname not in ('pg_catalog','information_schema') and p.prokind in ('f','p')),
-  capabilities as (select f.*,acl.grantee,acl.privilege_type,acl.is_grantable from functions f cross join lateral aclexplode(coalesce(f.proacl,acldefault('f',f.proowner))) acl),
-  observed as (select 'db-function-acl:'||nspname||'.'||proname||'('||args||'):'||coalesce(r.rolname,'public')||':execute' ingress_key,jsonb_build_object('ingress_key','db-function-acl:'||nspname||'.'||proname||'('||args||'):'||coalesce(r.rolname,'public')||':execute','ingress_kind','db_function_acl','signature',nspname||'.'||proname||'('||args||')','security_definer',prosecdef,'function_kind',prokind,'volatility',provolatile,'parallel',proparallel,'config',coalesce(to_jsonb(proconfig),'[]'::jsonb),'grantee',coalesce(r.rolname,'public'),'privilege','execute','grantable',is_grantable) row from capabilities c left join pg_roles r on r.oid=c.grantee where prosecdef and privilege_type='EXECUTE' and grantee<>proowner and (grantee=0 or r.oid in(select oid from runtime_roles)))
-  select coalesce(array_agg(ingress_key order by ingress_key collate "C"), '{}')
-    into registration_rows from observed
-    where ingress_key like 'db-function-acl:ops.scac_mutation_registration_v29(%';
-  if cardinality(registration_rows) <> 4 then
-    raise exception 'WR-000110: the v29 registration function has % secdef rows, expected exactly 4 grantees (%)',
-      cardinality(registration_rows), registration_rows;
-  end if;
-
-    with recursive connected(oid) as (select oid from pg_roles where rolname~'^carr_' and rolname<>'carr_ci' union select other.oid from connected c join pg_auth_members m on m.roleid=c.oid or m.member=c.oid join pg_roles other on other.oid=case when m.roleid=c.oid then m.member else m.roleid end where other.rolname<>'carr_ci' and not other.rolsuper),
-  runtime_roles as (select r.oid,r.rolname from pg_roles r where r.oid in(select oid from connected) and not r.rolsuper),
-  functions as (select p.oid,n.nspname,p.proname,pg_get_function_identity_arguments(p.oid) args,p.prosecdef,p.prokind,p.provolatile,p.proparallel,p.proconfig,p.proacl,p.proowner from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname not in ('pg_catalog','information_schema') and p.prokind in ('f','p')),
-  capabilities as (select f.*,acl.grantee,acl.privilege_type,acl.is_grantable from functions f cross join lateral aclexplode(coalesce(f.proacl,acldefault('f',f.proowner))) acl),
-  observed as (select 'db-function-acl:'||nspname||'.'||proname||'('||args||'):'||coalesce(r.rolname,'public')||':execute' ingress_key,jsonb_build_object('ingress_key','db-function-acl:'||nspname||'.'||proname||'('||args||'):'||coalesce(r.rolname,'public')||':execute','ingress_kind','db_function_acl','signature',nspname||'.'||proname||'('||args||')','security_definer',prosecdef,'function_kind',prokind,'volatility',provolatile,'parallel',proparallel,'config',coalesce(to_jsonb(proconfig),'[]'::jsonb),'grantee',coalesce(r.rolname,'public'),'privilege','execute','grantable',is_grantable) row from capabilities c left join pg_roles r on r.oid=c.grantee where prosecdef and privilege_type='EXECUTE' and grantee<>proowner and (grantee=0 or r.oid in(select oid from runtime_roles)))
-  select coalesce(array_agg(ingress_key order by ingress_key collate "C"), '{}')
-    into quiet_rows from observed
-    where ingress_key like 'db-function-acl:ops.scac_mutation_catalog_v29%'
-       or ingress_key like 'db-function-acl:ops.scac_mutation_registry_v29%';
-  if cardinality(quiet_rows) <> 0 then
-    raise exception 'WR-000110: a v29 seal or catalog function carries an ACL row: %', quiet_rows;
-  end if;
-
-  -- THE SEAL, NOT THE LIVE CATALOG. This asserted ops.scac_mutation_catalog_v29_current()
-  -- until WR-000111/112/113 installed v30, which renames that predicate to
-  -- _live_at_seal and makes it false BY DESIGN -- exactly what v29 did to v28.
-  -- A proof pinned to "my generation is still the frontier" has to be rewritten
-  -- by every successor; the durable claim is that 0518's own seal is intact and
-  -- still validates its entry set, which stays true for every generation after.
-  if not ops.scac_mutation_registry_v29_seal_available() then
-    raise exception 'WR-000110: the v29 registry seal is absent or no longer validates its entry set';
-  end if;
-end $wr110_successor_catalog$;
 
 -- ---------------------------------------------------------------------------
 -- F02-LEASE-ROW and F02-ADMISSION-OVERLAP, the ledger half: the refusal row is

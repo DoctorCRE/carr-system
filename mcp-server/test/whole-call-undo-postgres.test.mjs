@@ -89,7 +89,9 @@ async function fileCandidate(session, item, key = randomUUID()) {
   } });
   const response = await handler.fetch(new Request('http://127.0.0.1/capture/candidates', {
     method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({
-      session_token:sessionTokens.get(session), idempotency_key:key, items:[item]
+      session_token:sessionTokens.get(session), idempotency_key:key, items:[item],
+      evidence_sources:[{speaker:'joe', source_sha256:createHash('sha256').update('Synthetic stored partner transcript').digest('hex'),
+        quote_sha256:createHash('sha256').update(item.evidence_quote).digest('hex')}],
     })
   }), {});
   const body = await response.json();

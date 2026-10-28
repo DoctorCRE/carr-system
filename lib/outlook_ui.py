@@ -35,7 +35,8 @@ from lib.outlook_settings import load_settings
 EXIT = {'succeeded': 0, 'skipped': 78, 'timed_out': 124, 'failed': 1}
 SIDEBAR = ['View', 'Sidebar']
 QUIT = ['Outlook', 'Quit Outlook']
-TABS = re.compile(r'Focused Inbox (Selected|Unselected);\s*Other Inbox (Selected|Unselected)')
+# Outlook names the selected tab first: "Other Inbox Selected;  Focused Inbox Unselected".
+TABS = re.compile(r'(Focused|Other) Inbox Selected;\s*(?:Focused|Other) Inbox Unselected')
 SWITCH = {'focused': ['View', 'Switch to Focused'], 'other': ['View', 'Switch to Other']}
 LIST_WALK = 1500
 PANE_WALK = {'max_elements': 1500, 'max_depth': 3}
@@ -61,6 +62,10 @@ class Waits:
 
 
 class CuaError(Exception):
+    pass
+
+
+class ComposeWindowOpen(Exception):
     pass
 
 
@@ -136,18 +141,16 @@ def is_main_window(window: dict) -> bool:
 
 
 def is_compose_window(window: dict) -> bool:
-    """Protect possible drafts, except the observed unassigned off-screen window.
-
-    The 500x500 window has an empty title and unknown purpose; AX did not resolve it.
-    Keep all other sizeable non-mailbox windows protected, even without a subject.
-    """
+    """Identify titled drafts, retaining the observed unassigned-window exemption."""
     bounds = window.get('bounds') or {}
     if (window.get('title') == '' and bounds.get('width') == 500
             and bounds.get('height') == 500 and window.get('is_on_screen') is False
             and 'on_current_space' in window and window['on_current_space'] is None):
         return False
-    return (not is_main_window(window) and bounds.get('width', 0) >= 400
-            and bounds.get('height', 0) >= 400)
+    title = window.get('title') or ''
+    return bool(re.match(r'^(?:Draft|Compose|New (?:Mail|Message))(?: • |$)', title, re.I)
+                or (title and not is_main_window(window) and bounds.get('width', 0) >= 400
+                    and bounds.get('height', 0) >= 400))
 
 
 def is_ordinary_main_window(window: dict) -> bool:
@@ -191,7 +194,28 @@ def usable_window(pid: int) -> dict | None:
     return next((w for w in _windows(pid) if is_ordinary_main_window(w) and _readable(pid, w)), None)
 
 
+def compose_window_open(pid: int, windows: list[dict]) -> bool:
+    """True on positive draft evidence: a draft title, or readable Send/Subject controls."""
+    for window in windows:
+        if is_compose_window(window):
+            return True
+        bounds = window.get('bounds') or {}
+        if (window.get('title') == '' and window.get('is_on_screen') is False
+                and bounds.get('height') in (30, 32)):
+            continue
+        state = cua('get_window_state', {'pid': pid, 'window_id': window['window_id'],
+                                         'include_screenshot': False, 'max_elements': LIST_WALK})
+        controls = {(element.get('role'), element.get('label'))
+                    for element in state.get('elements') or []}
+        if (not str(state.get('degraded_reason') or '').startswith('ax_window_unresolved')
+                and ({('AXButton', 'Send'), ('AXTextField', 'Subject')} & controls)):
+            return True
+    return False
+
+
 def _quit(pid: int, windows: list[dict], waits: Waits) -> bool:
+    if compose_window_open(pid, windows):
+        raise ComposeWindowOpen
     window = next((w for w in windows if is_ordinary_main_window(w)), None)
     fallback_at = time.monotonic()
     if window is not None:
@@ -207,6 +231,11 @@ def _quit(pid: int, windows: list[dict], waits: Waits) -> bool:
         if now >= deadline:
             return False
         if now >= fallback_at:
+            if compose_window_open(pid, _windows(pid)):
+                raise ComposeWindowOpen
+            now = time.monotonic()
+            if now >= deadline:
+                return False
             try:
                 subprocess.run(['osascript', '-e', f'tell application "{APP}" to quit'],
                                capture_output=True, timeout=min(30, deadline - now))
@@ -279,6 +308,8 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
                 pass
             time.sleep(waits.new_window_seconds)
         return None if usable_window(pid) else Outcome('failed', 'no_usable_main_window')
+    except ComposeWindowOpen:
+        return Outcome('skipped', 'compose_window_open')
     except CuaError:
         return Outcome('failed', 'cua_driver_unavailable')
     except subprocess.TimeoutExpired:
@@ -508,5 +539,5 @@ def _tab(elements: list[dict]) -> str | None:
     for e in elements:
         match = TABS.search(e.get('label') or '')
         if e.get('role') == 'AXCheckBox' and match:
-            return 'focused' if match.group(1) == 'Selected' else 'other'
+            return match.group(1).lower()
     return None

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Run one Codex job in a fresh clone; return its final message and exit code."""
 import argparse
+import contextlib
 import fcntl
 import os
 from pathlib import Path
 import re
 import signal
+import runpy
 import stat
 import shutil
 import subprocess
@@ -22,10 +24,12 @@ from skill_picker import prepare
 
 
 def job_log():
-    """The file this job's output is redirected to: its transcript for attach-memory."""
+    """The file this job's output is redirected to: its transcript for attach-memory, made owner-only."""
     try:
         if not stat.S_ISREG(os.fstat(2).st_mode):
             return None
+        with contextlib.suppress(OSError):
+            os.fchmod(2, 0o600)
         if sys.platform == 'darwin':
             return os.fsdecode(fcntl.fcntl(2, fcntl.F_GETPATH, bytes(1024)).rstrip(b'\0'))
         return os.readlink('/proc/self/fd/2')
@@ -39,7 +43,11 @@ def main():
     parser.add_argument('branch', help='new branch name')
     parser.add_argument('brief')
     parser.add_argument('-c', '--config', action='append', default=[], metavar='key=value')
+    parser.add_argument("--timeout-seconds", type=int, default=10800, help="wall-clock cap (default: 3 hours)")
     args = parser.parse_args()
+    if args.timeout_seconds <= 0:
+        parser.error("--timeout-seconds must be positive")
+    timeout = runpy.run_path(str(Path(__file__).with_name("with-timeout.py")))
     repo = args.repo
     if not Path(repo).exists() and re.fullmatch(r'[\w.-]+/[\w.-]+', repo):
         repo = f'https://github.com/{repo}.git'
@@ -99,7 +107,11 @@ def main():
                                  stdout=sys.stderr, start_new_session=True)
         pgid = child.pid
         try:
-            code = child.wait()
+            try:
+                code = child.wait(timeout=args.timeout_seconds)
+            except subprocess.TimeoutExpired:
+                timeout["_terminate_group"](child)
+                code = 124
         finally:
             try:
                 os.killpg(pgid, signal.SIGTERM)

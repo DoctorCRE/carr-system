@@ -90,7 +90,7 @@ for (const blocker of ["human_only", "ruling", "capability"]) {
         residue_kind: kind, residue_host: "  github.com  " });
       assert.equal(r.ok, true);
       assert.deepEqual(r.residue, { kind, host: "github.com" });
-      assert.deepEqual(storedExtraCells(db), { blocker_residue: { kind, host: "github.com" } });
+      assert.deepEqual(storedExtraCells(db), { writer_surface: "local", blocker_residue: { kind, host: "github.com" } });
       assert.equal(db.events.length, 1);
       assert.ok(db.events[0].payload.includes(`"kind":"${kind}"`), "the event keeps the claim as made");
     });
@@ -103,7 +103,7 @@ for (const blocker of ["counterparty", "external_event", "other_lane"]) {
     const r = await addLoop(db, { blocker, blocker_detail: "Sanders, the listing broker on C-112" });
     assert.equal(r.ok, true);
     assert.equal(r.residue, undefined);
-    assert.deepEqual(storedExtraCells(db), {});
+    assert.deepEqual(storedExtraCells(db), { writer_surface: "local" });
   });
 }
 
@@ -118,7 +118,7 @@ test("add-loop: a kind without a blocker (idea) is untouched by the gate", async
   const r = await TOOLS["add-loop"].handler(db, joe, { idempotency_key: derivedIdempotencyKey("test", `residue-idea-${++n}`),
     kind: "idea", owner: "joe", body: "a parked idea" });
   assert.equal(r.ok, true);
-  assert.deepEqual(storedExtraCells(db), {});
+  assert.deepEqual(storedExtraCells(db), { writer_surface: "local" });
 });
 
 // ── add-loop: refusal ───────────────────────────────────────────────────

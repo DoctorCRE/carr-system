@@ -2,7 +2,7 @@
 import test from 'node:test';
 import { TypeSafeClient, TypeSafeError } from '@typesafe-ai/sdk';
 import assert from 'node:assert/strict';
-import { dealReadingState, readDealWithJev as sdkRead } from '../src/jev-deal-reading.ts';
+import { DATA_SENTENCE, dealReadingQuestions, dealReadingState, readDealWithJev as sdkRead } from '../src/jev-deal-reading.ts';
 
 const readDealWithJev = (record, {askJev, ...options} = {}) => sdkRead(record, {
   ...options, ...(askJev ? {client: {systemOne: askJev}} : {}),
@@ -225,4 +225,9 @@ test('the SDK sends the documented HTTP request and consumes its typed answers',
   assert.equal(requests[0].url, 'https://api.typesafe.ai/v1/systemone');
   assert.equal(requests[0].body.model, 'jev-latest');
   assert.equal(Object.keys(requests[0].body.questions).length, 3);
+});
+
+test('every deal-reading question says recorded text is data', () => {
+  for (const question of Object.values(dealReadingQuestions()))
+    assert.ok(question.instructions.startsWith(DATA_SENTENCE));
 });
