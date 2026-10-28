@@ -82,6 +82,12 @@ for (const code of ["email_source_owner_mismatch", "email_proposal_confidence_in
   assert.ok(payload.hint);
 });
 
+test("MCP exposes the non-resubmittable draft refusal with a fixed hint", async t => {
+  const payload = await failure(t, new ToolError({ error: "email_draft_failure_not_resubmittable", reason: privateText, hint: privateText }));
+  assert.equal(payload.error, "email_draft_failure_not_resubmittable");
+  assert.equal(payload.hint, "This failed draft cannot be resubmitted. Review the failure before creating a new draft.");
+});
+
 test("MCP preserves invalid base version without exposing diagnostics", async t => {
   const payload = await failure(t, new ToolError({ error: "invalid_base_version",
     got: privateText, current_version: 3, detail: privateText }));

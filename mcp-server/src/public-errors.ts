@@ -13,6 +13,7 @@ type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSche
 // Public shapes are deliberately closed. Never copy messages, hints, wrapped
 // details, event rows, driver codes, or arbitrary properties from a refusal.
 const PUBLIC_ERRORS = new Map<unknown, string>([
+  ["email_draft_failure_not_resubmittable", "This failed draft cannot be resubmitted. Review the failure before creating a new draft."],
   ["email_source_owner_mismatch", "Use the mailbox owner that matches the email source."],
   ["email_proposal_confidence_invalid", "Provide a confidence between zero and one."],
   ["email_proposal_fields_invalid", "Check the fields for the proposal kind."],
