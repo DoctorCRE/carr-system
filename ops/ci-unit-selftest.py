@@ -10,7 +10,7 @@ import unittest
 from git_env import fixture_env
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGES = ('mcp-server', 'control-room', 'workspace', 'practice-plugin')
+PACKAGES = ('mcp-server', 'practice-plugin')
 
 
 class UnitClassTests(unittest.TestCase):
@@ -60,7 +60,7 @@ class UnitClassTests(unittest.TestCase):
         self.all_packages()
         result = self.run_class()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn('4 tests, 4 passed', result.stdout)
+        self.assertIn('2 tests, 2 passed', result.stdout)
         for name in PACKAGES:
             self.assertIn(f'OK unit {name}: 1 tests, 1 passed', result.stdout)
 
@@ -73,34 +73,34 @@ class UnitClassTests(unittest.TestCase):
 
     def test_zero_tests_fails_even_when_node_exits_zero(self):
         self.all_packages()
-        (self.root / 'workspace/test/suite.test.mjs').write_text('')
+        (self.root / 'practice-plugin/test/suite.test.mjs').write_text('')
         result = self.run_class()
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn('workspace: zero passing tests', result.stderr)
+        self.assertIn('practice-plugin: zero passing tests', result.stderr)
 
     def test_skipped_only_package_fails_even_when_node_exits_zero(self):
         self.all_packages()
-        (self.root / 'workspace/test/suite.test.mjs').write_text(
+        (self.root / 'practice-plugin/test/suite.test.mjs').write_text(
             "import test from 'node:test'; test.skip('not executed', () => {});")
         result = self.run_class()
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn('workspace: zero passing tests', result.stderr)
+        self.assertIn('practice-plugin: zero passing tests', result.stderr)
 
     def test_failed_test_fails_the_class(self):
         self.all_packages()
-        (self.root / 'workspace/test/suite.test.mjs').write_text(
+        (self.root / 'practice-plugin/test/suite.test.mjs').write_text(
             "import test from 'node:test'; test('broken', () => { throw Error('seeded defect'); });")
         result = self.run_class()
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn('workspace: command exited 1', result.stderr)
+        self.assertIn('practice-plugin: command exited 1', result.stderr)
 
     def test_exit_zero_without_test_output_fails(self):
         self.all_packages()
-        (self.root / 'workspace/package.json').write_text(
+        (self.root / 'practice-plugin/package.json').write_text(
             json.dumps({'scripts': {'test': 'node -e "console.log(123)"'}}))
         result = self.run_class()
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn('workspace: no complete test counts', result.stderr)
+        self.assertIn('practice-plugin: no complete test counts', result.stderr)
 
     def test_missing_runner_fails(self):
         self.all_packages()
@@ -135,36 +135,36 @@ class UnitClassTests(unittest.TestCase):
 
     def test_package_skip_exit_is_red(self):
         self.all_packages()
-        (self.root / 'workspace/package.json').write_text(
+        (self.root / 'practice-plugin/package.json').write_text(
             json.dumps({'scripts': {'test': 'node -e "process.exit(78)"'}}))
         result = self.run_class()
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn('workspace: command exited 78', result.stderr)
+        self.assertIn('practice-plugin: command exited 78', result.stderr)
 
     def test_partial_individual_skips_are_reported(self):
         self.all_packages()
-        (self.root / 'workspace/test/suite.test.mjs').write_text(
+        (self.root / 'practice-plugin/test/suite.test.mjs').write_text(
             "import test from 'node:test'; test('executes', () => {}); test.skip('migration case', () => {});")
         result = self.run_class()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn('workspace: 2 tests, 1 passed, 1 skipped', result.stdout)
+        self.assertIn('practice-plugin: 2 tests, 1 passed, 1 skipped', result.stdout)
 
     def test_tap_reporter_counts_executed_tests(self):
         self.all_packages()
-        (self.root / 'workspace/package.json').write_text(
+        (self.root / 'practice-plugin/package.json').write_text(
             json.dumps({'scripts': {'test': 'node --test --test-reporter=tap test/*.test.mjs'}}))
         result = self.run_class()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn('workspace: 1 tests, 1 passed', result.stdout)
+        self.assertIn('practice-plugin: 1 tests, 1 passed', result.stdout)
 
     def test_tap_empty_file_is_not_a_test(self):
         self.all_packages()
-        (self.root / 'workspace/package.json').write_text(
+        (self.root / 'practice-plugin/package.json').write_text(
             json.dumps({'scripts': {'test': 'node --test --test-reporter=tap test/*.test.mjs'}}))
-        (self.root / 'workspace/test/suite.test.mjs').write_text('')
+        (self.root / 'practice-plugin/test/suite.test.mjs').write_text('')
         result = self.run_class()
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn('workspace: zero passing tests', result.stderr)
+        self.assertIn('practice-plugin: zero passing tests', result.stderr)
 
     def test_mcp_skipped_only_suites_fail(self):
         self.all_packages()
@@ -181,41 +181,41 @@ class UnitClassTests(unittest.TestCase):
 
     def test_empty_spec_file_is_not_a_test(self):
         self.all_packages()
-        workspace = self.root / 'workspace'
+        workspace = self.root / 'practice-plugin'
         (workspace / 'test/suite.test.mjs').rename(workspace / 'test/empty.spec.mjs')
         (workspace / 'test/empty.spec.mjs').write_text('')
         (workspace / 'package.json').write_text(
             json.dumps({'scripts': {'test': 'node --test test/*.spec.mjs'}}))
         result = self.run_class()
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn('workspace: zero passing tests', result.stderr)
+        self.assertIn('practice-plugin: zero passing tests', result.stderr)
 
     def test_real_test_named_like_a_file_passes(self):
         self.all_packages()
-        (self.root / 'workspace/test/suite.test.mjs').write_text(
+        (self.root / 'practice-plugin/test/suite.test.mjs').write_text(
             "import test from 'node:test'; import assert from 'node:assert/strict'; "
             "test('contract.test.mjs', () => assert.equal(2 + 2, 4));")
         for reporter in ('tap', 'spec'):
             with self.subTest(reporter=reporter):
-                (self.root / 'workspace/package.json').write_text(json.dumps({'scripts': {
+                (self.root / 'practice-plugin/package.json').write_text(json.dumps({'scripts': {
                     'test': f'node --test --test-reporter={reporter} test/*.test.mjs'}}))
                 result = self.run_class()
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertIn('workspace: 1 tests, 1 passed', result.stdout)
+                self.assertIn('practice-plugin: 1 tests, 1 passed', result.stdout)
 
     def test_mixed_empty_and_skipped_files_do_not_inflate_counts(self):
         self.all_packages()
-        tests = self.root / 'workspace/test'
+        tests = self.root / 'practice-plugin/test'
         (tests / 'empty.test.mjs').write_text("import 'node:test';")
         (tests / 'skipped.test.mjs').write_text(
             "import test from 'node:test'; test.skip('conditional', () => {});")
         result = self.run_class()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn('workspace: 2 tests, 1 passed, 1 skipped', result.stdout)
+        self.assertIn('practice-plugin: 2 tests, 1 passed, 1 skipped', result.stdout)
 
     def test_nested_node_tool_is_not_counted_as_an_empty_test_file(self):
         self.all_packages()
-        (self.root / 'workspace/test/suite.test.mjs').write_text(
+        (self.root / 'practice-plugin/test/suite.test.mjs').write_text(
             "import test from 'node:test'; import {spawnSync, fork} from 'node:child_process'; "
             "import assert from 'node:assert/strict'; "
             "test('nested tool', async () => { const child = spawnSync(process.execPath, "
@@ -225,10 +225,10 @@ class UnitClassTests(unittest.TestCase):
             "let output = ''; forked.stdout.on('data', data => output += data); "
             "await new Promise(resolve => forked.on('close', resolve)); "
             "assert.equal(forked.exitCode, 0); assert.equal(output.trim(), '123'); });")
-        (self.root / 'workspace/test/tool.mjs').write_text('console.log(123);')
+        (self.root / 'practice-plugin/test/tool.mjs').write_text('console.log(123);')
         result = self.run_class()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn('workspace: 1 tests, 1 passed', result.stdout)
+        self.assertIn('practice-plugin: 1 tests, 1 passed', result.stdout)
 
 
 if __name__ == '__main__':
