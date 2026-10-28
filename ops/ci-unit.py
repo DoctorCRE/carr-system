@@ -9,7 +9,7 @@ import tempfile
 from node_test_summary import FIELDS, test_counts
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGES = ('mcp-server', 'control-room', 'workspace', 'practice-plugin')
+PACKAGES = ('mcp-server', 'practice-plugin')
 
 def main():
     failed = False

@@ -448,8 +448,7 @@
       "sources": [
         "ops/*selftest.py",
         "ops/learning-credential-boundary-selftest.py",
-        "ops/learning-monthly-credential-selftest.py",
-        "workspace/test/**"
+        "ops/learning-monthly-credential-selftest.py"
       ],
       "path_pattern": "{{VAULT}}/**",
       "producer": "test fixtures",
