@@ -207,7 +207,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
       handler: async (c, actor, args) => {
         validate(args, {}, []);
         const rows = await ordered(c, actor);
-        const oldest = rows.filter(row => !row.finished && row.started_at).reduce((min, row) => Math.min(min, new Date(row.started_at).getTime()), Infinity);
+        const oldest = rows.filter(row => !row.finished && (row.executor !== 'codex' || row.started_at)).reduce((min, row) => Math.min(min, new Date(row.started_at ?? row.created_at).getTime()), Infinity);
         const sources = await (c.pullRequests ?? unavailablePullRequests)(Object.keys(addressFormat.repositories),
           Number.isFinite(oldest) ? new Date(oldest).toISOString() : undefined);
         const { finishes, ...view } = queueView(rows, sources, Date.now());
