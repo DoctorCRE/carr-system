@@ -1,7 +1,7 @@
 // Test shared OAuth policy and consent in the Worker.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { builtinModules } from "node:module";
+import { builtinModules, stripTypeScriptTypes } from "node:module";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -47,9 +47,9 @@ test("Worker entrypoint applies OAuth policy before authentication and alternate
 });
 
 test("Workerd SQLite consent consumption is atomic, persistent and deadline bound", async () => {
-  const source = await readFile(new URL("../src/oauth-consent-state.js", import.meta.url), "utf8");
+  const source = await readFile(new URL("../src/oauth-consent-state.ts", import.meta.url), "utf8");
   const worker = new Miniflare({ ...convertV4MiniflareOptions({ modules: true,
-    script: source + '\nexport default { fetch(request, env) { return env.OAUTH_CONSENT_STATE.get(env.OAUTH_CONSENT_STATE.idFromName(new URL(request.url).searchParams.get("id"))).fetch(request); } };',
+    script: stripTypeScriptTypes(source) + '\nexport default { fetch(request, env) { return env.OAUTH_CONSENT_STATE.get(env.OAUTH_CONSENT_STATE.idFromName(new URL(request.url).searchParams.get("id"))).fetch(request); } };',
     compatibilityDate: "2026-09-01",
     durableObjects: { OAUTH_CONSENT_STATE: { className: "OAuthConsentState", useSQLite: true } },
   }), resourcePersistencePath: fileURLToPath(new URL("../../out/_to_delete/oauth-consent-fixture/", import.meta.url)), unsafeEnableSharedStorage: false });

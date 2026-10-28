@@ -1,7 +1,7 @@
 // Test Doc suggestion contracts and stale decision handling.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { docSuggestionTools } from '../src/doc-suggestions.js';
+import { docSuggestionTools } from '../src/doc-suggestions.ts';
 
 const tools = docSuggestionTools({
   withEnvelope: (_c, _a, _name, _args, fn) => fn(),

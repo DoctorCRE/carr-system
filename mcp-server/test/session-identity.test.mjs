@@ -18,7 +18,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
 import { sessionIdentityTools, sessionIdentityProjection, sessionDispatchProjection }
-  from "../src/session-identity.js";
+  from "../src/session-identity.ts";
 import { TOOLS } from "../src/tools.js";
 import { PROFILES } from "../src/mcp.js";
 

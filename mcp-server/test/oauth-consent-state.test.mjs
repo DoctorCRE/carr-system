@@ -1,7 +1,7 @@
 import { NOW } from "./helpers/fixed-clock.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { OAuthConsentState } from "../src/oauth-consent-state.js";
+import { OAuthConsentState } from "../src/oauth-consent-state.ts";
 
 function fixture(alarm = null) {
   const values = new Map();

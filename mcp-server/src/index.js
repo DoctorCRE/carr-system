@@ -86,7 +86,7 @@ import { OAuthProvider, getOAuthApi } from "@cloudflare/workers-oauth-provider";
 import { neon, Pool } from "@neondatabase/serverless";
 import { mcpApiHandler, dispatch } from "./mcp.js";
 import { handleAuthorize, handleCallback, handleConsent } from "./google-oidc.js";
-export { OAuthConsentState } from "./oauth-consent-state.js";
+export { OAuthConsentState } from "./oauth-consent-state.ts";
 export { AiNeuronBudget } from "./ai-budget.js";
 import { sharedOAuthFetch, mcpOriginRefusal, isSharedOAuthPath } from "./oauth-policy.ts";
 import { agentActorForToken, authenticatedIdentity, continuityActorForTokenMaps,

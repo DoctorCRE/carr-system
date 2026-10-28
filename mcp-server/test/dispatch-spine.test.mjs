@@ -20,8 +20,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
 import { dispatchSpineTools, dispatchLinkProjection, dispatchAckProjection }
-  from "../src/dispatch-spine.js";
-import { sessionDispatchProjection } from "../src/session-identity.js";
+  from "../src/dispatch-spine.ts";
+import { sessionDispatchProjection } from "../src/session-identity.ts";
 import { TOOLS } from "../src/tools.js";
 
 const DSN = process.env.DATABASE_URL || "";

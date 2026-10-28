@@ -3,7 +3,7 @@ import { vendorMeetingTools } from "./vendor-meetings.js";
 import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.ts";
 import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.ts";
-import { invoiceTrackerTools } from "./invoice-tracker.js";
+import { invoiceTrackerTools } from "./invoice-tracker.ts";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.ts";
@@ -26,13 +26,13 @@ import { doctrineTools } from "./doctrine.js";
 import { situationRetrievalTools } from "./situation-retrieval.js";
 import { investigationTools } from "./investigation.js";
 import { docConversationTools } from "./doc-conversation.js";
-import { docSuggestionTools } from "./doc-suggestions.js";
+import { docSuggestionTools } from "./doc-suggestions.ts";
 import { docActivityTools } from "./doc-activity.js";
 import { whatsNewTools } from "./whats-new.js";
 import { MEETING_MODE_WRITE_VERBS, meetingModeTools } from "./meeting-mode.js";
-import { notificationTools } from "./notifications.js";
-import { sessionIdentityTools } from "./session-identity.js";
-import { dispatchSpineTools } from "./dispatch-spine.js";
+import { notificationTools } from "./notifications.ts";
+import { sessionIdentityTools } from "./session-identity.ts";
+import { dispatchSpineTools } from "./dispatch-spine.ts";
 import { workShapeTools } from "./work-shape.ts";
 import { workQueueTools } from "./work-queue.js";
 import { workRequestIntakeTools } from "./work-request-intake.js";
@@ -44,7 +44,7 @@ import { clientPortalTools } from "./client-portal.ts";
 import { memoryTools } from "./memory.js";
 import { codexContinuityTools } from "./codex-continuity.js";
 import { incidentTools } from "./incident.js";
-import { resourceObservationTools } from "./resource-observation.v5.js";
+import { resourceObservationTools } from "./resource-observation.v5.ts";
 import { invoiceAutomation } from "./invoice-automation.js";
 import { emailDealProgressTools } from "./email-deal-progress.ts";
 import { emailNextStepTools } from "./email-next-step.ts";
@@ -85,11 +85,11 @@ import { salesforceReadRunStoreTools } from "./salesforce-read-run-store-rw02.v5
 import { V5BoundaryDoorRefusal, globalBoundariesDoorTools, passBoundaryDoor } from
   "./global-boundaries-door.v5.js";
 import { governedCorrespondenceStoreTools } from "./governed-correspondence-store.v5.js";
-import { assuranceHealthStoreTools } from "./assurance-health-store.v5.js";
+import { assuranceHealthStoreTools } from "./assurance-health-store.v5.ts";
 import { ruleContextRuntimeTools } from "./rule-context-runtime.v5.js";
 import { systemWorkTools } from "./system-work-census.v5.js";
 import { BOARD_ANSWER_WRITE_VERBS, boardAnswerTools } from "./board-answers.js";
-import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.js";
+import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.ts";
 import { partyIdentityTools } from "./party-identity.js";
 import { partyDuplicateCandidateTools } from "./party-duplicate-candidates.js";
 import { briefQueuePage, readBriefLoops, briefLoopKey, briefNeedsJoeKey, briefAssuranceKey } from "./brief-queues.ts";
@@ -8976,9 +8976,9 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "doc-conversation": "mcp-server/src/doc-conversation.js",
   "doc-activity": "mcp-server/src/doc-activity.js",
   "meeting-mode": "mcp-server/src/meeting-mode.js",
-  "notifications": "mcp-server/src/notifications.js",
-  "session-identity": "mcp-server/src/session-identity.js",
-  "dispatch-spine": "mcp-server/src/dispatch-spine.js",
+  "notifications": "mcp-server/src/notifications.ts",
+  "session-identity": "mcp-server/src/session-identity.ts",
+  "dispatch-spine": "mcp-server/src/dispatch-spine.ts",
   "doc-outcome-cards": "mcp-server/src/tools.js",
   "work-shape": "mcp-server/src/work-shape.ts",
   "work-queue": "mcp-server/src/work-queue.js",
@@ -8988,7 +8988,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "partner-room": "mcp-server/src/partner-room.js",
   "agent-profile": "mcp-server/src/agent-profiles.js",
   "client-portal": "mcp-server/src/client-portal.ts",
-  "resource-observation": "mcp-server/src/resource-observation.v5.js",
+  "resource-observation": "mcp-server/src/resource-observation.v5.ts",
   "lead-automation": "mcp-server/src/lead-automation.js",
   "invoice-automation": "mcp-server/src/invoice-automation.js",
   "email-deal-progress": "mcp-server/src/email-deal-progress.ts",
@@ -9014,17 +9014,17 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "salesforce-read-run-rw02": "mcp-server/src/salesforce-read-run-store-rw02.v5.js",
   "global-boundaries-door": "mcp-server/src/global-boundaries-door.v5.js",
   "governed-correspondence-store": "mcp-server/src/governed-correspondence-store.v5.js",
-  "assurance-health-store": "mcp-server/src/assurance-health-store.v5.js",
+  "assurance-health-store": "mcp-server/src/assurance-health-store.v5.ts",
   "rule-context-runtime": "mcp-server/src/rule-context-runtime.v5.js",
   "system-work-census": "mcp-server/src/system-work-census.v5.js",
   "board-answers": "mcp-server/src/board-answers.js",
-  "research-sites": "mcp-server/src/research-sites.js",
+  "research-sites": "mcp-server/src/research-sites.ts",
   "party-identity": "mcp-server/src/party-identity.js",
   "party-duplicate-candidates": "mcp-server/src/party-duplicate-candidates.js",
   "schedule-board": "mcp-server/src/schedule-board.js",
-  "doc-suggestions": "mcp-server/src/doc-suggestions.js",
+  "doc-suggestions": "mcp-server/src/doc-suggestions.ts",
   "whats-new": "mcp-server/src/whats-new.js",
-  "invoice-tracker": "mcp-server/src/invoice-tracker.js",
+  "invoice-tracker": "mcp-server/src/invoice-tracker.ts",
   "vendor-meetings": "mcp-server/src/vendor-meetings.js",
 });
 
@@ -10571,7 +10571,7 @@ registerTools(agentProfileTools(), "agent-profile");
 registerTools(clientPortalTools({ withEnvelope, writeEvent, resolveSubject }), "client-portal");
 // DoctorCRE v5 V5-UX-C02/C06: the resource-metering read contract and the
 // one write door the local, credential-less collector uses. See
-// src/resource-observation.v5.js.
+// src/resource-observation.v5.ts.
 registerTools(resourceObservationTools({ withEnvelope, ToolError }), "resource-observation");
 registerTools(emailDealProgressTools({ withEnvelope, writeEvent, lockDealField, resolveEmailProposal,
   updateDeal: (c, actor, args) => TOOLS["update-deal"].handler(c, actor, args) }), "email-deal-progress");

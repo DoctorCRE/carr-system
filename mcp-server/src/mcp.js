@@ -15,7 +15,7 @@ import { neon, Pool } from "@neondatabase/serverless";
 import { budgetedAi } from "./ai-budget.js";
 import { publicError } from "./public-errors.ts";
 import { mcpOriginRefusal } from "./oauth-policy.ts";
-import { DOC_TOOL_NAMES, DOC_INSTRUCTIONS, docToolAnnotations } from "./doc-profile.js";
+import { DOC_TOOL_NAMES, DOC_INSTRUCTIONS, docToolAnnotations } from "./doc-profile.ts";
 import { isolatePullRequests } from "./work-queue.js";
 import { TOOLS, ToolError, executeRegisteredTool, assertRegisteredToolInput, UNATTENDED_AUTHORITY_VERBS,
   auditIdentity, assertNoCallerAuthorityFields, coerceArgsToSchema,
