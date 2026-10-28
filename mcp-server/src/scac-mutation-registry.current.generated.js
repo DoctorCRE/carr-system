@@ -3947,6 +3947,132 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "ingress_key": "db-relation-acl:ops.provider_route:carr_writer:update",
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.actor_profile",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.actor_profile:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.actor_profile",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.actor_profile:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.ammo_item",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.ammo_item:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.ammo_item",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.ammo_item:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.claude_continuity_event",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.claude_continuity_event:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.claude_continuity_revision",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.claude_continuity_revision:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.codex_continuity_event",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.codex_continuity_event:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.codex_continuity_revision",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.codex_continuity_revision:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.investigation_evidence",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.investigation_evidence:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.investigation_evidence",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.investigation_evidence:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.search_candidate",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.search_candidate:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.search_candidate",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.search_candidate:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.sensitive_blob",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.sensitive_blob:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.sensitive_blob",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.sensitive_blob:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
     }
   ],
   "retired_secdef_execute": [

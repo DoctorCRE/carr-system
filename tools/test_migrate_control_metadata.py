@@ -89,6 +89,37 @@ class ApprovedControlMigrationTests(unittest.TestCase):
         if result.returncode:
             raise RuntimeError(result.stdout + result.stderr)
 
+    def test_orphan_retirement_preserves_scac_with_present_or_absent_target(self):
+        retirement = next((ROOT / 'migrations').glob('*_drop_orphan_continuity_and_unreferenced_tables.sql'))
+        predecessor = sorted(path.name for path in (ROOT / 'migrations').glob('*.sql')
+                             if path.name < retirement.name)[-1]
+        with self.psycopg.connect(self.dsn, autocommit=True) as conn:
+            conn.execute('create database orphan_retirement_before template template0')
+        before_dsn = self.dsn.rsplit('/', 1)[0] + '/orphan_retirement_before'
+        source = subprocess.check_output(['git', 'show',
+            '7ec2c96068a8d8c2be2a54cc7f9bdd634a83da67:db/schema.sql'],
+            cwd=ROOT, env=self.child, text=True)
+        loaded = subprocess.run([str(self.bins / 'psql'), before_dsn, '-X', '-v', 'ON_ERROR_STOP=1', '-q'],
+            input=source, env=self.child, capture_output=True, text=True, timeout=120)
+        self.assertEqual(loaded.returncode, 0, loaded.stderr[-2000:])
+        from rule_projection_fixture import seed_reviewed_rule_projection
+        with self.psycopg.connect(before_dsn) as conn, conn.cursor() as cur:
+            seed_reviewed_rule_projection(cur, slug='orphan-retirement-fixture',
+                title='Orphan retirement regression', rule_label='Orphan retirement fixture',
+                uuid_tail='000000009446')
+        result = subprocess.run([sys.executable, str(ROOT / 'tools/migrate.py'), '--apply', '--yes',
+                                 '--through', predecessor],
+            cwd=ROOT, env={**self.child, 'DATABASE_URL': before_dsn}, capture_output=True, text=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        with self.psycopg.connect(before_dsn, autocommit=True) as conn:
+            for missing in (False, True):
+                with self.subTest(workflow_receipt_absent=missing), conn.transaction(force_rollback=True):
+                    if missing:
+                        conn.execute('drop table if exists ops.workflow_cutover_retire_receipt_use restrict')
+                    self.assertIs(conn.execute('select ops.scac_mutation_catalog_v118_current()').fetchone()[0], True)
+                    conn.execute(retirement.read_text())
+                    self.assertIs(conn.execute('select ops.scac_mutation_catalog_v118_current()').fetchone()[0], True)
+
     def test_source_integrity_and_grants_survive_retirement(self):
         with self.psycopg.connect(self.dsn, autocommit=True) as conn:
             conn.execute('update doctrine_meta set generation=generation+1 where id=1')
