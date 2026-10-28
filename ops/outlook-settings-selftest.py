@@ -218,7 +218,6 @@ class SettingsTest(unittest.TestCase):
 
     def test_window_guard_uses_visible_window_size(self):
         from lib import outlook_ui as ui
-        self.enterContext(patch.object(ui, 'load_settings', lambda: load_settings(self.home)))
         window = {'title': 'Inbox • owner@example.test', 'is_on_screen': True,
                   'bounds': {'x': -1329, 'width': 1329, 'height': 1002}}
         self.assertTrue(ui.is_ordinary_main_window(window))

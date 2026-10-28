@@ -797,7 +797,9 @@ def open_form(item: Mail | Event, waits: ui.Waits = ui.Waits()) -> ComposeWindow
     try:
         pid, main = _main_window(waits)
         windows = _cua('list_windows', {'pid': pid}).get('windows') or []
-        if any(w['window_id'] != main['window_id'] for w in windows):
+        if any(w['window_id'] != main['window_id']
+               and min((w.get('bounds') or {}).get(k, 0) for k in ('width', 'height')) >= 400
+               for w in windows):
             raise UiFailure('compose_window_open')
         before = {w['window_id'] for w in windows}
         window: ComposeWindow | EventWindow

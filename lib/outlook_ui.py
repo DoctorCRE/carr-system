@@ -29,6 +29,7 @@ import time
 from typing import Callable
 
 APP = 'Microsoft Outlook'
+MAILBOX_TITLE = re.compile(r'. • [^\s@]+@[^\s@]+\.[^\s@]+$')
 INBOX_TITLE = re.compile(r'^Inbox • ')
 from lib.outlook_settings import load_settings
 EXIT = {'succeeded': 0, 'skipped': 78, 'timed_out': 124, 'failed': 1}
@@ -126,13 +127,28 @@ class Row:
         return re.sub(r'\s+', ' ', re.split(r',\s*Message preview:', self.label)[0]).strip()
 
 
-def is_account_window(window: dict) -> bool:
-    return (window.get('title') or '').endswith(' • ' + load_settings().account)
+def is_main_window(window: dict) -> bool:
+    return bool(MAILBOX_TITLE.search(window.get('title') or ''))
+
+
+def is_compose_window(window: dict) -> bool:
+    """Protect possible drafts, except the observed unassigned off-screen window.
+
+    The 500x500 window has an empty title and unknown purpose; AX did not resolve it.
+    Keep all other sizeable non-mailbox windows protected, even without a subject.
+    """
+    bounds = window.get('bounds') or {}
+    if (window.get('title') == '' and bounds.get('width') == 500
+            and bounds.get('height') == 500 and window.get('is_on_screen') is False
+            and 'on_current_space' in window and window['on_current_space'] is None):
+        return False
+    return (not is_main_window(window) and bounds.get('width', 0) >= 400
+            and bounds.get('height', 0) >= 400)
 
 
 def is_ordinary_main_window(window: dict) -> bool:
     bounds = window.get('bounds') or {}
-    return (is_account_window(window) and window.get('is_on_screen') is True
+    return (is_main_window(window) and window.get('is_on_screen') is True
             and bounds.get('width', 0) >= 400 and bounds.get('height', 0) >= 400)
 
 
@@ -161,10 +177,10 @@ def _windows(pid: int) -> list[dict]:
 
 def _readable(pid: int, window: dict) -> bool:
     state = cua('get_window_state', {'pid': pid, 'window_id': window['window_id'],
-                                     'include_screenshot': False, 'max_elements': 20, 'max_depth': 1})
-    return not state.get('degraded_reason') and any(
-        e.get('role') == 'AXButton' and e.get('label') == 'New Mail' and e.get('depth') == 1
-        for e in state.get('elements') or [])
+                                     'include_screenshot': False, 'max_elements': LIST_WALK})
+    controls = {(e.get('role'), e.get('label')) for e in state.get('elements') or []}
+    return (not str(state.get('degraded_reason') or '').startswith('ax_window_unresolved')
+            and {('AXButton', 'New Mail'), ('AXTable', 'Message List')} <= controls)
 
 
 def usable_window(pid: int) -> dict | None:
@@ -198,34 +214,32 @@ def _quit(pid: int, windows: list[dict], waits: Waits) -> bool:
     return True
 
 
-def _quit_window_detail(pid: int, windows: list[dict] | None = None) -> str:
+def _quit_window_detail(pid: int) -> str:
     try:
-        if windows is None:
-            windows = _windows(pid)
-        snapshot = []
-        safe_names = {'Send', 'Save', 'Save & Close', 'To Recipients', 'Required attendees',
-                      'New Mail', 'Cancel', 'Close', 'Discard'}
-        for window in windows:
-            bounds = window.get('bounds') or {}
-            controls: list[dict[str, object]] = []
-            entry: dict[str, object] = {key: bounds.get(key) if type(bounds.get(key)) in (int, float) else None
-                     for key in ('width', 'height')}
-            entry.update(has_title=bool(window.get('title')), account_suffix=is_account_window(window), controls=controls)
-            if not entry['account_suffix']:
-                try:
-                    state = cua('get_window_state', {'pid': pid, 'window_id': window['window_id'],
-                                'include_screenshot': False, 'max_elements': 20, 'max_depth': 2})
-                    for element in (state.get('elements') or [])[:20]:
-                        role = element.get('role')
-                        if isinstance(role, str) and re.fullmatch(r'AX[A-Za-z]+', role):
-                            name = element.get('label')
-                            controls.append({'role': role, 'name': name if name in safe_names else None})
-                except (CuaError, KeyError, TypeError, AttributeError):
-                    pass
-            snapshot.append(entry)
-        return json.dumps({'window_count': len(windows), 'windows': snapshot}, separators=(',', ':'))
+        windows = _windows(pid)
     except CuaError:
         return 'windows_unavailable'
+    snapshot = []
+    for window in windows:
+        role = window.get('role')
+        subrole = window.get('subrole')
+        if role == 'AXSheet' or subrole == 'AXSheet':
+            kind = 'sheet'
+        elif subrole in ('AXDialog', 'AXSystemDialog') or role == 'AXDialog':
+            kind = 'dialog'
+        elif is_main_window(window):
+            kind = 'main'
+        elif is_compose_window(window):
+            kind = 'compose'
+        else:
+            kind = 'dialog'
+        bounds = window.get('bounds') or {}
+        size = {key: bounds.get(key) if type(bounds.get(key)) in (int, float) else None
+                for key in ('width', 'height')}
+        visible = window.get('is_on_screen')
+        snapshot.append({'kind': kind, **size,
+                         'is_on_screen': visible if type(visible) is bool else None})
+    return json.dumps({'windows': snapshot}, separators=(',', ':'))
 
 
 def prepare_outlook(waits: Waits) -> Outcome | None:
@@ -234,9 +248,11 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
         pid = outlook_pid()
         if pid is not None:
             windows = _windows(pid)
-            if (len(windows) != 1 or not is_ordinary_main_window(windows[0])
-                    or not _readable(pid, windows[0])):
-                return Outcome('skipped', 'compose_window_open', _quit_window_detail(pid, windows))
+            if any(is_compose_window(w) for w in windows):
+                return Outcome('skipped', 'compose_window_open')
+            candidates = [w for w in windows if is_ordinary_main_window(w)]
+            if candidates and not any(_readable(pid, w) for w in candidates):
+                return Outcome('skipped', 'no_usable_main_window')
             if not _quit(pid, windows, waits):
                 return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
         launched = subprocess.run(['open', '-g', '-a', APP, '--args',
@@ -248,10 +264,16 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
         pid = outlook_pid()
         if pid is None:
             return Outcome('failed', 'outlook_not_running_after_launch')
+        if usable_window(pid):
+            return None
         windows = _windows(pid)
-        if (len(windows) != 1 or not is_ordinary_main_window(windows[0])
-                or not _readable(pid, windows[0])):
-            return Outcome('skipped', 'compose_window_open', _quit_window_detail(pid, windows))
+        if windows:
+            try:
+                cua('invoke_menu', {'pid': pid, 'window_id': windows[0]['window_id'],
+                                    'path': ['File', 'New', 'Main Window']})
+            except CuaError:
+                pass
+            time.sleep(waits.new_window_seconds)
         return None if usable_window(pid) else Outcome('failed', 'no_usable_main_window')
     except CuaError:
         return Outcome('failed', 'cua_driver_unavailable')
