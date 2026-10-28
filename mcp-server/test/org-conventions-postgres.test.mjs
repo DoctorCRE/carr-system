@@ -62,12 +62,14 @@ before(async () => {
 // pack-delivered rule through the real approval chain, as production holds.
 async function seedDeliveredRule() {
   await c.query('begin');
+  // engineering-git exists in production; adopt_rule puts card-less conventions on it.
   await c.query(`insert into ops.rule_pack(pack,title,description,triggers,source)
-    values('fixture-pack','Fixture pack','Synthetic pack for the S4 proof','{fixture-trigger}','org-conventions-postgres')`);
+    values('engineering-git','Repo, git, gates, migrations and deploys','Synthetic copy of the production pack',
+      '{git,commit}','org-conventions-postgres') on conflict (pack) do nothing`);
   const id = (await c.query(`insert into rule(statement,taught_by,status) values('Synthetic delivered rule.',$1,'proposed')
     returning id`, [joe.id])).rows[0].id;
   await c.query(`insert into ops.rule_load_layer(rule_id,short_id,load_layer,packs,scope,why,source,map_digest)
-    values($1::uuid,left($1::text,8),'pack','{fixture-pack}','shared',null,'org-conventions-postgres',repeat('0',64))`, [id]);
+    values($1::uuid,left($1::text,8),'pack','{engineering-git}','shared',null,'org-conventions-postgres',repeat('0',64))`, [id]);
   await c.query('set local session authorization carr_authority_joe');
   await c.query(`select ops.approve_rule($1,'human_only',array['human_authority_runtime'],$2,'Synthetic fixture rule')`,
     [id, randomUUID()]);
@@ -164,17 +166,62 @@ test('Joe adopts a core card in person: active rule, card on the rule, proposal 
 test('an adopted card cannot be adopted twice, and a stale base_version is refused', async () => {
   const k01 = proposal('card-k01');
   await refused(adopt(joe, k01, 'carr_authority_joe'), 'convention_proposal_not_found');
+  // A staging rerun writes the retired key at base_version 0 and gets
+  // version_conflict, which ops/stage-convention-proposals.py skips.
+  const { attach_id } = await call(joe, 'attach-memory', { surface: 'claude_code' });
+  const staged = PLAN.find(p => p.section_key === k01.section_key);
+  await refused(call(joe, 'write-doctrine-section', { document: 'team-memory', section_key: staged.section_key,
+    title: staged.title, body_text: staged.body_text, base_version: 0, attach_id }), 'version_conflict');
   const k02 = proposal('card-k02');
   await refused(adopt(joe, { ...k02, base_version: k02.base_version + 1 }, 'carr_authority_joe'), 'version_conflict');
 });
 
-test('an uncovered ORG convention adopts without a card on the control layer', async () => {
+test('an adopted card-less convention is delivered to a claude_code session on the engineering-git pack', async () => {
   const org = queue.find(p => !p.section_key.startsWith('conventions/proposed/card-'));
   const out = await adopt(joe, org, 'carr_authority_joe');
   assert.equal(out.card_id, null);
-  assert.equal(out.load_layer, 'control');
+  assert.equal(out.load_layer, 'pack');
   const rule = (await c.query('select status, card from rule where id=$1', [out.rule_id])).rows[0];
   assert.deepEqual(rule, { status: 'active', card: null });
+  const plan = async packs => (await c.query('select selected from ops.rule_delivery_plan($1,$2) where rule_id=$3',
+    ['joe', packs, out.rule_id])).rows[0]?.selected;
+  assert.equal(await plan(['engineering-git']), true, 'the scoped boot hands it over with the pack');
+  assert.equal(await plan([]), false, 'it is pack-delivered, not layer0');
+  // The session-side read: a claude_code session's standing-context with the
+  // pack it declares for repo work carries the adopted statement.
+  const context = await executeRegisteredTool(c, claudeForJoe, 'standing-context', { packs: ['engineering-git'] });
+  assert.deepEqual(context.rule_delivery?.packs_not_found ?? [], []);
+  const shortId = out.rule_id.slice(0, 8);
+  assert.ok(context.shared_rules.some(r => r.id === shortId), 'the session is handed the convention');
+  assert.ok(!context.rule_delivery.would_omit.includes(shortId),
+    'the scoped (enforced-mode) selector keeps it, so it is not a silent drop');
+  assert.deepEqual(context.rule_delivery.pack_index.find(p => p.pack === 'engineering-git').rules, 2);
+});
+
+test('two proposals with one card id adopted concurrently: the second gets the named refusal', async () => {
+  const { attach_id } = await call(joe, 'attach-memory', { surface: 'claude_code' });
+  const k03 = proposal('card-k03');
+  const twinText = (await c.query(`select r.body->>'text' as t from doctrine_section s
+    join doctrine_revision r on r.id=s.current_revision_id where s.id=$1`, [k03.section_id])).rows[0].t;
+  const twin = await call(joe, 'write-doctrine-section', { document: 'team-memory',
+    section_key: 'conventions/proposed/card-k03-twin', body_text: twinText, base_version: 0, attach_id });
+  const second = new pg.Client({ host: fixture.root, user: 'carr_ci', database: 'carr_ci' });
+  await second.connect();
+  try {
+    await c.query('begin');
+    await c.query('set local session authorization carr_authority_joe');
+    await executeRegisteredTool(c, joe, 'adopt-rule', { idempotency_key: randomUUID(), section_id: k03.section_id,
+      base_version: k03.base_version, reason: 'First of two' });
+    await second.query('begin');
+    await second.query('set local session authorization carr_authority_joe');
+    const racing = executeRegisteredTool(second, joe, 'adopt-rule', { idempotency_key: randomUUID(),
+      section_id: twin.section_id, base_version: 1, reason: 'Second of two' })
+      .finally(() => second.query('rollback'));
+    await new Promise(resolve => setTimeout(resolve, 300));
+    await c.query('commit');
+    await refused(racing, 'convention_card_already_active');
+  } finally { await second.end(); }
+  assert.equal((await c.query(`select count(*) from rule where status='active' and card->>'id'='K03'`)).rows[0].count, '1');
 });
 
 test('a malformed proposal is refused and changes nothing', async () => {

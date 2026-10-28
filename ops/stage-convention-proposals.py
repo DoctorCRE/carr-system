@@ -11,7 +11,8 @@ governance-queue and adopt-rule; staging binds nobody.
     python3 ops/stage-convention-proposals.py --apply --attach-id <attach_id>
 
 --apply writes through ./run.sh call with the caller's own read_write attach.
-It writes only keys the team-memory index lacks, so a rerun stages nothing new.
+It skips keys already in team-memory, active or retired (adopted), so a rerun
+after adoptions stages nothing new and revives nothing.
 """
 import argparse
 import json
@@ -59,25 +60,48 @@ def plan(cards_path=CARDS, ledger_path=LEDGER):
     return out
 
 
+class VerbRefused(Exception):
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
 def stage(call, attach_id, proposals):
-    """Write each proposal the team-memory index lacks. call(verb, args) -> dict."""
+    """Write each proposal not yet in team-memory. call(verb, args) -> dict.
+
+    Active keys are skipped from the snapshot. A key that exists only as a
+    retired section (an adopted or withdrawn proposal) is absent from the
+    snapshot, so its base_version 0 write returns version_conflict; that key
+    is skipped too, and a retired proposal is never revived.
+    """
     present = {s['section_key'] for s in call('read-doctrine', {'document': 'team-memory'})['sections']}
-    written = []
+    written, retired = [], []
     for p in proposals:
         if p['section_key'] in present:
             continue
-        call('write-doctrine-section', {
-            'idempotency_key': str(uuid.uuid4()), 'document': 'team-memory',
-            'section_key': p['section_key'], 'title': p['title'], 'body_text': p['body_text'],
-            'base_version': 0, 'attach_id': attach_id})
+        try:
+            call('write-doctrine-section', {
+                'idempotency_key': str(uuid.uuid4()), 'document': 'team-memory',
+                'section_key': p['section_key'], 'title': p['title'], 'body_text': p['body_text'],
+                'base_version': 0, 'attach_id': attach_id})
+        except VerbRefused as refusal:
+            if refusal.code != 'version_conflict':
+                raise
+            retired.append(p['section_key'])
+            continue
         written.append(p['section_key'])
-    return written
+    return written, retired
 
 
 def run_sh_call(verb, args):
-    out = subprocess.run([str(ROOT / 'run.sh'), 'call', verb, json.dumps(args)], cwd=ROOT,
-                         capture_output=True, text=True, check=True, timeout=120).stdout
-    result = json.loads(out[out.index('{'):])
+    done = subprocess.run([str(ROOT / 'run.sh'), 'call', verb, json.dumps(args)], cwd=ROOT,
+                          capture_output=True, text=True, timeout=120)
+    if done.returncode:
+        marker = done.stderr.find('TOOL ERROR ')
+        if marker < 0:
+            raise RuntimeError(f'{verb} failed: {done.stderr.strip()[-500:]}')
+        raise VerbRefused(json.loads(done.stderr[marker + len('TOOL ERROR '):].split('\n}', 1)[0] + '\n}')['error'])
+    result = json.loads(done.stdout[done.stdout.index('{'):])
     return result.get('result', result)
 
 
@@ -94,8 +118,9 @@ def main():
         return 0
     if not args.attach_id:
         parser.error('--apply needs --attach-id')
-    written = stage(run_sh_call, args.attach_id, proposals)
-    print(f'staged {len(written)} of {len(proposals)} proposals')
+    written, retired = stage(run_sh_call, args.attach_id, proposals)
+    print(f'staged {len(written)} of {len(proposals)} proposals; '
+          f'{len(retired)} skipped as already adopted or retired')
     return 0
 
 

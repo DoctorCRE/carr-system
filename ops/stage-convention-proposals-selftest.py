@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import re
 import unittest
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('stage', REPO / 'ops/stage-convention-proposals.py')
@@ -62,13 +63,42 @@ class StageTests(unittest.TestCase):
                 return {'sections': [{'section_key': self.plan[0]['section_key']}]}
             return {'ok': True}
 
-        written = stage.stage(call, 'attach-1', self.plan[:3])
+        written, retired = stage.stage(call, 'attach-1', self.plan[:3])
         self.assertEqual(written, [p['section_key'] for p in self.plan[1:3]])
+        self.assertEqual(retired, [])
         writes = [args for verb, args in calls if verb == 'write-doctrine-section']
         self.assertEqual(len(writes), 2)
         for args in writes:
             self.assertEqual((args['document'], args['base_version'], args['attach_id']), ('team-memory', 0, 'attach-1'))
         self.assertEqual(len({args['idempotency_key'] for args in writes}), 2)
+
+    def test_rerun_after_adoption_skips_retired_keys_and_still_fails_on_other_refusals(self):
+        adopted = self.plan[0]['section_key']
+
+        def call(verb, args):
+            if verb == 'read-doctrine':
+                return {'sections': []}   # the snapshot holds active sections only
+            if args['section_key'] == adopted:
+                raise stage.VerbRefused('version_conflict')
+            return {'ok': True}
+
+        written, retired = stage.stage(call, 'attach-1', self.plan[:2])
+        self.assertEqual((written, retired), ([self.plan[1]['section_key']], [adopted]))
+
+        def refusing(verb, args):
+            if verb == 'read-doctrine':
+                return {'sections': []}
+            raise stage.VerbRefused('memory_attach_required')
+
+        with self.assertRaises(stage.VerbRefused):
+            stage.stage(refusing, 'attach-1', self.plan[:1])
+
+    def test_run_sh_call_reads_the_tool_error_code(self):
+        failed = mock.Mock(returncode=1, stdout='', stderr='local-verb identity -> x\nTOOL ERROR {\n  "error": "version_conflict",\n  "current_version": 2\n}\n')
+        with mock.patch.object(stage.subprocess, 'run', return_value=failed):
+            with self.assertRaises(stage.VerbRefused) as caught:
+                stage.run_sh_call('write-doctrine-section', {})
+        self.assertEqual(caught.exception.code, 'version_conflict')
 
     def test_statement_must_be_one_line(self):
         with self.assertRaises(ValueError):

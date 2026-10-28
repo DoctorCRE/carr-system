@@ -60,6 +60,11 @@ export function orgConventionTools({ withEnvelope, writeEvent }) {
     } catch (error) {
       const code = ADOPT_REFUSALS.get(error.message);
       if (code) throw new ToolError({ error: code, section_id: args.section_id });
+      // Backstop for two proposals with one card id: the document lock in
+      // ops.adopt_rule serializes them, and the partial unique index refuses
+      // whatever still races past it.
+      if (error.code === "23505" && error.constraint === "rule_active_card_id")
+        throw new ToolError({ error: "convention_card_already_active", section_id: args.section_id });
       if (/requires Joe authority|human authority/.test(error.message))
         throw new ToolError({ error: "rule_adoption_requires_joe" });
       throw error;

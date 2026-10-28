@@ -140,13 +140,19 @@ begin
 
   insert into public.rule(statement,taught_by,status,card)
   values (v_statement,v_actor,'proposed',v_card) returning id into v_rule;
-  -- Delivery: the generated CLAUDE.md/AGENTS.md block carries CORE cards and
-  -- the rule-card hook carries the rest when their triggers fire, so no
-  -- adopted rule adds to the capped shared layer0 boot recitation.
-  v_layer := 'control';
+  -- Delivery, never the capped shared layer0 boot recitation:
+  --  * a card is carried by the generated CLAUDE.md/AGENTS.md block (CORE)
+  --    or by the rule-card hook when its triggers fire;
+  --  * a convention without a card joins the existing engineering-git pack,
+  --    which the per-call pack hook loads on the git, commit, PR, CI and test
+  --    work every agent session in this system does. The pack must exist
+  --    (rule_load_layer_packs_exist), so this never invents a pack.
+  v_layer := case when v_card is null then 'pack' else 'control' end;
   insert into ops.rule_load_layer(rule_id,short_id,load_layer,packs,scope,why,source,map_digest)
-  values (v_rule,left(v_rule::text,8),v_layer,'{}','shared',
-          'adopted convention; delivered by the generated core block or the rule-card hook',
+  values (v_rule,left(v_rule::text,8),v_layer,
+          case when v_card is null then array['engineering-git'] else '{}'::text[] end,'shared',
+          case when v_card is null then null
+               else 'adopted rule card; delivered by the generated core block or the rule-card hook' end,
           'ops.adopt_rule',encode(public.digest(coalesce(v_card::text,'')||v_statement,'sha256'),'hex'));
   v_approval := ops.approve_rule(v_rule,'human_only',array['human_authority_runtime'],
                                  p_idempotency_key,p_reason);
