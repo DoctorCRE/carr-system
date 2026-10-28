@@ -184,8 +184,12 @@ jobs:
           # one download and one commit away from fixed.
           CARR_SHADOW_ARTIFACT_DIR: ${{ runner.temp }}/migration-shadow
           CARR_CI_PROGRAM_RECORDS: ${{ runner.temp }}/ci-programs.json
+          CARR_LOCAL_PG_ALLOW_HOSTED: "1"
+          CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
         run: |
-          if [ "${{ matrix.classes }}" = gates ]; then
+          if [ "${{ matrix.classes }}" = migration ]; then
+            python ops/local-pg-ci.py --class migration --migration-part proofs
+          elif [ "${{ matrix.classes }}" = gates ]; then
             ops/ci.sh --strict --only gates --gate-shard "${{ matrix.gate_shard }}/2"
           else
             ops/ci.sh --strict --only "${{ matrix.classes }}"
@@ -210,11 +214,96 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  migration-fixtures:
+    needs: evidence
+    if: ${{ always() && (needs.evidence.result != 'success' || needs.evidence.outputs.reused != 'true') }}
+    name: Migration ${{ matrix.part }}
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [reconstruction, equivalence, shadow, gates, acceptance]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: mcp-server/package-lock.json
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+      - name: Install proof dependencies
+        run: |
+          python -m pip install -r requirements.lock
+          npm --prefix mcp-server ci --no-audit
+      - name: Install PostgreSQL 17
+        timeout-minutes: 5
+        run: bash ops/ci-postgres.sh
+
+      - name: Identify the runner image for the zsh archive
+        if: matrix.part == 'equivalence'
+        id: zsh-image
+        run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
+      - name: Restore zsh package archives
+        if: matrix.part == 'equivalence'
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ runner.temp }}/zsh-debs/*.deb
+          key: zsh-ubuntu24-${{ runner.arch }}-${{ steps.zsh-image.outputs.version }}-${{ hashFiles('ops/ci-zsh.sh') }}
+      - name: Install zsh
+        if: matrix.part == 'equivalence'
+        timeout-minutes: 12
+        env:
+          ZSH_RETRY_BACKOFF: "5"
+          ZSH_ARCHIVE_DIR: ${{ runner.temp }}/zsh-debs
+        run: ops/ci-zsh.sh
+
+      - name: Prove independent migration fixture
+        if: matrix.part != 'acceptance' && matrix.part != 'gates'
+        env:
+          CARR_CI_PORTABLE_ONLY: "1"
+          CARR_SHADOW_ARTIFACT_DIR: ${{ runner.temp }}/migration-shadow
+          CARR_CI_PROGRAM_RECORDS: ${{ runner.temp }}/ci-programs.json
+        run: ops/ci.sh --strict --only migration --migration-part "${{ matrix.part }}"
+      - name: Prove database programs on their own migrated cluster
+        if: matrix.part == 'acceptance' || matrix.part == 'gates'
+        env:
+          CARR_CI_PORTABLE_ONLY: "1"
+          CARR_LOCAL_PG_ALLOW_HOSTED: "1"
+          CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
+          CARR_CI_PROGRAM_RECORDS: ${{ runner.temp }}/ci-programs.json
+        run: python ops/local-pg-ci.py --class migration --migration-part "${{ matrix.part }}"
+      - name: Retain a regenerated schema on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: migration-fixture-schema-${{ matrix.part }}
+          path: ${{ runner.temp }}/migration-shadow/schema.sql
+          if-no-files-found: ignore
+
+
+      - name: Retain per-program records and failed CI logs
+        # Every attempt keeps its own artifact, so a re-run never hides the
+        # first failure. Records hold program names, exits and seconds only.
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-canary-${{ github.job }}-${{ strategy.job-index }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/carr-ci.*/*.log.redacted
+            ${{ runner.temp }}/ci-programs.json
+          if-no-files-found: ignore
+          retention-days: 14
+
   canary:
     name: main canary
     runs-on: ubuntu-24.04
     timeout-minutes: 2
-    needs: [evidence, classes]
+    needs: [evidence, classes, migration-fixtures]
     if: ${{ always() }}
     steps:
       - name: Require reused evidence or green classes
@@ -222,10 +311,11 @@ jobs:
           EVIDENCE: ${{ needs.evidence.result }}
           REUSED: ${{ needs.evidence.outputs.reused }}
           CLASSES: ${{ needs.classes.result }}
+          FIXTURES: ${{ needs.migration-fixtures.result }}
         run: |
-          if [ "$CLASSES" = success ] || { [ "$EVIDENCE" = success ] && [ "$REUSED" = true ] && [ "$CLASSES" = skipped ]; }; then
+          if [ "$CLASSES" = success ] && [ "$FIXTURES" = success ] || { [ "$EVIDENCE" = success ] && [ "$REUSED" = true ] && [ "$CLASSES" = skipped ] && [ "$FIXTURES" = skipped ]; }; then
             echo "main-canary-green: identical-tree PR evidence or all classes passed"
           else
-            echo "MAIN IS RED: evidence=$EVIDENCE classes=$CLASSES reused=$REUSED" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "MAIN IS RED: evidence=$EVIDENCE classes=$CLASSES fixtures=$FIXTURES reused=$REUSED" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi

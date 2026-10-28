@@ -75,19 +75,26 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
               for steps in (main_steps, pr_steps))
           and any(st.get('if') == "matrix.classes == 'gates' && matrix.gate_shard == 1"
                   and st.get('run') == 'python3 test/ci-noise-incident-test.py' for st in main_steps))
-    check('main retains the full default class while PR partitions the same proof',
-          any('ops/ci.sh --strict --only "${{ matrix.classes }}"' in st.get('run', '') for st in main_steps)
-          and any('--migration-part proofs' in st.get('run', '') for st in pr_steps)
-          and set(pr['jobs']['migration-fixtures']['strategy']['matrix']['part'])
-          == {'reconstruction', 'equivalence', 'shadow', 'gates', 'acceptance'})
     check('main retains its service and PR limits the shared fixture to unit checks',
           classes['services']['postgres']['image'] in pr['jobs']['classes']['services']['postgres']['image']
           and "contains(matrix.classes, 'unit')" in pr['jobs']['classes']['services']['postgres']['image'])
+    check('migration fallback matches ready fixture parts',
+          set(main['jobs'].get('migration-fixtures', {}).get('strategy', {}).get('matrix', {}).get('part', []))
+          == set(pr['jobs']['migration-fixtures']['strategy']['matrix']['part'])
+          and any('--migration-part proofs' in st.get('run', '') for st in main_steps))
+    fixture = main['jobs']['migration-fixtures']
+    ready_fixture = pr['jobs']['migration-fixtures']
+    check('fixture execution and timeout match ready CI',
+          fixture['timeout-minutes'] == ready_fixture['timeout-minutes']
+          and [(st.get('if'), st.get('run')) for st in fixture['steps'] if '--migration-part' in st.get('run', '')]
+          == [(st.get('if'), st.get('run')) for st in ready_fixture['steps'] if '--migration-part' in st.get('run', '')]
+          and fixture['strategy']['fail-fast'] is False
+          and fixture['if'] == classes['if'])
     aggregate = main['jobs']['canary']
     check('one aggregate main canary always reports',
           aggregate['name'] == 'main canary' and 'always()' in aggregate['if'])
     check('aggregate requires evidence and classes',
-          aggregate['needs'] == ['evidence', 'classes'])
+          aggregate['needs'] == ['evidence', 'classes', 'migration-fixtures'])
     check('reuse is recorded before any classes are skipped',
           'ops/ci-evidence.py resolve' in CANARY.read_text()
           and 'ci-tree-evidence' in CI_YML.read_text())
@@ -107,7 +114,7 @@ def test_evidence_failure_runs_checks_and_uses_their_verdict():
           all(not workflow['jobs'][job].get('continue-on-error', False)
               and all(not step.get('continue-on-error', False)
                       for step in workflow['jobs'][job]['steps'])
-              for job in ('classes', 'canary')))
+              for job in ('classes', 'migration-fixtures', 'canary')))
     script = workflow['jobs']['canary']['steps'][0]['run']
     cases = [
         ('success', 'true', 'skipped', 0),
@@ -125,11 +132,18 @@ def test_evidence_failure_runs_checks_and_uses_their_verdict():
     with tempfile.TemporaryDirectory() as tmp:
         for evidence, reused, classes, code in cases:
             env = dict(os.environ, EVIDENCE=evidence, REUSED=reused,
-                       CLASSES=classes, GITHUB_STEP_SUMMARY=str(pathlib.Path(tmp) / 'summary'))
+                       CLASSES=classes, FIXTURES=classes, GITHUB_STEP_SUMMARY=str(pathlib.Path(tmp) / 'summary'))
             actual = subprocess.run(['bash', '-e', '-c', script], env=env,
                                     capture_output=True, text=True)
             check(f'aggregate evidence={evidence} reused={reused!r} classes={classes}',
                   actual.returncode == code, actual.stdout + actual.stderr)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        for fixture_result in ('failure', 'skipped', 'cancelled', ''):
+            env = dict(os.environ, EVIDENCE='failure', REUSED='', CLASSES='success',
+                       FIXTURES=fixture_result, GITHUB_STEP_SUMMARY=str(pathlib.Path(tmp) / 'summary'))
+            actual = subprocess.run(['bash', '-e', '-c', script], env=env, capture_output=True, text=True)
+            check(f'aggregate rejects fixture result {fixture_result!r}', actual.returncode != 0)
 
 
 def test_main_retains_migration_shadow_coverage():
