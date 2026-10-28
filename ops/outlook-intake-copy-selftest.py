@@ -7,6 +7,7 @@ import plistlib
 from pathlib import Path
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,39 @@ sys.path.insert(0, str(ROOT))
 from git_env import fixture_env
 from outlook_test_support import write_settings
 from lib.outlook_settings import load_settings, SettingsError
+
+
+# Rewrites every page of the file in order, forever: generation, page, then a
+# filler that repeats the generation so a torn page is visible too.
+WRITER = """
+import os, struct, sys
+fd = os.open(sys.argv[1], os.O_WRONLY)
+pages = int(sys.argv[2])
+generation = 0
+while True:
+    generation += 1
+    page = struct.pack('<QQ', generation, 0) + struct.pack('<Q', generation) * 510
+    for index in range(pages):
+        os.pwrite(fd, page[:8] + struct.pack('<Q', index) + page[16:], index * 4096)
+"""
+
+
+def page_stamps(data, pages):
+    stamps = []
+    for index in range(pages):
+        page = data[index * 4096:(index + 1) * 4096]
+        generation, = struct.unpack_from('<Q', page)
+        whole = page[16:] == struct.pack('<Q', generation) * 510
+        stamps.append(generation if whole and struct.unpack_from('<Q', page, 8)[0] in (0, index) else -1)
+    return stamps
+
+
+def one_instant(stamps):
+    """Pages read g..g then g-1..g-1 (one boundary), with no torn page."""
+    if -1 in stamps:
+        return False
+    drops = [(a, b) for a, b in zip(stamps, stamps[1:]) if a != b]
+    return len(drops) <= 1 and all(a == b + 1 for a, b in drops)
 
 
 class CopyTest(unittest.TestCase):
@@ -146,14 +180,57 @@ class CopyTest(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == 'darwin', 'APFS cloning is macOS only')
     def test_attachment_copy_falls_back_when_cloning_is_unsupported(self):
+        self.build(str(self.unsupported_clone()))
+        self.test_selected_attachments_are_copied_privately_without_refreshing_snapshot()
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'APFS cloning is macOS only')
+    def test_store_and_sidecars_are_cloned_when_the_volume_supports_it(self):
+        log = self.root / 'clones.log'
+        recording = self.root / 'recording-clone.c'
+        recording.write_text('\n'.join((
+            '#include <dlfcn.h>', '#include <stdio.h>', '#include <sys/clonefile.h>',
+            'int fclonefileat(int source, int target, const char *name, uint32_t flags) {',
+            f'    FILE *log = fopen({json.dumps(str(log))}, "a");',
+            '    if (log) { fprintf(log, "%s\\n", name); fclose(log); }',
+            '    int (*real)(int, int, const char *, uint32_t) =',
+            '        (int (*)(int, int, const char *, uint32_t))dlsym(RTLD_NEXT, "fclonefileat");',
+            '    return real(source, target, name, flags);', '}', '')))
+        self.build(str(recording))
+        self.test_copies_only_the_fixed_store_and_body_sidecars_privately()
+        self.assertEqual(log.read_text().splitlines(), ['store.hxd', '7.dat'])
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'APFS cloning is macOS only')
+    def test_store_copy_falls_back_to_a_full_copy_when_cloning_is_unsupported(self):
+        self.build(str(self.unsupported_clone()))
+        self.test_copies_only_the_fixed_store_and_body_sidecars_privately()
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'APFS cloning is macOS only')
+    def test_store_clone_is_one_instant_while_the_store_is_being_written(self):
+        # A writer stamps every 4 KiB page with a generation number, sweeping
+        # the file front to back again and again, one pwrite per page. A copy
+        # taken at one instant shows at most one boundary, between generation
+        # g and g - 1; a copy assembled over time can show more.
+        pages = 4096
+        store = self.profile / 'HxStore.hxd'
+        store.write_bytes(bytes(4096 * pages))
+        writer = subprocess.Popen([sys.executable, '-c', WRITER, str(store), str(pages)])
+        self.addCleanup(writer.kill)
+        for attempt in range(20):
+            work = Path(tempfile.mkdtemp(prefix='work-', dir=self.out))
+            self.assertEqual(self.copy(cwd=work).returncode, 0)
+            stamps = page_stamps((work / 'store.hxd').read_bytes(), pages)
+            self.assertTrue(one_instant(stamps), f'copy {attempt} mixes moments: {sorted(set(stamps))}')
+            shutil.rmtree(work)
+        self.assertIsNone(writer.poll(), 'the writer kept writing throughout')
+
+    def unsupported_clone(self):
         unsupported = self.root / 'unsupported-clone.c'
         unsupported.write_text('\n'.join((
             '#include <errno.h>', '#include <sys/clonefile.h>',
             'int fclonefileat(int source, int target, const char *name, uint32_t flags) {',
             '    (void)source; (void)target; (void)name; (void)flags;',
             '    errno = ENOTSUP; return -1;', '}', '')))
-        self.build(str(unsupported))
-        self.test_selected_attachments_are_copied_privately_without_refreshing_snapshot()
+        return unsupported
 
     def test_scope_readback_names_only_the_compiled_paths_without_copying(self):
         result = self.copy('--scope', cwd=self.root)

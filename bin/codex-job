@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Run one Codex job in a fresh clone; return its final message and exit code."""
 import argparse
+import fcntl
 import os
 from pathlib import Path
 import re
 import signal
+import stat
 import shutil
 import subprocess
 import sys
@@ -17,6 +19,18 @@ if python.is_file() and Path(sys.prefix) != python.parent.parent:
     os.execv(str(python), [str(python), __file__, *sys.argv[1:]])
 
 from skill_picker import prepare
+
+
+def job_log():
+    """The file this job's output is redirected to: its transcript for attach-memory."""
+    try:
+        if not stat.S_ISREG(os.fstat(2).st_mode):
+            return None
+        if sys.platform == 'darwin':
+            return os.fsdecode(fcntl.fcntl(2, fcntl.F_GETPATH, bytes(1024)).rstrip(b'\0'))
+        return os.readlink('/proc/self/fd/2')
+    except OSError:
+        return None
 
 
 def main():
@@ -73,6 +87,9 @@ def main():
         subprocess.run(['git', '-C', str(clone), 'config', 'user.email',
                         'jbookout@users.noreply.github.com'], check=True)
         brief, _ = prepare(args.brief, clone)
+        log = job_log()
+        brief = (f'Job log: {log} (pass it to attach-memory as transcript_ref).' if log
+                 else 'Job log: none (stderr is not a file).') + '\n\n' + brief
         result = clone.parent / 'result.md'
         command = ['codex', 'exec', '-C', str(clone), '--dangerously-bypass-hook-trust',
                    '-o', str(result)]

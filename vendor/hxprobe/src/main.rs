@@ -481,8 +481,11 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     }
 
     // Collapse the copies `sender + send time` could not join. See body.rs.
-    let mut by_time: Vec<record::Record> = best.into_values().collect();
-    by_time.sort_by_key(|r| r.sent_unix);
+    // Ties on send time are broken by merge key, not hash order, so the same
+    // store always collapses and numbers its rows the same way.
+    let mut keyed: Vec<(String, record::Record)> = best.into_iter().collect();
+    keyed.sort_by(|(a, x), (b, y)| (x.sent_unix, a).cmp(&(y.sent_unix, b)));
+    let by_time = keyed.into_iter().map(|(_, r)| r);
     let mut best: Vec<record::Record> = Vec::with_capacity(by_time.len());
     let mut first_copy: std::collections::HashMap<(std::collections::BTreeSet<u64>, String), Vec<usize>> = Default::default();
     let mut collapsed = 0usize;

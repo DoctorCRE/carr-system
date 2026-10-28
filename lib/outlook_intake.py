@@ -431,6 +431,12 @@ def _decoder_health(meta: dict, since: int, now: datetime, baseline: dict) -> di
             'store_messages': len(store_rows)}
 
 
+def health_counts(health: dict | None) -> dict:
+    """Each measured rate in basis points, so every receipt carries the decoder's health."""
+    return {f'decoder_{name}_bp': round(rate * 10_000)
+            for name, rate in ((health or {}).get('rates') or {}).items() if rate is not None}
+
+
 def _snapshot(home: Path, work: Path) -> None:
     settings = load_settings(home)
     settings.verify_helper()
@@ -1417,7 +1423,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
             _refresh_list(out, state['pending_full'])
             _save(out, state)
         counts = {**mapping_counts(state), **calendar_counts(state),
-                  'mail_other_accounts': state['mail_other_accounts']}
+                  'mail_other_accounts': state['mail_other_accounts'], **health_counts(state.get('decoder_health'))}
         return Outcome('succeeded', 'store_unchanged', counts)
     try:
         with _decode(home, out, ports.decode) as (meta, mails, events, db, files):
@@ -1449,13 +1455,14 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     _save(out, state)
     if 'block_verification' in health['failing'] and 'block_verification' in health['eligible']:
         work = Run(ports, state, now, out, settings)
-        work.counts.update(decoder_alarm=alarm, writes_deferred=1)
+        work.counts.update(decoder_alarm=alarm, writes_deferred=1, **health_counts(health))
         work.report(out, 0)
         state['decoder_alarm_delivered'] = True
         _save(out, state)
         return Outcome('degraded', 'writes_deferred', work.counts)
     if (meta.get('event_identities') or 0) > 0 and not meta.get('events_decoded'):
         work = Run(ports, state, now, out, settings)
+        work.counts.update(health_counts(health))
         if health.get('error_class'):
             work.counts['decoder_health_error_' + health['error_class']] = 1
         work.report(out, 0)
@@ -1467,6 +1474,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     work = Run(ports, state, now, out, settings)
     work.counts['mail_other_accounts'] = meta['mail_other_accounts']
     work.counts['decoder_alarm'] = alarm
+    work.counts.update(health_counts(health))
     if health.get('error_class'):
         work.counts['decoder_health_error_' + health['error_class']] = 1
     try:
@@ -1489,7 +1497,8 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         work.full_text(mails)
         work.next_steps(mails)
         mail_processed = bool(work.written or any(value for key, value in work.counts.items()
-                                                  if key not in ('mail_other_accounts', 'decoder_alarm')))
+                                                  if key not in ('mail_other_accounts', 'decoder_alarm')
+                                                  and not key.endswith('_bp')))
         work.events(events, matcher, since)
         snapshot, agenda_counts = agenda(events, meta, settings, now)
         work.counts.update(agenda_counts)

@@ -1924,6 +1924,21 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.run_intake(healthy).state, 'succeeded')
         self.assertEqual(self.run_intake(broken).counts['decoder_alarm'], 1)
 
+    def test_every_receipt_records_block_verification_and_fill_rates(self):
+        sample = [mail(OWNER, -timedelta(hours=1), subject=f'Synthetic {i}', recipients='pat@example.test')
+                  for i in range(19)] + [mail(OWNER, -timedelta(hours=1), subject='', recipients=None)]
+        expected = {'decoder_block_verification_bp': 9990, 'decoder_sender_bp': 10000,
+                    'decoder_subject_bp': 9500, 'decoder_recipients_bp': 9500, 'decoder_sent_time_bp': 10000,
+                    'decoder_folder_bp': 0}
+        processed = self.run_intake(sample)
+        self.assertEqual({k: v for k, v in processed.counts.items() if k.endswith('_bp')}, expected)
+        unchanged = self.run_intake(sample, touch=False)
+        self.assertEqual(unchanged.reason, 'store_unchanged')
+        self.assertEqual({k: v for k, v in unchanged.counts.items() if k.endswith('_bp')}, expected)
+        deferred = self.run_intake(sample, found=1000, verified=900)
+        self.assertEqual((deferred.reason, deferred.counts['decoder_block_verification_bp']),
+                         ('writes_deferred', 9000))
+
     def test_failed_degraded_run_does_not_consume_alarm(self):
         healthy = [mail(OWNER, -timedelta(hours=1), recipients='pat@example.test') for _ in range(20)]
         self.run_intake(healthy)
