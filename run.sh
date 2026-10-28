@@ -129,6 +129,9 @@ case "${1:-}" in
   # three, two of which (the .venv and out/ symlinks) are invisible until
   # something breaks on a path that is simply not there.
   worktree)     shift; "$REPO/bin/worktree.sh" "$@" ;;
+  # `pre-pr` (WR576.S1.J1): run before git push / gh pr create in any clone. Leak guard
+  # over the merge-base range, gate integrity, and the review gate's Card line.
+  pre-pr)       shift; "$PY" "$REPO/ops/ci-pushfloor.py" --pre-pr "$@" ;;
   local-db-ci)  shift; "$PY" "$REPO/ops/local-pg-ci.py" "$@" ;;
   outlook-send) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import outlook_send as o; sys.exit(o.main(["send", *sys.argv[1:]]))' "$@" ;;
   outlook-event) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import outlook_send as o; sys.exit(o.main(["event", *sys.argv[1:]]))' "$@" ;;
@@ -162,6 +165,7 @@ case "${1:-}" in
       "export [--only <target>] [--bootstrap]|" \
       "call [--branch <name>] <verb> '<json args>'|" \
       "call-mode [serve|state|start|stop]|" \
+      "pre-pr [--body <file>]|" \
       "local-db-ci [--class migration|strict] [--port N]|" \
       "portal-parity --stage N [--rows <ids>] (see --help)|" \
       "worktree <name> [--from B]|--list|--remove <name|path>"

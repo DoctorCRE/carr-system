@@ -5,10 +5,15 @@ ci.sh calls this from the repository root and owns the class verdict. Detail goe
 stderr; the one stdout line is the verdict text. Exit 0 passes the class, 1 fails it.
 Each check writes <logdir>/pushfloor-<name>.log and .rc, which ci.sh's exit trap
 keeps only for failures.
+
+--pre-pr [--body FILE] is ./run.sh pre-pr: the three checks hosted CI failed on in the
+2026-10-28 retro (#2623, #2629, #2636, #2637), each costing a full CI round. It prints one
+line per failure saying what to do and exits 1 on any failure.
 """
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import os
 import re
 import subprocess
@@ -202,12 +207,66 @@ def check(floor, diff_range, gates_deferred):
                   " · durable fix: add ops/<gate>-selftest.py", file=sys.stderr, flush=True)
 
 
+def pull_request_files(span):
+    """The changed-file records the review gate reads from GitHub, built from git."""
+    files = []
+    for line in git_lines("diff", "--name-status", "-M", span) or []:
+        status, *paths = line.split("\t")
+        files.append({"filename": paths[-1], "previous_filename": paths[0]} if status[0] in "RC"
+                     else {"filename": paths[0]})
+    return files
+
+
+def pre_pr(python, body_file):
+    """Failure lines for the leak guard, gate integrity and the review gate's Card line."""
+    body = Path(body_file).read_text() if body_file else None
+    os.chdir(Path(__file__).resolve().parents[1])
+    base, head = git_lines("merge-base", "origin/main", "HEAD"), git_lines("rev-parse", "HEAD")
+    if not base or not head:
+        return ["no merge base with origin/main: run git fetch origin main, then rerun ./run.sh pre-pr"]
+    span = f"{base[0]}..{head[0]}"
+    failures = []
+    leak = subprocess.run([python, "security/leak_guard.py", "--range", span], stdout=sys.stderr)
+    if leak.returncode:
+        failures.append(f"leak guard flagged lines this branch adds (locations above): remove them in a new "
+                        f"commit, then recheck with python3 security/leak_guard.py --range {span}")
+    integrity = subprocess.run([python, "hooks/gate-integrity.py", "--strict"], stdout=sys.stderr)
+    if integrity.returncode:
+        failures.append("gate integrity failed (detail above): for an intended hook change run python3 "
+                        "hooks/gate-integrity.py --bless <hook file name> and commit ops/config/gate-baseline.json")
+    if body is None:
+        view = subprocess.run(["gh", "pr", "view", "--json", "body", "--jq", ".body"],
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        body = view.stdout if view.returncode == 0 else None
+    if body is None:
+        failures.append("no PR body to check and no open PR for this branch: write the body to a file "
+                        "and rerun ./run.sh pre-pr --body <file>")
+    else:
+        spec = importlib.util.spec_from_file_location("review_gate", "ops/review-gate.py")
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+        files = pull_request_files(span)
+        if not gate.card_allowed({"body": body, "changed_files": len(files), "user": {}}, files):
+            failures.append("PR body needs a line that is exactly Card: WR<n>.S<n>.J<n> with nothing "
+                            "before or after it: add your brief's card line on its own line")
+    return failures
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--logdir", required=True)
+    parser.add_argument("--logdir")
+    parser.add_argument("--pre-pr", action="store_true",
+                        help="check this branch the way hosted CI will before git push / gh pr create")
+    parser.add_argument("--body", help="with --pre-pr: PR body file (default: the open PR's body via gh)")
     parser.add_argument("--gates-deferred", action="store_true",
                         help="the gates class is not selected in this run")
     args = parser.parse_args(argv)
+    if args.pre_pr:
+        failures = pre_pr(sys.executable, args.body)
+        print("\n".join(failures), end="\n" if failures else "")
+        return int(bool(failures))
+    if not args.logdir:
+        parser.error("--logdir is required")
     started = int(time.time())
     floor = Floor(args.logdir, sys.executable)
     check(floor, os.environ.get("CARR_CI_RANGE", ""), args.gates_deferred)
