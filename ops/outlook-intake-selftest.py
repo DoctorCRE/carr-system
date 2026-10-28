@@ -2195,6 +2195,40 @@ class IntakeTest(unittest.TestCase):
         result = intake.run(self.repo, self.home, self.fake.ports())
         self.assertEqual((result.state, result.reason), ('failed', 'store_missing'))
 
+    def test_failed_tools_leave_sanitized_detail_in_receipt(self):
+        for tool in ('outlook-intake-copy', 'hxprobe'):
+            with self.subTest(tool=tool):
+                ports = self.fake.ports()
+                if tool == 'hxprobe':
+                    ports.decode = intake._decoder(self.home)
+                original = self.copy_snapshot
+
+                def run(command, **kwargs):
+                    if command[-1] == '--scope' or (tool == 'hxprobe' and len(command) == 1):
+                        return original(command, **kwargs)
+                    return subprocess.CompletedProcess(command, 42, stdout=b'private stdout',
+                        stderr=b'ignored first line\nlee@example.test Subject: Lease offer /Users/x/Deals/Acme Medical/LOI.docx')
+
+                with patch('subprocess.run', side_effect=run):
+                    result = intake.run(self.repo, self.home, ports)
+                receipt = json.loads(intake.receipt_line(result).split(' ', 1)[1])
+                self.assertEqual((receipt['state'], receipt['reason']), ('failed', 'decode_failed'))
+                for private in ('lee@example.test', 'Lease offer', 'Acme', 'Medical',
+                                '/Users/x', 'private stdout', 'ignored first line'):
+                    self.assertNotIn(private, json.dumps(receipt))
+                self.assertEqual(receipt['detail'], f'{tool} exit=42 code=exit_nonzero')
+                self.assertEqual([p for p in self.out().iterdir() if p.is_dir()], [])
+
+    def test_decode_os_and_sqlite_errors_report_type_without_private_message(self):
+        for error in (OSError(errno.EIO, '/private/elsewhere/file'), sqlite3.DatabaseError('private sql')):
+            with self.subTest(error=type(error).__name__):
+                ports = self.fake.ports()
+                ports.decode = lambda *args: (_ for _ in ()).throw(error)
+                result = intake.run(self.repo, self.home, ports)
+                receipt = json.loads(intake.receipt_line(result).split(' ', 1)[1])
+                self.assertIn(type(error).__name__, receipt['detail'])
+                self.assertNotIn('private', receipt['detail'])
+
     def test_a_decoder_failure_fails_and_cleans_up(self):
         def broken(store_copy, files_copy, db_path):
             raise intake.DecodeError('exit 101')
@@ -2209,6 +2243,8 @@ class IntakeTest(unittest.TestCase):
         with patch('subprocess.run', side_effect=PermissionError(errno.EPERM, 'Operation not permitted')):
             result = self.run_intake()
         self.assertEqual(result.state, 'failed')
+        receipt = json.loads(intake.receipt_line(result).split(' ', 1)[1])
+        self.assertEqual(receipt['detail'], 'outlook-intake-copy exit=None code=permission_denied')
         self.assertIn(f'grant Full Disk Access to {self.home}/carr-local/bin/outlook-intake-copy',
                       intake.status_line(result))
         self.assertEqual(self.fake.calls, [])
