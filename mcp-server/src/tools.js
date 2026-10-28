@@ -4256,15 +4256,7 @@ export const TOOLS = {
       summary: { type: "string" }, detail: { type: "string" },
       email_context: { type: 'object', additionalProperties: false,
         required: ['subject', 'conversation_id', 'sender', 'recipients'], properties: {
-          subject: { type: 'string' }, conversation_id: { type: ['string', 'null'] },
-          sender: { type: 'object', additionalProperties: false, required: ['email', 'internal'],
-            properties: { email: { type: 'string' }, name: { type: ['string', 'null'] }, internal: { type: 'boolean' } } },
-          recipients: { type: 'array', items: { type: 'object', additionalProperties: false,
-            required: ['email', 'kind', 'internal'], properties: { email: { type: 'string' },
-              name: { type: ['string', 'null'] }, kind: { enum: ['to', 'cc'] }, internal: { type: 'boolean' } } } },
-        } },
-      email_context: { type: 'object', additionalProperties: false,
-        required: ['subject', 'conversation_id', 'sender', 'recipients'], properties: {
+          source_activity_id: { type: 'string', format: 'uuid' },
           subject: { type: 'string' }, conversation_id: { type: ['string', 'null'] },
           sender: { type: 'object', additionalProperties: false, required: ['email', 'internal'],
             properties: { email: { type: 'string' }, name: { type: ['string', 'null'] }, internal: { type: 'boolean' } } },
