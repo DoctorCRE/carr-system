@@ -9,7 +9,7 @@
 //! Each recipient is its own object, owned by the message through a typed
 //! reference. Its kind says which list it belongs to; its position in that
 //! list follows its object key. See spec/outlook/hxstore-atlas.json and
-//! SPEC.md, "Recipients and conversations".
+//! spec/outlook/recipients-threads-research.md.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -140,7 +140,7 @@ fn revision(object: &[u8]) -> Option<Revision> {
 }
 
 fn recipient(object: &[u8]) -> Option<(u64, u64, RecipientKey)> {
-    if object.get(..10)? != folder::signature(RECIPIENT.1) {
+    if object.get(..10)? != [0x55, 0, 0, 0, 0, 0, 0, 0, 0, 0] {
         return None;
     }
     let (id, kind, owner) = (u64_at(object, 10)?, u32_at(object, 18)?, u64_at(object, 22)?);
