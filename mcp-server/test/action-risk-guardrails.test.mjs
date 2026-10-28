@@ -154,7 +154,7 @@ test("top-level reserved authority fields are rejected before a direct handler o
   for (const field of reserved) {
     const db = new SetLeadFake();
     const out = await rejected(() => executeRegisteredTool(db, JOE, "set-lead", payload({ [field]: CANARY })));
-    assert.deepEqual(out, { error: "caller_authority_field_forbidden" });
+    assert.deepEqual(out, { error: "caller_authority_field_forbidden", fields: [field] });
     assert.equal(db.handlerCalls, 0, `${field} reached a handler`);
     assert.equal(db.participantWrites, 0, `${field} reached a write`);
     assert.ok(!JSON.stringify(out).includes(CANARY));
@@ -166,19 +166,19 @@ test("the same top-level gate covers composite executeRegisteredTool dispatch", 
   const out = await rejected(() => executeRegisteredTool(db, JOE, "set-next-step", {
     idempotency_key: "00000571-0000-4000-8000-000000000016", text: "synthetic", profile: CANARY,
   }));
-  assert.deepEqual(out, { error: "caller_authority_field_forbidden" });
+  assert.deepEqual(out, { error: "caller_authority_field_forbidden", fields: ["profile"] });
   assert.ok(!JSON.stringify(out).includes(CANARY));
 });
 
 test("direct MCP and call-verb recursion refuse authority claims before a writer pool", async () => {
   const direct = await rejected(() => callTool({}, JOE, "set-lead", payload({ profile: CANARY })));
-  assert.deepEqual(direct, { error: "caller_authority_field_forbidden" });
+  assert.deepEqual(direct, { error: "caller_authority_field_forbidden", fields: ["profile"] });
   assert.ok(!JSON.stringify(direct).includes(CANARY));
 
   const recursive = await rejected(() => callTool({}, JOE, "call-verb", {
     verb: "set-lead", args: payload({ action_authority: CANARY }),
   }));
-  assert.deepEqual(recursive, { error: "caller_authority_field_forbidden" });
+  assert.deepEqual(recursive, { error: "caller_authority_field_forbidden", fields: ["action_authority"] });
   assert.ok(!JSON.stringify(recursive).includes(CANARY));
 });
 
