@@ -52,7 +52,11 @@ test('link queue executes hydration, filing and cursor paging in PostgreSQL', as
     assert.deepEqual(next.emails.map(row => row.activity_id), [ids[1]]);
     assert.equal(next.more, false);
     const other = await queue.handler(c, { human: true, slug: 'dell', id: '30000000-0000-0000-0000-000000000002' }, { purpose: 'links' });
-    assert.deepEqual(other.emails.map(row => row.activity_id), [ids[0]]);
+    assert.deepEqual(other.emails.map(row => row.activity_id), []);
+    const secondDeal = '20000000-0000-0000-0000-000000000002';
+    await c.query('update activity set deal_id=$1 where id=$2', [secondDeal, ids[0]]);
+    const refiled = await queue.handler(c, caller, { purpose: 'links' });
+    assert.equal(refiled.emails.find(row => row.activity_id === ids[0]).deal, secondDeal);
   } finally {
     await c?.end();
     if (database) await admin.query(`drop database "${database}"`);

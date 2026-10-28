@@ -356,6 +356,31 @@ class IntakeTest(unittest.TestCase):
         second = self.fake.writes('log-activity')[-1][1]['idempotency_key']
         self.assertEqual(first, second)
 
+    def test_refiled_email_gets_a_link_note_for_each_deal(self):
+        self.fake.email_queue = [{'activity_id': 'email-refiled', 'deal': 'deal-one',
+                                 'body': 'https://loopnet.com/Listing/123', 'occurred_at': NOW.isoformat()}]
+        self.assertEqual(self.run_intake().state, 'succeeded')
+        self.fake.email_queue[0]['deal'] = 'deal-two'
+        self.assertEqual(self.run_intake(touch=False).state, 'succeeded')
+        notes = [a for _, a in self.fake.writes('log-activity') if a['summary'] == 'Links from matched email']
+        self.assertEqual([a['ref'] for a in notes], ['deal-one', 'deal-two'])
+        self.assertNotEqual(notes[0]['idempotency_key'], notes[1]['idempotency_key'])
+
+    def test_refused_link_does_not_block_later_intake(self):
+        self.fake.email_queue = [{'activity_id': 'email-refused', 'deal': 'deal-one',
+                                 'body': 'https://loopnet.com/Listing/123', 'occurred_at': NOW.isoformat()},
+                                {'activity_id': 'email-valid', 'deal': 'deal-two',
+                                 'body': 'https://crexi.com/properties/456', 'occurred_at': NOW.isoformat()}]
+        original = self.fake.carr
+        def carr(verb, args):
+            if verb == 'log-activity' and args.get('ref') == 'deal-one':
+                raise intake.CarrError(code='key_reuse')
+            return original(verb, args)
+        self.fake.carr = carr
+        self.assertEqual(self.run_intake().state, 'succeeded')
+        self.assertEqual(self.run_intake(touch=False).state, 'succeeded')
+        self.assertEqual([a['ref'] for _, a in self.fake.writes('log-activity')], ['deal-two'])
+
     def test_hydrated_links_follow_original_confirmed_email(self):
         preview = mail('pat@example.test', -timedelta(hours=1), body='Still loading the full message',
                        kind='preview', copy_key='hydration-fixture')
