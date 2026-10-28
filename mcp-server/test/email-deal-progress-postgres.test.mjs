@@ -1803,3 +1803,28 @@ test('legacy undo refuses when the deal owner is unknown', async () => {
       e => e.payload?.error === 'email_thread_filing_owner_unknown');
   } finally { await c.query("update deal set owner='joe' where id=$1", [deal]); }
 });
+
+
+test('quality reports automatic filing undo rates for the requested filing cohort', async () => {
+  await c.query("delete from event where verb in ('inherit-email-thread','undo-email-thread-filing')");
+  const report = (days = 7) => command('email-proposal-quality', { days }, actor, 'carr_reader');
+  assert.deepEqual((await report()).automatic_filings,
+    { filed: 0, undone: 0, undo_rate: null, over_threshold: false });
+  const filings = [];
+  for (let i = 0; i < 20; i++) filings.push((await automaticThreadFiling()).filing);
+  assert.deepEqual((await report()).automatic_filings,
+    { filed: 20, undone: 0, undo_rate: 0, over_threshold: false });
+  const undo = event_id => command('undo-email-thread-filing', { idempotency_key: randomUUID(), event_id }, actor, 'carr_writer');
+  await undo(filings[0].event_id);
+  assert.deepEqual((await report()).automatic_filings,
+    { filed: 20, undone: 1, undo_rate: 0.05, over_threshold: false });
+  await undo(filings[1].event_id);
+  assert.deepEqual((await report()).automatic_filings,
+    { filed: 20, undone: 2, undo_rate: 0.1, over_threshold: true });
+  await c.query("update event set recorded_at=now()-interval '10 days' where verb='inherit-email-thread' and id<>$1", [filings[1].event_id]);
+  assert.deepEqual((await report()).automatic_filings,
+    { filed: 1, undone: 1, undo_rate: 1, over_threshold: false });
+  assert.deepEqual((await report(30)).automatic_filings,
+    { filed: 20, undone: 2, undo_rate: 0.1, over_threshold: true });
+  assert.equal((await report()).send, false);
+});
