@@ -56,7 +56,7 @@ test('ordinary router mode retains the existing bounded classification contract'
   assert.deepEqual(result.emails, []);
   assert.deepEqual(result.open_deals, []);
   assert.equal(result.schema_version, 'email-router-queue.v2');
-  assert.match(calls[0].sql, /a\.kind='email_in'/);
+  assert.match(calls[0].sql, /a\.kind in \('email_in','email_out'\)/);
   assert.match(calls[0].sql, /make_interval\(days=>\$1\)/);
-  assert.deepEqual(calls[0].args, [3, [], 26, 'joe']);
+  assert.deepEqual(calls[0].args, [3, [], 26, 'joe', actor.id]);
 });
