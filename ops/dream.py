@@ -11,6 +11,7 @@ import tempfile
 import re
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -262,8 +263,8 @@ class VerbStore:
         result = self.call('dry-run-doctrine-gates', args)
         return result.get('result') == 'pass'
     def apply(self, items, attach, key):
-        self.call('change-doctrine-sections', {'document': 'team-memory', 'attach_id': attach, 'idempotency_key': key, 'commit_message': 'Dream memory consolidation', 'items': items})
+        self.call('change-doctrine-sections', {'document': 'team-memory', 'attach_id': attach, 'idempotency_key': str(uuid.uuid5(uuid.NAMESPACE_URL, key)), 'commit_message': 'Dream memory consolidation', 'items': items})
     def log(self, report, key):
         kind = 'error' if 'error' in report else 'success'
         section_key = 'dreams/' + hashlib.sha256((key + '-' + kind).encode()).hexdigest()
-        self.call('write-doctrine-section', {'document': 'dreams-log', 'section_key': section_key, 'title': 'Dream report', 'body_text': json.dumps(report, sort_keys=True), 'base_version': 0, 'idempotency_key': key + '-' + kind + '-log'})
+        self.call('write-doctrine-section', {'document': 'dreams-log', 'section_key': section_key, 'title': 'Dream report', 'body_text': json.dumps(report, sort_keys=True), 'base_version': 0, 'idempotency_key': str(uuid.uuid5(uuid.NAMESPACE_URL, key + '-' + kind + '-log'))})

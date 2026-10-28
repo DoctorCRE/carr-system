@@ -76,7 +76,7 @@ test('dream applies a synthetic memory consolidation in one doctrine change set'
     assert.match(after.sections.find(s => s.section_key === 'confirmed').body.text, /Verified from session synthetic-a/);
     const row = (await c.query("select review_after from doctrine_section where section_key='confirmed'")).rows[0];
     assert.ok(row.review_after > new Date('2000-01-01'));
-    const sets = await c.query("select count(*)::int as n from doctrine_change_set where idempotency_key='synthetic-dream'");
+    const sets = await c.query("select count(*)::int as n from doctrine_change_set where idempotency_key='0fe2c6c2-669f-5863-8cef-0d20460dd9dd'");
     assert.equal(sets.rows[0].n, 1);
   } finally { await c?.end(); await fixture.close(); rmSync(directory, { recursive: true, force: true }); }
 });
