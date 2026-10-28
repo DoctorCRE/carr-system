@@ -1,4 +1,6 @@
 // Expose resource dashboard and metering observations.
+import type { Actor, Db, VerbInputs, WithEnvelope } from "./verb-contract.ts";
+import type { ToolError as ToolErrorClass } from "./tool-error.ts";
 import { connectionsProjection } from './connections.v1.ts';
 // DoctorCRE v5 slices V5-UX-C02 (Resource dashboard and metering read
 // contract) and V5-UX-C06 (Local compute capacity and model-route
@@ -33,13 +35,13 @@ const STATES = Object.freeze(["ok", "partial", "stale", "unconfigured", "collect
 
 const jsonOrNullSchema = { type: ["object", "null"] };
 
-export function resourceObservationTools({ withEnvelope, ToolError }) {
+export function resourceObservationTools({ withEnvelope, ToolError }: { withEnvelope: WithEnvelope; ToolError: typeof ToolErrorClass }) {
   return {
     "read-resource-dashboard": {
       write: false,
       description: "Read the full DoctorCRE resource-metering provider matrix: neon, github, cloudflare, local_compute, model_route -- one entry each, always present. A provider with no collector observation yet reads back state 'unconfigured' (external providers whose adapter is not built) or 'collector_absent' (local providers awaiting their first collector run), with an explicit reason. Never fabricates a quantity, allowance, or capacity for an absent source; policy caps are never shown as consumed usage or an invoice.",
       inputSchema: { type: "object", additionalProperties: false, properties: {} },
-      handler: async (c) => {
+      handler: async (c: Db) => {
         const row = (await c.query("select ops.read_resource_dashboard() as dashboard")).rows[0];
         const dashboard = row?.dashboard;
         if (!dashboard || !Array.isArray(dashboard.providers))
@@ -77,8 +79,8 @@ export function resourceObservationTools({ withEnvelope, ToolError }) {
         },
         required: ["idempotency_key", "provider", "state", "source", "observed_at"],
       },
-      handler: async (c, actor, args) => withEnvelope(c, actor, "record-resource-observation", args, async () => {
-        for (const field of ["policy", "measured_capacity", "configured_capacity", "model_route"]) {
+      handler: async (c: Db, actor: Actor, args: VerbInputs["record-resource-observation"]) => withEnvelope(c, actor, "record-resource-observation", args, async () => {
+        for (const field of ["policy", "measured_capacity", "configured_capacity", "model_route"] as const) {
           if (args[field] !== undefined && args[field] !== null && typeof args[field] !== "object")
             throw new ToolError({ error: "resource_observation_field_invalid", field });
         }

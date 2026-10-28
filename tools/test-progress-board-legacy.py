@@ -108,7 +108,7 @@ class LegacyDispositionTests(unittest.TestCase):
         info = {
             **FIXTURE['github']['DoctorCRE/carr-system#1454'],
             'title': 'Doc V0: a ChatGPT plugin and Claude connector endpoint over the record layer',
-            'files': [{'path': 'mcp-server/src/doc-profile.js'},
+            'files': [{'path': 'mcp-server/src/doc-profile.ts'},
                       {'path': 'mcp-server/test/doc-oauth.test.mjs'}],
         }
         with tempfile.TemporaryDirectory() as directory:
@@ -144,7 +144,7 @@ class LegacyDispositionTests(unittest.TestCase):
     def test_changed_file_can_corroborate_subject_when_pr_title_is_uninformative(self):
         task = {**FIXTURE['tasks']['build-r-oauth-hardening'], 'title': 'OAuth consent hardening'}
         info = {**FIXTURE['github']['DoctorCRE/carr-system#1460'], 'title': 'Security improvements',
-                'files': [{'path': 'mcp-server/src/oauth-consent-state.js'}]}
+                'files': [{'path': 'mcp-server/src/oauth-consent-state.ts'}]}
         _, report = board.dispose_legacy({'project': 'test', 'tasks': {'oauth': task}},
                                          {('DoctorCRE/carr-system', 1460): (info, None)}, AT)
         self.assertEqual(report['counts']['done'], 1)

@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import {
   assuranceHealthStoreTools,
   validateAssuranceHealthProjection,
-} from "../src/assurance-health-store.v5.js";
+} from "../src/assurance-health-store.v5.ts";
 import { ToolError as ServerToolError } from "../src/tool-error.ts";
 import { publicError } from "../src/public-errors.ts";
 

@@ -2,7 +2,7 @@
 import { readMigration } from "./migration-source.testhelper.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { invoiceTrackerTools } from '../src/invoice-tracker.js';
+import { invoiceTrackerTools } from '../src/invoice-tracker.ts';
 import { TOOLS } from '../src/tools.js';
 import { assertAdmits } from './helpers/registry-admission.mjs';
 

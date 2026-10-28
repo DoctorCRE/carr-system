@@ -26,11 +26,17 @@
 // `acknowledged` from inside its own turn. Nothing in this file lets one of
 // them speak for another: there is no actor argument to speak with.
 
+import type { Actor, Db, VerbInputs, WithEnvelope, WriteEvent } from "./verb-contract.ts";
+import type { ToolError as ToolErrorClass } from "./tool-error.ts";
+
+// Preserve partial database JSON validation; unchecked fields remain untyped.
+type ProjectionFacts = Record<string, any> | null | undefined;
+
 const DISPATCH_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Pure shaper over ops.record_dispatch_link. */
-export function dispatchLinkProjection(result, ToolError) {
+export function dispatchLinkProjection(result: ProjectionFacts, ToolError: typeof ToolErrorClass) {
   if (!result || typeof result !== "object" || result.ok !== true) {
     throw new ToolError({ error: result?.reason_id || "dispatch_link_refused" });
   }
@@ -49,7 +55,7 @@ export function dispatchLinkProjection(result, ToolError) {
 }
 
 /** Pure shaper over ops.acknowledge_dispatch. */
-export function dispatchAckProjection(result, ToolError) {
+export function dispatchAckProjection(result: ProjectionFacts, ToolError: typeof ToolErrorClass) {
   if (!result || typeof result !== "object" || result.ok !== true) {
     throw new ToolError({ error: result?.reason_id || "dispatch_ack_refused" });
   }
@@ -63,7 +69,7 @@ export function dispatchAckProjection(result, ToolError) {
   };
 }
 
-export function dispatchSpineTools({ withEnvelope, writeEvent, ToolError }) {
+export function dispatchSpineTools({ withEnvelope, writeEvent, ToolError }: { withEnvelope: WithEnvelope; writeEvent: WriteEvent; ToolError: typeof ToolErrorClass }) {
   return {
     "record-dispatch-link": {
       write: true,
@@ -76,7 +82,7 @@ export function dispatchSpineTools({ withEnvelope, writeEvent, ToolError }) {
         session_id:      { type: "string", minLength: 1, maxLength: 200 },
         work_request_id: { type: "string" },
       }, required: ["idempotency_key", "dispatch_ref", "turn_msg_id", "session_id"] },
-      handler: async (c, actor, args) =>
+      handler: async (c: Db, actor: Actor, args: VerbInputs["record-dispatch-link"]) =>
         withEnvelope(c, actor, "record-dispatch-link", args, async () => {
           if (!DISPATCH_UUID.test(String(args.dispatch_ref || ""))) {
             throw new ToolError({ error: "dispatch_ref_invalid",
@@ -123,7 +129,7 @@ export function dispatchSpineTools({ withEnvelope, writeEvent, ToolError }) {
         stage:        { type: "string", enum: ["received", "acknowledged"] },
         evidence:     { type: "string", maxLength: 500 },
       }, required: ["idempotency_key", "dispatch_ref", "stage"] },
-      handler: async (c, actor, args) =>
+      handler: async (c: Db, actor: Actor, args: VerbInputs["acknowledge-dispatch"]) =>
         withEnvelope(c, actor, "acknowledge-dispatch", args, async () => {
           if (!DISPATCH_UUID.test(String(args.dispatch_ref || ""))) {
             throw new ToolError({ error: "dispatch_ref_invalid",

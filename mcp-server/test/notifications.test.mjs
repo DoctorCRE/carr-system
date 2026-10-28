@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
 import { notificationTools, notificationFeedProjection, notificationPreferenceProjection }
-  from "../src/notifications.js";
+  from "../src/notifications.ts";
 import { investigationTools } from "../src/investigation.js";
 import { docConversationTools } from "../src/doc-conversation.js";
 import { TOOLS } from "../src/tools.js";

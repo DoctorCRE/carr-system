@@ -9,6 +9,7 @@
 // exists. Research workflows read it first, search the open web beyond it, and
 // add what they find. Every verb is open to every caller, sessions and scheduled
 // runs included — Joe ruled he does not want to be involved in adding sites.
+import type { Actor, Db, VerbInputs, WithEnvelope, WriteEvent } from "./verb-contract.ts";
 import { ToolError } from "./tool-error.ts";
 
 export const RESEARCH_SITE_WRITE_VERBS = new Set(["add-research-site", "remove-research-site"]);
@@ -19,7 +20,7 @@ const NON_PUBLIC_SUFFIX = new Set(["localhost", "local", "internal", "localdomai
 // Topic tags: short lowercase words joined by hyphens ("cre-market", "npi").
 const TOPIC_OK = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
-export function normalizeResearchHost(value) {
+export function normalizeResearchHost(value: unknown) {
   const host = typeof value === "string" ? value.trim().toLowerCase().replace(/\.$/, "") : "";
   const labels = host.split(".");
   if (!HOST_OK.test(host) || host.length > 253 || labels.some(l => l.length > 63) ||
@@ -32,7 +33,7 @@ export function normalizeResearchHost(value) {
   return host;
 }
 
-export function normalizeTopics(value) {
+export function normalizeTopics(value: unknown) {
   if (value === undefined || value === null)
     throw new ToolError({ error: "research_site_topics_required",
       hint: "tag what the site is good for, e.g. [\"cre-market\", \"medical-office\"]" });
@@ -44,7 +45,9 @@ export function normalizeTopics(value) {
   return topics.sort();
 }
 
-function text(value, field, { optional = false, max = 1000 } = {}) {
+function text(value: unknown, field: string, options?: { optional?: false; max?: number }): string;
+function text(value: unknown, field: string, options: { optional: true; max?: number }): string | null;
+function text(value: unknown, field: string, { optional = false, max = 1000 } = {}) {
   if (optional && (value === undefined || value === null || value === "")) return null;
   if (typeof value !== "string" || !value.trim() || value.length > max)
     throw new ToolError({ error: "research_site_text_invalid", field, max });
@@ -65,7 +68,7 @@ const SENSITIVE_FLAT = /token|secret|passw|passcode|credential|signature|authori
 const BENIGN_PARAM = new Set(["keyword", "keywords", "monkey", "turkey", "hockey", "jockey", "whiskey", "donkey",
   "tokenizer", "tokenizers", "tokenize", "turnkey", "hotkey", "hotkeys"]);
 
-function sensitiveName(name) {
+function sensitiveName(name: string) {
   const flat = name.toLowerCase().replace(/[-_.]/g, "");
   if (BENIGN_PARAM.has(flat)) return false;
   const words = name.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
@@ -73,7 +76,7 @@ function sensitiveName(name) {
   return words.some(word => SENSITIVE_WORD.test(word)) || SENSITIVE_FLAT.test(flat);
 }
 
-function sensitiveFields(params) {
+function sensitiveFields(params: URLSearchParams) {
   return [...params.keys()].some(sensitiveName);
 }
 
@@ -81,7 +84,7 @@ function sensitiveFields(params) {
 // caller, and the add writes it into the audit event, so it must carry no
 // credential: no user:pass@ authority and no token/key/secret/signature/password
 // field in the query or fragment. Errors never echo the rejected url.
-export function startUrl(value, host) {
+export function startUrl(value: unknown, host: string) {
   const url = text(value, "url", { optional: true, max: 2000 });
   if (url === null) return null;
   let parsed;
@@ -100,14 +103,14 @@ export function startUrl(value, host) {
 }
 
 // LIKE treats % and _ as wildcards; a free-text filter means the literal text.
-function likeLiteral(value) {
+function likeLiteral(value: string) {
   return `%${value.replace(/[\\%_]/g, "\\$&")}%`;
 }
 
 const SITE_COLUMNS = `s.host, s.url, s.topics, s.note, a.slug as added_by, s.added_at,
   s.removed_at, ra.slug as removed_by, s.removal_reason`;
 
-export function researchSiteTools({ withEnvelope, writeEvent }) {
+export function researchSiteTools({ withEnvelope, writeEvent }: { withEnvelope: WithEnvelope; writeEvent: WriteEvent }) {
   return {
     "list-research-sites": {
       description: "The research-site index: sources worth checking FIRST for a research topic, each tagged with what it is good for. A starting point, never a limit — always ALSO search the open internet for sources not listed here, and add any new useful one with add-research-site. Filter by topic tag (exact, e.g. cre-market, npi, veterinary) and/or free text matched against host, tags and note. Active rows only unless include_removed is true. Returns the topic tags in use so a caller can pick one.",
@@ -115,8 +118,8 @@ export function researchSiteTools({ withEnvelope, writeEvent }) {
         topic: { type: "string", description: "one topic tag; rows carrying it are returned" },
         text: { type: "string", description: "substring matched against host, tags and note" },
         include_removed: { type: "boolean", description: "also return soft-removed rows, for history" } } },
-      handler: async (c, _actor, args = {}) => {
-        const where = [], params = [];
+      handler: async (c: Db, _actor: Actor, args: VerbInputs["list-research-sites"] = {}) => {
+        const where: string[] = [], params: string[] = [];
         if (args.include_removed !== true) where.push("s.removed_at is null");
         if (args.topic !== undefined) {
           params.push(normalizeTopics(args.topic)[0]);
@@ -152,7 +155,7 @@ export function researchSiteTools({ withEnvelope, writeEvent }) {
         url: { type: "string", description: "optional starting page on that host" },
         note: { type: "string", description: "optional: what to look for there" } },
         required: ["idempotency_key", "host", "topics"] },
-      handler: async (c, actor, args) => {
+      handler: async (c: Db, actor: Actor, args: VerbInputs["add-research-site"]) => {
         const host = normalizeResearchHost(args.host);
         const topics = normalizeTopics(args.topics);
         const url = startUrl(args.url, host);
@@ -188,7 +191,7 @@ export function researchSiteTools({ withEnvelope, writeEvent }) {
         host: { type: "string", description: "the listed hostname" },
         reason: { type: "string", description: "why it no longer belongs in the index" } },
         required: ["idempotency_key", "host", "reason"] },
-      handler: async (c, actor, args) => {
+      handler: async (c: Db, actor: Actor, args: VerbInputs["remove-research-site"]) => {
         const host = normalizeResearchHost(args.host);
         const reason = text(args.reason, "reason");
         return withEnvelope(c, actor, "remove-research-site", args, async () => {

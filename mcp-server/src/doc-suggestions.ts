@@ -1,10 +1,12 @@
 // B08: versioned Doc suggestions over the canonical conversation and loop stores.
 // All actor, source body, contributor and source time facts are read in SQL.
+import type { Actor, Db, VerbInputs, WithEnvelope, WriteEvent } from "./verb-contract.ts";
+import type { ToolError as ToolErrorClass } from "./tool-error.ts";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const valid = value => UUID.test(String(value || ''));
+const valid = (value: unknown) => UUID.test(String(value || ''));
 
-export function docSuggestionTools({ withEnvelope, writeEvent, ToolError }) {
-  const result = (value, fallback) => {
+export function docSuggestionTools({ withEnvelope, writeEvent, ToolError }: { withEnvelope: WithEnvelope; writeEvent: WriteEvent; ToolError: typeof ToolErrorClass }) {
+  const result = <T extends { ok?: boolean; reason_id?: string; current?: unknown }>(value: T | null | undefined, fallback: string): T => {
     if (!value?.ok) throw new ToolError({ error: value?.reason_id || fallback, current: value?.current || null });
     return value;
   };
@@ -16,7 +18,7 @@ export function docSuggestionTools({ withEnvelope, writeEvent, ToolError }) {
         idempotency_key: { type: 'string' }, conversation_id: { type: 'string' },
         through_sequence: { type: 'integer' },
       }, required: ['idempotency_key','conversation_id','through_sequence'] },
-      handler: (c, actor, args) => withEnvelope(c, actor, 'complete-doc-suggestion-scan', args, async () => {
+      handler: (c: Db, actor: Actor, args: VerbInputs["complete-doc-suggestion-scan"]) => withEnvelope(c, actor, 'complete-doc-suggestion-scan', args, async () => {
         if (!valid(args.idempotency_key) || !valid(args.conversation_id)
           || !Number.isInteger(args.through_sequence) || args.through_sequence < -1)
           throw new ToolError({ error: 'doc_suggestion_scan_input_invalid' });
@@ -38,7 +40,7 @@ export function docSuggestionTools({ withEnvelope, writeEvent, ToolError }) {
         polished_text: { type: 'string' }, uncertainty: { type: 'string' },
         material_facts: { type: 'object' },
       }, required: ['idempotency_key','conversation_id','source_sequence','obligation_key','polished_text','material_facts'] },
-      handler: (c, actor, args) => withEnvelope(c, actor, 'suggest-doc-work', args, async () => {
+      handler: (c: Db, actor: Actor, args: VerbInputs["suggest-doc-work"]) => withEnvelope(c, actor, 'suggest-doc-work', args, async () => {
         if (!valid(args.idempotency_key) || !valid(args.conversation_id) || !Number.isInteger(args.source_sequence)
           || args.source_sequence < 0 || !String(args.obligation_key || '').trim()
           || !String(args.polished_text || '').trim() || typeof args.material_facts !== 'object'
@@ -58,7 +60,7 @@ export function docSuggestionTools({ withEnvelope, writeEvent, ToolError }) {
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         conversation_id: { type: 'string' }, include_parked: { type: 'boolean' },
       } },
-      handler: async (c, _actor, args) => {
+      handler: async (c: Db, _actor: Actor, args: VerbInputs["list-doc-suggestions"]) => {
         if (args.conversation_id !== undefined && !valid(args.conversation_id))
           throw new ToolError({ error: 'doc_conversation_id_invalid' });
         const found = await c.query('select ops.list_doc_suggestions($1::uuid,$2::boolean) as result',
@@ -74,7 +76,7 @@ export function docSuggestionTools({ withEnvelope, writeEvent, ToolError }) {
         base_version: { type: 'integer' }, choice: { type: 'string', enum: ['act','discuss','snooze','dismiss'] },
         snoozed_until: { type: 'string' }, work_ref: { type: 'string' },
       }, required: ['idempotency_key','suggestion_id','base_version','choice'] },
-      handler: (c, actor, args) => withEnvelope(c, actor, 'decide-doc-suggestion', args, async () => {
+      handler: (c: Db, actor: Actor, args: VerbInputs["decide-doc-suggestion"]) => withEnvelope(c, actor, 'decide-doc-suggestion', args, async () => {
         if (!valid(args.idempotency_key) || !valid(args.suggestion_id) || !Number.isInteger(args.base_version)
           || !['act','discuss','snooze','dismiss'].includes(args.choice))
           throw new ToolError({ error: 'doc_suggestion_decision_invalid' });
@@ -94,7 +96,7 @@ export function docSuggestionTools({ withEnvelope, writeEvent, ToolError }) {
         base_version: { type: 'integer' }, proposed_text: { type: 'string' },
         source_conversation_id: { type: 'string' }, source_sequence: { type: 'integer' },
       }, required: ['idempotency_key','suggestion_id','base_version','proposed_text','source_conversation_id','source_sequence'] },
-      handler: (c, actor, args) => withEnvelope(c, actor, 'propose-doc-correction', args, async () => {
+      handler: (c: Db, actor: Actor, args: VerbInputs["propose-doc-correction"]) => withEnvelope(c, actor, 'propose-doc-correction', args, async () => {
         if (!valid(args.idempotency_key) || !valid(args.suggestion_id) || !valid(args.source_conversation_id)
           || !Number.isInteger(args.base_version) || !Number.isInteger(args.source_sequence)
           || !String(args.proposed_text || '').trim())
