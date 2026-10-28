@@ -13,6 +13,21 @@ type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSche
 // Public shapes are deliberately closed. Never copy messages, hints, wrapped
 // details, event rows, driver codes, or arbitrary properties from a refusal.
 const PUBLIC_ERRORS = new Map<unknown, string>([
+  ["email_source_owner_mismatch", "Use the mailbox owner that matches the email source."],
+  ["email_proposal_confidence_invalid", "Provide a confidence between zero and one."],
+  ["email_proposal_fields_invalid", "Check the fields for the proposal kind."],
+  ["email_proposal_source_missing", "Review the email source before creating a draft."],
+  ["email_proposal_quote_invalid", "Use an exact quote from the email."],
+  ["email_proposal_evidence_invalid", "Review the email evidence and create a new proposal."],
+  ["email_proposal_deal_invalid", "Choose an eligible deal and review the proposal again."],
+  ["email_proposal_not_pending", "Re-read the proposal before confirming."],
+  ["email_proposal_stale", "Re-read and review the current proposal before confirming."],
+  ["email_sender_contact_required", "Create the sender contact before confirming the filing."],
+  ["email_thread_not_continuous", "Review the email and choose a deal."],
+  ["email_thread_ambiguous", "Review the email and choose a deal."],
+  ["email_thread_recipient_changed", "Review the email and choose a deal."],
+  ["email_new_deal_not_found", "Choose an existing deal before confirming."],
+  ["email_new_deal_client_mismatch", "Choose a deal belonging to the email client."],
   ["version_conflict", "Re-read the record and ask the human before retrying."],
   ["next_action_conflict", "Re-read get-next-action with ref and owner. Review the current action before retrying set-next-action with its id and version, or null if absent, in expected_action."],
   ["needs_confirm", "Ask the human to confirm before resubmitting with confirm:true."],

@@ -81,6 +81,11 @@ def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identiti
                      m['body_kind'], m['sent_unix'], m['copy_key']))
         if keyed:
             con.execute('UPDATE messages SET local_keys = ? WHERE id = last_insert_rowid()', (m.get('local_keys'),))
+    for field in ('conversation_id', 'cc'):
+        if any(m.get(field) is not None for m in mails):
+            con.execute(f'ALTER TABLE messages ADD COLUMN {field} TEXT')
+            for row_id, m in enumerate(mails, 1):
+                con.execute(f'UPDATE messages SET {field}=? WHERE id=?', (m.get(field), row_id))
     for e in events:
         cur = con.execute('INSERT INTO events(goid,start_unix,end_unix,start_utc,end_utc,subject,location,'
                           'organizer_name,organizer_email,body) VALUES (?,?,?,?,?,?,?,?,?,?)',
@@ -926,6 +931,33 @@ class IntakeTest(unittest.TestCase):
         self.fake.calls.clear()
         self.assertEqual(self.run_intake([m]).state, 'succeeded')
         self.assertEqual(self.fake.writes('log-activity'), [])
+
+    def test_logged_mail_preserves_all_recipient_evidence(self):
+        m = mail('pat@example.test', -timedelta(hours=1), name='Pat Example',
+                 recipients=OWNER + ', new.doctor@clinic.test')
+        self.run_intake([m])
+        [(_, args)] = self.fake.writes('log-activity')
+        self.assertEqual(args['email_context'], {
+            'subject': 'Suite question', 'conversation_id': None,
+            'sender': {'email': 'pat@example.test', 'name': 'Pat Example', 'internal': False},
+            'recipients': [{'email': OWNER, 'name': None, 'kind': 'to', 'internal': True},
+                           {'email': 'new.doctor@clinic.test', 'name': None, 'kind': 'to', 'internal': False}]})
+
+    def test_decoded_conversation_and_cc_survive_intake(self):
+        m = mail('pat@example.test', -timedelta(hours=1))
+        m.update(conversation_id='synthetic-thread', cc='new.doctor@clinic.test')
+        self.run_intake([m])
+        [(_, args)] = self.fake.writes('log-activity')
+        self.assertEqual(args['email_context']['conversation_id'], 'synthetic-thread')
+        self.assertEqual(args['email_context']['recipients'][-1], {
+            'email': 'new.doctor@clinic.test', 'name': None, 'kind': 'cc', 'internal': False})
+
+    def test_configured_account_in_cc_is_eligible(self):
+        m = mail('pat@example.test', -timedelta(hours=1), recipients='other@clinic.test')
+        m['cc'] = OWNER
+        self.run_intake([m])
+        [(_, args)] = self.fake.writes('log-activity')
+        self.assertEqual(args['email_context']['recipients'][-1]['email'], OWNER)
 
     def test_mail_sent_from_the_internal_domain_is_email_out(self):
         self.run_intake([mail(OWNER, -timedelta(hours=1), recipients='lee@example.test')])
