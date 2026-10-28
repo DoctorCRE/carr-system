@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+# Print why a PR's CI failed: failed step plus a short error window per failed job.
+# Real failure it prevents (2026-10-28 retro): builders hand-ran gh pr checks, gh api job logs and sed, then read whole logs.
+import argparse
+import json
+import re
+import subprocess
+import sys
+
+WINDOW = 40
+BEFORE = 10
+CAP = 200
+REVIEW_GATE = {'evaluate', 'review-gate'}
+UNFINISHED = {'failure', 'cancelled', 'timed_out'}
+ANSI = re.compile(r'\x1b\[[0-9;?]*[A-Za-z]')
+STAMP = re.compile(r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z ?')
+MARKER = re.compile(r'##\[error\]|\bFAIL(?:ED)?\b|Error:|Traceback|AssertionError|exit (?:code|status) [1-9]')
+JOB_LINK = re.compile(r'/actions/runs/(\d+)/job/(\d+)')
+
+
+def gh(*args):
+    done = subprocess.run(['gh', *args], text=True, capture_output=True)
+    if done.returncode and not done.stdout:
+        raise SystemExit(f'ci-why: gh {" ".join(args[:3])} failed: {done.stderr.strip()}')
+    return done.stdout
+
+
+def clean(log):
+    return [STAMP.sub('', ANSI.sub('', line)) for line in log.splitlines()]
+
+
+def error_window(lines):
+    """Return the lines around the first error marker inside the failed step."""
+    ends = [i for i, line in enumerate(lines) if line.startswith('##[error]')]
+    end = ends[0] if ends else len(lines) - 1
+    starts = [i for i in range(end + 1) if lines[i].startswith('##[group]Run ')]
+    start = starts[-1] if starts else 0
+    anchor = next((i for i in range(start, end + 1) if MARKER.search(lines[i])), end)
+    first = max(start, anchor - BEFORE)
+    if end < first + WINDOW:
+        return lines[first:end + 1]
+    return lines[first:first + WINDOW - 2] + ['...', lines[end]]
+
+
+def failed_jobs(repo, run_id):
+    jobs = json.loads(gh('run', 'view', str(run_id), '--repo', repo, '--json', 'jobs'))['jobs']
+    return [job for job in jobs if job.get('conclusion') in UNFINISHED]
+
+
+def explain_job(repo, job):
+    steps = [s['name'] for s in job.get('steps', []) if s.get('conclusion') in UNFINISHED]
+    out = [f'== {job["name"]} (job {job["databaseId"]}, {job["conclusion"]})', f'failed step: {", ".join(steps) or "unknown"}']
+    log = gh('api', '--allow-escape-sequences', f'repos/{repo}/actions/jobs/{job["databaseId"]}/logs')
+    return out + error_window(clean(log)) + ['']
+
+
+def from_run(repo, run_id):
+    out = []
+    for job in failed_jobs(repo, run_id):
+        out += explain_job(repo, job)
+    return out or [f'run {run_id}: no failed jobs']
+
+
+def from_pr(repo, pr):
+    head = json.loads(gh('pr', 'view', str(pr), '--repo', repo, '--json', 'headRefOid'))['headRefOid']
+    checks = json.loads(gh('pr', 'checks', str(pr), '--repo', repo, '--json', 'name,bucket,link,workflow') or '[]')
+    failed = [c for c in checks if c['bucket'] in ('fail', 'cancel')]
+    pending = sum(c['bucket'] == 'pending' for c in checks)
+    out = [f'PR #{pr} head {head[:12]}: {len(failed)} failing, {pending} pending, {len(checks)} checks']
+    gate = [c for c in failed if c['name'] in REVIEW_GATE]
+    real = [c for c in failed if c['name'] not in REVIEW_GATE]
+    if gate:
+        out.append('review gate (' + ', '.join(c['name'] for c in gate) + ') is waiting for an approval on this head; '
+                   + ('that is the only failure, nothing to fix in code.' if not real else 'not a code failure.'))
+    runs = {}
+    for check in real:
+        match = JOB_LINK.search(check.get('link') or '')
+        if match:
+            runs.setdefault(match[1], set()).add(int(match[2]))
+        else:
+            out.append(f'{check["name"]}: not a GitHub Actions job, see {check.get("link") or "no link"}')
+    out.append('')
+    for run_id, job_ids in runs.items():
+        for job in failed_jobs(repo, run_id):
+            if job['databaseId'] in job_ids:
+                out += explain_job(repo, job)
+    return out
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog='ci-why', description='Show why CI failed: failed checks on the PR head, '
+                                     'each failed Actions step and about 40 log lines around its first error.')
+    parser.add_argument('pr', type=int, nargs='?', help='pull request number')
+    parser.add_argument('--repo', default='DoctorCRE/carr-system', help='owner/name (default DoctorCRE/carr-system)')
+    parser.add_argument('--run', type=int, help='explain this Actions run id instead of a PR head')
+    args = parser.parse_args(argv)
+    if (args.pr is None) == (args.run is None):
+        parser.error('give a PR number or --run RUN_ID')
+    out = from_run(args.repo, args.run) if args.run else from_pr(args.repo, args.pr)
+    if len(out) > CAP:
+        out = out[:CAP - 1] + [f'... truncated at {CAP} lines']
+    print('\n'.join(out).rstrip())
+
+
+if __name__ == '__main__':
+    sys.exit(main())

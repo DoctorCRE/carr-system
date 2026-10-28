@@ -169,6 +169,13 @@ function inputFields(schema: InputSchema | undefined, names = new Set<string>())
   return names;
 }
 
+// Refusals of caller-sent keys outside the schema echo those keys back so the
+// caller can see which one to remove (2026-10-28 retro: the wire said
+// "fields": [] and the orchestrator had to diff schemas by hand). Only
+// identifier-shaped keys travel; values and free-form keys never do.
+const REJECTED_KEY_CODES = new Set(["unregistered_operation_fields", "invalid_report_problem_fields", "caller_authority_field_forbidden"]);
+const REJECTED_KEY = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;
+
 // Row values travel in these: pg's "Failing row contains (...)" and ToolError payloads.
 const UNLOGGED = new Set(["detail", "hint", "where", "payload"]);
 
@@ -215,13 +222,14 @@ export function publicError(error: unknown, { env, inputSchema, fallback = "unha
       .filter(id => typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(id)))].slice(0, 50);
   if (code === "version_conflict" && Number.isSafeInteger(payload?.current_version) && (payload!.current_version as number) >= 0)
     result.current_version = payload!.current_version as number;
-  if (["invalid_idempotency_key", "invalid_report_problem", "invalid_report_problem_fields", "invalid_acceptance_criteria", "current_situation_source_not_found", "invalid_field_value", "validation_error", "value_not_in_declared_vocabulary", "unregistered_operation_fields", "missing_required", "invalid_boolean", "invalid_number", "tool_call_markup_in_value"].includes(code)) {
+  if (["invalid_idempotency_key", "invalid_report_problem", "invalid_report_problem_fields", "caller_authority_field_forbidden", "invalid_acceptance_criteria", "current_situation_source_not_found", "invalid_field_value", "validation_error", "value_not_in_declared_vocabulary", "unregistered_operation_fields", "missing_required", "invalid_boolean", "invalid_number", "tool_call_markup_in_value"].includes(code)) {
     const allowed = inputFields(inputSchema);
     const candidates = [payload?.field, payload?.column,
       ...(Array.isArray(payload?.fields) ? payload.fields : []),
       ...(Array.isArray(payload?.missing) ? payload.missing : []),
       ...(Array.isArray(payload?.columns) ? payload.columns : [])];
-    result.fields = [...new Set(candidates.filter(field => allowed.has(field)))];
+    const rejected = (field: unknown) => REJECTED_KEY_CODES.has(code) && typeof field === "string" && REJECTED_KEY.test(field);
+    result.fields = [...new Set(candidates.filter(field => allowed.has(field) || rejected(field)))].slice(0, 20);
     if (code === "invalid_field_value" && result.fields.length === 0) {
       result.error = "database_refused_the_statement";
       result.hint = PUBLIC_ERRORS.get(result.error)!;

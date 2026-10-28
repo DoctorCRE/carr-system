@@ -49,8 +49,10 @@ import { resourceObservationTools } from "./resource-observation.v5.ts";
 import { invoiceAutomation } from "./invoice-automation.js";
 import { emailDealProgressTools } from "./email-deal-progress.ts";
 import { derivedIdempotencyKey } from "./derived-key.ts";
+import { DURABLE_KEY_SHAPES, REPLAY_WINDOW, durableReceipt, replayReceipt } from "./replay-receipt.ts";
 import { emailNextStepTools } from "./email-next-step.ts";
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
+import { clearTheDeckTools } from "./clear-the-deck.js";
 import { addCalendarMeetingPrep } from "./calendar-meeting-prep.js";
 import { CALENDAR_AGENDA_BOARD, calendarSection, addCalendarContacts, addCalendarDealSuggestions } from "./brief-calendar.js";
 import { emailLeadProposalTools } from "./email-lead-proposal.ts";
@@ -317,20 +319,12 @@ export function auditIdentity(actor) {
 }
 
 const UUID_KEY = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
-// Two RW02 keys carry meaning the database reads back: ops.rw02_record_run finds a
-// run's page stops by the `rw02-read:<run_ref>:` key prefix, and ops.rw02_loop_episodes
-// finds a finding's loop episodes by the exact base/`:eN` shape. Only those exact
-// shapes, on those verbs, are accepted until a migration gives them a UUID form.
-const DB_READ_KEY_SHAPES = {
-  "record-salesforce-page-stop": /^rw02-read:[0-9a-f]{24}:page-stop:[0-9]{1,6}$/,
-  "add-loop": /^rw02-(?:missing-joe|unknown-to-carr):[0-9a-f]{32}(?::e(?:[2-9]|[1-9][0-9]{1,5}))?$/,
-};
 
 async function withEnvelope(client, actor, verb, args, fn) {
   const key = args.idempotency_key;
   if (!key) throw new ToolError({ error: "missing_idempotency_key",
     hint: "generate a UUID per intended action; retries reuse the SAME key" });
-  if (typeof key !== "string" || !(UUID_KEY.test(key) || DB_READ_KEY_SHAPES[verb]?.test(key)))
+  if (typeof key !== "string" || !(UUID_KEY.test(key) || DURABLE_KEY_SHAPES[verb]?.test(key)))
     throw new ToolError({ error: "invalid_idempotency_key", field: "idempotency_key" });
   const identity = auditIdentity(actor);
   // SIEP-11: replay authority is the exact operation manifest, never the bare
@@ -360,11 +354,15 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing"].includes(verb) || verb === "undo-call" || ["set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing", "clear-the-deck-apply"].includes(verb) || verb === "undo-call" || ["set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
-  const prior = await client.query("select request_hash, response from tool_call where idempotency_key=$1", [key]);
+  // A receipt older than REPLAY_WINDOW is not a replay: the key is unknown and the
+  // write runs as new (tool_call_expire frees the key on insert). A durable
+  // receipt is read back by key elsewhere and keeps replaying.
+  const prior = await client.query(`select request_hash, response from tool_call where idempotency_key=$1
+    and ($2 or created_at > now() - interval '${REPLAY_WINDOW}')`, [key, durableReceipt(verb, key)]);
   if (prior.rows.length) {
     if (prior.rows[0].request_hash !== hash) throw new ToolError({ error: "key_reuse" });
     const response = prior.rows[0].response;
@@ -377,7 +375,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
     `insert into tool_call (idempotency_key, verb, actor_id, request_hash, response, via, client_id,
        organization_tenant_id, sponsoring_human_slug, personal_scope, authorization_class, correlation_id)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-    [key, verb, actor.id, hash, JSON.stringify(result), actor.via || null, actor.client_id || null,
+    [key, verb, actor.id, hash, replayReceipt(result), actor.via || null, actor.client_id || null,
      identity.organization_tenant_id, identity.sponsoring_human_slug, identity.personal_scope,
      identity.authorization_class, identity.correlation_id]);
   return result;
@@ -3500,7 +3498,7 @@ export const TOOLS = {
 
   "today-triage": {
     write: false,
-    description: "What needs attention now: due actions, critical dates inside 14 days, and untriaged ingest. Due and overdue actions lead, then critical dates due today through 14 days, then remaining rows. Each group sorts oldest-first, with kind and id breaking ties. Optional owners='partners' selects both partners, machine seats, and unowned rows before limiting; default 'all' preserves shared triage. Optional limit is 1..50 (default 50). Pass next_cursor as cursor with the same owners filter to continue. Returns items, total for the filtered queue, has_more, and next_cursor. Continuation uses live rows and pins ordering to the first page's business date; it is not a snapshot.",
+    description: "What needs attention now: due actions, critical dates inside 14 days, and untriaged ingest. Due and overdue actions lead, then critical dates due today through 14 days, then remaining rows. Due actions and remaining rows sort most recent first, critical dates soonest first, with kind and id breaking ties. Optional owners='partners' selects both partners, machine seats, and unowned rows before limiting; default 'all' preserves shared triage. Optional limit is 1..50 (default 50). Pass next_cursor as cursor with the same owners filter to continue. Returns items, total for the filtered queue, has_more, and next_cursor. Continuation uses live rows and pins ordering to the first page's business date; it is not a snapshot.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       owners: { type: "string", enum: ["all", "partners"] },
       limit: { type: "integer", minimum: 1, maximum: 50 },
@@ -3516,14 +3514,14 @@ export const TOOLS = {
         try {
           if (typeof args.cursor !== "string" || !args.cursor.length || args.cursor.length > 1000) throw Error();
           after = JSON.parse(atob(args.cursor));
-          if (!after || after.v !== 1 || after.owners !== owners || !isCalendarDate(after.on) || after.on < "0001-01-01"
+          if (!after || after.v !== 2 || after.owners !== owners || !isCalendarDate(after.on) || after.on < "0001-01-01"
               || ![0, 1, 2].includes(after.rank)
               || !(after.due_on === null || (isCalendarDate(after.due_on) && after.due_on >= "0001-01-01"))
               || !["next_action", "post_call_action", "critical_date", "ingest"].includes(after.item_kind)
               || typeof after.id !== "string" || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(after.id)) throw Error();
         } catch { throw new ToolError({ error: "triage_cursor_invalid" }); }
       }
-      const rows = (await c.query(`with scoped as (
+      const rows = (await c.query(`with ranked as (
         select *, due_on::text as triage_due_on, coalesce($4::date, current_date)::text as triage_on,
           case when item_kind in ('next_action', 'post_call_action')
             and due_on <= coalesce($4::date, current_date) then 0
@@ -3531,13 +3529,20 @@ export const TOOLS = {
             and due_on between coalesce($4::date, current_date) and coalesce($4::date, current_date) + 14
             then 1 else 2 end as triage_rank
         from v_today_triage
+      ), keyed as (
+        select *, coalesce(case when triage_rank = 1 then 1 else -1 end * to_char(due_on, 'J')::integer, 9999999)
+          as triage_key
+        from ranked
+      ), scoped as (
+        select * from keyed
         where ($1::text = 'all' or owner is null or lower(owner) = any($2::text[]))
       ), totals as (select count(*) as triage_total from scoped)
       select page.*, totals.triage_total from totals left join lateral (
         select * from scoped
-        where $5::integer is null or (triage_rank, coalesce(due_on, 'infinity'::date), item_kind, id)
-          > ($5::integer, coalesce($6::date, 'infinity'::date), $7::text, $8::uuid)
-        order by triage_rank, due_on nulls last, item_kind, id
+        where $5::integer is null or (triage_rank, triage_key, item_kind, id)
+          > ($5::integer, coalesce(case when $5::integer = 1 then 1 else -1 end * to_char($6::date, 'J')::integer, 9999999),
+               $7::text, $8::uuid)
+        order by triage_rank, triage_key, item_kind, id
         limit $3
       ) page on true`, [owners, [...TODO_OWNER_PARTNER.keys()], limit + 1,
         after?.on ?? null, after?.rank ?? null, after?.due_on ?? null, after?.item_kind ?? null, after?.id ?? null])).rows;
@@ -3545,10 +3550,10 @@ export const TOOLS = {
       const page = rows.filter(row => !(row.id === null && row.item_kind === null));
       const has_more = page.length > limit;
       const last = page[Math.min(page.length, limit) - 1];
-      const next_cursor = has_more ? btoa(JSON.stringify({ v: 1, owners, on: last.triage_on,
+      const next_cursor = has_more ? btoa(JSON.stringify({ v: 2, owners, on: last.triage_on,
         rank: last.triage_rank, due_on: last.triage_due_on,
         item_kind: last.item_kind, id: last.id })) : null;
-      const items = page.slice(0, limit).map(({ triage_total, triage_rank, triage_on, triage_due_on, ...row }) => row);
+      const items = page.slice(0, limit).map(({ triage_total, triage_rank, triage_on, triage_due_on, triage_key, ...row }) => row);
       return { items, total, has_more, next_cursor };
     },
   },
@@ -3846,7 +3851,7 @@ export const TOOLS = {
                 coalesce((select jsonb_agg(jsonb_build_object('id',i.id,'title',i.item_title,
                   'due_on',to_jsonb(i.due_on)#>>'{}','status',i.status,'bullets',i.item_bullets,'source_ref',i.source_ref)
                   order by i.created_order,i.id) from v_deal_room_action i where i.deal_id=b.id
-                  and i.item_title is not null and i.status <> 'dropped'),'[]'::jsonb) as items,
+                  and i.item_title is not null and i.status not in ('dropped', 'expired')),'[]'::jsonb) as items,
                 (b.next_step is null or b.next_date is null) as next_step_required, b.market, b.segment,
                 b.client_id, b.client_ref, b.client_name, ce.client_status, ce.client_version,
                 ce.prospect_engagement_status, b.account_client_id, b.account_client_ref,
@@ -3958,7 +3963,7 @@ export const TOOLS = {
 
   "email-match-contacts": {
     write: false,
-    description: "The Outlook intake's contact list: every address written in a live party's email field, in any market, as {address, ref, name, exact}. ref is the party's client, lead or vendor ref, one row per live role, or its P- ref when it holds none. Merged-away and deleted parties never appear. exact=false marks a role address (info, front desk, office...) sharing its field with other addresses: it may serve many people.",
+    description: "The Outlook intake's contact list: every address written in a live party's email field, in any market, as {address, ref, name, exact}. ref is the party's client, lead or vendor ref, one row per live role, or its P- ref when it holds none. A participant of an open deal holding no client, lead or vendor role also comes back with the deal's id as ref and the deal's name (v_email_deal_contact), so its mail logs on that deal. Merged-away and deleted parties never appear. exact=false marks a role address (info, front desk, office...) sharing its field with other addresses: it may serve many people.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c) => {
       const ROLE = /^(?:front-?desk|info|office|admin|contact|reception|billing|hello|team|support|scheduling|appointments?|sales|inquiries|enquiries|referrals?|records|staff|help|general)(?:[-.+].*)?$/u;
@@ -3972,6 +3977,8 @@ export const TOOLS = {
             union all select vendor_ref from vendor where party_id = p.id and merged_into is null) r on true
          where p.merged_into is null and p.deleted_at is null and p.email like '%@%'
            and coalesce(r.ref, p.ref) is not null
+        union all
+        select "Deal ID"::text, coalesce("Name", ''), "Email" from v_email_deal_contact where "Email" like '%@%'
          order by 1`)).rows;
       const contacts = rows.flatMap(({ ref, name, email }) => {
         const found = [...new Set((email.match(/[\p{L}\p{M}\p{N}_.+'-]+@[\p{L}\p{M}\p{N}_-]+(?:\.[\p{L}\p{M}\p{N}_-]+)+/gu) ?? [])
@@ -8815,9 +8822,9 @@ const RESERVED_AUTHORITY_ARGUMENT_FIELDS = new Set([
 // the two server-bound local partner doors, but reviewers, probes, Hermes, Grok,
 // and unsponsored runtimes remain outside partner authority.
 export function assertNoCallerAuthorityFields(args) {
-  if (args && typeof args === "object" && !Array.isArray(args) &&
-      Object.keys(args).some((key) => RESERVED_AUTHORITY_ARGUMENT_FIELDS.has(key)))
-    throw new ToolError({ error: "caller_authority_field_forbidden" });
+  const fields = args && typeof args === "object" && !Array.isArray(args)
+    ? Object.keys(args).filter((key) => RESERVED_AUTHORITY_ARGUMENT_FIELDS.has(key)).sort() : [];
+  if (fields.length) throw new ToolError({ error: "caller_authority_field_forbidden", fields });
   return args;
 }
 
@@ -9062,6 +9069,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "email-next-step": "mcp-server/src/email-next-step.ts",
   "email-proposals": "mcp-server/src/email-proposals.js",
   "email-lead-proposal": "mcp-server/src/email-lead-proposal.ts",
+  "clear-the-deck": "mcp-server/src/clear-the-deck.js",
   "workflow-cutover": "mcp-server/src/workflow-cutover.v5.ts",
   "memory": "mcp-server/src/memory.js",
   "codex-continuity": "mcp-server/src/codex-continuity.js",
@@ -9230,7 +9238,7 @@ registerTools({
       return stripDealPlaceholders({ schema_version: "deal-timeline.v1", checklist, lease: lease.rows[0] || null,
         deal_id: s.id, ...deal.rows[0], short_name: shortDealHeading(deal.rows[0]), thread: thread.rows,
         critical_dates: criticalDates.rows, next_actions: actions.rows,
-        item_schema_version: DEAL_ITEMS_SCHEMA, items: actions.rows.filter(i => i.title && i.status !== 'dropped')
+        item_schema_version: DEAL_ITEMS_SCHEMA, items: actions.rows.filter(i => i.title && !['dropped', 'expired'].includes(i.status))
           .map(({ id,title,due_on,status,bullets,source_ref }) => ({ id,title,due_on,status,bullets,source_ref })),
         activities: activities.rows, participants: participants.rows,
         premises: premises.rows, negotiation_rounds: negotiation.rows,
@@ -9328,7 +9336,7 @@ registerTools({
           select a.deal_id, a.id, a.item_title as title, to_jsonb(a.due_on)#>>'{}' as due_on,
                  a.status, a.item_bullets as bullets, a.source_ref, a.created_order
             from v_deal_room_action a join scoped s on s.id = a.deal_id
-           where a.item_title is not null and a.status <> 'dropped'
+           where a.item_title is not null and a.status not in ('dropped', 'expired')
            order by a.deal_id, a.created_order, a.id limit 10001
         ), bounds as (
           select (select count(*) from scoped) > 1000
@@ -10653,7 +10661,10 @@ registerTools(emailNextStepTools({ withEnvelope, writeEvent, lockDealField, reso
   setNextAction: (c, actor, args) => TOOLS["set-next-action"].handler(c, actor, args) }), "email-next-step");
 registerTools(emailProposalTools({ ToolError, withEnvelope, writeEvent,
   preview: (c, actor, verb, args) => TOOLS[verb].handler(c, actor, args) }), "email-proposals");
-registerTools(emailLeadProposalTools({ withEnvelope, writeEvent }), "email-lead-proposal");
+registerTools(emailLeadProposalTools({ withEnvelope, writeEvent,
+  updatePartyContact: (c, actor, args) => TOOLS["update-party-contact"].handler(c, actor, args),
+  newLead: (c, actor, args) => TOOLS["new-lead"].handler(c, actor, args) }), "email-lead-proposal");
+registerTools(clearTheDeckTools({ ToolError, withEnvelope, writeEvent }), "clear-the-deck");
 const invoices=invoiceAutomation({withEnvelope,writeEvent,ToolError,lockDealField,
   updateDeal:(c,actor,args)=>TOOLS["update-deal"].handler(c,actor,args),
   invoicingMailbox:process.env.CARR_INVOICING_MAILBOX});

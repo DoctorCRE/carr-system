@@ -47,16 +47,24 @@ test('every live party address comes back with its record ref, in or out of mark
         (7, 'P-0007', 'Practice Org', 'info@practice.test', null, null, null, null),
         (8, 'P-0008', 'No Email', null, null, null, null, null),
         (9, 'P-0009', 'Old Client', 'old@client.test', null, null, null, null),
-        (10, 'P-0010', 'Notes Only', 'call the office', null, null, null, null);
+        (10, 'P-0010', 'Notes Only', 'call the office', null, null, null, null),
+        (11, 'P-0011', 'Landlord Rep', 'rep@landlord.test', null, null, null, null);
       insert into client values (1, 'C-0101', null), (9, 'C-0109', 101);
       insert into lead values (6, 'L-0206', 'new'), (1, 'L-0201', 'lost');
-      insert into vendor values (2, 'V-LAW-001', null, true), (4, 'V-OLD-004', null, false);`);
+      insert into vendor values (2, 'V-LAW-001', null, true), (4, 'V-OLD-004', null, false);
+      -- Migration 1029's view: role-less, live participants of open deals. Its filter is the view's own.
+      create table v_email_deal_contact("Deal ID" uuid, "Name" text, "Email" text);
+      insert into v_email_deal_contact values
+        ('aaaaaaaa-0000-4000-8000-000000000001', 'Bayside suite', ' Rep@Landlord.test '),
+        ('aaaaaaaa-0000-4000-8000-000000000002', 'Office build', 'pm@build.test; office@build.test'),
+        ('aaaaaaaa-0000-4000-8000-000000000003', 'Blank deal', 'no address here');`);
     // The deployed reader has these column grants (0500, 0839, 0989), not table ownership.
     await db.query(`create role carr_reader;
       grant select(id,name,ref,email,merged_into,deleted_at,org_id) on party to carr_reader;
       grant select(party_id,roster_ref,merged_into) on client to carr_reader;
       grant select(party_id,registry_ref) on lead to carr_reader;
       grant select(party_id,vendor_ref,merged_into) on vendor to carr_reader;
+      grant select on v_email_deal_contact to carr_reader;
       set role carr_reader;`);
     const tool = TOOLS['email-match-contacts'];
     assert.equal(tool.write, false);
@@ -70,8 +78,12 @@ test('every live party address comes back with its record ref, in or out of mark
       {address: 'lena@bank.test', ref: 'P-0003', name: 'Lena Lender', exact: true},
       {address: 'info@practice.test', ref: 'P-0007', name: 'Practice Org', exact: true},
       {address: 'old@client.test', ref: 'P-0009', name: 'Old Client', exact: true},
+      {address: 'rep@landlord.test', ref: 'P-0011', name: 'Landlord Rep', exact: true},
       {address: 'far@vendor.test', ref: 'V-LAW-001', name: 'Far Vendor', exact: true},
-    ], 'out-of-market and role-less parties are read; merged-away and deleted parties never are');
+      {address: 'rep@landlord.test', ref: 'aaaaaaaa-0000-4000-8000-000000000001', name: 'Bayside suite', exact: true},
+      {address: 'pm@build.test', ref: 'aaaaaaaa-0000-4000-8000-000000000002', name: 'Office build', exact: true},
+      {address: 'office@build.test', ref: 'aaaaaaaa-0000-4000-8000-000000000002', name: 'Office build', exact: false},
+    ], 'out-of-market and role-less parties are read, plus open-deal contacts by deal ref; merged-away and deleted parties never are');
   } finally {
     try { if (db) await db.end(); }
     finally { try { await fixture?.close(); } finally { await release(); } }

@@ -105,7 +105,7 @@ export function boardAnswerTools({ withEnvelope: envelope, writeEvent }) {
   return {
     "publish-board-snapshot": {
       write: true,
-      description: "Publish the current progress board view for the signed-in app. Use base_version 0 to create it; stale versions refuse. The snapshot is display data and never grants authority.",
+      description: "Publish the current progress board view for the signed-in app. Use base_version 0 to create it; stale versions refuse. Replies with the board_id and new version; read-progress-board reads the snapshot back. The snapshot is display data and never grants authority.",
       inputSchema: { type: "object", properties: {
         idempotency_key: { type: "string" }, board_id: { type: "string" },
         base_version: { type: "integer" }, snapshot: { type: "object" },
@@ -140,7 +140,9 @@ export function boardAnswerTools({ withEnvelope: envelope, writeEvent }) {
             { new: { board_id: board, version: snapshot.version }, idempotency_key: args.idempotency_key });
           return { ok: true, snapshot };
         });
-        return { ...result, snapshot: { ...result.snapshot, snapshot_json: JSON.parse(snapshotJson) } };
+        // The caller already holds the snapshot it sent; read-progress-board reads it back.
+        return { ...(result.replayed ? { replayed: true } : {}), ok: true, board_id: board,
+          version: result.snapshot.version };
       },
     },
 

@@ -7,8 +7,8 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
-        <string>/Users/booko/carr-system/tools/dictation-rig/bin/call-mode.py</string>
+        <string>/Library/Developer/CommandLineTools/usr/bin/python3</string>
+        <string>{{REPO}}/tools/dictation-rig/bin/call-mode.py</string>
         <string>serve</string>
     </array>
 
@@ -22,10 +22,11 @@
     <string>Interactive</string>
 
     <key>StandardOutPath</key>
-    <string>/Users/booko/Library/Logs/carr-call-mode.log</string>
+    <string>{{HOME}}/Library/Logs/carr-call-mode.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/booko/Library/Logs/carr-call-mode.log</string>
+    <string>{{HOME}}/Library/Logs/carr-call-mode.log</string>
+
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>

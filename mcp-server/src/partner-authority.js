@@ -44,6 +44,14 @@ export function partnerAuthoritySlugForActor(actor) {
   return null;
 }
 
+// Whose Outlook mailbox a caller acts for: the partner in person, or that
+// partner's own local agent (joe-local, dell-local). Other sponsored agents and
+// machine callers act for no mailbox.
+export function mailboxOwnerForActor(actor) {
+  const owner = partnerAuthoritySlugForActor(actor);
+  return owner && (actor.human === true || actor.slug === `${owner}-local`) ? owner : null;
+}
+
 export function canExercisePartnerAuthority(actor) {
   return partnerAuthoritySlugForActor(actor) !== null;
 }

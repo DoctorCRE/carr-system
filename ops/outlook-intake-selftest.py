@@ -7,6 +7,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import sqlite3
@@ -47,6 +48,8 @@ CLIENT = intake.Contact(email='pat@example.test', ref='C-901', name='Pat Example
 LEAD = intake.Contact(email='lee@example.test', ref='L-902', name='Lee Sample')
 OWNER = 'owner@example.test'
 PARTNER = 'partner@example.test'
+# The server's get-next-action refuses a deal; the parity selftest also runs this fake against older intakes.
+DEAL_UUID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
 
 
 def read(applies_to, summary=None, deal=None, party=None, quote=None, confidence=0.9):
@@ -171,6 +174,8 @@ class Fake:
         if verb == 'read-deal-reconciliation':
             return {'deals': self.deal_rows}
         if verb == 'get-next-action':
+            if DEAL_UUID.match(args['ref']):
+                raise intake.CarrError(code='not_a_record')  # the server refuses deals here
             return {'ok': True, 'owner': args['owner'], 'action': self.actions.get((args['ref'], args['owner']))}
         if verb == 'set-next-action':
             current = self.actions.get((args['ref'], args.get('owner', 'runtime')))
@@ -1178,6 +1183,44 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(args['idempotency_key'],
                          str(uuid.uuid5(uuid.NAMESPACE_URL, f'log-activity|C-901|joe|{ident(m)}')))
 
+    def test_a_confirmed_deal_contact_logs_on_the_deal_and_is_never_offered_as_a_record(self):
+        deal = '0b6c8a52-7d1e-4c55-9f0a-2e3d4c5b6a71'
+        self.fake.contacts_rows.append(intake.Contact('rep@landlord.test', deal, 'Bayside suite'))
+        result = self.run_intake([mail('rep@landlord.test', -timedelta(hours=1), name='Rep Example')])
+        self.assertEqual(result.state, 'succeeded')
+        [(_, args)] = self.fake.writes('log-activity')
+        self.assertEqual(args['ref'], deal)
+        self.assertEqual(self.fake.writes('propose-email-lead'), [])
+        matcher = intake.Matcher([intake.Contact('rep@landlord.test', deal, 'Bayside suite'), CLIENT], 'carr.us')
+        self.assertEqual([ref for _, ref, _ in matcher.people], ['C-901'])
+
+    def test_deal_contact_preview_then_full_text_files_on_the_deal_and_later_runs_succeed(self):
+        deal = '0b6c8a52-7d1e-4c55-9f0a-2e3d4c5b6a71'
+        self.fake.contacts_rows.append(intake.Contact('rep@landlord.test', deal, 'Bayside suite'))
+        full = mail('rep@landlord.test', -timedelta(hours=2), name='Rep Example')
+        preview = mail('rep@landlord.test', -timedelta(hours=1), subject='Tour follow-up', kind='preview')
+        for _ in range(2):
+            self.assertEqual(self.run_intake([full, preview]).state, 'succeeded')
+        hydrated = {**preview, 'body_kind': 'full', 'body': 'Full synthetic body'}
+        for _ in range(2):
+            self.assertEqual(self.run_intake([full, hydrated]).state, 'succeeded')
+        self.assertEqual({args['ref'] for _, args in self.fake.writes('log-activity')}, {deal})
+        self.assertEqual(self.fake.writes('set-next-action'), [])
+
+    def test_a_deal_contact_row_from_the_verb_wins_over_the_same_partys_p_ref(self):
+        deal = '0b6c8a52-7d1e-4c55-9f0a-2e3d4c5b6a71'
+
+        def carr(verb, args):
+            return {'schema_version': 'email-match-contacts.v1', 'contacts': [
+                {'address': 'rep@landlord.test', 'ref': 'P-0011', 'name': 'Landlord Rep', 'exact': True},
+                {'address': 'rep@landlord.test', 'ref': deal, 'name': 'Bayside suite', 'exact': True}]}
+        self.fake.contacts = intake._contacts(carr)
+        result = self.run_intake([mail('rep@landlord.test', -timedelta(hours=1), name='Rep Example')])
+        self.assertEqual(result.state, 'succeeded')
+        [(_, args)] = self.fake.writes('log-activity')
+        self.assertEqual(args['ref'], deal)
+        self.assertEqual((result.counts['mapping_missing'], result.counts['unmatched']), (0, 0))
+
     def test_shared_inbound_message_has_a_separate_activity_key_for_each_mailbox(self):
         m = mail('pat@example.test', -timedelta(hours=1))
         captured = []
@@ -1957,9 +2000,15 @@ class IntakeTest(unittest.TestCase):
                     'decoder_folder_bp': 0}
         processed = self.run_intake(sample)
         self.assertEqual({k: v for k, v in processed.counts.items() if k.endswith('_bp')}, expected)
+        expected_samples = {'decoder_block_verification_sample': 1000, 'decoder_sender_sample': 20,
+                            'decoder_subject_sample': 20, 'decoder_recipients_sample': 20,
+                            'decoder_sent_time_sample': 20, 'decoder_folder_sample': 20,
+                            'decoder_attachment_metadata_sample': 0}
+        self.assertEqual({k: v for k, v in processed.counts.items() if k.endswith('_sample')}, expected_samples)
         unchanged = self.run_intake(sample, touch=False)
         self.assertEqual(unchanged.reason, 'store_unchanged')
         self.assertEqual({k: v for k, v in unchanged.counts.items() if k.endswith('_bp')}, expected)
+        self.assertEqual({k: v for k, v in unchanged.counts.items() if k.endswith('_sample')}, expected_samples)
         deferred = self.run_intake(sample, found=1000, verified=900)
         self.assertEqual((deferred.reason, deferred.counts['decoder_block_verification_bp']),
                          ('writes_deferred', 9000))
@@ -3297,6 +3346,118 @@ class StoreResolverTest(unittest.TestCase):
         with self.assertRaises(FileNotFoundError) as refusal:
             intake.resolve_store(self.home)
         self.assertIn('Main Identity/HxStore.hxd', str(refusal.exception))
+
+class LoadObjectFieldsTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db = Path(self.tmp.name) / 'decoded.sqlite'
+        write_db(self.db, [mail('pat@example.test', -timedelta(hours=1),
+                                 subject='Legacy topic', recipients=OWNER, local_keys='71')])
+        with sqlite3.connect(self.db) as con:
+            con.executescript("""
+                CREATE TABLE message_keys(message_id INTEGER, local_key INTEGER);
+                CREATE TABLE message_objects(local_key INTEGER PRIMARY KEY, subject TEXT,
+                    conversation_id TEXT, recipients_status TEXT NOT NULL);
+                CREATE TABLE recipients(local_key INTEGER, kind TEXT, kind_code INTEGER,
+                    position INTEGER, address TEXT, name TEXT);
+                INSERT INTO message_keys VALUES(1,71);
+                INSERT INTO message_objects VALUES(71,'Re: Café 🏢','synthetic-thread','listed');
+                INSERT INTO recipients VALUES(71,'to',204,2,'second@example.test','Second');
+                INSERT INTO recipients VALUES(71,'to',204,1,'first@example.test','First');
+                INSERT INTO recipients VALUES(71,'cc',205,1,'owner@example.test','Owner');
+                INSERT INTO recipients VALUES(71,NULL,413,1,'unknown@example.test','Unknown');
+            """)
+
+    def load(self, account=None):
+        return intake._load(self.db, account)
+
+    def test_object_subject_recovers_missing_heuristic_and_recipients_in_order(self):
+        with sqlite3.connect(self.db) as con:
+            con.execute('UPDATE messages SET subject=NULL, recipients=NULL')
+        meta, mails, _ = self.load(OWNER)
+        self.assertEqual(len(mails), 1)
+        self.assertEqual(mails[0]['subject'], 'Re: Café 🏢')
+        self.assertEqual(mails[0]['recipients'], 'first@example.test, second@example.test')
+        self.assertEqual(mails[0]['cc'], OWNER)
+        self.assertEqual(mails[0]['conversation_id'], 'synthetic-thread')
+        health = intake._decoder_health(meta, ts(-timedelta(hours=2)), NOW, {})
+        self.assertEqual(intake.health_counts(health)['decoder_subject_bp'], 10000)
+        self.assertEqual(intake.health_counts(health)['decoder_recipients_bp'], 10000)
+        self.assertEqual(intake.health_counts(health)['decoder_subject_sample'], 1)
+        self.assertEqual(health['eligible'].get('subject'), None)
+
+    def test_cc_only_message_counts_as_having_recipients(self):
+        with sqlite3.connect(self.db) as con:
+            con.execute("DELETE FROM recipients WHERE kind='to'")
+        meta, mails, _ = self.load(OWNER)
+        self.assertEqual(len(mails), 1)
+        self.assertIsNone(mails[0]['recipients'])
+        self.assertEqual(mails[0]['cc'], OWNER)
+        health = intake._decoder_health(meta, ts(-timedelta(hours=2)), NOW, {})
+        self.assertEqual(intake.health_counts(health)['decoder_recipients_bp'], 10000)
+
+    def test_object_subject_replaces_inherited_or_wrong_heuristic(self):
+        self.assertEqual(self.load()[1][0]['subject'], 'Re: Café 🏢')
+
+    def test_explicit_empty_subject_is_preserved(self):
+        with sqlite3.connect(self.db) as con:
+            con.execute("UPDATE message_objects SET subject=''")
+        self.assertEqual(self.load()[1][0]['subject'], '')
+
+    def test_null_subject_and_recipient_conflict_keep_legacy_fields(self):
+        with sqlite3.connect(self.db) as con:
+            con.execute("UPDATE message_objects SET subject=NULL, recipients_status='conflict'")
+        row = self.load()[1][0]
+        self.assertEqual(row['subject'], 'Legacy topic')
+        self.assertEqual(row['recipients'], OWNER)
+        self.assertIsNone(row['cc'])
+
+    def test_multiple_item_keys_do_not_cross_pair_fields_even_if_one_object_is_missing(self):
+        with sqlite3.connect(self.db) as con:
+            con.execute('INSERT INTO message_keys VALUES(1,72)')
+        row = self.load()[1][0]
+        self.assertEqual(row['subject'], 'Legacy topic')
+        self.assertEqual(row['recipients'], OWNER)
+        self.assertIsNone(row['conversation_id'])
+
+    def test_shared_item_key_never_projects_fields_or_passes_account_filter(self):
+        for competing_key in (False, True):
+            with self.subTest(competing_key=competing_key):
+                with sqlite3.connect(self.db) as con:
+                    con.execute('DELETE FROM messages WHERE id=2')
+                    con.execute('DELETE FROM message_keys WHERE message_id=2')
+                    con.execute("UPDATE messages SET recipients='legacy-one@example.test'")
+                    con.execute("INSERT INTO messages(id,sender,recipients,subject,sent_unix,local_keys) "
+                                "VALUES(2,'other@example.test','legacy-two@example.test','Other topic',?,?)",
+                                (ts(-timedelta(hours=2)), '71,72' if competing_key else '71'))
+                    con.execute('INSERT INTO message_keys VALUES(2,71)')
+                    if competing_key:
+                        con.execute('INSERT INTO message_keys VALUES(2,72)')
+                rows = {m['row_ids'][0]: m for m in self.load()[1]}
+                for row_id, subject, recipient in ((1, 'Legacy topic', 'legacy-one@example.test'),
+                                                   (2, 'Other topic', 'legacy-two@example.test')):
+                    self.assertEqual(rows[row_id]['subject'], subject)
+                    self.assertEqual(rows[row_id]['recipients'], recipient)
+                    self.assertIsNone(rows[row_id]['conversation_id'])
+                    self.assertIsNone(rows[row_id]['cc'])
+                meta, mails, _ = self.load(OWNER)
+                self.assertEqual(mails, [])
+                self.assertEqual(meta['mail_other_accounts'], 2)
+
+    def test_missing_or_unknown_recipient_kinds_do_not_erase_legacy_addresses(self):
+        for status in ('none', 'listed'):
+            with self.subTest(status=status):
+                with sqlite3.connect(self.db) as con:
+                    con.execute('UPDATE message_objects SET recipients_status=?', (status,))
+                    con.execute('UPDATE recipients SET kind=NULL')
+                self.assertEqual(self.load()[1][0]['recipients'], OWNER)
+
+    def test_older_decoder_without_object_tables_keeps_legacy_projection(self):
+        self.db = Path(self.tmp.name) / 'legacy.sqlite'
+        write_db(self.db, [mail('pat@example.test', -timedelta(hours=1), subject='Legacy topic')])
+        self.assertEqual(self.load()[1][0]['subject'], 'Legacy topic')
+
 
 if __name__ == '__main__':
     unittest.main()

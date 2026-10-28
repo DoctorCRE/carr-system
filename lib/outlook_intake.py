@@ -19,8 +19,9 @@ through the named record-layer verbs:
 A run outside 07:00-19:30 local does nothing. Matching requires one record with
 that exact address; every address written in a record's email field counts, and
 names alone never establish identity. Every live party address counts, in any market
-(email-match-contacts); a party holding no client, lead or vendor role is known but has
-no record to log on, so it is unsupported, never missing. Unmatched participants in mail and calendar
+(email-match-contacts); a participant of an open deal holding no client, lead or vendor
+role (a partner-confirmed email sender, for one) logs on that deal itself; any other party
+holding no such role is known but has no record to log on, so it is unsupported, never missing. Unmatched participants in mail and calendar
 stay unresolved and are retried when mappings change, even outside the rolling
 lookback. Records are never created, merged or renamed.
 
@@ -105,6 +106,7 @@ WRITE_VERBS = frozenset({'log-activity', 'publish-board-snapshot', 'propose-emai
                          'record-deal-item', 'complete-deal-item', 'drop-action'})
 FLAG_ITEM_TITLE = 'Follow up flagged email'
 RECORD_REF = re.compile(r'^[CLV]-')
+DEAL_REF = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
 EXIT = {'succeeded': 0, 'skipped': 78, 'failed': 1}
 
 BACKFILL = timedelta(hours=48)
@@ -396,6 +398,36 @@ def _attachment_metadata(con: sqlite3.Connection) -> dict[int, list[dict]]:
     return found
 
 
+def _message_object_fields(con: sqlite3.Connection) -> dict[int, dict]:
+    """Use stored fields only for one-to-one message row and object links."""
+    tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if not {'message_objects', 'message_keys'} <= tables:
+        return {}
+    recipients: dict[int, dict[str, list[str]]] = {}
+    if 'recipients' in tables:
+        for key, kind, address in con.execute(
+                "SELECT local_key, kind, address FROM recipients WHERE kind IN ('to', 'cc') "
+                'ORDER BY local_key, kind, position'):
+            recipients.setdefault(key, {}).setdefault(kind, []).append(address)
+    found = {}
+    for row in con.execute(
+            'WITH k AS (SELECT message_id, MIN(local_key) AS local_key FROM message_keys '
+            'GROUP BY message_id HAVING COUNT(DISTINCT local_key) = 1), '
+            'unique_keys AS (SELECT local_key FROM message_keys '
+            'GROUP BY local_key HAVING COUNT(DISTINCT message_id) = 1) '
+            'SELECT k.message_id, o.local_key, o.subject, o.conversation_id, o.recipients_status '
+            'FROM k JOIN unique_keys ON unique_keys.local_key = k.local_key '
+            'JOIN message_objects o ON o.local_key = k.local_key'):
+        fields = {name: row[name] for name in ('subject', 'conversation_id') if row[name] is not None}
+        lists = recipients.get(row['local_key'])
+        # No observed recipient objects does not prove an empty recipient list.
+        if row['recipients_status'] == 'listed' and lists:
+            fields.update(recipients=', '.join(lists.get('to', [])) or None,
+                          cc=', '.join(lists.get('cc', [])) or None)
+        found[row['message_id']] = fields
+    return found
+
+
 def _load(db: Path, account: str | None = None) -> tuple[dict, list[dict], list[dict]]:
     con = sqlite3.connect(db)
     con.row_factory = sqlite3.Row
@@ -412,6 +444,9 @@ def _load(db: Path, account: str | None = None) -> tuple[dict, list[dict], list[
         mails = [dict(r) for r in con.execute(
             'SELECT id, sender, sender_name, recipients, subject, body, preview, body_kind, sent_unix, copy_key, '
             f'{local_keys}, {context_columns} FROM messages')]
+        object_fields = _message_object_fields(con)
+        for m in mails:
+            m.update(object_fields.get(m['id'], {}))
         mail_count = len(mails)
         meta['health_store_mails'] = list(mails)
         if account is not None:
@@ -448,8 +483,9 @@ def _decoder_health(meta: dict, since: int, now: datetime, baseline: dict) -> di
                                 ('recipients', 'recipients', store_rows), ('sent_time', 'sent_unix', store_rows),
                                 ('folder', 'folders', rows)):
         samples[name] = len(sample)
-        rates[name] = sum(bool(m[field] and (not isinstance(m[field], str) or m[field].strip()))
-                          for m in sample) / len(sample) if sample else None
+        fields = ('recipients', 'cc') if name == 'recipients' else (field,)
+        rates[name] = sum(any(bool(m.get(f) and (not isinstance(m[f], str) or m[f].strip()))
+                              for f in fields) for m in sample) / len(sample) if sample else None
     attachments = [a for m in rows for a in m['attachments']]
     samples['attachment_metadata'] = len(attachments)
     rates['attachment_metadata'] = (sum(bool(a['name'] and a['size'] is not None) for a in attachments)
@@ -461,14 +497,16 @@ def _decoder_health(meta: dict, since: int, now: datetime, baseline: dict) -> di
                (name in baseline and rate < baseline[name] - DECODER_HEALTH_DROP)]
     if not found:
         failing.append('block_verification')
-    return {'rates': rates, 'eligible': eligible, 'failing': failing, 'messages': len(rows),
+    return {'rates': rates, 'samples': samples, 'eligible': eligible, 'failing': failing, 'messages': len(rows),
             'store_messages': len(store_rows)}
 
 
 def health_counts(health: dict | None) -> dict:
     """Each measured rate in basis points, so every receipt carries the decoder's health."""
-    return {f'decoder_{name}_bp': round(rate * 10_000)
-            for name, rate in ((health or {}).get('rates') or {}).items() if rate is not None}
+    return {**{f'decoder_{name}_bp': round(rate * 10_000)
+               for name, rate in ((health or {}).get('rates') or {}).items() if rate is not None},
+            **{f'decoder_{name}_sample': count
+               for name, count in ((health or {}).get('samples') or {}).items()}}
 
 
 def _tool_detail(tool: str, code: int | None, failure: str) -> str:
@@ -591,7 +629,7 @@ class Matcher:
             if '@' in c.email and not _internal(c.email, domain):
                 if not c.exact:
                     self.shared.add(c.email.lower())
-                elif RECORD_REF.match(c.ref):
+                elif RECORD_REF.match(c.ref) or DEAL_REF.match(c.ref):
                     self.by_email.setdefault(c.email.lower(), set()).add(c.ref)
                 else:
                     self.unsupported.add(c.email.lower())
@@ -1179,7 +1217,7 @@ class Run:
             lines += [f'- {name}: {rate * 100:.1f}%' if rate is not None else f'- {name}: unavailable'
                       for name, rate in health['rates'].items()]
             lines += [f'- failing: {", ".join(health["failing"]) or "none"}',
-                      '- skipped: conversation_id (not exported by hxprobe)', '']
+                      '- conversation_id: available for rows linked to one decoded message object', '']
         lines += ['## Counts', '']
         lines += [f'- {k}: {v}' for k, v in sorted(self.counts.items())]
         lines += [f'- needs_refresh_listed: {refresh_count}', '', '## Writes', '']
@@ -1587,7 +1625,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         work.full_text(mails)
         mail_processed = bool(work.written or any(value for key, value in work.counts.items()
                                                   if key not in ('mail_other_accounts', 'decoder_alarm')
-                                                  and not key.endswith('_bp')))
+                                                  and not key.endswith(('_bp', '_sample'))))
         work.events(events, matcher, since)
         snapshot, agenda_counts = agenda(events, meta, settings, now)
         work.counts.update(agenda_counts)
