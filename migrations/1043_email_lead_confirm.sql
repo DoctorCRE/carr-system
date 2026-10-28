@@ -1,9 +1,9 @@
--- rollback: drop view v_email_deal_contact; end email_contact participants and remove that role; move confirmed outlook-intake rows back to pool, then restore the four-status check.
--- expand-contract: expand — widens candidate_pool status with 'confirmed' and adds one reader view; nothing is removed.
+-- rollback: drop view v_email_deal_contact; end email_contact participants and remove that role; move confirmed outlook-intake rows back to pool, then recreate the check without 'confirmed' (keep 'expired', which Clear the deck owns).
+-- expand-contract: expand — widens candidate_pool status with 'confirmed' (keeping Clear the deck's 'expired', so 1042 and 1043 leave the same full set in either order) and adds one reader view; nothing is removed.
 -- lock-review: candidate_pool is a few thousand rows; swapping one check constraint is a brief lock and a single validation scan.
 alter table public.candidate_pool drop constraint candidate_pool_status_check;
 alter table public.candidate_pool add constraint candidate_pool_status_check
-  check (status = any (array['pool','promoted','suppressed_dup','declined','confirmed']));
+  check (status = any (array['pool','promoted','suppressed_dup','declined','expired','confirmed']));
 -- A confirmed email sender on a deal: the partner knows the mail belongs there, not the sender's side.
 insert into public.participant_role(slug,label,side) values ('email_contact','Email contact','party')
   on conflict (slug) do nothing;
