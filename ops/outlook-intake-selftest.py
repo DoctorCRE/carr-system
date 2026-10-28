@@ -2570,6 +2570,52 @@ class IntakeTest(unittest.TestCase):
             self.run_intake([m], touch=False)
         self.assertEqual(len(self.flag_calls()), 1)
 
+    def flag_state(self, m):
+        """File a flagged to-do, then let more than the intake prune horizon pass with the flag still set."""
+        self.filed_deal(m)
+        self.run_intake([m], touch=False)
+        self.fake.now = NOW + timedelta(days=12)
+        self.fake.email_queue = []  # the links page no longer shows the activity
+        self.assertEqual(self.run_intake([m]).state, 'succeeded')
+
+    def test_a_flag_cleared_long_after_filing_still_drops_the_todo(self):
+        m = self.flagged(flag='flagged', due=self.OCT29)
+        self.flag_state(m)
+        outcome = self.run_intake([self.flagged(flag='none')])
+        self.assertEqual(self.flag_calls()[-1][0], 'drop-action')
+        self.assertEqual(outcome.counts['flags_unfiled'], 0)
+        self.assertEqual(outcome.counts['flags_unmatched'], 0)
+
+    def test_a_flag_completed_long_after_filing_still_completes_the_todo(self):
+        self.flag_state(self.flagged(flag='flagged'))
+        self.run_intake([self.flagged(flag='complete', done=self.OCT28)])
+        self.assertEqual(self.flag_calls()[-1][0], 'complete-deal-item')
+
+    def test_a_todo_already_closed_in_the_app_settles_without_blocking_other_flags(self):
+        first, second = self.flagged(flag='flagged'), mail('pat@example.test', -timedelta(hours=2), subject='Other', flag='flagged')
+        self.assertEqual(self.run_intake([first, second]).state, 'succeeded')
+        logged = [a['idempotency_key'] for v, a in self.fake.writes('log-activity')]
+        self.fake.email_queue = [{'activity_id': str(uuid.uuid5(uuid.NAMESPACE_URL, k)), 'deal': 'deal-1', 'body': '',
+                                  'occurred_at': NOW.isoformat()} for k in logged]
+        self.run_intake([first, second], touch=False)
+        original = self.fake.carr
+
+        def refuse_close(verb, args):
+            if verb in ('drop-action', 'complete-deal-item'):
+                self.fake.calls.append((verb, args))
+                raise intake.CarrError(code='action_not_open' if verb == 'drop-action' else 'deal_item_not_open')
+            return original(verb, args)
+
+        self.fake.carr = refuse_close
+        cleared = [self.flagged(flag='none'), mail('pat@example.test', -timedelta(hours=2), subject='Other', flag='complete', done=self.OCT28)]
+        for _ in range(2):
+            outcome = self.run_intake(cleared)
+            self.assertEqual(outcome.state, 'succeeded')
+        verbs = [v for v, _ in self.flag_calls() if v != 'record-deal-item']
+        self.assertEqual(sorted(verbs), ['complete-deal-item', 'drop-action'])  # both tried once, none retried
+        self.assertEqual(outcome.counts['flags_closed_elsewhere'], 0)  # settled on the first run
+
+
 
 class AttachmentMetadataTest(unittest.TestCase):
     def setUp(self):

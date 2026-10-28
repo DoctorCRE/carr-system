@@ -135,7 +135,9 @@ def resolve_store(home: Path) -> Path:
     return store
 
 
-ERROR_CODES = frozenset({'timeout', 'auth_refused', 'key_reuse', 'transport_oversized',
+# A to-do someone already closed or edited in the app: the Outlook close has nothing left to do.
+CLOSED_ELSEWHERE = frozenset({'action_not_open', 'deal_item_not_open', 'version_conflict'})
+ERROR_CODES = CLOSED_ELSEWHERE | frozenset({'timeout', 'auth_refused', 'key_reuse', 'transport_oversized',
                          'no_acknowledgement', 'reply_unreadable', 'transport_error',
                          'invalid_request', 'subject_unresolved', 'database_refused',
                          'setup_failed', 'contacts_empty', 'contacts_read_failed', 'next_action_conflict',
@@ -147,7 +149,7 @@ def _reply_error(reply: dict) -> str:
     error = reply.get('error')
     if error == 'board_version_conflict':
         return 'agenda_version_conflict'
-    if error in ('key_reuse', 'next_action_conflict'):
+    if error in ('key_reuse', 'next_action_conflict', *CLOSED_ELSEWHERE):
         return error
     if error in ('unauthorized', 'forbidden'):
         return 'auth_refused'
@@ -656,7 +658,7 @@ class Run:
                                       'lead_proposed', 'lead_already_queued', 'lead_known_party',
                                       'lead_not_business', 'lead_refused', 'flags_unfiled', 'flags_unmatched',
                                       'flags_unknown', 'flags_untracked', 'flags_reflagged', 'flags_filed',
-                                      'flags_completed', 'flags_cleared')}
+                                      'flags_completed', 'flags_cleared', 'flags_closed_elsewhere')}
         self.deals: dict[str, str] = {}
         self.written: list[tuple[str, str, str, str]] = []
         self.unmatched: set[tuple[str, str, str]] = set()
@@ -702,6 +704,12 @@ class Run:
                                    retry_at=None, error_code=error.code)
                     _save(self.out, self.state)
                     self.written.append((who, args.get('ref', 'claim card'), verb, 'refused'))
+                    return True
+                if verb in ('complete-deal-item', 'drop-action') and error.code in CLOSED_ELSEWHERE:
+                    request.update(acknowledged=True, disposition='closed_elsewhere', retry_at=None,
+                                   error_code=None)
+                    self.counts['flags_closed_elsewhere'] += 1
+                    _save(self.out, self.state)
                     return True
                 if verb == 'set-next-action' and error.code == 'next_action_conflict':
                     request.update(acknowledged=True, disposition='superseded', retry_at=None,
@@ -864,34 +872,37 @@ class Run:
                 continue
             if status == 'none' and m['ident'] not in flags:
                 continue
-            activities = sorted({
-                self.state['requests'][k]['activity_id']
-                for address, _ in _parties(m, self.settings.internal_domain) if (ref := matcher.ref(address))
-                for k in (self.activity_key(ref, m['ident']),)
-                if self.state['requests'].get(k, {}).get('activity_id')})
-            if not activities:
-                self.counts['flags_unfiled'] += 1
-                continue
-            seen = flags.setdefault(m['ident'], {'applied': {}})
+            seen = flags.get(m['ident'])
+            if seen is None:  # the activity ids are only readable while intake still remembers the logging
+                activities = sorted({
+                    self.state['requests'][k]['activity_id']
+                    for address, _ in _parties(m, self.settings.internal_domain) if (ref := matcher.ref(address))
+                    for k in (self.activity_key(ref, m['ident']),)
+                    if self.state['requests'].get(k, {}).get('activity_id')})
+                if not activities:
+                    self.counts['flags_unfiled'] += 1
+                    continue
+                seen = flags.setdefault(m['ident'], {'applied': {}, 'activities': activities})
             seen.update(status=status, due=_flag_day(m.get('flag_due_unix')),
-                        done=_flag_day(m.get('flag_completed_unix')), activities=activities,
+                        done=_flag_day(m.get('flag_completed_unix')),
                         subject=m['subject'] or '(no subject)', at=int(self.now.timestamp()))
 
     def apply_flags(self) -> bool:
         """File each observed flag on the deal its email is confirmed against. Idempotent per (email, state)."""
         flags = self.state.setdefault('flags', {})
+        ok = True
         for ident, f in sorted(flags.items()):
-            deals = sorted({self.deals[a] for a in f['activities'] if a in self.deals})
+            deals = sorted(set(f['applied']) | {self.deals[a] for a in f['activities'] if a in self.deals})
             if not deals:
                 self.counts['flags_unmatched'] += 1
                 continue
             for deal in deals:
-                if not self._flag_on_deal(ident, f, deal):
-                    return False
-        for ident in [i for i, f in flags.items() if f['applied'] and f['at'] < self.now.timestamp() - UNRESOLVED_DAYS.total_seconds()
+                ok = self._flag_on_deal(ident, f, deal) and ok
+        horizon = self.now.timestamp() - UNRESOLVED_DAYS.total_seconds()
+        for ident in [i for i, f in flags.items() if f['at'] < horizon
                       and all(a['state'] != 'flagged' for a in f['applied'].values())]:
             del flags[ident]
-        return True
+        return ok
 
     def _flag_on_deal(self, ident: str, f: dict, deal: str) -> bool:
         applied = f['applied'].get(deal)
