@@ -160,7 +160,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
 with tempfile.TemporaryDirectory() as tmp:
     work = pathlib.Path(tmp)
-    labels = []
+    labels: list[str] = []
     different_order = False
     fail_shutdown = True
     def fake_run(command, env, label, log):
