@@ -231,12 +231,17 @@ elif tool == 'get_window_state':
                     add('AXRow', folder, 3, top, ['folder', folder])
     state['tokens'] = {'snap': snap, 'map': tokens}
     save()
-    print(json.dumps({'snapshot_id': snap, 'elements': elements, 'degraded_reason': None}))
+    if payload['window_id'] in state.get('draft_window_ids', []):
+        elements = [{'role': 'AXTextField', 'label': 'Subject'}]
+    degraded = 'ax_window_unresolved' if payload['window_id'] in state.get('unresolved_window_ids', []) else None
+    print(json.dumps({'snapshot_id': snap, 'elements': elements, 'degraded_reason': degraded}))
 elif tool == 'invoke_menu':
     path = payload['path']
     if path == ['Outlook', 'Quit Outlook']:
         state['running'] = (state.get('menu_quit_ignored', False) or
                             payload['window_id'] != state.get('quit_window_id', payload['window_id']))
+        if 'after_menu_quit' in state:
+            state['windows'] = state['after_menu_quit']
     elif path == ['View', 'Sidebar']:
         if not state.get('sidebar_stuck'):
             state['sidebar'] = not state['sidebar']
@@ -366,6 +371,12 @@ class FakeOutlookCase(unittest.TestCase):
         rows = [json.loads(line) for line in self.calls.read_text().splitlines()]
         return [row[1:] for row in rows if row[0] == name]
 
+    def assert_no_restart(self):
+        self.assertEqual(self.called('osascript') + self.called('open'), [])
+        self.assertFalse(any(call[1] == 'invoke_menu' and json.loads(call[2])['path'] ==
+                             ['Outlook', 'Quit Outlook'] for call in self.called('cua-driver')))
+        self.assertTrue(json.loads(self.state.read_text())['running'])
+
     def refresh_list(self, entries):
         path = self.repo / triage.REFRESH_LIST
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -390,6 +401,41 @@ class PreflightQuitTest(FakeOutlookCase):
         from lib.outlook_ui import prepare_outlook
         with patch.dict(os.environ, self.env, clear=True):
             return prepare_outlook(waits)
+
+    def test_titled_and_untitled_drafts_beside_mailbox_prevent_restart(self):
+        for title in (f'Re: subject-000 • {ACCOUNT}', ''):
+            with self.subTest(title=title):
+                self.given(windows=[ORDINARY, COMPOSE | {'title': title}], draft_window_ids=[14])
+                outcome = self.prepare()
+                self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+                self.assert_no_restart()
+
+    def test_small_titled_and_untitled_drafts_prevent_restart_on_any_space(self):
+        for title in ('subject-000', f'subject-000 • {ACCOUNT}', ''):
+            for on_screen in (True, False):
+                with self.subTest(title=title, on_screen=on_screen):
+                    self.calls.unlink(missing_ok=True)
+                    draft = window(14, title, 399, 399, on_screen)
+                    self.given(windows=[ORDINARY, draft], draft_window_ids=[14])
+                    outcome = self.prepare()
+                    self.assertIsNotNone(outcome)
+                    self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+                    self.assert_no_restart()
+
+    def test_unresolved_mailbox_candidate_prevents_restart(self):
+        self.given(windows=[ORDINARY], unresolved_window_ids=[13])
+        outcome = self.prepare()
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+        self.assert_no_restart()
+
+    def test_draft_opened_after_menu_quit_prevents_fallback_and_relaunch(self):
+        self.given(windows=[ORDINARY], menu_quit_ignored=True,
+                   after_menu_quit=[ORDINARY, COMPOSE | {'title': f'subject-000 • {ACCOUNT}'}],
+                   draft_window_ids=[14])
+        outcome = self.prepare()
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+        self.assertEqual(self.called('osascript') + self.called('open'), [])
+        self.assertTrue(json.loads(self.state.read_text())['running'])
 
     def test_quit_uses_mailbox_when_unassigned_window_is_first(self):
         self.given(windows=[UNTITLED_OFFSCREEN, ORDINARY], quit_window_id=13)
@@ -435,7 +481,7 @@ class PreflightQuitTest(FakeOutlookCase):
 
     def test_refused_quit_times_out_without_relaunch(self):
         self.given(windows=[ORDINARY], menu_quit_ignored=True, osascript_quit_ignored=True)
-        outcome = self.prepare(Waits(0.4, 0, 0, 0.01, 0, 0, 0))
+        outcome = self.prepare(Waits(1, 0, 0, 0.01, 0, 0, 0))
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'outlook_quit_timeout'))
         self.assertEqual(len(self.called('osascript')), 1)
         self.assertEqual(self.called('open'), [])
@@ -462,17 +508,34 @@ class PreflightQuitTest(FakeOutlookCase):
         from lib.outlook_ui import CuaError, cua
         self.given(windows=[ORDINARY], menu_quit_ignored=True, osascript_quit_ignored=True)
         snapshots = 0
-        def fail_second_snapshot(tool, arguments):
+        def fail_diagnostic_snapshot(tool, arguments):
+            nonlocal snapshots
+            if tool == 'list_windows':
+                snapshots += 1
+                if snapshots > 2:
+                    raise CuaError('private window title')
+            return cua(tool, arguments)
+        with patch('lib.outlook_ui.cua', side_effect=fail_diagnostic_snapshot):
+            outcome = self.prepare(Waits(0.4, 0, 0, 0.01, 0, 0, 0))
+        self.assertEqual((outcome.reason, outcome.detail),
+                         ('outlook_quit_timeout', 'windows_unavailable'))
+
+    def test_unavailable_fallback_snapshot_prevents_quit_and_relaunch(self):
+        from lib.outlook_ui import CuaError, cua
+        self.given(windows=[ORDINARY], menu_quit_ignored=True)
+        snapshots = 0
+        def fail_fallback_snapshot(tool, arguments):
             nonlocal snapshots
             if tool == 'list_windows':
                 snapshots += 1
                 if snapshots > 1:
-                    raise CuaError('private window title')
+                    raise CuaError('windows unavailable')
             return cua(tool, arguments)
-        with patch('lib.outlook_ui.cua', side_effect=fail_second_snapshot):
+        with patch('lib.outlook_ui.cua', side_effect=fail_fallback_snapshot):
             outcome = self.prepare(Waits(0.4, 0, 0, 0.01, 0, 0, 0))
-        self.assertEqual((outcome.reason, outcome.detail),
-                         ('outlook_quit_timeout', 'windows_unavailable'))
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'cua_driver_unavailable'))
+        self.assertEqual(self.called('osascript') + self.called('open'), [])
+        self.assertTrue(json.loads(self.state.read_text())['running'])
 
     def test_refresh_cli_logs_timeout_detail(self):
         from lib import outlook_refresh
@@ -524,6 +587,16 @@ class ComposeWindowTest(unittest.TestCase):
 
 
 class OutlookTriageTest(FakeOutlookCase):
+    def test_titled_and_untitled_drafts_skip_triage_without_restart(self):
+        for title in (f'Re: subject-000 • {ACCOUNT}', ''):
+            with self.subTest(title=title):
+                self.given([FILE_A], windows=[ORDINARY, COMPOSE | {'title': title}],
+                           draft_window_ids=[14])
+                outcome, state = self.run_triage()
+                self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+                self.assertEqual(state['moved'], [])
+                self.assert_no_restart()
+
     def test_configured_driver_outside_shell_path_works(self):
         self.given([FILE_A, NEWS, UNREAD])
         local_driver = self.home / '.local/bin/cua-driver'
@@ -815,6 +888,20 @@ def listed(message_id, row, sender_email, **extra):
 class RefreshTest(FakeOutlookCase):
     READ_BODY = msg('sender-news', 'subject-010', email='news@news.test')
     UNREAD_BODY = msg('folder-A, client-001', 'subject-011', '8:15 AM', unread=True, email='c1@client.test')
+
+    def test_titled_and_untitled_drafts_skip_refresh_without_restart(self):
+        from lib import outlook_refresh
+        for title in (f'Re: subject-000 • {ACCOUNT}', ''):
+            with self.subTest(title=title):
+                self.given([self.READ_BODY], windows=[ORDINARY, COMPOSE | {'title': title}],
+                           draft_window_ids=[14])
+                path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+                with patch.dict(os.environ, self.env, clear=True):
+                    outcome = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                                  waits=Waits(2, 0, 0, 0, 0, 0, 0))
+                self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+                self.assertNotIn('opened_at', json.loads(path.read_text())[0])
+                self.assert_no_restart()
 
     def test_refresh_worker_placement_and_entry_share_intake_host(self):
         catalog = json.loads((ROOT / 'ops/config/services.json').read_text())['services']
