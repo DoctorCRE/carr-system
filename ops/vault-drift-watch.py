@@ -158,7 +158,7 @@ ALWAYS_EXPECTED = {
 # one shared credential file, one bearer token per source, never composed into
 # a command line or printed. Reused here rather than reinvented.
 INGEST_ENVFILE = os.path.expanduser("~/.config/carr/ingest.env")
-DEFAULT_INGEST_URL = "https://api.practicecre.com/ingest"
+DEFAULT_INGEST_URL = "https://api.doctorcre.com/ingest"
 INGEST_TOKEN_VAR = "CARR_INGEST_TOKEN_VAULT_DRIFT"
 
 

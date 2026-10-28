@@ -98,10 +98,6 @@ SAFE_ZONES = (
 
 # Hosts this system legitimately talks to.
 KNOWN_HOSTS = (
-    # api.doctorcre.com is the SAME Worker as api.practicecre.com — both are custom
-    # domains on carr-mcp. It became the PRIMARY name on Joe's 2026-08-01 domain
-    # ruling, which reached wrangler.toml and the Worker routes but never reached
-    # this list, so calls to the primary domain were blocked until 2026-08-03.
     # Microsoft identity + Graph: the carr.us mailbox is Microsoft 365, and the
     # draft transport talks to these two and nothing else on Microsoft's side.
     "login.microsoftonline.com", "graph.microsoft.com", "outlook.office365.com",
@@ -135,7 +131,7 @@ KNOWN_HOSTS = (
     "nodejs.org", "registry.npmjs.org",
     # DoctorCRE's production app is CARR-owned infrastructure; release checks
     # and the signed-out progress-board check read this exact host.
-    "api.practicecre.com", "api.doctorcre.com", "app.doctorcre.com",
+    "api.doctorcre.com", "app.doctorcre.com",
     "api.anthropic.com", "console.neon.tech",
     # OpenRouter (Joe 2026-10-06): his own pay-per-token model router, used as a
     # Claude Code ANTHROPIC_BASE_URL so builders can run GLM or DeepSeek models

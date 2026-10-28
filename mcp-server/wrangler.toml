@@ -148,9 +148,8 @@ compatibility_flags = ["global_fetch_strictly_public", "nodejs_compat"]
 # Custom domains. api.* is the machine surface; reports.* is the isolated
 # client-link surface routed through the same Worker so its digest-only exchange
 # and reads remain same-origin. The apex stays free for the future public site.
-# doctorcre.com added 2026-08-01 (Joe's domain ruling): PRIMARY name
-# as of Dell's onboarding — practicecre.com stays live as an alias; its
-# retirement is a later, unhurried decision. Same Worker answers both.
+# api.doctorcre.com is primary. Retain the retiring alias until live traffic
+# reaches zero, then remove its route in a separate PR.
 routes = [
   { pattern = "api.practicecre.com", custom_domain = true },
   { pattern = "api.doctorcre.com", custom_domain = true },
