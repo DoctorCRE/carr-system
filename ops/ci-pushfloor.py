@@ -219,29 +219,35 @@ def pull_request_files(span):
 
 def pre_pr(python, body_file):
     """Failure lines for the leak guard, gate integrity and the review gate's Card line."""
-    body = Path(body_file).read_text() if body_file else None
+    failures = []
+    body = None
+    if body_file is not None:
+        try:
+            body = Path(body_file).read_text()
+        except (OSError, UnicodeError):
+            failures.append("cannot read PR body: pass a readable UTF-8 file with --body")
     os.chdir(Path(__file__).resolve().parents[1])
     base, head = git_lines("merge-base", "origin/main", "HEAD"), git_lines("rev-parse", "HEAD")
     if not base or not head:
         return ["no merge base with origin/main: run git fetch origin main, then rerun ./run.sh pre-pr"]
     span = f"{base[0]}..{head[0]}"
-    failures = []
-    leak = subprocess.run([python, "security/leak_guard.py", "--range", span], stdout=sys.stderr)
+    leak = subprocess.run([python, "security/leak_guard.py", "--range", span], capture_output=True)
     if leak.returncode:
-        failures.append(f"leak guard flagged lines this branch adds (locations above): remove them in a new "
-                        f"commit, then recheck with python3 security/leak_guard.py --range {span}")
-    integrity = subprocess.run([python, "hooks/gate-integrity.py", "--strict"], stdout=sys.stderr)
+        failures.append(f"leak guard failed: inspect findings with python3 security/leak_guard.py --range {span}")
+    integrity = subprocess.run([python, "hooks/gate-integrity.py", "--strict"], capture_output=True)
     if integrity.returncode:
-        failures.append("gate integrity failed (detail above): for an intended hook change run python3 "
-                        "hooks/gate-integrity.py --bless <hook file name> and commit ops/config/gate-baseline.json")
-    if body is None:
-        view = subprocess.run(["gh", "pr", "view", "--json", "body", "--jq", ".body"],
-                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-        body = view.stdout if view.returncode == 0 else None
-    if body is None:
+        failures.append("gate integrity failed: inspect findings with python3 hooks/gate-integrity.py --strict")
+    if body_file is None:
+        try:
+            view = subprocess.run(["gh", "pr", "view", "--json", "body", "--jq", ".body"],
+                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            body = view.stdout if view.returncode == 0 else None
+        except OSError:
+            pass
+    if body is None and body_file is None:
         failures.append("no PR body to check and no open PR for this branch: write the body to a file "
                         "and rerun ./run.sh pre-pr --body <file>")
-    else:
+    elif body is not None:
         spec = importlib.util.spec_from_file_location("review_gate", "ops/review-gate.py")
         gate = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(gate)

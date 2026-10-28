@@ -361,6 +361,35 @@ class PrePrTests(RepositoryFixture):
         result = self.pre_pr(None)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_unreadable_body_is_one_failure_and_other_checks_still_run(self):
+        result = self.pre_pr(None, "--body", "missing.md")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(len(result.stdout.splitlines()), 1)
+        self.assertIn("cannot read PR body", result.stdout)
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(len(self.calls()), 2)
+
+    def test_empty_body_path_cannot_skip_card_validation(self):
+        result = self.pre_pr(None, "--body", "")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("cannot read PR body", result.stdout)
+
+    def test_absent_gh_is_one_failure(self):
+        (self.repo / "bin/gh").unlink()
+        result = self.pre_pr(None)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(len(result.stdout.splitlines()), 1)
+        self.assertIn("--body", result.stdout)
+        self.assertEqual(result.stderr, "")
+
+    def test_scanner_output_does_not_add_failure_lines(self):
+        self.write("security/leak_guard.py", "import sys\nprint('details')\n"
+                   "print('more details', file=sys.stderr)\nraise SystemExit(1)\n")
+        result = self.pre_pr()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(len(result.stdout.splitlines()), 1)
+        self.assertEqual(result.stderr, "")
+
     def test_each_failure_is_one_line_with_its_remedy(self):
         self.scanner("security/leak_guard.py", "leak", status=1)
         self.scanner("hooks/gate-integrity.py", "integrity", status=1)
@@ -369,7 +398,7 @@ class PrePrTests(RepositoryFixture):
         lines = result.stdout.splitlines()
         self.assertEqual(len(lines), 3, result.stdout)
         self.assertIn(f"--range {self.base}..{self.head}", lines[0])
-        self.assertIn("gate-integrity.py --bless", lines[1])
+        self.assertIn("gate-integrity.py --strict", lines[1])
         self.assertIn("Card:", lines[2])
 
 
