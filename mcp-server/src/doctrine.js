@@ -29,7 +29,7 @@ const MEMORY_SURFACES = ["claude_code", "codex", "routine", "dot", "dream", "app
 const MEMORY_ACCESS = ["read_only", "read_write"];
 // The one attach instruction (S6): the MCP instructions embed it and
 // ops/sync-core-rule-cards.py renders it into CLAUDE.md and AGENTS.md.
-export const MEMORY_ATTACH_LINE = "OPENING ACT, every session: call attach-memory once, first, with surface claude_code for Claude Code or codex for a Codex job (pass the job log named on the brief's first line as transcript_ref). Check its team-memory index before starting, read any section that bears on your task with doctrine-sections, and skip work a current section records as done or ruled out, citing it; as you learn or rule something out, write it with write-doctrine-section document=team-memory and your attach_id.";
+export const MEMORY_ATTACH_LINE = "OPENING ACT, every session: call attach-memory once, first, with surface claude_code for a Claude Code session (terminal or Desktop) or codex for a Codex job (pass the job log named on the brief's first line as transcript_ref); a claude.ai or other chat app does not attach and calls standing-context instead. Check its team-memory index before starting, read any section that bears on your task with doctrine-sections, and skip work a current section records as done or ruled out, citing it; as you learn or rule something out, write it with write-doctrine-section document=team-memory and your attach_id.";
 const TERRITORY_SECTION_ID = "aa3868ef-d0a2-4bc2-9954-525ad418636b";
 
 /** Read the count banner emitted by the generated personal/shared rule renders. */

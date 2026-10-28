@@ -1,7 +1,7 @@
 // Test Doc tool discovery, authorization, and input restrictions.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { allowedIn, profileForActor, mcpApiHandler, callTool } from "../src/mcp.js";
+import { allowedIn, profileForActor, mcpApiHandler, callTool, PROFILES, serverInstructions } from "../src/mcp.js";
 import { dispatch } from "./helpers/budgeted-dispatch.mjs";
 import { TOOLS } from "../src/tools.js";
 import { MEMORY_ATTACH_LINE } from "../src/doctrine.js";
@@ -153,11 +153,23 @@ test("ordinary /mcp keeps its tool contracts and boot instructions behind compac
   }
   const initialized = (await rpc("/mcp", "initialize")).result;
   assert.ok(initialized.instructions.includes(MEMORY_ATTACH_LINE), "the generated attach line opens every session");
+  assert.match(MEMORY_ATTACH_LINE, /claude\.ai or other chat app does not attach/, "chats are told not to attach");
   assert.doesNotMatch(initialized.instructions, /standing-context FIRST/);
   assert.match(initialized.instructions, /list-verbs with a filter.*call-verb/);
   assert.match(initialized.instructions, /idempotency_key.*base_version/);
   assert.equal(initialized.serverInfo.name, "carr-record-layer");
   assert.deepEqual((await rpc("/mcp", "ping")).result, {});
+});
+
+test("every profile gets the attach line if and only if it may call attach-memory", () => {
+  const profiles = Object.keys(PROFILES);
+  assert.ok(profiles.includes("codex-continuity") && profiles.includes("doc") && profiles.includes("full"));
+  for (const profile of profiles) {
+    const text = serverInstructions(profile);
+    const allowed = allowedIn(profile, "attach-memory", TOOLS["attach-memory"]);
+    assert.equal(text.includes(MEMORY_ATTACH_LINE), allowed, profile);
+    if (!allowed && profile !== "doc") assert.match(text, /call standing-context FIRST/, profile);
+  }
 });
 
 test("Doc initialization describes brokerage usage without the engineering briefing", async () => {
