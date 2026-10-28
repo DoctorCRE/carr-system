@@ -29,10 +29,7 @@ import time
 from typing import Callable
 
 APP = 'Microsoft Outlook'
-MAILBOX_TITLE = re.compile(r'. • [^\s@]+@[^\s@]+\.[^\s@]+$')
 INBOX_TITLE = re.compile(r'^Inbox • ')
-FORM_SEND, FORM_SAVE = 'Send', 'Save'
-FORM_TO, FORM_ATTENDEES = 'To Recipients', 'Required attendees'
 from lib.outlook_settings import load_settings
 EXIT = {'succeeded': 0, 'skipped': 78, 'timed_out': 124, 'failed': 1}
 SIDEBAR = ['View', 'Sidebar']
@@ -130,25 +127,7 @@ class Row:
 
 
 def is_main_window(window: dict) -> bool:
-    return bool(MAILBOX_TITLE.search(window.get('title') or ''))
-
-
-def is_compose_window(pid: int, window: dict) -> bool:
-    """Protect draft forms and windows whose accessibility state cannot be identified."""
-    try:
-        state = cua('get_window_state', {'pid': pid, 'window_id': window['window_id'],
-                            'include_screenshot': False, 'max_elements': 600, 'max_depth': 3})
-        elements = state.get('elements')
-        if (state.get('degraded_reason') or state.get('error') or state.get('refusal')
-                or state.get('status') in ('refused', 'failed', 'error') or not isinstance(elements, list) or len(elements) < 2
-                or len(elements) >= 600 or not any(e.get('role') == 'AXWindow' for e in elements)):
-            return True
-        return any((e.get('role') == 'AXButton' and e.get('label') in (FORM_SEND, FORM_SAVE)
-                    and e.get('depth') == 1)
-                   or (e.get('role') == 'AXTextField' and e.get('label') in
-                       (FORM_TO, FORM_ATTENDEES)) for e in elements)
-    except (CuaError, KeyError, TypeError, AttributeError):
-        return True
+    return (window.get('title') or '').endswith(' • ' + load_settings().account)
 
 
 def is_ordinary_main_window(window: dict) -> bool:
@@ -217,32 +196,33 @@ def _quit(pid: int, windows: list[dict], waits: Waits) -> bool:
     return True
 
 
-def _quit_window_detail(pid: int) -> str:
+def _quit_window_detail(pid: int, windows: list[dict] | None = None) -> str:
     try:
-        windows = _windows(pid)
+        if windows is None:
+            windows = _windows(pid)
+        snapshot = []
+        safe_names = {'Send', 'Save', 'Save & Close', 'To Recipients', 'Required attendees',
+                      'New Mail', 'Cancel', 'Close', 'Discard'}
+        for window in windows:
+            bounds = window.get('bounds') or {}
+            entry = {key: bounds.get(key) if type(bounds.get(key)) in (int, float) else None
+                     for key in ('width', 'height')}
+            entry.update(has_title=bool(window.get('title')), mailbox_suffix=is_main_window(window), controls=[])
+            if not entry['mailbox_suffix']:
+                try:
+                    state = cua('get_window_state', {'pid': pid, 'window_id': window['window_id'],
+                                'include_screenshot': False, 'max_elements': 20, 'max_depth': 2})
+                    for element in (state.get('elements') or [])[:20]:
+                        role = element.get('role')
+                        if isinstance(role, str) and re.fullmatch(r'AX[A-Za-z]+', role):
+                            name = element.get('label')
+                            entry['controls'].append({'role': role, 'name': name if name in safe_names else None})
+                except (CuaError, KeyError, TypeError, AttributeError):
+                    pass
+            snapshot.append(entry)
+        return json.dumps({'window_count': len(windows), 'windows': snapshot}, separators=(',', ':'))
     except CuaError:
         return 'windows_unavailable'
-    snapshot = []
-    for window in windows:
-        role = window.get('role')
-        subrole = window.get('subrole')
-        if role == 'AXSheet' or subrole == 'AXSheet':
-            kind = 'sheet'
-        elif subrole in ('AXDialog', 'AXSystemDialog') or role == 'AXDialog':
-            kind = 'dialog'
-        elif is_compose_window(pid, window):
-            kind = 'compose_or_unresolved'
-        elif is_main_window(window):
-            kind = 'main'
-        else:
-            kind = 'dialog'
-        bounds = window.get('bounds') or {}
-        size = {key: bounds.get(key) if type(bounds.get(key)) in (int, float) else None
-                for key in ('width', 'height')}
-        visible = window.get('is_on_screen')
-        snapshot.append({'kind': kind, **size,
-                         'is_on_screen': visible if type(visible) is bool else None})
-    return json.dumps({'windows': snapshot}, separators=(',', ':'))
 
 
 def prepare_outlook(waits: Waits) -> Outcome | None:
@@ -251,8 +231,8 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
         pid = outlook_pid()
         if pid is not None:
             windows = _windows(pid)
-            if any(is_compose_window(pid, w) for w in windows):
-                return Outcome('skipped', 'compose_window_open', _quit_window_detail(pid))
+            if any(not is_main_window(w) for w in windows):
+                return Outcome('skipped', 'compose_window_open', _quit_window_detail(pid, windows))
             if not _quit(pid, windows, waits):
                 return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
         launched = subprocess.run(['open', '-g', '-a', APP, '--args',
@@ -264,6 +244,9 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
         pid = outlook_pid()
         if pid is None:
             return Outcome('failed', 'outlook_not_running_after_launch')
+        windows = _windows(pid)
+        if any(not is_main_window(w) for w in windows):
+            return Outcome('skipped', 'compose_window_open', _quit_window_detail(pid, windows))
         if usable_window(pid):
             return None
         windows = _windows(pid)
@@ -274,6 +257,9 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
             except CuaError:
                 pass
             time.sleep(waits.new_window_seconds)
+        windows = _windows(pid)
+        if any(not is_main_window(w) for w in windows):
+            return Outcome('skipped', 'compose_window_open', _quit_window_detail(pid, windows))
         return None if usable_window(pid) else Outcome('failed', 'no_usable_main_window')
     except CuaError:
         return Outcome('failed', 'cua_driver_unavailable')

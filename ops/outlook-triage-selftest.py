@@ -75,11 +75,11 @@ def window(window_id, title, width, height, on_current_space=True):
             'bounds': {'x': 0, 'y': 33, 'width': width, 'height': height}}
 
 
-TOOLBAR = window(11, '', 1512, 32, False)
-FULL_SCREEN = window(12, MAILBOX, 1512, 949, False)
-ORDINARY = window(13, MAILBOX, 1230, 768)
-COMPOSE = window(14, 'Re: subject-000', 917, 911)
-UNTITLED_OFFSCREEN = window(15, '', 500, 500, None) | {'is_on_screen': False}
+TOOLBAR = window(11, '', 1512, 32, False) | {'kind': 'toolbar'}
+FULL_SCREEN = window(12, MAILBOX, 1512, 949, False) | {'kind': 'mailbox'}
+ORDINARY = window(13, MAILBOX, 1230, 768) | {'kind': 'mailbox'}
+COMPOSE = window(14, 'Re: subject-000', 917, 911) | {'kind': 'mail_draft'}
+UNTITLED_OFFSCREEN = window(15, '', 500, 500, None) | {'is_on_screen': False, 'kind': 'unknown'}
 UNTITLED_OFFSCREEN['bounds']['y'] = 580
 
 
@@ -194,7 +194,11 @@ elif tool == 'get_window_state':
         elements.append(element)
         tokens[str(index)] = kind
         return index
-    if payload['window_id'] == 14:
+    window_kind = next((w.get('kind') for w in state['windows'] if w['window_id'] == payload['window_id']), None)
+    if window_kind == 'event':
+        print(json.dumps({'elements': [{'role': 'AXWindow', 'label': 'private event'}, {'role': 'AXButton', 'label': 'Save & Close'}]}))
+        sys.exit(0)
+    if window_kind == 'mail_draft':
         print(json.dumps({'elements': [{'role': 'AXWindow'},
                                        {'role': 'AXButton', 'label': 'Send', 'depth': 1}]}))
         sys.exit(0)
@@ -343,7 +347,7 @@ class FakeOutlookCase(unittest.TestCase):
     def given(self, rows=None, tabs=None, **state):
         lists = tabs if tabs is not None else {'only': rows or []}
         self.state.write_text(json.dumps({
-            'running': True, 'windows': [TOOLBAR, FULL_SCREEN], 'after_launch': [TOOLBAR, ORDINARY],
+            'running': True, 'windows': [FULL_SCREEN], 'after_launch': [ORDINARY],
             'idle_seconds': 3600, 'sidebar': True, 'tab': 'focused' if tabs else None, 'folder': 'Inbox',
             'lists': lists, 'elsewhere': [], 'folder_rows': ['Deals', 'Active Deals', 'folder-A'],
             'picker_folders': ['folder-A', 'vendor-001', 'folder-C', 'folder-D', 'folder-E', 'folder-F',
@@ -389,8 +393,8 @@ class PreflightQuitTest(FakeOutlookCase):
         with patch.dict(os.environ, self.env, clear=True):
             return prepare_outlook(waits)
 
-    def test_quit_uses_mailbox_when_unassigned_window_is_first(self):
-        self.given(windows=[UNTITLED_OFFSCREEN, ORDINARY], quit_window_id=13)
+    def test_main_window_alone_allows_restart(self):
+        self.given(windows=[ORDINARY], quit_window_id=13)
         self.assertIsNone(self.prepare())
         menus = [json.loads(call[2]) for call in self.called('cua-driver')
                  if call[1] == 'invoke_menu']
@@ -403,7 +407,7 @@ class PreflightQuitTest(FakeOutlookCase):
             with self.subTest(x=x, width=width, height=height):
                 secondary = window(13, MAILBOX, width, height, None) | {'is_on_screen': True}
                 secondary['bounds']['x'] = x
-                self.given(windows=[TOOLBAR, secondary], osascript_quit_ignored=True,
+                self.given(windows=[secondary], osascript_quit_ignored=True,
                            after_launch=[secondary])
                 self.assertIsNone(self.prepare(Waits(0.4, 0, 0, 0.01, 0, 0, 0)))
                 self.assertEqual(self.called('osascript'), [])
@@ -415,7 +419,7 @@ class PreflightQuitTest(FakeOutlookCase):
         self.assertEqual(len(self.called('open')), 1)
 
     def test_no_ordinary_window_uses_graceful_quit(self):
-        self.given(windows=[UNTITLED_OFFSCREEN, FULL_SCREEN])
+        self.given(windows=[FULL_SCREEN])
         self.assertIsNone(self.prepare())
         self.assertEqual(len(self.called('osascript')), 1)
         self.assertFalse(any(call[1] == 'invoke_menu' for call in self.called('cua-driver')))
@@ -446,12 +450,7 @@ class PreflightQuitTest(FakeOutlookCase):
                    menu_quit_ignored=True, osascript_quit_ignored=True)
         outcome = self.prepare(Waits(0.4, 0, 0, 0.01, 0, 0, 0))
         self.assertEqual(outcome.reason, 'outlook_quit_timeout')
-        self.assertEqual(json.loads(outcome.detail), {'windows': [
-            {'kind': 'main', 'width': 1230, 'height': 768, 'is_on_screen': True},
-            {'kind': 'compose_or_unresolved', 'width': 917, 'height': 911, 'is_on_screen': True},
-            {'kind': 'sheet', 'width': 700, 'height': 240, 'is_on_screen': True},
-            {'kind': 'dialog', 'width': 600, 'height': 300, 'is_on_screen': True},
-            {'kind': 'dialog', 'width': 1512, 'height': 32, 'is_on_screen': False}]})
+        self.assertEqual(json.loads(outcome.detail)['window_count'], 5)
         for private in ('subject-000', ACCOUNT, 'private', 'address@example.test'):
             self.assertNotIn(private, outcome.detail)
         self.assertEqual(self.called('open'), [])
@@ -490,16 +489,30 @@ class PreflightQuitTest(FakeOutlookCase):
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'outlook_quit_timeout'))
         self.assertEqual(self.called('open'), [])
 
-    def test_large_calendar_window_does_not_block_preflight(self):
+    def test_save_and_close_event_draft_blocks_and_reports_snapshot(self):
+        event = window(16, 'private event', 300, 200) | {'kind': 'event'}
+        self.given(windows=[ORDINARY, event])
+        outcome = self.prepare()
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+        snapshot = json.loads(outcome.detail)
+        self.assertEqual(snapshot['window_count'], 2)
+        self.assertEqual(snapshot['windows'][1]['width'], 300)
+        self.assertTrue(snapshot['windows'][1]['has_title'])
+        self.assertIn({'role': 'AXButton', 'name': 'Save & Close'}, snapshot['windows'][1]['controls'])
+        self.assertFalse(any(json.loads(call[2]).get('window_id') == 13 for call in self.called('cua-driver') if call[1] == 'get_window_state'))
+        self.assertNotIn('private event', outcome.detail)
+        self.assertEqual(self.called('open'), [])
+
+    def test_large_calendar_window_blocks_preflight(self):
         calendar = window(16, 'Calendar', 900, 700)
         self.given(windows=[ORDINARY, calendar])
-        self.assertIsNone(self.prepare())
+        self.assertEqual(self.prepare().reason, 'compose_window_open')
 
     def test_unresolved_window_blocks_with_snapshot(self):
         self.given(windows=[ORDINARY, window(16, 'Unknown', 900, 700)], unresolved_windows=[16])
         outcome = self.prepare()
         self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
-        self.assertEqual(json.loads(outcome.detail)['windows'][1]['kind'], 'compose_or_unresolved')
+        self.assertEqual(json.loads(outcome.detail)['windows'][1]['controls'], [])
         self.assertEqual(self.called('open'), [])
 
     def test_unresolved_offscreen_window_is_protected(self):
@@ -677,11 +690,11 @@ class OutlookTriageTest(FakeOutlookCase):
         self.assertEqual(outcome.state, 'skipped')
         self.assertEqual(self.settled().read_text(), 'skipped user_active\n')
 
-    def test_observed_untitled_offscreen_window_allows_triage(self):
+    def test_observed_untitled_offscreen_window_blocks_triage(self):
         self.given([FILE_A], windows=[TOOLBAR, ORDINARY, UNTITLED_OFFSCREEN])
         outcome, state = self.run_triage()
-        self.assertEqual((outcome.state, outcome.reason), ('succeeded', 'filed'))
-        self.assertEqual(state['moved'], [[FILE_A['label'], 'folder-A']])
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+        self.assertEqual(state['moved'], [])
 
     def test_empty_subject_draft_skips_the_night(self):
         self.given([FILE_A], windows=[ORDINARY, COMPOSE | {'title': ''}])
@@ -881,7 +894,7 @@ class RefreshTest(FakeOutlookCase):
         with patch.dict(os.environ, self.env, clear=True):
             result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
                                          waits=Waits(2, 0, 0, 0, 0, 0, 0))
-        self.assertEqual(result.reason, 'wrong_account')
+        self.assertEqual(result.reason, 'compose_window_open')
         self.assertEqual(json.loads(self.state.read_text())['selections'], [])
         self.given([self.READ_BODY], idle_seconds=1)
         with patch.dict(os.environ, self.env, clear=True):

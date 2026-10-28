@@ -789,23 +789,17 @@ class SendTests(unittest.TestCase):
     def test_existing_compose_is_left_untouched(self):
         h = Harness(self.out)
         h.fake.open_url('mailto:person-z@example.test?subject=other-draft&body=leave-alone')
+        h.fake.windows[100]['title'] = 'other-draft'
         result = h.send()
         self.assertEqual((result.state, result.reason), (State.FAILED, 'compose_window_open'))
         self.assertEqual(h.fake.presses(), 0)
         self.assertEqual(len(h.fake.forms), 1)
 
-    def test_existing_read_only_window_does_not_block_send(self):
+    def test_existing_read_only_window_blocks_send(self):
         h = Harness(self.out)
         h.fake.windows[2] = {'window_id': 2, 'title': 'Synthetic message',
                              'bounds': {'width': 900, 'height': 700}}
-        elements = h.fake.elements
-        def window_elements(wid):
-            if wid == 2:
-                return [{'role': 'AXWindow', 'label': 'Synthetic message'},
-                        {'role': 'AXStaticText', 'label': 'Message'}]
-            return elements(wid)
-        h.fake.elements = window_elements
-        self.assertEqual(h.send().state, State.DONE)
+        self.assertEqual(h.send().reason, 'compose_window_open')
 
     def test_failed_discard_is_reported(self):
         h = Harness(self.out, corrupt=('subject', 'changed'))
