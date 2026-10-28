@@ -32,7 +32,7 @@ export const DOC_INSTRUCTIONS =
 // and supersedes the actor's open action, retaining attributed history and old
 // values. None erases history or performs irreversible business actions. Operational
 // read-call audit telemetry does not mutate the business record being read.
-export function docToolAnnotations(tool) {
+export function docToolAnnotations(tool: { write?: boolean }) {
   return {
     readOnlyHint: !tool.write,
     destructiveHint: false,

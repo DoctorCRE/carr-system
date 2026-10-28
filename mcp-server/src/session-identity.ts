@@ -20,8 +20,14 @@
 // false` with the actor absent is what makes the server-side derivation
 // UNFORGEABLE rather than merely absent.
 
+import type { Actor, Db, VerbInputs } from "./verb-contract.ts";
+import type { ToolError as ToolErrorClass } from "./tool-error.ts";
+
+// Preserve partial database JSON validation; unchecked fields remain untyped.
+type ProjectionFacts = Record<string, any> | null | undefined;
+
 /** Pure shaper over ops.session_identity_facts. */
-export function sessionIdentityProjection(facts, ToolError) {
+export function sessionIdentityProjection(facts: ProjectionFacts, ToolError: typeof ToolErrorClass) {
   if (!facts || typeof facts !== "object" || facts.ok !== true) {
     throw new ToolError({ error: "session_identity_unavailable" });
   }
@@ -59,7 +65,7 @@ export function sessionIdentityProjection(facts, ToolError) {
 }
 
 /** Pure shaper over ops.session_dispatch_history. */
-export function sessionDispatchProjection(facts, ToolError) {
+export function sessionDispatchProjection(facts: ProjectionFacts, ToolError: typeof ToolErrorClass) {
   if (!facts || typeof facts !== "object" || facts.ok !== true) {
     throw new ToolError({
       error: facts?.reason_id || "session_dispatch_history_unavailable" });
@@ -108,7 +114,7 @@ export function sessionDispatchProjection(facts, ToolError) {
   };
 }
 
-export function sessionIdentityTools({ ToolError }) {
+export function sessionIdentityTools({ ToolError }: { ToolError: typeof ToolErrorClass }) {
   return {
     "read-session-identity": {
       writerConnection: true,
@@ -118,7 +124,7 @@ export function sessionIdentityTools({ ToolError }) {
         limit: { type: "integer", minimum: 1, maximum: 50 },
         include_closed: { type: "boolean" },
       }, required: [] },
-      handler: async (c, _a, args) => {
+      handler: async (c: Db, _a: Actor, args: VerbInputs["read-session-identity"]) => {
         const r = await c.query(
           "select ops.session_identity_facts($1::text,$2::integer,$3::boolean) as facts",
           [args.query ?? null, args.limit ?? null, args.include_closed ?? null]);
@@ -134,7 +140,7 @@ export function sessionIdentityTools({ ToolError }) {
         cursor: { type: "string", minLength: 1, maxLength: 500 },
         limit: { type: "integer", minimum: 1, maximum: 100 },
       }, required: ["session_id"] },
-      handler: async (c, _a, args) => {
+      handler: async (c: Db, _a: Actor, args: VerbInputs["read-dispatch-history"]) => {
         const r = await c.query(
           "select ops.session_dispatch_history($1::text,$2::text,$3::integer) as facts",
           [args.session_id, args.cursor ?? null, args.limit ?? null]);

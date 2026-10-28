@@ -14,7 +14,7 @@
 
 import { slugForEmail, propsForSlug, agentSlugForClient, verifiedAgentSlugForClient } from "./identity.js";
 import { validateAuthorizationRequest, requireApprovedClient } from "./oauth-policy.ts";
-import { consentState } from "./oauth-consent-state.js";
+import { consentState } from "./oauth-consent-state.ts";
 
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
