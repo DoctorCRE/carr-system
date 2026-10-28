@@ -1722,6 +1722,21 @@ class IntakeTest(unittest.TestCase):
         self.run_intake(broken)
         self.assertEqual(len(list(self.out().glob('report-*.md'))), 3)
 
+    def test_healthy_run_with_new_mail_or_unmatched_sender_still_reports(self):
+        known = mail('pat@example.test', -timedelta(hours=1))
+        self.run_intake([known])
+        self.assertEqual(len(list(self.out().glob('report-*.md'))), 1)
+        self.fake.now += timedelta(minutes=30)
+        stranger = mail('stranger@example.test', -timedelta(minutes=10), subject='New inquiry')
+        result = self.run_intake([known, stranger])
+        self.assertEqual((result.state, result.counts['logged']), ('succeeded', 0))
+        self.assertEqual(json.loads((self.out() / intake.STATE).read_text())['decoder_report_status'], 'healthy')
+        self.assertEqual(len(list(self.out().glob('report-*.md'))), 2, 'a new unmatched sender is reported')
+        self.fake.now += timedelta(minutes=30)
+        filed = self.run_intake([known, stranger, mail('pat@example.test', -timedelta(minutes=5), subject='Follow-up')])
+        self.assertEqual((filed.state, filed.counts['logged']), ('succeeded', 1))
+        self.assertEqual(len(list(self.out().glob('report-*.md'))), 3, 'filed mail is reported')
+
     def test_small_message_sample_does_not_raise_fill_rate_alarm(self):
         sample = [mail(OWNER, -timedelta(hours=1), subject='', recipients=None)]
         result = self.run_intake(sample)

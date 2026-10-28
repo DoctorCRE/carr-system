@@ -1038,14 +1038,15 @@ class Run:
         self.state.pop('upcoming', None)
         self.counts.update(calendar_counts(self.state))
 
-    def report(self, out: Path, refresh_count: int) -> None:
+    def report(self, out: Path, refresh_count: int, news: bool = False) -> None:
+        """Write a report when the run has news, health changed, or the decoder is degraded."""
         health = self.state.get('decoder_health')
         status = (health.get('status', 'degraded' if health['failing'] else 'healthy')
                   if health else 'unavailable')
         for path in out.glob('report-*.md'):
             if path.is_file() and path.stat().st_mtime < (self.now - timedelta(days=14)).timestamp():
                 path.unlink()
-        if status != 'degraded' and status == self.state.get('decoder_report_status'):
+        if not news and status != 'degraded' and status == self.state.get('decoder_report_status'):
             return
         self.state['decoder_report_status'] = status
         lines = [f'# Outlook intake {self.now.astimezone(self.settings.timezone):%Y-%m-%d %H:%M %Z}', '']
@@ -1444,7 +1445,8 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         work.counts['error_' + code] = sum(not r['acknowledged'] and r.get('error_code') == code
                                           for r in state.get('requests', {}).values())
     refresh = _refresh_list(out, state.get('pending_full', {}))
-    work.report(out, refresh)
+    work.report(out, refresh, news=bool(mail_processed or work.unmatched or refresh
+                                        or work.counts['calendar_requests_quarantined']))
     counts = {**work.counts, 'needs_refresh_listed': refresh}
     failed = next((reason for count, reason in (('writes_failed', 'writes_failed'),
                                                ('requests_blocked', 'request_blocked'),
