@@ -676,6 +676,20 @@ function preferredMergeSurvivor(rows) {
 // includes rulings like the 2026-08-06 vendor merges, one ruling settling V-GC-001,
 // V-MSC-024 and T-004 together, which a single-ref parameter can only record a third of.
 //
+async function resolveDecisionAbout(client, actor, about) {
+  const refs = (Array.isArray(about) ? about : [about])
+    .map(r => String(r || "").trim()).filter(Boolean);
+  for (const ref of refs) {
+    if (/^WR-/i.test(ref)) {
+      const found = await client.query(
+        "select 1 from ops.work_request where ref = $1 and organization_tenant_id = $2", [ref, organizationTenantForActor(actor)]);
+      if (!found.rows.length) throw new ToolError({ error: "decision_about_work_request_not_found", field: "about" });
+      throw new ToolError({ error: "unsupported_decision_about", field: "about" });
+    }
+    await resolveSubject(client, ref);
+  }
+  return refs;
+}
 // Re-attaching is safe. A mirror already written for the same (subject, decision) pair
 // is skipped, not duplicated, so calling update-decision twice does not stack pointers
 // on a timeline.
@@ -6992,15 +7006,7 @@ export const TOOLS = {
       // record this loop exists to stop creating. Resolution happens twice on the happy
       // path (here to validate, again inside mirrorDecision to write); that is a couple
       // of indexed reads against correctness, which is not a trade worth making.
-      const aboutRefs = args.about
-        ? (Array.isArray(args.about) ? args.about : [args.about]).map(r => String(r || "").trim()).filter(Boolean)
-        : [];
-      for (const ref of aboutRefs) {
-        if (/^WR-/i.test(ref))
-          throw new ToolError({ error: "unsupported_decision_about", field: "about", ref,
-            hint: "Work Request refs are not supported in about. Use a lead, client, vendor, party or deal ref. For a system-wide ruling, omit about and name the Work Request in the rationale." });
-        await resolveSubject(c, ref);
-      }
+      const aboutRefs = await resolveDecisionAbout(c, actor, args.about);
 
       // [idea 68, 0085] BOTH HALVES OF A PRICE OR NEITHER. A cost with no
       // quality number is a complaint and a quality number with no cost is a
@@ -7118,6 +7124,8 @@ export const TOOLS = {
           where subject_id = $1 and verb = 'log-decision' limit 1`, [decisionId])).rows[0];
       if (!cur) throw new ToolError({ error: "decision_not_found", decision_id: args.decision_id,
         hint: "pass the decision_id log-decision returned, not the event_id" });
+
+      await resolveDecisionAbout(c, actor, args.about);
 
       const nv = cur.new_value || {};
       const quote = args.human_quote !== undefined ? args.human_quote : cur.human_quote;

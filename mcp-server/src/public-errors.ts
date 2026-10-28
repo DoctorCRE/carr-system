@@ -32,6 +32,8 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["next_action_conflict", "Re-read get-next-action with ref and owner. Review the current action before retrying set-next-action with its id and version, or null if absent, in expected_action."],
   ["needs_confirm", "Ask the human to confirm before resubmitting with confirm:true."],
   ["not_found", "The requested record was not found."],
+  ["unsupported_decision_about", "The about field accepts lead, client, vendor, party, and deal references or names; Work Request references are not supported."],
+  ["decision_about_work_request_not_found", "The Work Request in the about field was not found. Check its reference."],
   ["work_request_not_found", "Re-read the Work Request reference before retrying."],
   ["work_request_terminal_state", "The Work Request is already terminal. Re-read its card before choosing another action."],
   ["work_request_not_completable", "Complete only a captured, triaged, ready, or verification Work Request."],
