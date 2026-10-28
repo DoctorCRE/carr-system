@@ -74,6 +74,7 @@ class FakeOutlook:
         self.front = False
         self.background = False
         self.press_count = 0
+        self.unresolved: set[int] = set()
 
     def open_url(self, url: str) -> None:
         parts = urlsplit(url)
@@ -127,6 +128,8 @@ class FakeOutlook:
         if tool == 'list_windows':
             return {'windows': list(self.windows.values())}
         if tool == 'get_window_state':
+            if args['window_id'] in self.unresolved:
+                return {'elements': [], 'degraded_reason': 'ax_window_unresolved'}
             return {'elements': self.elements(args['window_id'])}
         if tool == 'click':
             wid, index = map(int, args['element_token'].split(':'))
@@ -828,6 +831,28 @@ class SendTests(unittest.TestCase):
         self.assertEqual((result.state, result.reason), (State.FAILED, 'compose_window_open'))
         self.assertEqual(h.fake.presses(), 0)
         self.assertEqual(len(h.fake.forms), 1)
+
+    def test_unreadable_unassigned_window_does_not_hold_send(self):
+        h = Harness(self.out)
+        h.fake.windows[15] = {'window_id': 15, 'title': '', 'is_on_screen': False, 'on_current_space': None,
+                              'bounds': {'x': 0, 'y': 580, 'width': 500, 'height': 500}}
+        h.fake.unresolved.add(15)
+        self.assertEqual(h.send().state, State.DONE)
+        self.assertEqual(h.fake.presses(), 1)
+
+    def test_untitled_compose_and_unassigned_shape_with_draft_controls_hold_send(self):
+        for title, bounds, on_screen, space in (
+                ('', {'x': 298, 'y': 52, 'width': 917, 'height': 911}, True, True),
+                ('', {'x': 0, 'y': 580, 'width': 500, 'height': 500}, False, None)):
+            with self.subTest(bounds=bounds):
+                h = Harness(self.out / str(bounds['width']))
+                h.fake.open_url('mailto:person-z@example.test?subject=&body=leave-alone')
+                h.fake.windows[100].update(title=title, bounds=bounds, is_on_screen=on_screen,
+                                           on_current_space=space)
+                result = h.send()
+                self.assertEqual((result.state, result.reason), (State.FAILED, 'compose_window_open'))
+                self.assertEqual(h.fake.presses(), 0)
+                self.assertEqual(len(h.fake.forms), 1)
 
     def test_failed_discard_is_reported(self):
         h = Harness(self.out, corrupt=('subject', 'changed'))
