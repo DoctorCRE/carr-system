@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Rehearse base-first and filename-order upgrades on disposable PostgreSQL 18.
 
-Restore the candidate, compare reviewed seeds, and prove business-data isolation.
+Compare schema, grants and checksummed ledger across both orders. Data migration
+commutativity is not inferred from schema equality. Restore the candidate and
+compare its reviewed seeds exactly, then prove business-data isolation.
 An unchanged base snapshot passes. A changed snapshot must match the candidate.
 --write refreshes db/schema.sql; --artifact-dir retains the candidate for CI.
 Exit 0 verified, 1 changed snapshot differs, 2 step failed, 3 PG18 unavailable.
@@ -99,7 +101,8 @@ def _structure(snapshot: str) -> str | None:
 def dump_objects(text: str) -> Counter[str]:
     # Only pg_dump's envelope varies independently of the catalog. Preserve
     # comments, SQL text and function bodies byte for byte. Both inputs must
-    # already be owner-free and ACL-free pg_dump output.
+    # already be owner-free pg_dump output. Retain ACLs when comparing databases
+    # in the same disposable cluster.
     literals = re.compile(r'''(?P<tag>\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$).*?(?P=tag)|E'(?:\\.|''|[^'])*'|'(?:''|[^'])*'|"(?:""|[^"])*"|--[^\n]*|/\*.*?\*/''', re.S)
     masked = literals.sub(lambda match: match[0] if match[0].startswith('--') else re.sub(r'[^\n]', ' ', match[0]), text)
     pieces: list[str] = []
@@ -286,23 +289,26 @@ def shadow(base: str, bindir: pathlib.Path, work: pathlib.Path) -> tuple[str, st
         candidate = work / "candidate.sql"
         run([REPO / "bin/schema-snapshot.sh", "--from-disposable-local", dsn,
              "--output-candidate", candidate], env, "bin/schema-snapshot.sh", log)
-        canonical_dsn = dsn
-        run([bindir / "psql", dsn.rsplit("/", 1)[0] + "/postgres", "-X", "-v", "ON_ERROR_STOP=1",
-             "-qc", "alter database carr_ci rename to base_first"], env, "retain base-first database", log)
-        dsn = dsn.rsplit("/", 1)[0] + "/base_first"
-        run([bindir / "createdb", "-h", "127.0.0.1", "-p", str(port), "-U", "carr_ci", "carr_ci"],
+        run([bindir / "createdb", "-h", "127.0.0.1", "-p", str(port), "-U", "carr_ci", "canonical"],
             env, "createdb canonical migration order", log)
+        canonical_dsn = dsn.rsplit("/", 1)[0] + "/canonical"
         run([bindir / "psql", canonical_dsn, "-X", "-v", "ON_ERROR_STOP=1", "-q", "-f", work / "base.sql"],
             {**env, "PGOPTIONS": "--client-min-messages=warning"}, "load canonical base snapshot", log)
         run([python, REPO / "tools/migrate.py", "--apply", "--yes"], {**env, "DATABASE_URL": canonical_dsn},
             "canonical tools/migrate.py --apply", log)
-        canonical = work / "canonical.sql"
-        run([REPO / "bin/schema-snapshot.sh", "--from-disposable-local", canonical_dsn,
-             "--output-candidate", canonical], env, "export canonical snapshot", log)
-        order_diffs = differences(read_snapshot(canonical), read_snapshot(candidate))
+        ledger = run([bindir / "psql", canonical_dsn, "-XAtq", "-v", "ON_ERROR_STOP=1", "-c",
+                      "select coalesce(jsonb_object_agg(filename,sha256),'{}'::jsonb) from public.schema_migrations"],
+                     env, "canonical migration ledger", log)
+        if json.loads(ledger) != gate.ledger_rows(read_snapshot(candidate)):
+            raise StepFailed("base-first migration ledger differs from canonical rebuild")
+        for label, source in (("base-first", dsn), ("canonical", canonical_dsn)):
+            run([bindir / "pg_dump", "--schema-only", "--no-owner", "--dbname", source,
+                 "--file", work / f"{label}-schema.sql"], env, f"dump {label} schema and grants", log)
+        order_diffs = schema_difference(read_snapshot(work / "canonical-schema.sql"),
+                                        read_snapshot(work / "base-first-schema.sql"))
         if order_diffs:
             raise StepFailed("base-first migration order differs from canonical rebuild:\n"
-                             + "\n".join(order_diffs))
+                             + "\n".join(order_diffs[:80]))
         run([bindir / "createdb", "-h", "127.0.0.1", "-p", str(port), "-U", "carr_ci", "rebuilt"],
             env, "createdb snapshot rebuild", log)
         rebuilt = dsn.rsplit("/", 1)[0] + "/rebuilt"

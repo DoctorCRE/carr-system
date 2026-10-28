@@ -165,11 +165,15 @@ with tempfile.TemporaryDirectory() as tmp:
     fail_shutdown = True
     def fake_run(command, env, label, log):
         labels.append(label)
-        if label in ("bin/schema-snapshot.sh", "export canonical snapshot"):
-            tables = T
-            if different_order and label == "export canonical snapshot":
+        if label == "bin/schema-snapshot.sh":
+            pathlib.Path(command[-1]).write_text(snapshot(T, R1))
+        if label == "canonical migration ledger":
+            return '{"0001_a.sql":"aa","0002_b.sql":"bb"}'
+        if label.startswith("dump "):
+            tables = "-- Name: deal; Type: TABLE; Schema: public; Owner: -\n" + T
+            if different_order and label == "dump canonical schema and grants":
                 tables += "CREATE TABLE widget(id int);\n"
-            pathlib.Path(command[-1]).write_text(snapshot(tables, R1))
+            pathlib.Path(command[-1]).write_text(tables)
         return ''
     def fake_process(command, **kwargs):
         if command[0] == 'git':
