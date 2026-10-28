@@ -7,6 +7,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import sqlite3
@@ -47,6 +48,8 @@ CLIENT = intake.Contact(email='pat@example.test', ref='C-901', name='Pat Example
 LEAD = intake.Contact(email='lee@example.test', ref='L-902', name='Lee Sample')
 OWNER = 'owner@example.test'
 PARTNER = 'partner@example.test'
+# The server's get-next-action refuses a deal; the parity selftest also runs this fake against older intakes.
+DEAL_UUID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
 
 
 def read(applies_to, summary=None, deal=None, party=None, quote=None, confidence=0.9):
@@ -171,6 +174,8 @@ class Fake:
         if verb == 'read-deal-reconciliation':
             return {'deals': self.deal_rows}
         if verb == 'get-next-action':
+            if DEAL_UUID.match(args['ref']):
+                raise intake.CarrError(code='not_a_record')  # the server refuses deals here
             return {'ok': True, 'owner': args['owner'], 'action': self.actions.get((args['ref'], args['owner']))}
         if verb == 'set-next-action':
             current = self.actions.get((args['ref'], args.get('owner', 'runtime')))
@@ -1177,6 +1182,44 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(args['occurred_at'], (NOW - timedelta(hours=1)).isoformat())
         self.assertEqual(args['idempotency_key'],
                          str(uuid.uuid5(uuid.NAMESPACE_URL, f'log-activity|C-901|joe|{ident(m)}')))
+
+    def test_a_confirmed_deal_contact_logs_on_the_deal_and_is_never_offered_as_a_record(self):
+        deal = '0b6c8a52-7d1e-4c55-9f0a-2e3d4c5b6a71'
+        self.fake.contacts_rows.append(intake.Contact('rep@landlord.test', deal, 'Bayside suite'))
+        result = self.run_intake([mail('rep@landlord.test', -timedelta(hours=1), name='Rep Example')])
+        self.assertEqual(result.state, 'succeeded')
+        [(_, args)] = self.fake.writes('log-activity')
+        self.assertEqual(args['ref'], deal)
+        self.assertEqual(self.fake.writes('propose-email-lead'), [])
+        matcher = intake.Matcher([intake.Contact('rep@landlord.test', deal, 'Bayside suite'), CLIENT], 'carr.us')
+        self.assertEqual([ref for _, ref, _ in matcher.people], ['C-901'])
+
+    def test_deal_contact_preview_then_full_text_files_on_the_deal_and_later_runs_succeed(self):
+        deal = '0b6c8a52-7d1e-4c55-9f0a-2e3d4c5b6a71'
+        self.fake.contacts_rows.append(intake.Contact('rep@landlord.test', deal, 'Bayside suite'))
+        full = mail('rep@landlord.test', -timedelta(hours=2), name='Rep Example')
+        preview = mail('rep@landlord.test', -timedelta(hours=1), subject='Tour follow-up', kind='preview')
+        for _ in range(2):
+            self.assertEqual(self.run_intake([full, preview]).state, 'succeeded')
+        hydrated = {**preview, 'body_kind': 'full', 'body': 'Full synthetic body'}
+        for _ in range(2):
+            self.assertEqual(self.run_intake([full, hydrated]).state, 'succeeded')
+        self.assertEqual({args['ref'] for _, args in self.fake.writes('log-activity')}, {deal})
+        self.assertEqual(self.fake.writes('set-next-action'), [])
+
+    def test_a_deal_contact_row_from_the_verb_wins_over_the_same_partys_p_ref(self):
+        deal = '0b6c8a52-7d1e-4c55-9f0a-2e3d4c5b6a71'
+
+        def carr(verb, args):
+            return {'schema_version': 'email-match-contacts.v1', 'contacts': [
+                {'address': 'rep@landlord.test', 'ref': 'P-0011', 'name': 'Landlord Rep', 'exact': True},
+                {'address': 'rep@landlord.test', 'ref': deal, 'name': 'Bayside suite', 'exact': True}]}
+        self.fake.contacts = intake._contacts(carr)
+        result = self.run_intake([mail('rep@landlord.test', -timedelta(hours=1), name='Rep Example')])
+        self.assertEqual(result.state, 'succeeded')
+        [(_, args)] = self.fake.writes('log-activity')
+        self.assertEqual(args['ref'], deal)
+        self.assertEqual((result.counts['mapping_missing'], result.counts['unmatched']), (0, 0))
 
     def test_shared_inbound_message_has_a_separate_activity_key_for_each_mailbox(self):
         m = mail('pat@example.test', -timedelta(hours=1))

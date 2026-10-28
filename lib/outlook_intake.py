@@ -19,8 +19,9 @@ through the named record-layer verbs:
 A run outside 07:00-19:30 local does nothing. Matching requires one record with
 that exact address; every address written in a record's email field counts, and
 names alone never establish identity. Every live party address counts, in any market
-(email-match-contacts); a party holding no client, lead or vendor role is known but has
-no record to log on, so it is unsupported, never missing. Unmatched participants in mail and calendar
+(email-match-contacts); a participant of an open deal holding no client, lead or vendor
+role (a partner-confirmed email sender, for one) logs on that deal itself; any other party
+holding no such role is known but has no record to log on, so it is unsupported, never missing. Unmatched participants in mail and calendar
 stay unresolved and are retried when mappings change, even outside the rolling
 lookback. Records are never created, merged or renamed.
 
@@ -105,6 +106,7 @@ WRITE_VERBS = frozenset({'log-activity', 'publish-board-snapshot', 'propose-emai
                          'record-deal-item', 'complete-deal-item', 'drop-action'})
 FLAG_ITEM_TITLE = 'Follow up flagged email'
 RECORD_REF = re.compile(r'^[CLV]-')
+DEAL_REF = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
 EXIT = {'succeeded': 0, 'skipped': 78, 'failed': 1}
 
 BACKFILL = timedelta(hours=48)
@@ -591,7 +593,7 @@ class Matcher:
             if '@' in c.email and not _internal(c.email, domain):
                 if not c.exact:
                     self.shared.add(c.email.lower())
-                elif RECORD_REF.match(c.ref):
+                elif RECORD_REF.match(c.ref) or DEAL_REF.match(c.ref):
                     self.by_email.setdefault(c.email.lower(), set()).add(c.ref)
                 else:
                     self.unsupported.add(c.email.lower())
