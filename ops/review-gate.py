@@ -31,8 +31,8 @@ def approved(pr, files, comments):
     if SKIP_CI.search(pr.get("title") or ""):
         return False
     sha_line = f'Reviewed-SHA: {pr["head"]["sha"]}'
-    # GitHub lists comments oldest first; the newest VERDICT naming the current head wins.
-    verdicts = [lines[0] for lines in (c["body"].splitlines() for c in comments)
+    # The newest verdict naming the current head wins across both sources.
+    verdicts = [lines[0] for lines in ((c.get("body") or "").splitlines() for c in comments)
                 if lines[:1] in (["VERDICT: APPROVE"], ["VERDICT: CHANGES"]) and sha_line in lines]
     if verdicts[-1:] == ["VERDICT: CHANGES"]:
         return False
@@ -75,6 +75,8 @@ def run(event, repo):
     status(sha, "pending")
     files = api(f"{root}/pulls/{number}/files?per_page=100")
     comments = api(f"{root}/issues/{number}/comments?per_page=100")
+    reviews = api(f"{root}/pulls/{number}/reviews?per_page=100")
+    comments = sorted(comments + [r for r in reviews if r.get("state") not in ("DISMISSED", "PENDING")], key=lambda item: item.get("submitted_at") or item.get("created_at") or "")
     card_ok = card_allowed(pr, files)
     passed = card_ok and approved(pr, files, comments)
     latest = api(f"{root}/pulls/{number}")

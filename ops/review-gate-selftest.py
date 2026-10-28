@@ -90,12 +90,12 @@ class ReviewGate(unittest.TestCase):
         for event in ({"number": 4}, {"issue": {"number": 4}}):
             for approved in (False, True):
                 comments = [{"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok"}] if approved else []
-                with patch.object(gate, "api", side_effect=[pr, {}, [{"filename": "safe"}], comments, pr, {}]) as api:
+                with patch.object(gate, "api", side_effect=[pr, {}, [{"filename": "safe"}], comments, [], pr, {}]) as api:
                     gate.run(event, "owner/repo")
                     self.assertEqual(api.call_args.args[1]["state"], "success" if approved else "failure")
         pr["additions"] = 0
         for comments, expected in [([], "failure"), ([{"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok"}], "success")]:
-            with patch.object(gate, "api", side_effect=[pr, {}, [], comments, pr, {}]) as api:
+            with patch.object(gate, "api", side_effect=[pr, {}, [], comments, [], pr, {}]) as api:
                 gate.run({"number": 4}, "owner/repo")
                 self.assertEqual(api.call_args.args[1]["state"], expected)
         with patch.object(gate, "api", return_value={"base": {"ref": "feature"}}) as api:
@@ -106,10 +106,24 @@ class ReviewGate(unittest.TestCase):
             self.assertEqual(api.call_args.args[0], "repos/owner/repo/statuses/queue")
             self.assertEqual(api.call_args.args[1]["state"], "success")
 
+    def test_review_bodies_participate_in_chronological_verdicts(self):
+        pr = {"body": "Card: WR568.S1.J1", "base": {"ref": "main"}, "additions": 151,
+              "deletions": 0, "head": {"sha": "abc"}, "changed_files": 1}
+        approval = {"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok", "submitted_at": "2026-01-01T00:00:00Z"}
+        cases = [([approval], "success"),
+                 ([{**approval, "state": "DISMISSED"}], "failure"),
+                 ([{**approval, "body": approval["body"].replace("abc", "old")}], "failure"),
+                 ([{**approval, "body": approval["body"].replace("grok", "anyone")}], "success"),
+                 ([approval, {"body": "VERDICT: CHANGES\nReviewed-SHA: abc", "submitted_at": "2026-01-02T00:00:00Z"}], "failure")]
+        for reviews, expected in cases:
+            with self.subTest(reviews=reviews), patch.object(gate, "api", side_effect=[pr, {}, [{"filename": "safe"}], [], reviews, pr, {}]) as api:
+                gate.run({"number": 4}, "owner/repo")
+                self.assertEqual(api.call_args.args[1]["state"], expected)
+
     def test_missing_card_fails_status(self):
         pr = {"base": {"ref": "main"}, "head": {"sha": "abc"}, "changed_files": 1,
               "additions": 1, "deletions": 0, "body": "", "user": {"type": "User"}}
-        with patch.object(gate, "api", side_effect=[pr, {}, [{"filename": "app.py"}], [], pr, {}]) as api:
+        with patch.object(gate, "api", side_effect=[pr, {}, [{"filename": "app.py"}], [], [], pr, {}]) as api:
             gate.run({"number": 4}, "owner/repo")
             status = api.call_args.args[1]
             self.assertEqual(status["state"], "failure")
