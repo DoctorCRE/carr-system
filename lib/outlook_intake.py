@@ -1367,8 +1367,8 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     try:
         health = _decoder_health(meta, since, now, state.get('decoder_baseline', {}))
     except Exception as error:
-        health = {'status': 'unavailable', 'error_class': (type(error).__name__ if type(error) in
-                  (TypeError, ValueError, KeyError, IndexError, AttributeError, RuntimeError) else 'Other'), 'rates': {},
+        health = {'status': 'unavailable', 'error_class': (type(error).__name__.lower() if type(error) in
+                  (TypeError, ValueError, KeyError, IndexError, AttributeError, RuntimeError) else 'other'), 'rates': {},
                   'eligible': {}, 'failing': [], 'messages': 0}
     state['decoder_health'] = health
     prior_failures = state.get('decoder_failures', [])

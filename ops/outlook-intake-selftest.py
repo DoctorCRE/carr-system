@@ -1692,11 +1692,11 @@ class IntakeTest(unittest.TestCase):
             result = self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         self.assertEqual(result.state, 'succeeded')
         self.assertTrue(self.fake.writes())
-        self.assertEqual(result.counts['decoder_health_error_TypeError'], 1)
+        self.assertEqual(result.counts['decoder_health_error_typeerror'], 1)
         self.assertIn('status: unavailable', self.report_text())
         with patch.object(intake, '_decoder_health', side_effect=TypeError('synthetic')):
             failed = self.run_intake([], identities=5, decoded=0)
-        self.assertEqual(failed.counts['decoder_health_error_TypeError'], 1)
+        self.assertEqual(failed.counts['decoder_health_error_typeerror'], 1)
 
     def test_missing_block_verification_alarms(self):
         result = self.run_intake([mail('pat@example.test', -timedelta(hours=1))], found=0, verified=0)

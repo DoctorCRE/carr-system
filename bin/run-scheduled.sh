@@ -90,9 +90,9 @@ counts = frozenset("emails events_past events_upcoming logged preview_only full_
                    "calendar_agenda_items calendar_agenda_canceled calendar_agenda_conflicts "
                    "calendar_agenda_other_accounts calendar_agenda_published calendar_agenda_failed "
                    "calendar_agenda_time_changed calendar_agenda_recurring calendar_agenda_trimmed "
-                   "calendar_agenda_undecoded decoder_alarm decoder_health_error_TypeError decoder_health_error_ValueError "
-                   "decoder_health_error_KeyError decoder_health_error_IndexError decoder_health_error_AttributeError "
-                   "decoder_health_error_RuntimeError decoder_health_error_Other".split())
+                   "calendar_agenda_undecoded decoder_alarm decoder_health_error_typeerror decoder_health_error_valueerror "
+                   "decoder_health_error_keyerror decoder_health_error_indexerror decoder_health_error_attributeerror "
+                   "decoder_health_error_runtimeerror decoder_health_error_other".split())
 receipt = None
 with open(sys.argv[1]) as output:
     for line in output:

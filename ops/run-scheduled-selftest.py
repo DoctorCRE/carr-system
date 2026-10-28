@@ -91,9 +91,9 @@ class ScheduledRunTests(unittest.TestCase):
         args = json.loads(self.rows()[-1][3])
         self.assertEqual(json.loads(args[args.index('--detail') + 1]), deferred)
         unavailable = {'state': 'succeeded', 'reason': 'processed',
-                       'counts': {'decoder_health_error_TypeError': 1}}
+                       'counts': {'decoder_health_error_typeerror': 1}}
         result = self.invoke_intake(unavailable, code=0)
-        self.assertIn('decoder_health_error_TypeError', result.stdout)
+        self.assertIn('decoder_health_error_typeerror', result.stdout)
 
     def test_calendar_receipts_preserve_counts_and_failure_class(self):
         for reason, code in (('writes_failed', 1), ('calendar_lifecycle_unsupported', 0)):
