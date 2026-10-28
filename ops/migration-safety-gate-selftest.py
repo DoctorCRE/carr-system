@@ -170,14 +170,14 @@ check("a ledger naming every migration with its checksum passes", problems == []
 problems = msg.ledger_problems(files, ledger([("0001_a.sql", digest(a_sql))]))
 check("pending migrations do not require a snapshot refresh", problems == [], repr(problems))
 check("an empty ledger is refused", msg.ledger_problems(files, ledger([])) != [])
-check("a hole in the applied prefix is refused",
-      msg.ledger_problems(files, ledger([("0002_b.sql", digest(b_sql))])) != [])
+check("a lower migration merged after a snapshot remains pending",
+      msg.ledger_problems(files, ledger([("0002_b.sql", digest(b_sql))])) == [])
 problems = msg.ledger_problems(files, ledger([("0001_a.sql", digest(a_sql)),
                                               ("0002_b.sql", digest("-- edited\n"))]))
 check("a checksum mismatch is stale", problems and "checksum" in problems[0], repr(problems))
 problems = msg.ledger_problems({"0001_a.sql": a_sql},
                                ledger([("0001_a.sql", digest(a_sql)), ("0002_b.sql", "x")]))
-check("a ledger row with no file is stale", any("prefix" in problem for problem in problems), repr(problems))
+check("a ledger row with no file is stale", any("missing from the tree" in problem for problem in problems), repr(problems))
 check("a snapshot without a ledger section is refused, never a pass",
       msg.ledger_problems(files, "CREATE TABLE x();\n") != [])
 

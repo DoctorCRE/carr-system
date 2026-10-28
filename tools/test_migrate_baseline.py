@@ -42,11 +42,14 @@ class RunnerBaselineTests(unittest.TestCase):
         with self.assertRaisesRegex(migrate.AppliedMigrationLedgerError, 'missing from the tree'):
             migrate.validate_applied_ledger([self.suffix], applied, self.baseline)
 
-    def test_logical_prefix_checks_include_absent_history(self):
+    def test_lower_migration_merged_after_applied_higher_remains_pending(self):
         applied = dict(self.applied, **{'0890_later.sql': runner_sha256('select 2;')})
         later = ('0890_later.sql', 'select 2;', runner_sha256('select 2;'))
-        with self.assertRaisesRegex(migrate.AppliedMigrationLedgerError, 'reordered'):
-            migrate.validate_applied_ledger([self.suffix, later], applied, self.baseline)
+        migrate.validate_applied_ledger([self.suffix, later], applied, self.baseline)
+        self.assertEqual(migrate.pending_migrations([self.suffix, later], applied), [self.suffix])
+        applied[self.suffix[0]] = self.suffix[2]
+        migrate.validate_applied_ledger([self.suffix, later], applied, self.baseline)
+        self.assertEqual(migrate.pending_migrations([self.suffix, later], applied), [])
 
     def test_loader_validates_manifest_union_without_synthesizing_sql(self):
         with tempfile.TemporaryDirectory() as directory:
