@@ -189,7 +189,30 @@ def usable_window(pid: int) -> dict | None:
     return next((w for w in _windows(pid) if is_ordinary_main_window(w) and _readable(pid, w)), None)
 
 
-def _quit(pid: int, windows: list[dict], waits: Waits) -> bool:
+def _compose_window_open(pid: int, windows: list[dict]) -> bool:
+    for window in windows:
+        if is_compose_window(window):
+            return True
+        bounds = window.get('bounds') or {}
+        if not is_main_window(window):
+            if bounds.get('width', 0) >= 400 and bounds.get('height', 0) >= 400:
+                continue
+            if (window.get('title') == '' and window.get('is_on_screen') is False
+                    and bounds.get('height') in (30, 32)):
+                continue
+        state = cua('get_window_state', {'pid': pid, 'window_id': window['window_id'],
+                                         'include_screenshot': False, 'max_elements': LIST_WALK})
+        controls = {(element.get('role'), element.get('label'))
+                    for element in state.get('elements') or []}
+        if (str(state.get('degraded_reason') or '').startswith('ax_window_unresolved')
+                or not {('AXButton', 'New Mail'), ('AXTable', 'Message List')} <= controls):
+            return True
+    return False
+
+
+def _quit(pid: int, windows: list[dict], waits: Waits) -> Outcome | None:
+    if _compose_window_open(pid, windows):
+        return Outcome('skipped', 'compose_window_open')
     window = next((w for w in windows if is_ordinary_main_window(w)), None)
     fallback_at = time.monotonic()
     if window is not None:
@@ -203,17 +226,22 @@ def _quit(pid: int, windows: list[dict], waits: Waits) -> bool:
     while outlook_pid() is not None:
         now = time.monotonic()
         if now >= deadline:
-            return False
+            return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
         if now >= fallback_at:
+            if _compose_window_open(pid, _windows(pid)):
+                return Outcome('skipped', 'compose_window_open')
+            now = time.monotonic()
+            if now >= deadline:
+                return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
             try:
                 subprocess.run(['osascript', '-e', f'tell application "{APP}" to quit'],
                                capture_output=True, timeout=min(30, deadline - now))
             except subprocess.TimeoutExpired:
-                return False
+                return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
             fallback_at = float('inf')
             continue
         time.sleep(min(waits.poll_seconds, deadline - now, fallback_at - now))
-    return True
+    return None
 
 
 def _quit_window_detail(pid: int) -> str:
@@ -250,10 +278,9 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
         pid = outlook_pid()
         if pid is not None:
             windows = _windows(pid)
-            if any(is_compose_window(w) for w in windows):
-                return Outcome('skipped', 'compose_window_open')
-            if not _quit(pid, windows, waits):
-                return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
+            blocked = _quit(pid, windows, waits)
+            if blocked:
+                return blocked
         launched = subprocess.run(['open', '-g', '-a', APP, '--args',
                                    '-ApplePersistenceIgnoreState', 'YES'],
                                   capture_output=True, timeout=60)
