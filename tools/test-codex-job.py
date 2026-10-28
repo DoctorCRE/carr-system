@@ -195,10 +195,11 @@ class CodexJobTests(unittest.TestCase):
         self.assertIn(b'Retained checkout:', errors)
 
     def test_concurrent_jobs_get_separate_checkouts(self):
-        # 2026-10-28 retro: two builders sharing one clone folder overwrote each other's tree.
-        jobs = [self.launch('import time; time.sleep(1); raise SystemExit(7)') for _ in range(2)]
+        jobs = [self.launch('import time; time.sleep(1); raise SystemExit(7)', push=False)
+                for _ in range(2)]
         checkouts = {Path(job.communicate(timeout=15)[1].decode().split('Retained checkout: ')[1].strip())
                      for job in jobs}
+        self.assertEqual([job.returncode for job in jobs], [7, 7])
         self.assertEqual(len(checkouts), 2)
         self.assertTrue(all((checkout / '.git').is_dir() for checkout in checkouts))
 

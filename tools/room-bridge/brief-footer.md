@@ -6,8 +6,8 @@ Pre-approved: decide test seams, interfaces and design forks yourself; nobody is
 
 Open the PR with GitHub auto-merge turned on (squash, pinned to your head commit); it merges itself when CI is green. App screen changes open as drafts until the independent taste score passes.
 
-Branch from a fresh origin/main; when work depends on an unmerged PR, wait for it to merge, or build on main and say so in the PR body.
-Clone into a folder whose name is unique to this job (include the Card or a random suffix), never one another job used.
+Branch from a fresh `origin/main`. If work depends on an unmerged PR, wait for it or build on main and say so in the PR body.
+Clone into a folder unique to this job, using a random suffix.
 
 Rules: report PR number, head SHA, and test counts in your final reply; commits jbookout@users.noreply.github.com; never force-push; never open .env, credentials, tokens, keys, keychains, or DB dumps; never decrypt; no production writes; never install config into ~/.claude or ~/.codex; no client PII; GitHub calls never burst (sleep 2 between per-item gh calls). Less code: prefer deleting output over adding flags. If you edit hooks/, run `python3 hooks/gate-integrity.py --bless <gate file names, e.g. guard-unattended.py>` (names, not hooks/ paths) and commit the baseline.
 
