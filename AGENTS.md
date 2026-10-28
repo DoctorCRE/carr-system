@@ -24,7 +24,7 @@ Before acting when a card applies, answer one line with applies yes/no and the a
 
 [K06] Resolve source conflicts openly: When sources disagree, follow Joe's live direction, then the current store record, then the newer dated ruling, and say there was a conflict. Archives and backups are evidence, not authority.
 
-[K12] Capture durable corrections now: When a partner corrects or overrules you, or states a preference that would recur, propose an edit to the relevant guidance file (CLAUDE.md, AGENTS.md or a skill) in a PR this turn with the trade-off; proposals bind nobody until merged. A how-to the same partner explains twice: quote both, offer a skill.
+[K12] Capture durable corrections now: When a partner corrects or overrules you, or states a preference that would recur, propose it this turn as a team-memory convention with the trade-off; it binds nobody until Joe or Dell adopts it in the app. A how-to the same partner explains twice: quote both, offer a skill.
 
 [K08] End with one action or one decision: When ending a reply, do the doable steps yourself and leave at most one human action or decision, asked directly (approve or decline) in the question box. No closing menus or scripted replies.
 
@@ -273,9 +273,10 @@ Several sessions run against this one checkout at the same time.
 
 ## Guidance changes
 
-Capture durable corrections as proposed edits to the relevant CLAUDE.md,
-AGENTS.md or skill in a pull request, with the trade-off. Proposals bind nobody
-until merged. Edit generated guidance at its source and regenerate it:
+Capture durable corrections as team-memory convention proposals, with the
+trade-off; they bind nobody until Joe or Dell adopts them in the app
+(docs/memory/team-memory-design.md). Changes to the files themselves go through
+a pull request. Edit generated guidance at its source and regenerate it:
 `python3 ops/sync-core-rule-cards.py` renders the core cards from
 `ops/config/rule-cards.v1.json`. Keep attribution and review in Git history.
 
