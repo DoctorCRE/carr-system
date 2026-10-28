@@ -681,7 +681,7 @@ def main():
     scope.add_argument('--staged', action='store_true', help='lines the index adds over HEAD (the default)')
     scope.add_argument('--history', action='store_true',
                        help='audit every blob in all history as a whole; not limited to added lines')
-    scope.add_argument('--range', help='lines added by each commit in BASE..HEAD not already on --remote')
+    scope.add_argument('--range', help='lines added by each commit in BASE..HEAD')
     scope.add_argument('--pre-push', action='store_true',
                        help='lines added by each pushed commit not already on --remote (refs on stdin)')
     scope.add_argument('--ci', action='store_true', help="lines added by each commit of the pull request event")
@@ -700,7 +700,7 @@ def main():
     elif args.range:
         if not re.fullmatch(r'[0-9a-f]{40}\.\.[0-9a-f]{40}', args.range):
             raise Refusal('range must bind full commit hashes')
-        source = history(args.root, [args.range, *upstream(args.root, args.remote)])
+        source = history(args.root, [args.range])
     elif args.ci:
         if os.environ.get('GITHUB_EVENT_NAME') != 'pull_request':
             raise Refusal('CI scope requires a pull request event')

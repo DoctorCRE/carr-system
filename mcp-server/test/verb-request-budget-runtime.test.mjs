@@ -23,6 +23,21 @@ async function runtime(persist, alarmFixture = false) {
         return super.fetch(request);
       }
     }` : "";
+  // Bursts run inside workerd. Node-side getBindings() proxies every binding call over a
+  // loopback socket; under CPU load those sockets fail and the gate correctly fails closed.
+  const burst = `
+    export default {
+      async fetch(request, env) {
+        const { count, actor, sessionKey } = await request.json();
+        const outcomes = await Promise.all(Array.from({ length: count }, async () => {
+          const refusal = await verbRequestBudgetRefusal(env, actor, sessionKey);
+          return refusal ? (await refusal.json()).error : "admitted";
+        }));
+        const tally = {};
+        for (const outcome of outcomes) tally[outcome] = (tally[outcome] || 0) + 1;
+        return Response.json(tally);
+      }
+    };`;
   const className = alarmFixture ? "AlarmBudget" : "VerbRequestBudget";
   return new Miniflare({
     cf: false,
@@ -30,7 +45,7 @@ async function runtime(persist, alarmFixture = false) {
     workers: [{ config: {
       name: "budget-test",
       compatibilityDate: "2026-07-01", compatibilityFlags: ["nodejs_compat"],
-      manifest: { mainModule: "budget.js", modules: { "budget.js": { type: "esm", contents: "Date.now = () => 1800000000000;\n" + built.outputFiles[0].text + fixture } } },
+      manifest: { mainModule: "budget.js", modules: { "budget.js": { type: "esm", contents: "Date.now = () => 1800000000000;\n" + built.outputFiles[0].text + fixture + burst } } },
       env: {
         VERB_REQUEST_BUDGET: { type: "durable-object", worker: "budget-test", exportName: className },
         VERB_REQUEST_BUDGET_HUMAN: { type: "rate-limit", namespace: "56401", simple: { limit: 120, period: 60 } },
@@ -46,6 +61,13 @@ function request(name = "no-such-verb", query = "") {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name } }),
   });
+}
+
+async function burst(mf, count, actor, sessionKey) {
+  const response = await mf.dispatchFetch("https://budget.internal/burst", {
+    method: "POST", body: JSON.stringify({ count, actor, sessionKey }),
+  });
+  return response.json();
 }
 
 const HUMAN = { slug: "joe", human: true, via: "oauth-google" };
@@ -77,10 +99,7 @@ test("workerd agent quota admits 1200 requests and isolates authenticated princi
   const mf = await runtime(directory);
   t.after(async () => { await mf.dispose(); await rm(directory, { recursive: true, force: true }); });
   const env = await mf.getBindings();
-  const responses = await Promise.all(Array.from({ length: 1201 }, () =>
-    dispatch(request(), env, {}, { ...AGENT })));
-  assert.equal(responses.filter(response => response.status === 200).length, 1200);
-  assert.equal(responses.filter(response => response.status === 429).length, 1);
+  assert.deepEqual(await burst(mf, 1201, AGENT), { admitted: 1200, verb_request_budget_exceeded: 1 });
   assert.equal((await dispatch(request(), env, {}, { ...AGENT, slug: "claude" })).status, 200);
   assert.equal((await dispatch(request(), env, {}, { ...AGENT, sponsoring_human_slug: "dell" })).status, 200);
 });
@@ -104,9 +123,5 @@ test("workerd admits the supplied 500 per minute OAuth connector peak", async t 
   t.mock.method(console, "error", () => {});
   const mf = await runtime();
   t.after(() => mf.dispose());
-  const env = await mf.getBindings();
-  const responses = await Promise.all(Array.from({ length: 500 }, () =>
-    dispatch(request(), env, {}, { ...HUMAN })));
-  assert.equal(responses.filter(response => response.status === 200).length, 500);
-  assert.equal(responses.filter(response => response.status === 429).length, 0);
+  assert.deepEqual(await burst(mf, 500, HUMAN), { admitted: 500 });
 });

@@ -50,6 +50,8 @@ before(async () => {
     await c.query(readFileSync(new URL('../../migrations/1020_email_deal_matching.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select to_regclass('public.v_email_reply_partner') as relation")).rows[0].relation)
     await c.query(readFileSync(new URL('../../migrations/1010_email_reply_recipients.sql', import.meta.url), 'utf8'));
+  if (!(await c.query("select 1 from information_schema.columns where table_schema='public' and table_name='email_proposal' and column_name='result_recorded_at'")).rows.length)
+    await c.query(readFileSync(new URL('../../migrations/1022_email_send_result_time.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic physician',$1,$1) returning id", [actor.id])).rows[0].id;
   await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
@@ -1528,13 +1530,17 @@ test('only the sending Mac records matching Sent Items confirmation once and rem
   await refuses(recordSent({ base_version: 1 }), 'version_conflict');
   await refuses(recordSent({ sha256: 'b'.repeat(64) }), 'email_draft_submission_mismatch');
   await refuses(recordSent({ sent_item_id: undefined }), 'email_draft_sent_confirmation_required');
+  const beforeResult = (await c.query('select clock_timestamp() as time')).rows[0].time;
   const result = await recordSent();
+  const afterResult = (await c.query('select clock_timestamp() as time')).rows[0].time;
   assert.equal(result.status, 'sent');
   assert.equal((await recordSent()).replayed, true);
   await refuses(recordSent({ idempotency_key: randomUUID() }), 'email_draft_not_approved');
   assert.deepEqual((await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader')).drafts, []);
   const sent = (await command('list-email-proposals', { status: 'sent' }, actor, 'carr_reader')).proposals[0];
   assert.equal(sent.send_result.sent_item_id, 'synthetic-sent-item');
+  assert.equal(sent.send_result.status, 'sent');
+  assert.ok(new Date(sent.result_recorded_at) >= beforeResult && new Date(sent.result_recorded_at) <= afterResult);
 });
 
 test('failed delivery requires a reason and is recorded once without an automatic resend', async () => {
@@ -1545,7 +1551,15 @@ test('failed delivery requires a reason and is recorded once without an automati
     status: 'failed', sha256: submitted.sha256 };
   await refuses(command('record-email-sent', args, machineFor('joe')), 'email_draft_failure_reason_required');
   args.reason = 'Synthetic Outlook did not confirm the sent item.';
+  const beforeResult = (await c.query('select clock_timestamp() as time')).rows[0].time;
   assert.equal((await command('record-email-sent', args, machineFor('joe'), 'carr_writer')).status, 'failed');
+  const afterResult = (await c.query('select clock_timestamp() as time')).rows[0].time;
+  const failed = (await command('list-email-proposals', { status: 'failed' }, actor, 'carr_reader')).proposals[0];
+  assert.equal(failed.send_result.status, 'failed');
+  assert.ok(new Date(failed.result_recorded_at) >= beforeResult && new Date(failed.result_recorded_at) <= afterResult);
+  await c.query('update email_proposal set result_recorded_at=null where id=$1', [proposal.proposal_id]);
+  const legacy = (await command('list-email-proposals', { status: 'failed' }, actor, 'carr_reader')).proposals[0];
+  assert.equal(legacy.result_recorded_at, null);
   assert.equal((await command('record-email-sent', args, machineFor('joe'), 'carr_writer')).replayed, true);
   assert.deepEqual((await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader')).drafts, []);
 });
