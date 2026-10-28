@@ -8,7 +8,7 @@ import pg from 'pg';
 import { TOOLS } from '../src/tools.js';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 
-const MIGRATION = new URL('../../migrations/1045_drop_unused_indexes.sql', import.meta.url);
+const MIGRATION = new URL('../../migrations/1046_drop_unused_indexes.sql', import.meta.url);
 
 const DROPPED = [
   'public.event_decision_text_trgm',
@@ -72,7 +72,7 @@ after(async () => {
 const present = async names =>
   (await c.query('select n from unnest($1::text[]) n where to_regclass(n) is not null', [names])).rows.map(r => r.n);
 
-test('migration 1045 drops exactly the reviewed indexes inside one transaction', async () => {
+test('migration 1046 drops exactly the reviewed indexes inside one transaction', async () => {
   assert.deepEqual(await present(DROPPED), DROPPED, 'snapshot must still carry every index the migration drops');
   const constraints = await c.query(`select oid, conindid from pg_constraint order by oid`);
   const candidates = await c.query(`select i.indexrelid::regclass::text as name
