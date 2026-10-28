@@ -84,6 +84,17 @@ class ScheduledRunTests(unittest.TestCase):
         self.assertEqual(len(self.rows()), 1)
         self.assertIn('"state": "degraded"', second.stdout)
 
+    def test_decoder_deferred_and_health_error_receipts_are_preserved(self):
+        deferred = {'state': 'degraded', 'reason': 'writes_deferred',
+                    'counts': {'decoder_alarm': 1, 'writes_deferred': 1}}
+        self.invoke_intake(deferred, code=1)
+        args = json.loads(self.rows()[-1][3])
+        self.assertEqual(json.loads(args[args.index('--detail') + 1]), deferred)
+        unavailable = {'state': 'succeeded', 'reason': 'processed',
+                       'counts': {'decoder_health_error_TypeError': 1}}
+        result = self.invoke_intake(unavailable, code=0)
+        self.assertIn('decoder_health_error_TypeError', result.stdout)
+
     def test_calendar_receipts_preserve_counts_and_failure_class(self):
         for reason, code in (('writes_failed', 1), ('calendar_lifecycle_unsupported', 0)):
             receipt = {'state': 'failed' if code else 'succeeded', 'reason': reason,

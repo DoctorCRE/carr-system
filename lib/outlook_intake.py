@@ -401,7 +401,7 @@ def _decoder_health(meta: dict, since: int, now: datetime, baseline: dict) -> di
     rows = [m for m in meta['health_mails'] if m['sent_unix'] is not None
             and since <= m['sent_unix'] <= now.timestamp() + 300]
     found = meta.get('blocks_found') or 0
-    rates = {'block_verification': (meta.get('blocks_verified') or 0) / found if found else 0.0}
+    rates = {'block_verification': (meta.get('blocks_verified') or 0) / found if found else None}
     store_rows = meta['health_store_mails']
     samples = {'block_verification': found}
     for name, field, sample in (('sender', 'sender', rows), ('subject', 'subject', rows),
@@ -419,6 +419,8 @@ def _decoder_health(meta: dict, since: int, now: datetime, baseline: dict) -> di
     failing = [name for name, rate in eligible.items() if
                rate < DECODER_HEALTH_FLOORS[name] or
                (name in baseline and rate < baseline[name] - DECODER_HEALTH_DROP)]
+    if not found:
+        failing.append('block_verification')
     return {'rates': rates, 'eligible': eligible, 'failing': failing, 'messages': len(rows),
             'store_messages': len(store_rows)}
 
@@ -1037,10 +1039,18 @@ class Run:
         self.counts.update(calendar_counts(self.state))
 
     def report(self, out: Path, refresh_count: int) -> None:
-        lines = [f'# Outlook intake {self.now.astimezone(self.settings.timezone):%Y-%m-%d %H:%M %Z}', '']
         health = self.state.get('decoder_health')
+        status = (health.get('status', 'degraded' if health['failing'] else 'healthy')
+                  if health else 'unavailable')
+        for path in out.glob('report-*.md'):
+            if path.is_file() and path.stat().st_mtime < (self.now - timedelta(days=14)).timestamp():
+                path.unlink()
+        if status != 'degraded' and status == self.state.get('decoder_report_status'):
+            return
+        self.state['decoder_report_status'] = status
+        lines = [f'# Outlook intake {self.now.astimezone(self.settings.timezone):%Y-%m-%d %H:%M %Z}', '']
         if health:
-            lines += ['## Decoder health', '', f'- status: {"degraded" if health["failing"] else "healthy"}',
+            lines += ['## Decoder health', '', f'- status: {health.get("status", "degraded" if health["failing"] else "healthy")}',
                       f'- messages in window: {health["messages"]}',
                       f'- messages in store: {health.get("store_messages", "unavailable")}']
             lines += [f'- {name}: {rate * 100:.1f}%' if rate is not None else f'- {name}: unavailable'
@@ -1353,25 +1363,44 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
 def _process(out, ports, settings, state, signature, now, matcher, meta, mails, events, db, files):
     high = state.get('high_water')
     since = int((datetime.fromtimestamp(high, timezone.utc) - LOOKBACK if high else now - BACKFILL).timestamp())
-    health = _decoder_health(meta, since, now, state.get('decoder_baseline', {}))
+    try:
+        health = _decoder_health(meta, since, now, state.get('decoder_baseline', {}))
+    except Exception as error:
+        health = {'status': 'unavailable', 'error_class': (type(error).__name__ if type(error) in
+                  (TypeError, ValueError, KeyError, IndexError, AttributeError, RuntimeError) else 'Other'), 'rates': {},
+                  'eligible': {}, 'failing': [], 'messages': 0}
     state['decoder_health'] = health
     prior_failures = state.get('decoder_failures', [])
     unresolved = [name for name in prior_failures if name not in health['eligible']]
-    alarm = int(bool(health['failing']) and not state.get('decoder_degraded', False))
+    alarm = int(bool(health['failing']) and not state.get('decoder_alarm_delivered', False))
     state['decoder_failures'] = list(dict.fromkeys(health['failing'] + unresolved))
     state['decoder_degraded'] = bool(state['decoder_failures'])
-    if not state['decoder_degraded']:
+    if not state['decoder_degraded'] and health.get('status') != 'unavailable':
+        state.pop('decoder_alarm_delivered', None)
         state['decoder_baseline'] = {**state.get('decoder_baseline', {}), **health['eligible']}
     _save(out, state)
+    if 'block_verification' in health['failing'] and 'block_verification' in health['eligible']:
+        work = Run(ports, state, now, out, settings)
+        work.counts.update(decoder_alarm=alarm, writes_deferred=1)
+        work.report(out, 0)
+        state['decoder_alarm_delivered'] = True
+        _save(out, state)
+        return Outcome('degraded', 'writes_deferred', work.counts)
     if (meta.get('event_identities') or 0) > 0 and not meta.get('events_decoded'):
-        Run(ports, state, now, out, settings).report(out, 0)
-        return Outcome('failed', 'calendar_decode_empty')
+        work = Run(ports, state, now, out, settings)
+        if health.get('error_class'):
+            work.counts['decoder_health_error_' + health['error_class']] = 1
+        work.report(out, 0)
+        _save(out, state)
+        return Outcome('failed', 'calendar_decode_empty', work.counts)
 
     mails = _best_copies(mails)
     state['hydration_check_at'] = int((now + REFRESH_INTERVAL).timestamp())
     work = Run(ports, state, now, out, settings)
     work.counts['mail_other_accounts'] = meta['mail_other_accounts']
     work.counts['decoder_alarm'] = alarm
+    if health.get('error_class'):
+        work.counts['decoder_health_error_' + health['error_class']] = 1
     try:
         matcher = matcher or Matcher(ports.contacts(), settings.internal_domain)
         prepared = work.prepare_attachments(mails, matcher, db, files)
@@ -1407,8 +1436,8 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
             state.pop('calendar_review_at', None)
             work.counts.update(calendar_agenda_published=0, calendar_agenda_failed=1)
     except CarrError as error:
-        _save(out, state)
         work.report(out, 0)
+        _save(out, state)
         return Outcome('failed', 'carr_unreachable' if error.code == 'transport_error' else error.code, work.counts)
     work.counts.update(mapping_counts(state))
     for code in ERROR_CODES:
@@ -1432,6 +1461,8 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     _save(out, state)
     counts.update(mapping_counts(state))  # a run that expires items reports them itself
     if health['failing']:
+        state['decoder_alarm_delivered'] = True
+        _save(out, state)
         return Outcome('degraded', 'decoder_degraded', counts)
     return Outcome('succeeded', 'processed' if mail_processed else 'nothing_new', counts)
 

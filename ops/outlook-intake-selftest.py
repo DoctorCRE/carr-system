@@ -1679,6 +1679,49 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.run_intake(healthy).state, 'succeeded')
         self.assertEqual(self.run_intake(broken).counts['decoder_alarm'], 1)
 
+    def test_failed_degraded_run_does_not_consume_alarm(self):
+        healthy = [mail(OWNER, -timedelta(hours=1), recipients='pat@example.test') for _ in range(20)]
+        self.run_intake(healthy)
+        broken = [{**m, 'recipients': None} for m in healthy]
+        self.assertEqual(self.run_intake(broken, identities=5, decoded=0).reason, 'calendar_decode_empty')
+        result = self.run_intake(broken)
+        self.assertEqual((result.state, result.counts['decoder_alarm']), ('degraded', 1))
+
+    def test_health_exception_does_not_stop_filing(self):
+        with patch.object(intake, '_decoder_health', side_effect=TypeError('synthetic')):
+            result = self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertTrue(self.fake.writes())
+        self.assertEqual(result.counts['decoder_health_error_TypeError'], 1)
+        self.assertIn('status: unavailable', self.report_text())
+        with patch.object(intake, '_decoder_health', side_effect=TypeError('synthetic')):
+            failed = self.run_intake([], identities=5, decoded=0)
+        self.assertEqual(failed.counts['decoder_health_error_TypeError'], 1)
+
+    def test_missing_block_verification_alarms(self):
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=1))], found=0, verified=0)
+        self.assertEqual((result.state, result.counts['decoder_alarm']), ('degraded', 1))
+        self.assertIn('block_verification: unavailable', self.report_text())
+
+    def test_reports_only_on_health_change_or_degradation_and_prunes_old_reports(self):
+        sample = [mail(OWNER, -timedelta(hours=1), recipients='pat@example.test') for _ in range(20)]
+        self.run_intake(sample)
+        self.fake.now += timedelta(minutes=1)
+        self.run_intake(sample)
+        self.assertEqual(len(list(self.out().glob('report-*.md'))), 1)
+        old = self.out() / 'report-old.md'
+        old.write_text('old')
+        timestamp = (self.fake.now - timedelta(days=15)).timestamp()
+        os.utime(old, (timestamp, timestamp))
+        broken = [{**m, 'recipients': None} for m in sample]
+        self.fake.now += timedelta(minutes=1)
+        self.run_intake(broken)
+        self.assertFalse(old.exists())
+        self.assertEqual(len(list(self.out().glob('report-*.md'))), 2)
+        self.fake.now += timedelta(minutes=1)
+        self.run_intake(broken)
+        self.assertEqual(len(list(self.out().glob('report-*.md'))), 3)
+
     def test_small_message_sample_does_not_raise_fill_rate_alarm(self):
         sample = [mail(OWNER, -timedelta(hours=1), subject='', recipients=None)]
         result = self.run_intake(sample)
@@ -1687,13 +1730,13 @@ class IntakeTest(unittest.TestCase):
         self.assertIn('recipients: 0.0%', self.report_text())
         self.assertIn('failing: none', self.report_text())
 
-    def test_low_verification_alarms_but_processes_mail(self):
+    def test_low_verification_alarms_and_defers_writes(self):
         result = self.run_intake([mail('pat@example.test', -timedelta(hours=1))], found=1000, verified=900)
         self.assertEqual((result.state, result.reason, result.counts['decoder_alarm']),
-                         ('degraded', 'decoder_degraded', 1))
+                         ('degraded', 'writes_deferred', 1))
+        self.assertEqual(self.fake.writes(), [])
         self.assertIn('block_verification: 90.0%', self.report_text())
         self.assertIn('failing: block_verification', self.report_text())
-        self.assertTrue(self.fake.calls)
 
     def test_a_missing_store_fails(self):
         self.store.unlink()
