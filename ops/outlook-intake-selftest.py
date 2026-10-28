@@ -2913,6 +2913,37 @@ class IntakeTest(unittest.TestCase):
         self.run_intake([self.flagged(flag='complete', done=self.OCT28)])
         self.assertEqual(self.flag_calls()[-1][0], 'complete-deal-item')
 
+    def test_legacy_flag_completed_after_twenty_days_completes_its_todo(self):
+        self.legacy_flag_closes_after_twenty_days('complete', 'complete-deal-item')
+
+    def test_legacy_flag_cleared_after_twenty_days_drops_its_todo(self):
+        self.legacy_flag_closes_after_twenty_days('none', 'drop-action')
+
+    def legacy_flag_closes_after_twenty_days(self, status, verb):
+        m = mail('pat@example.test', -timedelta(hours=1), subject=f'Follow up {status}',
+                 flag='flagged', due=self.OCT29)
+        self.fake.now = NOW
+        self.filed_deal(m)
+        self.assertEqual(self.run_intake([m], touch=False).state, 'succeeded')
+        self.seed_legacy_mail_keys(m, ['9100'])
+        item_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f'outlook-flag:joe:{ident(m)}'))
+        self.fake.email_queue = []
+        keyed = {**m, 'local_keys': '9100'}
+        self.fake.now = NOW + timedelta(days=12)
+        self.assertEqual(self.run_intake([keyed]).state, 'succeeded')
+        self.fake.now = NOW + timedelta(days=20)
+        closed = {**keyed, 'flag_status': status, 'flag_completed_unix': self.OCT28}
+        result = self.run_intake([closed])
+        self.assertEqual(result.state, 'succeeded')
+        calls = self.flag_calls()
+        self.assertEqual(calls[-1][0], verb)
+        self.assertEqual(calls[-1][1]['item_id' if status == 'complete' else 'action_id'], item_id)
+        self.assertEqual(result.counts['flags_unfiled'], 0)
+        self.assertEqual(result.counts['flags_unmatched'], 0)
+        count = len(calls)
+        self.assertEqual(self.run_intake([closed]).state, 'succeeded')
+        self.assertEqual(len(self.flag_calls()), count)
+
     def test_a_flag_closes_without_its_activity_on_the_current_links_page(self):
         m = self.flagged(flag='flagged')
         self.filed_deal(m)
