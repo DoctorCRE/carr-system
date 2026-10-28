@@ -57,8 +57,15 @@ before(async () => {
   await c.query('update next_action set updated_by=$2 where id=$1', [pre.joeEditedThenSystem, ids.system]);
   pre.eventOnly = await loop({ owner: 'claude' });
   await c.query(`insert into event(occurred_at,actor_id,verb,subject_type,subject_id,cause)
-    values(now() - interval '35 days',$1,'update-loop','loop_item',$2,'human_stated')`, [ids['dell-local'], pre.eventOnly]);
+    values(now() - interval '35 days',$1,'update-loop','loop_item',$2,'human_stated')`, [ids.dell, pre.eventOnly]);
   pre.untouched = await action();
+  // The merge queue wrote through joe-local into claude's queue; its own door events do not confirm.
+  pre.queueLoop = await loop({ by: 'joe-local', owner: 'claude' });
+  await c.query(`insert into event(occurred_at,actor_id,verb,subject_type,subject_id,cause)
+    values(now() - interval '35 days',$1,'add-loop','loop_item',$2,'automation_job')`, [ids['joe-local'], pre.queueLoop]);
+  pre.queueLoopJoeEdited = await loop({ by: 'joe-local', owner: 'claude' });
+  await c.query('update loop_item set updated_by=$2 where id=$1', [pre.queueLoopJoeEdited, ids.joe]);
+  pre.callModeAction = await action({ by: 'joe-local', owner: 'joe', ageDays: 400 });
   await c.query(readFileSync(new URL('../../migrations/1030_clear_the_deck.sql', import.meta.url), 'utf8'));
 });
 after(async () => {
@@ -114,8 +121,21 @@ test('partner history confirms a row permanently; only unconfirmed automation ro
   assert.equal(await deckRow('next_action', pre.joeEditedThenSystem), undefined, 'a later automation edit cannot undo it');
   assert.equal(await deckRow('loop', pre.eventOnly), undefined, 'a partner event in history confirms');
   assert.equal((await deckRow('next_action', pre.untouched)).stale, true);
-  for (const by of ['joe', 'joe-local', 'dell-local'])
-    assert.equal(await deckRow('next_action', await action({ by, ageDays: 400 })), undefined, `${by} rows are partner-made`);
+  for (const by of ['joe', 'dell', 'joe-local', 'dell-local'])
+    assert.equal(await deckRow('next_action', await action({ by, ageDays: 400 })), undefined, `${by} rows owned by a partner are partner-made`);
+  assert.equal(await deckRow('next_action', pre.callModeAction), undefined, 'a Call Mode action through joe-local stays partner-made');
+  assert.equal((await deckRow('loop', pre.queueLoop)).stale, true, 'a joe-local loop in claude\'s queue is automation');
+  assert.equal(await deckRow('loop', pre.queueLoopJoeEdited), undefined, 'Joe editing a claude-owned loop confirms it');
+  const doorLoop = await loop({ by: 'dell-local', owner: 'claude' });
+  assert.equal((await deckRow('loop', doorLoop)).stale, true);
+  await c.query('update loop_item set updated_by=$2 where id=$1', [doorLoop, ids['joe-local']]);
+  assert.ok(await deckRow('loop', doorLoop), 'a door edit is not partner-attributed');
+  await c.query('update loop_item set updated_by=$2 where id=$1', [doorLoop, ids.joe]);
+  assert.equal(await deckRow('loop', doorLoop), undefined, 'a later Joe edit confirms');
+  const doorDrop = await loop({ by: 'joe-local', owner: 'claude' });
+  const dropped = await asWriter(JOE, { idempotency_key: randomUUID(), items: [
+    { kind: 'loop', id: doorDrop, version: await version('loop_item', doorDrop), action: 'drop' }] });
+  assert.equal(dropped.counts.loop.expired, 1, 'a claude-owned joe-local loop is droppable');
   const touched = await action();
   await c.query('update next_action set updated_by=$2 where id=$1', [touched, ids.dell]);
   await c.query("update next_action set updated_by=$2, description='automation rewrite' where id=$1", [touched, ids.system]);
@@ -226,7 +246,10 @@ test('expire_all_matching previews exact counts across owners and expires on app
   assert.equal((await c.query("select count(*)::int as n from loop_item where status='expired' and id=any($1)", [ciLoops])).rows[0].n, 0);
   const { text_prefixes: _p, ...unfiltered } = filter;
   assert.equal((await asWriter(JOE, { dry_run: true, expire_all_matching: unfiltered })).would.matched, 4);
-  for (const created_by of ['joe', 'joe-local', 'dell-local'])
+  const doorFilter = { ...filter, created_by: 'joe-local' };
+  assert.equal((await asWriter(JOE, { dry_run: true, expire_all_matching: doorFilter })).would.matched, 1,
+    'the merge-queue shape (joe-local, owner claude) is matchable');
+  for (const created_by of ['joe', 'dell'])
     await assert.rejects(asWriter(JOE, { dry_run: true, expire_all_matching: { ...filter, created_by } }),
       refusal('deck_partner_rows_never_expire'));
   await assert.rejects(asWriter(JOE, { dry_run: true, expire_all_matching: { ...filter, created_from: '2026-07-31' } }),

@@ -5,8 +5,9 @@ const KINDS = ['next_action', 'loop', 'candidate'];
 const ACTIONS = ['keep', 'drop'];
 const MATCH_LIMIT = 10000;
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})$/;
-// A deck row is automation-made and never partner-confirmed; carr_is_partner_actor is the one partner rule.
-const UNCONFIRMED = 't.confirmed_at is null and not carr_is_partner_actor(t.created_by)';
+// A deck row was never partner-confirmed. Migration 1030 stamps confirmed_at on every partner-made
+// row (carr_is_partner_made) and on any joe/dell edit, so this one column is the rule.
+const UNCONFIRMED = 't.confirmed_at is null';
 
 // One row source per kind. Partners are equal operators: either may decide any
 // automation-made row, whoever owns it; the event keeps each row's prior owner and status.
