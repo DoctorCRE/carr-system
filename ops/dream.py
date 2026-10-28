@@ -74,8 +74,6 @@ def _git(root, *args):
 def clone(store, root, key=None):
     root = Path(root)
     state = root.parent / ('.' + root.name + '-dream-state')
-    state.mkdir(mode=0o700, parents=True, exist_ok=False)
-    root.mkdir(parents=True, exist_ok=False)
     snapshot = store.read()
     paths = []
     folded = [section['section_key'].casefold() for section in snapshot['sections']]
@@ -83,6 +81,8 @@ def clone(store, root, key=None):
         if key is not None:
             store.log({'error': 'case_colliding_section_keys', 'notes': [], 'dropped': [], 'changed': 0}, key)
         raise ValueError('case_colliding_section_keys')
+    state.mkdir(mode=0o700, parents=True, exist_ok=False)
+    root.mkdir(parents=True, exist_ok=False)
     for section in snapshot['sections']:
         path = _path(root, section['section_key'])
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -197,7 +197,7 @@ def apply(store, root, notes, input_sessions, attach, key, *, _attempt=0, _confl
         if any(rx.search(text) for _, rx, _, _ in secret_scan.PATTERNS):
             raise ValueError('secret scan failed')
     for item in changes:
-        if not store.gate(item, attach):
+        if not store.gate(item, attach, current.get(item['section_key'], {}).get('section_id')):
             raise ValueError('doctrine gate failed')
     report = {'notes': applied, 'dropped': dropped, 'changed': len(changes)}
     receipt.parent.mkdir(parents=True, exist_ok=True)
@@ -212,6 +212,9 @@ def _finish(store, root, notes, input_sessions, attach, key, journal, receipt, p
             store.apply(pending['changes'], attach, key)
         except VersionConflict as conflict:
             if attempt >= 2:
+                store.log({'error': 'version_conflict', 'attempts': attempt + 1,
+                           'section_key': conflict.section_key, 'notes': [],
+                           'dropped': pending['report']['dropped'], 'changed': 0}, key)
                 raise
             journal.unlink()
             return apply(store, root, notes, input_sessions, attach, key, _attempt=attempt + 1,
@@ -253,17 +256,16 @@ class VerbStore:
         return result
     def read(self):
         return self.call('read-doctrine', {'document': 'team-memory'})
-    def gate(self, item, attach):
-        snapshot = self.read()
-        section = next((s for s in snapshot['sections'] if s['section_key'] == item['section_key']), None)
+    def gate(self, item, attach, section_id=None):
         args = {'document': 'team-memory', 'op': item['op'], 'attach_id': attach}
-        if section: args['section_id'] = section['section_id']
+        if section_id is not None: args['section_id'] = section_id
         if item['op'] == 'write': args['body_text'] = item['body_text']
         result = self.call('dry-run-doctrine-gates', args)
         return result.get('result') == 'pass'
     def apply(self, items, attach, key):
         self.call('change-doctrine-sections', {'document': 'team-memory', 'attach_id': attach, 'idempotency_key': key, 'commit_message': 'Dream memory consolidation', 'items': items})
     def log(self, report, key):
-        kind = 'error' if 'error' in report else 'success'
+        body_text = json.dumps(report, sort_keys=True)
+        kind = 'error-' + hashlib.sha256(body_text.encode()).hexdigest() if 'error' in report else 'success'
         section_key = 'dreams/' + hashlib.sha256((key + '-' + kind).encode()).hexdigest()
-        self.call('write-doctrine-section', {'document': 'dreams-log', 'section_key': section_key, 'title': 'Dream report', 'body_text': json.dumps(report, sort_keys=True), 'base_version': 0, 'idempotency_key': key + '-' + kind + '-log'})
+        self.call('write-doctrine-section', {'document': 'dreams-log', 'section_key': section_key, 'title': 'Dream report', 'body_text': body_text, 'base_version': 0, 'idempotency_key': key + '-' + kind + '-log'})
