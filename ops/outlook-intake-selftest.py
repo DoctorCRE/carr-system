@@ -3378,6 +3378,30 @@ class LoadObjectFieldsTest(unittest.TestCase):
         self.assertEqual(row['recipients'], OWNER)
         self.assertIsNone(row['conversation_id'])
 
+    def test_shared_item_key_never_projects_fields_or_passes_account_filter(self):
+        for competing_key in (False, True):
+            with self.subTest(competing_key=competing_key):
+                with sqlite3.connect(self.db) as con:
+                    con.execute('DELETE FROM messages WHERE id=2')
+                    con.execute('DELETE FROM message_keys WHERE message_id=2')
+                    con.execute("UPDATE messages SET recipients='legacy-one@example.test'")
+                    con.execute("INSERT INTO messages(id,sender,recipients,subject,sent_unix,local_keys) "
+                                "VALUES(2,'other@example.test','legacy-two@example.test','Other topic',?,?)",
+                                (ts(-timedelta(hours=2)), '71,72' if competing_key else '71'))
+                    con.execute('INSERT INTO message_keys VALUES(2,71)')
+                    if competing_key:
+                        con.execute('INSERT INTO message_keys VALUES(2,72)')
+                rows = {m['row_ids'][0]: m for m in self.load()[1]}
+                for row_id, subject, recipient in ((1, 'Legacy topic', 'legacy-one@example.test'),
+                                                   (2, 'Other topic', 'legacy-two@example.test')):
+                    self.assertEqual(rows[row_id]['subject'], subject)
+                    self.assertEqual(rows[row_id]['recipients'], recipient)
+                    self.assertIsNone(rows[row_id]['conversation_id'])
+                    self.assertIsNone(rows[row_id]['cc'])
+                meta, mails, _ = self.load(OWNER)
+                self.assertEqual(mails, [])
+                self.assertEqual(meta['mail_other_accounts'], 2)
+
     def test_missing_or_unknown_recipient_kinds_do_not_erase_legacy_addresses(self):
         for status in ('none', 'listed'):
             with self.subTest(status=status):

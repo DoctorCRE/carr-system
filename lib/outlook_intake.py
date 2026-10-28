@@ -397,7 +397,7 @@ def _attachment_metadata(con: sqlite3.Connection) -> dict[int, list[dict]]:
 
 
 def _message_object_fields(con: sqlite3.Connection) -> dict[int, dict]:
-    """Use stored fields only when a row identifies exactly one message object."""
+    """Use stored fields only for one-to-one message row and object links."""
     tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if not {'message_objects', 'message_keys'} <= tables:
         return {}
@@ -410,9 +410,12 @@ def _message_object_fields(con: sqlite3.Connection) -> dict[int, dict]:
     found = {}
     for row in con.execute(
             'WITH k AS (SELECT message_id, MIN(local_key) AS local_key FROM message_keys '
-            'GROUP BY message_id HAVING COUNT(DISTINCT local_key) = 1) '
+            'GROUP BY message_id HAVING COUNT(DISTINCT local_key) = 1), '
+            'unique_keys AS (SELECT local_key FROM message_keys '
+            'GROUP BY local_key HAVING COUNT(DISTINCT message_id) = 1) '
             'SELECT k.message_id, o.local_key, o.subject, o.conversation_id, o.recipients_status '
-            'FROM k JOIN message_objects o ON o.local_key = k.local_key'):
+            'FROM k JOIN unique_keys ON unique_keys.local_key = k.local_key '
+            'JOIN message_objects o ON o.local_key = k.local_key'):
         fields = {name: row[name] for name in ('subject', 'conversation_id') if row[name] is not None}
         lists = recipients.get(row['local_key'])
         # No observed recipient objects does not prove an empty recipient list.
