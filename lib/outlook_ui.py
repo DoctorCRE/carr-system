@@ -442,12 +442,20 @@ class Window:
 
     def scan_rows(self, allowed: Callable[[], bool]) -> list[Row]:
         """Collect overlapping viewports using wheel events, with bounded top restoration."""
-        def page() -> list[Row]:
-            rows = self.rows()[1]
+        observed: dict[str, Row] = {}
+
+        def page(rows: list[Row] | None = None) -> list[Row]:
+            if rows is None:
+                rows = self.rows()[1]
             if any(not r.sender or r.subject is None for r in rows) or len({r.key for r in rows}) != len(rows):
                 raise UiError('coverage_identity_ambiguous', step='scan_rows')
             if any(r.selected and r.read_state is not ReadState.READ for r in rows):
                 raise UiError('unread_row_selected', step='scan_rows')
+            for row in rows:
+                previous = observed.get(row.key)
+                if previous is not None and (previous.label, previous.selected) != (row.label, row.selected):
+                    raise UiError('coverage_changed', step='scan_rows')
+                observed[row.key] = row
             return rows
 
         def signature(rows: list[Row]) -> list[tuple[str, bool]]:
@@ -455,18 +463,32 @@ class Window:
 
         def top() -> list[Row]:
             deadline = time.monotonic() + 30
-            previous = self.rows()[1]
+            error = None
+
+            def snapshot() -> list[Row]:
+                nonlocal error
+                rows = self.rows()[1]
+                try:
+                    page(rows)
+                except UiError as exc:
+                    error = error or exc
+                return rows
+
+            previous = snapshot()
             for _ in range(50):
                 if time.monotonic() >= deadline:
                     break
                 self._scroll_list('up')
-                current = self.rows()[1]
+                current = snapshot()
                 if signature(previous) == signature(current):
+                    if error is not None:
+                        raise error
                     return current
                 previous = current
             raise UiError('coverage_restore_failed', step='scan_rows')
 
         first = None
+        collected: dict[str, Row] = {}
         try:
             first = top()
             previous = page()
@@ -477,6 +499,8 @@ class Window:
                 self._scroll_list('down')
                 current = page()
                 if signature(current) == signature(previous):
+                    if observed.keys() != collected.keys():
+                        raise UiError('coverage_changed', step='scan_rows')
                     return list(collected.values())
                 old_keys, keys = [r.key for r in previous], [r.key for r in current]
                 overlap = next((n for n in range(min(len(old_keys), len(keys)), 0, -1)
@@ -490,7 +514,8 @@ class Window:
             raise UiError('coverage_page_limit', step='scan_rows')
         finally:
             restored = top()
-            if first is not None and signature(first) != signature(restored):
+            if first is not None and (signature(first) != signature(restored)
+                                      or observed.keys() != collected.keys()):
                 raise UiError('coverage_changed', step='scan_rows')
 
     def switch_tab(self, tab: str) -> None:
