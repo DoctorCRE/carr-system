@@ -431,6 +431,17 @@ class CatalogCacheTests(unittest.TestCase):
         self.prompt()
         self.assertEqual(self.rule_ids(self.tool(n=2)), [])
 
+    def test_a_long_session_without_prompts_rereads_after_the_window(self):
+        self.prompt()
+        self.source.update(corpus_digest='b' * 64, rules=[])
+        self.assertEqual(self.rule_ids(self.tool(n=1)), ['11111111'])
+        cached = hook._catalog_path('s1')
+        aged = time.time() - hook.CATALOG_MAX_SECONDS - 1
+        os.utime(cached, (aged, aged))
+        self.assertEqual(self.rule_ids(self.tool(n=2)), [], 'a stop rule reaches a prompt-less job')
+        self.tool(n=3)
+        self.assertEqual(len(self.calls), 2, 'then the fresh catalog is reused')
+
     def test_a_tool_call_before_any_prompt_fetches_once_and_caches(self):
         self.tool(n=1)
         self.tool(n=2)
@@ -439,6 +450,9 @@ class CatalogCacheTests(unittest.TestCase):
     def test_a_rule_writing_verb_clears_the_cache_for_the_next_call(self):
         self.prompt()
         for name, tool_input in (('mcp__carr__adopt-rule', {'rule_id': 'x'}),
+                                 ('mcp__carr__approve-rule', {'rule_id': 'x'}),
+                                 ('mcp__carr__call-verb', {'verb': 'retire-rule', 'args': {}}),
+                                 ('Bash', {'command': "./run.sh call retire-rule '{}'"}),
                                  ('Bash', {'command': "./run.sh call bind-rule-context-contract '{}'"})):
             with self.subTest(name=name):
                 before = len(self.calls)
