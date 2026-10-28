@@ -502,6 +502,12 @@ class PreflightQuitTest(FakeOutlookCase):
         self.assertEqual(json.loads(outcome.detail)['windows'][1]['kind'], 'compose_or_unresolved')
         self.assertEqual(self.called('open'), [])
 
+    def test_unresolved_offscreen_window_is_protected(self):
+        self.given(windows=[ORDINARY, UNTITLED_OFFSCREEN], unresolved_windows=[15])
+        outcome = self.prepare()
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+        self.assertEqual(self.called('open'), [])
+
     def test_possible_draft_prevents_both_quit_routes(self):
         self.given(windows=[UNTITLED_OFFSCREEN, ORDINARY, COMPOSE])
         outcome = self.prepare()

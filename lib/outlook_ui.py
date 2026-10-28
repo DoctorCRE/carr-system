@@ -31,6 +31,8 @@ from typing import Callable
 APP = 'Microsoft Outlook'
 MAILBOX_TITLE = re.compile(r'. • [^\s@]+@[^\s@]+\.[^\s@]+$')
 INBOX_TITLE = re.compile(r'^Inbox • ')
+FORM_SEND, FORM_SAVE = 'Send', 'Save'
+FORM_TO, FORM_ATTENDEES = 'To Recipients', 'Required attendees'
 from lib.outlook_settings import load_settings
 EXIT = {'succeeded': 0, 'skipped': 78, 'timed_out': 124, 'failed': 1}
 SIDEBAR = ['View', 'Sidebar']
@@ -131,19 +133,22 @@ def is_main_window(window: dict) -> bool:
     return bool(MAILBOX_TITLE.search(window.get('title') or ''))
 
 
-def is_compose_window(window: dict) -> bool:
-    """Protect possible drafts, except the observed unassigned off-screen window.
-
-    The 500x500 window has an empty title and unknown purpose; AX did not resolve it.
-    Keep all other sizeable non-mailbox windows protected, even without a subject.
-    """
-    bounds = window.get('bounds') or {}
-    if (window.get('title') == '' and bounds.get('width') == 500
-            and bounds.get('height') == 500 and window.get('is_on_screen') is False
-            and 'on_current_space' in window and window['on_current_space'] is None):
-        return False
-    return (not is_main_window(window) and bounds.get('width', 0) >= 400
-            and bounds.get('height', 0) >= 400)
+def is_compose_window(pid: int, window: dict) -> bool:
+    """Protect draft forms and windows whose accessibility state cannot be identified."""
+    try:
+        state = cua('get_window_state', {'pid': pid, 'window_id': window['window_id'],
+                            'include_screenshot': False, 'max_elements': 600, 'max_depth': 3})
+        elements = state.get('elements')
+        if (state.get('degraded_reason') or state.get('error') or state.get('refusal')
+                or state.get('status') in ('refused', 'failed', 'error') or not isinstance(elements, list) or len(elements) < 2
+                or len(elements) >= 600 or not any(e.get('role') == 'AXWindow' for e in elements)):
+            return True
+        return any((e.get('role') == 'AXButton' and e.get('label') in (FORM_SEND, FORM_SAVE)
+                    and e.get('depth') == 1)
+                   or (e.get('role') == 'AXTextField' and e.get('label') in
+                       (FORM_TO, FORM_ATTENDEES)) for e in elements)
+    except (CuaError, KeyError, TypeError, AttributeError):
+        return True
 
 
 def is_ordinary_main_window(window: dict) -> bool:
@@ -225,10 +230,10 @@ def _quit_window_detail(pid: int) -> str:
             kind = 'sheet'
         elif subrole in ('AXDialog', 'AXSystemDialog') or role == 'AXDialog':
             kind = 'dialog'
+        elif is_compose_window(pid, window):
+            kind = 'compose_or_unresolved'
         elif is_main_window(window):
             kind = 'main'
-        elif is_compose_window(window):
-            kind = 'compose'
         else:
             kind = 'dialog'
         bounds = window.get('bounds') or {}
@@ -246,8 +251,8 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
         pid = outlook_pid()
         if pid is not None:
             windows = _windows(pid)
-            if any(is_compose_window(w) for w in windows):
-                return Outcome('skipped', 'compose_window_open')
+            if any(is_compose_window(pid, w) for w in windows):
+                return Outcome('skipped', 'compose_window_open', _quit_window_detail(pid))
             if not _quit(pid, windows, waits):
                 return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
         launched = subprocess.run(['open', '-g', '-a', APP, '--args',

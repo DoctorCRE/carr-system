@@ -696,11 +696,11 @@ def _value(elements: list[dict], role: str, label: str) -> str:
 
 
 class ComposeWindow(Window):
-    commit_label = 'Send'
+    commit_label = ui.FORM_SEND
 
     def fill(self, item: Mail) -> None:
         for key, value in fields(item).items():
-            label = {'to': 'To Recipients', 'cc': 'Cc Recipients', 'bcc': 'Bcc Recipients',
+            label = {'to': ui.FORM_TO, 'cc': 'Cc Recipients', 'bcc': 'Bcc Recipients',
                      'subject': 'Subject', 'body': BODY_LABEL}[key]
             hits = [e for e in self.elements() if e.get('label') == label
                     and e.get('role') in ('AXTextField', 'AXTextArea')]
@@ -721,7 +721,7 @@ class ComposeWindow(Window):
         title = next((e.get('label') or '' for e in elements if e.get('role') == 'AXWindow'), '')
         if not title.endswith(f' • {account()}'):
             raise UiFailure('wrong_account')
-        return {'to': _recipients(elements, 'To Recipients'), 'cc': _recipients(elements, 'Cc Recipients'),
+        return {'to': _recipients(elements, ui.FORM_TO), 'cc': _recipients(elements, 'Cc Recipients'),
                 'bcc': _recipients(elements, 'Bcc Recipients'),
                 'subject': _value(elements, 'AXTextField', 'Subject'),
                 'body': _value(elements, BODY_ROLE, BODY_LABEL)}
@@ -734,12 +734,12 @@ class EventWindow(Window):
     installed Outlook version; offline fixtures do not establish native labels.
     """
     LABELS = {'subject': 'Subject', 'start': 'Start', 'end': 'End', 'location': 'Location',
-              'body': 'Message body', 'attendees': 'Required attendees'}
+              'body': 'Message body', 'attendees': ui.FORM_ATTENDEES}
 
     def __init__(self, pid: int, window_id: int, waits: ui.Waits, item: Event):
         super().__init__(pid, window_id, waits)
         self.item = item
-        self.commit_label = 'Send' if item.attendees else 'Save'
+        self.commit_label = ui.FORM_SEND if item.attendees else ui.FORM_SAVE
 
     def _field(self, elements: list[dict], key: str) -> dict:
         hits = [e for e in elements if e.get('label') == self.LABELS[key]
@@ -794,9 +794,7 @@ def open_form(item: Mail | Event, waits: ui.Waits = ui.Waits()) -> ComposeWindow
     try:
         pid, main = _main_window(waits)
         windows = _cua('list_windows', {'pid': pid}).get('windows') or []
-        if any(w['window_id'] != main['window_id']
-               and min((w.get('bounds') or {}).get(k, 0) for k in ('width', 'height')) >= 400
-               for w in windows):
+        if any(ui.is_compose_window(pid, w) for w in windows):
             raise UiFailure('compose_window_open')
         before = {w['window_id'] for w in windows}
         window: ComposeWindow | EventWindow
