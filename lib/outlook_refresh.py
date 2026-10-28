@@ -63,6 +63,10 @@ def run(repo: Path, now: datetime, waits: Waits = Waits(),
     except ValueError:
         return Outcome('failed', 'refresh_list_invalid')
     except (OSError, UiError, CuaError) as exc:
+        if isinstance(exc, UiError) and exc.step:
+            detail = f'at {exc.step}: {exc}'
+            print(f'outlook-refresh UiError {detail}', file=sys.stderr)
+            return Outcome('failed', 'ui_error', detail)
         if isinstance(exc, UiError):
             reason, message = 'ui_error', 'Outlook UI interaction failed'
         elif isinstance(exc, CuaError):

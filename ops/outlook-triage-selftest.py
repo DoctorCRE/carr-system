@@ -844,6 +844,40 @@ class RefreshTest(FakeOutlookCase):
         self.assertNotIn('opened_at', entries[1])
         self.assertEqual(len(entries), 2, 'opening is not a body-decoded acknowledgement')
 
+    def test_refresh_ui_error_names_failed_step(self):
+        from lib import outlook_refresh
+        from lib.outlook_ui import UiError
+        self.given([self.READ_BODY])
+        self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+        output = io.StringIO()
+        with patch.dict(os.environ, self.env, clear=True), \
+                patch('lib.outlook_refresh.Window._inbox_rows',
+                      side_effect=UiError('inbox_row_not_found', step='_inbox_rows')), \
+                redirect_stderr(output):
+            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0))
+        self.assertEqual((result.state, result.reason), ('failed', 'ui_error'))
+        self.assertIn('outlook-refresh UiError at _inbox_rows: inbox_row_not_found',
+                      output.getvalue())
+        self.assertEqual(result.detail, 'at _inbox_rows: inbox_row_not_found')
+
+    def test_refresh_search_error_detail_reaches_cli(self):
+        from lib import outlook_refresh
+        from lib.outlook_ui import UiError
+        self.given([self.READ_BODY])
+        self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+        with patch.dict(os.environ, self.env, clear=True), \
+                patch('lib.outlook_refresh.Window.search',
+                      side_effect=UiError('search_field_not_found', step='search')):
+            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0))
+        self.assertEqual((result.state, result.reason), ('failed', 'search_field_not_found'))
+        self.assertEqual(result.detail, 'at search: search_field_not_found')
+        output = io.StringIO()
+        with patch('lib.outlook_refresh.run', return_value=result), redirect_stdout(output):
+            self.assertEqual(outlook_refresh.main(), 1)
+        self.assertIn('at search: search_field_not_found', output.getvalue())
+
     def test_refresh_failure_logs_category_without_exception_content(self):
         from lib import outlook_refresh
         from lib.outlook_ui import CuaError, UiError
