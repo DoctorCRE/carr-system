@@ -88,6 +88,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "backfill-deal-items",
     "cancel-pending-deal",
     "claim-lead",
+    "clear-the-deck-apply",
     "commit-winning-property",
 
     "complete-deal-item",
