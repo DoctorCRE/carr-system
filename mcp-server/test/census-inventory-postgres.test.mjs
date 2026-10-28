@@ -55,7 +55,7 @@ after(async () => {
   }
 });
 
-const MIGRATION = readFileSync(new URL('../../migrations/1034_system_work_census_inventory.sql', import.meta.url), 'utf8');
+const MIGRATION = readFileSync(new URL('../../migrations/1044_system_work_census_inventory.sql', import.meta.url), 'utf8');
 const OBSERVED_AT = '2026-10-28T12:00:00.000Z';
 const hex = char => char.repeat(64);
 const seedBoard = (boardId, version = 1, json = { items: [] }) => c.query(
