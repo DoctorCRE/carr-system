@@ -1,8 +1,5 @@
-"""Send-time skill selection against temporary catalogs and a fake SDK."""
-import asyncio
-import os
+"""Send-time skill selection against temporary catalogs; nothing leaves the machine."""
 import sys
-from types import SimpleNamespace
 from unittest.mock import patch
 import tempfile
 import unittest
@@ -38,118 +35,37 @@ class CatalogTests(unittest.TestCase):
 
 
 class PickerTests(unittest.TestCase):
+    """Selection is local: the brief's Skills: line names them; nothing leaves the machine."""
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.home, self.repo = Path(self.tmp.name) / 'home', Path(self.tmp.name) / 'repo'
         self.texts = {}
-        for name in ('poteto-mode', 'principle-prove-it-works', *(f'skill-{n}' for n in range(8))):
+        for name in ('poteto-mode', 'principle-prove-it-works', 'tdd', 'grill-with-docs', 'pr', 'research'):
             path = self.repo / '.claude/skills' / name / 'SKILL.md'
             path.parent.mkdir(parents=True)
             self.texts[name] = f'---\nname: {name}\ndescription: Procedure {name}\n---\nComplete instructions {name}\n'
             path.write_text(self.texts[name])
-        self.calls = []
 
-    def client(self, probabilities=None, error=None, delay=0):
-        owner = self
-        class FakeClient:
-            async def __aenter__(self):
-                return self
-            async def __aexit__(self, *_):
-                pass
-            async def system_one(self, *, state, questions):
-                owner.calls.append((state, questions))
-                await asyncio.sleep(delay)
-                if error:
-                    raise error
-                return SimpleNamespace(nouls={key: SimpleNamespace(noul=next(
-                    (value for name, value in (probabilities or {}).items()
-                     if f'the {name} skill:' in question.instructions), 0.01))
-                    for key, question in questions.items()})
-        return FakeClient
+    def prepare(self, brief):
+        return skill_picker.prepare(brief, self.repo, home=self.home)
 
-    def prepare(self, **kwargs):
-        return skill_picker.prepare('Repair the dispatcher.', self.repo, home=self.home, **kwargs)
-
-    def test_single_sdk_call_threshold_cap_baselines_and_full_text(self):
-        probabilities = {f'skill-{n}': value for n, value in enumerate((.79, .80, .81, .82, .83, .84, .85, .99))}
-        with patch.dict(os.environ, {'TYPESAFE_API_KEY': 'fixture-only'}):
-            brief, picks = self.prepare(client_factory=self.client(probabilities))
-        self.assertEqual(len(self.calls), 1)
-        self.assertEqual(self.calls[0][0], 'Repair the dispatcher.')
-        self.assertEqual(len(self.calls[0][1]), 10)
-        self.assertEqual([p['name'] for p in picks], ['poteto-mode', 'principle-prove-it-works',
-                         'skill-7', 'skill-6', 'skill-5', 'skill-4', 'skill-3', 'skill-2'])
-        self.assertEqual(picks[2]['probability'], .99)
-        self.assertNotIn('skill-0', brief)
-        self.assertNotIn('skill-1', brief)
+    def test_skills_line_selects_named_skills_with_full_text(self):
+        brief, picks = self.prepare('Card: X\nSkills: poteto-mode, TDD, Grill With Docs, missing-skill\nOpen a PR after research.')
+        self.assertEqual([p['name'] for p in picks],
+                         ['poteto-mode', 'principle-prove-it-works', 'grill-with-docs', 'tdd'])
         for pick in picks:
             self.assertIn(self.texts[pick['name']], brief)
-            self.assertIn(str((self.repo / '.claude/skills' / pick['name'] / 'SKILL.md').resolve()), brief)
+        self.assertNotIn(self.texts['pr'], brief)
+        self.assertNotIn(self.texts['research'], brief)
+        self.assertIn('Named skill not found: missing-skill.', brief)
+        self.assertTrue(brief.startswith('Skills: poteto-mode, principle-prove-it-works, grill-with-docs, tdd\n\n'))
+
+    def test_no_skills_line_sends_baseline_and_makes_no_network_call(self):
+        with patch('socket.socket', side_effect=AssertionError('network used')):
+            brief, picks = self.prepare('Repair the dispatcher. Use tdd.')
+        self.assertEqual([p['name'] for p in picks], ['poteto-mode', 'principle-prove-it-works'])
         self.assertIn('## Required skills', brief)
-
-    def test_env_file_fallback_reaches_sdk_without_changing_process_environment(self):
-        env_file = self.home / '.config/carr/typesafe.env'
-        env_file.parent.mkdir(parents=True)
-        env_file.write_text('TYPESAFE_API_KEY=fixture-file-key\nUNRELATED=fixture-only\n')
-        env_file.chmod(0o600)
-        with patch.dict(os.environ, {}, clear=True), \
-             patch('typesafe_sdk.AsyncTypeSafeClient', return_value=self.client({'skill-0': .95})()) as sdk:
-            brief, picks = self.prepare()
-            self.assertNotIn('TYPESAFE_API_KEY', os.environ)
-        self.assertEqual(len(self.calls), 1)
-        self.assertEqual(sdk.call_args.kwargs['api_key'], 'fixture-file-key')
-        self.assertIn({'name': 'skill-0', 'probability': .95}, picks)
-        self.assertNotIn('fixture-file-key', brief)
-        self.assertNotIn('picker skipped:', brief)
-
-    def test_missing_key_sends_baseline_without_call(self):
-        with patch.dict(os.environ, {}, clear=True):
-            brief, picks = self.prepare(client_factory=self.client())
-        self.assertEqual(self.calls, [])
-        self.assertEqual(len(picks), 2)
-        self.assertTrue(all(p['probability'] is None for p in picks))
-        self.assertIn('picker skipped: TYPESAFE_API_KEY is missing', brief)
-        self.assertIn(self.texts['poteto-mode'], brief)
-
-    def test_failure_does_not_expose_response_or_block_baseline(self):
-        with patch.dict(os.environ, {'TYPESAFE_API_KEY': 'fixture-only'}):
-            brief, picks = self.prepare(client_factory=self.client(error=RuntimeError('sensitive response')))
-        self.assertEqual(len(picks), 2)
-        self.assertIn('picker skipped: RuntimeError', brief)
-        self.assertNotIn('sensitive response', brief)
-
-    def test_total_deadline_cancels_request_and_returns_baseline(self):
-        with patch.dict(os.environ, {'TYPESAFE_API_KEY': 'fixture-only'}), \
-             patch.object(skill_picker, 'TIMEOUT_S', .02):
-            brief, picks = self.prepare(client_factory=self.client(delay=1))
-        self.assertEqual(len(self.calls), 1)
-        self.assertEqual(len(picks), 2)
-        self.assertIn('picker skipped: timeout', brief)
-
-    def test_large_catalog_shards_only_when_context_requires_it(self):
-        for n in range(45):
-            path = self.repo / '.claude/skills' / f'large-{n}' / 'SKILL.md'
-            path.parent.mkdir(parents=True)
-            path.write_text(f'---\nname: large-{n}\ndescription: "' + 'x' * 1500 + '"\n---\nComplete body\n')
-        with patch.dict(os.environ, {'TYPESAFE_API_KEY': 'fixture-only'}):
-            brief, picks = self.prepare(client_factory=self.client())
-        self.assertEqual(len(self.calls), 2)
-        self.assertTrue(all(state == 'Repair the dispatcher.' for state, _ in self.calls))
-        self.assertEqual(sum(len(questions) for _, questions in self.calls), 55)
-        self.assertEqual(len(picks), 2)
-        self.assertNotIn('picker skipped:', brief)
-
-    def test_malformed_answer_falls_back_without_partial_selection(self):
-        with patch.dict(os.environ, {'TYPESAFE_API_KEY': 'fixture-only'}):
-            brief, picks = self.prepare(client_factory=self.client({'skill-0': .99, 'skill-1': float('nan')}))
-        self.assertEqual(len(picks), 2)
-        self.assertIn('picker skipped: ValueError', brief)
-
-    def test_exact_threshold_is_included(self):
-        with patch.dict(os.environ, {'TYPESAFE_API_KEY': 'fixture-only'}):
-            _, picks = self.prepare(client_factory=self.client({'skill-0': .80, 'skill-1': .7999}))
-        self.assertEqual([p['name'] for p in picks][2:], ['skill-0'])
 
 
 if __name__ == '__main__':

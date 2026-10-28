@@ -26,6 +26,7 @@ import uuid
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from lib.fence import DATA_SENTENCE
 from lib.scheduled_step0 import monthly_gate, stop_reason, version_gate
 
 UTC = timezone.utc
@@ -390,7 +391,7 @@ def _claude(prompt: Path, repo: Path, model: str, tools: str, timeout: float,
     receipt = env['CARR_HEADLESS_RECEIPT']
     task_instructions = prompt.read_text()
     instruction = (f'<scheduled-task name="{task_id}">\n' + task_instructions +
-        f'\n</scheduled-task>\nHEADLESS COMPLETION CONTRACT: run_id={run_id}. '
+        f'\n</scheduled-task>\n{DATA_SENTENCE}\nHEADLESS COMPLETION CONTRACT: run_id={run_id}. '
         'Only after verifying the task done-condition, write a private JSON receipt at '+receipt+'. '
         'Use schema carr-headless-completion/v1, task_id '+task_id+', run_id '+run_id+', '
         'outcome completed or noop, and artifacts [{"path":"absolute retained artifact or '

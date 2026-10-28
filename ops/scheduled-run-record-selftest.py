@@ -120,8 +120,11 @@ def fixture_gate_denied(sid="fx-denied", task="x-reply-run-daily") -> str:
 def fixture_trailing_tool_error(sid="fx-toolerr", task="restore-rehearse-weekly") -> str:
     return write_fixture([
         LAUNCH.format(sid=sid, task=task),
+        json.dumps({"message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "toolu_fx", "name": "Bash", "input": {}}]}, "sessionId": sid}),
         json.dumps({"message": {"role": "user", "content": [
-            {"type": "tool_result", "is_error": True, "content": "pg_restore: not found"}]},
+            {"type": "tool_result", "tool_use_id": "toolu_fx", "is_error": True,
+             "content": "pg_restore: not found"}]},
             "sessionId": sid}),
     ])
 
@@ -200,7 +203,7 @@ def main() -> int:
     recs, raw = load_records(p), load_raw(p)
     state, fc, detail = compute_outcome(recs, raw)
     check("a PreToolUse deny -> failed/gate_denied", state == "failed" and fc == "gate_denied")
-    check("the deny reason is captured in detail", "MODEL FLOOR TEST REASON" in detail,
+    check("the deny reason text stays out of detail", "MODEL FLOOR TEST REASON" not in detail,
           detail)
     os.unlink(p)
 
@@ -209,6 +212,8 @@ def main() -> int:
     state, fc, detail = compute_outcome(recs, raw)
     check("a trailing unrecovered tool error -> failed/tool_error",
           state == "failed" and fc == "tool_error")
+    check("detail names the failed tool, never its output",
+          "Bash" in detail and "pg_restore" not in detail, detail)
     os.unlink(p)
 
     social_launch = json.loads(LAUNCH.format(sid="fx-social", task="social-batch-weekly"))

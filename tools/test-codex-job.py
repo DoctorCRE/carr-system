@@ -196,6 +196,22 @@ while True: time.sleep(1)
                     for parent in parents:
                         shutil.rmtree(parent)
 
+    def test_job_log_is_private_and_ignored(self):
+        log = self.root / 'job.log'
+        log.write_text('')
+        log.chmod(0o644)
+        with log.open('ab') as sink:
+            job = subprocess.Popen([sys.executable, '-c', WRAPPER, str(ROOT / 'bin/codex-job'),
+                                    str(ROOT / '.venv'), str(self.origin), 'test/job', 'brief'],
+                                   env=dict(self.git_env, PATH=str(self.codex.parent) + os.pathsep + os.defpath,
+                                            TMPDIR=str(self.root)), stdout=subprocess.PIPE, stderr=sink)
+            job.communicate(timeout=10)
+        self.assertEqual(job.returncode, 0)
+        self.assertEqual(log.stat().st_mode & 0o777, 0o600)
+        for path in ('scratchpad/jobs/logs/x.log', 'out/calendar-archive/x.ics'):
+            ignored = subprocess.run(['git', '-C', str(ROOT), 'check-ignore', '-q', path])
+            self.assertEqual(ignored.returncode, 0, path)
+
 
 if __name__ == '__main__':
     unittest.main()

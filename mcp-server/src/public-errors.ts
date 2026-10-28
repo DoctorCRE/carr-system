@@ -169,6 +169,9 @@ function inputFields(schema: InputSchema | undefined, names = new Set<string>())
   return names;
 }
 
+// Row values travel in these: pg's "Failing row contains (...)" and ToolError payloads.
+const UNLOGGED = new Set(["detail", "hint", "where", "payload"]);
+
 function diagnostics(error: unknown) {
   const seen = new WeakSet();
   return JSON.parse(JSON.stringify(error, (_key, value) => {
@@ -177,7 +180,7 @@ function diagnostics(error: unknown) {
       seen.add(value);
       if (value instanceof Error) return {
         ...Object.fromEntries(Object.entries(Object.getOwnPropertyDescriptors(value))
-          .filter(([, descriptor]) => "value" in descriptor)
+          .filter(([key, descriptor]) => "value" in descriptor && !UNLOGGED.has(key))
           .map(([key, descriptor]) => [key, descriptor.value])),
         name: value.name, message: value.message, stack: value.stack,
       };
