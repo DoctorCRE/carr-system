@@ -787,13 +787,17 @@ class SendTests(unittest.TestCase):
                             for tool, args in h.fake.calls))
 
     def test_existing_compose_is_left_untouched(self):
-        h = Harness(self.out)
-        h.fake.open_url('mailto:person-z@example.test?subject=other-draft&body=leave-alone')
-        h.fake.windows[100]['title'] = 'other-draft'
-        result = h.send()
-        self.assertEqual((result.state, result.reason), (State.FAILED, 'compose_window_open'))
-        self.assertEqual(h.fake.presses(), 0)
-        self.assertEqual(len(h.fake.forms), 1)
+        for kind in ('mail', 'event'):
+            with self.subTest(kind=kind):
+                h = Harness(self.out)
+                if kind == 'mail':
+                    h.fake.open_url('mailto:person-z@example.test?subject=other-draft&body=leave-alone')
+                else:
+                    h.fake('invoke_menu', {'path': ['File', 'New', 'Event']})
+                result = h.send(key=kind, subject=kind)
+                self.assertEqual((result.state, result.reason), (State.FAILED, 'compose_window_open'))
+                self.assertEqual(h.fake.presses(), 0)
+                self.assertEqual(len(h.fake.forms), 1)
 
     def test_existing_read_only_window_blocks_send(self):
         h = Harness(self.out)
