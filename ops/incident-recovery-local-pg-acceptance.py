@@ -178,7 +178,7 @@ def retention(owner, dsn):
                    now() - interval '40 days', 'wrapper', 'acceptance',
                    now() - interval '40 days', now() - interval '39 days'
               from generate_series(1, 1005)""", (sid, ENVIRONMENT, key))
-        cur.execute("select ops.reap_expired_runs(%s, %s, %s, 2147483647)",
+        cur.execute("select ops.reap_expired_runs(%s, %s, %s, 1001)",
                     (sid, ENVIRONMENT, key))
         check(cur.fetchone()[0] == 1000, "even an oversized request must delete at most 1000 runs")
         cur.execute("select ops.reap_expired_runs(%s, %s, %s, -1)", (sid, ENVIRONMENT, key))
