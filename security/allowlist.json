@@ -658,6 +658,12 @@
       "sha256": "370981c239bb5f52b9011287b1d42ea3d6e458cc48cb1f8589e2d6cdded94f73",
       "rule": "pii-email",
       "reason": "Pushed PR history (d3cafe75) holds a regenerated schema dump with a partner work address; 7cba9c4f reverted the file, so only this historical blob carries it."
+    },
+    {
+      "path": "ops/incident-recovery-local-pg-acceptance.py",
+      "sha256": "4f0dbb9a2e197f11fbbb1b3efa0e5b035f5c018b7fa30c355717bfcad320bd65",
+      "rule": "pii-phone",
+      "reason": "The integer maximum in commit a2b9482df tests the retention batch clamp. It is not a phone number and was replaced by 1001 in 929431cc6. Only this historical blob is exempt."
     }
   ]
 }
