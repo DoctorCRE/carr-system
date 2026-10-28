@@ -2591,6 +2591,31 @@ class IntakeTest(unittest.TestCase):
         self.run_intake([self.flagged(flag='complete', done=self.OCT28)])
         self.assertEqual(self.flag_calls()[-1][0], 'complete-deal-item')
 
+    def test_a_flag_closes_without_its_activity_on_the_current_links_page(self):
+        m = self.flagged(flag='flagged')
+        self.filed_deal(m)
+        self.run_intake([m], touch=False)
+        self.fake.email_queue = []
+        outcome = self.run_intake([self.flagged(flag='none')])
+        self.assertEqual(self.flag_calls()[-1][0], 'drop-action')
+        self.assertEqual(outcome.counts['flags_unmatched'], 0)
+
+    def test_a_failed_close_does_not_block_later_flags_on_the_next_run(self):
+        mails = [self.flagged(flag='flagged'),
+                 mail('pat@example.test', -timedelta(hours=2), subject='Other', flag='flagged')]
+        self.run_intake(mails)
+        self.fake.email_queue = [
+            {'activity_id': str(uuid.uuid5(uuid.NAMESPACE_URL, a['idempotency_key'])),
+             'deal': 'deal-1', 'body': '', 'occurred_at': NOW.isoformat()}
+            for v, a in self.fake.writes('log-activity')]
+        self.run_intake(mails, touch=False)
+        first, second = sorted(mails, key=ident)
+        self.fake.fail_verbs.add('drop-action')
+        self.assertEqual(self.run_intake([{**first, 'flag_status': 'none'}, second]).state, 'failed')
+        self.fake.now += timedelta(minutes=2)
+        self.run_intake([{**first, 'flag_status': 'none'}, {**second, 'flag_status': 'complete'}])
+        self.assertEqual([v for v, a in self.flag_calls()].count('complete-deal-item'), 1)
+
     def test_a_todo_already_closed_in_the_app_settles_without_blocking_other_flags(self):
         first, second = self.flagged(flag='flagged'), mail('pat@example.test', -timedelta(hours=2), subject='Other', flag='flagged')
         self.assertEqual(self.run_intake([first, second]).state, 'succeeded')
@@ -2614,6 +2639,44 @@ class IntakeTest(unittest.TestCase):
         verbs = [v for v, _ in self.flag_calls() if v != 'record-deal-item']
         self.assertEqual(sorted(verbs), ['complete-deal-item', 'drop-action'])  # both tried once, none retried
         self.assertEqual(outcome.counts['flags_closed_elsewhere'], 0)  # settled on the first run
+
+    def test_a_flag_close_version_conflict_is_blocked_without_claiming_it_closed(self):
+        m = self.flagged(flag='flagged')
+        self.filed_deal(m)
+        self.run_intake([m], touch=False)
+        original = self.fake.carr
+
+        def edited_item(verb, args):
+            if verb == 'drop-action':
+                self.fake.calls.append((verb, args))
+                return {'ok': False, 'error': 'version_conflict'}
+            return original(verb, args)
+
+        self.fake.carr = edited_item
+        for _ in range(2):
+            outcome = self.run_intake([self.flagged(flag='none')])
+            self.assertEqual(outcome.state, 'failed')
+            self.assertEqual(outcome.counts['flags_closed_elsewhere'], 0)
+            self.assertEqual(outcome.counts['flags_cleared'], 0)
+            self.assertEqual(outcome.counts.get('error_version_conflict'), 1)
+            self.fake.now += timedelta(minutes=2)
+        self.assertEqual([v for v, a in self.flag_calls()].count('drop-action'), 1)
+
+    def test_a_failed_flag_filing_does_not_block_a_later_flag_closing(self):
+        closing = self.flagged(flag='flagged')
+        self.filed_deal(closing)
+        self.run_intake([closing], touch=False)
+        filing = mail('pat@example.test', -timedelta(minutes=20), subject='New flag', flag='flagged')
+        self.fake.fail_verbs.add('record-deal-item')
+        self.run_intake([closing, filing])
+        logged = self.fake.writes('log-activity')[-1][1]['idempotency_key']
+        self.fake.email_queue.append({
+            'activity_id': str(uuid.uuid5(uuid.NAMESPACE_URL, logged)), 'deal': 'deal-1',
+            'body': '', 'occurred_at': NOW.isoformat()})
+        self.assertEqual(self.run_intake([closing, filing]).state, 'failed')
+        self.fake.now += timedelta(minutes=2)
+        self.run_intake([{**closing, 'flag_status': 'complete'}, filing])
+        self.assertEqual([v for v, a in self.flag_calls()].count('complete-deal-item'), 1)
 
 
 
