@@ -47,6 +47,8 @@ before(async () => {
     await c.query(readFileSync(new URL('../../migrations/1017_work_request_queue.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select 1 from schema_migrations where filename='1024_work_request_job_start.sql'")).rows.length)
     await c.query(readFileSync(new URL('../../migrations/1024_work_request_job_start.sql', import.meta.url), 'utf8'));
+  if (!(await c.query("select 1 from schema_migrations where filename='1025_work_request_job_finished.sql'")).rows.length)
+    await c.query(readFileSync(new URL('../../migrations/1025_work_request_job_finished.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => {
@@ -84,8 +86,9 @@ test('dispatch mints a stable ID under implicit S1 and retries without another j
   const queue = await command('work-queue', {});
   assert.deepEqual(queue.jobs.map(row => row.card_id), ['WR14.S1.J1']);
   assert.equal(queue.jobs[0].card_title, 'Queue work');
-  assert.equal(queue.jobs[0].stage, undefined);
-  assert.equal(queue.jobs[0].pr, undefined);
+  assert.equal(queue.jobs[0].work_request_title, 'Synthetic queue work');
+  assert.deepEqual([queue.jobs[0].stage, queue.jobs[0].stale, queue.jobs[0].prs], ['queued', false, []]);
+  assert.deepEqual(queue.github.map(source => source.reason), ['no_github_reader', 'no_github_reader', 'no_github_reader']);
 });
 
 test('ordered plans are repeatable and allocate independent J numbers per slice', async () => {
@@ -208,4 +211,30 @@ test('queue grants preserve the current catalog seal and reject wider grants', a
   try { await c.query('grant delete on ops.work_request_job to carr_writer'); assert.equal(await current(), false); }
   finally { await c.query('rollback'); }
   assert.equal(await current(), true);
+});
+
+test('the read saves a finish once on the side connection, and later reads keep it after the PR leaves the window', async () => {
+  const work_request = await request('WR-000061');
+  const done = (await command('dispatch-job', job(work_request))).card_id;
+  await c.query("update ops.work_request_job set created_at=now()-interval '20 days' where work_request_id=(select id from ops.work_request where ref=$1)", [work_request]);
+  const pending = (await command('dispatch-job', job(work_request))).card_id;
+  const bounds = [], writes = [];
+  const merged = { repo: 'DoctorCRE/carr-system', number: 77, url: 'u77', title: 'PR 77', draft: false, state: 'merged', updated_at: '2026-10-27T12:00:00Z', cards: [done] };
+  const reader = sources => ({ query: (text, params) => c.query(text, params),
+    pullRequests: async (repos, since) => { bounds.push(since); return repos.map(repo => ({ repo, state: 'ok', prs: repo === merged.repo ? sources : [] })); },
+    sideWrite: (text, params) => { writes.push(params[2]); return c.query(text, params); } });
+  const first = await command('work-queue', {}, reader([merged]));
+  assert.equal(first.jobs.find(row => row.card_id === done).stage, 'merged');
+  assert.equal(writes.length, 1, 'one single-row write for the newly finished job');
+  await command('work-queue', {}, reader([merged]));
+  const later = await command('work-queue', {}, reader([]));
+  assert.equal(writes.length, 1, 'a saved finish is never written again');
+  const saved = later.jobs.find(row => row.card_id === done);
+  assert.deepEqual([saved.stage, saved.stale, saved.prs.map(pr => pr.card_id)], ['merged', false, [`${done}.carr#77`]]);
+  const open = later.jobs.find(row => row.card_id === pending);
+  assert.equal(open.stage, 'queued');
+  assert.equal(bounds[0], first.jobs.find(row => row.card_id === done).created_at, 'before the finish is saved, the old job bounds the window');
+  const unfinished = later.jobs.filter(row => row.card_id !== done).map(row => row.created_at).sort();
+  assert.equal(bounds.at(-1), unfinished[0], 'once saved, the window starts at the oldest unfinished job');
+  assert.ok(bounds.at(-1) > bounds[0] && bounds.at(-1) <= open.created_at);
 });

@@ -158,6 +158,7 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
     clock = clock or (lambda: now + timedelta(seconds=time.monotonic() - started))
     counts = {k: 0 for k in ('emails', 'routed', 'model_failed', 'abandoned', 'recorded', 'refused',
                              'dropped', 'write_failed', 'queue_failed', 'more', 'out_of_time', 'inherited', 'contact_only')}
+    codes: dict[str, int] = {}
     routed, attempts = state.setdefault('routed', {}), state.setdefault('attempts', {})
     cutoff = (now - timedelta(days=WINDOW_DAYS + 1)).timestamp()
     for activity, at in list(routed.items()):
@@ -174,7 +175,7 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
         queue = call('email-router-queue', {'days': WINDOW_DAYS, 'limit': MAX_EMAILS, 'exclude': sorted(routed)})
     except Exception:
         counts['queue_failed'] = 1
-        return counts
+        return {**counts, 'refusal_codes': codes}
     counts['more'] = int(bool(queue.get('more')))
     for email in queue.get('emails', [])[:MAX_EMAILS]:
         if clock() >= now + BUDGET:
@@ -184,6 +185,8 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
         counts['emails'] += 1
         inheritance = None
         def matching_proposal(decision):
+            if decision.kind == 'file_to_deal' and decision.deal in email.get('suppressed_deals', []):
+                return []
             if decision.kind == 'contact_only':
                 counts['contact_only'] += 1
                 return []
@@ -234,9 +237,11 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
                     call('record-email-proposal', {'idempotency_key': key, **args})
                     counts['recorded'] += 1
                 except Exception as error:
-                    if refusal_code(error) is None:
+                    code = refusal_code(error)
+                    if code is None:
                         raise WriteFailed() from error
                     counts['refused'] += 1
+                    codes[code] = codes.get(code, 0) + 1
         except WriteFailed:
             counts['write_failed'] += 1
             failed(activity)
@@ -244,7 +249,7 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
         attempts.pop(activity, None)
         routed[activity] = now.timestamp()
         counts['routed'] += 1
-    return counts
+    return {**counts, 'refusal_codes': codes}
 
 
 def _state(out: Path) -> dict:
@@ -282,7 +287,12 @@ def run(out: Path, carr: Callable[[str, dict], dict], classify: Callable[[dict, 
 
 
 def receipt(outcome: str, counts: dict) -> str:
-    return 'email-router-receipt ' + json.dumps({'state': outcome, 'counts': counts})
+    counts = counts.copy()
+    codes = counts.pop('refusal_codes', {})
+    result = {'state': outcome, 'counts': counts}
+    if codes:
+        result['refusal_codes'] = codes
+    return 'email-router-receipt ' + json.dumps(result)
 
 
 def step(repo: Path, settings) -> int:

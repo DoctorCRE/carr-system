@@ -149,6 +149,8 @@ class RouterTests(unittest.TestCase):
         counts = route(server, lambda e, d: {'proposals': [BOTH['proposals'][0]]}, state)
         self.assertEqual((counts['refused'], counts['routed'], counts['write_failed']), (1, 1, 0))
         self.assertIn('a3', state['routed'])
+        receipt = json.loads(email_router.receipt('succeeded', counts).split(' ', 1)[1])
+        self.assertEqual(receipt['refusal_codes'], {INVALID: 1})
 
     def test_invented_quotes_and_low_confidence_never_leave_the_router(self):
         server = Server([email('a4', FIXTURE['attacks'][0])])
@@ -430,6 +432,22 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual(writes[0], writes[1])
         self.assertEqual(writes[1][0], 'inherit-email-thread')
         self.assertEqual(writes[1][1]['thread_activity_id'], 'prior')
+
+    def test_undone_filing_is_not_proposed_again_to_the_same_deal(self):
+        pending = []
+        def carr(verb, args):
+            if verb == 'email-router-queue':
+                return {'open_deals': [{'id': DEAL}], 'emails': [self.mail(thread_history=[self.prior()], suppressed_deals=[DEAL])]}
+            if verb == 'inherit-email-thread':
+                raise Refused('email_thread_filing_suppressed')
+            pending.append(args)
+            return {'ok': True}
+        def matching(mail, deals, history):
+            if history:
+                return email_matching.MatchDecision('inherit_thread', DEAL, thread_activity_id='prior')
+            return email_matching.MatchDecision('file_to_deal', DEAL, sender_role='client', confidence=0.9)
+        email_router.route(carr, None, refusal_code, {}, NOW, matching=matching)
+        self.assertFalse(any(p.get('deal') == DEAL for p in pending))
 
     def test_router_matches_after_thread_refusal(self):
         self.assertIsNotNone(email_router.REFUSAL.fullmatch('email_thread_ambiguous'))

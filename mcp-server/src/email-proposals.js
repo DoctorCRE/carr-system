@@ -150,12 +150,14 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'list-email-thread-filings': {
       write: false,
-      description: 'List automatic email thread filings for the authenticated partner.',
+      description: 'List the authenticated partner’s automatic email thread filings with source subject, sender name, email time, event ID and recorded activity version (null for legacy events). Undo uses event_id and an idempotency key.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       handler: async (c, actor) => {
         if (actor.human !== true || !['joe','dell'].includes(actor.slug)) fail('partner_confirmation_required');
         const { rows } = await c.query(`select e.id as event_id,e.subject_id as deal,
-          e.new_value->>'activity_id' as activity_id,e.recorded_at,a.summary
+          e.new_value->>'activity_id' as activity_id,e.recorded_at,a.summary,
+          a.email_context->>'subject' as subject,a.email_context->'sender'->>'name' as sender_name,
+          a.occurred_at,(e.new_value->>'activity_version')::integer as activity_version
           from v_email_thread_filing_event e join activity a on a.id::text=e.new_value->>'activity_id'
           where e.verb='inherit-email-thread' and (a.email_source->>'mailbox_owner'=$1 or
             (a.email_source->>'mailbox_owner' is null and exists
@@ -385,6 +387,12 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           evidence_quote: args.evidence_quote, task_text: step || args.kind === 'possible_new_deal' ? args.text?.trim() ?? null : null,
           sender_role: matching ? args.sender_role : null, next_date: step ? args.next_date : null,
           owner: draft ? source.email_source.mailbox_owner : step ? args.owner || 'joe' : null };
+        if (row.kind === 'file_to_deal') {
+          await c.query('select id from activity where id=$1 for update', [row.activity_id]);
+          if ((await c.query(`select 1 from v_email_thread_filing_event where verb='undo-email-thread-filing'
+            and subject_id=$1 and new_value->>'activity_id'=$2 limit 1`, [row.deal_id,row.activity_id])).rows.length)
+            fail('email_thread_filing_suppressed');
+        }
         const existing = (await c.query(`select 1 from email_proposal where kind=$1 and deal_id is not distinct from $2::uuid
           and activity_id=$3 for update`, [row.kind,row.deal_id,row.activity_id])).rows.length > 0;
         if (!existing && !draft) await show(c, actor, row);
@@ -405,13 +413,39 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'list-email-proposals': {
       write: false,
-      description: 'List email proposals for Home across deals, or only the optional deal UUID, oldest first. Status defaults to pending; select confirmed, dismissed, approved_to_send, sent or failed to read resolved proposals. Reply drafts include subject, body and owner in reply_draft, send_result with the outcome, and nullable result_recorded_at when the outcome was recorded. Pending drafts also include exact to/cc arrays for verified human Joe or Dell. Missing source/copy addresses set preview_error and disable confirm_verb; machine callers receive no pending recipient addresses. Submit must echo the displayed arrays through submit-email-draft. Every item includes its status, kind, deal, confidence, source email sender, subject, quote, activity_id and suspected_instruction warning. Pending items have a fresh preview and confirm_verb; confirm with the preview fields or dismiss with dismiss-email-proposal and the version. A stale pending item has preview null and preview_error. Resolved items have resolution (resolved_at, resolved_by actor ID, reason), the stored proposed_next_step when applicable, and null confirm_verb, preview and preview_error. Phase history retains the quote; exact phase changes remain in deal history. Without limit, refuses above 200 matching proposals. For pagination, pass limit and then next_cursor until more is false; a cursor remains valid after resolution, but must belong to the selected deal when deal is supplied.',
+      description: 'With mode=recent_outcomes, return partner-scoped recorded reply outcomes newest first, without body or addresses; limit defaults to 20 and max 50, cursor pages by result time and ID. Historical outcomes with no result time are excluded. Otherwise list email proposals for Home across deals, or only the optional deal UUID, oldest first. Status defaults to pending; select confirmed, dismissed, approved_to_send, sent or failed to read resolved proposals. Reply drafts include subject, body and owner in reply_draft, send_result with the outcome, and nullable result_recorded_at when the outcome was recorded. Pending drafts also include exact to/cc arrays for verified human Joe or Dell. Missing source/copy addresses set preview_error and disable confirm_verb; machine callers receive no pending recipient addresses. Submit must echo the displayed arrays through submit-email-draft. Every item includes its status, kind, deal, confidence, source email sender, subject, quote, activity_id and suspected_instruction warning. Pending items have a fresh preview and confirm_verb; confirm with the preview fields or dismiss with dismiss-email-proposal and the version. A stale pending item has preview null and preview_error. Resolved items have resolution (resolved_at, resolved_by actor ID, reason), the stored proposed_next_step when applicable, and null confirm_verb, preview and preview_error. Phase history retains the quote; exact phase changes remain in deal history. Without limit, refuses above 200 matching proposals. For pagination, pass limit and then next_cursor until more is false; a cursor remains valid after resolution, but must belong to the selected deal when deal is supplied.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         deal: { type: 'string', format: 'uuid' },
+        mode: { type: 'string', enum: ['recent_outcomes'] },
         status: { type: 'string', enum: ['pending', 'confirmed', 'dismissed', 'approved_to_send', 'sent', 'failed'], default: 'pending' },
         limit: { type: 'integer', minimum: 1, maximum: LIMIT },
         cursor: { type: 'string', format: 'uuid' } } },
       handler: async (c, actor, args) => {
+        if (args.mode === 'recent_outcomes') {
+          const owner = senderOwner(actor);
+          if (args.status !== undefined || (args.limit !== undefined && args.limit > 50)) fail('email_outcomes_arguments_invalid');
+          const limit = args.limit ?? 20;
+          if (args.cursor && !(await c.query(`select 1 from email_proposal p join activity a on a.id=p.activity_id
+            where p.id=$1 and p.kind='reply_draft' and p.status in ('sent','failed') and p.result_recorded_at is not null
+              and p.owner=$2 and a.email_source->>'mailbox_owner'=$2 and ($3::uuid is null or p.deal_id=$3)`,
+          [args.cursor, owner, args.deal ?? null])).rows.length) fail('email_proposals_cursor_invalid');
+          const { rows } = await c.query(`select p.id,p.deal_id,p.draft_subject,p.submitted_email->>'subject' as submitted_subject,
+              p.status,p.result_recorded_at,p.send_result->>'reason' as failure_reason from email_proposal p join activity a on a.id=p.activity_id
+            where p.kind='reply_draft' and p.status in ('sent','failed') and p.result_recorded_at is not null
+              and p.owner=$1 and a.email_source->>'mailbox_owner'=$1 and ($2::uuid is null or p.deal_id=$2)
+              and ($3::uuid is null or (p.result_recorded_at,p.id) <
+                (select result_recorded_at,id from email_proposal where id=$3))
+            order by p.result_recorded_at desc,p.id desc limit $4`, [owner, args.deal ?? null, args.cursor ?? null, limit + 1]);
+          const more = rows.length > limit;
+          const proposals = rows.slice(0, limit).map(row => ({ id: row.id, deal: row.deal_id,
+            subject: row.submitted_subject ?? row.draft_subject, outcome: row.status,
+            result_recorded_at: new Date(row.result_recorded_at).toISOString(),
+            failure_reason_code: row.status !== 'failed' ? null
+              : ['invalid_submission', 'submission_hash_mismatch', 'submission_recipients_invalid', 'aborted_before_dispatch'].includes(row.failure_reason)
+                ? row.failure_reason : /^unconfirmed_after_[0-9]+$/.test(row.failure_reason ?? '') ? 'unconfirmed_after_dispatch' : 'delivery_failed' }));
+          return { schema_version: 'email-reply-outcomes.v1', proposals, more,
+            next_cursor: more ? proposals.at(-1).id : null, send: false };
+        }
         if (args.cursor && !args.limit) fail('email_proposals_cursor_requires_limit');
         if (args.cursor && !(await c.query(`select 1 from email_proposal
           where id=$1 and ($2::uuid is null or deal_id=$2)`, [args.cursor, args.deal ?? null])).rows.length)
@@ -490,7 +524,10 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             next_cursor: more ? emails.at(-1).activity_id : null };
         }
         const { rows } = await c.query(`select a.id as activity_id,a.summary,a.detail as body,a.occurred_at,
-            a.email_context,a.email_source->>'mailbox_owner' as mailbox_owner,(select jsonb_build_object('party_id',p.id,'name',p.name,'email',null,
+            a.email_context,a.email_source->>'mailbox_owner' as mailbox_owner,
+            coalesce((select jsonb_agg(distinct e.subject_id) from v_email_thread_filing_event e
+              where e.verb='undo-email-thread-filing' and e.new_value->>'activity_id'=a.id::text), '[]'::jsonb) as suppressed_deals,
+            (select jsonb_build_object('party_id',p.id,'name',p.name,'email',null,
               'address_unavailable',true,'unknown',false,'internal',false) from party p where p.id=coalesce(
               (select party_id from client where id=a.client_id),(select party_id from vendor where id=a.vendor_id),
               (select party_id from lead where id=a.lead_id))) as recorded_sender,d.id as deal,d.name as deal_name,d.phase,d.deal_type

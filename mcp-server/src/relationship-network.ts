@@ -5,6 +5,8 @@ type NetworkNode = { id: string; restricted?: boolean; contact_state?: string; c
 type NetworkEdge = { id: string; kind: string; from: string; to: string; via: string | null; detail: string | null; summary?: string; when?: string | null };
 type ReferralCount = { node_id: string; won: number; lost: number; deals: number };
 type NetworkSnapshot = { nodes: NetworkNode[]; edges: NetworkEdge[]; referrals: ReferralCount[] };
+// Two refresh periods cover the app's 60-second polling floor.
+const SNAPSHOT_VALIDITY_MS = 120_000;
 export const NETWORK_SCHEMA = 'carr-relationship-network.v1';
 export const REFERRAL_KINDS = ['referral', 'referred'];
 // The one exact party-to-deal association rule; the network snapshot and the
@@ -85,7 +87,7 @@ export function projectNetwork(snapshot: NetworkSnapshot, observedAt: string) {
       && [other.from,other.to].sort().join() === [edge.from,edge.to].sort().join()))
     .sort((a,b)=>String(b.when||'').localeCompare(String(a.when||'')) || a.id.localeCompare(b.id))
     .map(edge=>({id:edge.id,from:edge.from,to:edge.to,via:edge.via,reason:edge.summary || edge.detail!.slice(0,180),detail:edge.detail,when:edge.when}));
-  return {schema:NETWORK_SCHEMA,observed_at:observedAt,valid_until:new Date(Date.parse(observedAt)+60000).toISOString(),...snapshot,
+  return {schema:NETWORK_SCHEMA,observed_at:observedAt,valid_until:new Date(Date.parse(observedAt)+SNAPSHOT_VALIDITY_MS).toISOString(),...snapshot,
     referrals:snapshot.referrals.map(row=>({...row,win_rate:row.won+row.lost ? row.won/(row.won+row.lost):null})),suggestions};
 }
 
