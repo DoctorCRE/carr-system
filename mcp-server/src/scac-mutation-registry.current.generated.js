@@ -588,6 +588,26 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "clear-the-deck": {
+    "ingress_key": "mcp-tool:clear-the-deck",
+    "source_locator": "mcp-server/src/clear-the-deck.js",
+    "schema_digest": "4699a146ee130b153a107e00f4ecc235ef4c0623c8b1e251413b29ca9312d926",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "clear-the-deck-apply": {
+    "ingress_key": "mcp-tool:clear-the-deck-apply",
+    "source_locator": "mcp-server/src/clear-the-deck.js",
+    "schema_digest": "dd32a36382e9907a0f7e586e4906f2bf734a02d9266344142b35144c853bda7b",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "close-investigation": {
     "ingress_key": "mcp-tool:close-investigation",
     "source_locator": "mcp-server/src/investigation.js",
@@ -3639,6 +3659,24 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "grantable": false,
       "privilege": "insert",
       "ingress_key": "db-relation-acl:public.email_lead_exclusion:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.tool_read_count",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.tool_read_count:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.tool_read_count",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.tool_read_count:carr_writer:update",
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
     },

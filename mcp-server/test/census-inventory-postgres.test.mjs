@@ -1,7 +1,6 @@
-// Exercise queue commands through the real transaction envelope and PostgreSQL.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
@@ -12,6 +11,7 @@ import { writeFileSync } from 'node:fs';
 import { canonicalJson } from '../src/artifact-trust.js';
 import { readSystemWorkCensus } from '../src/system-work-census.v5.js';
 import { executeRegisteredTool } from '../src/tools.js';
+import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.current.generated.js';
 
 let fixture, admin, database, c, actor, connection;
 before(async () => {
@@ -45,6 +45,13 @@ before(async () => {
   const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
   if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
   else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
+  const migrations = readdirSync(new URL('../../migrations/', import.meta.url))
+    .filter(name => /^\d{4}_.*\.sql$/.test(name) && name < MIGRATION_NAME).sort();
+  const dsn = connection.connectionString ?? `postgresql://carr_ci@localhost/carr_ci?host=${encodeURIComponent(fixture.root)}`;
+  const python = new URL('../../.venv/bin/python', import.meta.url).pathname;
+  await promisify(execFile)(existsSync(python) ? python : 'python3',
+    [new URL('../../tools/migrate.py', import.meta.url).pathname, '--apply', '--yes', '--through', migrations.at(-1)],
+    { env: { ...process.env, DATABASE_URL: dsn }, maxBuffer: 4 * 1024 * 1024 });
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => {
@@ -55,7 +62,8 @@ after(async () => {
   }
 });
 
-const MIGRATION = readFileSync(new URL('../../migrations/1044_system_work_census_inventory.sql', import.meta.url), 'utf8');
+const MIGRATION_NAME = '1050_system_work_census_inventory.sql';
+const MIGRATION = readFileSync(new URL(`../../migrations/${MIGRATION_NAME}`, import.meta.url), 'utf8');
 const OBSERVED_AT = '2026-10-28T12:00:00.000Z';
 const hex = char => char.repeat(64);
 const seedBoard = (boardId, version = 1, json = { items: [] }) => c.query(
@@ -90,6 +98,9 @@ test('the migration removes every hash page, leaves real boards, and registers t
   const grants = (await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract.relation_dml
     .filter(g => g.relation === 'public.system_work_census_inventory').map(g => g.privilege).sort();
   assert.deepEqual(grants, ['insert', 'update']);
+  assert.equal((await c.query('select ops.scac_mutation_catalog_v118_current() as valid')).rows[0].valid, true);
+  assert.deepEqual((await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract,
+    SCAC_MUTATION_CURRENT_DB_GRANTS);
   if (process.env.CENSUS_INVENTORY_CONTRACT_OUT)
     writeFileSync(process.env.CENSUS_INVENTORY_CONTRACT_OUT, JSON.stringify((await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract));
 });

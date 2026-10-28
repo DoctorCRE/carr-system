@@ -472,8 +472,6 @@ def native_manifest(source=SOURCE):
     paths = [path for directory in ("ops/launchd", "ops/headless-tasks")
              for path in (source / directory).glob("*.plist")]
     for path in sorted(paths):
-        if path.name == "com.carr.call-mode.plist":
-            path = source / "tools/dictation-rig/launchd" / path.name
         text = path.read_text().replace("{{REPO}}", "~/carr-system").replace("{{HOME}}", "~")
         definition = plistlib.loads(text.encode())
         interval = schedule(definition)

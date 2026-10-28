@@ -334,7 +334,7 @@ const LOCAL_SPONSOR = Object.freeze({ "joe-local": "joe", "dell-local": "dell" }
  * prove before a deploy. Takes the raw Authorization header and the raw
  * token-map string rather than a Request and an env, for the same reason.
  *
- * `viaLabel` names which door matched, so a tool_call/tool_read_call row can
+ * `viaLabel` names which door matched, so a tool_call row or tool_read_count counter can
  * tell an outside-model CLI's grant apart from a local machine credential's —
  * both resolve through this one function, EXTENDED rather than duplicated
  * (the credential's per-door shape is a config difference, not a new profile-

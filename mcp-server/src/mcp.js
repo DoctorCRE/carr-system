@@ -561,44 +561,38 @@ function toolList(profile = "full") {
     }));
 }
 
-// ---------- read-call recording (Phase 1, 0108) ----------
+// ---------- read-call counting (0108, counted per day since 1041) ----------
 //
-// withEnvelope() in tools.js is the ONLY writer of tool_call, and it only ever
-// runs inside a WRITE handler body. Every read verb — including the one every
-// session calls at boot, standing-context — reached executeRegisteredTool
-// DIRECTLY below with no record left anywhere. That made "did a session boot
-// from the store, and whose?" unanswerable except by a human running a manual
-// test, which is exactly the question the Dell 2026-08-21 cutover needs
-// answered passively. See migrations/0108_tool_read_call.sql for why this is
-// a SIBLING table rather than a reuse of tool_call (idempotency_key is a
-// primary key with no read equivalent; response is NOT NULL and reads must
-// never carry a response body).
+// withEnvelope() in tools.js records writes in tool_call; read verbs never pass
+// through it, so this is the read side's only trace. 0108 logged one
+// tool_read_call row per read to answer "did a session boot from the store, and
+// whose?" for Dell's 2026-08-21 cutover. Every question asked since is a count
+// or a latest time per verb and sponsor, so 1041 replaced the row per call with
+// one tool_read_count counter per (UTC day, verb, actor, sponsor, via, ok).
+// The actor stays separate from its sponsor, so an agent reading through
+// Joe's grant is counted as the agent.
 //
-// readCallInsertSQL is pure — no DB, no env, no ctx — so it is unit-testable
-// on its own (mcp-server/test/tool-read-call.test.mjs). It builds the exact
-// statement recordReadCall sends, and by construction it can only ever see
-// (actor, verb, ok, errorKind): there is no parameter through which an
-// argument value or a response body could reach it.
-export function readCallInsertSQL(actor, verb, ok, errorKind) {
-  const identity = auditIdentity(actor);
+// readCallCountSQL is pure — no DB, no env, no ctx — so it is unit-testable on
+// its own (mcp-server/test/tool-read-call.test.mjs). By construction it can only
+// see (actor, verb, ok): no argument value or response body can reach it.
+export function readCallCountSQL(actor, verb, ok) {
   return {
-    text: `insert into tool_read_call (verb, actor_slug, actor_id, ok, error_kind, via, client_id,
-             organization_tenant_id, sponsoring_human_slug, personal_scope, authorization_class)
-           values ($1, $2, (select id from actor where slug=$2), $3, $4, $5, $6, $7, $8, $9, $10)`,
-    params: [verb, actor.slug || null, ok, errorKind || null, actor.via || null, actor.client_id || null,
-             identity.organization_tenant_id, identity.sponsoring_human_slug, identity.personal_scope,
-             identity.authorization_class],
+    text: `insert into tool_read_count as c (day, verb, actor_slug, sponsoring_human_slug, via, ok, n, last_at)
+           values ((now() at time zone 'UTC')::date, $1, $2, $3, $4, $5, 1, now())
+           on conflict on constraint tool_read_count_key
+           do update set n = c.n + 1, last_at = greatest(c.last_at, excluded.last_at)`,
+    params: [verb, actor.slug, auditIdentity(actor).sponsoring_human_slug, actor.via || null, ok],
   };
 }
 
 // insertFn is (text, params) => Promise<rows>. Production passes a thin neon()
 // wrapper against DATABASE_URL_WRITER (carr_reader is views-only and cannot
-// INSERT — see 0108's grants); tests pass a fake that just records the call.
+// upsert — see 1041's grants); tests pass a fake that just records the call.
 // NEVER THROWS: a logging failure must not become a read failure, so any
 // rejection from insertFn is swallowed here, not propagated to the caller
 // that scheduled this via ctx.waitUntil.
-export async function recordReadCall(insertFn, actor, verb, ok, errorKind) {
-  const { text, params } = readCallInsertSQL(actor, verb, ok, errorKind);
+export async function recordReadCall(insertFn, actor, verb, ok) {
+  const { text, params } = readCallCountSQL(actor, verb, ok);
   try {
     await insertFn(text, params);
   } catch {
@@ -628,10 +622,10 @@ async function recordGateRejection(insertFn, actor, verb, args, rejection) {
 // Actor-scoped read doors use a read-only writer transaction and bypass the
 // ordinary reader branch. Schedule their identity-only audit after that
 // transaction; never classify a mutating writer call as a read.
-export function scheduleWriterReadCall(tool, actor, verb, ok, errorKind, waitUntil, insertFn) {
+export function scheduleWriterReadCall(tool, actor, verb, ok, waitUntil, insertFn) {
   if (tool?.writerConnection !== true || tool.write ||
       typeof waitUntil !== "function" || typeof insertFn !== "function") return false;
-  waitUntil(recordReadCall(insertFn, actor, verb, ok, errorKind));
+  waitUntil(recordReadCall(insertFn, actor, verb, ok));
   return true;
 }
 
@@ -844,19 +838,18 @@ export async function callTool(env, actor, name, args, profile = "full") {
         : null,
     };
     // Record AFTER the response is ready, via ctx.waitUntil, so recording never
-    // adds latency to the read the caller is waiting on. ok/errorKind are
-    // metadata only — never the result itself, never args.
-    let ok = true, errorKind = null;
+    // adds latency to the read the caller is waiting on. ok is metadata
+    // only — never the result itself, never args.
+    let ok = true;
     try {
       return await executeRegisteredTool(client, actor, name, args || {});
     } catch (e) {
       ok = false;
-      errorKind = e instanceof ToolError ? String(e.payload?.error || "tool_error").slice(0, 64) : "internal_error";
       throw e;
     } finally {
       if (env?.DATABASE_URL_WRITER) {
         const insertFn = (text, params) => neon(env.DATABASE_URL_WRITER).query(text, params);
-        env.ctx?.waitUntil?.(recordReadCall(insertFn, actor, name, ok, errorKind));
+        env.ctx?.waitUntil?.(recordReadCall(insertFn, actor, name, ok));
       }
     }
   }
@@ -876,7 +869,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
   }
   client.ai = budgetedAi(env);
   const writerRead = tool.writerConnection === true && !tool.write;
-  let readOk = true, readErrorKind = null;
+  let readOk = true;
   try {
     await client.query(tool.writerConnection && !tool.write ? "begin read only" : "begin");
     client.inTransaction = true;
@@ -914,11 +907,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
       }
       throw new ToolError({ ...rejection, gate_run_id, persisted: true });
     }
-    if (writerRead) {
-      readOk = false;
-      readErrorKind = e instanceof ToolError
-        ? String(e.payload?.error || "tool_error").slice(0, 64) : "internal_error";
-    }
+    if (writerRead) readOk = false;
     // TRANSLATE THE DATABASE'S REFUSAL HERE, WHERE THE CONNECTION IS STILL
     // OPEN. pgConstraintError has existed and been tested since 2026-08-21 and
     // until now had no production caller at all: every check, foreign-key,
@@ -938,8 +927,6 @@ export async function callTool(env, actor, name, args, profile = "full") {
       if (refusal) {
         const failure = await describeConstraint(client, refusal);
         failure.cause = e; // Retain the original driver diagnostics for server logs only.
-        if (writerRead && failure instanceof ToolError)
-          readErrorKind = String(failure.payload?.error || "tool_error").slice(0, 64);
         throw failure;
       }
     }
@@ -951,7 +938,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
     // the transaction has already ended, so this cannot change its answer.
     if (writerRead && env?.DATABASE_URL_WRITER) {
       const insertFn = (text, params) => neon(env.DATABASE_URL_WRITER).query(text, params);
-      scheduleWriterReadCall(tool, actor, name, readOk, readErrorKind,
+      scheduleWriterReadCall(tool, actor, name, readOk,
         env.ctx?.waitUntil?.bind(env.ctx), insertFn);
     }
     env.ctx?.waitUntil?.(pool.end());
