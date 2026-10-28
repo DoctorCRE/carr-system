@@ -1,5 +1,5 @@
-a9d052025fc168bc9a022647cc85d7be74edc4de905b61dfa3ac19f676dfb65b  target/release/hxprobe
-Source digest: 33f17cf411ca0573bf036b59faa0d681d1519bb5c0c72f8dc5323ade421ee9ec
+57099766eb6ce08880c46da0c76c75483462af5c91355580b919977b58a3c605  target/release/hxprobe
+Source digest: 552bfc521e4b58eda188e4796413e73c75ef877ecd6b564f301d4c475fa0321a
 
 Command: cargo build --release --locked
 Target: aarch64-apple-darwin
