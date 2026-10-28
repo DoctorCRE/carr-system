@@ -47,26 +47,30 @@ def output(argv, **options):
     return done.stdout if done.returncode == 0 else None
 
 
-def delivery(clone, branch, start, wants_pr):
-    """Did the job push a new commit and open the PR it was asked for?
+def delivery(clone, branch, start):
+    """Did the job push a new commit as a branch tip and open a PR for that branch?
 
     A job that exits cleanly without either loses its work (2026-10-28 retro: the
-    round-2 fix for #2624 reported success but never pushed), so both are checked
-    on the remote rather than trusted from the job's own report.
+    round-2 fix for #2624 reported success but never pushed), so the clone's final
+    HEAD is checked on the remote rather than trusted from the job's own report.
+    Jobs may push to an existing PR's branch, so any branch whose tip is HEAD counts.
     """
-    listing = output(['git', '-C', str(clone), 'ls-remote', 'origin', f'refs/heads/{branch}'])
-    remote = 'unchecked' if listing is None else next(
-        (line.split()[0] for line in listing.splitlines()
-         if line.split()[1:] == [f'refs/heads/{branch}']), 'none')
-    pr = 'not-requested'
-    if wants_pr:
-        found = output(['gh', 'pr', 'list', '--head', branch, '--state', 'all',
-                        '--json', 'url', '--jq', '.[0].url // empty'], cwd=clone)
-        pr = 'unchecked' if found is None else found.strip() or 'none'
-    missing = [name for name, gap in (('push', remote in ('unchecked', 'none', start)),
-                                      ('pr', pr in ('unchecked', 'none'))) if gap]
+    head = (output(['git', '-C', str(clone), 'rev-parse', 'HEAD']) or '').strip()
+    listing = output(['git', '-C', str(clone), 'ls-remote', '--heads', 'origin'])
+    tips = [ref.removeprefix('refs/heads/') for sha, ref in
+            (line.split('\t', 1) for line in (listing or '').splitlines())
+            if sha == head and head not in ('', start)]
+    found = branch if branch in tips else next(iter(tips), None)
+    pushed = found is not None
+    pr = 'unchecked'
+    if pushed:
+        url = output(['gh', 'pr', 'list', '--head', found, '--state', 'all',
+                      '--json', 'url', '--jq', '.[0].url // empty'], cwd=clone)
+        pr = 'unchecked' if url is None else url.strip() or 'none'
+    missing = [name for name, gap in (('push', not pushed), ('pr', pr in ('unchecked', 'none'))) if gap]
     return missing, (f"Delivery: {'failed' if missing else 'ok'} missing={','.join(missing) or 'none'} "
-                     f'branch={branch} start={start} remote={remote} pr={pr}')
+                     f"branch={found or ('unchecked' if listing is None else 'none')} "
+                     f'start={start} head={head or "unchecked"} pr={pr}')
 
 
 def main():
@@ -157,8 +161,7 @@ def main():
                 pass
             finally:
                 child.wait()
-        missing, report = delivery(clone, args.branch, start,
-                                   re.search(r'(?i:\bpull request\b)|\bPR\b', args.brief))
+        missing, report = delivery(clone, args.branch, start)
         status = code or int(bool(missing))
         try:
             if result.exists():

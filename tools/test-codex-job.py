@@ -64,6 +64,7 @@ class CodexJobTests(unittest.TestCase):
                       f'url = pathlib.Path({str(self.pr_url)!r})\n'
                       'print(url.read_text() if url.exists() else "")\n')
         gh.chmod(0o755)
+        self.pr_url.write_text('https://github.com/o/r/pull/9')  # a delivering job opened its PR
 
     def git(self, *args):
         return subprocess.run(['git', '--git-dir', str(self.origin), *args], env=self.git_env,
@@ -87,12 +88,12 @@ class CodexJobTests(unittest.TestCase):
         return output.decode().splitlines()[-1], errors.decode(), bool(retained)
 
     def test_job_that_never_pushed_reports_failure_and_keeps_its_work(self):
-        self.pr_url.write_text('https://github.com/o/r/pull/1')
         job = self.launch('', brief=PR_BRIEF, push=False)
         line, errors, retained = self.finish(job)
         self.assertEqual(job.returncode, 1)
-        self.assertEqual(line, f'Delivery: failed missing=push branch=test/job start={self.start} '
-                               'remote=none pr=https://github.com/o/r/pull/1')
+        self.assertEqual(line, f'Delivery: failed missing=push,pr branch=none start={self.start} '
+                               f'head={self.start} pr=unchecked')
+        self.assertFalse(self.gh_args.exists(), 'no branch, so nothing to look up')
         self.assertIn('Retained checkout:', errors)
         self.assertTrue(retained, 'unpushed work must not be deleted')
 
@@ -101,17 +102,18 @@ class CodexJobTests(unittest.TestCase):
         job = self.launch(body, push=False)
         line, _, _ = self.finish(job)
         self.assertEqual(job.returncode, 1)
-        self.assertEqual(line, f'Delivery: failed missing=push branch=test/job start={self.start} '
-                               f'remote={self.start} pr=not-requested')
+        self.assertEqual(line, f'Delivery: failed missing=push,pr branch=none start={self.start} '
+                               f'head={self.start} pr=unchecked')
 
-    def test_job_without_the_requested_pr_reports_failure(self):
+    def test_job_without_a_pr_reports_failure(self):
+        self.pr_url.unlink()
         job = self.launch('', brief=PR_BRIEF)
         line, _, retained = self.finish(job)
         remote = self.git('rev-parse', 'refs/heads/test/job')
         self.assertNotEqual(remote, self.start)
         self.assertEqual(job.returncode, 1)
         self.assertEqual(line, f'Delivery: failed missing=pr branch=test/job start={self.start} '
-                               f'remote={remote} pr=none')
+                               f'head={remote} pr=none')
         self.assertTrue(retained)
 
     def test_job_with_neither_names_both(self):
@@ -133,24 +135,58 @@ class CodexJobTests(unittest.TestCase):
         line, errors, retained = self.finish(job)
         self.assertEqual(job.returncode, 0, errors)
         self.assertEqual(line, f'Delivery: ok missing=none branch=test/job start={self.start} '
-                               f"remote={self.git('rev-parse', 'refs/heads/test/job')} "
+                               f"head={self.git('rev-parse', 'refs/heads/test/job')} "
                                'pr=https://github.com/o/r/pull/2')
         self.assertIn("'--head', 'test/job'", self.gh_args.read_text())
         self.assertIn("'--state', 'all'", self.gh_args.read_text())
         self.assertFalse(retained)
 
-    def test_brief_without_a_pr_needs_only_the_push(self):
-        job = self.launch('')
-        line, errors, _ = self.finish(job)
+    def test_push_to_an_existing_prs_branch_is_delivery(self):
+        self.pr_url.write_text('https://github.com/o/r/pull/3\n')
+        body = PUSH.replace("'HEAD']", "'HEAD:job/existing']")
+        job = self.launch(body, brief=PR_BRIEF, push=False)
+        line, errors, retained = self.finish(job)
         self.assertEqual(job.returncode, 0, errors)
-        self.assertTrue(line.endswith(' pr=not-requested'), line)
-        self.assertFalse(self.gh_args.exists(), 'no PR lookup when the brief asked for none')
+        self.assertEqual(line, f'Delivery: ok missing=none branch=job/existing start={self.start} '
+                               f"head={self.git('rev-parse', 'refs/heads/job/existing')} "
+                               'pr=https://github.com/o/r/pull/3')
+        self.assertIn("'--head', 'job/existing'", self.gh_args.read_text())
+        self.assertFalse(retained)
+
+    def test_branch_already_on_the_remote_is_not_a_push(self):
+        seed = self.root / 'seed'
+        subprocess.run(['git', '-C', str(seed), '-c', 'user.name=Fixture', '-c',
+                        'user.email=fixture@example.invalid', 'commit', '-qm', 'earlier run',
+                        '--allow-empty'], env=self.git_env, check=True)
+        subprocess.run(['git', '-C', str(seed), 'push', '-q', str(self.origin), 'HEAD:refs/heads/test/job'],
+                       env=self.git_env, check=True)
+        job = self.launch('', brief=PR_BRIEF, push=False)
+        line, _, retained = self.finish(job)
+        self.assertEqual(job.returncode, 1)
+        self.assertTrue(line.startswith('Delivery: failed missing=push,pr branch=none '), line)
+        self.assertTrue(retained)
+
+    def test_commit_made_after_the_push_is_not_delivered(self):
+        job = self.launch(PUSH.split('\n_git.run', 1)[0] + "\n_git.run(['git', '-C', _clone, '-c', "
+                          "'user.name=Fixture', 'commit', '-q', '--allow-empty', '-m', 'late'], check=True)\n",
+                          brief=PR_BRIEF)
+        line, _, retained = self.finish(job)
+        self.assertEqual(job.returncode, 1)
+        self.assertTrue(line.startswith('Delivery: failed missing=push,pr branch=none '), line)
+        self.assertTrue(retained, 'the unpushed commit must be kept')
+
+    def test_pr_is_required_even_when_the_brief_never_names_one(self):
+        self.pr_url.unlink()
+        job = self.launch('')
+        line, _, _ = self.finish(job)
+        self.assertEqual(job.returncode, 1)
+        self.assertTrue(line.startswith('Delivery: failed missing=pr '), line)
 
     def test_child_failure_keeps_its_own_exit_and_reports_delivery(self):
         job = self.launch('import sys; sys.exit(7)', push=False)
         line, _, _ = self.finish(job)
         self.assertEqual(job.returncode, 7)
-        self.assertTrue(line.startswith('Delivery: failed missing=push '), line)
+        self.assertTrue(line.startswith('Delivery: failed missing=push,pr '), line)
 
     def test_hung_job_exits_at_configured_deadline(self):
         job = self.launch('import time; time.sleep(60)', flags=('--timeout-seconds', '1'))
