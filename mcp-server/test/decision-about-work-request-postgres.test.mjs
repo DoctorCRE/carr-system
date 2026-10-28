@@ -64,13 +64,14 @@ async function command(name, args = {}, identity = actor, role = null, client = 
 
 test('log-decision refuses Work Request about refs without writing a decision or replay', async () => {
   const before = (await c.query('select count(*) from event')).rows[0].count;
-  for (const about of ['WR-000508', ['WR-000508'], 'WR-AI-002', 'WR-SIEP-26']) {
+  for (const [about, code] of [['WR-000508', 'decision_about_work_request_not_found'], [['WR-000508'], 'decision_about_work_request_not_found'], ['WR-AI-002', 'decision_about_work_request_not_found'], ['WR-SIEP-26', 'unsupported_decision_about']]) {
     const idempotency_key = randomUUID();
     await assert.rejects(command('log-decision', {
       idempotency_key, title: 'Synthetic settled decision',
       rationale: 'Synthetic rationale', about,
     }, actor, 'carr_writer'), error => {
-      assert.ok(['unsupported_decision_about', 'decision_about_work_request_not_found'].includes(error.payload?.error));
+      assert.equal(error.payload?.error, code);
+      assert.equal(error.payload.ref, Array.isArray(about) ? about[0] : about);
       assert.equal(error.payload.field, 'about');
       return true;
     });
@@ -101,7 +102,7 @@ test('log-decision still attaches supported subjects and refuses a mixed list at
   const mixedKey = randomUUID();
   await assert.rejects(command('log-decision', {
     ...args, idempotency_key: mixedKey, about: [party.ref, 'WR-000508'],
-  }, actor, 'carr_writer'), error => ['unsupported_decision_about', 'decision_about_work_request_not_found'].includes(error.payload?.error));
+  }, actor, 'carr_writer'), error => error.payload?.error === 'decision_about_work_request_not_found');
   assert.equal((await c.query('select count(*) from event where idempotency_key=$1', [mixedKey])).rows[0].count, '0');
   const out = await command('log-decision', {
     ...args, idempotency_key: randomUUID(), about: party.ref,
@@ -124,7 +125,7 @@ test('decision about Work Requests returns public errors and leaves mixed writes
   const lead = (await c.query(`insert into lead(party_id,registry_ref,stage,created_by,updated_by) values($1,'L-999509','new',$2,$2) returning registry_ref as ref`, [party.id, actor.id])).rows[0];
   const decision = await command('log-decision', {idempotency_key: randomUUID(), title: 'Synthetic original', rationale: 'Synthetic rationale'}, actor, 'carr_writer');
   for (const verb of ['log-decision', 'update-decision']) {
-    for (const [about, code] of [['WR-999123','unsupported_decision_about'], ['WR-AI-998','unsupported_decision_about'], ['WR-999999999999','decision_about_work_request_not_found'], [[lead.ref, 'WR-999123'],'unsupported_decision_about']]) {
+    for (const [about, code] of [['WR-999123','unsupported_decision_about'], ['wr-999123','unsupported_decision_about'], ['WR-AI-998','unsupported_decision_about'], ['WR-999999999999','decision_about_work_request_not_found'], [[lead.ref, 'WR-999123'],'unsupported_decision_about']]) {
       const before = (await c.query('select count(*) from event')).rows[0].count;
       const args = verb === 'log-decision'
         ? {title:'Synthetic decision', rationale:'Synthetic rationale', about}
@@ -133,6 +134,8 @@ test('decision about Work Requests returns public errors and leaves mixed writes
         const result = publicError(error, {inputSchema: TOOLS[verb].inputSchema});
         assert.equal(result.error, code);
         assert.match(result.hint, /about/i);
+        assert.ok(result.hint.includes(Array.isArray(about) ? about[1] : about));
+        if (code === 'unsupported_decision_about') assert.match(result.hint, /omit about and name the Work Request in the rationale/i);
         return true;
       });
       assert.equal((await c.query('select count(*) from event')).rows[0].count, before);
