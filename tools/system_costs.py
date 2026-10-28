@@ -3,6 +3,7 @@
 import calendar
 import json
 import hashlib
+import uuid
 import os
 import urllib.error
 import urllib.parse
@@ -330,7 +331,7 @@ def reconcile(report, path, run_verb=cost_verb):
         def write(name, payload, provider, after):
             state['revision'] += 1
             manifest = json.dumps([name, provider, state['revision'], payload], sort_keys=True)
-            payload['idempotency_key'] = hashlib.sha256(manifest.encode()).hexdigest()
+            payload['idempotency_key'] = str(uuid.uuid5(uuid.NAMESPACE_URL, manifest))
             state['pending'] = {'name': name, 'payload': payload, 'provider': provider, 'after': after}
             _save_state(path, state)
             complete_pending()

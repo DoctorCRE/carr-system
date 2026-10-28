@@ -1,5 +1,6 @@
 // Local readers submit derived invoice facts. No provider, raw message or send path.
 import { canExercisePartnerAuthority } from "./partner-authority.js";
+import { derivedIdempotencyKey } from "./derived-key.ts";
 const normal = value => typeof value === "string" ? value.trim().replace(/\s+/g, " ").toLowerCase() : "";
 const candidateDeals = (invoice,deals) => deals.filter(d=>normal(d.name)===normal(invoice.deal_name));
 const dateText = value => value instanceof Date ? value.toISOString().slice(0, 10) : value;
@@ -92,7 +93,7 @@ export function invoiceAutomation({withEnvelope,writeEvent,ToolError,updateDeal,
       }
       if(move.status!=="applied") {results.push(move);continue;}
       const d=s.deals.find(d=>d.id===move.deal_id);
-      await updateDeal(c,actor,{idempotency_key:`${args.idempotency_key}:invoice:${move.invoice_id}`,
+      await updateDeal(c,actor,{idempotency_key:derivedIdempotencyKey("invoice-close",`${args.idempotency_key}:${move.invoice_id}`),
         deal:d.id,base_version:d.version,fields:{phase:"closed",invoiced_on:move.invoiced_on}});
       const ids=await fieldEvents(c,d.id);
       await c.query(`update deal_invoice_email set status='applied',deal_id=$2,prior_phase=$3,prior_invoiced_on=$4,
@@ -149,7 +150,7 @@ export function invoiceAutomation({withEnvelope,writeEvent,ToolError,updateDeal,
         const ids=await fieldEvents(c,m.deal_id);
         if(current.status!=="applied" || d.version!==args.base_version || d.phase!=="closed" || dateText(d.invoiced_on)!==dateText(m.email_date) ||
           ids.find(e=>e.field==="phase")?.id!==m.phase_event_id || ids.find(e=>e.field==="invoiced_on")?.id!==m.invoice_event_id) fail("newer_invoice_change_exists");
-        await updateDeal(c,actor,{idempotency_key:`${args.idempotency_key}:restore`,deal:m.deal_id,base_version:d.version,
+        await updateDeal(c,actor,{idempotency_key:derivedIdempotencyKey("invoice-restore",args.idempotency_key),deal:m.deal_id,base_version:d.version,
           fields:{phase:m.prior_phase,invoiced_on:dateText(m.prior_invoiced_on)}});
         await c.query("update deal_invoice_email set status='undone',undone_at=now(),undone_by=$2 where id=$1",[m.id,actor.id]);
         await writeEvent(c,actor,"undo-invoice-close","deal",m.deal_id,{old:{phase:"closed",invoiced_on:dateText(m.email_date)},new:{phase:m.prior_phase,invoiced_on:dateText(m.prior_invoiced_on),undone_invoice_id:m.id,undone_by:actor.id,reason:`Undid: ${m.reason}`,evidence_ref:m.evidence_ref},cause:"human_correction"});

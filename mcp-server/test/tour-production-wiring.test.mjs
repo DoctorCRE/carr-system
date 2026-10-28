@@ -41,7 +41,7 @@ test("production Tour runtime preserves tool envelopes and digest-only public ac
   assert.match(runtime, /sharing\.readPacket/);
   assert.match(runtime, /sharing\.readMap/);
   assert.match(runtime, /read_tour_projection_creation_metadata/);
-  assert.match(runtime, /derivedIdempotencyUuid\("tour-pdf-render-result", context\.input\.idempotency_key\)/);
+  assert.match(runtime, /derivedIdempotencyKey\("tour-pdf-render-result", context\.input\.idempotency_key\)/);
   assert.doesNotMatch(runtime, /record-tour-pdf-render-result[\s\S]{0,300}crypto\.randomUUID\(\)/);
   assert.doesNotMatch(runtime, /from ops\.tour_public_projection/i);
   assert.doesNotMatch(runtime, /raw_token|plaintext_token|authorization\s*:/i);

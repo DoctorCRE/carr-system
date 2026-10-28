@@ -88,7 +88,7 @@
     {
       "key": "outlook-intake",
       "name": "Outlook mail and calendar intake",
-      "purpose": "Every 30 minutes from 07:00 to 19:00, decodes a private copy of the new Outlook's local store with the pinned hxprobe fork and logs new email (full plain-text body), past meetings and next-seven-day meetings for exactly matched CARR records through log-activity and set-next-action, with one isolated haiku call per new matched email for its next step. After intake releases its lock, the same invocation runs the WR-000441 email router (lib/email_router.py) under its own lock and receipt for at most 20 minutes, storing phase-move and next-step proposals for Joe to confirm. Never creates, merges or renames records; never sends anything.",
+      "purpose": "Every 30 minutes from 07:00 to 19:00, decodes a private copy of the new Outlook's local store with the pinned hxprobe fork and logs new email (full plain-text body), past meetings and next-seven-day meetings for exactly matched CARR records through log-activity and set-next-action, with one isolated haiku call per new matched email for its next step and one read per unresolved inbound email from an unknown sender proposing what it applies to, queued on the claim card for a partner to confirm. After intake releases its lock, the same invocation runs the WR-000441 email router (lib/email_router.py) under its own lock and receipt for at most 20 minutes, storing phase-move and next-step proposals for Joe to confirm. Never creates, merges or renames records; never sends anything.",
       "family": "Local Mac edge",
       "criticality": "medium",
       "owner_actor": "joe",

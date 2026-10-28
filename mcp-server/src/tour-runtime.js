@@ -8,6 +8,7 @@ import { trustedTourRendererResult } from "./tour-artifacts.js";
 import { tourSharingBrowserAccess } from "./tour-sharing.js";
 import { authorizationClassForActor, organizationTenantForActor } from "./identity.js";
 import { readPropertyEvidence } from "./tour-property-evidence.ts";
+import { derivedIdempotencyKey } from "./derived-key.ts";
 
 const sharing = tourSharingBrowserAccess({ ToolError });
 
@@ -141,14 +142,6 @@ async function sha256Bytes(value) {
   return `sha256:${[...hash].map(byte => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
-async function derivedIdempotencyUuid(namespace, value) {
-  const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${namespace}:${value}`)));
-  bytes[6] = (bytes[6] & 0x0f) | 0x50;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = [...bytes.slice(0, 16)].map(byte => byte.toString(16).padStart(2, "0")).join("");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
 const PDF_ARTIFACT_READS = Object.freeze({
   review: {
     sql: "select ops.read_tour_pdf_artifact_for_review($1::text,$2::uuid,$3::text) as data",
@@ -199,7 +192,7 @@ export async function runTourPdfRender(context, dependencies = {}) {
   });
   if (!request.ok || !request.data.render_job_id) return request;
   const renderJobId = request.data.render_job_id;
-  const resultIdempotencyKey = await derivedIdempotencyUuid("tour-pdf-render-result", context.input.idempotency_key);
+  const resultIdempotencyKey = derivedIdempotencyKey("tour-pdf-render-result", context.input.idempotency_key);
   try {
     let stored;
     try {

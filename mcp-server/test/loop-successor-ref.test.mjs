@@ -22,6 +22,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError } from "../src/tools.js";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const joe = { id: "10000000-0000-0000-0000-000000000002", slug: "joe",
   display: "Joe", human: true, via: "mcp", client_id: "claude" };
@@ -75,7 +76,7 @@ class Fake {
 
 async function closeWith(successor_loop, fake = new Fake()) {
   const args = {
-    idempotency_key: `k-${successor_loop}`, loop_id: CLOSING.id, kind: "open_loop",
+    idempotency_key: derivedIdempotencyKey("test", `k-${successor_loop}`), loop_id: CLOSING.id, kind: "open_loop",
     base_version: 2, resolution: "dropped", outcome: OUTCOME, successor_loop,
   };
   try { return { fake, result: await TOOLS["close-loop"].handler(fake, joe, args), error: null }; }

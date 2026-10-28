@@ -194,6 +194,9 @@ elif tool == 'get_window_state':
         elements.append(element)
         tokens[str(index)] = kind
         return index
+    if payload['window_id'] == 14:
+        print(json.dumps({'elements': [{'role': 'AXButton', 'label': 'Send'}]}))
+        sys.exit(0)
     top = add('AXWindow', state['folder'] + ' • ' + ACCOUNT, 0)
     if not state.get('account_button_missing'):
         add('AXButton', 'All Accounts', 1, top, ['account'])
@@ -390,6 +393,21 @@ class PreflightQuitTest(FakeOutlookCase):
         from lib.outlook_ui import prepare_outlook
         with patch.dict(os.environ, self.env, clear=True):
             return prepare_outlook(waits)
+
+    def test_mailbox_with_twelve_toolbar_strips_allows_restart(self):
+        strips = [window(wid, '', 1920, 30, False) for wid in range(20, 32)]
+        self.given(windows=strips + [ORDINARY], after_launch=strips + [ORDINARY])
+        self.assertIsNone(self.prepare())
+
+    def test_mailbox_with_suffixed_compose_preserves_restart(self):
+        self.given(windows=[ORDINARY, COMPOSE | {'title': f'Draft • {ACCOUNT}'}])
+        self.assertIsNone(self.prepare())
+
+    def test_lone_draft_is_refused_without_quitting(self):
+        self.given(windows=[COMPOSE | {'title': f'Draft • {ACCOUNT}'}])
+        self.assertIsNotNone(self.prepare())
+        self.assertEqual(self.called('osascript') + self.called('open'), [])
+        self.assertFalse(any(call[1] == 'invoke_menu' for call in self.called('cua-driver')))
 
     def test_quit_uses_mailbox_when_unassigned_window_is_first(self):
         self.given(windows=[UNTITLED_OFFSCREEN, ORDINARY], quit_window_id=13)

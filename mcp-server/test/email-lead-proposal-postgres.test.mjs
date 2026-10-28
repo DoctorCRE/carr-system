@@ -116,3 +116,56 @@ test('a replayed key returns the stored answer without a second row', async () =
   assert.equal(second.pool_id, first.pool_id);
   assert.equal((await c.query("select count(*)::int as n from candidate_pool where email='replay@unknown.test'")).rows[0].n, 1);
 });
+
+let deals;
+async function fixtures() {
+  if (deals) return deals;
+  const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic Client Person',$1,$1) returning id", [actor.id])).rows[0].id;
+  await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
+  const client = (await c.query("insert into client(party_id,status,created_by,updated_by,roster_ref) values($1,'fixture_active',$2,$2,'C-999451') returning id", [party, actor.id])).rows[0].id;
+  const deal = async (name, phase) => (await c.query(`insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by)
+    values($1,$2,'purchase',$3,'joe',$4,$4) returning id`, [name, client, phase, actor.id])).rows[0].id;
+  deals = { open: await deal('Synthetic bayside suite', 'site_selection'), closed: await deal('Synthetic closed suite', 'closed') };
+  return deals;
+}
+
+test('a read names what the email applies to on the queued row, validated against open records', async () => {
+  const { open, closed } = await fixtures();
+  const deal = await propose('assistant@landlord-reads.test', { applies_to: 'existing_deal', deal: open,
+    evidence_quote: 'Tour times for the bayside suite', confidence: 0.8 });
+  assert.equal(deal.proposed, true);
+  const row = (await c.query('select score_basis, source_row from candidate_pool where id=$1', [deal.pool_id])).rows[0];
+  assert.equal(row.score_basis, 'Inbound email: Asks about leasing a small clinic suite. Applies to open deal Synthetic bayside suite.');
+  assert.deepEqual(row.source_row.reading, { applies_to: 'existing_deal', deal_id: open, party_ref: null,
+    evidence_quote: 'Tour times for the bayside suite', confidence: 0.8 });
+  const party = await propose('personal@reads.test', { applies_to: 'existing_party', party: 'C-999451', confidence: 0.7 });
+  assert.match((await c.query('select score_basis from candidate_pool where id=$1', [party.pool_id])).rows[0].score_basis,
+    /Likely a new address for Synthetic Client Person \(C-999451\)\.$/);
+  const matter = await propose('newmatter@reads.test', { applies_to: 'new_matter', confidence: 0.6 });
+  assert.match((await c.query('select score_basis from candidate_pool where id=$1', [matter.pool_id])).rows[0].score_basis,
+    /Possible new lead or matter\.$/);
+  await assert.rejects(propose('closed@reads.test', { applies_to: 'existing_deal', deal: closed, confidence: 0.9 }),
+    error => error.payload?.error === 'email_lead_deal_invalid');
+  await assert.rejects(propose('noref@reads.test', { applies_to: 'existing_party', party: 'C-000000', confidence: 0.9 }),
+    error => error.payload?.error === 'email_lead_party_invalid');
+  for (const extra of [{ applies_to: 'existing_deal', confidence: 0.9 }, { applies_to: 'new_matter', deal: open, confidence: 0.9 },
+    { deal: open }, { applies_to: 'new_matter' }])
+    await assert.rejects(propose('shape@reads.test', extra), error => error.payload?.error === 'email_lead_input_invalid', JSON.stringify(extra));
+});
+
+test('a read adds its reasoning once to a row queued before reads existed, never to a judged row', async () => {
+  const { open } = await fixtures();
+  const first = await propose('legacy@reads.test');
+  const reasoned = await propose('legacy@reads.test', { applies_to: 'existing_deal', deal: open, confidence: 0.8 });
+  assert.deepEqual([reasoned.proposed, reasoned.reason, reasoned.reasoned, reasoned.pool_id], [false, 'already_in_queue', true, first.pool_id]);
+  const row = (await c.query('select score_basis, source_row, version from candidate_pool where id=$1', [first.pool_id])).rows[0];
+  assert.match(row.score_basis, /Applies to open deal Synthetic bayside suite\.$/);
+  assert.equal(row.source_row.message_ref, 'abc123:1760972400', 'the original provenance stays');
+  assert.equal(row.version, 2);
+  const again = await propose('legacy@reads.test', { applies_to: 'new_matter', confidence: 0.5 });
+  assert.equal(again.reasoned, false, 'a reasoned row keeps its first reading');
+  const declined = await propose('judged@reads.test');
+  await c.query("update candidate_pool set status='declined', declined_at=now(), declined_by=$1, decline_reason='Synthetic no' where id=$2", [actor.id, declined.pool_id]);
+  const late = await propose('judged@reads.test', { applies_to: 'new_matter', confidence: 0.9 });
+  assert.deepEqual([late.reasoned, late.status], [false, 'declined']);
+});
