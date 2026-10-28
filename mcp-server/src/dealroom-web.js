@@ -28,6 +28,7 @@ import {
 } from "./workspace-business-read.js";
 import { isTourInternalRequest } from "./tour-internal-web.js";
 import { executeRegisteredTool } from "./tools.js";
+import { verbRequestBudgetRefusal } from "./verb-request-budget.js";
 import { readDealWithJev } from "./jev-deal-reading.ts";
 import { callTool } from "./mcp.js";
 import { isStagingBrowserEnvironment } from "./staging-browser.ts";
@@ -883,6 +884,8 @@ async function jevDealReadingResponse(request, env, session, dependencies) {
   if (!args || Object.keys(args).length !== 1 ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(args.deal || ""))
     return json({ error: "INVALID_REQUEST" }, 400);
+  const refusal = await verbRequestBudgetRefusal(env, session.actor, session.key);
+  if (refusal) return refusal;
   try {
     const reader = dependencies.jevDealRecordReader || (async (deal) => {
       const sql = neon(env.DATABASE_URL_READER);
@@ -1138,7 +1141,7 @@ async function handleRequest(request, env, ctx, dependencies) {
             !equalStrings(request.headers.get("x-carr-csrf"), session.csrfToken)) {
           return json({ error: "forbidden", reason: "csrf_mismatch" }, 403);
         }
-        response = await dependencies.mcpHandler(request, env, ctx, session.actor);
+        response = await dependencies.mcpHandler(request, env, ctx, session.actor, session.key);
       }
       else if (url.pathname === "/pipeline/changes") response = await dependencies.pipelineHandler(request, env, ctx, session.actor);
       else if (url.pathname === JEV_DEAL_READING_PATH) {
