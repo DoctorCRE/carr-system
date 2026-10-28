@@ -15,7 +15,6 @@ const INTERNAL_ONLY = new Set([
   "already_merged",
   "already_on_another_campaign",
   "already_scored",
-  "ambiguous_decision_id",
   "ambiguous_file",
   "ambiguous_measurement",
   "ambiguous_placement",
@@ -66,9 +65,6 @@ const INTERNAL_ONLY = new Set([
   "deal_name_exists",
   "deal_not_found",
   "deal_outside_review_workspace",
-  "decision_id_malformed",
-  "decision_id_required",
-  "decision_not_found",
   "defect_class_required",
   "derived_claim_type",
   "different_parties",
@@ -280,7 +276,6 @@ const INTERNAL_ONLY = new Set([
   "unknown_vendor_stage",
   "unresolved_items",
   "unsupported_call_change",
-  "unsupported_decision_about",
   "use_reassign_deal",
   "value_required",
   "vendor_not_live",
@@ -299,6 +294,8 @@ function walk(node, visit, ancestors = []) {
   }
 }
 
+// This inventories tools.js only. It passes ToolError to other modules whose codes
+// are not inventoried, and an aliased constructor (const E = ToolError) is missed.
 function codesIn(source) {
   const tree = parse(source, { sourceType: "module" });
   const codes = new Set();
@@ -355,6 +352,11 @@ test("every tools.js ToolError code is classified", t => {
   const refusalSet = parse(source, { sourceType: "module" }).program.body.find(node =>
     node.type === "VariableDeclaration" && node.declarations.some(d => d.id.name === "RULE_ENFORCEMENT_FALLBACK_REFUSALS"));
   walk(refusalSet, node => { if (node.type === "StringLiteral") codes.add(node.value); });
+  const publicInternal = [...INTERNAL_ONLY].filter(code =>
+    publicError(new ToolError({ error: code, field: "field" }), { inputSchema: { properties: { field: {} } } }).error === code).sort();
+  assert.deepEqual(publicInternal, [], "internal-only codes must not be public");
+  const stale = [...INTERNAL_ONLY].filter(code => !codes.has(code)).sort();
+  assert.deepEqual(stale, [], "internal-only codes must still be thrown in tools.js");
   const unclassified = [...codes].filter(code => !INTERNAL_ONLY.has(code) &&
     publicError(new ToolError({ error: code, field: "field" }), { inputSchema: { properties: { field: {} } } }).error !== code).sort();
   assert.deepEqual(unclassified, [], "classify each code as public or internal-only");
