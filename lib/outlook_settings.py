@@ -40,6 +40,7 @@ class OutlookSettings:
     source: Path
     model: str = 'haiku'
     partner_cc: str = ''
+    signing_identity: str = ''
 
     @property
     def decoder(self) -> Path:
@@ -123,7 +124,12 @@ def load_settings(home: Path | None = None) -> OutlookSettings:
     if 'model' in values and (not isinstance(values['model'], str)
                               or not re.fullmatch(r'[a-z0-9][a-z0-9.-]{0,63}', values['model'])):
         fail('model', 'must be a model name such as haiku')
-    for name in sorted(expected - {'model', 'partner_cc'}):
+    if 'signing_identity' in values:
+        identity = values['signing_identity']
+        if (not isinstance(identity, str) or not identity.strip() or identity == '-'
+                or identity != identity.strip() or any(ord(c) < 32 for c in identity)):
+            fail('signing_identity', 'must name a code-signing identity without control characters or surrounding spaces')
+    for name in sorted(expected - {'model', 'partner_cc', 'signing_identity'}):
         if name not in values:
             fail(name, 'required')
         value = values[name]

@@ -157,7 +157,7 @@ class ProductIntegrationTest(unittest.TestCase):
         summary = next(i for i, step in enumerate(steps) if '--summary' in step.get('run', ''))
         self.assertLess(upload, summary)
         self.assertEqual(steps[upload]['if'], 'always()')
-        self.assertEqual(steps[summary]['if'], "github.event_name != 'pull_request'")
+        self.assertEqual(steps[summary]['if'], "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'")
         self.assertIn('"$GITHUB_STEP_SUMMARY"', steps[summary]['run'])
         self.assertIn('--baseline scripts/doc-drift/baseline.json', steps[summary]['run'])
         self.assertIn('schedule', workflow['on'])

@@ -10,12 +10,12 @@ no mcp-server/node_modules there, could not run its own tooling, and fell
 back to running from the shared CANONICAL checkout instead — the exact
 multi-writer collision `run.sh worktree` exists to prevent (see that file's
 header). bin/worktree.sh's create path already solves this for worktrees IT
-creates, by symlinking .venv, out, and mcp-server/node_modules back to the
+creates, by symlinking .venv and out back to the
 canonical tree. A worktree created by any other door gets none of that,
 because nothing calls the linking step for it.
 
 `bin/worktree.sh --plumb [path]` (added alongside this file) is the same
-three links, made callable against a worktree bin/worktree.sh did not
+links, made callable against a worktree bin/worktree.sh did not
 create. THIS hook is what makes that automatic: at SessionStart, if the
 session's cwd is inside a non-canonical carr-system worktree that is
 missing any of the three links, it calls `--plumb` for that worktree and
@@ -76,12 +76,12 @@ from lib.hook_runtime import decision, run
 # paths-selftest.py pins that no-op.
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Must match the three names bin/worktree.sh links at create time and
+# Must match the names bin/worktree.sh links at create time and
 # re-links under --plumb. Kept here only to decide WHETHER to bother calling
 # --plumb (and what to say if we do) — the actual linking decision (what
 # counts as already-plumbed, the tracked-real-dir guard) stays solely in
 # bin/worktree.sh's link(), never duplicated here (rule a8c55a47).
-PLUMB_LINKS = (".venv", "out", os.path.join("mcp-server", "node_modules"))
+PLUMB_LINKS = (".venv", "out")
 
 # One canonical source for the active operating policy. Codex reads
 # AGENTS.md directly; Claude Code receives this exact block from its existing

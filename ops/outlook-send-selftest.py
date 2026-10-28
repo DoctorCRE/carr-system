@@ -74,6 +74,7 @@ class FakeOutlook:
         self.front = False
         self.background = False
         self.press_count = 0
+        self.unresolved: set[int] = set()
 
     def open_url(self, url: str) -> None:
         parts = urlsplit(url)
@@ -127,6 +128,8 @@ class FakeOutlook:
         if tool == 'list_windows':
             return {'windows': list(self.windows.values())}
         if tool == 'get_window_state':
+            if args['window_id'] in self.unresolved:
+                return {'elements': [], 'degraded_reason': 'ax_window_unresolved'}
             return {'elements': self.elements(args['window_id'])}
         if tool == 'click':
             wid, index = map(int, args['element_token'].split(':'))
@@ -829,6 +832,28 @@ class SendTests(unittest.TestCase):
         self.assertEqual(h.fake.presses(), 0)
         self.assertEqual(len(h.fake.forms), 1)
 
+    def test_unreadable_unassigned_window_does_not_hold_send(self):
+        h = Harness(self.out)
+        h.fake.windows[15] = {'window_id': 15, 'title': '', 'is_on_screen': False, 'on_current_space': None,
+                              'bounds': {'x': 0, 'y': 580, 'width': 500, 'height': 500}}
+        h.fake.unresolved.add(15)
+        self.assertEqual(h.send().state, State.DONE)
+        self.assertEqual(h.fake.presses(), 1)
+
+    def test_untitled_compose_and_unassigned_shape_with_draft_controls_hold_send(self):
+        for title, bounds, on_screen, space in (
+                ('', {'x': 298, 'y': 52, 'width': 917, 'height': 911}, True, True),
+                ('', {'x': 0, 'y': 580, 'width': 500, 'height': 500}, False, None)):
+            with self.subTest(bounds=bounds):
+                h = Harness(self.out / str(bounds['width']))
+                h.fake.open_url('mailto:person-z@example.test?subject=&body=leave-alone')
+                h.fake.windows[100].update(title=title, bounds=bounds, is_on_screen=on_screen,
+                                           on_current_space=space)
+                result = h.send()
+                self.assertEqual((result.state, result.reason), (State.FAILED, 'compose_window_open'))
+                self.assertEqual(h.fake.presses(), 0)
+                self.assertEqual(len(h.fake.forms), 1)
+
     def test_failed_discard_is_reported(self):
         h = Harness(self.out, corrupt=('subject', 'changed'))
         with patch.object(send_mod.ComposeWindow, 'discard', lambda _: None):
@@ -1046,6 +1071,31 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual(receipts[0]['sent_item_id'], 'sent-42')
         self.assertEqual(receipts[0]['base_version'], 2)
         self.assertEqual(receipts[0]['sha256'], self.draft['sha256'])
+
+    def test_open_partner_draft_defers_without_quit_relaunch_or_failure_receipt(self):
+        for title in (f'Partner draft • {ACCOUNT}', '', None):
+            for recovery in (False, True):
+                with self.subTest(title=title, recovery=recovery):
+                    fake = FakeOutlook(self.clock, self.mailbox)
+                    fake.open_url('mailto:other@example.test?subject=Partner%20draft&body=keep')
+                    fake.windows[100]['title'] = title
+                    fake.windows[1]['is_on_screen'] = not recovery
+                    fake.windows[100]['is_on_screen'] = not recovery
+                    self.calls.clear()
+                    self.ports.open_form = lambda item: send_mod.open_form(item, ui.Waits(
+                        quit_seconds=0, sync_seconds=0, new_window_seconds=0))
+                    with patch.object(ui, 'cua', fake), \
+                            patch.object(ui, 'outlook_pid', return_value=42), \
+                            patch.object(ui.subprocess, 'run') as command:
+                        counts = self.worker.run(self.settings, self.ports)
+                    self.assertEqual(counts['deferred'], 1)
+                    self.assertEqual(counts['compose_window_open'], 1)
+                    self.assertEqual((counts['failed'], counts['sent']), (0, 0))
+                    self.assertEqual([v for v, _ in self.calls if v == 'record-email-sent'], [])
+                    self.assertEqual(fake.presses(), 0)
+                    self.assertEqual(len(fake.forms), 1)
+                    self.assertFalse(any(tool == 'invoke_menu' for tool, _ in fake.calls))
+                    command.assert_not_called()
 
     def test_invalid_rows_record_failure_and_do_not_block_later_draft(self):
         bad = dict(self.draft, cc=['wrong@example.test'])

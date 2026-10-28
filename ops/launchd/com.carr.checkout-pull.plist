@@ -6,9 +6,12 @@
     <string>com.carr.checkout-pull</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
-        <string>{{REPO}}/ops/checkout-pull.py</string>
+        <string>/usr/bin/git</string>
+        <string>-C</string>
         <string>{{REPO}}</string>
+        <string>pull</string>
+        <string>--ff-only</string>
+        <string>--quiet</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
