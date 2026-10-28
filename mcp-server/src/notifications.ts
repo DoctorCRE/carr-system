@@ -10,10 +10,16 @@
 // transaction-local setting, which only the writer path installs -- on the
 // reader connection it would resolve nobody.
 
+import type { Actor, Db, VerbInputs, WithEnvelope, WriteEvent } from "./verb-contract.ts";
+import type { ToolError as ToolErrorClass } from "./tool-error.ts";
+
+// Preserve partial database JSON validation; unchecked fields remain untyped.
+type ProjectionFacts = Record<string, any> | null | undefined;
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** Pure shaper over ops.notification_preference_facts. */
-export function notificationPreferenceProjection(prefs, ToolError) {
+export function notificationPreferenceProjection(prefs: ProjectionFacts, ToolError: typeof ToolErrorClass) {
   if (!prefs || typeof prefs !== "object" || prefs.ok !== true) {
     throw new ToolError({ error: "notification_preferences_unavailable" });
   }
@@ -37,7 +43,7 @@ export function notificationPreferenceProjection(prefs, ToolError) {
  * snapshot and cannot disagree about the preference row. It is OUTPUT-ONLY:
  * notification-feed's inputSchema does not move for it.
  */
-export function notificationFeedProjection(facts, prefs, ToolError) {
+export function notificationFeedProjection(facts: ProjectionFacts, prefs: ProjectionFacts, ToolError: typeof ToolErrorClass) {
   if (!facts || typeof facts !== "object" || facts.ok !== true) {
     throw new ToolError({ error: "notification_feed_unavailable" });
   }
@@ -58,7 +64,7 @@ export function notificationFeedProjection(facts, prefs, ToolError) {
       created_at: row.created_at,
       read_at: row.read_at ?? null,
       delivery: (Array.isArray(row.delivery) ? row.delivery : [])
-        .map(entry => ({ channel: entry.channel, state: entry.state })),
+        .map((entry: Record<string, any>) => ({ channel: entry.channel, state: entry.state })),
       // A DISJUNCTION OF TWO HONEST FACTS. The first term is AC-PREF-FEED's
       // clause: quiet hours across the current instant mark the affected rows.
       // The second preserves what the store already knows -- a device push
@@ -67,12 +73,12 @@ export function notificationFeedProjection(facts, prefs, ToolError) {
       // now.
       quiet_suppressed: quietNow
         || (Array.isArray(row.delivery) ? row.delivery : [])
-          .some(entry => entry?.state === "suppressed_quiet_hours"),
+          .some((entry: Record<string, any>) => entry?.state === "suppressed_quiet_hours"),
     })),
   };
 }
 
-export function notificationTools({ withEnvelope, writeEvent, ToolError }) {
+export function notificationTools({ withEnvelope, writeEvent, ToolError }: { withEnvelope: WithEnvelope; writeEvent: WriteEvent; ToolError: typeof ToolErrorClass }) {
   return {
     "acknowledge-notification": {
       write: true,
@@ -81,7 +87,7 @@ export function notificationTools({ withEnvelope, writeEvent, ToolError }) {
         idempotency_key: { type: "string" },
         notification_id: { type: "string" },
       }, required: ["idempotency_key", "notification_id"] },
-      handler: async (c, actor, args) =>
+      handler: async (c: Db, actor: Actor, args: VerbInputs["acknowledge-notification"]) =>
         withEnvelope(c, actor, "acknowledge-notification", args, async () => {
           if (!UUID.test(String(args.notification_id || ""))) {
             throw new ToolError({ error: "notification_not_found" });
@@ -115,7 +121,7 @@ export function notificationTools({ withEnvelope, writeEvent, ToolError }) {
         after: { type: "string" },
         limit: { type: "integer", minimum: 1, maximum: 200 },
       }, required: [] },
-      handler: async (c, _a, args) => {
+      handler: async (c: Db, _a: Actor, args: VerbInputs["notification-feed"]) => {
         const r = await c.query(
           "select ops.notification_feed_facts($1::timestamptz,$2::integer) as facts",
           [args.after ?? null, args.limit ?? 50]);
@@ -133,7 +139,7 @@ export function notificationTools({ withEnvelope, writeEvent, ToolError }) {
       writerConnection: true,
       description: "Read the acting actor's own notification preferences and whether quiet hours cover this moment. There is no actor argument: the function resolves the caller itself.",
       inputSchema: { type: "object", additionalProperties: false, properties: {}, required: [] },
-      handler: async (c, _a, _args) => {
+      handler: async (c: Db, _a: Actor, _args: VerbInputs["read-notification-preferences"]) => {
         const r = await c.query("select ops.notification_preference_facts() as prefs");
         return notificationPreferenceProjection(r.rows[0]?.prefs, ToolError);
       },
@@ -155,7 +161,7 @@ export function notificationTools({ withEnvelope, writeEvent, ToolError }) {
         timezone: { type: "string" },
         clear_quiet_hours: { type: "boolean" },
       }, required: ["idempotency_key", "base_version"] },
-      handler: async (c, actor, args) =>
+      handler: async (c: Db, actor: Actor, args: VerbInputs["set-notification-preference"]) =>
         withEnvelope(c, actor, "set-notification-preference", args, async () => {
           const r = await c.query(
             `select ops.set_notification_preference($1::integer,$2::boolean,$3::time,$4::time,

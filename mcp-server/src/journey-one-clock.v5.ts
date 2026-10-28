@@ -14,7 +14,7 @@ export const JOURNEY_ONE_DEADLINE_CONTRACT = Object.freeze({
 });
 const HOUR = 3600000;
 const freeze = Object.freeze;
-function stamp(value) {
+function stamp(value: string) {
   const m = typeof value === "string" && /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|[+-]\d{2}:\d{2})$/.exec(value);
   if (!m) { throw new RangeError("invalid_timestamp"); }
   const [y, mo, d, h, mi, s] = m.slice(1, 7).map(Number);
@@ -24,10 +24,10 @@ function stamp(value) {
   const ms = Date.parse(value); if (!Number.isSafeInteger(ms)) { throw new RangeError("invalid_timestamp"); }
   return ms;
 }
-const iso = ms => new Date(ms).toISOString();
+const iso = (ms: number) => new Date(ms).toISOString();
 const format = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hourCycle: "h23",
   year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
-function wall(ms) {
+function wall(ms: number) {
   const p = Object.fromEntries(format.formatToParts(ms).map(x => [x.type, x.value]));
   const date = new Date(0);
   date.setUTCFullYear(Number(p.year), Number(p.month) - 1, Number(p.day));
@@ -41,13 +41,13 @@ export const DEADLINE_OVERLAP_ORIGIN_OFFSET = "chicago_wall_time_overlap_resolve
 export const DEADLINE_UNSUPPORTED = "unsupported_chicago_calendar_case";
 
 /** Every Chicago UTC offset in force within two days of a wall-clock target. */
-function offsetsAround(target) {
-  const offsets = new Set();
+function offsetsAround(target: number) {
+  const offsets = new Set<number>();
   for (let h = -48; h <= 48; h += 6) { const probe = target + h * HOUR; offsets.add(wall(probe) - probe); }
   return [...offsets];
 }
 /** The instants whose Chicago wall time is exactly `target`: 0 in a gap, 2 in a fold. */
-function instantsAt(target) {
+function instantsAt(target: number) {
   return offsetsAround(target).map(offset => target - offset)
     .filter(ms => wall(ms) === target).sort((a, b) => a - b);
 }
@@ -72,12 +72,12 @@ function instantsAt(target) {
  * gap always resolves one date forward), and it is kept because a calendar this
  * kernel cannot resolve must stop the clock rather than silence it.
  */
-export function chicagoThirtyDayDeadline(origin) {
+export function chicagoThirtyDayDeadline(origin: string) {
   const start = stamp(origin);
   const targetDate = new Date(wall(start)); targetDate.setUTCDate(targetDate.getUTCDate() + 30);
   const target = targetDate.getTime();
   const unsupported = () => freeze({ status: "unresolved_deadline", due_at: null, reason_id: DEADLINE_UNSUPPORTED });
-  const resolved = (ms, reason) => freeze({ status: "resolved", due_at: iso(ms), reason_id: reason });
+  const resolved = (ms: number, reason: string) => freeze({ status: "resolved", due_at: iso(ms), reason_id: reason });
 
   const candidates = instantsAt(target);
   if (candidates.length === 1) return resolved(candidates[0], DEADLINE_PLAIN);

@@ -352,7 +352,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         let key_links = folders.keys(&b.data, &needle);
 
         for loc in records(&b.data, &needle) {
-            let mut r = record::parse(o, &b.data, loc.anchor);
+            let Some(mut r) = record::parse(o, &b.data, loc.anchor) else { continue };
             r.folder_ids = folder_links.get(&loc.anchor).cloned().unwrap_or_default();
             r.local_keys = key_links.get(&loc.anchor).into_iter().copied().collect();
             let m = schema::build_bounded(&b.data, loc.anchor, loc.end, loc.back);

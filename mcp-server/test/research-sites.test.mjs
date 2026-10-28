@@ -12,7 +12,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
-import { RESEARCH_SITE_WRITE_VERBS, normalizeResearchHost, normalizeTopics, startUrl } from "../src/research-sites.js";
+import { RESEARCH_SITE_WRITE_VERBS, normalizeResearchHost, normalizeTopics, startUrl } from "../src/research-sites.ts";
 
 const joe = { id: "10000000-0000-0000-0000-000000000002", slug: "joe", display: "Joe",
   human: true, via: "oauth", client_id: "claude-ai" };

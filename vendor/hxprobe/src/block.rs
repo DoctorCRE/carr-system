@@ -52,10 +52,8 @@ fn u32_at(b: &[u8], off: usize) -> u32 {
 }
 
 fn read_header(mm: &[u8], off: usize) -> Option<Header> {
-    if off + PAYLOAD > mm.len() {
-        return None;
-    }
-    let h = &mm[off..off + PAYLOAD];
+    let end = off.checked_add(PAYLOAD)?;
+    let h = mm.get(off..end)?;
     Some(Header {
         crc_header: u32_at(h, 0x00),
         crc_body: u32_at(h, 0x04),
@@ -104,14 +102,14 @@ pub fn parse_checked(mm: &[u8], off: usize) -> Result<Block, ParseError> {
     if h.inflated_len == 0 || h.inflated_len > 32 << 20 {
         return Err(ParseError::InvalidInflatedLength);
     }
-    if off + PAYLOAD + h.payload_len > mm.len() {
-        return Err(ParseError::TruncatedPayload);
-    }
+    let end = (off + PAYLOAD)
+        .checked_add(h.payload_len)
+        .filter(|&end| end <= mm.len())
+        .ok_or(ParseError::TruncatedPayload)?;
 
     if crc32(&mm[off + 4..off + 0x20]) != h.crc_header {
         return Err(ParseError::HeaderCrcMismatch);
     }
-    let end = off + PAYLOAD + h.payload_len;
     if crc32(&mm[off + 8..end]) != h.crc_body {
         return Err(ParseError::PayloadCrcMismatch);
     }

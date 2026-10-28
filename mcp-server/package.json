@@ -5,7 +5,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "node run-tests.mjs",
+    "test": "npm run generate:types && node run-tests.mjs",
     "generate:types": "node generate-verb-types.mjs && node generate-worker-types.mjs",
     "typecheck": "npm run generate:types && tsc --project tsconfig.json",
     "test:routing-replay": "node test/doctrine-routing-replay.mjs",
