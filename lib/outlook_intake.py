@@ -135,13 +135,12 @@ def resolve_store(home: Path) -> Path:
     return store
 
 
-# A to-do someone already closed or edited in the app: the Outlook close has nothing left to do.
-CLOSED_ELSEWHERE = frozenset({'action_not_open', 'deal_item_not_open', 'version_conflict'})
+CLOSED_ELSEWHERE = frozenset({'action_not_open', 'deal_item_not_open'})
 ERROR_CODES = CLOSED_ELSEWHERE | frozenset({'timeout', 'auth_refused', 'key_reuse', 'transport_oversized',
                          'no_acknowledgement', 'reply_unreadable', 'transport_error',
                          'invalid_request', 'subject_unresolved', 'database_refused',
                          'setup_failed', 'contacts_empty', 'contacts_read_failed', 'next_action_conflict',
-                         'legacy_action_guard_required', 'agenda_version_conflict'})
+                         'legacy_action_guard_required', 'agenda_version_conflict', 'version_conflict'})
 BLOCKED_ERRORS = frozenset({'key_reuse', 'transport_oversized', 'invalid_request', 'subject_unresolved'})
 
 
@@ -149,7 +148,7 @@ def _reply_error(reply: dict) -> str:
     error = reply.get('error')
     if error == 'board_version_conflict':
         return 'agenda_version_conflict'
-    if error in ('key_reuse', 'next_action_conflict', *CLOSED_ELSEWHERE):
+    if error in ('key_reuse', 'next_action_conflict', 'version_conflict', *CLOSED_ELSEWHERE):
         return error
     if error in ('unauthorized', 'forbidden'):
         return 'auth_refused'
@@ -717,7 +716,8 @@ class Run:
                     self.counts['balls_kept'] += 1
                     _save(self.out, self.state)
                     return True
-                blocked = error.code in BLOCKED_ERRORS
+                blocked = error.code in BLOCKED_ERRORS or (
+                    verb in ('complete-deal-item', 'drop-action') and error.code == 'version_conflict')
                 request.update(error_code=error.code, disposition='blocked' if blocked else 'retry',
                                retry_at=None if blocked else int(self.now.timestamp()) +
                                min(1800, 60 * 2 ** min(request['attempts'] - 1, 5)))
@@ -1610,6 +1610,8 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         _quarantine_calendar_requests(state)
         _save(out, state)
         for request in list(state.get('requests', {}).values()):
+            if request['verb'] in ('record-deal-item', 'complete-deal-item', 'drop-action'):
+                continue
             if not request['acknowledged'] and request.get('disposition') != 'calendar_unsupported':
                 args = json.loads(request['payload'])
                 if request['verb'] == 'set-next-action' and (
