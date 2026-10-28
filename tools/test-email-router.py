@@ -435,7 +435,7 @@ class MatchingTests(unittest.TestCase):
         pending = []
         def carr(verb, args):
             if verb == 'email-router-queue':
-                return {'open_deals': [{'id': DEAL}], 'emails': [self.mail(thread_history=[self.prior()])]}
+                return {'open_deals': [{'id': DEAL}], 'emails': [self.mail(thread_history=[self.prior()], suppressed_deals=[DEAL])]}
             if verb == 'inherit-email-thread':
                 raise Refused('email_thread_filing_suppressed')
             pending.append(args)

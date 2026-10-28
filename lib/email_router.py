@@ -184,6 +184,8 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
         counts['emails'] += 1
         inheritance = None
         def matching_proposal(decision):
+            if decision.kind == 'file_to_deal' and decision.deal in email.get('suppressed_deals', []):
+                return []
             if decision.kind == 'contact_only':
                 counts['contact_only'] += 1
                 return []
