@@ -103,16 +103,24 @@ class ParityTest(unittest.TestCase):
                                         f'past-visit|{self.fixtures.ts(-timedelta(hours=5))}')
         before_calls = [(verb, args) for verb, args in before[1]
                         if args.get('idempotency_key') != calendar_activity]
-        self.assertEqual(len(before_calls), len(after[1]))
-        for (old_verb, old_args), (verb, args) in zip(before_calls, after[1], strict=True):
+        self.assertNotIn('email-router-queue', [verb for verb, _ in before[1]])
+        router_reads = [args for verb, args in after[1] if verb == 'email-router-queue']
+        self.assertEqual(router_reads, [{'purpose': 'links', 'limit': 200}])
+        after_calls = [(verb, args) for verb, args in after[1] if verb != 'email-router-queue']
+        self.assertEqual(len(before_calls), len(after_calls))
+        captured = [args['email_context'] for verb, args in after_calls
+                    if verb == 'log-activity' and args.get('kind') == 'email_in']
+        self.assertEqual([context['sender']['email'] for context in captured],
+                         ['pat@example.test', 'pat@example.test'])
+        for (old_verb, old_args), (verb, args) in zip(before_calls, after_calls, strict=True):
             self.assertEqual(verb, old_verb)
-            expected = dict(old_args)
-            actual = dict(args)
+            expected, actual = dict(old_args), dict(args)
             if verb == 'log-activity':
                 self.assertNotEqual(actual.pop('idempotency_key'), expected.pop('idempotency_key'))
                 if args['kind'] == 'email_in':
                     self.assertEqual(actual.pop('email_source'),
                                      {'sender_email': 'pat@example.test', 'mailbox_owner': 'joe'})
+                    actual.pop('email_context')
                 else:
                     self.assertNotIn('email_source', actual)
             self.assertEqual(json.dumps(expected).encode(), json.dumps(actual).encode())

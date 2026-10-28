@@ -20,14 +20,14 @@ PROGRAM_PATTERNS = (
     'tools/test-*.sh', 'tools/test_*.sh',
 )
 INVARIANTS = (
-    'stale-count-check', 'rule-load-layer-check', 'rule-classification-parity-check',
+    'rule-load-layer-check', 'rule-classification-parity-check',
     'selftest-git-isolation-check', 'sync-core-rule-ids', 'rule-route-coverage',
     'migration-order-gate', 'migration-safety-gate',
 )
 CLOCK_ALLOW = (
     'lead-automation-concurrency.postgres.mjs', 'invoice-review-regressions.postgres.mjs',
     'salesforce-read-run-store-rw02-postgres.test.mjs',
-    'program-controller-census-role-boundary.v5.test.mjs', 'call-mode-rehearsal.test.mjs',
+    'program-controller-census-role-boundary.v5.test.mjs',
     'recovery-matrix.v5.test.mjs', 'shared-oauth-worker.test.mjs',
 )
 

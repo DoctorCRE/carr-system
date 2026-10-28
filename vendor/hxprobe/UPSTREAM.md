@@ -194,7 +194,14 @@ start date); the series master keeps zero there. Only one ID appeared at two
 starts, which reads as a moved meeting. Not decoded yet, so the snapshot always
 warns about them: attendee responses (declines), deleted-items or folder
 membership, the owning account, revision order, and whether every occurrence of
-a series is materialized. It does not create reminders or contact activities from these
+a series is materialized. Cancelled meetings are recognised only by the subject prefix `Canceled:` or
+`Cancelled:` that Outlook writes on a cancellation; the snapshot leaves them out
+and carries a `canceled_hidden` warning with the count, which the brief turns
+into a sentence. Declines and recurrence expansion stay undecoded: no study copy
+ties a status byte, a folder, or a recurrence pattern to them, so nothing is
+inferred. A decline probably shows as folder membership (Deleted Items), which
+needs a TEST-account study pair that declines one invite and one occurrence.
+It does not create reminders or contact activities from these
 rows. Existing unacknowledged calendar activities and next actions without
 established mail provenance remain quarantined with their frozen payloads.
 Mail continues independently. Status reasons remain `processed`, `nothing_new`,

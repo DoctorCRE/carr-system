@@ -58,7 +58,6 @@ DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
 RENDERED="$REPO/out/$LABEL.plist"
 LOG="$REPO/out/outlook-intake-launchd.log"
 VENDOR="$("$PY" -m lib.outlook_settings field vendor)"
-HELPER="$("$PY" -m lib.outlook_settings field copy_helper)"
 # build.rs also reads the store atlas and its generator from the repository root.
 SOURCES=(vendor/hxprobe spec/outlook/hxstore-atlas.json ops/hxstore-atlas.py)
 DECODER="$VENDOR/hxprobe/target/release/hxprobe"
@@ -120,8 +119,23 @@ if not (helper.is_file() and os.access(helper, os.X_OK) and pin.is_file() and pi
         subprocess.run(['/usr/bin/cc', *flags, str(source), '-o', str(built)], check=True)
         built.chmod(0o700)
         os.replace(built, helper)
+        print(f'install-outlook-intake: Full Disk Access must be re-granted for {helper}', flush=True)
     pin.write_text(wanted)
 settings.verify_helper()
+
+if 'outbox' in settings.services:
+    label = 'com.carr.outlook-outbox'
+    rendered = repo / 'out' / f'{label}.plist'
+    rendered.parent.mkdir(parents=True, exist_ok=True)
+    rendered.write_bytes(settings.render_plist(repo / 'ops/launchd' / f'{label}.plist'))
+    rendered.chmod(0o644)
+    log = repo / 'out/outlook-outbox-launchd.log'
+    log.touch(mode=0o600)
+    log.chmod(0o600)
+    dest = home / 'Library/LaunchAgents' / f'{label}.plist'
+    print('install-outlook-intake: outbox worker rendered; it is NOT loaded.')
+    print(f"  install -m 644 '{rendered}' '{dest}'")
+    print(f"  launchctl bootstrap gui/{os.getuid()} '{dest}'")
 PY
 
 mkdir -p "$REPO/out"
@@ -134,8 +148,6 @@ touch "$LOG"
 chmod 600 "$LOG"
 
 print -- "install-outlook-intake: hxprobe built from vendor/hxprobe; plist rendered to $RENDERED"
-print -- "install-outlook-intake: one-time step: grant Full Disk Access to $HELPER"
-print -- "  System Settings > Privacy & Security > Full Disk Access > add the helper above."
 print -- "install-outlook-intake: it is NOT loaded. To load it, run:"
 print -- "  install -m 644 '$RENDERED' '$DEST'"
 print -- "  launchctl bootstrap gui/$(id -u) '$DEST'"

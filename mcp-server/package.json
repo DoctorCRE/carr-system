@@ -5,23 +5,27 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "node run-tests.mjs",
+    "test": "npm run generate:types && node run-tests.mjs",
     "generate:types": "node generate-verb-types.mjs && node generate-worker-types.mjs",
     "typecheck": "npm run generate:types && tsc --project tsconfig.json",
-    "test:routing-replay": "node test/doctrine-routing-replay.mjs"
+    "test:routing-replay": "node test/doctrine-routing-replay.mjs",
+    "portal-parity": "node portal-parity/cli.mjs"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "@babel/parser": "7.28.5",
     "esbuild": "0.28.1",
     "json-schema-to-typescript": "16.0.0",
     "neonctl": "2.38.5",
     "pg": "8.13.1",
+    "playwright-core": "1.63.0",
     "typescript": "7.0.2",
     "wrangler": "^4.115.0"
   },
   "dependencies": {
+    "@cfworker/json-schema": "4.1.1",
     "@cloudflare/workers-oauth-provider": "^0.8.3",
     "@neondatabase/serverless": "^1.1.0",
     "@pdf-lib/fontkit": "1.1.1",

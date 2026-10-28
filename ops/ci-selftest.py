@@ -3,6 +3,7 @@
 
 import contextlib
 import hashlib
+import importlib.util
 import inspect
 import json
 import os
@@ -38,7 +39,7 @@ def ci_fixture():
     with tempfile.TemporaryDirectory(prefix="carr-ci-fixture-") as directory:
         root = pathlib.Path(directory)
         for rel in (
-            "ops/ci.sh", "ops/ci-gates.py", "ops/ci-pushfloor.py", "ops/ci-migration.py",
+            "ops/ci.sh", "ops/ci-gates.py", "ops/ci-pushfloor.py", "ops/ci-migration.py", "ops/ci-secret.py",
             "ops/node_test_summary.py", "tools/codemap.py",
             "ops/ci-secret-scan.py", "ops/pii_guard.py", "ops/ci-dep-check.py",
             "ops/git_env.py", "ops/no-client-deliverables-gate.py",
@@ -387,13 +388,27 @@ def test_hosted_migration_ownership():
     check("not-applicable proof cannot be reused as full main evidence", "full != 'false'" in record.get("if", ""))
 
 
-def test_contract_rejects_platform_postgres_defaults():
+def test_postgres_path_boundary_rejects_platform_defaults():
     with ci_fixture() as root:
-        (root / 'lib/default.py').write_text("DEFAULT = '" + '/opt/homebrew/opt/' + "postgresql@17/bin'\n")
-        subprocess.run(['git', 'add', 'lib/default.py'], cwd=root, env=fixture_env(), check=True)
-        rc, output = run(['--strict', '--only', 'contract'], root=root)
-        check('contract rejects PostgreSQL paths outside the resolver',
-              rc == 1 and 'PostgreSQL paths must use lib/disposable_pg_fixture.py' in output)
+        path = root / 'lib/default.py'
+        path.write_text("DEFAULT = '" + '/opt/homebrew/opt/' + "postgresql@17/bin'\n")
+        subprocess.run(['git', 'add', 'lib/default.py'], cwd=root,
+                       env=fixture_env(), check=True)
+        result = subprocess.run(
+            ['git', 'grep', '-n', '-F', '/opt/homebrew/opt/postgresql@17',
+             '--', '*.py', ':!lib/disposable_pg_fixture.py'],
+            cwd=root, capture_output=True, text=True)
+        check('PostgreSQL path boundary rejects a platform default',
+              result.returncode == 0 and 'lib/default.py' in result.stdout)
+        path.write_text("from lib.disposable_pg_fixture import postgres_binary\n")
+        subprocess.run(['git', 'add', 'lib/default.py'], cwd=root,
+                       env=fixture_env(), check=True)
+        result = subprocess.run(
+            ['git', 'grep', '-n', '-F', '/opt/homebrew/opt/postgresql@17',
+             '--', '*.py', ':!lib/disposable_pg_fixture.py'],
+            cwd=root, capture_output=True, text=True)
+        check('PostgreSQL path boundary accepts fixture-resolver ownership',
+              result.returncode == 1 and not result.stdout)
 
 
 def test_gate_shards_execute_a_disjoint_complete_inventory():
@@ -592,10 +607,11 @@ def test_every_test_file_in_the_tree_is_collected():
                             env=fixture_env(), text=True, capture_output=True)
     check("canonical gate inventory is readable", listed.returncode == 0, listed.stderr)
     collected = set(listed.stdout.splitlines())
-    for m in re.finditer(r"for t in ([^;]+); do", ci):
-        for pat in m.group(1).split():
-            if re.fullmatch(r"[A-Za-z0-9_./*?\[\]-]+", pat):
-                collected.update(p.relative_to(REPO).as_posix() for p in REPO.glob(pat))
+    spec = importlib.util.spec_from_file_location('ci_secret', REPO / 'ops/ci-secret.py')
+    assert spec is not None and spec.loader is not None
+    secret = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(secret)
+    collected.update(secret.qualification_programs(REPO))
 
     on_disk = _test_shaped_files()
     check("the tree still contains test files to collect", on_disk,
@@ -735,6 +751,29 @@ def test_fail_tail_withholds_the_window_when_it_cannot_redact():
           "WITHHELD" in out, out)
     check("and where the captured log actually is",
           str(log) in out, out)
+
+def test_gates_exclude_prose_counts_but_enforce_rule_consistency():
+    with ci_fixture() as root:
+        (root / "hooks/gate-integrity.py").write_text("raise SystemExit(0)\n")
+        (root / "ops/stale-count-check.py").write_text(
+            "from pathlib import Path\nPath('prose-check-ran').touch()\nraise SystemExit(9)\n")
+        (root / "ops/stale-count-selftest.py").write_text("print('prose checker selftest ran')\n")
+        rule_marker = root / "rule-check-ran"
+        for status in (0, 7):
+            rule_marker.unlink(missing_ok=True)
+            (root / "ops/rule-load-layer-check.py").write_text(
+                "from pathlib import Path\nPath('rule-check-ran').touch()\n"
+                f"raise SystemExit({status})\n")
+            rc, out = run(["--strict", "--only", "gates"], root=root)
+            check(f"strict gates never invoke the prose count checker (rule exit={status})",
+                  not (root / "prose-check-ran").exists(), out)
+            check(f"strict gates retain the prose checker selftest (rule exit={status})",
+                  "prose checker selftest ran" in out, out)
+            check(f"strict gates invoke the rule consistency checker (rule exit={status})",
+                  rule_marker.exists(), out)
+            check(f"strict gates propagate rule consistency failures (rule exit={status})",
+                  rc == (1 if status else 0), out)
+
 
 def test_gates_never_run_the_production_diagnostic():
     with ci_fixture() as root:
@@ -1480,7 +1519,7 @@ def main(argv=None):
                test_hxprobe_runs_locked_checks_and_propagates_failures,
                test_gates_build_hxprobe_before_parallel_selftests,
                test_gate_shards_execute_a_disjoint_complete_inventory,
-               test_contract_rejects_platform_postgres_defaults,
+               test_postgres_path_boundary_rejects_platform_defaults,
                test_hosted_migration_ownership,
                test_hosted_draft_lifecycle,
                test_database_scope_receipts,
@@ -1495,6 +1534,7 @@ def main(argv=None):
                test_a_failing_gates_output_is_printed_whole_when_it_is_short,
                test_a_long_failing_gate_log_is_tailed_and_still_redacted,
                test_fail_tail_withholds_the_window_when_it_cannot_redact,
+               test_gates_exclude_prose_counts_but_enforce_rule_consistency,
                test_gates_never_run_the_production_diagnostic,
                test_gates_report_every_completed_result_after_a_timeout,
                test_gates_selftests_have_a_process_group_watchdog,

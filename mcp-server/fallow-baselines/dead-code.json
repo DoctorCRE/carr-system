@@ -389,8 +389,8 @@
     "unused-file:uptime-worker.js"
   ],
   "unused_exports": [
-    "unused-export:src/assurance-health-store.v5.js:ASSURANCE_HEALTH_LAYERS",
-    "unused-export:src/assurance-health-store.v5.js:ASSURANCE_HEALTH_SCHEMA_VERSION",
+    "unused-export:src/assurance-health-store.v5.ts:ASSURANCE_HEALTH_LAYERS",
+    "unused-export:src/assurance-health-store.v5.ts:ASSURANCE_HEALTH_SCHEMA_VERSION",
     "unused-export:src/atlas-inventory-graph.v5.js:ATLAS_LAYERS",
     "unused-export:src/atlas-inventory-graph.v5.js:ATLAS_LIMIT_DEFAULT",
     "unused-export:src/atlas-inventory-graph.v5.js:WRITE_KEYWORDS",
@@ -563,7 +563,7 @@
     "unused-export:src/jev-call-receipt.js:calibrationBlock",
     "unused-export:src/jev-deal-reading.ts:JEV_DEAL_EVIDENCE_FLOOR",
     "unused-export:src/jev-deal-reading.ts:dealReadingQuestions",
-    "unused-export:src/journey-one-clock.v5.js:DEADLINE_UNSUPPORTED",
+    "unused-export:src/journey-one-clock.v5.ts:DEADLINE_UNSUPPORTED",
     "unused-export:src/judge-provider.js:decisionsProvider",
     "unused-export:src/lead-automation.js:LEAD_AUTOMATION_CONTRACT",
     "unused-export:src/lead-automation.js:moveReason",
@@ -644,7 +644,7 @@
     "unused-export:src/work-portfolio.js:SOURCE_DIGEST_KEYS",
     "unused-export:src/work-portfolio.js:portfolioAcceptedDigest",
     "unused-export:src/work-portfolio.js:portfolioChildPreimage",
-    "unused-export:src/work-shape.js:SHAPE_DISPOSITIONS",
+    "unused-export:src/work-shape.ts:SHAPE_DISPOSITIONS",
     "unused-export:src/workspace-business-read.js:BUSINESS_API_PREFIX",
     "unused-export:src/workspace-business-read.js:DATASETS",
     "unused-export:src/workspace-business-read.js:DEFAULT_SCOPE",

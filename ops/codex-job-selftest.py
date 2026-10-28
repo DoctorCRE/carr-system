@@ -2,11 +2,13 @@
 """Exercise the actual Codex job launcher without Git, model, or network calls."""
 import contextlib
 import io
+import os
 from pathlib import Path
 import runpy
 import shutil
 import subprocess
 import sys
+import tempfile
 import types
 import unittest
 from unittest.mock import Mock, patch
@@ -61,11 +63,34 @@ class CodexJobTests(unittest.TestCase):
                                       "--dangerously-bypass-hook-trust", "-o",
                                       str(Path(clone).parent / "result.md"),
                                       "-c", "model_reasoning_effort=high", "-c", "model=test",
-                                      "prepared brief"])
+                                      calls[-1][0][-1]])
+        self.assertTrue(calls[-1][0][-1].endswith("\n\nprepared brief"))
         self.assertEqual(calls[-1][1]["stdin"], subprocess.DEVNULL)
         prepare.assert_called_once_with("original brief", Path(clone))
         self.assertEqual((code, output), (0, "job result\n"))
         self.assertFalse(Path(clone).parent.exists(), "temporary clone must be cleaned up")
+
+    def launch_with_stderr(self, target):
+        saved = os.dup(2)
+        try:
+            with open(target, "wb") as sink:
+                os.dup2(sink.fileno(), 2)
+            return self.launch()
+        finally:
+            os.dup2(saved, 2)
+            os.close(saved)
+
+    def test_brief_opens_with_the_job_log_for_attach(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory).resolve() / "job.log"
+            _, _, calls, _ = self.launch_with_stderr(log)
+        first, _, rest = calls[-1][0][-1].partition("\n")
+        self.assertEqual(first, f"Job log: {log} (pass it to attach-memory as transcript_ref).")
+        self.assertEqual(rest, "\nprepared brief")
+
+    def test_brief_names_no_job_log_when_stderr_is_not_a_file(self):
+        _, _, calls, _ = self.launch_with_stderr(os.devnull)
+        self.assertTrue(calls[-1][0][-1].startswith("Job log: none (stderr is not a file).\n\n"))
 
     def test_child_failure_is_returned_with_its_final_message(self):
         code, output, _, _ = self.launch(status=7)

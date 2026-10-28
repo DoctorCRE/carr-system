@@ -7,6 +7,7 @@ import plistlib
 from pathlib import Path
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,39 @@ sys.path.insert(0, str(ROOT))
 from git_env import fixture_env
 from outlook_test_support import write_settings
 from lib.outlook_settings import load_settings, SettingsError
+
+
+# Rewrites every page of the file in order, forever: generation, page, then a
+# filler that repeats the generation so a torn page is visible too.
+WRITER = """
+import os, struct, sys
+fd = os.open(sys.argv[1], os.O_WRONLY)
+pages = int(sys.argv[2])
+generation = 0
+while True:
+    generation += 1
+    page = struct.pack('<QQ', generation, 0) + struct.pack('<Q', generation) * 510
+    for index in range(pages):
+        os.pwrite(fd, page[:8] + struct.pack('<Q', index) + page[16:], index * 4096)
+"""
+
+
+def page_stamps(data, pages):
+    stamps = []
+    for index in range(pages):
+        page = data[index * 4096:(index + 1) * 4096]
+        generation, = struct.unpack_from('<Q', page)
+        whole = page[16:] == struct.pack('<Q', generation) * 510
+        stamps.append(generation if whole and struct.unpack_from('<Q', page, 8)[0] in (0, index) else -1)
+    return stamps
+
+
+def one_instant(stamps):
+    """Pages read g..g then g-1..g-1 (one boundary), with no torn page."""
+    if -1 in stamps:
+        return False
+    drops = [(a, b) for a, b in zip(stamps, stamps[1:]) if a != b]
+    return len(drops) <= 1 and all(a == b + 1 for a, b in drops)
 
 
 class CopyTest(unittest.TestCase):
@@ -35,22 +69,187 @@ class CopyTest(unittest.TestCase):
         self.out.mkdir(parents=True, mode=0o700)
         self.work = Path(tempfile.mkdtemp(prefix='work-', dir=self.out))
         self.helper = self.root / 'outlook-intake-copy'
+        self.build()
+
+    def build(self, *sources):
         subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                         f'-DOUTLOOK_PROFILE={json.dumps(str(self.profile))}',
                         f'-DOUTLOOK_WORK_ROOT={json.dumps(str(self.out))}',
                         f'-DOUTLOOK_REPO={json.dumps(str(self.root))}',
-                        str(ROOT / 'tools/outlook-intake-copy.c'), '-o', str(self.helper)],
+                        str(ROOT / 'tools/outlook-intake-copy.c'), *sources, '-o', str(self.helper)],
                        check=True, capture_output=True)
 
-    def copy(self, *args, cwd=None, env=None):
+    def copy(self, *args, cwd=None, env=None, input=None):
         return subprocess.run([str(self.helper), *args], cwd=cwd or self.work,
-                              env=env, capture_output=True)
+                              env=env, input=input, capture_output=True)
+
+    def test_selected_attachments_are_copied_privately_without_refreshing_snapshot(self):
+        selected = self.profile / 'Files/S0/845/Attachments/9'
+        selected.mkdir(parents=True)
+        (selected / 'selected.pdf').write_bytes(b'synthetic-attachment')
+        (selected / 'unmatched.pdf').write_bytes(b'must-not-copy')
+        self.assertEqual(self.copy().returncode, 0)
+        (self.profile / 'HxStore.hxd').write_bytes(b'changed-store')
+        (self.sidecars / '7.dat').write_bytes(b'changed-body')
+        request = b'~/Files/S0/845/Attachments/9/selected.pdf\n'
+        for _ in range(2):
+            self.assertEqual(self.copy('--attachments', input=request).returncode, 0)
+        copied = self.work / 'Files/S0/845/Attachments/9/selected.pdf'
+        self.assertEqual(copied.read_bytes(), b'synthetic-attachment')
+        self.assertFalse(copied.with_name('unmatched.pdf').exists())
+        self.assertEqual((self.work / 'store.hxd').read_bytes(), b'synthetic-store')
+        self.assertEqual((self.work / 'Files/S0/845/EFMData/7.dat').read_bytes(), b'synthetic-body')
+        for directory, _, files in os.walk(self.work):
+            self.assertEqual(stat.S_IMODE(Path(directory).stat().st_mode), 0o700)
+            for name in files:
+                self.assertEqual(stat.S_IMODE((Path(directory) / name).stat().st_mode), 0o600)
+
+    def test_attachment_requests_reject_malformed_paths(self):
+        self.assertEqual(self.copy().returncode, 0)
+        for request in (b'Files/S0/845/Attachments/9/a.pdf\n',
+                        b'~/Files/S0/../Attachments/9/a.pdf\n',
+                        b'~/Files/S0/845/EFMData/9/a.pdf\n',
+                        b'~/Files/S0/845/Attachments/x/a.pdf\n',
+                        b'~/Files/S0/845/Attachments/9/../a.pdf\n',
+                        b'~/Files/S0/845/Attachments/9/..\n',
+                        b'~/Files/S0/845/Attachments/9/a.pdf',
+                        b'~/Files/S0/845/Attachments/9/a\tb.pdf\n',
+                        b'~/Files/S0/845/Attachments/9/a\x00.pdf\n', b'\n'):
+            with self.subTest(request=request):
+                self.assertNotEqual(self.copy('--attachments', input=request).returncode, 0)
+        self.assertFalse((self.work / 'Files/S0/845/Attachments').exists())
+        self.assertNotEqual(self.copy('--attachments', input=b'', cwd=self.root).returncode, 0)
+
+    def test_missing_and_oversize_attachments_are_not_copied(self):
+        selected = self.profile / 'Files/S0/845/Attachments/9'
+        selected.mkdir(parents=True)
+        with (selected / 'large.pdf').open('wb') as stream:
+            stream.truncate(25 * 1024 * 1024 + 1)
+        self.assertEqual(self.copy().returncode, 0)
+        request = b'~/Files/S0/845/Attachments/9/large.pdf\n~/Files/S0/845/Attachments/9/missing.pdf\n'
+        self.assertEqual(self.copy('--attachments', input=request).returncode, 0)
+        self.assertEqual(list((self.work / 'Files/S0/845/Attachments/9').iterdir()), [])
+
+    def test_attachment_symlinks_are_refused_at_source_and_destination(self):
+        selected = self.profile / 'Files/S0/845/Attachments/9'
+        selected.mkdir(parents=True)
+        outside = self.root / 'outside'
+        outside.write_bytes(b'outside-scope')
+        attachment = selected / 'a.pdf'
+        attachment.symlink_to(outside)
+        self.assertEqual(self.copy().returncode, 0)
+        request = b'~/Files/S0/845/Attachments/9/a.pdf\n'
+        self.assertNotEqual(self.copy('--attachments', input=request).returncode, 0)
+        attachment.unlink()
+        attachment.write_bytes(b'allowed')
+        destination = self.work / 'Files/S0/845/Attachments/9/a.pdf'
+        destination.symlink_to(outside)
+        self.assertNotEqual(self.copy('--attachments', input=request).returncode, 0)
+        self.assertEqual(outside.read_bytes(), b'outside-scope')
+        destination.unlink()
+        shutil.rmtree(selected)
+        selected.symlink_to(self.root, target_is_directory=True)
+        self.assertNotEqual(self.copy('--attachments', input=request).returncode, 0)
+        selected.unlink()
+        selected.mkdir()
+        (selected / 'a.pdf').write_bytes(b'allowed')
+        destination.parent.rmdir()
+        destination.parent.symlink_to(self.root, target_is_directory=True)
+        self.assertNotEqual(self.copy('--attachments', input=request).returncode, 0)
+        self.assertFalse((self.root / 'a.pdf').exists())
+
+    def test_attachment_copy_caps_batch_count_and_bytes(self):
+        selected = self.profile / 'Files/S0/845/Attachments/9'
+        selected.mkdir(parents=True)
+        self.assertEqual(self.copy().returncode, 0)
+        for name in range(51):
+            (selected / str(name)).write_bytes(b'a')
+        requests = ''.join(f'~/Files/S0/845/Attachments/9/{name}\n' for name in range(51)).encode()
+        self.assertEqual(self.copy('--attachments', input=requests).returncode, 0)
+        destination = self.work / 'Files/S0/845/Attachments/9'
+        self.assertEqual(len(list(destination.iterdir())), 50)
+        self.assertFalse((destination / '50').exists())
+        shutil.rmtree(destination)
+        for name in range(5):
+            with (selected / str(name)).open('wb') as stream:
+                stream.truncate(25 * 1024 * 1024)
+        requests = ''.join(f'~/Files/S0/845/Attachments/9/{name}\n' for name in range(5)).encode()
+        self.assertEqual(self.copy('--attachments', input=requests).returncode, 0)
+        self.assertEqual(sum(path.stat().st_size for path in destination.iterdir()), 100 * 1024 * 1024)
+        self.assertFalse((destination / '4').exists())
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'APFS cloning is macOS only')
+    def test_attachment_copy_falls_back_when_cloning_is_unsupported(self):
+        self.build(str(self.unsupported_clone()))
+        self.test_selected_attachments_are_copied_privately_without_refreshing_snapshot()
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'APFS cloning is macOS only')
+    def test_store_and_sidecars_are_cloned_when_the_volume_supports_it(self):
+        log = self.root / 'clones.log'
+        recording = self.root / 'recording-clone.c'
+        recording.write_text('\n'.join((
+            '#include <dlfcn.h>', '#include <stdio.h>', '#include <sys/clonefile.h>',
+            'int fclonefileat(int source, int target, const char *name, uint32_t flags) {',
+            f'    FILE *log = fopen({json.dumps(str(log))}, "a");',
+            '    if (log) { fprintf(log, "%s\\n", name); fclose(log); }',
+            '    int (*real)(int, int, const char *, uint32_t) =',
+            '        (int (*)(int, int, const char *, uint32_t))dlsym(RTLD_NEXT, "fclonefileat");',
+            '    return real(source, target, name, flags);', '}', '')))
+        self.build(str(recording))
+        self.test_copies_only_the_fixed_store_and_body_sidecars_privately()
+        self.assertEqual(log.read_text().splitlines(), ['store.hxd', '7.dat'])
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'APFS cloning is macOS only')
+    def test_store_copy_falls_back_to_a_full_copy_when_cloning_is_unsupported(self):
+        self.build(str(self.unsupported_clone()))
+        self.test_copies_only_the_fixed_store_and_body_sidecars_privately()
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'APFS cloning is macOS only')
+    def test_store_clone_is_one_instant_while_the_store_is_being_written(self):
+        # A writer stamps every 4 KiB page with a generation number, sweeping
+        # the file front to back again and again, one pwrite per page. A copy
+        # taken at one instant shows at most one boundary, between generation
+        # g and g - 1; a copy assembled over time can show more.
+        pages = 4096
+        store = self.profile / 'HxStore.hxd'
+        store.write_bytes(bytes(4096 * pages))
+        writer = subprocess.Popen([sys.executable, '-c', WRITER, str(store), str(pages)])
+        self.addCleanup(writer.kill)
+        for attempt in range(20):
+            work = Path(tempfile.mkdtemp(prefix='work-', dir=self.out))
+            self.assertEqual(self.copy(cwd=work).returncode, 0)
+            stamps = page_stamps((work / 'store.hxd').read_bytes(), pages)
+            self.assertTrue(one_instant(stamps), f'copy {attempt} mixes moments: {sorted(set(stamps))}')
+            shutil.rmtree(work)
+        self.assertIsNone(writer.poll(), 'the writer kept writing throughout')
+
+    def unsupported_clone(self):
+        unsupported = self.root / 'unsupported-clone.c'
+        unsupported.write_text('\n'.join((
+            '#include <errno.h>', '#include <sys/clonefile.h>',
+            'int fclonefileat(int source, int target, const char *name, uint32_t flags) {',
+            '    (void)source; (void)target; (void)name; (void)flags;',
+            '    errno = ENOTSUP; return -1;', '}', '')))
+        return unsupported
 
     def test_scope_readback_names_only_the_compiled_paths_without_copying(self):
         result = self.copy('--scope', cwd=self.root)
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout.decode(), f'{self.profile}\n{self.out}\n{self.root}\n')
         self.assertFalse((self.work / 'store.hxd').exists())
+
+    def test_helper_launches_only_fixed_intake_and_outbox_commands(self):
+        (self.root / 'bin').mkdir()
+        (self.root / 'bin/run-scheduled.sh').write_text('printf "%s\\n" "$@"\nexit 23\n')
+        for service, mode, tail in (
+                ('intake', '--run-intake', ['-c', 'from lib.outlook_intake import main; raise SystemExit(main())']),
+                ('outbox', '--run-outbox', ['-m', 'lib.outlook_outbox'])):
+            with self.subTest(service=service):
+                result = self.copy(mode, cwd=self.root)
+                self.assertEqual(result.returncode, 23)
+                self.assertEqual(result.stdout.decode().splitlines(), [f'outlook-{service}',
+                    f'outlook.{service}', str(self.root / '.venv/bin/python'), *tail])
+        self.assertNotEqual(self.copy('--run-outbox', '/tmp/command').returncode, 0)
 
     def test_runtime_refuses_a_settings_profile_that_differs_from_the_granted_binary(self):
         settings_home = tempfile.TemporaryDirectory()
@@ -126,6 +325,7 @@ class InstallerTest(unittest.TestCase):
                          'tools/outlook-intake-copy.c', 'lib/outlook_settings.py',
                          'ops/launchd/com.carr.outlook-intake.plist',
                          'ops/launchd/com.carr.outlook-refresh.plist',
+                         'ops/launchd/com.carr.outlook-outbox.plist',
                          'ops/launchd/com.carr.outlook-triage.plist'):
             shutil.copyfile(ROOT / relative, self.repo / relative)
         for relative in ('vendor/hxprobe/Cargo.toml', 'spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py'):
@@ -157,7 +357,7 @@ class InstallerTest(unittest.TestCase):
         result = self.install()
         self.assertTrue(self.helper.is_file())
         self.assertEqual(stat.S_IMODE(self.helper.stat().st_mode), 0o700)
-        self.assertIn(f'grant Full Disk Access to {self.helper}', result.stdout)
+        self.assertIn(f'Full Disk Access must be re-granted for {self.helper}', result.stdout)
         self.assertFalse((self.home / 'Library/LaunchAgents').exists())
         for service in ('intake', 'refresh'):
             rendered = plistlib.loads((self.repo / f'out/com.carr.outlook-{service}.plist').read_bytes())
@@ -177,6 +377,59 @@ class InstallerTest(unittest.TestCase):
         before = self.helper.stat().st_mtime_ns
         self.install()
         self.assertEqual(self.helper.stat().st_mtime_ns, before, 'an unchanged helper retains its privacy identity')
+
+    def test_unchanged_install_keeps_binary_bytes_and_mtime_without_an_access_warning(self):
+        self.install()
+        before_bytes = self.helper.read_bytes()
+        before_mtime = self.helper.stat().st_mtime_ns
+        result = self.install()
+        self.assertEqual(self.helper.read_bytes(), before_bytes)
+        self.assertEqual(self.helper.stat().st_mtime_ns, before_mtime)
+        self.assertNotIn('Full Disk Access', result.stdout)
+
+    def test_source_change_rebuilds_once_and_names_the_binary_needing_access(self):
+        self.install()
+        before = self.helper.read_bytes()
+        source = self.repo / 'tools/outlook-intake-copy.c'
+        source.write_text(source.read_text().replace('snapshot failed', 'fixture snapshot failed'))
+        result = self.install()
+        self.assertNotEqual(self.helper.read_bytes(), before)
+        warning = f'Full Disk Access must be re-granted for {self.helper}'
+        self.assertEqual(sum(warning in line for line in result.stdout.splitlines()), 1)
+        before_bytes = self.helper.read_bytes()
+        before_mtime = self.helper.stat().st_mtime_ns
+        result = self.install()
+        self.assertEqual(self.helper.read_bytes(), before_bytes)
+        self.assertEqual(self.helper.stat().st_mtime_ns, before_mtime)
+        self.assertNotIn('Full Disk Access', result.stdout)
+
+    def test_compiled_settings_change_rebuilds_and_warns_for_the_configured_binary(self):
+        self.install()
+        values = json.loads(self.config.read_text())
+        values['profile'] = str(self.home / 'Changed Profile')
+        self.config.write_text(json.dumps(values))
+        result = self.install()
+        scope = subprocess.run([str(self.helper), '--scope'], capture_output=True, text=True, check=True)
+        self.assertEqual(scope.stdout.splitlines()[0], values['profile'])
+        self.assertIn(f'Full Disk Access must be re-granted for {self.helper}', result.stdout)
+
+    def test_outbox_is_rendered_only_when_enabled_and_never_loaded(self):
+        self.install()
+        rendered = self.repo / 'out/com.carr.outlook-outbox.plist'
+        self.assertFalse(rendered.exists())
+        before = self.helper.read_bytes()
+        values = json.loads(self.config.read_text())
+        values['services'].append('outbox')
+        self.config.write_text(json.dumps(values))
+        result = self.install()
+        plist = plistlib.loads(rendered.read_bytes())
+        self.assertEqual(plist['WorkingDirectory'], str(self.repo))
+        self.assertEqual(plist['StartCalendarInterval'], [{'Minute': n} for n in range(60)])
+        self.assertEqual(plist['ProgramArguments'], [str(self.helper), '--run-outbox'])
+        self.assertEqual(self.helper.read_bytes(), before)
+        self.assertEqual(stat.S_IMODE((self.repo / 'out/outlook-outbox-launchd.log').stat().st_mode), 0o600)
+        self.assertIn('outbox worker rendered; it is NOT loaded', result.stdout)
+        self.assertFalse((self.home / 'Library/LaunchAgents').exists())
 
     def git(self, checkout, *args):
         return subprocess.run(['git', '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.test',

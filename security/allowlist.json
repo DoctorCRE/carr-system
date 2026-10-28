@@ -328,6 +328,108 @@
       "sha256": "3ea854a4192faab8ca31795f12e99dfdeef9ec23912d2e809ab34f9ebb994c23",
       "rule": "pii-email",
       "reason": "Historical synthetic account-exclusion fixture introduced by b5ce2848 in PR #2390. The invented longer-domain recipient tests exact-address matching in an offline SQLite fixture, not a real contact. Commit 2ed36da6 replaces it with a reserved .invalid domain. Qualification binds only these exact historical file bytes and this detector because pushed history is retained without force-push."
+    },
+    {
+      "path": "mcp-server/src/work-queue.js",
+      "sha256": "496e3dd60730bf4944d27b676264276351b38156c0e06fb985d3e1349ca9ed3c",
+      "rule": "pii-phone",
+      "reason": "Historical int32 maximum is a numeric schema limit, not phone data; rewritten as a hexadecimal limit in 578227931."
+    },
+    {
+      "path": "mcp-server/test/work-queue-postgres.test.mjs",
+      "sha256": "c9479ec38c9545cac579db69f2ee0c9a8b245d367fc2d7e195da4e5a9a6aaa2d",
+      "rule": "pii-phone",
+      "reason": "Historical int32 overflow fixtures are numeric bounds, not phone data; rewritten as exponent expressions in 578227931."
+    },
+    {
+      "path": "mcp-server/test/work-queue-postgres.test.mjs",
+      "sha256": "c9479ec38c9545cac579db69f2ee0c9a8b245d367fc2d7e195da4e5a9a6aaa2d",
+      "rule": "generic-api-key",
+      "reason": "Historical synthetic UUID tests idempotency only and is not a credential; replaced by randomUUID in 578227931."
+    },
+    {
+      "path": "mcp-server/contracts/email-reply-draft.v1.json",
+      "sha256": "58f1bd0f281a7bfaf206edaa12e749e1bf3edb73d8d9b3349cab6fb90199ef51",
+      "rule": "pii-email",
+      "reason": "WR441.S3.J2 explicitly permits the two canonical partner email addresses for copy routing documentation and synthetic behavioral fixtures. This exception binds the reviewed file bytes and email rule only; all other fixture addresses use reserved domains."
+    },
+    {
+      "path": "mcp-server/test/email-deal-progress-postgres.test.mjs",
+      "sha256": "1858a8fd6491a5e448563dacfd36bc49f68a4931cc5e4877bb9b5eb513939b62",
+      "rule": "pii-email",
+      "reason": "WR441.S3.J2 explicitly permits the two canonical partner email addresses for copy routing documentation and synthetic behavioral fixtures. This exception binds the reviewed file bytes and email rule only; all other fixture addresses use reserved domains."
+    },
+    {
+      "path": "migrations/1014_dell_actor_email.sql",
+      "sha256": "442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a",
+      "rule": "pii-email",
+      "reason": "The canonical Dell email is required by WR441.S4.J2 in the guarded migration."
+    },
+    {
+      "path": "ops/schema-reconstruction-selftest.py",
+      "sha256": "9392d23e19641e1523bc512372e8384bc91e94c96cfb8f6545b0210b1460da3e",
+      "rule": "pii-email",
+      "reason": "The reconstruction test verifies the canonical Dell email and migration idempotence."
+    },
+    {
+      "path": "db/schema.sql",
+      "sha256": "b0669b25e19cb114f913b7edb691b00e027e3a7dde2f5c9c150b7c981480878e",
+      "rule": "pii-email",
+      "reason": "Pushed PR history contains the canonical Dell email in this exact historical file; the CI history scan requires this scoped exception."
+    },
+    {
+      "path": "migrations/1005_dell_actor_email.sql",
+      "sha256": "442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a",
+      "rule": "pii-email",
+      "reason": "Pushed PR history contains the canonical Dell email in this exact historical file; the CI history scan requires this scoped exception."
+    },
+    {
+      "path": "migrations/1006_dell_actor_email.sql",
+      "sha256": "442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a",
+      "rule": "pii-email",
+      "reason": "Pushed PR history contains the canonical Dell email in this exact historical file; the CI history scan requires this scoped exception."
+    },
+    {
+      "path": "migrations/1007_dell_actor_email.sql",
+      "sha256": "442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a",
+      "rule": "pii-email",
+      "reason": "Pushed PR history contains the canonical Dell email in this exact historical file; the CI history scan requires this scoped exception."
+    },
+    {
+      "path": "migrations/1008_dell_actor_email.sql",
+      "sha256": "442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a",
+      "rule": "pii-email",
+      "reason": "Pushed PR history contains the canonical Dell email in this exact historical file; the CI history scan requires this scoped exception."
+    },
+    {
+      "path": "migrations/1009_dell_actor_email.sql",
+      "sha256": "442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a",
+      "rule": "pii-email",
+      "reason": "Pushed PR history contains the canonical Dell email in this exact historical file; the CI history scan requires this scoped exception."
+    },
+    {
+      "path": "migrations/1010_dell_actor_email.sql",
+      "sha256": "442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a",
+      "rule": "pii-email",
+      "reason": "Pushed PR history contains the canonical Dell email in this exact historical file; the CI history scan requires this scoped exception."
+    },
+    {
+      "path": "migrations/1011_dell_actor_email.sql",
+      "sha256": "442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a",
+      "rule": "pii-email",
+      "reason": "Pushed PR history contains the canonical Dell email in this exact historical file; the CI history scan requires this scoped exception."
+    },
+    {
+      "path": "ops/schema-reconstruction-selftest.py",
+      "sha256": "14f2a7dd1805a65c30d9155585c89896c49d411c038de73fc5d462d6e8d2b66e",
+      "rule": "pii-email",
+      "reason": "Pushed PR history contains the canonical Dell email in this exact historical file; the CI history scan requires this scoped exception."
+    },
+    {
+      "path": "ops/schema-reconstruction-selftest.py",
+      "sha256": "56724bec7f8920f87fdb86bf9dba6ab1827ae7a2650060cf4ba3d043c0003495",
+      "rule": "pii-email",
+      "reason": "Pushed PR history contains the canonical Dell email in this exact historical file; the CI history scan requires this scoped exception."
     }
   ]
 }

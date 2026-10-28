@@ -7,10 +7,12 @@ never changes the intake's exit code. By hand:
 python -c 'from lib.email_router import main; raise SystemExit(main())'
 
 Each run reads at most MAX_EMAILS emails from `email-router-queue`: recent inbound
-emails already logged by the intake, each tied to one open deal, oldest first, minus
+emails already logged by the intake, filed or unfiled, oldest first, minus
 the ones this router already handled. It starts no new email after BUDGET (20
-minutes). One isolated model call per email (lib/model_call.py, the intake's model
-door, model from settings) returns phase-move, next-step and reply-draft proposals, each with a
+minutes). Unfiled email goes through lib.email_matching: thread continuity files
+automatically; otherwise one pinned Jev call proposes a deal, a possible new matter,
+or contact-only logging. Filed email retains the isolated phase-move, next-step and
+reply-draft model call (lib/model_call.py, model from settings), each proposal with a
 literal evidence quote (capped at 2000 characters) and a confidence. Every surviving
 proposal is stored through `record-email-proposal`, which re-checks the evidence
 against the stored email and the deal, and flags a quote that reads like an injected
@@ -19,8 +21,8 @@ result, flags included, through `list-email-proposals`.
 
 Email text is data. The prompt fences the email and escapes a fence inside it, a
 quote that is not a literal substring of the email never leaves this process, and
-this module calls only the two verbs in VERBS: it never confirms, sends or changes a
-deal. Joe confirms every proposal.
+this module calls only VERBS. The thread inheritance verb revalidates continuity on the
+server; every other filing requires a partner confirmation. No mail is sent.
 
 An email counts as handled once the model answered and every proposal was either
 stored or refused by the server with a TOOL ERROR (bad evidence). A model failure, a
@@ -43,12 +45,12 @@ import time
 from typing import Callable
 import uuid
 
-from lib import model_call
+from lib import email_matching, model_call
 
-VERBS = frozenset({'email-router-queue', 'record-email-proposal'})
+VERBS = frozenset({'email-router-queue', 'record-email-proposal', 'inherit-email-thread'})
 KINDS = frozenset({'phase_move', 'next_step', 'reply_draft'})
 OWNERS = frozenset({'joe', 'dell'})
-REFUSAL = re.compile(r'^(?:email_proposal|email_deal|email_next_step)_[a-z_]+$')
+REFUSAL = re.compile(r'^(?:email_proposal|email_deal|email_next_step|email_thread)_[a-z_]+$')
 MIN_CONFIDENCE = 0.6
 MAX_EMAILS = 25
 MAX_ATTEMPTS = 3
@@ -142,7 +144,8 @@ def proposals(reply: dict, email: dict, today: date) -> list[dict]:
 
 def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], dict],
           refusal_code: Callable[[Exception], str | None], state: dict, now: datetime,
-          clock: Callable[[], datetime] | None = None) -> dict:
+          clock: Callable[[], datetime] | None = None,
+          matching: Callable = email_matching.match) -> dict:
     """One bounded pass over the queue. refusal_code names a server refusal, or None for any other failure.
 
     No new email is started once clock() passes now + BUDGET.
@@ -154,7 +157,8 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
     started = time.monotonic()
     clock = clock or (lambda: now + timedelta(seconds=time.monotonic() - started))
     counts = {k: 0 for k in ('emails', 'routed', 'model_failed', 'abandoned', 'recorded', 'refused',
-                             'dropped', 'write_failed', 'queue_failed', 'more', 'out_of_time')}
+                             'dropped', 'write_failed', 'queue_failed', 'more', 'out_of_time', 'inherited', 'contact_only')}
+    codes: dict[str, int] = {}
     routed, attempts = state.setdefault('routed', {}), state.setdefault('attempts', {})
     cutoff = (now - timedelta(days=WINDOW_DAYS + 1)).timestamp()
     for activity, at in list(routed.items()):
@@ -171,7 +175,7 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
         queue = call('email-router-queue', {'days': WINDOW_DAYS, 'limit': MAX_EMAILS, 'exclude': sorted(routed)})
     except Exception:
         counts['queue_failed'] = 1
-        return counts
+        return {**counts, 'refusal_codes': codes}
     counts['more'] = int(bool(queue.get('more')))
     for email in queue.get('emails', [])[:MAX_EMAILS]:
         if clock() >= now + BUDGET:
@@ -179,15 +183,53 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
             break
         activity = email['activity_id']
         counts['emails'] += 1
+        inheritance = None
+        def matching_proposal(decision):
+            if decision.kind == 'file_to_deal' and decision.deal in email.get('suppressed_deals', []):
+                return []
+            if decision.kind == 'contact_only':
+                counts['contact_only'] += 1
+                return []
+            args = {'kind': decision.kind, 'activity_id': activity, 'confidence': decision.confidence,
+                    'sender_role': decision.sender_role,
+                    'evidence_quote': (email.get('body') or email.get('subject') or '')[:MAX_QUOTE]}
+            if decision.deal:
+                args['deal'] = decision.deal
+            if decision.text:
+                args['text'] = decision.text
+            return [args]
         try:
-            reply = classify(email, now.date())
+            if email.get('deal'):
+                reply = classify(email, now.date())
+                kept = proposals(reply, email, now.date())
+                counts['dropped'] += max(0, len(reply.get('proposals') or []) - len(kept))
+            else:
+                decision = matching(email, queue['open_deals'], email.get('thread_history', []))
+                kept = []
+                if decision.kind == 'inherit_thread':
+                    inheritance = {'activity_id': activity, 'thread_activity_id': decision.thread_activity_id}
+                else:
+                    kept = matching_proposal(decision)
         except Exception:
             counts['model_failed'] += 1
             failed(activity)
             continue
-        kept = proposals(reply, email, now.date())
-        counts['dropped'] += max(0, len(reply.get('proposals') or []) - len(kept))
         try:
+            if inheritance:
+                digest = hashlib.sha256(json.dumps(inheritance, sort_keys=True).encode()).hexdigest()
+                try:
+                    call('inherit-email-thread', {'idempotency_key': str(uuid.uuid5(uuid.NAMESPACE_URL, digest)),
+                                                   **inheritance})
+                    counts['inherited'] += 1
+                except Exception as error:
+                    if not (refusal_code(error) or '').startswith('email_thread_'):
+                        raise WriteFailed() from error
+                    try:
+                        kept = matching_proposal(matching(email, queue['open_deals'], []))
+                    except Exception:
+                        counts['model_failed'] += 1
+                        failed(activity)
+                        continue
             for args in kept:
                 digest = hashlib.sha256(json.dumps(args, sort_keys=True).encode()).hexdigest()
                 key = str(uuid.uuid5(uuid.NAMESPACE_URL, f'record-email-proposal|{digest}'))
@@ -195,9 +237,11 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
                     call('record-email-proposal', {'idempotency_key': key, **args})
                     counts['recorded'] += 1
                 except Exception as error:
-                    if refusal_code(error) is None:
+                    code = refusal_code(error)
+                    if code is None:
                         raise WriteFailed() from error
                     counts['refused'] += 1
+                    codes[code] = codes.get(code, 0) + 1
         except WriteFailed:
             counts['write_failed'] += 1
             failed(activity)
@@ -205,7 +249,7 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
         attempts.pop(activity, None)
         routed[activity] = now.timestamp()
         counts['routed'] += 1
-    return counts
+    return {**counts, 'refusal_codes': codes}
 
 
 def _state(out: Path) -> dict:
@@ -243,7 +287,12 @@ def run(out: Path, carr: Callable[[str, dict], dict], classify: Callable[[dict, 
 
 
 def receipt(outcome: str, counts: dict) -> str:
-    return 'email-router-receipt ' + json.dumps({'state': outcome, 'counts': counts})
+    counts = counts.copy()
+    codes = counts.pop('refusal_codes', {})
+    result = {'state': outcome, 'counts': counts}
+    if codes:
+        result['refusal_codes'] = codes
+    return 'email-router-receipt ' + json.dumps(result)
 
 
 def step(repo: Path, settings) -> int:

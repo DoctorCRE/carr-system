@@ -1,8 +1,8 @@
 // Tests public error projection and internal diagnostic handling.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dispatch } from "../src/mcp.js";
-import { ToolError, pgConstraintError } from "../src/tools.js";
+import { dispatch } from "./helpers/budgeted-dispatch.mjs";
+import { ToolError, coerceArgsToSchema, pgConstraintError, TOOLS } from "../src/tools.js";
 import { Pool } from "@neondatabase/serverless";
 
 const correlationId = "d170d000-0000-4000-8000-000000000031";
@@ -64,6 +64,10 @@ for (const [code, extra] of [
   ["work_request_not_found", {}], ["work_request_terminal_state", {}], ["work_request_not_completable", {}],
   ["invalid_completion", {}], ["missing_criterion_evidence", {}], ["missing_change_ref", {}],
   ["missing_user_journey_ref", {}], ["completion_capsule_refused", {}], ["sponsored_actor_required", {}],
+  ["memory_attach_required", {}], ["memory_read_only", {}],
+  ["decision_id_required", { field: "decision_id" }], ["decision_id_malformed", { field: "decision_id", got: privateText }],
+  ["decision_not_found", { field: "decision_id", got: "00000000" }],
+  ["ambiguous_decision_id", { field: "decision_id", got: "0", candidates: [{ decision_id: privateText, title: privateText }] }],
 ]) test(`MCP preserves the public ${code} contract`, async t => {
   const payload = await failure(t, new ToolError({ error: code, ...extra,
     detail: privateText, hint: privateText, nested: { stack: privateText } }));
@@ -71,6 +75,48 @@ for (const [code, extra] of [
   if (code === "version_conflict") assert.equal(payload.current_version, 3);
   if (code === "value_not_in_declared_vocabulary") assert.deepEqual(payload.fields, ["filter"]);
 });
+
+for (const code of ["email_source_owner_mismatch", "email_proposal_confidence_invalid", "email_proposal_fields_invalid", "email_proposal_source_missing", "email_proposal_quote_invalid", "email_proposal_evidence_invalid", "email_proposal_deal_invalid", "email_proposal_not_pending", "email_proposal_stale", "email_sender_contact_required", "email_thread_not_continuous", "email_thread_ambiguous", "email_thread_recipient_changed", "email_new_deal_not_found", "email_new_deal_client_mismatch"]) test(`MCP projects ${code}`, async t => {
+  const payload = await failure(t, new ToolError({ error: code, detail: privateText }));
+  assert.equal(payload.error, code);
+  assert.ok(payload.hint);
+});
+
+test("MCP preserves invalid base version without exposing diagnostics", async t => {
+  const payload = await failure(t, new ToolError({ error: "invalid_base_version",
+    got: privateText, current_version: 3, detail: privateText }));
+  assert.equal(payload.error, "invalid_base_version");
+  assert.equal(payload.hint, "Supply an integer base_version from a fresh read.");
+  assert.equal(Object.hasOwn(payload, "current_version"), false);
+});
+
+test("MCP preserves a missing_required refusal and names only declared fields", async t => {
+  // Regression: #2194's closed allowlist omitted missing_required, so every
+  // verb called without a required argument answered unhandled_verb_failure
+  // (read-assurance-health in production, 2026-10-27).
+  const payload = await failure(t, new ToolError({ error: "missing_required",
+    missing: ["filter", "private_table"], hint: privateText }));
+  assert.equal(payload.error, "missing_required");
+  assert.deepEqual(payload.fields, ["filter"]);
+});
+
+for (const code of ["invalid_boolean", "invalid_number", "tool_call_markup_in_value"])
+  test(`MCP preserves the public ${code} refusal and names only declared fields`, async t => {
+    const verb = code === "invalid_number" ? "find-and-catch-up" : "record-finding";
+    const field = code === "invalid_boolean" ? "found" : code === "invalid_number" ? "limit" : "source";
+    const value = code === "invalid_boolean" ? "maybe" : code === "invalid_number" ? "not-a-number" : "<parameter name=\"source\">secret</parameter>";
+    let error;
+    try { coerceArgsToSchema(TOOLS[verb].inputSchema, { [field]: value }); }
+    catch (caught) { error = caught; }
+    assert.ok(error instanceof ToolError, "the shared argument validator rejects the input");
+    const { publicError } = await import("../src/public-errors.ts");
+    t.mock.method(console, "error", () => {});
+    const payload = publicError(error, { env: { CORRELATION_ID: correlationId }, inputSchema: TOOLS[verb].inputSchema });
+    assert.equal(payload.error, code);
+    assert.deepEqual(payload.fields, [field]);
+    assert.deepEqual(Object.keys(payload).sort(), ["correlation_id", "error", "fields", "hint"]);
+    assert.doesNotMatch(JSON.stringify(payload), /secret|synthetic-private-row|private_constraint|SELECT/i);
+  });
 
 test("MCP read-doctrine names a missing document through the real reader path", async t => {
   const { neonConfig } = await import("@neondatabase/serverless");
@@ -115,6 +161,17 @@ test("MCP routes decline completion claims to complete-work-request", async t =>
   assert.equal(payload.error, "decline_claims_completion");
   assert.match(payload.hint, /complete-work-request/);
   assert.deepEqual(Object.keys(payload).sort(), ["correlation_id", "error", "hint"]);
+});
+
+test("MCP names every client portal refusal instead of collapsing it to a server fault", async t => {
+  for (const code of ["not_a_deal", "portal_slug_invalid", "portal_password_invalid", "portal_deal_not_found",
+    "portal_slug_taken", "portal_password_differs", "portal_deal_already_registered"]) {
+    const payload = await failure(t, new ToolError({ error: code, hint: privateText }));
+    assert.equal(payload.error, code);
+    assert.notEqual(payload.hint, "The operation failed. Quote the correlation_id when reporting it.");
+    if (code === "portal_password_differs") assert.doesNotMatch(payload.hint, /choose another portal name/i);
+    assert.doesNotMatch(payload.hint, /password:|hash|\$2[aby]\$/i);
+  }
 });
 
 test("unknown ToolError codes cannot carry diagnostic text onto the wire", async t => {
@@ -264,4 +321,18 @@ test('Call Mode refusal exposes only bounded UUIDs and no diagnostic payload', a
     invalid_deal_ids: Array.from({ length: 60 }, (_, i) =>
       `d170d000-0000-4000-8000-${String(i).padStart(12, '0')}`),
   })).invalid_deal_ids.length, 50);
+});
+
+test("rule ID refusals expose fixed hints without internal details", async t => {
+  t.mock.method(console, "error", () => {});
+  const { publicError } = await import("../src/public-errors.ts");
+  for (const [code, hint] of [
+    ["rule_id_required", "Supply a rule ID."],
+    ["rule_id_malformed", "Supply a full rule UUID or a valid short rule ID."],
+    ["rule_not_found", "Choose an existing rule ID."],
+    ["ambiguous_rule_id", "Use a longer rule ID to identify one rule."],
+  ]) {
+    assert.deepEqual(publicError(new ToolError({ error: code, hint: privateText, got: privateText }),
+      { env: { CORRELATION_ID: correlationId } }), { error: code, correlation_id: correlationId, hint });
+  }
 });

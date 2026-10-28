@@ -3,7 +3,7 @@ import { vendorMeetingTools } from "./vendor-meetings.js";
 import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.ts";
 import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.ts";
-import { invoiceTrackerTools } from "./invoice-tracker.js";
+import { invoiceTrackerTools } from "./invoice-tracker.ts";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.ts";
@@ -26,14 +26,15 @@ import { doctrineTools } from "./doctrine.js";
 import { situationRetrievalTools } from "./situation-retrieval.js";
 import { investigationTools } from "./investigation.js";
 import { docConversationTools } from "./doc-conversation.js";
-import { docSuggestionTools } from "./doc-suggestions.js";
+import { docSuggestionTools } from "./doc-suggestions.ts";
 import { docActivityTools } from "./doc-activity.js";
 import { whatsNewTools } from "./whats-new.js";
 import { MEETING_MODE_WRITE_VERBS, meetingModeTools } from "./meeting-mode.js";
-import { notificationTools } from "./notifications.js";
-import { sessionIdentityTools } from "./session-identity.js";
-import { dispatchSpineTools } from "./dispatch-spine.js";
-import { workShapeTools } from "./work-shape.js";
+import { notificationTools } from "./notifications.ts";
+import { sessionIdentityTools } from "./session-identity.ts";
+import { dispatchSpineTools } from "./dispatch-spine.ts";
+import { workShapeTools } from "./work-shape.ts";
+import { workQueueTools } from "./work-queue.js";
 import { workRequestIntakeTools } from "./work-request-intake.js";
 import { workPortfolioTools } from "./work-portfolio.js";
 import { leaseTermComparisonTools } from "./lease-term-comparison.js";
@@ -43,7 +44,7 @@ import { clientPortalTools } from "./client-portal.ts";
 import { memoryTools } from "./memory.js";
 import { codexContinuityTools } from "./codex-continuity.js";
 import { incidentTools } from "./incident.js";
-import { resourceObservationTools } from "./resource-observation.v5.js";
+import { resourceObservationTools } from "./resource-observation.v5.ts";
 import { invoiceAutomation } from "./invoice-automation.js";
 import { emailDealProgressTools } from "./email-deal-progress.ts";
 import { emailNextStepTools } from "./email-next-step.ts";
@@ -52,7 +53,7 @@ import { addCalendarMeetingPrep } from "./calendar-meeting-prep.js";
 import { CALENDAR_AGENDA_BOARD, calendarSection, addCalendarContacts, addCalendarDealSuggestions } from "./brief-calendar.js";
 import { emailLeadProposalTools } from "./email-lead-proposal.ts";
 import { leadAutomationTools } from "./lead-automation.js";
-import { workflowCutoverTools } from "./workflow-cutover.v5.js";
+import { workflowCutoverTools } from "./workflow-cutover.v5.ts";
 import { engineeringRuntimeTools } from "./engineering-runtime.js";
 import { tourRightsProjectionTools } from "./tour-rights-projection.js";
 import { tourPropertyJurisdictionTools } from "./tour-property-jurisdiction.js";
@@ -84,11 +85,11 @@ import { salesforceReadRunStoreTools } from "./salesforce-read-run-store-rw02.v5
 import { V5BoundaryDoorRefusal, globalBoundariesDoorTools, passBoundaryDoor } from
   "./global-boundaries-door.v5.js";
 import { governedCorrespondenceStoreTools } from "./governed-correspondence-store.v5.js";
-import { assuranceHealthStoreTools } from "./assurance-health-store.v5.js";
+import { assuranceHealthStoreTools } from "./assurance-health-store.v5.ts";
 import { ruleContextRuntimeTools } from "./rule-context-runtime.v5.js";
 import { systemWorkTools } from "./system-work-census.v5.js";
 import { BOARD_ANSWER_WRITE_VERBS, boardAnswerTools } from "./board-answers.js";
-import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.js";
+import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.ts";
 import { partyIdentityTools } from "./party-identity.js";
 import { partyDuplicateCandidateTools } from "./party-duplicate-candidates.js";
 import { briefQueuePage, readBriefLoops, briefLoopKey, briefNeedsJoeKey, briefAssuranceKey } from "./brief-queues.ts";
@@ -345,7 +346,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || verb === "dismiss-email-proposal" || verb === "undo-call" || ["set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing"].includes(verb) || verb === "undo-call" || ["set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
@@ -664,6 +665,21 @@ function preferredMergeSurvivor(rows) {
     if (as[i] !== bs[i]) return as[i] > bs[i] ? a : b;
   }
   return new Date(a.created_at).getTime() <= new Date(b.created_at).getTime() ? a : b;
+}
+
+async function resolveDecisionAbout(client, actor, about) {
+  const refs = (Array.isArray(about) ? about : [about])
+    .map(r => String(r || "").trim()).filter(Boolean);
+  for (const ref of refs) {
+    if (/^WR-/i.test(ref)) {
+      const found = await client.query(
+        "select 1 from ops.work_request where ref = $1 and organization_tenant_id = $2", [ref.toUpperCase(), organizationTenantForActor(actor)]);
+      if (!found.rows.length) throw new ToolError({ error: "decision_about_work_request_not_found", field: "about", ref });
+      throw new ToolError({ error: "unsupported_decision_about", field: "about", ref });
+    }
+    await resolveSubject(client, ref);
+  }
+  return refs;
 }
 
 // [loop #278] The ONE place a decision gets mirrored onto the record it governs.
@@ -3808,6 +3824,7 @@ export const TOOLS = {
                 b.operating_state, b.parking_reason, b.parking_note,
                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on,
                 to_jsonb(b.closed_on)#>>'{}' as closed_on, b.lane, b.outcome,
+                (select cp.client_portal_url from v_deal_client_portal cp where cp.deal_id=b.id) as client_portal_url,
                 (select to_jsonb(pc) from v_deal_room_phase_change pc where pc.deal_id=b.id) as phase_change,
                 coalesce((select jsonb_object_agg(ps.phase, to_jsonb(ps.started_on)#>>'{}')
                             from v_deal_room_phase_start ps where ps.deal_id=b.id), '{}'::jsonb) as phase_started_on,
@@ -4252,6 +4269,16 @@ export const TOOLS = {
       // migration 0028; without it the FK to activity_kind rejects the row.
       kind: { type: "string", enum: ["call","email_out","email_in","meeting","tour","text","note","counter_sent","counter_received","loi","lease_signed","task","analysis"] },
       summary: { type: "string" }, detail: { type: "string" },
+      email_context: { type: 'object', additionalProperties: false,
+        required: ['subject', 'conversation_id', 'sender', 'recipients'], properties: {
+          source_activity_id: { type: 'string', format: 'uuid' },
+          subject: { type: 'string' }, conversation_id: { type: ['string', 'null'] },
+          sender: { type: 'object', additionalProperties: false, required: ['email', 'internal'],
+            properties: { email: { type: 'string' }, name: { type: ['string', 'null'] }, internal: { type: 'boolean' } } },
+          recipients: { type: 'array', items: { type: 'object', additionalProperties: false,
+            required: ['email', 'kind', 'internal'], properties: { email: { type: 'string' },
+              name: { type: ['string', 'null'] }, kind: { enum: ['to', 'cc'] }, internal: { type: 'boolean' } } } },
+        } },
       email_source: { type: "object", additionalProperties: false, required: ["sender_email", "mailbox_owner"],
         properties: { sender_email: { type: "string", format: "email", maxLength: 254 },
           mailbox_owner: { type: "string", enum: ["joe", "dell"] } } },
@@ -4331,10 +4358,14 @@ export const TOOLS = {
         for (const vendorId of versions.keys())
           await c.query('update vendor set updated_by=$1 where id=$2',[actor.id,vendorId]);
       }
+      if (args.email_source !== undefined && (args.kind !== 'email_in' ||
+          args.email_source.mailbox_owner !== partnerAuthoritySlugForActor(actor)))
+        throw new ToolError({ error: 'email_source_owner_mismatch' });
       const r = await c.query(
-        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_source)
-         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb) returning id, occurred_at`,
+        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_context, email_source)
+         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb, $9::jsonb) returning id, occurred_at`,
         [args.occurred_at || null, actor.id, args.kind, args.summary, args.detail || null, args.owed || null, s.id,
+          args.email_context ? JSON.stringify(args.email_context) : null,
           args.email_source ? JSON.stringify(args.email_source) : null]);
       await writeEvent(c, actor, "log-activity", s.type, s.id,
         { new: { activity: r.rows[0].id, kind: args.kind }, human_quote: args.human_quote, idempotency_key: args.idempotency_key });
@@ -6968,15 +6999,7 @@ export const TOOLS = {
       // record this loop exists to stop creating. Resolution happens twice on the happy
       // path (here to validate, again inside mirrorDecision to write); that is a couple
       // of indexed reads against correctness, which is not a trade worth making.
-      const aboutRefs = args.about
-        ? (Array.isArray(args.about) ? args.about : [args.about]).map(r => String(r || "").trim()).filter(Boolean)
-        : [];
-      for (const ref of aboutRefs) {
-        if (/^WR-/i.test(ref))
-          throw new ToolError({ error: "unsupported_decision_about", field: "about", ref,
-            hint: "Work Request refs are not supported in about. Use a lead, client, vendor, party or deal ref. For a system-wide ruling, omit about and name the Work Request in the rationale." });
-        await resolveSubject(c, ref);
-      }
+      const aboutRefs = await resolveDecisionAbout(c, actor, args.about);
 
       // [idea 68, 0085] BOTH HALVES OF A PRICE OR NEITHER. A cost with no
       // quality number is a complaint and a quality number with no cost is a
@@ -7094,6 +7117,8 @@ export const TOOLS = {
           where subject_id = $1 and verb = 'log-decision' limit 1`, [decisionId])).rows[0];
       if (!cur) throw new ToolError({ error: "decision_not_found", decision_id: args.decision_id,
         hint: "pass the decision_id log-decision returned, not the event_id" });
+
+      await resolveDecisionAbout(c, actor, args.about);
 
       const nv = cur.new_value || {};
       const quote = args.human_quote !== undefined ? args.human_quote : cur.human_quote;
@@ -8952,25 +8977,26 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "doc-conversation": "mcp-server/src/doc-conversation.js",
   "doc-activity": "mcp-server/src/doc-activity.js",
   "meeting-mode": "mcp-server/src/meeting-mode.js",
-  "notifications": "mcp-server/src/notifications.js",
-  "session-identity": "mcp-server/src/session-identity.js",
-  "dispatch-spine": "mcp-server/src/dispatch-spine.js",
+  "notifications": "mcp-server/src/notifications.ts",
+  "session-identity": "mcp-server/src/session-identity.ts",
+  "dispatch-spine": "mcp-server/src/dispatch-spine.ts",
   "doc-outcome-cards": "mcp-server/src/tools.js",
-  "work-shape": "mcp-server/src/work-shape.js",
+  "work-shape": "mcp-server/src/work-shape.ts",
+  "work-queue": "mcp-server/src/work-queue.js",
   "work-request-intake": "mcp-server/src/work-request-intake.js",
   "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
   "fact-observations": "mcp-server/src/fact-observations.ts",
   "partner-room": "mcp-server/src/partner-room.js",
   "agent-profile": "mcp-server/src/agent-profiles.js",
   "client-portal": "mcp-server/src/client-portal.ts",
-  "resource-observation": "mcp-server/src/resource-observation.v5.js",
+  "resource-observation": "mcp-server/src/resource-observation.v5.ts",
   "lead-automation": "mcp-server/src/lead-automation.js",
   "invoice-automation": "mcp-server/src/invoice-automation.js",
   "email-deal-progress": "mcp-server/src/email-deal-progress.ts",
   "email-next-step": "mcp-server/src/email-next-step.ts",
   "email-proposals": "mcp-server/src/email-proposals.js",
   "email-lead-proposal": "mcp-server/src/email-lead-proposal.ts",
-  "workflow-cutover": "mcp-server/src/workflow-cutover.v5.js",
+  "workflow-cutover": "mcp-server/src/workflow-cutover.v5.ts",
   "memory": "mcp-server/src/memory.js",
   "codex-continuity": "mcp-server/src/codex-continuity.js",
   "incident": "mcp-server/src/incident.js",
@@ -8989,17 +9015,17 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "salesforce-read-run-rw02": "mcp-server/src/salesforce-read-run-store-rw02.v5.js",
   "global-boundaries-door": "mcp-server/src/global-boundaries-door.v5.js",
   "governed-correspondence-store": "mcp-server/src/governed-correspondence-store.v5.js",
-  "assurance-health-store": "mcp-server/src/assurance-health-store.v5.js",
+  "assurance-health-store": "mcp-server/src/assurance-health-store.v5.ts",
   "rule-context-runtime": "mcp-server/src/rule-context-runtime.v5.js",
   "system-work-census": "mcp-server/src/system-work-census.v5.js",
   "board-answers": "mcp-server/src/board-answers.js",
-  "research-sites": "mcp-server/src/research-sites.js",
+  "research-sites": "mcp-server/src/research-sites.ts",
   "party-identity": "mcp-server/src/party-identity.js",
   "party-duplicate-candidates": "mcp-server/src/party-duplicate-candidates.js",
   "schedule-board": "mcp-server/src/schedule-board.js",
-  "doc-suggestions": "mcp-server/src/doc-suggestions.js",
+  "doc-suggestions": "mcp-server/src/doc-suggestions.ts",
   "whats-new": "mcp-server/src/whats-new.js",
-  "invoice-tracker": "mcp-server/src/invoice-tracker.js",
+  "invoice-tracker": "mcp-server/src/invoice-tracker.ts",
   "vendor-meetings": "mcp-server/src/vendor-meetings.js",
 });
 
@@ -9051,6 +9077,7 @@ registerTools({
                 b.operating_state, b.parking_reason, b.parking_note,
                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on,
                 to_jsonb(b.closed_on)#>>'{}' as closed_on, b.lane, b.outcome,
+                (select cp.client_portal_url from v_deal_client_portal cp where cp.deal_id=b.id) as client_portal_url,
                 (select to_jsonb(pc) from v_deal_room_phase_change pc where pc.deal_id=b.id) as phase_change,
                 coalesce((select jsonb_object_agg(ps.phase, to_jsonb(ps.started_on)#>>'{}')
                             from v_deal_room_phase_start ps where ps.deal_id=b.id), '{}'::jsonb) as phase_started_on,
@@ -9067,6 +9094,7 @@ registerTools({
                 case when a.account_client_id is null then 'team' else 'national_account' end as workspace_kind,
                 to_jsonb(b.closed_on)#>>'{}' as closed_on,
                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on, b.outcome, b.lane,
+                (select cp.client_portal_url from v_deal_client_portal cp where cp.deal_id=b.id) as client_portal_url,
                 coalesce((select jsonb_object_agg(ps.phase, to_jsonb(ps.started_on)#>>'{}')
                             from v_deal_room_phase_start ps where ps.deal_id=b.id), '{}'::jsonb) as phase_started_on,
                 r.salesforce_id, r.base_version, ce.client_status, ce.client_version, ce.prospect_engagement_status
@@ -10529,6 +10557,7 @@ registerTools({
 registerTools(workShapeTools({ withEnvelope, writeEvent, ToolError }), "work-shape");
 
 // Program 6: sourced additive capture and a safe card only. No lifecycle verbs.
+registerTools(workQueueTools({ withEnvelope, writeEvent, ToolError }), "work-queue");
 registerTools(workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }), "work-request-intake");
 registerTools(workPortfolioTools({ ToolError }), "work-portfolio");
 
@@ -10540,10 +10569,10 @@ registerTools(factObservationTools(), "fact-observations");
 // turns, server-derived attribution, human-watchable. See src/partner-room.js.
 registerTools(partnerRoomTools({ withEnvelope, ToolError }), "partner-room");
 registerTools(agentProfileTools(), "agent-profile");
-registerTools(clientPortalTools(), "client-portal");
+registerTools(clientPortalTools({ withEnvelope, writeEvent, resolveSubject }), "client-portal");
 // DoctorCRE v5 V5-UX-C02/C06: the resource-metering read contract and the
 // one write door the local, credential-less collector uses. See
-// src/resource-observation.v5.js.
+// src/resource-observation.v5.ts.
 registerTools(resourceObservationTools({ withEnvelope, ToolError }), "resource-observation");
 registerTools(emailDealProgressTools({ withEnvelope, writeEvent, lockDealField, resolveEmailProposal,
   updateDeal: (c, actor, args) => TOOLS["update-deal"].handler(c, actor, args) }), "email-deal-progress");
@@ -10561,7 +10590,7 @@ registerTools(leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoice
 // DoctorCRE V5-R02: workflow cutover, caller migration and retirement
 // readiness. Reads historical acceptance and native retirement evidence rather than
 // duplicating their evidence; retire-workflow-cutover-plan is authority-only.
-// See src/workflow-cutover.v5.js.
+// See src/workflow-cutover.v5.ts.
 registerTools(workflowCutoverTools({ withEnvelope, ToolError }), "workflow-cutover");
 // Phase 1 CARR-native learning memory: evidence-backed context with explicit
 // candidate/promotion/correction/forgetting lifecycle. Memory never grants

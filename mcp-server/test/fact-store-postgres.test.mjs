@@ -43,8 +43,10 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
   try {
     await c.query(await readFile(new URL('../../migrations/0001_init.sql', import.meta.url), 'utf8'));
     await c.query('create schema ops; create role carr_reader; create role carr_writer; create role carr_authority; create role dot_reader; grant usage on schema ops to dot_reader; alter default privileges in schema ops grant select on tables to dot_reader');
+    // Grants registered by migrations after 0983 are not in the predecessor; they follow the fact-store grants.
+    const LATER_FUNCTIONS = /^ops\.register_client_portal\(/;
     const predecessor = { ...SCAC_MUTATION_CURRENT_DB_GRANTS,
-      secdef_execute: SCAC_MUTATION_CURRENT_DB_GRANTS.secdef_execute.filter(g => !FACT_FUNCTIONS.test(g.signature)) };
+      secdef_execute: SCAC_MUTATION_CURRENT_DB_GRANTS.secdef_execute.filter(g => !FACT_FUNCTIONS.test(g.signature) && !LATER_FUNCTIONS.test(g.signature)) };
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as $f$select ${c.escapeLiteral(JSON.stringify(predecessor))}::jsonb$f$`);
     await c.query(await readFile(new URL('../../migrations/0983_fact_store.sql', import.meta.url), 'utf8'));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner'),($2,'codex','automation','Synthetic job')", [partner.id, job.id]);
@@ -56,7 +58,9 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
     });
 
     await t.test('the grant contract registers exactly the installed fact-store definers', async () => {
-      assert.deepEqual((await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract, SCAC_MUTATION_CURRENT_DB_GRANTS);
+      const installedContract = (await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract;
+      installedContract.secdef_execute.push(...SCAC_MUTATION_CURRENT_DB_GRANTS.secdef_execute.filter(g => LATER_FUNCTIONS.test(g.signature)));
+      assert.deepEqual(installedContract, SCAC_MUTATION_CURRENT_DB_GRANTS);
       const installed = (await c.query(`select p.oid::regprocedure::text sig,
           n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')' signature,
           p.proconfig,p.provolatile,acl.grantee::regrole::text grantee

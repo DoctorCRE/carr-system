@@ -22,6 +22,14 @@ import { safeInteger, integerFields, normalizedEnvelope } from "./safe-integer.t
 import { isPersonalRecordOwner } from "./personal-record-ownership.ts";
 
 const CORE_RULE_ID_SET = new Set(CORE_RULE_IDS);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// WR-000562: the read-write team store and who may attach to it (migration 1015).
+const TEAM_MEMORY = "team-memory";
+const MEMORY_SURFACES = ["claude_code", "codex", "routine", "dot", "dream", "app"];
+const MEMORY_ACCESS = ["read_only", "read_write"];
+// The one attach instruction (S6): the MCP instructions embed it and
+// ops/sync-core-rule-cards.py renders it into CLAUDE.md and AGENTS.md.
+export const MEMORY_ATTACH_LINE = "OPENING ACT, every session: call attach-memory once, first, with surface claude_code for a Claude Code session (terminal or Desktop) or codex for a Codex job (pass the job log named on the brief's first line as transcript_ref); a claude.ai or other chat app does not attach and calls standing-context instead. Check its team-memory index before starting, read any section that bears on your task with doctrine-sections, and skip work a current section records as done or ruled out, citing it; as you learn or rule something out, write it with write-doctrine-section document=team-memory and your attach_id.";
 const TERRITORY_SECTION_ID = "aa3868ef-d0a2-4bc2-9954-525ad418636b";
 
 /** Read the count banner emitted by the generated personal/shared rule renders. */
@@ -88,6 +96,35 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
     if (doc.visibility === "personal" &&
         !await isPersonalRecordOwner(c, actor, doc.owner_actor_id))
       throw new ToolError({ error: "personal_doc_not_owner" });
+  }
+
+  // The memory_session row behind an attach_id, only when this actor made it.
+  async function attachFor(c, actor, attachId) {
+    if (!UUID_RE.test(attachId || "")) return null;
+    return (await c.query(`select access from memory_session where attach_id = $1 and actor_id = $2`,
+      [attachId, actor.id])).rows[0] || null;
+  }
+
+  // A write's session: its memory attach when given (WR-000562 D4), else the
+  // OAuth client that carried it. A given attach_id must be this actor's own.
+  async function sessionFor(c, actor, args) {
+    if (args.attach_id === undefined) return actor.client_id || null;
+    if (!await attachFor(c, actor, args.attach_id))
+      throw new ToolError({ error: "memory_attach_required", field: "attach_id" });
+    return args.attach_id;
+  }
+
+  // The gated rule boot (rule-boot.ts): sponsor-scoped rule rows hashed into
+  // one digest page. standing-context detail=boot and attach-memory share it.
+  async function ruleBoot(c, scope, page = 1) {
+    const rows = (await c.query(
+      `select id, statement, scope, personal_to
+         from v_compiled_rules
+        where (personal_to is null or ($1::text is not null and personal_to = $1))
+          and coalesce(scope->>'kind','') <> 'intro_politics'
+        /* standing-context:rule-boot */`, [scope.sponsor])).rows;
+    const bootSponsor = scope.status === "personal" ? scope.sponsor : null;
+    return { boot: await ruleBootPage(rows, bootSponsor, page), bootSponsor };
   }
 
   async function lockSection(c, sectionId, actor) {
@@ -277,6 +314,19 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
       }
       return out;
     },
+    // WR-000562 D4: team memory is written only under a read-write attach that
+    // the writing actor made. A finding's `refusal` becomes the public error.
+    "gates.memory_attach_required": async (c, ctx, cfg) => {
+      if (!((cfg && cfg.slugs) || []).includes(ctx.doc_slug)) return [];
+      const attach = await attachFor(c, ctx.actor, ctx.attach_id);
+      if (!attach)
+        return [{ refusal: "memory_attach_required", path: "attach_id",
+          message: "pass the attach_id that attach-memory returned to this actor" }];
+      if (attach.access !== "read_write")
+        return [{ refusal: "memory_read_only", path: "attach_id",
+          message: "this attach is read_only; attach again with access read_write to write" }];
+      return [];
+    },
     "gates.unresolved_conflict": async (c, ctx) => {
       const out = [];
       for (const e of ctx.edges || []) {
@@ -335,7 +385,9 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
          values ($1,$2,$3,$4,$5,$6) on conflict do nothing`,
         [run.rows[0].id, f.check_key, f.severity, f.passed, f.message, f.path || ""]);
     if (blocked && !dryRun)
-      throw new ToolError({ error: "gate_blocked", gate_run_id: run.rows[0].id,
+      throw new ToolError({
+        error: failed.find(f => f.severity === "block" && f.refusal)?.refusal || "gate_blocked",
+        gate_run_id: run.rows[0].id,
         findings: failed,
         hint: "each finding names its fix; repair and retry with a NEW idempotency key" });
     return { gate_run_id: run.rows[0].id, result: blocked ? "fail" : "pass", findings };
@@ -358,9 +410,12 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         malformed.push({ item_index: index, fields: ["item"] });
         continue;
       }
+      const op = item.op ?? "write";
+      if (op !== "write" && op !== "retire")
+        fields.push("op");
       if (typeof item.section_key !== "string" || !item.section_key.trim())
         fields.push("section_key");
-      if (typeof item.body_text !== "string" || !item.body_text.trim())
+      if (op === "write" && (typeof item.body_text !== "string" || !item.body_text.trim()))
         fields.push("body_text");
       if (!Number.isInteger(item.base_version) || item.base_version < 0)
         fields.push("base_version");
@@ -372,7 +427,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
     }
     if (malformed.length)
       throw new ToolError({ error: "change_set_item_invalid", malformed,
-        hint: "each item requires a non-empty section_key, body_text, and non-negative integer base_version" });
+        hint: "each item requires a non-empty section_key and non-negative integer base_version; op write (the default) also requires body_text, op retire takes none" });
     return items;
   }
 
@@ -428,7 +483,8 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         body_text: { type: "string", description: "the section's prose (P2 body model)" },
         base_version: { type: "integer", description: "0 to create; else current_version from a fresh read" },
         ordinal: { type: "integer" },
-        commit_message: { type: "string" } },
+        commit_message: { type: "string" },
+        attach_id: { type: "string", description: "the attach_id from attach-memory; required to write team-memory, and recorded as the write's session" } },
         required: ["idempotency_key", "document", "section_key", "body_text", "base_version"] },
       handler: async (c, actor, args) => withEnvelope(c, actor, "write-doctrine-section", args, async () => {
         const doc = await resolveDoc(c, args.document, true);
@@ -445,7 +501,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         const body = { text: args.body_text };
         await runGates(c, actor, "write", { section_id: sec ? sec.id : null, body,
           content_class: doc.content_class, visibility: doc.visibility,
-          owner_actor_id: doc.owner_actor_id, doc_slug: doc.slug });
+          owner_actor_id: doc.owner_actor_id, doc_slug: doc.slug, attach_id: args.attach_id });
         if (!sec) {
           const ord = args.ordinal ?? (await c.query(
             `select coalesce(max(ordinal),0)+10 as o from doctrine_section where document_id=$1`,
@@ -457,10 +513,11 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         } else if (args.title) {
           await c.query(`update doctrine_section set title=$2 where id=$1`, [sec.id, args.title]);
         }
+        const session = await sessionFor(c, actor, args);
         const cs = await c.query(
           `insert into doctrine_change_set (actor_id, session_key, idempotency_key, state, committed_at)
            values ($1,$2,$3,'committed',now()) returning id`,
-          [actor.id, actor.client_id || null, args.idempotency_key]);
+          [actor.id, session, args.idempotency_key]);
         const hash = await sha256hex(args.body_text);
         const newVersion = safeInteger(version(sec.current_version) + 1, "doctrine_version_invalid");
         const rev = await c.query(
@@ -468,7 +525,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
              actor_id, session_key, body, plain_text, content_hash, commit_message)
            values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id`,
           [sec.id, newVersion, sec.current_revision_id, cs.rows[0].id, actor.id,
-           actor.client_id || null, JSON.stringify(body), args.body_text, hash,
+           session, JSON.stringify(body), args.body_text, hash,
            args.commit_message || null]);
         await c.query(
           `update doctrine_section
@@ -549,15 +606,24 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         idempotency_key: { type: "string" },
         section_id: { type: "string" },
         base_version: { type: "integer" },
-        reason: { type: "string" } },
+        reason: { type: "string" },
+        attach_id: { type: "string", description: "the attach_id from attach-memory; required to retire a team-memory section" } },
         required: ["idempotency_key", "section_id", "base_version", "reason"] },
       handler: async (c, actor, args) => withEnvelope(c, actor, "retire-doctrine-section", args, async () => {
         const sec = await lockSection(c, args.section_id, actor);
         baseVersion(args.base_version);
         if (version(sec.current_version) !== args.base_version)
           throw await versionConflict(c, sec);
-        await runGates(c, actor, "retire", { section_id: sec.id, content_class: sec.content_class });
+        await runGates(c, actor, "retire", { section_id: sec.id, content_class: sec.content_class,
+          doc_slug: sec.doc_slug, attach_id: args.attach_id });
         safeInteger(version(sec.current_version) + 1, "doctrine_version_invalid");
+        const cs = await c.query(
+          `insert into doctrine_change_set (actor_id, session_key, idempotency_key, state, committed_at)
+           values ($1,$2,$3,'committed',now()) returning id`,
+          [actor.id, await sessionFor(c, actor, args), args.idempotency_key]);
+        await c.query(
+          `insert into doctrine_change_item (change_set_id, section_id, op, expected_version)
+           values ($1,$2,'retire',$3)`, [cs.rows[0].id, sec.id, args.base_version]);
         await c.query(
           `update doctrine_section set status='retired', updated_at=now(),
                   current_version = current_version + 1 where id=$1`, [sec.id]);
@@ -819,16 +885,18 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
 
     "change-doctrine-sections": {
       write: true,
-      description: "Write SEVERAL sections of one document atomically — all commit or none do (the half-applied-rename preventer; P2's known gap, closed in P3). Each item carries its own base_version; any stale version or blocked gate aborts the whole set. One generation bump, one snapshot rebuild.",
+      description: "Write or retire SEVERAL sections of one document atomically — all commit or none do (the half-applied-rename preventer; P2's known gap, closed in P3). Each item carries its own base_version and an op: write (default, needs body_text) or retire. Any stale version or blocked gate aborts the whole set. One generation bump, one snapshot rebuild. Team-memory changes need attach_id from attach-memory.",
       inputSchema: { type: "object", properties: {
         idempotency_key: { type: "string" },
         document: { type: "string" },
         commit_message: { type: "string" },
+        attach_id: { type: "string", description: "the attach_id from attach-memory; required to change team-memory, and recorded as the change set's session" },
         items: { type: "array", items: { type: "object", properties: {
+          op: { type: "string", enum: ["write", "retire"], description: "write (default) or retire" },
           section_key: { type: "string" }, title: { type: "string" },
-          body_text: { type: "string" }, base_version: { type: "integer" },
+          body_text: { type: "string", description: "required for op write" }, base_version: { type: "integer" },
           ordinal: { type: "integer" } },
-          required: ["section_key", "body_text", "base_version"] } } },
+          required: ["section_key", "base_version"] } } },
         required: ["idempotency_key", "document", "items"] },
       handler: async (c, actor, args) => {
         // Reject malformed nested input before the envelope opens its transaction
@@ -838,10 +906,11 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         if (!args.items.length) throw new ToolError({ error: "empty_change_set" });
         const doc = await resolveDoc(c, args.document, true);
         await assertDocumentOwner(c, actor, doc);
+        const session = await sessionFor(c, actor, args);
         const cs = await c.query(
           `insert into doctrine_change_set (actor_id, session_key, idempotency_key, state)
            values ($1,$2,$3,'prepared') returning id`,
-          [actor.id, actor.client_id || null, args.idempotency_key]);
+          [actor.id, session, args.idempotency_key]);
         // The document's own declared review policy, read once for the whole
         // batch. write-doctrine-section has always applied this; this door did
         // not, so every section written here landed with a null review_after and
@@ -866,13 +935,28 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
           baseVersion(it.base_version);
           if (sec && version(sec.current_version) !== it.base_version)
             throw await versionConflict(c, sec);
+          if (it.op === "retire") {
+            if (!sec || sec.status !== "active")
+              throw new ToolError({ error: "doctrine_section_not_found", section_key: it.section_key });
+            await runGates(c, actor, "retire", { section_id: sec.id, content_class: doc.content_class,
+              doc_slug: doc.slug, attach_id: args.attach_id }, { changeSetId: cs.rows[0].id });
+            const retiredVersion = safeInteger(version(sec.current_version) + 1, "doctrine_version_invalid");
+            await c.query(
+              `insert into doctrine_change_item (change_set_id, section_id, op, expected_version)
+               values ($1,$2,'retire',$3)`, [cs.rows[0].id, sec.id, it.base_version]);
+            await c.query(
+              `update doctrine_section set status='retired', current_version=$2, updated_at=now() where id=$1`,
+              [sec.id, retiredVersion]);
+            results.push({ section_key: it.section_key, section_id: sec.id, version: retiredVersion, status: "retired" });
+            continue;
+          }
           if (!sec && it.base_version !== 0)
             throw new ToolError({ error: "section_not_found_base_nonzero",
               section_key: it.section_key });
           const body = { text: it.body_text };
           await runGates(c, actor, "write", { section_id: sec ? sec.id : null, body,
             content_class: doc.content_class, visibility: doc.visibility,
-            owner_actor_id: doc.owner_actor_id, doc_slug: doc.slug },
+            owner_actor_id: doc.owner_actor_id, doc_slug: doc.slug, attach_id: args.attach_id },
             { changeSetId: cs.rows[0].id });
           if (!sec) {
             const ord = it.ordinal ?? (await c.query(
@@ -896,7 +980,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
                actor_id, session_key, body, plain_text, content_hash, commit_message)
              values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id`,
             [sec.id, newVersion, sec.current_revision_id, cs.rows[0].id, actor.id,
-             actor.client_id || null, JSON.stringify(body), it.body_text, hash,
+             session, JSON.stringify(body), it.body_text, hash,
              args.commit_message || null]);
           await c.query(
             `update doctrine_section set current_revision_id=$2, current_version=$3,
@@ -907,7 +991,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
               where id=$1`,
             [sec.id, rev.rows[0].id, newVersion, hash, policyDays]);
           embeddingRevisions.push({ revision_id: rev.rows[0].id, plain_text: it.body_text });
-          results.push({ section_key: it.section_key, section_id: sec.id, version: newVersion });
+          results.push({ section_key: it.section_key, section_id: sec.id, version: newVersion, status: "active" });
         }
         await c.query(
           `update doctrine_change_set set state='committed', committed_at=now() where id=$1`,
@@ -1022,14 +1106,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         // rows (same filter as the recitation below) and must stay cheap,
         // because every session and subagent fetches its single digest page.
         if (args.detail === "boot") {
-          const bootRows = (await c.query(
-            `select id, statement, scope, personal_to
-               from v_compiled_rules
-              where (personal_to is null or ($1::text is not null and personal_to = $1))
-                and coalesce(scope->>'kind','') <> 'intro_politics'
-              /* standing-context:rule-boot */`, [who])).rows;
-          const bootSponsor = scope.status === "personal" ? who : null;
-          const boot = await ruleBootPage(bootRows, bootSponsor, args.page ?? 1);
+          const { boot, bootSponsor } = await ruleBoot(c, scope, args.page ?? 1);
           if (boot.error) {
             throw new ToolError({ error: boot.error, page: args.page,
               pages_total: boot.pages_total, digest: boot.digest,
@@ -1507,6 +1584,55 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
       },
     },
 
+    "attach-memory": {
+      write: true,
+      description: "Attach this session to memory at start (WR-000562): returns an attach_id and the two stores. org-conventions is the rule corpus, read-only (read with standing-context; propose a convention as a team-memory section under conventions/proposed/). team-memory is the shared lessons document: check its index before starting, read with doctrine-sections, and write lessons as you learn them with write-doctrine-section document=team-memory attach_id=<attach_id>. Records one memory_session row: what this session read and its access.",
+      inputSchema: { type: "object", properties: {
+        idempotency_key: { type: "string" },
+        surface: { type: "string", enum: MEMORY_SURFACES, description: "the agent surface attaching" },
+        access: { type: "string", enum: MEMORY_ACCESS, description: "team-memory access; read_write (default) or read_only" },
+        native_session_id: { type: "string", description: "the surface's own session id, if it has one" },
+        transcript_ref: { type: "string", description: "where this session's transcript will be, if known" },
+        host: { type: "string", description: "the machine running the session" } },
+        required: ["idempotency_key", "surface"] },
+      handler: async (c, actor, args) => withEnvelope(c, actor, "attach-memory", args, async () => {
+        const access = args.access ?? "read_write";
+        const scope = personalScopeForActor(actor);
+        if (scope.status === "error") throw new ToolError({ error: scope.error });
+        const { boot } = await ruleBoot(c, scope);
+        const doc = await resolveDoc(c, TEAM_MEMORY);
+        const generation = Number((await c.query(`select generation from doctrine_meta where id=1`)).rows[0].generation);
+        const index = (await c.query(
+          `select s.id as section_id, s.section_key, s.title, s.current_version as version, s.body_hash as content_hash,
+                  s.review_after, m.surface as last_writer_surface
+             from doctrine_section s
+             left join doctrine_revision r on r.id = s.current_revision_id
+             left join memory_session m on m.attach_id =
+               case when r.session_key ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                    then r.session_key::uuid end
+            where s.document_id = $1 and s.status = 'active'
+            order by s.section_key`, [doc.id])).rows.map(sectionVersions);
+        const attached = (await c.query(
+          `insert into memory_session (surface, native_session_id, transcript_ref, host, actor_id,
+             access, attached_generation, attached_index_digest)
+           values ($1,$2,$3,$4,$5,$6,$7,$8) returning attach_id`,
+          [args.surface, args.native_session_id ?? null, args.transcript_ref ?? null,
+           args.host ?? null, actor.id, access, generation,
+           await sha256hex(JSON.stringify(index))])).rows[0].attach_id;
+        await writeEvent(c, actor, "attach-memory", "memory_session", attached,
+          { new: { surface: args.surface, access }, idempotency_key: args.idempotency_key });
+        return { ok: true, attach_id: attached, stores: [
+          { name: "org-conventions", access: "read_only",
+            boot: { schema: boot.schema, digest: boot.digest, counts: boot.counts },
+            read_with: "standing-context rule_ids / search-doctrine",
+            propose_with: `write-doctrine-section document=${TEAM_MEMORY} section_key=conventions/proposed/<slug> attach_id=${attached}` },
+          { name: TEAM_MEMORY, access, document: TEAM_MEMORY, generation, index,
+            instructions: access === "read_write"
+              ? `Check the index before starting. Read with doctrine-sections. Write lessons as you learn them with write-doctrine-section document=${TEAM_MEMORY} attach_id=${attached} base_version=<version>. On version_conflict re-read, then write once.`
+              : `Check the index before starting. Read with doctrine-sections. This attach is read_only; attach_id=${attached} cannot write.` } ] };
+      }),
+    },
+
     "dry-run-doctrine-gates": {
       write: true,   // persists the run for audit — must ride the writer pool
       description: "Run the validation gates against a proposed write WITHOUT committing anything — the self-check an agent runs before spending a real write, and the shakedown harness for new gates. Persists the run (dry_run=true) for audit.",
@@ -1515,16 +1641,16 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         document: { type: "string" }, section_id: { type: "string" },
         slug: { type: "string" }, body_text: { type: "string" },
         content_class: { type: "string" },
+        attach_id: { type: "string", description: "the attach_id a team-memory write would carry" },
         links: { type: "array" }, edges: { type: "array" } },
         required: ["op"] },
       handler: async (c, actor, args) => {
-        let content_class = args.content_class;
-        if (args.document && !content_class)
-          content_class = (await resolveDoc(c, args.document)).content_class;
+        const doc = args.document ? await resolveDoc(c, args.document) : null;
         const res = await runGates(c, actor, args.op, {
           section_id: args.section_id || null, slug: args.slug,
           body: args.body_text !== undefined ? { text: args.body_text } : undefined,
-          content_class, links: args.links || [], edges: args.edges || [] },
+          content_class: args.content_class || doc?.content_class, doc_slug: doc?.slug,
+          attach_id: args.attach_id, links: args.links || [], edges: args.edges || [] },
           { dryRun: true });
         return { ok: true, ...res };
       },

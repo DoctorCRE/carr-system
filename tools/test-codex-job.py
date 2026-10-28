@@ -12,11 +12,14 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'ops'))
 from git_env import fixture_env
-WRAPPER = """
-import runpy, sys, types
+NOW = 2000000000
+WRAPPER = f"""
+import os, runpy, sys, tempfile, time, types
 from unittest.mock import Mock
 sys.argv.pop(0)
 sys.prefix = sys.argv.pop(1)
+tempfile.tempdir = os.environ['TMPDIR']
+time.time = Mock(return_value={NOW})
 sys.modules['skill_picker'] = types.SimpleNamespace(prepare=Mock(side_effect=lambda b, c: (b, [])))
 runpy.run_path(sys.argv[0], run_name='__main__')
 """
@@ -28,6 +31,12 @@ class CodexJobTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.git_env = fixture_env()
+        self.processes = self.root / 'processes'
+        self.processes.write_text('')
+        ps = self.root / 'ps'
+        ps.write_text(f'#!{sys.executable}\nimport pathlib\n'
+                      f'print(pathlib.Path({str(self.processes)!r}).read_text())\n')
+        ps.chmod(0o755)
         self.origin = self.root / 'origin'
         subprocess.run(['git', 'init', '-q', str(self.origin)], env=self.git_env, check=True)
         subprocess.run(['git', '-C', str(self.origin), '-c', 'user.name=Fixture',
@@ -39,7 +48,7 @@ class CodexJobTests(unittest.TestCase):
 
     def launch(self, body, repo=None):
         self.codex.write_text(f'#!{sys.executable}\n' + body)
-        job_env = dict(self.git_env, PATH=str(self.root) + os.pathsep + os.defpath,
+        job_env = dict(self.git_env, PATH=str(self.codex.parent) + os.pathsep + os.defpath,
                        TMPDIR=str(self.root))
         return subprocess.Popen([sys.executable, '-c', WRAPPER, str(ROOT / 'bin/codex-job'),
                                  str(ROOT / '.venv'), str(repo or self.origin), 'test/job', 'brief'],
@@ -94,6 +103,69 @@ while True: time.sleep(1)
                                 os.kill(int(leaked), signal.SIGKILL)
                             except ProcessLookupError:
                                 pass
+
+    def test_startup_prunes_only_old_idle_retained_workspaces(self):
+        stale, recent, active, sibling = [self.root / f'codex-job-{name}'
+                                        for name in ('stale', 'recent', 'active space', 'active space-extra')]
+        for workspace in (stale, recent, active, sibling):
+            (workspace / 'checkout' / '.git').mkdir(parents=True)
+        unrelated = self.root / 'other-workspace'
+        unrelated.mkdir()
+        target = self.root / 'outside'
+        (target / 'checkout' / '.git').mkdir(parents=True)
+        link = self.root / 'codex-job-link'
+        link.symlink_to(target, target_is_directory=True)
+        old = NOW - 3 * 24 * 60 * 60
+        for workspace in (stale, active, sibling, unrelated, target):
+            for path in (workspace, workspace / 'checkout'):
+                if path.exists():
+                    os.utime(path, (old, old))
+        os.utime(recent, (NOW, NOW))
+        (self.root / 'checkout').mkdir()
+        alias = self.root / 'checkout -alias'
+        alias.symlink_to(active / 'checkout', target_is_directory=True)
+        self.processes.write_text(f'{self.root / "bin space/codex"} exec -C {alias} --model fixture\n')
+        job = self.launch('import sys; sys.exit(7)')
+        _, errors = job.communicate(timeout=10)
+        self.assertEqual(job.returncode, 7, errors.decode())
+        self.assertFalse(stale.exists(), 'old idle retained checkout must be pruned')
+        self.assertFalse(sibling.exists(), 'a shared path prefix does not mean in use')
+        for workspace in (recent, active, unrelated, target, link):
+            self.assertTrue(workspace.exists(), f'{workspace.name} must be preserved')
+
+    def test_startup_preserves_retained_workspace_with_recent_activity(self):
+        for recent in ('', 'checkout', 'checkout/.git/index',
+                       'checkout/.git/logs/HEAD', 'result.md'):
+            with self.subTest(recent=recent):
+                workspace = self.root / 'codex-job-edited'
+                checkout = workspace / 'checkout'
+                index = checkout / '.git' / 'index'
+                head = checkout / '.git' / 'logs' / 'HEAD'
+                head.parent.mkdir(parents=True)
+                for path in (index, head, workspace / 'result.md'):
+                    path.touch()
+                old = NOW - 3 * 24 * 60 * 60
+                for path in workspace.rglob('*'):
+                    os.utime(path, (old, old))
+                os.utime(workspace, (old, old))
+                os.utime(workspace / recent, (NOW, NOW))
+                job = self.launch('')
+                _, errors = job.communicate(timeout=10)
+                self.assertEqual(job.returncode, 0, errors.decode())
+                self.assertTrue(index.exists(), 'recent activity must preserve an old workspace')
+                shutil.rmtree(workspace)
+
+    def test_relative_live_checkout_prevents_unsafe_pruning(self):
+        active = self.root / 'codex-job-active'
+        (active / 'checkout' / '.git').mkdir(parents=True)
+        old = NOW - 3 * 24 * 60 * 60
+        for path in (active, active / 'checkout'):
+            os.utime(path, (old, old))
+        self.processes.write_text('codex exec -C checkout\n')
+        job = self.launch('')
+        _, errors = job.communicate(timeout=10)
+        self.assertEqual(job.returncode, 0, errors.decode())
+        self.assertTrue(active.exists(), 'relative live checkout must be preserved')
 
     def test_closed_stdout_preserves_success_and_cleanup(self):
         job = self.launch("import pathlib, sys\npathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_text('x' * 1000000)\n")

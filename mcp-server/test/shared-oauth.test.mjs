@@ -8,7 +8,7 @@ import { launchTestChrome } from "./helpers/chrome-launch.mjs";
 import { findDisposableChromium } from "./helpers/chromium-binary.mjs";
 import { handleAuthorize, s256 } from "../src/google-oidc.js";
 import * as policy from "../src/oauth-policy.ts";
-import { OAuthConsentState } from "../src/oauth-consent-state.js";
+import { OAuthConsentState } from "../src/oauth-consent-state.ts";
 
 // Substitute only the deployment identity allow-list with synthetic accounts.
 // Signature verification, callback and approval code execute unchanged.
@@ -19,7 +19,7 @@ const propsForSlug = (slug, extra) => ({ slug, ...extra });
 const agentSlugForClient = () => null;
 const verifiedAgentSlugForClient = () => null;`)
   .replace('"./oauth-policy.ts"', JSON.stringify(new URL("../src/oauth-policy.ts", import.meta.url).href))
-  .replace('"./oauth-consent-state.js"', JSON.stringify(new URL("../src/oauth-consent-state.js", import.meta.url).href))
+  .replace('"./oauth-consent-state.ts"', JSON.stringify(new URL("../src/oauth-consent-state.ts", import.meta.url).href))
 ).toString("base64")}`);
 
 // Only the Workers host class is stubbed. The pinned provider's parsing,
@@ -58,7 +58,7 @@ async function fixture(extraOptions = {}) {
         const values = new Map();
         let queue = Promise.resolve();
         const storage = { values, get: async k => structuredClone(values.get(k)), put: async (k, v) => values.set(k, structuredClone(v)),
-          delete: async k => values.delete(k), deleteAll: async () => values.clear(), setAlarm: async () => {},
+          delete: async k => values.delete(k), deleteAll: async () => values.clear(), getAlarm: async () => null, setAlarm: async () => {},
           transaction: fn => { const result = queue.then(() => fn(storage)); queue = result.catch(() => {}); return result; } };
         objects.set(id, new OAuthConsentState({ storage }));
       }

@@ -9,7 +9,12 @@ execFileSync("wrangler", ["types", output, "--strict-vars=false", "--env-file", 
 });
 
 let declarations = readFileSync(output, "utf8");
+const budgetNamespace = /^[\t ]*AI_NEURON_BUDGET: DurableObjectNamespace<import\("\.\.\/src\/index"\)\.AiNeuronBudget>;/gm;
+if ([...declarations.matchAll(budgetNamespace)].length !== 2)
+  throw new Error("AI budget namespace declarations changed; review the fetch-only binding.");
+declarations = declarations.replace(budgetNamespace, "AI_NEURON_BUDGET: DurableObjectNamespace;");
 for (const [site, count] of [
+  [/^[\t ]*VERB_REQUEST_BUDGET: DurableObjectNamespace<import\("\.\.\/src\/index"\)\.VerbRequestBudget>;/gm, 2],
   [/^[\t ]*OAUTH_CONSENT_STATE: DurableObjectNamespace<import\("\.\.\/src\/index"\)\.OAuthConsentState>;/gm, 2],
   [/^[\t ]*\[K in keyof MainModule\]: LoopbackForExport<MainModule\[K\]>/gm, 1],
 ]) {
@@ -17,6 +22,6 @@ for (const [site, count] of [
     throw new Error("Legacy Durable Object declarations changed; review the brand exception.");
   }
   declarations = declarations.replace(site,
-    "// @ts-expect-error Legacy OAuthConsentState lacks the RPC nominal brand.\n$&");
+    "// @ts-expect-error Legacy Durable Object classes lack the RPC nominal brand.\n$&");
 }
 writeFileSync(output, declarations);

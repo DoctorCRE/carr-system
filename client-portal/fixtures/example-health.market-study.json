@@ -1,0 +1,977 @@
+{
+  "schema": "carr.market-study.v1",
+  "client": {
+    "display_name": "Example Health Group",
+    "wordmark": {
+      "line1": "EXAMPLE",
+      "line2": "HEALTH GROUP"
+    },
+    "logo": {
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "name": "example-logo.png",
+      "type": "image/png"
+    },
+    "website": "https://example.com/",
+    "current_practice": {
+      "address": "Example Plaza, Exampleton",
+      "size_note": "About 2,000 SF today",
+      "marker_letter": "C",
+      "locator": {
+        "lon": -100.52,
+        "lat": 40.24,
+        "precision": "Approximate study locator"
+      },
+      "source_note": [
+        {
+          "text": "Current practice location from the client."
+        },
+        {
+          "link": {
+            "label": "Example source",
+            "url": "https://example.com/source"
+          }
+        }
+      ]
+    }
+  },
+  "prepared": {
+    "for": "Dr. Sample Person",
+    "on": "2026-01-15"
+  },
+  "market": {
+    "name": "Sample County",
+    "home_title": "Sample County Market Overview",
+    "headline": "Sample County's Next Chapter",
+    "intro": "A synthetic market used only to test the template.",
+    "snapshot": [
+      {
+        "value": "+10.0%",
+        "label": "County population, 2020 to 2025"
+      },
+      {
+        "value": "3",
+        "label": "Candidate sites"
+      },
+      {
+        "value": "$70,000",
+        "label": "Median household income"
+      }
+    ],
+    "footer_note": "Synthetic data; not a real market.",
+    "mini_map_caption": "Sample County and the study area"
+  },
+  "map": {
+    "basemap": {
+      "kind": "local-layers",
+      "water": {
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "name": "water.geojson",
+        "type": "application/geo+json"
+      },
+      "roads": {
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "name": "roads.geojson",
+        "type": "application/geo+json"
+      },
+      "attribution": "Example map data"
+    },
+    "center": [
+      -100.5,
+      40.25
+    ],
+    "zoom": 11,
+    "home_extent_points": [
+      [
+        -100.7,
+        40.1
+      ],
+      [
+        -100.3,
+        40.4
+      ]
+    ]
+  },
+  "properties": [
+    {
+      "id": "sample-property-1",
+      "number": 1,
+      "address": "Sample Way",
+      "city": "Exampleton",
+      "status": "For sale",
+      "role": "candidate",
+      "photo": {
+        "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+        "name": "photo-1.jpg",
+        "type": "image/jpeg"
+      },
+      "facts": [
+        {
+          "label": "Asking",
+          "value": "$1,000,000"
+        },
+        {
+          "label": "Size",
+          "value": "5,000 SF"
+        }
+      ],
+      "summary": "Single-story office building.",
+      "review_point": "Confirm parking count with the listing broker.",
+      "notes": {
+        "plan": "Open plan.",
+        "possession": "At closing.",
+        "public_check": "No open permits found."
+      },
+      "floorplan": {
+        "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+        "name": "floorplan-1.pdf",
+        "type": "application/pdf"
+      },
+      "sources": [
+        {
+          "label": "Listing",
+          "url": "https://example.com/listing"
+        }
+      ],
+      "source_caption": "Listing, January 2026",
+      "locator": {
+        "lon": -100.49,
+        "lat": 40.26,
+        "precision": "Approximate study locator",
+        "preferred_offset": [
+          12,
+          -8
+        ]
+      },
+      "ownership": {
+        "total_sf": 5000,
+        "asking_price": 1000000,
+        "tenure": "Fee simple",
+        "offering": "Whole building",
+        "contiguous_sf": 5000,
+        "available_sf": 5000,
+        "current_occupancy": "Vacant",
+        "current_income_annual": 0
+      }
+    },
+    {
+      "id": "sample-property-2",
+      "number": 2,
+      "address": "Example Road",
+      "status": "Sold",
+      "role": "market-context",
+      "photo": {
+        "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+        "name": "photo-2.jpg",
+        "type": "image/jpeg"
+      },
+      "facts": [
+        {
+          "label": "Sold",
+          "value": "$900,000"
+        }
+      ],
+      "summary": "Recent comparable sale.",
+      "sources": [
+        {
+          "date": "2025-11-01",
+          "label": "Deed record",
+          "url": "https://example.com/deed"
+        }
+      ]
+    }
+  ],
+  "purchases": {
+    "intro": "How the candidate sites were screened.",
+    "screening_factors": [
+      {
+        "title": "Size",
+        "body": "Size was checked for each site."
+      },
+      {
+        "title": "Parking",
+        "body": "Parking was checked for each site."
+      },
+      {
+        "title": "Visibility",
+        "body": "Visibility was checked for each site."
+      },
+      {
+        "title": "Access",
+        "body": "Access was checked for each site."
+      },
+      {
+        "title": "Price",
+        "body": "Price was checked for each site."
+      },
+      {
+        "title": "Timing",
+        "body": "Timing was checked for each site."
+      }
+    ],
+    "table": {
+      "locator_note": "Pins are approximate.",
+      "parking_note": "Parking counts are from listings."
+    },
+    "market_context_note": "Market-context sites are shown for comparison only."
+  },
+  "developments": [
+    {
+      "id": "sample-development-1",
+      "title": "Example Town Center",
+      "place": "Exampleton",
+      "status": "Approved",
+      "stage": "Site work",
+      "summary": "A mixed-use center.",
+      "copy": "More detail on the synthetic center.",
+      "relevance": "Adds rooftops near the study area.",
+      "image": {
+        "asset": {
+          "sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+          "name": "development-1.jpg",
+          "type": "image/jpeg"
+        },
+        "alt": "Rendering of a synthetic center",
+        "credit": "Example Developer",
+        "fit": "cover"
+      },
+      "locator": {
+        "lon": -100.45,
+        "lat": 40.3,
+        "precision": "Approximate study locator"
+      },
+      "overlay": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -100.45,
+                40.3
+              ]
+            }
+          }
+        ]
+      },
+      "overlay_note": "Overlay is approximate.",
+      "concept_note": "Concept plan only.",
+      "scale": "50 acres",
+      "latest_update": "Permits filed.",
+      "sources": [
+        {
+          "date": "2026-01-01",
+          "label": "Planning agenda",
+          "url": "https://example.com/agenda"
+        }
+      ]
+    }
+  ],
+  "context_anchors": [
+    {
+      "name": "Example Regional Hospital",
+      "category": "Hospital",
+      "address": "Example Avenue",
+      "locator": {
+        "lon": -100.55,
+        "lat": 40.2,
+        "precision": "Approximate study locator"
+      },
+      "source_note": "Location from the public directory.",
+      "address_source_url": "https://example.com/address",
+      "locator_source_url": "https://example.com/locator"
+    }
+  ],
+  "demographics": {
+    "growth": {
+      "area_label": "Sample County",
+      "tiles": [
+        {
+          "value": "1.0%",
+          "label": "Example tile 1"
+        },
+        {
+          "value": "2.0%",
+          "label": "Example tile 2"
+        },
+        {
+          "value": "3.0%",
+          "label": "Example tile 3"
+        },
+        {
+          "value": "4.0%",
+          "label": "Example tile 4"
+        }
+      ],
+      "geographies": [
+        {
+          "name": "Sample County",
+          "series": [
+            {
+              "label": "2020",
+              "value": 51000,
+              "kind": "census"
+            },
+            {
+              "label": "2025",
+              "value": 55000,
+              "kind": "estimate"
+            },
+            {
+              "label": "2030",
+              "value": 60000,
+              "kind": "projection"
+            }
+          ],
+          "source_url": "https://example.com/census"
+        }
+      ],
+      "reach_note": "Synthetic reach note.",
+      "source": [
+        {
+          "text": "Synthetic census series."
+        },
+        {
+          "link": {
+            "label": "Example source",
+            "url": "https://example.com/source"
+          }
+        }
+      ]
+    },
+    "age": {
+      "geographies": [
+        {
+          "name": "Sample County",
+          "under_18_pct": 22,
+          "over_65_pct": 18,
+          "source_url": "https://example.com/age"
+        }
+      ]
+    },
+    "median_income": {
+      "geographies": [
+        {
+          "name": "Sample County",
+          "value": 70000
+        }
+      ],
+      "households_note": "Synthetic households note."
+    },
+    "income_bands": {
+      "thresholds": [
+        100000,
+        150000,
+        200000
+      ],
+      "areas": [
+        {
+          "name": "Sample County",
+          "group": "county",
+          "households": 20000,
+          "population": 55000,
+          "median": 70000,
+          "counts": {
+            "100000": 6000,
+            "150000": 2500,
+            "200000": 1040
+          },
+          "caption": "Synthetic county bands"
+        }
+      ],
+      "combined": {
+        "label": "Study area",
+        "households": 20000,
+        "counts": {
+          "100000": 6000
+        },
+        "caption": "Synthetic combined bands"
+      },
+      "notes": [
+        {
+          "text": "Synthetic income notes."
+        },
+        {
+          "link": {
+            "label": "Example source",
+            "url": "https://example.com/source"
+          }
+        }
+      ]
+    },
+    "micro_zones": {
+      "title": "Micro-zones",
+      "description": "Two synthetic radius study areas.",
+      "comparison_note": "Synthetic comparison note.",
+      "years": [
+        {
+          "year": 2010,
+          "label": "2010 census"
+        },
+        {
+          "year": 2020,
+          "label": "2020 census"
+        },
+        {
+          "year": 2026,
+          "label": "2026 estimate"
+        },
+        {
+          "year": 2031,
+          "label": "2031 projection"
+        }
+      ],
+      "estimate_year": 2026,
+      "projection_year": 2031,
+      "zones": [
+        {
+          "id": "zone-1-mile",
+          "name": "One-mile zone",
+          "study_pdf": {
+            "sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+            "name": "zone-1-mile.pdf",
+            "type": "application/pdf"
+          },
+          "source": {
+            "provider": "Example Demographics Co.",
+            "pages": 6,
+            "report_timestamp": "2026-01-02 09:00",
+            "report_timezone": "Not stated",
+            "data_release": "Example release 2026",
+            "geography_version": "Example geography 2025"
+          },
+          "geography": {
+            "kind": "radius",
+            "center": [
+              -100.5,
+              40.25
+            ],
+            "center_address": "Sample Way, Exampleton",
+            "center_precision": "Report-stated coordinates; study locator, not a navigation entrance",
+            "radius_miles": 1,
+            "reported_area_sq_miles": 3.14,
+            "allocation_method": "Example block-centroid allocation",
+            "source_pages": [
+              1,
+              2
+            ]
+          },
+          "population": {
+            "by_year": {
+              "2010": 1010,
+              "2020": 1120,
+              "2026": 1230,
+              "2031": 1340
+            },
+            "density_per_sq_mile": 400,
+            "growth": {
+              "persons": 110,
+              "percent": 8.9,
+              "reported_annual_percent": 1.7,
+              "percent_method": "Derived from the two stated totals",
+              "annual_percent_method": "As reported"
+            },
+            "source_page": 2
+          },
+          "households": {
+            "by_year": {
+              "2010": 400,
+              "2020": 440,
+              "2026": 480,
+              "2031": 520
+            },
+            "with_children": {
+              "count": 150,
+              "reported_percent": 31.3
+            },
+            "average_size": 2.5,
+            "source_page": 2
+          },
+          "income": {
+            "average_household": {
+              "2026": 90000,
+              "2031": 99000
+            },
+            "median_household": {
+              "2026": 70000,
+              "2031": 77000
+            },
+            "per_capita": {
+              "2026": 36000,
+              "2031": 39000
+            },
+            "average_family": 100000,
+            "median_family": 80000,
+            "average_household_net_worth": 500000,
+            "source_page": 3
+          },
+          "age": {
+            "median_years": 40,
+            "bins": [
+              {
+                "label": "Under 18",
+                "count": 300,
+                "derived_percent": 25
+              },
+              {
+                "label": "18 to 64",
+                "count": 600,
+                "derived_percent": 50
+              },
+              {
+                "label": "65 and over",
+                "count": 300,
+                "derived_percent": 25
+              }
+            ],
+            "groups": [
+              {
+                "label": "Children",
+                "count": 300,
+                "derived_percent": 25
+              },
+              {
+                "label": "Adults",
+                "count": 900,
+                "derived_percent": 75
+              }
+            ],
+            "denominator_population": 1230,
+            "source_page": 3
+          },
+          "household_income": {
+            "denominator_households": 480,
+            "bins": [
+              {
+                "label": "Under $100,000",
+                "count": 300,
+                "reported_percent": 62.5,
+                "derived_percent": 62.5
+              },
+              {
+                "label": "$100,000 or more",
+                "count": 180,
+                "derived_percent": 37.5
+              }
+            ],
+            "thresholds": [
+              {
+                "minimum_usd": 100000,
+                "count": 180,
+                "reported_percent": 37.5,
+                "derived_percent": 37.5,
+                "method": "Reported count"
+              },
+              {
+                "minimum_usd": 150000,
+                "count": 80,
+                "derived_percent": 16.7,
+                "method": "Derived sum of bins"
+              }
+            ],
+            "source_page": 4
+          },
+          "housing": {
+            "total_units": 520,
+            "occupied_units": 480,
+            "occupied_percent_of_all_units": 92.3,
+            "owner_occupied_units": 252,
+            "owner_occupied_reported_percent_of_occupied": 52.5,
+            "renter_occupied_units": 228,
+            "renter_occupied_reported_percent_of_occupied": 47.5,
+            "vacant_units": 40,
+            "vacant_percent_of_all_units": 7.7,
+            "family_households": 320,
+            "non_family_households": 160,
+            "source_page": 4
+          },
+          "education": {
+            "denominator_label": "Population age 25 and over",
+            "denominator_count": 800,
+            "bins": [
+              {
+                "label": "High school or less",
+                "count": 400,
+                "derived_percent": 50
+              },
+              {
+                "label": "Some college",
+                "count": 160,
+                "derived_percent": 20
+              },
+              {
+                "label": "Bachelor's or higher",
+                "count": 240,
+                "derived_percent": 30
+              }
+            ],
+            "bachelors_or_higher_count": 240,
+            "bachelors_or_higher_derived_percent": 30,
+            "source_page": 5
+          },
+          "employment": {
+            "population_age_16_plus": 950,
+            "employed": 600,
+            "unemployed": 30,
+            "armed_forces": 0,
+            "not_in_labor_force": 320,
+            "occupation_denominator": 600,
+            "white_collar": 400,
+            "blue_collar": 200,
+            "businesses": 50,
+            "daytime_employees": 700,
+            "labor_source_page": 5,
+            "business_source_page": 6
+          },
+          "home_values_and_commute": {
+            "median_owner_home_value": 250000,
+            "median_renter_rent": 1150,
+            "mean_commute_minutes": 24,
+            "source_page": 6
+          }
+        },
+        {
+          "id": "zone-3-mile",
+          "name": "Three-mile zone",
+          "study_pdf": {
+            "sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+            "name": "zone-3-mile.pdf",
+            "type": "application/pdf"
+          },
+          "source": {
+            "provider": "Example Demographics Co.",
+            "pages": 6,
+            "report_timestamp": "2026-01-02 09:00",
+            "report_timezone": "Not stated",
+            "data_release": "Example release 2026",
+            "geography_version": "Example geography 2025"
+          },
+          "geography": {
+            "kind": "radius",
+            "center": [
+              -100.5,
+              40.25
+            ],
+            "center_address": "Sample Way, Exampleton",
+            "center_precision": "Report-stated coordinates; study locator, not a navigation entrance",
+            "radius_miles": 3,
+            "reported_area_sq_miles": 28.26,
+            "allocation_method": "Example block-centroid allocation",
+            "source_pages": [
+              1,
+              2
+            ]
+          },
+          "population": {
+            "by_year": {
+              "2010": 1010,
+              "2020": 1120,
+              "2026": 1230,
+              "2031": 1340
+            },
+            "density_per_sq_mile": 400,
+            "growth": {
+              "persons": 110,
+              "percent": 8.9,
+              "reported_annual_percent": 1.7,
+              "percent_method": "Derived from the two stated totals",
+              "annual_percent_method": "As reported"
+            },
+            "source_page": 2
+          },
+          "households": {
+            "by_year": {
+              "2010": 400,
+              "2020": 440,
+              "2026": 480,
+              "2031": 520
+            },
+            "with_children": {
+              "count": 150,
+              "reported_percent": 31.3
+            },
+            "average_size": 2.5,
+            "source_page": 2
+          },
+          "income": {
+            "average_household": {
+              "2026": 90000,
+              "2031": 99000
+            },
+            "median_household": {
+              "2026": 70000,
+              "2031": 77000
+            },
+            "per_capita": {
+              "2026": 36000,
+              "2031": 39000
+            },
+            "average_family": 100000,
+            "median_family": 80000,
+            "average_household_net_worth": 500000,
+            "source_page": 3
+          },
+          "age": {
+            "median_years": 40,
+            "bins": [
+              {
+                "label": "Under 18",
+                "count": 300,
+                "derived_percent": 25
+              },
+              {
+                "label": "18 to 64",
+                "count": 600,
+                "derived_percent": 50
+              },
+              {
+                "label": "65 and over",
+                "count": 300,
+                "derived_percent": 25
+              }
+            ],
+            "groups": [
+              {
+                "label": "Children",
+                "count": 300,
+                "derived_percent": 25
+              },
+              {
+                "label": "Adults",
+                "count": 900,
+                "derived_percent": 75
+              }
+            ],
+            "denominator_population": 1230,
+            "source_page": 3
+          },
+          "household_income": {
+            "denominator_households": 480,
+            "bins": [
+              {
+                "label": "Under $100,000",
+                "count": 300,
+                "reported_percent": 62.5,
+                "derived_percent": 62.5
+              },
+              {
+                "label": "$100,000 or more",
+                "count": 180,
+                "derived_percent": 37.5
+              }
+            ],
+            "thresholds": [
+              {
+                "minimum_usd": 100000,
+                "count": 180,
+                "reported_percent": 37.5,
+                "derived_percent": 37.5,
+                "method": "Reported count"
+              },
+              {
+                "minimum_usd": 150000,
+                "count": 80,
+                "derived_percent": 16.7,
+                "method": "Derived sum of bins"
+              }
+            ],
+            "source_page": 4
+          },
+          "housing": {
+            "total_units": 520,
+            "occupied_units": 480,
+            "occupied_percent_of_all_units": 92.3,
+            "owner_occupied_units": 252,
+            "owner_occupied_reported_percent_of_occupied": 52.5,
+            "renter_occupied_units": 228,
+            "renter_occupied_reported_percent_of_occupied": 47.5,
+            "vacant_units": 40,
+            "vacant_percent_of_all_units": 7.7,
+            "family_households": 320,
+            "non_family_households": 160,
+            "source_page": 4
+          },
+          "education": {
+            "denominator_label": "Population age 25 and over",
+            "denominator_count": 800,
+            "bins": [
+              {
+                "label": "High school or less",
+                "count": 400,
+                "derived_percent": 50
+              },
+              {
+                "label": "Some college",
+                "count": 160,
+                "derived_percent": 20
+              },
+              {
+                "label": "Bachelor's or higher",
+                "count": 240,
+                "derived_percent": 30
+              }
+            ],
+            "bachelors_or_higher_count": 240,
+            "bachelors_or_higher_derived_percent": 30,
+            "source_page": 5
+          },
+          "employment": {
+            "population_age_16_plus": 950,
+            "employed": 600,
+            "unemployed": 30,
+            "armed_forces": 0,
+            "not_in_labor_force": 320,
+            "occupation_denominator": 600,
+            "white_collar": 400,
+            "blue_collar": 200,
+            "businesses": 50,
+            "daytime_employees": 700,
+            "labor_source_page": 5,
+            "business_source_page": 6
+          },
+          "home_values_and_commute": {
+            "median_owner_home_value": 250000,
+            "median_renter_rent": 1150,
+            "mean_commute_minutes": 24,
+            "source_page": 6
+          }
+        }
+      ]
+    },
+    "competition": {
+      "markets": [
+        "Exampleton",
+        "Sampleville"
+      ],
+      "offices": [
+        {
+          "name": "Example Dental",
+          "address": "Example Street",
+          "market": "Exampleton",
+          "service_type": "General dentistry",
+          "services": [
+            "Cleanings",
+            "Crowns"
+          ],
+          "source_url": "https://example.com/dental",
+          "logo": {
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "example-dental.png",
+            "type": "image/png"
+          },
+          "locator": {
+            "lon": -100.48,
+            "lat": 40.27,
+            "precision": "Approximate study locator"
+          }
+        }
+      ],
+      "scope_note": [
+        {
+          "text": "Synthetic competitor scope."
+        },
+        {
+          "link": {
+            "label": "Example source",
+            "url": "https://example.com/source"
+          }
+        }
+      ]
+    },
+    "methodology": [
+      {
+        "text": "Synthetic methodology."
+      },
+      {
+        "link": {
+          "label": "Example source",
+          "url": "https://example.com/source"
+        }
+      }
+    ]
+  },
+  "ownership": {
+    "program": {
+      "min_share": 0.3,
+      "min_sf": 1500
+    },
+    "defaults": {
+      "financed_pct": 80,
+      "rate": 6.5,
+      "years": 25,
+      "rent_psf": 24,
+      "collection_pct": 95,
+      "buildout_psf": 60,
+      "lease_up_months": 6,
+      "appreciation_pct": 2,
+      "ti_options": [
+        20,
+        40,
+        60
+      ]
+    },
+    "default_property": "sample-property-1",
+    "copy": {
+      "intro": "Synthetic ownership intro.",
+      "benefits": [
+        {
+          "title": "Benefit 1",
+          "body": "Synthetic benefit 1."
+        },
+        {
+          "title": "Benefit 2",
+          "body": "Synthetic benefit 2."
+        },
+        {
+          "title": "Benefit 3",
+          "body": "Synthetic benefit 3."
+        },
+        {
+          "title": "Benefit 4",
+          "body": "Synthetic benefit 4."
+        }
+      ],
+      "notes": [
+        {
+          "text": "Synthetic ownership notes."
+        },
+        {
+          "link": {
+            "label": "Example source",
+            "url": "https://example.com/source"
+          }
+        }
+      ],
+      "methods": [
+        {
+          "text": "Synthetic ownership methods."
+        },
+        {
+          "link": {
+            "label": "Example source",
+            "url": "https://example.com/source"
+          }
+        }
+      ]
+    }
+  },
+  "sources": {
+    "sections": [
+      {
+        "heading": "Data sources",
+        "body": [
+          {
+            "text": "Every figure in this synthetic study is invented."
+          },
+          {
+            "link": {
+              "label": "Example source",
+              "url": "https://example.com/source"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

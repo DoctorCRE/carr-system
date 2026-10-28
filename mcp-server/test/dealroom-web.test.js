@@ -4,10 +4,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { createDealroomHandler, isDealroomRequest } from "../src/dealroom-web.js";
-import { ALLOW_LIST } from "../src/identity.js";
+import { ALLOW_LIST, slugForEmail } from "../src/identity.js";
 
 const WRANGLER_PATH = fileURLToPath(new URL("../wrangler.toml", import.meta.url));
 const INDEX_PATH = fileURLToPath(new URL("../src/index.js", import.meta.url));
+const TEST_PARTNER_EMAIL = "partner@example.test";
 const PRODUCTION_HOST = "dealroom.doctorcre.com";
 const APP_HOST = "app.doctorcre.com";
 const STAGING_HOST = "carr-mcp-staging.joe-bookout-carr-us.workers.dev";
@@ -73,6 +74,7 @@ async function login(handler, environment, email, { host = environment.DEALROOM_
 
 function identityOverrides(email, clock) {
   return {
+    slugForEmailFn: value => value === TEST_PARTNER_EMAIL ? "joe" : slugForEmail(value),
     exchangeGoogleCodeFn: async () => ({ id_token: "stub-id-token" }),
     verifyGoogleIdTokenFn: async () => ({ email, email_verified: true, sub: `sub:${email}` }),
     now: () => clock?.now ?? 1_800_000_000_000,
@@ -86,6 +88,30 @@ function identityOverrides(email, clock) {
 function identityHandler(email, clock) {
   return createDealroomHandler(identityOverrides(email, clock));
 }
+
+test("browser MCP passes the verified session key independently of caller budget hints", async () => {
+  const email = TEST_PARTNER_EMAIL, environment = env();
+  const sessions = [];
+  const handler = createDealroomHandler({ ...identityOverrides(email),
+    mcpHandler: async (_request, _env, _ctx, actor, sessionKey) => {
+      assert.equal(actor.human, true);
+      assert.ok(environment.OAUTH_KV.values.has(sessionKey));
+      sessions.push(sessionKey);
+      return new Response("{}");
+    },
+  });
+  const first = namedCookie(await login(handler, environment, email), "__Host-dealroom_session");
+  const send = cookie => handler.fetch(new Request(`https://${PRODUCTION_HOST}/mcp?budget=agent`, {
+    method: "POST", headers: { cookie, origin: `https://${PRODUCTION_HOST}`, "x-session-key": "caller-choice" },
+  }), environment, {});
+  assert.equal((await send(first)).status, 200);
+  assert.equal((await send(first)).status, 200);
+  const second = namedCookie(await login(handler, environment, email), "__Host-dealroom_session");
+  assert.equal((await send(second)).status, 200);
+  assert.equal(sessions[0], sessions[1]);
+  assert.notEqual(sessions[0], sessions[2]);
+  assert.notEqual(sessions[0], "caller-choice");
+});
 
 test("Deal Room host is explicit per environment and request matching fails closed", async () => {
   const wrangler = await readFile(WRANGLER_PATH, "utf8");
@@ -115,6 +141,11 @@ test("Deal Room host is explicit per environment and request matching fails clos
 
 test("Jev deal read requires a partner session and same-origin one-deal request", async () => {
   const environment = env();
+  environment.VERB_REQUEST_BUDGET_HUMAN = { limit: async () => ({ success: true }) };
+  environment.VERB_REQUEST_BUDGET = {
+    idFromName: key => key,
+    get: () => ({ fetch: async () => Response.json({ allowed: true }) }),
+  };
   environment.TYPESAFE_API_KEY = "synthetic";
   let readCount = 0;
   const handler = createDealroomHandler({
@@ -139,6 +170,29 @@ test("Jev deal read requires a partner session and same-origin one-deal request"
   assert.equal(response.status, 200);
   assert.equal((await response.json()).reason, "insufficient_recorded_evidence");
   assert.equal(readCount, 1);
+});
+
+test("Jev refuses an exhausted browser budget before record or external AI work", async () => {
+  const environment = env();
+  environment.VERB_REQUEST_BUDGET_HUMAN = { limit: async () => ({ success: true }) };
+  environment.VERB_REQUEST_BUDGET = {
+    idFromName: key => key,
+    get: () => ({ fetch: async () => Response.json({ allowed: false, retryAfter: 23 }) }),
+  };
+  const handler = createDealroomHandler({
+    ...identityOverrides(TEST_PARTNER_EMAIL),
+    jevDealRecordReader: async () => assert.fail("refused Jev request read deal records"),
+    jevDealRead: async () => assert.fail("refused Jev request called external AI"),
+  });
+  const callback = await login(handler, environment, TEST_PARTNER_EMAIL);
+  const response = await handler.fetch(new Request("https://dealroom.doctorcre.com/api/v1/jev-deal-reading", {
+    method: "POST", headers: { origin: "https://dealroom.doctorcre.com",
+      cookie: namedCookie(callback, "__Host-dealroom_session") },
+    body: JSON.stringify({ deal: "00000000-0000-4000-8000-000000000001" }),
+  }), environment, {});
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get("retry-after"), "23");
+  assert.equal(response.headers.get("cache-control"), "no-store");
 });
 
 test("independent DoctorCRE host owns its OAuth origin and cannot replay sessions across allowed hosts", async () => {

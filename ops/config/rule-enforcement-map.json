@@ -544,7 +544,7 @@
       ]
     },
     "stale_count": {
-      "failure_mode": "CI class failure",
+      "failure_mode": "Explicit manual diagnostic exits nonzero on prose findings",
       "implementation": [
         "ops/stale-count-check.py"
       ],
@@ -1336,7 +1336,7 @@
       "why_unenforceable": "The probabilistic permission classifier lives in the client transport before repository code or the MCP handler executes. Only that client can distinguish its transient classifier error from a human denial and retry the identical call; repository code never receives the refused attempt."
     },
     "b01edd26": {
-      "binding_moment": "CI, on any committed source or doc",
+      "binding_moment": "Explicit manual invocation of ops/stale-count-check.py",
       "category": "post_action_verification",
       "control": "stale_count",
       "enforcement_class": "stop_gate",
@@ -2543,9 +2543,9 @@
       "why": "A classifier block can interrupt any tool call in any session."
     },
     "b01edd26": {
-      "load_layer": "control",
-      "packs": [],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "load_layer": "pack",
+      "packs": ["engineering-git", "surface-doctrine"],
+      "why": "WR-000544 removes mandatory prose lint. Deliver the writing rule through task packs; retain the explicit manual diagnostic."
     },
     "b1521526": {
       "load_layer": "pack",

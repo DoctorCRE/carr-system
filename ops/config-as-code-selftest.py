@@ -130,8 +130,20 @@ def installed_hook_file_regressions():
             problems = mod.installed_hook_missing_files()
             assert len(problems) == 4, problems
             assert all(str(missing) in reason for _, reason in problems)
+            output = io.StringIO()
+            with patch.object(sys, "argv", ["config-as-code.py", "check-hook-files"]), contextlib.redirect_stdout(output):
+                assert mod.main() == 1
+            assert all(str(path) in output.getvalue() for path in paths)
+            assert str(missing) in output.getvalue()
+            assert str(existing) not in output.getvalue()
+
             missing.touch()
             assert mod.installed_hook_missing_files() == []
+            output = io.StringIO()
+            with patch.object(sys, "argv", ["config-as-code.py", "check-hook-files"]), contextlib.redirect_stdout(output):
+                assert mod.main() == 0
+            assert output.getvalue() == ""
+
             existing.unlink()
             assert len(mod.installed_hook_missing_files()) == 4
         with patch.dict(os.environ, {"HOME": directory}):
@@ -143,15 +155,17 @@ def installed_hook_file_regressions():
 
 def retired_machine_config_regressions():
     retired = {'ai-capability-builder', 'linkedin-engagement-daily',
-               'restore-rehearse-weekly', 'social-batch-weekly', 'social-metrics-pull-weekly'}
+               'restore-rehearse-weekly', 'social-metrics-pull-weekly'}
     with patch.object(mod, 'IS_PRIMARY', True):
+        assert 'social-batch-weekly' in mod.scheduled_task_install_plan()['install'], \
+            'Friday social batch must remain installed'
         assert not retired.intersection(mod.scheduled_task_install_plan()['install']), \
             'retired scheduled tasks must not be installed'
     assert not (Path(REPO) / 'ops/launchd/com.carr.calendar-eventkit.plist').exists(), \
         'blocked EventKit capture must not be installed'
     name = 'com.carr.outlook-research-copy.plist'
     source = Path(mod.launchd_repo_path(name))
-    assert source == Path(REPO) / 'spec/outlook' / name, 'reuse the Outlook installer template'
+    assert source == Path(mod.REPO) / 'spec/outlook' / name, 'reuse the Outlook installer template'
     with tempfile.TemporaryDirectory() as directory:
         agents = Path(directory)
         expected = plistlib.loads(source.read_bytes().replace(b'{{HOME}}', b'/synthetic/home'))
