@@ -264,6 +264,7 @@ class PagedPublicationTests(unittest.TestCase):
         (root / "boards").mkdir()
         self.path = root / "boards/carr-v5.json"
         self.store = {}
+        self.pages = {}
         self.writes = []
         self.enterContext(patch.object(board, "call_verb", side_effect=self.call))
         self.inventory = {'schema': 'system-work-external.v1', 'items': [], 'complete': True,
@@ -271,6 +272,11 @@ class PagedPublicationTests(unittest.TestCase):
         self.enterContext(patch('system_work_cache.cached_github', return_value=self.inventory))
 
     def call(self, verb, args):
+        if verb == "publish-census-cache-page":
+            self.assertLessEqual(board.snapshot_size(args["payload"]), board.SNAPSHOT_BUDGET)
+            self.pages[(args["kind"], args["digest"])] = copy.deepcopy(args["payload"])
+            self.writes.append(args["digest"])
+            return {"ok": True}
         key = args["board_id"]
         if verb == "read-progress-board":
             return {"ok": True, "snapshot": copy.deepcopy(self.store.get(key)), "questions": []}
@@ -290,11 +296,15 @@ class PagedPublicationTests(unittest.TestCase):
         writes = len(self.writes)
         board.publish_board("carr-v5", costs={})
         self.assertEqual(self.store["carr-v5"], first)
-        self.assertEqual(self.writes[writes:], ["orchestrator"])
+        digests = [p["digest"] for p in first["snapshot_json"]["pagination"]["pages"]]
+        # The repeat tick touches each unchanged page once and republishes nothing else.
+        self.assertEqual([w for w in self.writes[writes:] if w != "orchestrator"], digests)
+        self.assertEqual(self.writes[writes:].count("orchestrator"), 1)
         manifest = first["snapshot_json"]
-        restored = json.loads("".join(self.store[p["board_id"]]["snapshot_json"]["content"]
+        restored = json.loads("".join(self.pages[("snapshot", p["digest"])]["content"]
                                      for p in manifest["pagination"]["pages"]))
         self.assertEqual(restored["notes"], [{"text": text}])
+        self.assertEqual(set(self.store), {"carr-v5", "orchestrator"})  # no hash-named page boards
         self.assertEqual(manifest["pagination"]["omitted"]["notes"], 1)
         self.assertIn('"notes": 1', manifest["notes"][0]["text"])
 
@@ -308,7 +318,7 @@ class PagedPublicationTests(unittest.TestCase):
         calls = 0
         def outage(verb, args):
             nonlocal calls
-            if verb == "publish-board-snapshot" and "-snapshot-" in args["board_id"]:
+            if verb == "publish-census-cache-page":
                 calls += 1
                 if calls == 2:
                     raise RuntimeError("page outage")
@@ -318,23 +328,22 @@ class PagedPublicationTests(unittest.TestCase):
                 board.publish_board("carr-v5", costs={})
         self.assertEqual(self.store["carr-v5"], previous["carr-v5"])
         for page in previous["carr-v5"]["snapshot_json"]["pagination"]["pages"]:
-            self.assertEqual(self.store[page["board_id"]], previous[page["board_id"]])
+            self.assertIn(("snapshot", page["digest"]), self.pages)
         board.publish_board("carr-v5", costs={})
         current = self.store["carr-v5"]["snapshot_json"]
-        restored = json.loads("".join(self.store[p["board_id"]]["snapshot_json"]["content"]
+        restored = json.loads("".join(self.pages[("snapshot", p["digest"])]["content"]
                                      for p in current["pagination"]["pages"]))
         self.assertEqual(restored["notes"], state["notes"])
 
-    def test_unverified_page_cannot_publish_a_manifest(self):
+    def test_rejected_page_cannot_publish_a_manifest(self):
         self.path.write_text(json.dumps({"project": "carr-v5", "tasks": {},
                                          "notes": [{"text": "Evidence " * 40000}]}))
-        def no_readback(verb, args):
-            result = self.call(verb, args)
-            if verb == "read-progress-board" and "-snapshot-" in args["board_id"]:
-                result["snapshot"] = None
-            return result
-        with patch.object(board, "call_verb", side_effect=no_readback):
-            with self.assertRaisesRegex(RuntimeError, "page did not read back"):
+        def rejected(verb, args):
+            if verb == "publish-census-cache-page":
+                raise RuntimeError("census_cache_digest_conflict")
+            return self.call(verb, args)
+        with patch.object(board, "call_verb", side_effect=rejected):
+            with self.assertRaisesRegex(RuntimeError, "census_cache_digest_conflict"):
                 board.publish_board("carr-v5", costs={})
         self.assertNotIn("carr-v5", self.store)
 
@@ -354,7 +363,7 @@ class PagedPublicationTests(unittest.TestCase):
         self.path.write_text(json.dumps(state))
         board.publish_board("carr-v5", costs={})
         manifest = self.store["carr-v5"]["snapshot_json"]
-        restored = json.loads("".join(self.store[p["board_id"]]["snapshot_json"]["content"]
+        restored = json.loads("".join(self.pages[("snapshot", p["digest"])]["content"]
                                      for p in manifest["pagination"]["pages"]))
         self.assertEqual(set(restored["tasks"]), set(state["tasks"]))
         self.assertEqual(manifest["task_counts"]["running"], 700)

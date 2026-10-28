@@ -132,21 +132,30 @@ test('paged external history is searchable beyond the first snapshot and gaps st
  const pages=[{board_id:'carr-v5-external-synthetic-0',version:1,count:1},{board_id:'carr-v5-external-synthetic-1',version:1,count:1}];
  const client=externalFixture([], {schema:'system-work-external.v2',pages,item_count:2});
  const query=client.query;
- client.query=async(sql,params)=>sql.includes('board_id=any')?{rows:pages.map((p,i)=>({board_id:p.board_id,version:'1',snapshot_json:{items:[{...row('pull_request',i),title:i?'Ancient merged feature':'Recent merged feature',kind:'pull_request',completed:true}]}}))}:query(sql,params);
+ client.query=async(sql,params)=>sql.includes('digest=any')?{rows:pages.map((p,i)=>({digest:p.board_id.slice('carr-v5-external-'.length),payload:{items:[{...row('pull_request',i),title:i?'Ancient merged feature':'Recent merged feature',kind:'pull_request',completed:true}]}}))}:query(sql,params);
  const result=await read(client,{live_library:true,kinds:'pull_request',text:'Ancient'});
  assert.equal(result.items.length,1);assert.equal(result.items[0].id,'pull_request-1');assert.equal(result.census_complete,true);
  const completeQuery=client.query;
- client.query=async(sql,params)=>{const r=await completeQuery(sql,params);return sql.includes('board_id=any')?{rows:r.rows.slice(0,1)}:r;};
+ client.query=async(sql,params)=>{const r=await completeQuery(sql,params);return sql.includes('digest=any')?{rows:r.rows.slice(0,1)}:r;};
  const gap=await read(client,{live_library:true,kinds:'pull_request'});
  assert.equal(gap.census_complete,false);assert.equal(gap.items.length,1);assert.equal(gap.coverage[0].state,'partial');
 });
-test('invalid stored external page versions leave coverage partial and preserve healthy sources',async()=>{
- const page={board_id:'carr-v5-external-synthetic-0',version:1,count:1};
- for(const version of ['1e0','01',true,'9007199254740993',9007199254740992,null]){
-  const client=externalFixture([], {schema:'system-work-external.v2',pages:[page],item_count:1});
+test('pages are read from the census cache table, never the board table, and a manifest version other than 1 leaves coverage partial',async()=>{
+ const pages=[{board_id:'carr-v5-external-synthetic-0',version:1,count:1}];
+ const stored=[{digest:'synthetic-0',payload:{items:[{...row('pull_request'),kind:'pull_request'}]}}];
+ const seen=[];
+ const fixtureFor=version=>{
+  const client=externalFixture([], {schema:'system-work-external.v2',pages:[{...pages[0],version}],item_count:1});
   const query=client.query;
-  client.query=async(sql,params)=>sql.includes('board_id=any')?{rows:[{board_id:page.board_id,version,snapshot_json:{items:[{...row('pull_request'),kind:'pull_request'}]}}]}:query(sql,params);
-  const result=await read(client,{kinds:'loop,pull_request'});
+  client.query=async(sql,params)=>{if(sql.includes('digest=any')){seen.push([sql,params]);return {rows:stored};}return query(sql,params);};
+  return client;
+ };
+ const healthy=await read(fixtureFor(1),{kinds:'pull_request'});
+ assert.equal(healthy.items.length,1);
+ assert.match(seen[0][0],/public\.system_work_census_cache/);assert.doesNotMatch(seen[0][0],/board_snapshot/);
+ assert.deepEqual(seen[0][1].at(-1),['synthetic-0']);
+ for(const version of [2,'1',9007199254740992]){
+  const result=await read(fixtureFor(version),{kinds:'loop,pull_request'});
   assert.deepEqual(result.items.map(item=>item.kind),['loop']);
   assert.equal(result.census_complete,false);
   assert.equal(result.coverage.find(item=>item.kind==='pull_request').state,'partial');

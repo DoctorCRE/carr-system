@@ -1912,6 +1912,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "publish-census-cache-page": {
+    "ingress_key": "mcp-tool:publish-census-cache-page",
+    "source_locator": "mcp-server/src/census-cache.js",
+    "schema_digest": "f210a44e7fc115e27b1b7f48c2d5e51f06da72654c3fb7d34b22652ef17883c7",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-action-context": {
     "ingress_key": "mcp-tool:read-action-context",
     "source_locator": "mcp-server/src/rule-context-runtime.v5.js",
@@ -1946,6 +1956,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:read-call-outcomes",
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-census-cache-page": {
+    "ingress_key": "mcp-tool:read-census-cache-page",
+    "source_locator": "mcp-server/src/census-cache.js",
+    "schema_digest": "8a7730c131280d6f1b9d4b20b6419509bc663503b2ab1ba688bfad82bd761061",
     "write": false,
     "human_only": false,
     "human_caller_only": false,

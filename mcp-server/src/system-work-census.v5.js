@@ -197,20 +197,20 @@ export async function readSystemWorkCensus({client,actor,correlationId,now=()=>n
  let pagesMissing=false;
  if(cache?.schema==='system-work-external.v2') {
   const pages=cache.pages;
+  const pagePrefix='carr-v5-external-';
   const validManifest=Array.isArray(pages) && pages.length<=10000 && pages.every(p=>p &&
    typeof p.board_id==='string' && /^carr-v5-external-[a-zA-Z0-9-]+$/.test(p.board_id) && Number.isSafeInteger(p.version) && p.version>0 && Number.isSafeInteger(p.count) && p.count>=0);
   const loaded=[];
   if(validManifest) {
-   const response=await client.query(`select board_id,version,snapshot_json from public.board_snapshot
-    where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=any($3::text[])`,[tenant,sponsor,pages.map(p=>p.board_id)]).catch(()=>({rows:[]}));
+   const response=await client.query(`select digest,payload from public.system_work_census_cache
+    where organization_tenant_id=$1 and sponsoring_human_slug=$2 and kind='external' and digest=any($3::text[])`,
+    [tenant,sponsor,pages.map(p=>p.board_id.slice(pagePrefix.length))]).catch(()=>({rows:[]}));
    for(const page of pages) {
-    const stored=response.rows.find(r=>r.board_id===page.board_id);
-    const rows=stored?.snapshot_json?.items;
-    let storedVersion;
-    try { storedVersion=safeInteger(stored?.version,'board_version_invalid'); }
-    catch { pagesMissing=true;continue; }
-    if(storedVersion!==page.version || !Array.isArray(rows) || rows.length!==page.count ||
-       (page.digest && createHash('sha256').update(canonicalJson(stored.snapshot_json)).digest('hex')!==page.digest)) {pagesMissing=true;continue;}
+    const stored=response.rows.find(r=>r.digest===page.board_id.slice(pagePrefix.length));
+    const rows=stored?.payload?.items;
+    // Cache pages are immutable and written once, so the manifest's version can only be 1.
+    if(page.version!==1 || !Array.isArray(rows) || rows.length!==page.count ||
+       (page.digest && createHash('sha256').update(canonicalJson(stored.payload)).digest('hex')!==page.digest)) {pagesMissing=true;continue;}
     loaded.push(...rows);
    }
   } else pagesMissing=true;

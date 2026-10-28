@@ -282,8 +282,12 @@ class ProgressBoardCLI(BoardCase):
                 'last_activity_at':'2026-09-02T00:00:00Z','identity':{}} for i in range(1448)]
         external={'schema':'system-work-external.v1','items':items,'complete':True,
                   'observed_at':iso(),'coverage':[],'completed_pr_history':True,'pr_work_refs':[]}
-        remote={}
+        remote,pages={},{}
         def call(verb,args):
+            if verb=='publish-census-cache-page':
+                self.assertLessEqual(len(json.dumps(args['payload'],separators=(',',':'),ensure_ascii=False)),262144)
+                pages[(args['kind'],args['digest'])]=args['payload']
+                return {'ok':True}
             board=args['board_id']
             if verb=='publish-board-snapshot':
                 self.assertLessEqual(len(json.dumps(args['snapshot'],separators=(',',':'),ensure_ascii=False)),262144)
@@ -293,7 +297,8 @@ class ProgressBoardCLI(BoardCase):
         with patch.dict(os.environ,self.env), patch.object(BOARD,'call_verb',call):
             BOARD.publish_board('carr-v5')
         manifest=remote['carr-v5']['snapshot_json']['external_inventory']
-        restored=[row for page in manifest['pages'] for row in remote[page['board_id']]['snapshot_json']['items']]
+        restored=[row for page in manifest['pages'] for row in pages[('external',page['digest'])]['items']]
+        self.assertFalse([board for board in remote if board.startswith('carr-v5-external-')])
         self.assertEqual(restored,items)
         self.assertNotIn('items',manifest)
 

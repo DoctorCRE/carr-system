@@ -2111,6 +2111,9 @@ def call_verb(verb: str, args: dict[str, Any]) -> dict[str, Any]:
             if timeout <= 0:
                 raise _StageExpired()
         result = record_call.call_verb(verb, args, timeout=timeout)
+        if (result.kind == record_call.TRANSIENT and attempt == 0
+                and verb == "publish-census-cache-page"):
+            continue  # the same key replays safely and the page upsert is idempotent
         if result.kind == record_call.TRANSIENT and args.get("idempotency_key") and verb in {
                 "publish-board-snapshot", "ask-board-question", "revise-board-question"}:
             disposition = reconcile_board_write(verb, args)
@@ -2467,17 +2470,16 @@ def question_revision(question: dict[str, Any], project: str) -> dict[str, Any]:
     }
 
 
-def publish_immutable_page(board_id: str, payload: dict[str, Any]) -> int:
+def publish_census_page(kind: str, digest: str, payload: dict[str, Any]) -> None:
+    """Store one immutable census page; the server verifies it stored this exact content.
+
+    One call per page per UTC day keeps a page the live manifest names inside the
+    server's 14-day retention without resending it on every publish."""
     if snapshot_size(payload) > SNAPSHOT_BUDGET:
         raise SnapshotTooLarge("snapshot page exceeds publication budget; previous observation retained")
-    before = call_verb("read-progress-board", {"board_id": board_id}).get("snapshot")
-    if before is None:
-        args = {"board_id": board_id, "base_version": 0, "snapshot": payload}
-        call_verb("publish-board-snapshot", {**args, "idempotency_key": stable_key("publish-board-snapshot", args)})
-    after = call_verb("read-progress-board", {"board_id": board_id}).get("snapshot")
-    if not after or after.get("snapshot_json") != payload:
-        raise RuntimeError("snapshot page did not read back; previous observation retained")
-    return int(after["version"])
+    args = {"kind": kind, "digest": digest, "payload": payload}
+    key = stable_key("publish-census-cache-page", {"kind": kind, "digest": digest, "day": now_utc().date().isoformat()})
+    call_verb("publish-census-cache-page", {**args, "idempotency_key": key})
 
 
 def publish_external_inventory(cache: dict[str, Any]) -> dict[str, Any]:
@@ -2488,9 +2490,9 @@ def publish_external_inventory(cache: dict[str, Any]) -> dict[str, Any]:
         payload = {'items': rows}
         encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
         digest = hashlib.sha256(encoded.encode()).hexdigest()
-        board_id = 'carr-v5-external-' + digest
-        version = publish_immutable_page(board_id, payload)
-        pages.append({'board_id': board_id, 'version': version, 'count': len(rows), 'digest': digest})
+        publish_census_page('external', digest, payload)
+        # The manifest keeps its board_id/version shape so the census reader needs no migration of published manifests.
+        pages.append({'board_id': 'carr-v5-external-' + digest, 'version': 1, 'count': len(rows), 'digest': digest})
     for row in cache['items']:
         candidate = [*batch, row]
         if len(json.dumps({'items': candidate}, ensure_ascii=False)) > 120000:
@@ -2527,9 +2529,8 @@ def publish_paged_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             raise SnapshotTooLarge("snapshot page cannot fit; no data published")
         payload = {"schema": "carr-progress-board-page.v1", "content": content[offset:offset + high]}
         digest = hashlib.sha256(payload["content"].encode()).hexdigest()
-        board_id = snapshot["project"] + "-snapshot-" + digest
-        payloads.append((board_id, payload))
-        pages.append({"board_id": board_id, "version": 1, "digest": digest})
+        payloads.append((digest, payload))
+        pages.append({"kind": "snapshot", "digest": digest})
         offset += high
 
     preview = copy.deepcopy(snapshot)
@@ -2543,7 +2544,7 @@ def publish_paged_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         counts = {**{key: value for key, value in preview["omitted"].items() if value}, **omitted}
         notice["text"] = ("Board preview. Omitted from this preview: " + json.dumps(counts, sort_keys=True) +
                           ". All records remain in the published snapshot pages. "
-                          "Retrieve them with read-progress-board using pagination.pages. Full queue overview: "
+                          "Retrieve them with read-census-cache-page using pagination.pages. Full queue overview: "
                           "https://app.doctorcre.com/progress-board?board=orchestrator")
         try:
             fit_snapshot(preview)
@@ -2567,8 +2568,8 @@ def publish_paged_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         if key == "notes" and parent is preview:
             parent[key].append(notice)
 
-    for page, (board_id, payload) in zip(pages, payloads):
-        page["version"] = publish_immutable_page(board_id, payload)
+    for digest, payload in payloads:
+        publish_census_page("snapshot", digest, payload)
     if snapshot_size(preview) > SNAPSHOT_BUDGET:
         raise SnapshotTooLarge("verified page manifest exceeds publication budget; previous observation retained")
     return preview
