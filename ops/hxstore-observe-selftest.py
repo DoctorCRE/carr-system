@@ -105,6 +105,33 @@ class ObservationTests(unittest.TestCase):
                     'JOIN message_keys k ON k.local_key=a.message_key').fetchall(),
                     [('Lease.pdf', 4096, 'application/pdf', 'part-1@example.test')])
 
+    def test_messages_with_tied_send_times_export_in_the_same_order_every_run(self):
+        def text(value):
+            return value.encode('utf-16le') + b'\0\0'
+
+        def message(key, sender):
+            obj = bytearray(500)
+            struct.pack_into('<H', obj, 0, 0xca)
+            struct.pack_into('<QIQQQ', obj, 10, key, 0, key, key, key)
+            obj.extend(text(sender) + text('Synthetic Sender') + text('IPM.Note') + text(f'<{key}@example.test>'))
+            obj.extend(f'<html><body>Synthetic opening {key} about the suite tour.</body></html>'.encode())
+            return struct.pack('<HHIH', 5, 0x074e, len(obj) + 10, 0) + bytes(obj)
+
+        data = store(b''.join(message(70 + i, f'sender{i}@example.test') for i in range(8)))
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / 'store.hxd'
+            source.write_bytes(data)
+            exports = set()
+            for run in range(6):
+                db = Path(tmp) / f'run{run}.db'
+                result = subprocess.run([str(BINARY), 'db', str(source), str(db)], capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                with sqlite3.connect(db) as con:
+                    rows = con.execute('SELECT id, sender, sent_unix FROM messages ORDER BY id').fetchall()
+                self.assertEqual(len(rows), 8)
+                exports.add(tuple(rows))
+            self.assertEqual(len(exports), 1, 'hash order must not number the rows')
+
     def test_counts_and_coverage_are_content_independent(self):
         data = envelope(77) * 2 + envelope(999, SECRET * 2)
         result = self.observe(store(data))

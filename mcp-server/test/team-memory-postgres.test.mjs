@@ -107,8 +107,8 @@ test('agent B attaches and its index shows A\'s lesson at version 1, written by 
   assert.match(entry.content_hash, /^[0-9a-f]{64}$/);
   assert.equal(entry.last_writer_surface, 'claude_code');
   assert.ok(entry.review_after, 'the team-memory review policy sets the staleness clock');
-  const read = await executeRegisteredTool(c, actor, 'read-doctrine', { document: 'team-memory' });
-  assert.equal(read.sections[0].body.text, LESSON);
+  const read = await executeRegisteredTool(c, actor, 'doctrine-sections', { section_ids: [entry.section_id] });
+  assert.equal(read.sections[0].body.text, LESSON, 'an index entry reads straight through doctrine-sections');
   assert.notEqual(b.stores[1].generation, a.stores[1].generation);
   const digests = (await c.query('select attached_index_digest from memory_session where attach_id = any($1::uuid[])',
     [[a.attach_id, b.attach_id]])).rows.map(r => r.attached_index_digest);
