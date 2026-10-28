@@ -1351,6 +1351,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "list-email-thread-filings": {
+    "ingress_key": "mcp-tool:list-email-thread-filings",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "list-fact-conflicts": {
     "ingress_key": "mcp-tool:list-fact-conflicts",
     "source_locator": "mcp-server/src/fact-observations.ts",
@@ -3306,6 +3316,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": true,
     "human_only": false,
     "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "undo-email-thread-filing": {
+    "ingress_key": "mcp-tool:undo-email-thread-filing",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "924711896f731da725114452205f966ca8461ee0a65888e70fdc235b72e7f856",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },

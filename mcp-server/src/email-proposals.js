@@ -148,6 +148,51 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         return { ok: true, status: 'confirmed', deal: target.id, activity_id: row.activity_id };
       }),
     },
+    'list-email-thread-filings': {
+      write: false,
+      description: 'List automatic email thread filings for the authenticated partner.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      handler: async (c, actor) => {
+        if (actor.human !== true || !['joe','dell'].includes(actor.slug)) fail('partner_confirmation_required');
+        const { rows } = await c.query(`select e.id as event_id,e.subject_id as deal,
+          e.new_value->>'activity_id' as activity_id,e.recorded_at,a.summary
+          from v_email_thread_filing_event e join activity a on a.id::text=e.new_value->>'activity_id'
+          where e.verb='inherit-email-thread' and (a.email_source->>'mailbox_owner'=$1 or
+            a.email_source is null)
+          and not exists (select 1 from v_email_thread_filing_event u where u.verb='undo-email-thread-filing'
+            and u.new_value->>'event_id'=e.id::text)
+          order by e.mutation_order desc`, [actor.slug]);
+        return { filings: rows };
+      },
+    },
+    'undo-email-thread-filing': {
+      write: true, humanOnly: true, humanCallerOnly: true,
+      description: 'Undo one automatic thread filing and suppress automatic re-filing of the email.',
+      inputSchema: { type: 'object', additionalProperties: false, required: ['idempotency_key','event_id'],
+        properties: { idempotency_key: { type: 'string', minLength: 1, maxLength: 200 },
+          event_id: { type: 'string', format: 'uuid' } } },
+      handler: (c, actor, args) => withEnvelope(c, actor, 'undo-email-thread-filing', args, async () => {
+        if (actor.human !== true || !['joe','dell'].includes(actor.slug)) fail('partner_confirmation_required');
+        const filing = (await c.query(`select e.id,e.subject_id,e.new_value,e.mutation_order from v_email_thread_filing_event e
+          join activity a on a.id::text=e.new_value->>'activity_id'
+          where e.id=$1 and e.verb='inherit-email-thread' and (a.email_source->>'mailbox_owner'=$2 or
+            a.email_source is null) for update of a`, [args.event_id,actor.slug])).rows[0];
+        if (!filing) fail('email_thread_filing_not_found');
+        const activity = (await c.query('select deal_id,version from activity where id=$1', [filing.new_value.activity_id])).rows[0];
+        const later = (await c.query(`select 1 from v_email_thread_filing_event where mutation_order>$1 and
+          verb in ('inherit-email-thread','confirm-email-filing','undo-email-thread-filing')
+          and new_value->>'activity_id'=$2 limit 1`, [filing.mutation_order,filing.new_value.activity_id])).rows.length;
+        if (later || activity.deal_id !== filing.subject_id ||
+            (filing.new_value.activity_version != null && activity.version !== filing.new_value.activity_version))
+          fail('email_thread_filing_changed');
+        await c.query('update activity set deal_id=null,version=version+1,updated_by=$2,updated_at=now() where id=$1',
+          [filing.new_value.activity_id,actor.id]);
+        await writeEvent(c, actor, 'undo-email-thread-filing', 'deal', filing.subject_id,
+          { new: { event_id: filing.id, activity_id: filing.new_value.activity_id }, cause: 'human_correction',
+            idempotency_key: args.idempotency_key, recorded_at_after_lock: true });
+        return { ok: true, activity_id: filing.new_value.activity_id };
+      }),
+    },
     'inherit-email-thread': {
       write: true,
       description: 'File a reply only when server-revalidated filed thread continuity and recipient safety hold. Deal participation and client deal counts never authorize filing.',
@@ -159,6 +204,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const rows = (await c.query(`select id as activity_id,deal_id as deal,summary,email_context,occurred_at,kind
           from activity where id=any($1::uuid[]) order by id for update`, [[args.activity_id,args.thread_activity_id]])).rows;
         const people = await contacts(c);
+        if ((await c.query("select 1 from v_email_thread_filing_event where verb='undo-email-thread-filing' and new_value->>'activity_id'=$1 limit 1", [args.activity_id.toLowerCase()])).rows.length) fail('email_thread_filing_suppressed');
         const current = rows.find(r => r.activity_id === args.activity_id.toLowerCase());
         const prior = rows.find(r => r.activity_id === args.thread_activity_id.toLowerCase());
         if (!current || !prior || !prior.deal || current.kind !== 'email_in' ||
@@ -186,10 +232,11 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const deal = (await c.query(`select id,client_id from deal where id=$1 and phase<>'closed' and invoiced_on is null for share`, [prior.deal])).rows[0];
         if (!deal || [a.sender,...a.recipients].some(p => !p.internal && !previous.has(p.email)))
           fail('email_thread_recipient_changed');
-        await c.query(`update activity set deal_id=$2,version=version+1,updated_by=$3,updated_at=now() where id=$1 and deal_id is null`,
-          [current.activity_id,prior.deal,actor.id]);
+        const updated = (await c.query(`update activity set deal_id=$2,version=version+1,updated_by=$3,updated_at=now() where id=$1 and deal_id is null returning version`,
+          [current.activity_id,prior.deal,actor.id])).rows[0];
+        if (!updated) fail('email_thread_not_continuous');
         await writeEvent(c, actor, 'inherit-email-thread', 'deal', prior.deal,
-          { new: { activity_id: current.activity_id, thread_activity_id: prior.activity_id },
+          { new: { activity_id: current.activity_id, thread_activity_id: prior.activity_id, activity_version: updated.version },
             cause: 'observed', idempotency_key: args.idempotency_key });
         return { ok: true, deal: prior.deal, activity_id: current.activity_id };
       }),
