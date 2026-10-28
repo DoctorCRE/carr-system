@@ -615,12 +615,6 @@
       "map-architecture"
      ],
      "bash_patterns": []
-    },
-    {
-     "kind": "path_rule",
-     "path_globs": [
-      "*control-room/public/*"
-     ]
     }
    ]
   },
@@ -1314,10 +1308,8 @@
      "path_globs": [
       "*.html",
       "*dealroom/*",
-      "*control-room/public/*",
       "*design/*",
-      "*.css",
-      "*workspace/public/*"
+      "*.css"
      ]
     }
    ]
@@ -1646,9 +1638,7 @@
      "kind": "path_rule",
      "path_globs": [
       "*dealroom/*",
-      "*workspace/public/*",
       "*.css",
-      "*control-room/public/*",
       "*design/*",
       "*.html"
      ]
@@ -1885,8 +1875,6 @@
      "kind": "path_rule",
      "read_only": true,
      "path_globs": [
-      "*control-room/public/*",
-      "*workspace/public/*",
       "*dealroom/*",
       "*design/*",
       "*.css",
@@ -2347,11 +2335,9 @@
      "kind": "path_rule",
      "read_only": true,
      "path_globs": [
-      "*control-room/public/*",
       "*.html",
       "*.css",
       "*design/*",
-      "*workspace/public/*",
       "*dealroom/*"
      ]
     }
@@ -2998,9 +2984,7 @@
       "*dealroom/*",
       "*design/*",
       "*.css",
-      "*control-room/public/*",
-      "*.html",
-      "*workspace/public/*"
+      "*.html"
      ]
     }
    ]
@@ -3429,8 +3413,6 @@
      "read_only": true,
      "path_globs": [
       "*dealroom/*",
-      "*workspace/public/*",
-      "*control-room/public/*",
       "*design/*",
       "*.html",
       "*share*"
