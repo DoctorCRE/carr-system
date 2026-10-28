@@ -1,0 +1,261 @@
+{
+  "card": "WR574.S2.J2",
+  "inherited_commit": "d7361a6c8bea992b41ba42a68cecda353a9e74f9",
+  "carr_base": "7ec2c96068a8d8c2be2a54cc7f9bdd634a83da67",
+  "app_read_only_clone": {
+    "repository": "jbookout/doctorcre-app",
+    "commit": "c19a0ff2b60e246e44b6a126f8749114b3398758",
+    "script_term_matches": 0
+  },
+  "method": [
+    "git grep -n -I -F for every deleted script basename, extensionless stem, and hyphen/underscore variants across all tracked files in both repositories.",
+    "Checked every match outside deleted families. Historical SQL inventories, replay fixtures, and references to a different JavaScript test are not callers.",
+    "Explicit configured caller sources included .github/workflows, ops/ci.sh, hooks, run.sh, .claude/settings.json, all ops/config JSON, ops/launchd plists, and ops/config/services.json.",
+    "git grep -n -F ops/fixtures/brief-check found no surviving fixture reader.",
+    "Imported ops/ci-gates.py and ran gate_programs(). All 361 discovered programs exist, and none is deleted.",
+    "Compared changed paths against gh pr view 2645 --json files. No intersection. Checked failover script unchanged and diff contains no deleted software-factory reference."
+  ],
+  "scope_limit": "Repository caller and declaration audit. Does not assert absence of untracked manual commands or inspect installed jobs on remote machines.",
+  "protected": [
+    "ops/failover-to-macbook.sh",
+    "every path touched by PR #2645",
+    "software-factory repository and references"
+  ],
+  "merge_resolution": "Main changed only the workspace description in build-isometric-map.py. Retained the caller-free deletion.",
+  "unmet": [],
+  "files": [
+    {
+      "deleted": "ops/accept-doctorcre-bundle.sh",
+      "surviving_callers": 0,
+      "other_matches": [
+        "historical SQL inventory or schema comment"
+      ]
+    },
+    {
+      "deleted": "ops/action-risk-guardrails-selftest.py",
+      "surviving_callers": 0,
+      "other_matches": []
+    },
+    {
+      "deleted": "ops/action-risk-guardrails.py",
+      "surviving_callers": 0,
+      "other_matches": [
+        "historical SQL inventory or schema comment",
+        "different mcp-server JavaScript test"
+      ]
+    },
+    {
+      "deleted": "ops/blocker-review-selftest.py",
+      "surviving_callers": 0,
+      "other_matches": []
+    },
+    {
+      "deleted": "ops/blocker-review.py",
+      "surviving_callers": 0,
+      "other_matches": [
+        "historical SQL inventory or schema comment"
+      ]
+    },
+    {
+      "deleted": "ops/brief-check-selftest.py",
+      "surviving_callers": 0,
+      "other_matches": []
+    },
+    {
+      "deleted": "ops/brief-check.py",
+      "surviving_callers": 0,
+      "other_matches": [
+        "historical SQL inventory or schema comment"
+      ]
+    },
+    {
+      "deleted": "ops/citation-trace-check-selftest.py",
+      "surviving_callers": 0,
+      "other_matches": []
+    },
+    {
+      "deleted": "ops/citation-trace-check.py",
+      "surviving_callers": 0,
+      "other_matches": [
+        "historical SQL inventory or schema comment"
+      ]
+    },
+    {
+      "deleted": "ops/command-precheck-selftest.py",
+      "surviving_callers": 0,
+      "other_matches": []
+    },
+    {
+      "deleted": "ops/command_precheck.py",
+      "surviving_callers": 0,
+      "other_matches": [
+        "inert recorded command in rule-evaluation fixtures"
+      ]
+    },
+    {
+      "deleted": "ops/doctorcre-sibling-manifest.py",
+      "surviving_callers": 0,
+      "other_matches": [
+        "historical SQL inventory or schema comment"
+      ]
+    },
+    {
+      "deleted": "ops/fixtures/brief-check/board-size.md",
+      "surviving_callers": 0,
+      "other_matches": []
+    },
+    {
+      "deleted": "ops/fixtures/brief-check/gap1.md",
+      "surviving_callers": 0,
+      "other_matches": []
+    },
+    {
+      "deleted": "ops/fixtures/brief-check/gap17.md",
+      "surviving_callers": 0,
+      "other_matches": []
+    },
+    {
+      "deleted": "ops/fixtures/brief-check/gap9.md",
+      "surviving_callers": 0,
+      "other_matches": []
+    },
+    {
+      "deleted": "ops/fixtures/brief-check/gatefix.md",
+      "surviving_callers": 0,
+      "other_matches": []
+    },
+    {
+      "deleted": "ops/fixtures/brief-check/pr1544.json",
+      "surviving_callers": 0,
+      "other_matches": []
+    },
+    {
+      "deleted": "ops/fixtures/brief-check/pr1545.json",
+      "surviving_callers": 0,
+      "other_matches": []
+    },
+    {
+      "deleted": "ops/fixtures/brief-check/pr1553.json",
+      "surviving_callers": 0,
+      "other_matches": []
+    },
+    {
+      "deleted": "ops/fixtures/brief-check/pr1572.json",
+      "surviving_callers": 0,
+      "other_matches": []
+    },
+    {
+      "deleted": "ops/guidance-situation-curation-preflight.py",
+      "surviving_callers": 0,
+      "other_matches": [
+        "historical SQL inventory or schema comment"
+      ]
+    },
+    {
+      "deleted": "ops/guidance-situation-curation-selftest.py",
+      "surviving_callers": 0,
+      "other_matches": [
+        "historical CI failure report"
+      ]
+    },
+    {
+      "deleted": "ops/isometric-map-selftest.py",
+      "surviving_callers": 0,
+      "other_matches": []
+    },
+    {
+      "deleted": "ops/propose-guidance-situation-curation.py",
+      "surviving_callers": 0,
+      "other_matches": [
+        "historical SQL inventory or schema comment"
+      ]
+    },
+    {
+      "deleted": "ops/retrieval-eval-selftest.py",
+      "surviving_callers": 0,
+      "other_matches": []
+    },
+    {
+      "deleted": "ops/retrieval_eval.py",
+      "surviving_callers": 0,
+      "other_matches": [
+        "historical SQL inventory or schema comment"
+      ]
+    },
+    {
+      "deleted": "ops/rule-triage-report.py",
+      "surviving_callers": 0,
+      "other_matches": [
+        "historical SQL inventory or schema comment"
+      ]
+    },
+    {
+      "deleted": "ops/session-crm-neon-selftest.py",
+      "surviving_callers": 0,
+      "other_matches": []
+    },
+    {
+      "deleted": "ops/situation-retrieval-gate-selftest.py",
+      "surviving_callers": 0,
+      "other_matches": []
+    },
+    {
+      "deleted": "ops/situation_retrieval_gate.py",
+      "surviving_callers": 0,
+      "other_matches": [
+        "historical SQL inventory or schema comment"
+      ]
+    },
+    {
+      "deleted": "pipelines/backfill_lease_event.py",
+      "surviving_callers": 0,
+      "other_matches": [
+        "historical SQL inventory or schema comment"
+      ]
+    },
+    {
+      "deleted": "pipelines/build-isometric-map.py",
+      "surviving_callers": 0,
+      "other_matches": [
+        "historical SQL inventory or schema comment",
+        "self references in merge conflict copy, removed on resolution"
+      ]
+    },
+    {
+      "deleted": "pipelines/extract_contact_events.py",
+      "surviving_callers": 0,
+      "other_matches": [
+        "historical SQL inventory or schema comment"
+      ]
+    },
+    {
+      "deleted": "pipelines/import_clients_active.py",
+      "surviving_callers": 0,
+      "other_matches": [
+        "historical SQL inventory or schema comment"
+      ]
+    },
+    {
+      "deleted": "pipelines/session_crm_brief.py",
+      "surviving_callers": 0,
+      "other_matches": [
+        "historical SQL inventory or schema comment"
+      ]
+    },
+    {
+      "deleted": "pipelines/session_crm_harvest.py",
+      "surviving_callers": 0,
+      "other_matches": [
+        "historical SQL inventory or schema comment"
+      ]
+    }
+  ],
+  "verification": {
+    "cloud_hook_paths": "45 checks passed, 0 failures",
+    "rule_triage": "14 checks passed, 0 failures",
+    "doc_drift": "26 tests passed; checker exited 0 with 312 stale warnings and 1626 unchecked claims; no warning mentions a deleted file",
+    "codemap": "tools/codemap.py --check exited 0; no committed map to regenerate",
+    "required_ci": "ops/ci.sh --only \"pushfloor secret\" passed both classes",
+    "review": "Independent Standards and Spec reviews found no defects; comment review found no newly added constraints or suppressions"
+  }
+}
