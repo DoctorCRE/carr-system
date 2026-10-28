@@ -33,6 +33,8 @@ THE ASSERTIONS.
      [env.staging] carries an explicit `routes = []`. A domain in
      the matrix that wrangler does not serve is fiction; a route wrangler serves
      that the matrix does not name is an undeclared production surface.
+  7. NO ENVIRONMENT EXPOSES WORKERS.DEV OR PREVIEW URLS. Explicit false values
+     prevent deployments from undoing the billing audit's public URL shutoff.
   5. EVERY OBSERVED STAGING-VS-PRODUCTION BINDING DIFFERENCE IS NAMED. Matched
      by keyword against intentional_differences, which is deliberately a loose
      match: the point is that a human wrote a sentence about it, not that the
@@ -126,6 +128,9 @@ def main() -> int:
           "needs:" not in staging_job and "needs:" not in production_job
           and "--env staging" not in production_job,
           "a `needs:` would let one environment's failure stop the other's deploy")
+    check("2f. staging deployment is paused until Cloudflare Access protects it",
+          staging_job.splitlines()[0].strip() == "if: ${{ false }}" if staging_job else False,
+          "the disabled staging URL cannot serve the release verification")
 
     # ── 3 ────────────────────────────────────────────────────────────────────
     db_tap_src = DB_TAP.read_text()
@@ -163,8 +168,13 @@ def main() -> int:
     check("4d. staging declares no domain, and wrangler gives it an explicit empty routes list",
           not envs["staging"]["domains"]
           and "routes" in stg_cfg and stg_cfg["routes"] == []
-          and "route" not in stg_cfg and stg_cfg.get("workers_dev") is True,
+          and "route" not in stg_cfg,
           f"[env.staging] routes={stg_cfg.get('routes', '<missing: inherits production>')!r}")
+
+    for name, config in [("production", wrangler), *wrangler.get("env", {}).items()]:
+        for setting in ("workers_dev", "preview_urls"):
+            check(f"7. {name} disables {setting}", config.get(setting) is False,
+                  f"{setting} must be explicitly false")
 
     # ── 5 ────────────────────────────────────────────────────────────────────
     prod_kv = {k.get("id") for k in wrangler.get("kv_namespaces", [])}

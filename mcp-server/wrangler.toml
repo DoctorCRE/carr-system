@@ -137,6 +137,8 @@ name = "carr-mcp"
 account_id = "12ccca77eb49142a6be8eb84c0d6a3a0"
 main = "src/index.js"
 compatibility_date = "2026-07-01"
+workers_dev = false
+preview_urls = false
 
 # Required by workers-oauth-provider for Client ID Metadata Document support:
 # it disables the legacy same-zone fetch shortcut, which is the SSRF guard for
@@ -227,6 +229,11 @@ enabled = true
 # selftest.py check 6 keeps both bounded. Raise only from a new measured max.
 [limits]
 cpu_ms = 5000
+# Local code-path measurement: a 1 MB doctrine revision uses 163 AI batches;
+# a 100-stop Tour route uses one SQL call. 1,000 leaves room for OAuth, audit,
+# KV/R2 and redirects while bounding fanout. Unbounded doctrine inputs can
+# still exceed this cap; it is a per-invocation guard, not a monthly spend cap.
+subrequests = 1000
 
 [[r2_buckets]]
 binding = "carr_documents"
@@ -246,7 +253,8 @@ name = "carr-mcp-staging"
 main = "src/index.js"
 compatibility_date = "2026-07-01"
 compatibility_flags = ["global_fetch_strictly_public", "nodejs_compat"]
-workers_dev = true
+workers_dev = false
+preview_urls = false
 
 # `routes = []` IS LOAD-BEARING. Wrangler inherits `routes` into an env that
 # omits the key: on 2026-08-13 a staging deploy without this line took over the

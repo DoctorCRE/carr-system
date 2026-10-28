@@ -225,18 +225,11 @@ jobs:
           echo "::error::$RELEASE_URL did not report git_sha $SHA, version $VERSION_ID, env production and $VERBS verbs within two minutes."
           exit 1
 
-  # Staging (WR-000511): the same commit to carr-mcp-staging and its database,
-  # in parallel with production and never gating it. This job does not appear
-  # in the production job's `needs`, so a staging failure leaves the production
-  # deploy untouched and only turns this job red.
+  # Staging is paused until Cloudflare Access protects its endpoint and the
+  # release probe authenticates through Access. Its public workers.dev and
+  # preview URLs are disabled for billing safety. Production runs independently.
   staging:
-    if: >-
-      (github.event_name == 'workflow_run'
-        && github.event.workflow_run.conclusion == 'success'
-        && github.event.workflow_run.event == 'push'
-        && github.event.workflow_run.head_repository.full_name == github.repository
-        && github.event.workflow_run.head_branch == 'main')
-      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    if: ${{ false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: staging
