@@ -1,4 +1,4 @@
-"""Select send-time skills by the names on the brief's Skills: line; nothing leaves the machine."""
+"""Select send-time skills by the catalog names the brief mentions; nothing leaves the machine."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -48,14 +48,19 @@ def catalog(repo: Path, *, home: Path | None = None) -> list[Skill]:
 
 
 BASELINE = ('poteto-mode', 'principle-prove-it-works')
+# What the old Jev picker chose for nearly every implementation brief; used when a brief names nothing else.
+DEFAULT = ('tdd', 'implement')
 MAX_NAMED = 6
 
 
-def named(brief: str) -> list[str]:
-    """Skill names on the brief's Skills: lines, lower-cased with spaces as hyphens."""
-    return [re.sub(r'\s+', '-', name.strip().lower())
-            for line in brief.splitlines() if line.lower().startswith('skills:')
-            for name in line[len('skills:'):].split(',') if name.strip()]
+def short(skill: Skill) -> str:
+    return skill.name.rsplit(':', 1)[-1]
+
+
+def mentioned(skill: Skill, brief: str) -> bool:
+    """The skill's name appears as a whole token, its words joined by hyphens or spaces, in any case."""
+    words = r'[\s-]+'.join(map(re.escape, re.split(r'[\s-]+', short(skill))))
+    return re.search(rf'(?<![\w-]){words}(?![\w-])', brief, re.I) is not None
 
 
 def prepare(brief: str, repo: Path, *, home: Path | None = None):
@@ -64,15 +69,12 @@ def prepare(brief: str, repo: Path, *, home: Path | None = None):
     baseline = [next((s for s in skills if s.name == 'pstack:' + name),
                      next((s for s in skills if s.name == name), None)) for name in BASELINE]
     selected = [s for s in baseline if s is not None]
-    blocks = ['## Required skills']
-    wanted = [name for name in named(brief) if name not in BASELINE]
-    for name in wanted:
-        if not any(name in (s.name.lower(), s.name.rsplit(':', 1)[-1].lower()) for s in skills):
-            blocks.append(f'Named skill not found: {name}.')
-    selected.extend([s for s in skills if s not in selected
-                     and s.name.rsplit(':', 1)[-1] not in BASELINE
-                     and (s.name.lower() in wanted or s.name.rsplit(':', 1)[-1].lower() in wanted)][:MAX_NAMED])
-    picks = []
+    others = [s for s in skills if s not in selected and short(s) not in BASELINE]
+    named = [s for s in others if mentioned(s, brief)]
+    if all(short(s) in DEFAULT for s in named):
+        named = [s for s in others if short(s) in DEFAULT]
+    selected.extend(named[:MAX_NAMED])
+    blocks, picks = ['## Required skills'], []
     for skill in selected:
         try:
             text = skill.path.read_text(encoding='utf-8')

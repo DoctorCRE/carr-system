@@ -41,7 +41,8 @@ class PickerTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.home, self.repo = Path(self.tmp.name) / 'home', Path(self.tmp.name) / 'repo'
         self.texts = {}
-        for name in ('poteto-mode', 'principle-prove-it-works', 'tdd', 'grill-with-docs', 'pr', 'research'):
+        for name in ('poteto-mode', 'principle-prove-it-works', 'tdd', 'implement', 'grill-with-docs',
+                     'codebase-design', 'zero-tech-debt', 'diagnosing-bugs'):
             path = self.repo / '.claude/skills' / name / 'SKILL.md'
             path.parent.mkdir(parents=True)
             self.texts[name] = f'---\nname: {name}\ndescription: Procedure {name}\n---\nComplete instructions {name}\n'
@@ -50,22 +51,31 @@ class PickerTests(unittest.TestCase):
     def prepare(self, brief):
         return skill_picker.prepare(brief, self.repo, home=self.home)
 
-    def test_skills_line_selects_named_skills_with_full_text(self):
-        brief, picks = self.prepare('Card: X\nSkills: poteto-mode, TDD, Grill With Docs, missing-skill\nOpen a PR after research.')
-        self.assertEqual([p['name'] for p in picks],
-                         ['poteto-mode', 'principle-prove-it-works', 'grill-with-docs', 'tdd'])
+    def names(self, picks):
+        return [p['name'] for p in picks]
+
+    def test_prose_skills_line_keeps_every_named_skill_with_full_text(self):
+        brief, picks = self.prepare('Card: X\nSkills: poteto-mode, grill-with-docs. Then codebase-design and '
+                                    'zero-tech-debt (Grill With Docs first).\nFix the dispatcher.')
+        self.assertEqual(self.names(picks), ['poteto-mode', 'principle-prove-it-works',
+                                             'codebase-design', 'grill-with-docs', 'zero-tech-debt'])
         for pick in picks:
             self.assertIn(self.texts[pick['name']], brief)
-        self.assertNotIn(self.texts['pr'], brief)
-        self.assertNotIn(self.texts['research'], brief)
-        self.assertIn('Named skill not found: missing-skill.', brief)
-        self.assertTrue(brief.startswith('Skills: poteto-mode, principle-prove-it-works, grill-with-docs, tdd\n\n'))
+        self.assertNotIn(self.texts['tdd'], brief)
+        self.assertTrue(brief.startswith('Skills: poteto-mode, principle-prove-it-works, codebase-design, '
+                                         'grill-with-docs, zero-tech-debt\n\n'))
 
-    def test_no_skills_line_sends_baseline_and_makes_no_network_call(self):
+    def test_names_match_whole_tokens_only(self):
+        _, picks = self.prepare('Skills: TDD, codebase-design. Read tdd-notes and undiagnosing-bugs-x.')
+        self.assertEqual(self.names(picks), ['poteto-mode', 'principle-prove-it-works', 'codebase-design', 'tdd'])
+
+    def test_queue_brief_without_names_gets_tdd_and_implement_and_no_network(self):
+        brief = ('Card: WR1.S1.J1\nRepair the dispatcher\nThe dispatcher drops jobs.\n\n'
+                 'Work Request: WR-000001, slice 1.\nImplement this queued task and deliver through a ready pull request.')
         with patch('socket.socket', side_effect=AssertionError('network used')):
-            brief, picks = self.prepare('Repair the dispatcher. Use tdd.')
-        self.assertEqual([p['name'] for p in picks], ['poteto-mode', 'principle-prove-it-works'])
-        self.assertIn('## Required skills', brief)
+            sent, picks = self.prepare(brief)
+        self.assertEqual(self.names(picks), ['poteto-mode', 'principle-prove-it-works', 'implement', 'tdd'])
+        self.assertIn(self.texts['implement'], sent)
 
 
 if __name__ == '__main__':
