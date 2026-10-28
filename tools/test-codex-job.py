@@ -195,13 +195,17 @@ class CodexJobTests(unittest.TestCase):
         self.assertIn(b'Retained checkout:', errors)
 
     def test_concurrent_jobs_get_separate_checkouts(self):
+        git = self.root / 'git'
+        git.write_text(f'#!{sys.executable}\nimport pathlib, sys\n'
+                       "if sys.argv[1] == 'clone': pathlib.Path(sys.argv[-1]).mkdir()\n")
+        git.chmod(0o755)
         jobs = [self.launch('import time; time.sleep(1); raise SystemExit(7)', push=False)
                 for _ in range(2)]
         checkouts = {Path(job.communicate(timeout=15)[1].decode().split('Retained checkout: ')[1].strip())
                      for job in jobs}
         self.assertEqual([job.returncode for job in jobs], [7, 7])
         self.assertEqual(len(checkouts), 2)
-        self.assertTrue(all((checkout / '.git').is_dir() for checkout in checkouts))
+        self.assertTrue(all(checkout.is_dir() for checkout in checkouts))
 
     def test_no_descendant_survives_any_job_exit(self):
         for outcome in (0, 7, signal.SIGTERM, signal.SIGINT):
