@@ -665,17 +665,21 @@ class Run:
         self.attempted: set[str] = set()
         self.lead_candidates: list[tuple[dict, dict]] = []
 
-    def activity_key(self, ref: str, source: str) -> str:
-        legacy = key('log-activity', ref, source)
+    def owner_key(self, verb: str, ref: str, source: str) -> str:
+        legacy = key(verb, ref, source)
         if legacy in self.state.get('requests', {}):
             return legacy
-        return key('log-activity', ref, f'{self.settings.owner}|{source}')
+        return key(verb, ref, f'{self.settings.owner}|{source}')
+
+    def activity_key(self, ref: str, source: str) -> str:
+        return self.owner_key('log-activity', ref, source)
 
     def write(self, verb: str, args: dict, who: str, note: str = '') -> bool:
         requests = self.state.setdefault('requests', {})
         request = requests.setdefault(args['idempotency_key'], {
             'verb': verb, 'payload': json.dumps(args), 'acknowledged': False,
-            'created_at': int(self.now.timestamp()), 'source_kind': 'mail'})
+            'created_at': int(self.now.timestamp()), 'source_kind': 'mail',
+            **({'key_owner': self.settings.owner} if verb == 'set-next-action' else {})})
         _save(self.out, self.state)
         if not request['acknowledged']:
             if args['idempotency_key'] in self.attempted:
@@ -763,7 +767,7 @@ class Run:
             self.written.append((who, ref, 'set-next-action', 'kept newer ball'))
             return True
         note = 'no prior ball' if existing is None else 'replaced ball'
-        args = {'idempotency_key': key('set-next-action', ref, source), 'ref': ref,
+        args = {'idempotency_key': self.owner_key('set-next-action', ref, source), 'ref': ref,
                 'description': description, 'due_on': due_on, 'owner': self.settings.owner,
                 'expected_action': {k: action[k] for k in ('id', 'version')} if action else None}
         if not self.write('set-next-action', args, who, note):
@@ -913,8 +917,8 @@ class Run:
                     self.counts['flags_reflagged'] += 1
                 return True
             text = re.sub(r'(?<=[.!?])\s+(?=[A-Z])', ' / ', re.sub(r'\s*;\s*|\s+', ' ', f['subject']).strip())
-            args = {'idempotency_key': key('record-deal-item', deal, f'{ident}|flagged'), 'deal': deal,
-                    'title': FLAG_ITEM_TITLE, 'due_on': f['due'], 'source_ref': f'outlook-flag:{ident}',
+            args = {'idempotency_key': self.owner_key('record-deal-item', deal, f'{ident}|flagged'), 'deal': deal,
+                    'title': FLAG_ITEM_TITLE, 'due_on': f['due'], 'source_ref': f'outlook-flag:{self.settings.owner}:{ident}',
                     'bullets': [{'kind': 'promised', 'date': f['due'], 'text': f'Flagged in Outlook: {text}'[:240]}]}
             if not self.write('record-deal-item', args, who, 'flagged'):
                 return False
@@ -924,11 +928,11 @@ class Run:
             self.counts['flags_untracked'] += 1  # complete or cleared before we filed it: nothing to close
         elif applied['state'] == 'flagged' and applied.get('item_id'):
             if f['status'] == 'complete':
-                args = {'idempotency_key': key('complete-deal-item', deal, f'{ident}|complete'),
+                args = {'idempotency_key': self.owner_key('complete-deal-item', deal, f'{ident}|complete'),
                         'deal': deal, 'item_id': applied['item_id']}
                 verb, state, count = 'complete-deal-item', 'complete', 'flags_completed'
             else:
-                args = {'idempotency_key': key('drop-action', deal, f'{ident}|cleared'),
+                args = {'idempotency_key': self.owner_key('drop-action', deal, f'{ident}|cleared'),
                         'action_id': applied['item_id'], 'base_version': 1,
                         'reason': f'Outlook flag cleared without completing (source: outlook-flag:{ident})'}
                 verb, state, count = 'drop-action', 'cleared', 'flags_cleared'
@@ -1081,7 +1085,7 @@ class Run:
         for m, progress in self.lead_candidates:
             address = m['sender'].lower()
             source = _hash(address)
-            request = self.state.get('requests', {}).get(key('propose-email-lead', source, 'sender'))
+            request = self.state.get('requests', {}).get(self.owner_key('propose-email-lead', source, 'sender'))
             if request and request['acknowledged']:
                 continue
             if request is None and progress.get('intent') == 'not_business':
@@ -1100,7 +1104,7 @@ class Run:
                 if progress['intent'] != 'business':
                     self.counts['lead_not_business'] += 1
                     continue
-            args = {'idempotency_key': key('propose-email-lead', source, 'sender'), 'address': address,
+            args = {'idempotency_key': self.owner_key('propose-email-lead', source, 'sender'), 'address': address,
                     'display_name': (_clean_name(m['sender_name'], m['subject']) or '')[:200] or None,
                     'summary': progress.get('summary') or '', 'first_seen_at': _iso(m['sent_unix']),
                     'message_ref': m['ident']}
@@ -1446,12 +1450,33 @@ def publish_agenda(carr: Callable[[str, dict], dict], snapshot: dict) -> None:
         try:
             carr('publish-board-snapshot', {
                 'idempotency_key': key('publish-board-snapshot', AGENDA_BOARD,
-                                       f'{snapshot["observed_at"]}|{base}'),
+                                       f'{_hash(json.dumps(snapshot, sort_keys=True))}|{base}'),
                 'board_id': AGENDA_BOARD, 'base_version': base, 'snapshot': snapshot})
             return
         except CarrError as error:
             if error.code != 'agenda_version_conflict' or attempt == 2:
                 raise
+
+
+def _retry_owner_key_collisions(state: dict, owner: str) -> None:
+    requests = state.get('requests', {})
+    sources = {key('set-next-action', step['ref'], f'next|{source}'): f'next|{source}'
+               for source, step in state.get('steps', {}).items()}
+    for legacy, request in list(requests.items()):
+        if (request['verb'] != 'set-next-action' or request['acknowledged']
+                or request.get('disposition') != 'blocked' or request.get('error_code') != 'key_reuse'
+                or request.get('key_owner') == owner):
+            continue
+        args = json.loads(request['payload'])
+        if (args.get('owner') != owner or 'expected_action' not in args
+                or not (request.get('source_kind') == 'mail' or legacy in sources)):
+            continue
+        source = sources.get(legacy, f'legacy|{legacy}')
+        scoped = key('set-next-action', args['ref'], f'{owner}|{source}')
+        args['idempotency_key'] = scoped
+        requests.setdefault(scoped, {**request, 'payload': json.dumps(args), 'key_owner': owner,
+                                    'source_kind': 'mail', 'disposition': 'retry', 'error_code': None, 'retry_at': None})
+        del requests[legacy]
 
 
 def _quarantine_calendar_requests(state: dict) -> None:
@@ -1612,6 +1637,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         prepared = work.prepare_attachments(mails, matcher, db, files)
         _remove(files.parent)
         work.file_attachments(prepared)
+        _retry_owner_key_collisions(state, settings.owner)
         _quarantine_calendar_requests(state)
         _save(out, state)
         for request in list(state.get('requests', {}).values()):
