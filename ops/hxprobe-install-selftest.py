@@ -21,7 +21,7 @@ from outlook_test_support import write_settings
 
 CRATE = ROOT / 'vendor/hxprobe'
 SOURCES = ('vendor/hxprobe', 'spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py')
-INSTALLER_FILES = ('ops/hxprobe-source-digest.py', 'bin/install-outlook-intake.sh', 'tools/outlook-intake-copy.c', 'lib/outlook_settings.py',
+INSTALLER_FILES = ('ops/hxprobe-source-digest.py', 'bin/install-outlook-intake.sh', 'tools/outlook-intake-copy.c', 'lib/outlook_settings.py', 'lib/outlook_helper.py',
                    'ops/launchd/com.carr.outlook-intake.plist', 'ops/launchd/com.carr.outlook-refresh.plist')
 
 
@@ -47,6 +47,9 @@ class InstalledDecoderTest(unittest.TestCase):
         shutil.copytree(CRATE, self.repo / SOURCES[0], ignore=shutil.ignore_patterns('target'))
         (self.repo / '.venv/bin').mkdir(parents=True)
         (self.repo / '.venv/bin/python').symlink_to(sys.executable)
+        codesign = self.repo / '.venv/bin/codesign'
+        codesign.write_text(f'#!{sys.executable}\n')
+        codesign.chmod(0o700)
         (self.repo / '.gitignore').write_text('.venv/\nout\ntarget/\n')
         self.git('init', '--quiet')
         self.commit('fixture')
@@ -54,7 +57,7 @@ class InstalledDecoderTest(unittest.TestCase):
         self.helper = self.home / 'carr local/bin/outlook-intake-copy'
         write_settings(self.home, self.repo, vendor=str(self.vendor), copy_helper=str(self.helper),
                        profile=str(self.home / 'Profile'),
-                       executable_path=f'{Path(shutil.which("cargo")).parent}:/usr/bin:/bin:/usr/sbin:/sbin')
+                       executable_path=f'{self.repo}/.venv/bin:{Path(shutil.which("cargo")).parent}:/usr/bin:/bin:/usr/sbin:/sbin')
         self.decoder = self.vendor / 'hxprobe/target/release/hxprobe'
 
     def git(self, *args):

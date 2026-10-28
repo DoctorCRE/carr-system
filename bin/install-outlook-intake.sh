@@ -85,13 +85,9 @@ fi
 rm -f "$PIN"
 
 "$REPO/.venv/bin/python" - "$REPO" "$HOME" <<'PY'
-import hashlib
-import json
 import os
 from pathlib import Path
-import subprocess
 import sys
-import tempfile
 
 repo, home = (Path(value).resolve() for value in sys.argv[1:])
 sys.path.insert(0, str(repo))
@@ -100,25 +96,9 @@ from lib.outlook_settings import load_settings
 settings = load_settings(home)
 settings.require_repo(repo)
 
-source = repo / 'tools/outlook-intake-copy.c'
-helper = settings.copy_helper
-work_root = (settings.repo / 'out/outlook-intake').resolve()
-flags = ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
-         f'-DOUTLOOK_PROFILE={json.dumps(str(settings.profile))}',
-         f'-DOUTLOOK_WORK_ROOT={json.dumps(str(work_root))}',
-         f'-DOUTLOOK_REPO={json.dumps(str(settings.repo))}']
-pin = helper.with_suffix('.pin')
-wanted = hashlib.sha256(source.read_bytes() + json.dumps(flags).encode()).hexdigest()
-helper.parent.mkdir(parents=True, exist_ok=True)
-if not (helper.is_file() and os.access(helper, os.X_OK) and pin.is_file() and pin.read_text() == wanted):
-    with tempfile.TemporaryDirectory(dir=helper.parent) as temp:
-        built = Path(temp) / helper.name
-        subprocess.run(['/usr/bin/cc', *flags, str(source), '-o', str(built)], check=True)
-        built.chmod(0o700)
-        os.replace(built, helper)
-        print(f'install-outlook-intake: Full Disk Access must be re-granted for {helper}', flush=True)
-    pin.write_text(wanted)
-settings.verify_helper()
+from lib.outlook_helper import install_helper
+
+install_helper(settings)
 
 if 'outbox' in settings.services:
     label = 'com.carr.outlook-outbox'

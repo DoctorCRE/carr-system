@@ -1393,7 +1393,8 @@ class IntakeTest(unittest.TestCase):
 
     def test_unmatched_people_are_reported_by_name_and_domain_only(self):
         self.run_intake([mail('stranger@example.test', -timedelta(hours=1), name='Sam Stranger')])
-        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual([(v, a.get('applies_to')) for v, a in self.fake.writes()],
+                         [('propose-email-lead', 'not_business')])
         text = self.report_text()
         self.assertIn('Sam Stranger', text)
         self.assertIn('example.test', text)
@@ -1402,7 +1403,8 @@ class IntakeTest(unittest.TestCase):
     def test_unmatched_mail_retries_after_a_contact_is_added_without_a_store_change(self):
         m = mail('new@example.test', -timedelta(hours=1), name='New Example')
         self.assertEqual(self.run_intake([m]).state, 'succeeded')
-        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual([(v, a.get('applies_to')) for v, a in self.fake.writes()],
+                         [('propose-email-lead', 'not_business')])
         decodes = self.fake.decodes
         self.assertEqual(self.run_intake([m], touch=False).reason, 'store_unchanged')
         self.assertEqual(self.fake.decodes, decodes)
@@ -1451,7 +1453,8 @@ class IntakeTest(unittest.TestCase):
         self.fake.parties['Rae Named'] = [{'name': 'Rae Named', 'ref': 'L-904', 'kind': 'lead', 'merged': False}]
         m = mail('rae@example.test', -timedelta(hours=1), name='Rae Named')
         self.run_intake([m])
-        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual([(v, a.get('applies_to')) for v, a in self.fake.writes()],
+                         [('propose-email-lead', 'not_business')])
         self.assertIn(ident(m), json.loads((self.out() / intake.STATE).read_text())['mail_unresolved'])
         self.assertIn('Rae Named', self.report_text())
 
@@ -1460,7 +1463,8 @@ class IntakeTest(unittest.TestCase):
             {'name': 'Rae Named', 'ref': 'L-904', 'kind': 'lead', 'merged': False},
             {'name': 'Rae Named', 'ref': 'C-905', 'kind': 'client', 'merged': False}]
         self.run_intake([mail('rae@example.test', -timedelta(hours=1), name='Rae Named')])
-        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual([(v, a.get('applies_to')) for v, a in self.fake.writes()],
+                         [('propose-email-lead', 'not_business')])
         self.assertIn('Rae Named', self.report_text())
 
     def test_a_fuzzy_or_merged_name_hit_is_not_a_match(self):
@@ -1468,7 +1472,8 @@ class IntakeTest(unittest.TestCase):
             {'name': 'Rae Namedson', 'ref': 'L-904', 'kind': 'lead', 'merged': False},
             {'name': 'Rae Named', 'ref': 'L-906', 'kind': 'lead', 'merged': True}]
         self.run_intake([mail('rae@example.test', -timedelta(hours=1), name='Rae Named')])
-        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual([(v, a.get('applies_to')) for v, a in self.fake.writes()],
+                         [('propose-email-lead', 'not_business')])
 
     def test_an_address_shared_by_two_records_is_ambiguous(self):
         self.fake.contacts_rows.append(intake.Contact('pat@example.test', 'L-907', 'Pat Example'))
@@ -1496,7 +1501,8 @@ class IntakeTest(unittest.TestCase):
         result = self.run_intake([m], touch=False)
         self.assertEqual(result.reason, 'store_unchanged')
         self.assertEqual(self.fake.decodes, decodes)
-        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual([(v, a.get('applies_to')) for v, a in self.fake.writes()],
+                         [('propose-email-lead', 'not_business')])
 
     def test_missing_unresolved_source_is_retained_until_it_decodes_again(self):
         m = mail('new@example.test', -timedelta(hours=1))
@@ -1520,7 +1526,8 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual((result.state, result.reason), ('failed', 'carr_unreachable'))
         self.assertEqual(self.fake.decodes, decodes)
         self.assertEqual((self.out() / intake.STATE).read_bytes(), before)
-        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual([(v, a.get('applies_to')) for v, a in self.fake.writes()],
+                         [('propose-email-lead', 'not_business')])
 
     def test_resolved_mail_write_failure_reuses_the_original_key_and_payload(self):
         m = mail('new@example.test', -timedelta(hours=1))
@@ -2262,11 +2269,28 @@ class IntakeTest(unittest.TestCase):
     def test_an_unknown_sender_without_business_intent_is_not_queued_or_asked_again(self):
         m = mail('friend@example.test', -timedelta(hours=1))
         result = self.run_intake([m])
-        self.assertEqual(self.fake.writes(), [])
+        [(_, exclusion)] = self.fake.writes('propose-email-lead')
+        self.assertEqual(exclusion['applies_to'], 'not_business')
+        self.assertEqual(exclusion['summary'], 'Not business.')
+        self.assertNotIn('evidence_quote', exclusion)
         self.assertEqual(result.counts['lead_not_business'], 1)
         self.assertEqual(result.counts['unresolved_messages'], 1)
         self.run_intake([m])
         self.assertEqual(len(self.fake.intent_calls), 1)
+
+    def test_an_exclusion_receipt_retries_without_reading_the_email_again(self):
+        m = mail('friend@example.test', -timedelta(hours=1))
+        self.fake.fail_verbs.add('propose-email-lead')
+        result = self.run_intake([m])
+        self.assertEqual(result.counts['writes_failed'], 1)
+        self.fake.fail_verbs.clear()
+        self.fake.now += timedelta(minutes=2)
+        result = self.run_intake([m])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(len(self.fake.intent_calls), 1)
+        attempts = self.fake.writes('propose-email-lead')
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(attempts[0][1], attempts[1][1])
 
     def test_a_read_naming_an_open_deal_queues_the_sender_with_that_deal(self):
         self.fake.deal_rows = [

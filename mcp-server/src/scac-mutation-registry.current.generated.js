@@ -1364,7 +1364,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "list-email-proposals": {
     "ingress_key": "mcp-tool:list-email-proposals",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "763e1b84c0c1bf7812acfd2646545fdad6b1a900a0bb2260b8901951aa8bacab",
+    "schema_digest": "bb574ff2f070c15332dcebaf05b524ba694521d6b66d050feb10eb95ae0cfe5f",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -1835,7 +1835,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "propose-email-lead": {
     "ingress_key": "mcp-tool:propose-email-lead",
     "source_locator": "mcp-server/src/email-lead-proposal.ts",
-    "schema_digest": "31ba38aa5047ef64f62c3c105e7f9c28ca3bf8219e385de931a5ac5942a5f3c8",
+    "schema_digest": "d045d96cb653e76fa11df0c5e763c48772c64e01589d9ee899bab6726ef02153",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -3621,6 +3621,15 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "relation_kind": "r",
       "grantee": "carr_writer",
       "privilege": "update",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:public.email_lead_exclusion:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "public.email_lead_exclusion",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
       "grantable": false
     }
   ],

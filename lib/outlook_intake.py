@@ -1073,14 +1073,14 @@ class Run:
             progress['read'] = read['applies_to']
             self.counts['lead_' + read['applies_to']] += 1
             _save(self.out, self.state)
-            if read['applies_to'] == 'not_business':
-                continue
             args = {'idempotency_key': request_key, 'address': address,
-                    'display_name': (name or '')[:200] or None, 'summary': read['summary'],
+                    'display_name': (name or '')[:200] or None, 'summary': read['summary'] or 'Not business.',
                     'first_seen_at': _iso(m['sent_unix']), 'message_ref': m['ident'],
                     'applies_to': read['applies_to'], 'confidence': read['confidence'],
                     **{k: read[k] for k in ('deal', 'party', 'evidence_quote') if read[k] is not None}}
             if self.write('propose-email-lead', args, name or _domain(address)):
+                if read['applies_to'] == 'not_business':
+                    continue
                 outcome = self.state['requests'][request_key].get('outcome')
                 self.counts[LEAD_OUTCOMES.get(outcome, 'lead_already_queued')] += 1
                 if outcome != 'refused':
