@@ -1664,7 +1664,8 @@ class IntakeTest(unittest.TestCase):
         healthy = [mail(OWNER, -timedelta(hours=1), subject=f'Synthetic {i}', recipients='pat@example.test')
                    for i in range(20)]
         self.assertEqual(self.run_intake(healthy).state, 'succeeded')
-        broken = [{**m, 'recipients': None, 'sent_unix': None} for m in healthy]
+        broken = [{**m, 'sender': 'other@example.test', 'recipients': None, 'sent_unix': None} for m in healthy]
+        self.fake.calls.clear()
         first = self.run_intake(broken + [mail('pat@example.test', -timedelta(hours=1))])
         self.assertEqual((first.state, first.counts['decoder_alarm']), ('degraded', 1))
         self.assertIn('recipients: 4.8%', self.report_text())
@@ -1672,6 +1673,8 @@ class IntakeTest(unittest.TestCase):
         self.assertIn('recipients', self.report_text().split('failing: ')[1].splitlines()[0])
         self.assertIn('sent_time', self.report_text().split('failing: ')[1].splitlines()[0])
         self.assertTrue(self.fake.calls)
+        self.assertEqual(self.run_intake(broken).counts['decoder_alarm'], 0)
+        self.run_intake([])
         self.assertEqual(self.run_intake(broken).counts['decoder_alarm'], 0)
         self.assertEqual(self.run_intake(healthy).state, 'succeeded')
         self.assertEqual(self.run_intake(broken).counts['decoder_alarm'], 1)
