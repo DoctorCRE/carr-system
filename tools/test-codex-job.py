@@ -46,13 +46,19 @@ class CodexJobTests(unittest.TestCase):
         self.codex.write_text(f'#!{sys.executable}\n')
         self.codex.chmod(0o755)
 
-    def launch(self, body, repo=None):
+    def launch(self, body, repo=None, flags=()):
         self.codex.write_text(f'#!{sys.executable}\n' + body)
         job_env = dict(self.git_env, PATH=str(self.codex.parent) + os.pathsep + os.defpath,
                        TMPDIR=str(self.root))
         return subprocess.Popen([sys.executable, '-c', WRAPPER, str(ROOT / 'bin/codex-job'),
-                                 str(ROOT / '.venv'), str(repo or self.origin), 'test/job', 'brief'],
+                                 str(ROOT / '.venv'), str(repo or self.origin), 'test/job', 'brief', *flags],
                                 env=job_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def test_hung_job_exits_at_configured_deadline(self):
+        job = self.launch('import time; time.sleep(60)', flags=('--timeout-seconds', '1'))
+        _, errors = job.communicate(timeout=15)
+        self.assertEqual(job.returncode, 124, errors.decode())
+        self.assertIn(b'Retained checkout:', errors)
 
     def test_no_descendant_survives_any_job_exit(self):
         for outcome in (0, 7, signal.SIGTERM, signal.SIGINT):

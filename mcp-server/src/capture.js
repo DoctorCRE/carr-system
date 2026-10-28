@@ -190,11 +190,20 @@ function validateCandidates(body) {
   if (!body || typeof body.idempotency_key !== "string" || !body.idempotency_key ||
       !Array.isArray(body.items) || body.items.length === 0 || body.items.length > 100)
     return { error: "invalid_candidates" };
+  if (body.evidence_sources !== undefined && (!Array.isArray(body.evidence_sources) ||
+      body.evidence_sources.length !== body.items.length || body.evidence_sources.some(source =>
+        source !== null && (!source || typeof source !== "object" || Array.isArray(source) ||
+          Object.keys(source).length !== 3 ||
+          !Object.keys(source).every(key => ["quote_sha256", "source_sha256", "speaker"].includes(key)) ||
+          !isSha256(source.quote_sha256) || !isSha256(source.source_sha256) ||
+          !["joe", "dell"].includes(source.speaker)))))
+    return { error: "invalid_evidence_sources" };
   for (const item of body.items) {
     if (!item || !KINDS.has(item.kind) || !item.payload || typeof item.payload !== "object" || Array.isArray(item.payload) ||
         typeof item.evidence_quote !== "string" || typeof item.confidence !== "number" ||
         !Number.isFinite(item.confidence) || item.confidence < 0 || item.confidence > 1)
       return { error: "invalid_candidate" };
+    if (Object.hasOwn(item.payload, "evidence_source")) return { error: "reserved_evidence_source" };
     if (hasForbiddenCaptureKey(item.payload))
       return { error: "transcript_field_forbidden" };
     if (JSON.stringify(item.payload).length > 8192 || payloadStringsTooLarge(item.payload))
@@ -285,10 +294,13 @@ async function candidates(request, dependencies) {
   if (hasForbiddenCaptureKey(body)) return json({ error: "forbidden_capture_field" }, 400);
   const invalid = validateCandidates(body);
   if (invalid) return json(invalid, 400);
-  const batchHash = await sha256(JSON.stringify(canonical(body.items)));
+  const batchHash = await sha256(JSON.stringify(canonical(body.evidence_sources === undefined
+    ? body.items : { items: body.items, evidence_sources: body.evidence_sources })));
   try {
     const result = await dependencies.withWriter(async client => {
       const session = await authenticatedSession(client, body.session_token, true);
+      if (!session.post_call && body.evidence_sources !== undefined)
+        refuse(409, { error: "not_post_call_session" });
       if (session.post_call) {
         const postCallInvalid = validatePostCallLegacyItems(body.items);
         if (postCallInvalid) refuse(postCallInvalid.error === "post_call_legacy_kind_forbidden" ? 409 : 400,
@@ -312,6 +324,9 @@ async function candidates(request, dependencies) {
       if (prior.rows.length && prior.rows[0].batch_hash !== batchHash)
         refuse(409, { error: "key_reuse" });
       const items = structuredClone(body.items);
+      for (const [index, source] of (body.evidence_sources || []).entries()) {
+        if (source !== null) items[index].payload.evidence_source = source;
+      }
       if (session.post_call && !prior.rows.length) {
         for (const item of items.filter(item => ["next_step", "phase_move"].includes(item.kind))) {
           const bases = await client.query(

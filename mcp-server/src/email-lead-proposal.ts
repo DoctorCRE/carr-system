@@ -8,11 +8,12 @@
 // spelled out in score_basis; it files nothing.
 import { sha256 } from './sha256.ts';
 import { ToolError } from './tool-error.ts';
+import { partnerAuthoritySlugForActor } from './partner-authority.js';
 import type { Actor, Db, VerbInputs, WithEnvelope, WriteEvent } from './verb-contract.ts';
 
 const ADDRESS = /^[a-z0-9._%+'-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+$/;
 const SOURCE = 'outlook-intake';
-const APPLIES_TO = ['existing_deal', 'existing_party', 'new_matter'] as const;
+const APPLIES_TO = ['existing_deal', 'existing_party', 'new_matter', 'not_business'] as const;
 
 export function emailLeadProposalTools({ withEnvelope, writeEvent }: { withEnvelope: WithEnvelope; writeEvent: WriteEvent }) {
   const fail = (error: string): never => { throw new ToolError({ error }); };
@@ -46,7 +47,7 @@ export function emailLeadProposalTools({ withEnvelope, writeEvent }: { withEnvel
   return {
     'propose-email-lead': {
       write: true,
-      description: 'Queue an unknown email sender with business intent for partner review on the claim card (candidate_pool lane outlook-intake). Exact address only. Optional applies_to records the intake model read of what the email applies to (existing_deal with an open deal UUID, existing_party with a client, lead or vendor ref, or new_matter), with confidence and an optional evidence_quote; it is spelled out in score_basis and files nothing. The server never sees the email, so it checks only the length of the quote: the intake drops any quote that is not literal, and a quote from another caller is unverified. Returns known_party, without writing, when any party already carries the address; returns the existing row when the address was proposed before, whatever a partner decided, adding a first reading (reasoned true) only to a row still in the pool without one. Never creates a party or lead; promote-pool or decline-candidate is the human decision.',
+      description: 'Queue an unknown email sender with business intent for partner review on the claim card (candidate_pool lane outlook-intake). Mailbox ownership derives from authenticated partner authority; ownerless legacy callers remain outside the mailbox read. A not_business reading records only a mailbox-scoped message hash for exclusion counts and creates no candidate. Exact address only. Optional applies_to records the intake model read of what the email applies to (existing_deal with an open deal UUID, existing_party with a client, lead or vendor ref, or new_matter), with confidence and an optional evidence_quote; it is spelled out in score_basis and files nothing. The server never sees the email, so it checks only the length of the quote: the intake drops any quote that is not literal, and a quote from another caller is unverified. Returns known_party, without writing, when any party already carries the address; returns the existing row when the address was proposed before, whatever a partner decided, adding a first reading (reasoned true) only to a row still in the pool without one. Never creates a party or lead; promote-pool or decline-candidate is the human decision.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         idempotency_key: { type: 'string', minLength: 1, maxLength: 200 },
         address: { type: 'string', minLength: 3, maxLength: 320 },
@@ -67,13 +68,22 @@ export function emailLeadProposalTools({ withEnvelope, writeEvent }: { withEnvel
         if (!ADDRESS.test(address) || !summary || summary.length > 300 || !Number.isFinite(seen) ||
             seen > Date.now() + 300_000 || !String(args.message_ref || '').trim())
           fail('email_lead_input_invalid');
+        const owner = partnerAuthoritySlugForActor(actor);
+        if (args.applies_to === 'not_business') {
+          if (!owner) fail('email_sender_identity_required');
+          if (args.deal !== undefined || args.party !== undefined || args.evidence_quote !== undefined)
+            fail('email_lead_input_invalid');
+          await c.query(`insert into email_lead_exclusion(mailbox_owner,message_hash) values($1,$2)
+            on conflict do nothing`, [owner, sha256(args.message_ref)]);
+          return { ok: true, contract: 'email-lead-proposal.v1', proposed: false, reason: 'not_business' };
+        }
         const read = await reading(c, args);
         const known = (await c.query(
           `select 1 from party p,
              regexp_matches(lower(coalesce(p.email, '')), '([a-z0-9._%+''-]+@[a-z0-9-]+(?:\\.[a-z0-9-]+)+)', 'g') m
            where m[1] = $1 limit 1`, [address])).rows.length > 0;
         if (known) return { ok: true, contract: 'email-lead-proposal.v1', proposed: false, reason: 'known_party' };
-        const sourceKey = `email-sha256:${sha256(address)}`;
+        const sourceKey = `email-sha256:${owner ? `${owner}:` : ''}${sha256(address)}`;
         const name = String(args.display_name || '').trim() || address;
         const basis = `Inbound email: ${summary}${read?.sentence ?? ''}`;
         const row = (await c.query(
@@ -81,7 +91,7 @@ export function emailLeadProposalTools({ withEnvelope, writeEvent }: { withEnvel
            values ($1, $2, $3, $4, $5, $6, $7, $7)
            on conflict (source, source_key) do nothing returning id, status`,
           [SOURCE, sourceKey, JSON.stringify({ message_ref: args.message_ref, first_seen_at: new Date(seen).toISOString(),
-            ...(read ? { reading: read.value } : {}) }),
+            ...(owner ? { mailbox_owner: owner } : {}), ...(read ? { reading: read.value } : {}) }),
             name, address, basis, actor.id])).rows[0];
         if (!row) {
           const prior = (await c.query(`select id, status, source_row ? 'reading' as reasoned
