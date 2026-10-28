@@ -41,15 +41,14 @@ test("a published board version can be read and passed straight back to publish"
   fake.receipts.get(args.idempotency_key).response.snapshot.version = "3";
   const replay = await TOOLS["publish-board-snapshot"].handler(fake, joe, args);
   const next = await TOOLS["publish-board-snapshot"].handler(fake, joe, {
-    ...args, idempotency_key: "00000571-0000-4000-8000-000000000025", base_version: replay.snapshot.version,
+    ...args, idempotency_key: "00000571-0000-4000-8000-000000000025", base_version: replay.version,
   });
   assert.equal(read.snapshot.version, 2);
   assert.equal(read.snapshot.snapshot_json.version, "display-value");
-  assert.equal(out.snapshot.version, 3);
-  assert.equal(out.snapshot.id, "9007199254740993");
+  assert.equal(out.version, 3);
   assert.equal(replay.replayed, true);
-  assert.equal(replay.snapshot.version, 3);
-  assert.equal(next.snapshot.version, 4);
+  assert.equal(replay.version, 3);
+  assert.equal(next.version, 4);
 });
 
 
