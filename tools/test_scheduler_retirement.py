@@ -79,8 +79,8 @@ class SchedulerRetirementTests(unittest.TestCase):
                     with conn.transaction():
                         conn.execute(f'delete from ops.{name}')
             self.assertTrue(conn.execute('select ops.scac_mutation_catalog_v118_current()').fetchone()[0])
-            self.assertEqual(conn.execute("select count(*) from generate_series(1,118) n where "
-                "ops.scac_mutation_registry_seal_valid('scac-mutation-registry.v'||n) is true").fetchone()[0], 118)
+            self.assertEqual(conn.execute('select array_agg(registry_version) from ops.scac_mutation_registry_version')
+                             .fetchone()[0], ['scac-mutation-registry.v118'])
             validate_current_catalog(conn.cursor())
             self.assert_enqueue(conn)
             self.assert_staging(conn)

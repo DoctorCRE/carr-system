@@ -23,6 +23,13 @@ time.time = Mock(return_value={NOW})
 sys.modules['skill_picker'] = types.SimpleNamespace(prepare=Mock(side_effect=lambda b, c: (b, [])))
 runpy.run_path(sys.argv[0], run_name='__main__')
 """
+# Subtests rerun on one fixture remote, so each fresh job replaces the branch.
+PUSH = """import subprocess as _git, sys as _sys
+_clone = _sys.argv[_sys.argv.index('-C') + 1]
+_git.run(['git', '-C', _clone, '-c', 'user.name=Fixture', 'commit', '-q', '--allow-empty', '-m', 'job'], check=True)
+_git.run(['git', '-C', _clone, 'push', '-qf', 'origin', 'HEAD'], check=True)
+"""
+PR_BRIEF = 'Fix it and deliver through a ready pull request.'
 
 
 class CodexJobTests(unittest.TestCase):
@@ -37,22 +44,149 @@ class CodexJobTests(unittest.TestCase):
         ps.write_text(f'#!{sys.executable}\nimport pathlib\n'
                       f'print(pathlib.Path({str(self.processes)!r}).read_text())\n')
         ps.chmod(0o755)
-        self.origin = self.root / 'origin'
-        subprocess.run(['git', 'init', '-q', str(self.origin)], env=self.git_env, check=True)
-        subprocess.run(['git', '-C', str(self.origin), '-c', 'user.name=Fixture',
+        seed = self.root / 'seed'
+        subprocess.run(['git', 'init', '-q', str(seed)], env=self.git_env, check=True)
+        subprocess.run(['git', '-C', str(seed), '-c', 'user.name=Fixture',
                         '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture',
                         '--allow-empty'], env=self.git_env, check=True)
+        self.origin = self.root / 'origin.git'
+        subprocess.run(['git', 'clone', '-q', '--bare', str(seed), str(self.origin)],
+                       env=self.git_env, check=True)
+        self.start = self.git('rev-parse', 'HEAD')
         self.codex = self.root / 'codex'
         self.codex.write_text(f'#!{sys.executable}\n')
         self.codex.chmod(0o755)
+        self.pr_url = self.root / 'pr-url'
+        self.gh_args = self.root / 'gh-args'
+        gh = self.root / 'gh'
+        gh.write_text(f'#!{sys.executable}\nimport pathlib, sys\n'
+                      f'pathlib.Path({str(self.gh_args)!r}).write_text(repr(sys.argv[1:]))\n'
+                      f'url = pathlib.Path({str(self.pr_url)!r})\n'
+                      'print(url.read_text() if url.exists() else "")\n')
+        gh.chmod(0o755)
+        self.pr_url.write_text('https://github.com/o/r/pull/9')  # a delivering job opened its PR
 
-    def launch(self, body, repo=None, flags=()):
+    def git(self, *args):
+        return subprocess.run(['git', '--git-dir', str(self.origin), *args], env=self.git_env,
+                              check=True, capture_output=True, text=True).stdout.strip()
+
+    def launch(self, body, repo=None, flags=(), brief='brief', push=True):
+        if push:  # a well-behaved job commits and pushes its branch before it exits
+            body = PUSH + body
         self.codex.write_text(f'#!{sys.executable}\n' + body)
         job_env = dict(self.git_env, PATH=str(self.codex.parent) + os.pathsep + os.defpath,
                        TMPDIR=str(self.root))
         return subprocess.Popen([sys.executable, '-c', WRAPPER, str(ROOT / 'bin/codex-job'),
-                                 str(ROOT / '.venv'), str(repo or self.origin), 'test/job', 'brief', *flags],
+                                 str(ROOT / '.venv'), str(repo or self.origin), 'test/job', brief, *flags],
                                 env=job_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def finish(self, job):
+        output, errors = job.communicate(timeout=15)
+        retained = list(self.root.glob('codex-job-*'))
+        for workspace in retained:
+            self.addCleanup(shutil.rmtree, workspace, True)
+        return output.decode().splitlines()[-1], errors.decode(), bool(retained)
+
+    def test_job_that_never_pushed_reports_failure_and_keeps_its_work(self):
+        job = self.launch('', brief=PR_BRIEF, push=False)
+        line, errors, retained = self.finish(job)
+        self.assertEqual(job.returncode, 1)
+        self.assertEqual(line, f'Delivery: failed missing=push,pr branch=none start={self.start} '
+                               f'head={self.start} pr=unchecked')
+        self.assertFalse(self.gh_args.exists(), 'no branch, so nothing to look up')
+        self.assertIn('Retained checkout:', errors)
+        self.assertTrue(retained, 'unpushed work must not be deleted')
+
+    def test_pushing_the_unchanged_start_point_is_not_a_new_commit(self):
+        body = "import subprocess, sys\nsubprocess.run(['git', '-C', sys.argv[sys.argv.index('-C') + 1], 'push', '-q', 'origin', 'HEAD'], check=True)\n"
+        job = self.launch(body, push=False)
+        line, _, _ = self.finish(job)
+        self.assertEqual(job.returncode, 1)
+        self.assertEqual(line, f'Delivery: failed missing=push,pr branch=none start={self.start} '
+                               f'head={self.start} pr=unchecked')
+
+    def test_job_without_a_pr_reports_failure(self):
+        self.pr_url.unlink()
+        job = self.launch('', brief=PR_BRIEF)
+        line, _, retained = self.finish(job)
+        remote = self.git('rev-parse', 'refs/heads/test/job')
+        self.assertNotEqual(remote, self.start)
+        self.assertEqual(job.returncode, 1)
+        self.assertEqual(line, f'Delivery: failed missing=pr branch=test/job start={self.start} '
+                               f'head={remote} pr=none')
+        self.assertTrue(retained)
+
+    def test_job_with_neither_names_both(self):
+        job = self.launch('', brief=PR_BRIEF, push=False)
+        line, _, _ = self.finish(job)
+        self.assertEqual(job.returncode, 1)
+        self.assertTrue(line.startswith('Delivery: failed missing=push,pr '), line)
+
+    def test_unanswerable_pr_lookup_counts_as_missing(self):
+        (self.root / 'gh').write_text(f'#!{sys.executable}\nimport sys; sys.exit(4)\n')
+        job = self.launch('', brief=PR_BRIEF)
+        line, _, _ = self.finish(job)
+        self.assertEqual(job.returncode, 1)
+        self.assertTrue(line.startswith('Delivery: failed missing=pr ') and line.endswith(' pr=unchecked'), line)
+
+    def test_pushed_job_with_its_pr_succeeds(self):
+        self.pr_url.write_text('https://github.com/o/r/pull/2\n')
+        job = self.launch('', brief=PR_BRIEF)
+        line, errors, retained = self.finish(job)
+        self.assertEqual(job.returncode, 0, errors)
+        self.assertEqual(line, f'Delivery: ok missing=none branch=test/job start={self.start} '
+                               f"head={self.git('rev-parse', 'refs/heads/test/job')} "
+                               'pr=https://github.com/o/r/pull/2')
+        self.assertIn("'--head', 'test/job'", self.gh_args.read_text())
+        self.assertIn("'--state', 'all'", self.gh_args.read_text())
+        self.assertFalse(retained)
+
+    def test_push_to_an_existing_prs_branch_is_delivery(self):
+        self.pr_url.write_text('https://github.com/o/r/pull/3\n')
+        body = PUSH.replace("'HEAD']", "'HEAD:job/existing']")
+        job = self.launch(body, brief=PR_BRIEF, push=False)
+        line, errors, retained = self.finish(job)
+        self.assertEqual(job.returncode, 0, errors)
+        self.assertEqual(line, f'Delivery: ok missing=none branch=job/existing start={self.start} '
+                               f"head={self.git('rev-parse', 'refs/heads/job/existing')} "
+                               'pr=https://github.com/o/r/pull/3')
+        self.assertIn("'--head', 'job/existing'", self.gh_args.read_text())
+        self.assertFalse(retained)
+
+    def test_branch_already_on_the_remote_is_not_a_push(self):
+        seed = self.root / 'seed'
+        subprocess.run(['git', '-C', str(seed), '-c', 'user.name=Fixture', '-c',
+                        'user.email=fixture@example.invalid', 'commit', '-qm', 'earlier run',
+                        '--allow-empty'], env=self.git_env, check=True)
+        subprocess.run(['git', '-C', str(seed), 'push', '-q', str(self.origin), 'HEAD:refs/heads/test/job'],
+                       env=self.git_env, check=True)
+        job = self.launch('', brief=PR_BRIEF, push=False)
+        line, _, retained = self.finish(job)
+        self.assertEqual(job.returncode, 1)
+        self.assertTrue(line.startswith('Delivery: failed missing=push,pr branch=none '), line)
+        self.assertTrue(retained)
+
+    def test_commit_made_after_the_push_is_not_delivered(self):
+        job = self.launch(PUSH.split('\n_git.run', 1)[0] + "\n_git.run(['git', '-C', _clone, '-c', "
+                          "'user.name=Fixture', 'commit', '-q', '--allow-empty', '-m', 'late'], check=True)\n",
+                          brief=PR_BRIEF)
+        line, _, retained = self.finish(job)
+        self.assertEqual(job.returncode, 1)
+        self.assertTrue(line.startswith('Delivery: failed missing=push,pr branch=none '), line)
+        self.assertTrue(retained, 'the unpushed commit must be kept')
+
+    def test_pr_is_required_even_when_the_brief_never_names_one(self):
+        self.pr_url.unlink()
+        job = self.launch('')
+        line, _, _ = self.finish(job)
+        self.assertEqual(job.returncode, 1)
+        self.assertTrue(line.startswith('Delivery: failed missing=pr '), line)
+
+    def test_child_failure_keeps_its_own_exit_and_reports_delivery(self):
+        job = self.launch('import sys; sys.exit(7)', push=False)
+        line, _, _ = self.finish(job)
+        self.assertEqual(job.returncode, 7)
+        self.assertTrue(line.startswith('Delivery: failed missing=push,pr '), line)
 
     def test_hung_job_exits_at_configured_deadline(self):
         job = self.launch('import time; time.sleep(60)', flags=('--timeout-seconds', '1'))
@@ -214,6 +348,7 @@ while True: time.sleep(1)
         log = self.root / 'job.log'
         log.write_text('')
         log.chmod(0o644)
+        self.codex.write_text(f'#!{sys.executable}\n' + PUSH)
         with log.open('ab') as sink:
             job = subprocess.Popen([sys.executable, '-c', WRAPPER, str(ROOT / 'bin/codex-job'),
                                     str(ROOT / '.venv'), str(self.origin), 'test/job', 'brief'],
