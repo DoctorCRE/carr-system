@@ -64,7 +64,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           (select party_id from client where id=a.client_id),(select party_id from vendor where id=a.vendor_id),
           (select party_id from lead where id=a.lead_id))) as recorded_sender from activity a where id=$1`,
       [row.activity_id])).rows[0];
-    if (!activity || activity.kind !== 'email_in' || !row.evidence_quote?.length ||
+    if (!activity || !['email_in','email_out'].includes(activity.kind) || !row.evidence_quote?.length ||
         !(activity.detail?.includes(row.evidence_quote) || activity.email_context?.subject?.includes(row.evidence_quote)))
       fail('email_proposal_evidence_invalid');
     if (row.kind === 'file_to_deal') {
@@ -217,7 +217,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         if ((await c.query("select 1 from v_email_thread_filing_event where verb='undo-email-thread-filing' and new_value->>'activity_id'=$1 limit 1", [args.activity_id.toLowerCase()])).rows.length) fail('email_thread_filing_suppressed');
         const current = rows.find(r => r.activity_id === args.activity_id.toLowerCase());
         const prior = rows.find(r => r.activity_id === args.thread_activity_id.toLowerCase());
-        if (!current || !prior || !prior.deal || current.kind !== 'email_in' ||
+        if (!current || !prior || !prior.deal || !['email_in','email_out'].includes(current.kind) ||
             !['email_in','email_out'].includes(prior.kind) || !current.email_context || !prior.email_context ||
             new Date(prior.occurred_at) >= new Date(current.occurred_at) ||
             (current.deal && current.deal !== prior.deal)) fail('email_thread_not_continuous');
@@ -499,7 +499,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'email-router-queue': {
       write: false,
-      description: 'Router input for WR-000441: captured inbound emails from the last 1-7 days (default 3), oldest first, including unfiled mail, with resolved participants, filed history and all open deals, and not in exclude (the activity ids the router already handled). An email with some proposals stored stays queued until the router excludes it, so a partly written email is retried; record-email-proposal upserts per kind, deal and email. Returns at most limit emails (1-200, default 25) and more=true when others wait, so a long queue drains over runs. Returns the email body as untrusted data for classification into record-email-proposal. purpose=links instead pages already-filed inbound and outbound email by activity UUID without an age window, returning its latest associated hydrated text and confirmed deal. Pass next_cursor as after until more=false.',
+      description: 'Router input for WR-000441: captured inbound and outbound emails from the last 1-7 days (default 3), oldest first, including unfiled mail, with resolved participants, filed history and all open deals, and not in exclude (the activity ids the router already handled). An email with some proposals stored stays queued until the router excludes it, so a partly written email is retried; record-email-proposal upserts per kind, deal and email. Returns at most limit emails (1-200, default 25) and more=true when others wait, so a long queue drains over runs. Returns the email body as untrusted data for classification into record-email-proposal. purpose=links instead pages already-filed inbound and outbound email by activity UUID without an age window, returning its latest associated hydrated text and confirmed deal. Pass next_cursor as after until more=false.',
       inputSchema: { type: 'object', additionalProperties: false,
         properties: { days: { type: 'integer', minimum: 1, maximum: 7 },
           purpose: { enum: ['links'] }, after: { type: 'string', format: 'uuid' },
@@ -529,8 +529,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           return { schema_version: 'email-link-sources.v1', emails, more,
             next_cursor: more ? emails.at(-1).activity_id : null };
         }
-        const { rows } = await c.query(`select a.id as activity_id,a.summary,a.detail as body,a.occurred_at,
-            a.email_context,a.email_source->>'mailbox_owner' as mailbox_owner,
+        const { rows } = await c.query(`select a.id as activity_id,a.kind,a.summary,a.detail as body,a.occurred_at,
+            a.email_context,coalesce(a.email_source->>'mailbox_owner',$4) as mailbox_owner,
             coalesce((select jsonb_agg(distinct e.subject_id) from v_email_thread_filing_event e
               where e.verb='undo-email-thread-filing' and e.new_value->>'activity_id'=a.id::text), '[]'::jsonb) as suppressed_deals,
             (select jsonb_build_object('party_id',p.id,'name',p.name,'email',null,
@@ -538,12 +538,13 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
               (select party_id from client where id=a.client_id),(select party_id from vendor where id=a.vendor_id),
               (select party_id from lead where id=a.lead_id))) as recorded_sender,d.id as deal,d.name as deal_name,d.phase,d.deal_type
           from activity a left join deal d on d.id=a.deal_id
-          where a.kind='email_in' and a.detail is not null and a.occurred_at<=now()
+          where a.kind in ('email_in','email_out') and a.detail is not null and a.occurred_at<=now()
             and a.occurred_at>now()-make_interval(days=>$1) and a.id<>all($2::uuid[]) and (a.email_source is null or a.email_source->>'mailbox_owner'=$4)
-          order by a.occurred_at,a.id limit $3`, [args.days ?? 3, args.exclude ?? [], limit + 1, partnerAuthoritySlugForActor(_actor)]);
+            and (a.kind <> 'email_out' or a.actor_id=$5::uuid)
+          order by a.occurred_at,a.id limit $3`, [args.days ?? 3, args.exclude ?? [], limit + 1, partnerAuthoritySlugForActor(_actor), _actor.id]);
         const people = await contacts(c);
         const openDeals = (await c.query(`select d.id,d.name,d.city,d.source_row->>'property' as property,
-            d.client_id,p.name as client,d.phase,
+            d.client_id,p.name as client,d.phase,d.deal_type,
             coalesce((select jsonb_agg(jsonb_build_object('party_id',dp.party_id,'name',pp.name,'role',dp.role))
               from deal_participant dp join party pp on pp.id=dp.party_id
               where dp.deal_id=d.id and dp.to_at is null),'[]'::jsonb) as participants

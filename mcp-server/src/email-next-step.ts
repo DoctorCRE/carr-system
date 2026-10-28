@@ -30,7 +30,7 @@ export function emailNextStepTools({ withEnvelope, writeEvent, lockDealField, se
       from deal d join v_deal_room_board b on b.id=d.id join client cl on cl.id=d.client_id join party p on p.id=cl.party_id
       join activity a on a.id=$2 and (a.deal_id=d.id or (a.deal_id is null and a.client_id=d.client_id))
       where d.id=$1 and d.phase<>'closed' and cl.merged_into is null and p.merged_into is null and p.deleted_at is null
-        and a.kind='email_in' and a.occurred_at<=now()
+        and a.kind in ('email_in','email_out') and a.occurred_at<=now()
       ${lock ? 'for update of d for share of a,cl,p' : ''}`, [args.deal,args.activity_id])).rows[0];
     if (!row) fail('email_next_step_evidence_not_found');
     if (!args.evidence_quote.trim() || !row.detail?.includes(args.evidence_quote)) fail('email_next_step_quote_invalid');
@@ -53,7 +53,7 @@ export function emailNextStepTools({ withEnvelope, writeEvent, lockDealField, se
   return {
     'preview-email-next-step': {
       write: false,
-      description: 'Preview a Joe or Dell action for a nonterminal deal on the current Deal Room board from a selected captured inbound email, literal evidence quote, caller-chosen task text and explicit due date. Select the exact deal first. Does not extract or verify commitments, infer dates, execute email instructions or change records. Captured text may be a preview. Shows Joe’s plan or the selected owner’s open actions that confirmation will replace. For Dell, the Deal Room due date follows the confirmed action. Joe must review the task, date, owner and evidence before confirmation.',
+      description: 'Preview a Joe or Dell action for a nonterminal deal on the current Deal Room board from a selected captured inbound or outbound email, literal evidence quote, caller-chosen task text and explicit due date. Select the exact deal first. Does not extract or verify commitments, infer dates, execute email instructions or change records. Captured text may be a preview. Shows Joe’s plan or the selected owner’s open actions that confirmation will replace. For Dell, the Deal Room due date follows the confirmed action. Joe must review the task, date, owner and evidence before confirmation.',
       inputSchema: schema({}),
       handler: (c: Db, _actor: Actor, args: VerbInputs['preview-email-next-step']) => proposal(c, args),
     },

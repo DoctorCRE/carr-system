@@ -78,6 +78,39 @@ def route(server, classify, state=None, clock=None):
 
 
 class RouterTests(unittest.TestCase):
+    def test_outbound_next_step_requires_the_sending_account(self):
+        source = dict(email('sent', ASK), kind='email_out', sender={'email': 'sender@example.test'}, mailbox_owner='dell')
+        for account, expected in [('sender@example.test', 1), ('copy@example.test', 0)]:
+            with self.subTest(account=account):
+                server = Server([source])
+                counts = email_router.route(server, lambda e, d: BOTH, refusal_code, {}, NOW,
+                                            account=account)
+                self.assertEqual(counts['recorded'], expected)
+                self.assertEqual([p['kind'] for p in server.recorded()], ['next_step'] if expected else [])
+                if expected:
+                    self.assertEqual(server.recorded()[0]['owner'], 'dell')
+                self.assertEqual({verb for verb, _ in server.calls} - {'email-router-queue'},
+                                 {'record-email-proposal'} if expected else set())
+
+    def test_unfiled_intake_email_proposes_next_step_for_the_selected_deal(self):
+        source = dict(email('unfiled', ASK), deal=None, kind='email_out',
+                      sender={'email': 'sender@example.test'}, mailbox_owner='dell')
+        calls = []
+        def carr(verb, args):
+            calls.append((verb, args))
+            if verb == 'email-router-queue':
+                return {'emails': [source], 'open_deals': [{'id': DEAL, 'name': 'Synthetic purchase',
+                        'phase': 'site_selection', 'deal_type': 'purchase'}]}
+            return {'ok': True}
+        counts = email_router.route(carr, lambda e, d: BOTH, refusal_code, {}, NOW,
+                    matching=lambda *args: email_matching.MatchDecision('file_to_deal', DEAL,
+                        sender_role='client', confidence=0.95), account='sender@example.test')
+        written = [args for verb, args in calls if verb == 'record-email-proposal']
+        self.assertEqual([args['kind'] for args in written], ['file_to_deal', 'next_step'])
+        self.assertEqual(counts['recorded'], 2)
+        self.assertEqual(written[1]['deal'], DEAL)
+        self.assertEqual(written[1]['owner'], 'dell')
+
     def test_one_model_answer_records_reply_draft_with_other_proposals(self):
         source = email('reply1', f'{LOI} {ASK}')
         source['mailbox_owner'] = 'dell'
@@ -258,7 +291,7 @@ class RouterTests(unittest.TestCase):
                 raise outlook_intake.CarrError(code='timeout')
             outcome, counts = email_router.run(Path(folder), down, lambda e, d: {}, refusal_code, NOW)
             self.assertEqual((outcome, counts['queue_failed']), ('failed', 1))
-            settings = SimpleNamespace(model='sonnet')
+            settings = SimpleNamespace(model='sonnet', account='broker@example.test')
             with patch.object(outlook_intake, '_carr', return_value=down), \
                     patch.object(email_router, 'OUT', Path(folder) / 'router'), \
                     patch('sys.stdout', new_callable=StringIO) as stdout:
@@ -273,7 +306,7 @@ class RouterTests(unittest.TestCase):
     def test_step_classifies_with_the_configured_model(self):
         seen = {}
 
-        def fake_run(out, carr, classify, refusal, now, clock=None):
+        def fake_run(out, carr, classify, refusal, now, clock=None, account=None):
             classify(email('e1', LOI), NOW.date())
             return 'succeeded', {}
 
@@ -283,7 +316,7 @@ class RouterTests(unittest.TestCase):
         with patch.object(email_router, 'run', side_effect=fake_run), \
                 patch.object(email_router.model_call, 'ask', side_effect=fake_ask), \
                 patch.object(outlook_intake, '_carr'), patch('sys.stdout'):
-            self.assertEqual(email_router.step(ROOT, SimpleNamespace(model='sonnet')), 0)
+            self.assertEqual(email_router.step(ROOT, SimpleNamespace(model='sonnet', account='broker@example.test')), 0)
         self.assertEqual(seen['model'], 'sonnet')
 
     def test_the_production_transport_names_only_tool_refusals(self):
@@ -425,9 +458,9 @@ class MatchingTests(unittest.TestCase):
                 broken.pop()
                 raise RuntimeError('transport unavailable')
             return {'ok': True}
-        first = email_router.route(carr, None, refusal_code, state, NOW)
+        first = email_router.route(carr, lambda e, d: {'proposals': []}, refusal_code, state, NOW)
         self.assertEqual((first['routed'], first['write_failed']), (0, 1))
-        second = email_router.route(carr, None, refusal_code, state, NOW)
+        second = email_router.route(carr, lambda e, d: {'proposals': []}, refusal_code, state, NOW)
         self.assertEqual((second['routed'], second['inherited']), (1, 1))
         self.assertEqual(writes[0], writes[1])
         self.assertEqual(writes[1][0], 'inherit-email-thread')
@@ -446,7 +479,7 @@ class MatchingTests(unittest.TestCase):
             if history:
                 return email_matching.MatchDecision('inherit_thread', DEAL, thread_activity_id='prior')
             return email_matching.MatchDecision('file_to_deal', DEAL, sender_role='client', confidence=0.9)
-        email_router.route(carr, None, refusal_code, {}, NOW, matching=matching)
+        email_router.route(carr, lambda e, d: {'proposals': []}, refusal_code, {}, NOW, matching=matching)
         self.assertFalse(any(p.get('deal') == DEAL for p in pending))
 
     def test_router_matches_after_thread_refusal(self):
@@ -467,7 +500,7 @@ class MatchingTests(unittest.TestCase):
             if history:
                 return email_matching.MatchDecision('inherit_thread', DEAL, thread_activity_id='prior')
             return email_matching.MatchDecision('possible_new_deal', sender_role='lender', confidence=0.9, text='New matter')
-        counts = email_router.route(carr, None, refusal_code, {}, NOW, matching=matching)
+        counts = email_router.route(carr, lambda e, d: {'proposals': []}, refusal_code, {}, NOW, matching=matching)
         self.assertEqual((counts['routed'], counts['recorded'], counts['write_failed']), (1, 1, 0))
         self.assertEqual(calls[-1][1]['kind'], 'possible_new_deal')
 
@@ -554,7 +587,7 @@ class MatchingTests(unittest.TestCase):
                 if verb == 'email-router-queue':
                     return {'open_deals': [{'id': DEAL}], 'emails': [self.mail(body=body)]}
                 return {'ok': True}
-            counts = email_router.route(carr, None, refusal_code, {}, NOW,
+            counts = email_router.route(carr, lambda e, d: {'proposals': []}, refusal_code, {}, NOW,
                                         matching=lambda e, ds, hs: email_matching.match(e, ds, hs, client=FakeJev()))
             self.assertEqual((counts['routed'], counts['recorded']), (1, 1))
             self.assertEqual(calls[1][1]['evidence_quote'], evidence)
