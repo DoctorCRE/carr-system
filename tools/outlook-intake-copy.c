@@ -76,13 +76,15 @@ static off_t copy_file(int source, const char *name, int target, const char *cop
     if (limit && info.st_size > limit) { close(reader); return -1; }
     int writer;
 #ifdef __APPLE__
-    if (limit && fclonefileat(reader, target, copy, CLONE_NOFOLLOW) == 0) {
+    /* An APFS clone captures the store at one instant even while Outlook
+       writes; other volumes fall through to the full copy below. */
+    if (fclonefileat(reader, target, copy, CLONE_NOFOLLOW) == 0) {
         writer = openat(target, copy, O_WRONLY | O_NOFOLLOW);
         if (writer < 0) fail();
         if (fchmod(writer, 0600) != 0 || fstat(writer, &info) != 0) fail();
         close(writer);
         close(reader);
-        if (info.st_size <= limit) return info.st_size;
+        if (!limit || info.st_size <= limit) return info.st_size;
         if (unlinkat(target, copy, 0) != 0) fail();
         return -1;
     }
