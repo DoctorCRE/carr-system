@@ -126,7 +126,8 @@ refusal_codes = frozenset("email_deal_evidence_not_found email_deal_phase_not_el
     "email_proposal_confidence_invalid email_proposal_deal_invalid "
     "email_proposal_evidence_invalid email_proposal_fields_invalid email_proposal_kind_invalid "
     "email_proposal_not_found email_proposal_not_pending email_proposal_quote_invalid "
-    "email_proposal_reason_required email_proposal_source_missing email_proposal_stale".split())
+    "email_proposal_reason_required email_proposal_source_missing email_proposal_stale "
+    "email_thread_ambiguous".split())
 receipt = None
 with open(sys.argv[1]) as output:
     for line in output:
@@ -137,13 +138,16 @@ with open(sys.argv[1]) as output:
                 receipt = None
 if (isinstance(receipt, dict) and receipt.get("state") in ("succeeded", "failed", "skipped")
         and isinstance(receipt.get("counts"), dict)
-        and all(k in counts and type(v) is int and 0 <= v <= 1_000_000_000
-                for k, v in receipt["counts"].items())
+        and all(type(v) is int and 0 <= v <= 1_000_000_000
+                for k, v in receipt["counts"].items() if k in counts)
         and isinstance(receipt.get("refusal_codes", {}), dict)
-        and all(k in refusal_codes and type(v) is int and 0 <= v <= 1_000_000_000
-                for k, v in receipt.get("refusal_codes", {}).items())):
-    print("email-router-receipt " + json.dumps(
-        {k: receipt[k] for k in ("state", "counts", "refusal_codes") if k in receipt}, sort_keys=True))
+        and all(type(v) is int and 0 <= v <= 1_000_000_000
+                for k, v in receipt.get("refusal_codes", {}).items() if k in refusal_codes)):
+    safe = {"state": receipt["state"],
+            "counts": {k: v for k, v in receipt["counts"].items() if k in counts}}
+    if "refusal_codes" in receipt:
+        safe["refusal_codes"] = {k: v for k, v in receipt["refusal_codes"].items() if k in refusal_codes}
+    print("email-router-receipt " + json.dumps(safe, sort_keys=True))
 PY_ROUTER_RECEIPT
   rm -f "$receipt_file"
 fi

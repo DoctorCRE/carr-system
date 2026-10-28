@@ -181,15 +181,24 @@ class ScheduledRunTests(unittest.TestCase):
                 self.assertNotIn("--failure-class", args)
                 self.assertNotIn("SYNTHETIC_PRIVATE", result.stdout + result.stderr + json.dumps(self.rows()))
 
+    def test_router_receipt_filters_unknown_names_and_keeps_known_codes(self):
+        intake = {"state": "succeeded", "reason": "processed", "counts": {}}
+        router = {"state": "succeeded", "counts": {"refused": 2, "SYNTHETIC_PRIVATE_COUNT": 7},
+                  "refusal_codes": {"email_thread_ambiguous": 1, "SYNTHETIC_PRIVATE_CODE": 1}}
+        result = self.invoke_intake(intake, code=0, router_lines=[
+            'email-router-receipt ' + json.dumps(router)])
+        self.assertEqual(result.stdout.splitlines()[-1], 'email-router-receipt ' + json.dumps({
+            "state": "succeeded", "counts": {"refused": 2},
+            "refusal_codes": {"email_thread_ambiguous": 1}}, sort_keys=True))
+        self.assertNotIn("SYNTHETIC_PRIVATE", result.stdout + result.stderr)
+
     def test_router_invalid_receipts_do_not_leak_or_change_intake_failure(self):
         intake = {"state": "failed", "reason": "writes_failed", "counts": {"writes_failed": 1}}
         cases = ["SYNTHETIC_PRIVATE_INVALID_JSON", [],
                  {"state": ["SYNTHETIC_PRIVATE_STATE"], "counts": {}},
                  {"state": "SYNTHETIC_PRIVATE_STATE", "counts": {}},
                  {"state": "failed", "counts": []},
-                 {"state": "failed", "counts": {}, "refusal_codes": {"synthetic_private": 1}},
                  {"state": "failed", "counts": {}, "refusal_codes": {"email_deal_quote_invalid": "SYNTHETIC_PRIVATE"}},
-                 {"state": "failed", "counts": {"SYNTHETIC_PRIVATE_KEY": 1}},
                  *({"state": "failed", "counts": {"error": value}}
                    for value in (True, -1, 10**20, 1.5, "SYNTHETIC_PRIVATE_VALUE"))]
         for router in cases:
