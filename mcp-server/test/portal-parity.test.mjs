@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, writeFile, mkdir, symlink } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, mkdir, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parityLaunchOptions } from '../portal-parity/browser.mjs';
@@ -317,6 +317,26 @@ test('the CLI refuses run-data paths inside the repository, through a symlink to
   assert.equal(outside.status, 0, outside.stderr);
   const aliases = cli('--candidate-aliases', path.join(link, 'aliases.json'));
   assert.match(aliases.stderr, /--candidate-aliases must point outside the repository/);
+});
+
+// Each bypass, unfixed, would write the report into the repository: the test
+// removes any such file so a failure leaves the checkout clean.
+test('the CLI refuses a dangling symlink into the repository and a .. taken after a symlink', async t => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'parity-cli-'));
+  const repo = new URL('.', ROOT).pathname;
+  const tag = path.basename(dir);
+  const intoFile = path.join(repo, 'mcp-server', `${tag}-dangling.json`), parentFile = path.join(repo, `${tag}-dotdot.json`);
+  t.after(() => Promise.all([rm(intoFile, { force: true }), rm(parentFile, { force: true })]));
+  const cli = (...args) => spawnSync(process.execPath, [CLI, '--stage', '1', '--probes', PROBES, '--package', FIXTURE, '--rows', 'V-S06', ...args], { encoding: 'utf8' });
+  await symlink(intoFile, path.join(dir, 'dangling.json'));
+  const dangling = cli('--report', path.join(dir, 'dangling.json'));
+  assert.match(dangling.stderr, /--report must point outside the repository/);
+  assert.equal(dangling.status, 2);
+  await mkdir(path.join(dir, 'x'));
+  await symlink(path.join(repo, 'mcp-server'), path.join(dir, 'x', 'sub'));
+  const dotdot = cli('--report', `${path.join(dir, 'x', 'sub')}/../${tag}-dotdot.json`);
+  assert.match(dotdot.stderr, /--report must point outside the repository/);
+  assert.equal(dotdot.status, 2);
 });
 
 // A two-row probe file, so the full-run rule can be shown without 456 rows.

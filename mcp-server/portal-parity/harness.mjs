@@ -118,7 +118,11 @@ async function stageTwo(doc, probes, options) {
   for (const side of Object.values(sides)) {
     if (!options.password) continue;
     await signIn(side.base, options.password).then(cookie => { side.cookie = cookie; },
-      error => { side.refusal = error.status ? `status-${error.status}` : 'unreachable'; });
+      error => {
+        if (error.status) side.refusal = `status-${error.status}`;
+        else if (error instanceof TypeError && error.message === 'fetch failed') side.refusal = 'unreachable';
+        else throw error;
+      });
   }
   const baseline = options.baselineFile ? JSON.parse(await readFile(options.baselineFile, 'utf8')) : null;
   const browser = probes.some(p => BROWSER_KINDS.has(p.kind) && !p.retired) ? await launchParityBrowser({ headed: Boolean(options.headed) }) : null;
