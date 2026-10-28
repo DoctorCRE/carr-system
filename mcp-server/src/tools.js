@@ -23,6 +23,7 @@ import { readLeadWorkspace, LEAD_WORKSPACE_SCHEMA, validateStageReview, lockLead
 // The doctrine store's verbs (P2, decision 82a2fb62) live in doctrine.js as a
 // factory over this file's envelope machinery, merged at the bottom.
 import { doctrineTools } from "./doctrine.js";
+import { orgConventionTools, conventionProposals } from "./org-conventions.js";
 import { situationRetrievalTools } from "./situation-retrieval.js";
 import { investigationTools } from "./investigation.js";
 import { docConversationTools } from "./doc-conversation.js";
@@ -6877,8 +6878,9 @@ export const TOOLS = {
 
   // BATCH REVIEW QUEUE (WR-000019 slice S6). Every pending governance decision
   // in one payload, so Joe reviews on his own schedule rather than one verb at
-  // a time: legacy rules and guidance imports for guidance-file PR review, retrieval
-  // proposals waiting on approve-retrieval-proposals. Read-only projection —
+  // a time: team-memory convention proposals waiting on adopt-rule (WR-000562
+  // S4), legacy rules and guidance imports, retrieval proposals waiting on
+  // approve-retrieval-proposals. Read-only projection —
   // it opens no new write path and changes nothing. carr_reader (the read-verb
   // credential) has no grant on `rule` or `retrieval_proposal`, so this reads
   // through a SECURITY DEFINER function (migration 0345), the same reason
@@ -6886,7 +6888,7 @@ export const TOOLS = {
   // multi-table read.
   "governance-queue": {
     write: false,
-    description: "Read every pending decision in one payload: legacy rule proposals and staged guidance imports for review through CLAUDE.md, AGENTS.md or skill PRs (proposals bind nobody until merged), retrieval proposals awaiting approve-retrieval-proposals, and needs_joe — the ONE list of every open item waiting on Joe (action-required and Joe-owned loops, Work Requests in needs_joe, unanswered board questions, rule approvals, and the locally published PR and tabled items), each with a plain title, why only Joe can do it, the one action, link, age and what it blocks, ordered by what it blocks. Items the system can decide itself are excluded and counted by reason. Read-only; grants no authority and performs no decision itself.",
+    description: "Read every pending decision in one payload: team-memory convention proposals (conventions/proposed/<slug>) a partner adopts in person with adopt-rule (they bind nobody until adopted), legacy rule proposals and staged guidance imports (read-only), retrieval proposals awaiting approve-retrieval-proposals, and needs_joe — the ONE list of every open item waiting on Joe (action-required and Joe-owned loops, Work Requests in needs_joe, unanswered board questions, rule approvals, and the locally published PR and tabled items), each with a plain title, why only Joe can do it, the one action, link, age and what it blocks, ordered by what it blocks. Items the system can decide itself are excluded and counted by reason. Read-only; grants no authority and performs no decision itself.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c, actor, _args, { now } = {}) => {
       const row = (await c.query("select ops.read_governance_queue() as queue /* governance-queue */")).rows[0];
@@ -6894,16 +6896,19 @@ export const TOOLS = {
       const rules = queue.pending_rule_approvals || [];
       const batches = queue.pending_guidance_import_batches || [];
       const proposals = queue.pending_retrieval_proposals || [];
+      const conventions = conventionProposals(queue.pending_convention_proposals);
       return {
         ok: true,
+        pending_convention_proposals: conventions,
         pending_rule_approvals: rules,
         pending_guidance_import_batches: batches,
         pending_retrieval_proposals: proposals,
         counts: {
+          pending_convention_proposals: conventions.length,
           pending_rule_approvals: rules.length,
           pending_guidance_import_batches: batches.length,
           pending_retrieval_proposals: proposals.length,
-          total: rules.length + batches.length + proposals.length,
+          total: conventions.length + rules.length + batches.length + proposals.length,
         },
         needs_joe: await readNeedsJoe(c, actor, queue, { now }),
       };
@@ -9019,6 +9024,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "rule-context-runtime": "mcp-server/src/rule-context-runtime.v5.js",
   "system-work-census": "mcp-server/src/system-work-census.v5.js",
   "board-answers": "mcp-server/src/board-answers.js",
+  "org-conventions": "mcp-server/src/org-conventions.js",
   "research-sites": "mcp-server/src/research-sites.ts",
   "party-identity": "mcp-server/src/party-identity.js",
   "party-duplicate-candidates": "mcp-server/src/party-duplicate-candidates.js",
@@ -10479,6 +10485,7 @@ registerTools({
 // Doctrine store verbs (P2, decision 82a2fb62) — same envelope, same contracts.
 registerTools(featureSwitchTools({ withEnvelope, executeRegisteredTool }), 'feature-switches');
 registerTools(doctrineTools({ withEnvelope, writeEvent, ToolError }), "doctrine");
+registerTools(orgConventionTools({ withEnvelope, writeEvent }), "org-conventions");
 registerTools(systemWorkTools(), "system-work-census");
 registerTools(boardAnswerTools({ withEnvelope, writeEvent }), "board-answers");
 registerTools(researchSiteTools({ withEnvelope, writeEvent }), "research-sites");

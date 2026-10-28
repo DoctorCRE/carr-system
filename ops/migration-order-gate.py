@@ -25,12 +25,13 @@ an upper bound on what any release can have applied — the pipeline only ever
 releases main — so "above main's maximum" implies "above anything applied".
 
 WHERE IT FIRES. ops/ci.sh's gates class, which runs in the required
-`ops/ci.sh --strict` context on every pull_request event. Strict status checks
-are on (ruleset 20824501), so when main moves, a PR must be brought up to date
-before it can merge; the merge queue's update-branch call pushes a merge commit
-to the PR branch, which raises a `synchronize` event, which re-runs this gate
-against the NEW main. A PR that fell behind therefore turns red at exactly the
-moment it would otherwise have merged a stale number.
+`ops/ci.sh --strict` context on every pull_request and merge_group event. In a
+merge_group run the base is the group's `base_sha` from the event, not
+origin/main: a queued PR's group is built on the groups ahead of it, whose
+migrations will reach main first. On 2026-10-28 #2560's group sat on #2503's
+group (1020..1023) while origin/main still stopped at 1017, so 1018 looked
+"above main", merged under 1020, and production refused a reordered ledger
+until #2595 renumbered it to 1024 (WR-000570).
 
 WHAT COUNTS AS ADDED: migration filenames present in HEAD's tree and absent
 from BOTH the merge-base tree and the base tree. Measuring against the merge
@@ -50,13 +51,14 @@ a PR that would in fact have been harmless must renumber too.
 Exit 0 clean · 1 an added migration is not above the base maximum · 2 the base
 could not be read, which is not a pass.
 
-  ops/migration-order-gate.py                       # base = origin/$GITHUB_BASE_REF or origin/main
+  ops/migration-order-gate.py                       # base = merge_group base_sha, origin/$GITHUB_BASE_REF or origin/main
   ops/migration-order-gate.py --base <ref> [--head <ref>]
 """
 # doctrine: scripted-release-pipeline
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import pathlib
 import subprocess
@@ -65,7 +67,8 @@ from typing import Iterable, Mapping
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
-from migration_number_contract import SLOT_RE, MigrationNumberError, validate_migration_names  # noqa: E402
+from migration_number_contract import (  # noqa: E402
+    SLOT_RE, MigrationNumberError, allocate_integration_successors, validate_migration_names)
 
 from migration_source import migration_names  # noqa: E402
 
@@ -99,9 +102,25 @@ def violations(base_paths: set[str], fork_paths: set[str],
     return [p for p, n in added(base_paths, fork_paths, head_paths).items() if n <= ceiling]
 
 
-def default_base(environ: Mapping[str, str]) -> str:
+def default_base(environ: Mapping[str, str], event: Mapping | None = None) -> str:
+    """The merge group's first parent in a merge_group run (KeyError if the
+    event lacks it), else origin/<pull request base>, else origin/main."""
+    if environ.get("GITHUB_EVENT_NAME") == "merge_group":
+        return str((event or {})["merge_group"]["base_sha"])
     ref = (environ.get("GITHUB_BASE_REF") or "").strip()
     return f"origin/{ref}" if ref else "origin/main"
+
+
+def renames(base_paths: set[str], kept: Iterable[str], bad: list[str]) -> dict[str, str]:
+    """The next free filename above the base for each refused migration,
+    skipping slots the change's other added migrations already hold."""
+    occupied = {n for n in (number(p) for p in kept) if n is not None}
+    try:
+        return allocate_integration_successors(
+            [p.rsplit("/", 1)[-1] for p in base_paths if number(p) is not None],
+            [p.rsplit("/", 1)[-1] for p in bad], occupied_slots=occupied)
+    except MigrationNumberError:
+        return {}
 
 
 def tree_paths(repo: pathlib.Path, ref: str) -> set[str]:
@@ -115,7 +134,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default=str(REPO))
     args = parser.parse_args(argv)
     repo = pathlib.Path(args.repo)
-    base = args.base or default_base(os.environ)
+    try:
+        event = None
+        if not args.base and os.environ.get("GITHUB_EVENT_NAME") == "merge_group":
+            event = json.loads(pathlib.Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+        base = args.base or default_base(os.environ, event)
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        print(f"migration-order-gate: cannot read the merge group's base_sha: {exc!r}",
+              file=sys.stderr)
+        print("  This is not a pass.", file=sys.stderr)
+        return 2
 
     try:
         base_paths = tree_paths(repo, base)
@@ -152,8 +180,11 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"migration-order-gate: REFUSED — {len(bad)} added migration(s) not above "
           f"{base}'s highest number {ceiling:04d}:", file=sys.stderr)
+    targets = renames(base_paths, set(added(base_paths, fork_paths, head_paths)) - set(bad), bad)
     for path in bad:
-        print(f"  {path}", file=sys.stderr)
+        target = targets.get(path.rsplit("/", 1)[-1])
+        print(f"  {path}" + (f" → next free slot: {MIGRATIONS_DIR}/{target}" if target else ""),
+              file=sys.stderr)
     print(
         "  The release pipeline applies migrations in filename order and requires the\n"
         "  source ledger to extend what staging and production already applied; a\n"

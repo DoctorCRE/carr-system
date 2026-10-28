@@ -90,6 +90,19 @@ class CardTests(unittest.TestCase):
                     '[gone](removed/file.txt) See removed/file.py.\n[ref]: removed/other.txt'),
                     ['removed/file.py', 'removed/file.txt', 'removed/other.txt'])
 
+    def test_cards_file_renders_from_the_store(self):
+        spec = importlib.util.spec_from_file_location('sync', REPO / 'ops/sync-core-rule-cards.py')
+        sync = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sync)
+        text = (REPO / 'ops/config/rule-cards.v1.json').read_text()
+        document = json.loads(text)
+        adopted = [{**card, 'rule_id': f'rule-{index}'} for index, card in enumerate(reversed(document['cards']))]
+        rendered = sync.cards_from_store(document, adopted)
+        self.assertEqual(json.dumps(rendered, indent=2, ensure_ascii=False) + '\n', text,
+                         'the store form of every card round-trips to the committed cards file')
+        with self.assertRaises(SystemExit):
+            sync.cards_from_store(document, [])
+
     def setUp(self):
         self.cards = load_cards()
         self.core = {c['id'] for c in self.cards if c['placement'] == 'CORE'}

@@ -13,6 +13,7 @@ type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSche
 // Public shapes are deliberately closed. Never copy messages, hints, wrapped
 // details, event rows, driver codes, or arbitrary properties from a refusal.
 const PUBLIC_ERRORS = new Map<unknown, string>([
+  ["email_draft_failure_not_resubmittable", "This failed draft cannot be resubmitted. Review the failure before creating a new draft."],
   ["email_source_owner_mismatch", "Use the mailbox owner that matches the email source."],
   ["email_proposal_confidence_invalid", "Provide a confidence between zero and one."],
   ["email_proposal_fields_invalid", "Check the fields for the proposal kind."],
@@ -50,6 +51,12 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["sponsored_actor_required", "An authenticated partner or sponsored agent must perform this operation."],
   ["memory_attach_required", "Call attach-memory first, then pass the attach_id it returned to this actor when writing or retiring team-memory."],
   ["memory_read_only", "This attach is read_only. Call attach-memory with access read_write, then retry with the new attach_id."],
+  ["convention_proposal_not_found", "Choose an active proposal from governance-queue pending_convention_proposals."],
+  ["convention_proposal_malformed", "Rewrite the proposal so its first line is 'Convention: <statement>' with an optional 'Card: <json>' line, then adopt it."],
+  ["convention_card_already_active", "An active rule already carries this card id; retire it before adopting a replacement."],
+  ["convention_pack_unknown", "The proposal names a pack outside the existing pack index; name only packs listed by standing-context."],
+  ["rule_adoption_requires_app_approval", "Adopt conventions in the DoctorCRE app's approval queue; chat and agent sessions cannot adopt them."],
+  ["rule_adoption_requires_joe","Rule activation runs on Joe's approval chain; Joe adopts this proposal in person."],
   ["rule_id_required", "Supply a rule ID."],
   ["rule_id_malformed", "Supply a full rule UUID or a valid short rule ID."],
   ["rule_not_found", "Choose an existing rule ID."],

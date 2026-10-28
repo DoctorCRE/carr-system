@@ -52,6 +52,7 @@ before(async () => {
     await c.query(readFileSync(new URL('../../migrations/1010_email_reply_recipients.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select 1 from information_schema.columns where table_schema='public' and table_name='email_proposal' and column_name='result_recorded_at'")).rows.length)
     await c.query(readFileSync(new URL('../../migrations/1022_email_send_result_time.sql', import.meta.url), 'utf8'));
+  await c.query(readFileSync(new URL('../../migrations/1026_email_recent_outcomes_index.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select to_regclass('public.v_email_thread_filing_event') as relation")).rows[0].relation)
     await c.query(readFileSync(new URL('../../migrations/1023_email_thread_filing_events.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
@@ -1465,6 +1466,33 @@ const submitDraft = (proposal, extra = {}, identity = actor) => command('submit-
   cc: [identity.slug === 'dell' ? 'joe@example.test' : 'dell@example.test'], ...extra }, identity, 'carr_writer');
 const refuses = (promise, code) => assert.rejects(promise, error => error.payload?.error === code);
 
+test('recent reply outcomes are bounded, ordered and scoped to the partner', async () => {
+  await c.query('delete from email_proposal');
+  const older = await draftFor(), newer = await draftFor(), other = await draftFor('dell'), legacy = await draftFor();
+  await c.query(`update email_proposal set status='approved_to_send',resolved_by=$1,resolved_at=now(),submitted_at=now(),submitted_email=' {"subject":"x","body":"x","sha256":"x","to":[],"cc":[]}' where id=any($2::uuid[])`, [actor.id, [older.proposal_id, newer.proposal_id, other.proposal_id, legacy.proposal_id]]);
+  await c.query(`update email_proposal set status='sent',send_result='{"status":"sent"}',result_recorded_at='2026-01-01T00:00:00Z' where id=$1`, [older.proposal_id]);
+  await c.query(`update email_proposal set status='failed',send_result='{"status":"failed","reason":"invalid_submission"}',result_recorded_at='2026-01-02T00:00:00Z' where id=$1`, [newer.proposal_id]);
+  await c.query(`update email_proposal set status='sent',send_result='{"status":"sent"}',result_recorded_at='2026-01-03T00:00:00Z' where id=$1`, [other.proposal_id]);
+  await c.query(`update email_proposal set status='sent',send_result='{"status":"sent"}',result_recorded_at=null where id=$1`, [legacy.proposal_id]);
+  const page = await command('list-email-proposals', { mode: 'recent_outcomes', limit: 1 }, actor, 'carr_reader');
+  assert.deepEqual(page.proposals, [{ id: newer.proposal_id, deal, subject: 'x', outcome: 'failed', result_recorded_at: '2026-01-02T00:00:00.000Z', failure_reason_code: 'invalid_submission' }]);
+  assert.equal(page.more, true);
+  const next = await command('list-email-proposals', { mode: 'recent_outcomes', limit: 1, cursor: page.next_cursor }, actor, 'carr_reader');
+  assert.deepEqual(next.proposals.map(row => row.id), [older.proposal_id]);
+  assert.equal(next.more, false);
+  const all = await command('list-email-proposals', { mode: 'recent_outcomes' }, actor, 'carr_reader');
+  assert.deepEqual(all.proposals.map(row => row.id), [newer.proposal_id, older.proposal_id]);
+  assert.equal(all.proposals[1].failure_reason_code, null);
+  await c.query(`update email_proposal set send_result='{"status":"failed","reason":"private details"}' where id=$1`, [newer.proposal_id]);
+  assert.equal((await command('list-email-proposals', { mode: 'recent_outcomes' }, actor, 'carr_reader')).proposals[0].failure_reason_code, 'delivery_failed');
+  await refuses(command('list-email-proposals', { mode: 'recent_outcomes', limit: 51 }, actor, 'carr_reader'), 'email_outcomes_arguments_invalid');
+  await refuses(command('list-email-proposals', { mode: 'recent_outcomes', cursor: other.proposal_id }, actor, 'carr_reader'), 'email_proposals_cursor_invalid');
+  await c.query('update email_proposal set result_recorded_at=$1 where id=$2', ['2026-01-02T00:00:00Z', older.proposal_id]);
+  const tied = await command('list-email-proposals', { mode: 'recent_outcomes', limit: 1 }, actor, 'carr_reader');
+  const tiedNext = await command('list-email-proposals', { mode: 'recent_outcomes', limit: 1, cursor: tied.next_cursor }, actor, 'carr_reader');
+  assert.deepEqual([tied.proposals[0].id, tiedNext.proposals[0].id], [newer.proposal_id, older.proposal_id].sort().reverse());
+});
+
 test('recipient review refuses omitted or changed destinations without enqueueing a draft', async () => {
   await c.query('delete from email_proposal');
   const proposal = await draftFor();
@@ -1564,6 +1592,40 @@ test('failed delivery requires a reason and is recorded once without an automati
   assert.equal(legacy.result_recorded_at, null);
   assert.equal((await command('record-email-sent', args, machineFor('joe'), 'carr_writer')).replayed, true);
   assert.deepEqual((await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader')).drafts, []);
+});
+
+test('the owner can resubmit a reply aborted before dispatch', async () => {
+  await c.query('delete from email_proposal');
+  await c.query("insert into actor(slug,kind,display_name,email) values('dell','human','Synthetic partner','dell@example.test') on conflict(slug) do update set email=excluded.email,active=true");
+  const proposal = await draftFor();
+  const first = await submitDraft(proposal, { cc: ['dell@example.test'] });
+  await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+    base_version: first.version, status: 'failed', sha256: first.sha256, reason: 'aborted_before_dispatch' }, machineFor('joe'), 'carr_writer');
+  const dell = { ...(await c.query("select id,slug from actor where slug='dell'")).rows[0], human: true };
+  await refuses(submitDraft(proposal, { base_version: 3 }, dell), 'email_draft_not_owner');
+  const key = randomUUID();
+  const args = { base_version: 3, cc: ['dell@example.test'], idempotency_key: key };
+  const again = await submitDraft(proposal, args);
+  assert.equal((await submitDraft(proposal, args)).replayed, true);
+  await refuses(submitDraft(proposal, { ...args, idempotency_key: randomUUID() }), 'email_draft_already_submitted');
+  assert.equal(again.version, 4);
+  assert.equal(again.sha256, first.sha256);
+  const outbox = await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader');
+  assert.equal(outbox.drafts[0].version, 4);
+  assert.equal(outbox.drafts[0].sha256, first.sha256);
+});
+
+test('unknown and dynamic failure reasons remain final', async () => {
+  for (const reason of ['unknown_reason', 'failed:compose_field_not_found:to', 'aborted_before_dispatch:details']) {
+    await c.query('delete from email_proposal');
+    const proposal = await draftFor();
+    const first = await submitDraft(proposal, { cc: ['dell@example.test'] });
+    await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+      base_version: first.version, status: 'failed', sha256: first.sha256, reason }, machineFor('joe'), 'carr_writer');
+    await assert.rejects(submitDraft(proposal, { base_version: 3, cc: ['dell@example.test'] }),
+      error => error.payload?.error === 'email_draft_failure_not_resubmittable' && error.payload.reason === reason);
+    assert.deepEqual((await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader')).drafts, []);
+  }
 });
 
 test('reply draft provenance cannot be forged or inferred from legacy display names', async () => {

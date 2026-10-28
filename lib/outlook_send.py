@@ -222,8 +222,11 @@ class Ledger:
     def contains_item(self, print_: str, since: float) -> bool:
         if not self.path.exists():
             return False
+        latest = {}
+        for row in map(json.loads, self.path.read_text().splitlines()):
+            latest[row['key']] = row
         return any(row.get('fingerprint') == print_ and row['at'] >= since
-                   for row in map(json.loads, self.path.read_text().splitlines()))
+                   and row['state'] != 'aborted_before_dispatch' for row in latest.values())
 
     def append(self, key: str, kind: str, state: str, print_: str, at: float,
                sent_item_id: str | None = None) -> None:

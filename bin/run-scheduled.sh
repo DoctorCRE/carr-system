@@ -78,7 +78,8 @@ reasons = frozenset("outside_window previous_run_active cleanup_failed store_mis
                     "writes_failed model_failed steps_pending processed nothing_new writes_deferred "
                     "request_blocked full_disk_access_required contacts_empty contacts_read_failed timeout auth_refused "
                     "key_reuse transport_oversized no_acknowledgement reply_unreadable transport_error "
-                    "invalid_request subject_unresolved database_refused setup_failed calendar_lifecycle_unsupported".split())
+                    "invalid_request subject_unresolved database_refused setup_failed calendar_lifecycle_unsupported "
+                    "email_links_read_failed email_links_pending".split())
 # Count keys are code-built names; values carry the meaning. A snake_case name with a
 # bounded non-negative integer value cannot carry mail content, so no key list drifts.
 count_key = re.compile(r"[a-z][a-z0-9_]{0,63}")
@@ -118,7 +119,15 @@ import json
 import sys
 
 counts = frozenset("emails routed model_failed abandoned recorded refused dropped write_failed "
-                   "queue_failed more out_of_time error".split())
+                   "queue_failed more out_of_time inherited contact_only error".split())
+refusal_codes = frozenset("email_deal_evidence_not_found email_deal_phase_not_eligible email_deal_proposal_stale "
+    "email_deal_quote_invalid email_next_step_evidence_not_found email_next_step_input_invalid "
+    "email_next_step_proposal_stale email_next_step_quote_invalid "
+    "email_proposal_confidence_invalid email_proposal_deal_invalid "
+    "email_proposal_evidence_invalid email_proposal_fields_invalid email_proposal_kind_invalid "
+    "email_proposal_not_found email_proposal_not_pending email_proposal_quote_invalid "
+    "email_proposal_reason_required email_proposal_source_missing email_proposal_stale "
+    "email_thread_ambiguous".split())
 receipt = None
 with open(sys.argv[1]) as output:
     for line in output:
@@ -129,10 +138,16 @@ with open(sys.argv[1]) as output:
                 receipt = None
 if (isinstance(receipt, dict) and receipt.get("state") in ("succeeded", "failed", "skipped")
         and isinstance(receipt.get("counts"), dict)
-        and all(k in counts and type(v) is int and 0 <= v <= 1_000_000_000
-                for k, v in receipt["counts"].items())):
-    print("email-router-receipt " + json.dumps(
-        {k: receipt[k] for k in ("state", "counts")}, sort_keys=True))
+        and all(type(v) is int and 0 <= v <= 1_000_000_000
+                for k, v in receipt["counts"].items() if k in counts)
+        and isinstance(receipt.get("refusal_codes", {}), dict)
+        and all(type(v) is int and 0 <= v <= 1_000_000_000
+                for k, v in receipt.get("refusal_codes", {}).items() if k in refusal_codes)):
+    safe = {"state": receipt["state"],
+            "counts": {k: v for k, v in receipt["counts"].items() if k in counts}}
+    if "refusal_codes" in receipt:
+        safe["refusal_codes"] = {k: v for k, v in receipt["refusal_codes"].items() if k in refusal_codes}
+    print("email-router-receipt " + json.dumps(safe, sort_keys=True))
 PY_ROUTER_RECEIPT
   rm -f "$receipt_file"
 fi

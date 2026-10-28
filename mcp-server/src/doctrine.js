@@ -1567,7 +1567,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
           } } : {}),
           ...(proposedRules.length ? { awaiting_activation: {
             count: proposedRules.length,
-            say: `${proposedRules.length} legacy rule proposal(s) remain for review — propose guidance-file edits in a PR; they bind nobody until merged`,
+            say: `${proposedRules.length} legacy rule proposal(s) remain for review — propose any correction as a team-memory convention; it binds nobody until adopted`,
             rules: proposedRules.map(r => ({
               id: String(r.id).slice(0, 8),
               gist: gist(r.statement),
@@ -1575,8 +1575,8 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
               taught_by: r.taught_by,
               proposed_on: r.created_at ? String(r.created_at).slice(0, 10) : null })),
             hint: "read the full text with rule_ids, then propose the correction or withdrawal "
-                + "in the relevant CLAUDE.md, AGENTS.md or skill through a PR. "
-                + "Proposals bind nobody until merged; these legacy rows remain read-only.",
+                + "as a team-memory section under conventions/proposed/; a partner adopts it in person "
+                + "through governance-queue (adopt-rule). These legacy rows remain read-only.",
           } } : {}),
           action_required: actionReq,
           doctrine: { generation: Number(gen.generation),

@@ -35,7 +35,7 @@ other target names for separate runs. Commit a minimized synthetic regression
 and a failing test before fixing any newly discovered crash.
 
 Build artifacts, coverage, corpora, and crash artifacts are generated data.
-Keep them outside the source tree when refreshing the source receipt.
+Keep them outside the source tree: the installer digests every file in it.
 A compile-only check on stable is
 `cargo check --locked --manifest-path fuzz/Cargo.toml --target-dir target/fuzz --bins`.
 This checks the targets but does not replace a coverage-guided fuzz run.
