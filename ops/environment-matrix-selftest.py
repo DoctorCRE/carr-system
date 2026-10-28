@@ -33,13 +33,23 @@ THE ASSERTIONS.
      [env.staging] carries an explicit `routes = []`. A domain in
      the matrix that wrangler does not serve is fiction; a route wrangler serves
      that the matrix does not name is an undeclared production surface.
+  7. NO ENVIRONMENT EXPOSES WORKERS.DEV OR PREVIEW URLS. Explicit false values
+     prevent deployments from undoing the billing audit's public URL shutoff.
   5. EVERY OBSERVED STAGING-VS-PRODUCTION BINDING DIFFERENCE IS NAMED. Matched
      by keyword against intentional_differences, which is deliberately a loose
      match: the point is that a human wrote a sentence about it, not that the
      sentence has a particular shape.
+  6. ALL WORKERS CARRY A CPU CAP AND EXPLICIT LOG SAMPLING. Workers Paid has no spend ceiling, so the
+     top-level `[limits] cpu_ms` is what bounds one invocation's CPU; staging
+     inherits it, and an environment override may only lower it. Production
+     samples at 0.1 and staging at 0.01, including any nested logs override.
+  8. ONLY THE DAILY BUDGET WRAPPER MAY ACCESS THE AI BINDING. A parsed source
+     check catches raw access, aliases, destructuring, and static computed names.
+  9. PRODUCTION AND STAGING AI BUDGETS TOTAL LESS THAN THE SHARED FREE ALLOWANCE.
 """
 
 import json
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -83,6 +93,37 @@ def workflow_jobs(text: str) -> dict[str, str]:
     return jobs
 
 
+def worker_limit_failures(config: dict) -> list[str]:
+    """Validate effective CPU caps and explicit sampling for every Worker."""
+    failures = []
+    production_cpu = config.get("limits", {}).get("cpu_ms")
+    for name, worker in [("production", config), *config.get("env", {}).items()]:
+        cpu = worker.get("limits", {}).get("cpu_ms", production_cpu)
+        if type(cpu) is not int or not 0 < cpu < 30_000:
+            failures.append(f"{name}: missing or unsafe cpu_ms")
+        elif type(production_cpu) is not int or cpu > production_cpu:
+            failures.append(f"{name}: cpu_ms exceeds production cap")
+        rate = worker.get("observability", {}).get("head_sampling_rate")
+        expected = {"production": 0.1, "staging": 0.01}.get(name)
+        if type(rate) not in (int, float) or not 0 <= rate < 1 or (expected is not None and rate != expected):
+            failures.append(f"{name}: missing or unsafe head_sampling_rate")
+        logs_rate = worker.get("observability", {}).get("logs", {}).get("head_sampling_rate", rate)
+        if type(logs_rate) not in (int, float) or not 0 <= logs_rate < 1 or (expected is not None and logs_rate != expected):
+            failures.append(f"{name}: unsafe logs.head_sampling_rate override")
+    return failures
+
+
+def ai_budget_failures(config: dict) -> list[str]:
+    """Keep the two isolated counters below the account's shared free allowance."""
+    failures = []
+    for name, worker, cap in (("production", config, 8000),
+                              ("staging", config.get("env", {}).get("staging", {}), 1500)):
+        value = worker.get("vars", {}).get("AI_DAILY_NEURON_BUDGET")
+        if not isinstance(value, str) or not value.isascii() or not value.isdigit() or int(value) > cap:
+            failures.append(f"{name}: missing or unsafe AI_DAILY_NEURON_BUDGET")
+    return failures
+
+
 def main() -> int:
     print("environment-matrix-selftest: the matrix matches the repository")
 
@@ -123,6 +164,9 @@ def main() -> int:
           "needs:" not in staging_job and "needs:" not in production_job
           and "--env staging" not in production_job,
           "a `needs:` would let one environment's failure stop the other's deploy")
+    check("2f. staging deployment is paused until Cloudflare Access protects it",
+          staging_job.splitlines()[0].strip() == "if: ${{ false }}" if staging_job else False,
+          "the disabled staging URL cannot serve the release verification")
 
     # ── 3 ────────────────────────────────────────────────────────────────────
     db_tap_src = DB_TAP.read_text()
@@ -136,7 +180,8 @@ def main() -> int:
           and "_project_id_by_name" in db_tap_src)
 
     # ── 4 ────────────────────────────────────────────────────────────────────
-    declared_prod = set(envs["production"]["domains"])
+    declared_prod = (set(envs["production"]["domains"])
+                     | set(envs["production"].get("retiring_domains", [])))
     served_prod = {r["pattern"] for r in wrangler.get("routes", [])
                    if isinstance(r, dict) and r.get("pattern")}
     check("4a. every domain the matrix claims for production is served by the Worker",
@@ -160,8 +205,13 @@ def main() -> int:
     check("4d. staging declares no domain, and wrangler gives it an explicit empty routes list",
           not envs["staging"]["domains"]
           and "routes" in stg_cfg and stg_cfg["routes"] == []
-          and "route" not in stg_cfg and stg_cfg.get("workers_dev") is True,
+          and "route" not in stg_cfg,
           f"[env.staging] routes={stg_cfg.get('routes', '<missing: inherits production>')!r}")
+
+    for name, config in [("production", wrangler), *wrangler.get("env", {}).items()]:
+        for setting in ("workers_dev", "preview_urls"):
+            check(f"7. {name} disables {setting}", config.get(setting) is False,
+                  f"{setting} must be explicitly false")
 
     # ── 5 ────────────────────────────────────────────────────────────────────
     prod_kv = {k.get("id") for k in wrangler.get("kv_namespaces", [])}
@@ -186,6 +236,20 @@ def main() -> int:
     check("5d. every intentional difference states a reason",
           all(d.get("why") for d in differences),
           "an entry names a difference with no why")
+
+    # ── 6 ────────────────────────────────────────────────────────────────────
+    uptime_path = REPO / "mcp-server" / "wrangler.uptime.toml"
+    with uptime_path.open("rb") as fh:
+        uptime = tomllib.load(fh)
+    limit_failures = worker_limit_failures(wrangler) + [f"uptime: {failure}" for failure in worker_limit_failures(uptime)]
+    check("6. every Worker has bounded CPU and explicit log sampling", not limit_failures, "; ".join(limit_failures))
+    ai_boundary = subprocess.run(
+        ["node", str(REPO / "mcp-server/check-ai-boundary.mjs")],
+        capture_output=True, text=True, cwd=REPO)
+    check("8. only the daily budget wrapper accesses Workers AI", ai_boundary.returncode == 0,
+          ai_boundary.stdout + ai_boundary.stderr)
+    ai_budget = ai_budget_failures(wrangler)
+    check("9. AI budgets stay below the shared free allowance", not ai_budget, "; ".join(ai_budget))
 
     print()
     if FAILURES:

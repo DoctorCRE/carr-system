@@ -13,7 +13,7 @@ export class OAuthConsentState {
       await this.storage.transaction(async tx => {
         if (await tx.get<ConsentInput>("pending")) throw new Error("Consent already exists");
         await tx.put("pending", input);
-        await tx.setAlarm(input.expiresAt);
+        if (await tx.getAlarm() === null) await tx.setAlarm(input.expiresAt);
       });
       return new Response(null, { status: 204 });
     }

@@ -1,8 +1,13 @@
 # Headless Friday social batch: design (WR-000561, slice S1)
 
-Status: design only, 2026-10-27 (America/Chicago). Nothing here is built, installed or
-scheduled. The current Claude Desktop task `social-batch-weekly` keeps running unchanged
-until slice S3 proves the replacement (Joe, 2026-10-27).
+Status: S2 built, 2026-10-27 (America/Chicago). The script, cadence config, prompt and
+launchd template exist but are not installed or scheduled: the plist label is
+`DEFINITION_ONLY` and the prompt carries the disabled marker, so neither installer will
+place them before S3. The current Claude Desktop task `social-batch-weekly` keeps running
+unchanged until slice S3 proves the replacement (Joe, 2026-10-27).
+
+S2 amended D4, D5 and acceptance 3 after the #2533 review. The orchestrator ruled on its
+three guard findings, and the amended text below follows those rulings.
 
 The goal is the same weekly review drafts in the same Blotato queue, made by a headless
 run on the Studio. Fixed rules go into a tested script. The model only writes drafts and
@@ -49,7 +54,7 @@ Repeated waste in both transcripts:
 - Each run grepped the previous run's transcript to rediscover how to upload media and
   schedule posts.
 - Each run rewrote its card generator from scratch.
-- `blotato.sh` was not used, because it has no list call, no windowed read and no
+- `claude-tree/skills/social-media-manager/scripts/blotato.sh` was not used, because it has no list call, no windowed read and no
   presigned upload. The runs called Blotato with raw curl instead.
 - Both batch records flag the same drift. The task prompt still names a Chrome Grok
   pass and a vault batch file. The store retired both: the Grok pass on 08-07
@@ -116,12 +121,12 @@ old task may change the queue in that time.
 threads through `additionalPosts`. Add it to `submit`; do not hand the model the key.
 
 **D3. Language and Blotato client: one Python module, `tools/social_batch.py`, with stdlib HTTP.**
-`blotato.sh` stays unchanged for the social-media-manager skill. The module reads the key
+`claude-tree/skills/social-media-manager/scripts/blotato.sh` stays unchanged for the social-media-manager skill. The module reads the key
 the same way the credential inventory's probe does: it sources `~/.zprofile` in a child
 shell and passes the key as a header on stdin. It never puts the key in argv and never
 logs it.
 
-*Reopen if* a second Python caller needs Blotato. Then extract `lib/blotato.py`.
+*Reopen if* a second Python caller needs Blotato. Then extract the proposed `lib/blotato.py`.
 
 **D4. Cadence numbers live in a small pinned config, checked against the store at every run.**
 `ops/social/cadence.v1.json` holds the numbers below. It also holds the `section_id` and
@@ -144,7 +149,7 @@ re-pins the config.
 | X recurring series | exactly 1 | cadence reset |
 | X every day | at least 1 X post on each of the 7 days | spec "Schedule into Blotato" |
 | X quote-tweets | 0 | cadence reset (owned by x-reply-run-daily) |
-| LinkedIn / Facebook / Instagram | at most the prior week's count on each platform, read from Blotato | task prompt "do not increase" |
+| LinkedIn / Facebook / Instagram | 2 / 2 / 2 per week, pinned; never derived from last week's count | both baseline runs; #2533 review ruling |
 | CARR formats | at least 3 distinct, a carousel on at least 1 platform, no platform all single cards | workflow format rotation |
 | Animated card | at most 1 per batch, not on X, not in two weeks running | workflow animated statics |
 | Instagram hashtags | at most 5 | task prompt |
@@ -155,8 +160,20 @@ belongs in a typed store record, not a pinned hash.
 
 **D5. Guard: fail closed, and window by the America/Chicago week.**
 `plan` reads `GET /v2/posts?since=…&until=…&limit=100`, using the local week converted to
-UTC. It runs a control query on the previous week, which must return at least one post,
-so an empty answer is not trusted on its own.
+UTC, and filters the answer to that local week again itself. It also reads back, by
+submission id, every post its own batch ledgers (`out/social-batch/*/ledger.jsonl`) record
+for the target week, deduplicated by platform and minute. A post X does not attribute to a
+lane counts against both X lanes. The previous week is read as a control: an empty answer
+there warns `control_week_empty` and never blocks, so one missed Friday cannot lock out
+every later run.
+
+Listing-horizon probe, read-only GETs on 2026-10-27 19:07 UTC: the unwindowed
+`GET /v2/posts` returned posts back to 10/21 00:52 UTC (about 6 days 18 hours) plus every
+upcoming post. That is the "7 days" in the old prompt. A windowed read of 10/19–10/26
+returned the 10/20 post the default listing had dropped. Forward reach could not be shown
+live, because nothing was scheduled past +5 days. The 10/23 run transcript shows its
+windowed read returning a post 9.5 days out (11/2 00:39 UTC). The by-id readback covers
+the remaining doubt for posts this script made.
 
 Evidence for the local-time rule: on 2026-10-27, the UTC window for next week
 (11/02–11/09) returns last week's Sunday 18:39 CST one-liner (00:39 UTC on 11/2). A UTC
@@ -164,7 +181,7 @@ window would count it as next week's post.
 
 Outcomes:
 
-- If Blotato cannot be read, or the control query is empty, the run stops with `queue_unreadable` and schedules nothing.
+- If Blotato cannot be read, answers with an error, or answers in a shape other than the recorded one, the run stops with `queue_unreadable` and schedules nothing.
 - If the target week already meets every lane maximum, the run ends `noop` with `week_covered`.
 - Otherwise, open slots are each lane's maximum minus what the week already holds.
 
@@ -251,16 +268,45 @@ vision check becomes a required `check` input.
 
 - Model: `--model opus`. Both baseline runs used Opus at medium effort, and the runner's
   default is Sonnet. This is the subscription, not the paid API.
-- Allowlist: the runner's defaults, plus `Bash(grok -p *)`, the headless Chrome binary,
-  `Bash(ffmpeg *)`, and `Agent`, which keeps the independent Sonnet claims reviewer that
-  caught real errors both weeks.
+- Allowlist (the #2538 review narrowed it so the model cannot rewrite its own guard or
+  reach any other writer):
+  - Read, Glob, Grep, WebFetch, WebSearch;
+  - `Agent`, which keeps the independent Sonnet claims reviewer that caught real errors both weeks;
+  - Write and Edit only under `out/social-batch/*/work/**`;
+  - `Bash(./run.sh social-batch *)` and `Bash(./run.sh call read-doctrine *)`.
+
+  The deny list covers `tools/`, `lib/`, `ops/`, `bin/`, `run.sh`, the batch ledger and
+  `out/social-batch/<week>/batch.json`, the Blotato hosts, `~/.zprofile`, curl and wget. `submit` calls the store
+  write verbs from its own subprocess, so the model needs no write verb.
+- Headless Chrome runs only through `./run.sh social-batch render`. Both the card HTML and
+  the PNG must sit in that work folder. Render serves the folder from a throwaway
+  `127.0.0.1` server as `http://card.test/`, and the same server is Chrome's only proxy
+  (`--proxy-bypass-list=<-loopback>`, with `--host-resolver-rules` mapping every name to
+  NOTFOUND). It answers GET for that origin only: the work folder plus the tracked brand
+  fonts at `/fonts/`. So a card cannot frame `file://` URLs, other local files, other local
+  services or outside hosts, and cannot leak them into a PNG the model reads (#2538 round 2).
+  Render also uses a throwaway profile and `--use-mock-keychain`, which avoids the keychain
+  prompts that hung securityd on 2026-10-24, and keeps the Chrome binary off the allowlist.
+- Two capabilities are left out until S3:
+  - **ffmpeg and the animated-static builder.** A permission rule cannot bind their output
+    paths. Until S3 the batch ships static cards only.
+  - **`grok -p`.** It is an agent with its own tools, and Claude's deny rules do not bind
+    it. Its `--tools`, `--sandbox` and `--permission-mode` flags exist, but the built-in
+    tool names were not confirmed: the 2026-10-27 probe returned HTTP 402 "usage balance
+    exhausted". **S3 precondition:** confirm a read-only grok invocation, then add exactly
+    that pinned command to the allowlist. Until then the prompt records `grok.status:
+    skipped` (D9's fallback).
 - Schedule: Friday 06:00 CT (`0 6 * * 5`), with a 5400 s timeout and a 3600 s grace.
 - Task id: `social-batch-headless`, kept separate from `social-batch-weekly` so the old
   file is never touched.
 
 The prompt file lives at `~/.claude/scheduled-tasks/social-batch-headless/SKILL.md`, with
 a tracked copy at `ops/scheduled-tasks/social-batch-headless.SKILL.md` so config-as-code
-reconciles it. A SKILL.md alone does not register a Desktop task:
+reconciles it. The prompt is one JSON object in a ```json fence, because
+the `contract` function in `lib/acceptance_checks.py` reads the acceptance
+contract only from a whole-JSON prompt. A markdown prompt yields no criteria, so its run can never be accepted. Model,
+allowed tools and the deny list (Blotato hosts, `~/.zprofile`, curl, wget) live in the
+task's `ops/headless-tasks/tasks.json` entry. A SKILL.md alone does not register a Desktop task:
 `deal-history-research-weekly` has one there and is absent from the scheduler list. No
 sidebar session is created.
 
@@ -361,7 +407,7 @@ At most about 40 lines, holding no rules the script enforces:
 3. Read the store by slug: `x-posting-spec`, `social-media-workflow`,
    `content-inspiration-bank` (§2 and the newest §4 sections), `x-strategy-2026`,
    `brand-voice`, and the voice and style documents the spec names. Read Drive only for
-   files that have no store copy (today: `content-fuel-inbox.md`), and name each one.
+   files that have no store copy (today: `{{VAULT}}/Marketing/Social Media/content-fuel-inbox.md`), and name each one.
 4. Research and Grok per D9 and D10. Verify every figure at its primary source.
 5. Draft to fill the open slots from `plan`, never past them. Render cards and look at
    each PNG.
@@ -379,13 +425,13 @@ Adds:
 - `ops/social/cadence.v1.json`;
 - a test file with recorded Blotato fixtures;
 - the tracked prompt;
-- `ops/headless-tasks/com.carr.headless.social-batch-headless.plist` and its `tasks.json` entry.
+- `ops/headless-tasks/com.carr.headless.social-batch-headless.plist` and its `ops/headless-tasks/tasks.json` entry.
 
 Acceptance:
 
 1. A fixture where the week is already covered gives 0 open slots, and `submit` refuses a full batch (the WR's DETERMINISTIC criterion).
 2. A fixture that crosses the DST change on Sun 11/1 places each post at the right UTC minute, and a UTC-edge post is counted in the right local week.
-3. An empty listing with an empty control query fails closed.
+3. An unreadable or malformed listing fails closed. An empty control week warns and plans from the spec cadence (amended by the #2533 review ruling).
 4. A draft with a HARD lint hit, an uncleared REVIEW hit, a 6th IG hashtag, a quote-tweet, or a past or too-early time is each refused by `check`.
 5. A changed spec hash stops `plan` with `spec_changed`.
 6. A retried `submit` after a simulated crash does not post twice.
@@ -414,6 +460,6 @@ Acceptance:
 ## 8. Out of scope, noted
 
 - Dell's batch (`ops/scheduled-tasks/dell/dell-social-batch-weekly.SKILL.md`) could later
-  reuse `social_batch.py` by taking an account set. Not in this WR.
-- `ops/config/credential-inventory.v1.json` names `lib/system_sender.py` as a Blotato
+  reuse `tools/social_batch.py` by taking an account set. Not in this WR.
+- `ops/config/credential-inventory.v1.json` names the old script `lib/system_sender.py` as a Blotato
   user, but that file does not exist. This is a stale pointer, unrelated to this design.

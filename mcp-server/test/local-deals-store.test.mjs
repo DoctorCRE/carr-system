@@ -70,6 +70,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await c.query(`do $$ begin
       begin create role carr_reader; exception when duplicate_object then null; end;
       begin create role carr_writer; exception when duplicate_object then null; end;
+      begin create role dot_reader; exception when duplicate_object then null; end;
     end $$;`);
     // Use the committed table definitions and caller views, without production data.
     for (const name of ['actor', 'party', 'vendor', 'client', 'deal', 'deal_phase', 'deal_participant', 'next_action', 'deal_note', 'national_account_owner', 'deal_market_assignment', 'deal_review_item', 'deal_review_session', 'event', 'tool_call', 'deal_conflict', 'critical_date', 'lease', 'activity', 'premises', 'negotiation_round', 'document', 'commission', 'capture_post_call_action', 'capture_post_call_candidate', 'building', 'space', 'premises_space', 'lead', 'lead_stage', 'lead_lane', 'lead_stage_move', 'record_flag']) {
@@ -79,6 +80,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       if (name === "party") await c.query("alter table party drop column if exists vendor_assignment_version");
     }
     await c.query('alter table activity add column if not exists email_source jsonb');
+    await c.query('alter table activity add column if not exists email_context jsonb');
     for (const table of ['actor','party','deal']) await c.query(`alter table ${table} add primary key(id)`);
     await c.query(readMigration('0951_deal_vendor_assignments.sql').split('-- Current catalog reseal')[0]);
     const touch = schema.match(/CREATE FUNCTION public\.trg_touch_row\(\) RETURNS trigger[\s\S]*?end \$\$;/)?.[0];
@@ -102,6 +104,11 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await c.query("grant select on doctrine_section to carr_reader,carr_writer");
     await c.query(readFileSync(path.join(root, 'migrations/0916_deal_phase_start_dates.sql'), 'utf8'));
     await c.query(readMigration('1004_phase_start_undo.sql'));
+    // The portal table is reached only through ops functions; stub the grant contract the migration extends.
+    await c.query('create schema if not exists ops; create extension if not exists pgcrypto');
+    await c.query(schema.match(/CREATE TABLE ops\.client_portal \([\s\S]*?\n\);/)[0]);
+    await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable as $$select '{"secdef_execute":[]}'::jsonb$$`);
+    await c.query(readMigration('1013_register_client_portal.sql'));
     await c.query(readFileSync(path.join(root, 'migrations/0923_deal_status_next_step.sql'), 'utf8'));
     await c.query("create view v_ref_index as select 'deal'::text subject_type, id subject_id from deal union all select 'vendor',id from vendor union all select 'lead', id from lead;");
     await c.query("grant select on v_ref_index to carr_reader");
@@ -353,6 +360,35 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal(board.deals[0].next_date, null);
       assert.equal(board.deals[0].next_step_required, true);
       assert.equal(update.next_step_required, true);
+    }));
+
+    await t.test('a registered client portal appears as a derived link on both Deal Room reads, never its password', async () => transaction(async () => {
+      await fixture(false);
+      const password = 'synthetic-simple-password';
+      const key = randomUUID();
+      const registered = await TOOLS['register-client-portal'].handler(c, actor, {
+        idempotency_key: key, deal: id(4), slug: 'synthetic-practice', password });
+      const portal = 'https://share.doctorcre.com/synthetic-practice';
+      assert.deepEqual(registered, {ok: true, deal_id: id(4), client_portal_url: portal, created: true});
+      assert.deepEqual(await TOOLS['register-client-portal'].handler(c, actor, {
+        idempotency_key: key, deal: id(4), slug: 'synthetic-practice', password }), {replayed: true, ...registered});
+      const reads = async () => {
+        await c.query('set role carr_reader');
+        try {
+          return [(await TOOLS['deal-room-board'].handler(c, actor, {})).deals[0], await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)})];
+        } finally { await c.query('reset role'); }
+      };
+      const shown = await reads();
+      for (const read of shown) assert.equal(read.client_portal_url, portal);
+      assert.equal(JSON.stringify(shown).includes(password), false);
+      assert.equal(/password_hash|\$2[aby]\$12/.test(JSON.stringify(shown)), false);
+      assert.equal(JSON.stringify((await c.query('select * from tool_call')).rows).includes(password), false);
+      assert.equal(JSON.stringify((await c.query('select * from event')).rows).includes(password), false);
+      assert.equal((await c.query("select count(*)::int n from event where verb='register-client-portal'")).rows[0].n, 1);
+      await c.query("update ops.client_portal set disabled_at=now()");
+      for (const read of await reads()) assert.equal(read.client_portal_url, null);
+      await assert.rejects(TOOLS['register-client-portal'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), slug: 'Bad Slug', password }), e => e.payload?.error === 'portal_slug_invalid');
     }));
 
     await t.test('Deal Room phase patches supersede overdue actions once with attributed history', async () => transaction(async () => {
@@ -1152,7 +1188,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
             delete prior.checklist;
           }
           rowsOf(prior).forEach(row => {
-            for (const field of ['phase_started_on','short_name','items','item_schema_version']) delete row[field];
+            for (const field of ['phase_started_on','short_name','items','item_schema_version','client_portal_url']) delete row[field];
           });
           const oldRows = rowsOf(baseline[name]);
           rowsOf(prior).forEach(row => { for (const field of ['client_status','client_version','prospect_engagement_status']) delete row[field]; });

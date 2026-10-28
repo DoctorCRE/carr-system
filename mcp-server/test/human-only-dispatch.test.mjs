@@ -89,7 +89,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "commit-winning-property",
 
     "complete-deal-item",
-    "confirm-email-deal-progress", "confirm-email-next-step",
+    "confirm-email-deal-progress", "confirm-email-filing", "confirm-email-next-step",
     "confirm-merge",
     "decide-doc-suggestion",
     "dismiss-email-proposal",
@@ -115,6 +115,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "record-partner-lifecycle-fact",
     "record-tour-map-promotion-receipt",
     "record-tour-pdf-human-review",
+    "register-client-portal",
     "register-record-source-authority-policy",
     "resolve-critical-date",
     "resolve-post-call-candidate",

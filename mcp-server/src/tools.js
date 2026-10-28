@@ -34,6 +34,7 @@ import { notificationTools } from "./notifications.ts";
 import { sessionIdentityTools } from "./session-identity.ts";
 import { dispatchSpineTools } from "./dispatch-spine.ts";
 import { workShapeTools } from "./work-shape.ts";
+import { workQueueTools } from "./work-queue.js";
 import { workRequestIntakeTools } from "./work-request-intake.js";
 import { workPortfolioTools } from "./work-portfolio.js";
 import { leaseTermComparisonTools } from "./lease-term-comparison.js";
@@ -345,7 +346,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || verb === "dismiss-email-proposal" || verb === "undo-call" || ["set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread"].includes(verb) || verb === "undo-call" || ["set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
@@ -3808,6 +3809,7 @@ export const TOOLS = {
                 b.operating_state, b.parking_reason, b.parking_note,
                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on,
                 to_jsonb(b.closed_on)#>>'{}' as closed_on, b.lane, b.outcome,
+                (select cp.client_portal_url from v_deal_client_portal cp where cp.deal_id=b.id) as client_portal_url,
                 (select to_jsonb(pc) from v_deal_room_phase_change pc where pc.deal_id=b.id) as phase_change,
                 coalesce((select jsonb_object_agg(ps.phase, to_jsonb(ps.started_on)#>>'{}')
                             from v_deal_room_phase_start ps where ps.deal_id=b.id), '{}'::jsonb) as phase_started_on,
@@ -4252,6 +4254,24 @@ export const TOOLS = {
       // migration 0028; without it the FK to activity_kind rejects the row.
       kind: { type: "string", enum: ["call","email_out","email_in","meeting","tour","text","note","counter_sent","counter_received","loi","lease_signed","task","analysis"] },
       summary: { type: "string" }, detail: { type: "string" },
+      email_context: { type: 'object', additionalProperties: false,
+        required: ['subject', 'conversation_id', 'sender', 'recipients'], properties: {
+          subject: { type: 'string' }, conversation_id: { type: ['string', 'null'] },
+          sender: { type: 'object', additionalProperties: false, required: ['email', 'internal'],
+            properties: { email: { type: 'string' }, name: { type: ['string', 'null'] }, internal: { type: 'boolean' } } },
+          recipients: { type: 'array', items: { type: 'object', additionalProperties: false,
+            required: ['email', 'kind', 'internal'], properties: { email: { type: 'string' },
+              name: { type: ['string', 'null'] }, kind: { enum: ['to', 'cc'] }, internal: { type: 'boolean' } } } },
+        } },
+      email_context: { type: 'object', additionalProperties: false,
+        required: ['subject', 'conversation_id', 'sender', 'recipients'], properties: {
+          subject: { type: 'string' }, conversation_id: { type: ['string', 'null'] },
+          sender: { type: 'object', additionalProperties: false, required: ['email', 'internal'],
+            properties: { email: { type: 'string' }, name: { type: ['string', 'null'] }, internal: { type: 'boolean' } } },
+          recipients: { type: 'array', items: { type: 'object', additionalProperties: false,
+            required: ['email', 'kind', 'internal'], properties: { email: { type: 'string' },
+              name: { type: ['string', 'null'] }, kind: { enum: ['to', 'cc'] }, internal: { type: 'boolean' } } } },
+        } },
       email_source: { type: "object", additionalProperties: false, required: ["sender_email", "mailbox_owner"],
         properties: { sender_email: { type: "string", format: "email", maxLength: 254 },
           mailbox_owner: { type: "string", enum: ["joe", "dell"] } } },
@@ -4331,10 +4351,14 @@ export const TOOLS = {
         for (const vendorId of versions.keys())
           await c.query('update vendor set updated_by=$1 where id=$2',[actor.id,vendorId]);
       }
+      if (args.email_source !== undefined && (args.kind !== 'email_in' ||
+          args.email_source.mailbox_owner !== partnerAuthoritySlugForActor(actor)))
+        throw new ToolError({ error: 'email_source_owner_mismatch' });
       const r = await c.query(
-        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_source)
-         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb) returning id, occurred_at`,
+        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_context, email_source)
+         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb, $9::jsonb) returning id, occurred_at`,
         [args.occurred_at || null, actor.id, args.kind, args.summary, args.detail || null, args.owed || null, s.id,
+          args.email_context ? JSON.stringify(args.email_context) : null,
           args.email_source ? JSON.stringify(args.email_source) : null]);
       await writeEvent(c, actor, "log-activity", s.type, s.id,
         { new: { activity: r.rows[0].id, kind: args.kind }, human_quote: args.human_quote, idempotency_key: args.idempotency_key });
@@ -8957,6 +8981,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "dispatch-spine": "mcp-server/src/dispatch-spine.ts",
   "doc-outcome-cards": "mcp-server/src/tools.js",
   "work-shape": "mcp-server/src/work-shape.ts",
+  "work-queue": "mcp-server/src/work-queue.js",
   "work-request-intake": "mcp-server/src/work-request-intake.js",
   "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
   "fact-observations": "mcp-server/src/fact-observations.ts",
@@ -9051,6 +9076,7 @@ registerTools({
                 b.operating_state, b.parking_reason, b.parking_note,
                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on,
                 to_jsonb(b.closed_on)#>>'{}' as closed_on, b.lane, b.outcome,
+                (select cp.client_portal_url from v_deal_client_portal cp where cp.deal_id=b.id) as client_portal_url,
                 (select to_jsonb(pc) from v_deal_room_phase_change pc where pc.deal_id=b.id) as phase_change,
                 coalesce((select jsonb_object_agg(ps.phase, to_jsonb(ps.started_on)#>>'{}')
                             from v_deal_room_phase_start ps where ps.deal_id=b.id), '{}'::jsonb) as phase_started_on,
@@ -9067,6 +9093,7 @@ registerTools({
                 case when a.account_client_id is null then 'team' else 'national_account' end as workspace_kind,
                 to_jsonb(b.closed_on)#>>'{}' as closed_on,
                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on, b.outcome, b.lane,
+                (select cp.client_portal_url from v_deal_client_portal cp where cp.deal_id=b.id) as client_portal_url,
                 coalesce((select jsonb_object_agg(ps.phase, to_jsonb(ps.started_on)#>>'{}')
                             from v_deal_room_phase_start ps where ps.deal_id=b.id), '{}'::jsonb) as phase_started_on,
                 r.salesforce_id, r.base_version, ce.client_status, ce.client_version, ce.prospect_engagement_status
@@ -10529,6 +10556,7 @@ registerTools({
 registerTools(workShapeTools({ withEnvelope, writeEvent, ToolError }), "work-shape");
 
 // Program 6: sourced additive capture and a safe card only. No lifecycle verbs.
+registerTools(workQueueTools({ withEnvelope, writeEvent, ToolError }), "work-queue");
 registerTools(workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }), "work-request-intake");
 registerTools(workPortfolioTools({ ToolError }), "work-portfolio");
 
@@ -10540,7 +10568,7 @@ registerTools(factObservationTools(), "fact-observations");
 // turns, server-derived attribution, human-watchable. See src/partner-room.js.
 registerTools(partnerRoomTools({ withEnvelope, ToolError }), "partner-room");
 registerTools(agentProfileTools(), "agent-profile");
-registerTools(clientPortalTools(), "client-portal");
+registerTools(clientPortalTools({ withEnvelope, writeEvent, resolveSubject }), "client-portal");
 // DoctorCRE v5 V5-UX-C02/C06: the resource-metering read contract and the
 // one write door the local, credential-less collector uses. See
 // src/resource-observation.v5.ts.

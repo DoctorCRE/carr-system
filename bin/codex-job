@@ -29,6 +29,38 @@ def main():
     repo = args.repo
     if not Path(repo).exists() and re.fullmatch(r'[\w.-]+/[\w.-]+', repo):
         repo = f'https://github.com/{repo}.git'
+    try:
+        cutoff = time.time() - 2 * 24 * 60 * 60
+        retained = [path for path in Path(tempfile.gettempdir()).glob('codex-job-*')
+                    if not path.is_symlink() and (path / 'checkout' / '.git').is_dir()
+                    and max(marker.stat().st_mtime
+                            for marker in (path, path / 'checkout',
+                                           path / 'checkout/.git/index',
+                                           path / 'checkout/.git/logs/HEAD', path / 'result.md')
+                            if marker.exists()) < cutoff]
+        if retained:
+            processes = subprocess.run(['ps', '-ww', '-axo', 'args='], check=True,
+                                       capture_output=True, text=True, timeout=5).stdout
+            active = []
+            for line in processes.splitlines():
+                if not re.search(r'(?:^|[/\s])codex(?:\s|$)', line.partition(' -')[0]):
+                    continue
+                match = re.search(r'(?:^|\s)(?:-C\s+|--cd(?:=|\s+))(.+)', line)
+                if match:
+                    locations = [Path(match[1][:end.start()].strip("\"'"))
+                                 for end in re.finditer(r'\s+(?=-)|$', match[1])]
+                    if not all(directory.is_absolute() for directory in locations):
+                        raise ValueError('Cannot establish relative Codex checkout')
+                    resolved = [directory.resolve(strict=True) for directory in locations
+                                if directory.is_dir()]
+                    if not resolved:
+                        raise ValueError('Cannot establish Codex checkout')
+                    active.extend(resolved)
+            for path in retained:
+                if not any(directory.is_relative_to(path.resolve()) for directory in active):
+                    shutil.rmtree(path)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
     workspace = Path(tempfile.mkdtemp(prefix='codex-job-'))
     clone = workspace / 'checkout'
     status, cloned = 1, False

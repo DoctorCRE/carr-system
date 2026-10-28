@@ -1,5 +1,6 @@
 // Embed doctrine revisions and search their vectors.
 import type { Db } from './verb-contract.ts';
+import { AiBudgetError } from './ai-budget.js';
 
 const DOCTRINE_EMBEDDING_MODEL = '@cf/baai/bge-small-en-v1.5';
 const EMBEDDING_VERSION = `${DOCTRINE_EMBEDDING_MODEL}:cls:chunks-v1`;
@@ -7,10 +8,19 @@ const DIMENSIONS = 384;
 const TIMEOUT_MS = 2000;
 
 /** The Workers AI binding, as far as this module calls it. */
-type EmbeddingAi = { run(model: string, input: { text: string[]; pooling: string }): Promise<unknown> };
+type EmbeddingAi = {
+  run(model: string, input: { text: string[]; pooling: string }): Promise<unknown>;
+  reserveOperation?(textCount: number): Promise<Pick<EmbeddingAi, 'run'>>;
+};
 /** The database client tools.js hands doctrine verbs: it carries the AI binding and its transaction state. */
 type DoctrineDb = Db & { ai?: EmbeddingAi; inTransaction?: boolean };
 type Vector = number[];
+
+function embeddingFailure(ai: EmbeddingAi | undefined, error: unknown) {
+  return error instanceof AiBudgetError
+    ? { reason: error.code, hint: error.message }
+    : { reason: ai?.run ? 'embedding_failed' : 'binding_unavailable' };
+}
 
 // Conservative UTF-8 bounds stay inside the 512-token context, including special tokens.
 function embeddingChunks(text: string) {
@@ -49,9 +59,10 @@ async function doctrineEmbeddings(ai: EmbeddingAi | undefined, texts: string[]):
 }
 
 async function embedChunks(ai: EmbeddingAi | undefined, texts: string[]) {
+  const operation = ai?.reserveOperation ? await ai.reserveOperation(texts.length) : ai;
   const vectors: Vector[] = [];
   for (let offset = 0; offset < texts.length; offset += 16)
-    vectors.push(...await doctrineEmbeddings(ai, texts.slice(offset, offset + 16)));
+    vectors.push(...await doctrineEmbeddings(operation, texts.slice(offset, offset + 16)));
   return vectors;
 }
 
@@ -62,9 +73,9 @@ export async function searchDoctrineWithEmbeddings(c: DoctrineDb,
   let vectors: Vector[];
   try {
     vectors = await embedChunks(c.ai, embeddingChunks(args.q));
-  } catch {
+  } catch (error) {
     return { semantic: { status: 'unavailable', model: DOCTRINE_EMBEDDING_MODEL, pooling: 'cls',
-      reason: c.ai?.run ? 'embedding_failed' : 'binding_unavailable' } };
+      ...embeddingFailure(c.ai, error) } };
   }
   if (c.inTransaction) await c.query('savepoint doctrine_embedding_search');
   try {
@@ -94,9 +105,8 @@ export async function embedDoctrineRevisions(c: DoctrineDb, revisions: { revisio
   let vectors: Vector[];
   try {
     vectors = await embedChunks(c.ai, chunks.map(chunk => chunk.text));
-  } catch {
-    return { status: 'unavailable', embedded: 0,
-      reason: c.ai?.run ? 'embedding_failed' : 'binding_unavailable' };
+  } catch (error) {
+    return { status: 'unavailable', embedded: 0, ...embeddingFailure(c.ai, error) };
   }
   await c.query('savepoint doctrine_embedding_write');
   try {

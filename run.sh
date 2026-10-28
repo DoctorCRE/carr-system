@@ -12,6 +12,7 @@
 #   ./run.sh key-recovery-test — prove the OFFLINE PAPER key copy alone can recover a backup
 #   ./run.sh call-mode     — inspect or operate the local Quill Call Mode bridge
 #   ./run.sh local-db-ci   — run migration or strict CI on disposable local PG
+#   ./run.sh portal-parity — compare a client-portal candidate with a reference site, row by row
 # Drive-backed legacy inputs are recovery-only. Scoped commands parse their own
 # explicit --recovery --reason WHY [--vault PATH] boundary and erase ambient
 # CARR_VAULT in normal mode.
@@ -98,6 +99,7 @@ case "${1:-}" in
   brief-pack)   brief_pack "$@" ;;
   restore-rehearse) restore_rehearse "$@" ;;
   key-recovery-test) shift; key_recovery_test "$@" ;;
+  portal-parity) shift; node "$REPO/mcp-server/portal-parity/cli.mjs" "$@" ;;
   call)         call_verb "$@" ;;
   call-mode)    shift; python3 "$REPO/tools/dictation-rig/bin/call-mode.py" "$@" ;;
   # Normal retrieval is canonical-store only and fail-closed. The reader itself
@@ -116,6 +118,9 @@ case "${1:-}" in
   costs)        shift; PYTHONPATH="$REPO/tools${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import system_costs,sys; sys.exit(system_costs.main(sys.argv[1:]))' "$@" ;;
   config)       shift; python3 "$REPO/ops/config-as-code.py" "$@" ;;
   lint)         shift; python3 "$REPO/tools/writing-lint.py" "$@" ;;
+  # WR561: the headless Friday social batch. plan and check are read-only;
+  # submit is the only Blotato writer and schedules future review drafts only.
+  social-batch) shift; python3 "$REPO/tools/social_batch.py" "$@" ;;
   migrate)      shift; "$REPO/.venv/bin/python" "$REPO/tools/migrate.py" "$@" ;;
   export)       shift; "$REPO/.venv/bin/python" -m exporters.run_exports "$@" ;;
   # `worktree` (2026-08-10): an isolated checkout in one command. Two sessions
@@ -150,6 +155,7 @@ case "${1:-}" in
       "health [--act] [--recovery --reason WHY [--vault PATH]]|" \
       "config [check|pull|install] [--apply]|" \
       "lint <file> [--surface email|social|proposal|web]|" \
+      "social-batch plan|check <drafts.json>|submit <drafts.json>|render <html> <png> --size WxH|" \
       "restore-rehearse --backup-run-id RUN-or-latest [--preflight] [--verify-only] [--identity PATH] [--keep-branch]|" \
       "key-recovery-test [--backup-run-id RUN-or-latest]|" \
       "migrate [--apply] [--yes]|" \
@@ -157,6 +163,7 @@ case "${1:-}" in
       "call [--branch <name>] <verb> '<json args>'|" \
       "call-mode [serve|state|start|stop]|" \
       "local-db-ci [--class migration|strict] [--port N]|" \
+      "portal-parity --stage N [--rows <ids>] (see --help)|" \
       "worktree <name> [--from B]|--list|--remove <name|path>"
     printf '\n'
     exit 2 ;;

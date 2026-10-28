@@ -59,6 +59,8 @@ def file_attachment(deal: str, meta: dict, data: bytes, *, message_id: str, clie
         reply = carr('attach-deal-file', args)
     except Exception as error:  # noqa: BLE001 - the object stays archived; a rerun records it
         return {'status': 'verb_failed', 'sha256': sha, 'error': type(error).__name__}
+    if not isinstance(reply, dict) or reply.get('ok') is not True or not reply.get('attachment_id'):
+        return {'status': 'verb_failed', 'sha256': sha}
     return {'status': 'existing' if reply.get('existing') else 'stored', 'sha256': sha,
             'attachment_id': reply.get('attachment_id')}
 

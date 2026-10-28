@@ -39,7 +39,7 @@ retry replays the same key. A run with any write, model or cleanup failure
 reports failed and does not advance its watermark.
 
 Each decoded email carries its observed folder paths (Inbox, Sent Items, user
-subfolders such as Active Deals/<deal>) as `folders`; nothing is written from them yet.
+subfolders such as Active Deals/<deal>) as `folders`; matched client attachments use them to resolve one deal.
 Attachment metadata travels as `attachments` with id, name, size, content_type and
 nullable content_id. Cache paths and bytes stay in the private decoder output.
 Only mail naming the configured account as sender or recipient enters intake;
@@ -66,6 +66,8 @@ name, address or body reaches the status line, the launchd log or the run row.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 import errno
@@ -89,7 +91,7 @@ REFRESH_LIST = 'needs-refresh.json'
 STATE = 'state.json'
 WORK_PREFIX = 'work-'
 WINDOW = (time(7, 0), time(19, 30))
-WRITE_VERBS = frozenset({'log-activity', 'set-next-action', 'publish-board-snapshot', 'propose-email-lead'})
+WRITE_VERBS = frozenset({'log-activity', 'set-next-action', 'publish-board-snapshot', 'propose-email-lead', 'attach-deal-file'})
 RECORD_REF = re.compile(r'^[CLV]-')
 EXIT = {'succeeded': 0, 'skipped': 78, 'failed': 1}
 
@@ -182,6 +184,8 @@ class Ports:
     decode: Callable[[Path, Path, Path], None]
     now: Callable[[], datetime]
     lead_intent: Callable[[dict, date], dict] | None = None
+    put_object: Callable[[str, str, bytes], dict] | None = None
+    copy_attachments: Callable[[Path, list[str]], None] | None = None
 
 
 @dataclass
@@ -238,6 +242,19 @@ def _internal(address: str, domain: str) -> bool:
 
 def _addresses(text: str | None) -> list[str]:
     return [a.lower() for a in re.findall(r'[\w.+\'-]+@[\w-]+(?:\.[\w-]+)+', text or '')]
+
+
+def email_context(mail: dict, domain: str) -> dict:
+    recipients = []
+    for field, kind in (('recipients', 'to'), ('cc', 'cc')):
+        for address in dict.fromkeys(_addresses(mail.get(field))):
+            recipients.append({'email': address, 'name': None, 'kind': kind,
+                               'internal': _internal(address, domain)})
+    return {'subject': mail.get('subject') or '',
+            'conversation_id': mail.get('conversation_id') or None,
+            'sender': {'email': mail['sender'].lower(), 'name': mail.get('sender_name'),
+                       'internal': _internal(mail['sender'], domain)},
+            'recipients': recipients}
 
 
 AUTOMATED_LOCAL = re.compile(r'^(?:no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounces?)(?:[-.+].*)?$')
@@ -345,17 +362,20 @@ def _load(db: Path, account: str | None = None) -> tuple[dict, list[dict], list[
         # Decoders built before WR-000502 export no local_keys column.
         columns = {r['name'] for r in con.execute('PRAGMA table_info(messages)')}
         local_keys = 'local_keys' if 'local_keys' in columns else 'NULL AS local_keys'
+        context_columns = ', '.join(name if name in columns else f'NULL AS {name}'
+                                    for name in ('conversation_id', 'cc'))
         mails = [dict(r) for r in con.execute(
             'SELECT id, sender, sender_name, recipients, subject, body, preview, body_kind, sent_unix, copy_key, '
-            f'{local_keys} FROM messages WHERE sent_unix IS NOT NULL AND sender IS NOT NULL')]
+            f'{local_keys}, {context_columns} FROM messages WHERE sent_unix IS NOT NULL AND sender IS NOT NULL')]
         mail_count = len(mails)
         if account is not None:
             account = account.lower()
             mails = [m for m in mails if account == m['sender'].lower()
-                     or account in _addresses(m['recipients'])]
+                     or account in _addresses(m['recipients']) or account in _addresses(m.get('cc'))]
         meta['mail_other_accounts'] = mail_count - len(mails)
         for m in mails:
             message_id = m.pop('id')
+            m['row_ids'] = [message_id]
             m['folders'] = paths.get(message_id, [])
             m['attachments'] = attachments.get(message_id, [])
         events = [dict(r) for r in con.execute('SELECT * FROM events')]
@@ -391,6 +411,7 @@ def _remove(work: Path) -> None:
         raise CleanupError('private work folder left behind')
 
 
+@contextmanager
 def _decode(home: Path, out: Path, decode: Callable[[Path, Path, Path], None]):
     work = Path(tempfile.mkdtemp(prefix=WORK_PREFIX, dir=out))
     try:
@@ -399,7 +420,7 @@ def _decode(home: Path, out: Path, decode: Callable[[Path, Path, Path], None]):
         files = work / 'Files'
         db = work / 'store.db'
         decode(copy, files, db)
-        return _load(db, account=load_settings(home).account)
+        yield (*_load(db, account=load_settings(home).account), db, files)
     finally:
         _remove(work)
 
@@ -419,6 +440,7 @@ def _best_copies(mails: list[dict]) -> list[dict]:
         last = out[-1] if out else None
         if last and last['ck'] == m['ck'] and m['sent_unix'] - last['first_sent'] <= COPY_WINDOW:
             m['local_keys'] = last['local_keys'] = sorted(set(last['local_keys']) | set(m['local_keys']))
+            m['row_ids'] = last['row_ids'] = sorted(set(last.get('row_ids', [])) | set(m.get('row_ids', [])))
             m['folders'] = last['folders'] = sorted(set(last.get('folders', [])) | set(m.get('folders', [])))
             attachments = {a['id']: a for a in last.get('attachments', []) + m.get('attachments', [])}
             m['attachments'] = last['attachments'] = [attachments[k] for k in sorted(attachments)]
@@ -725,6 +747,7 @@ class Run:
                 'idempotency_key': self.activity_key(ref, m['ident']), 'ref': ref, 'kind': kind,
                 'summary': f'{label}: {m["subject"] or "(no subject)"}', 'detail': m['text'],
                 'occurred_at': _iso(m['sent_unix']),
+                **({'email_context': email_context(m, self.settings.internal_domain)} if not outbound else {}),
                 **({'email_source': {'sender_email': m['sender'].lower(), 'mailbox_owner': self.settings.owner}}
                    if not outbound else {})}, who, '' if m['full'] else 'preview_only') for ref in refs]
             completed.extend(ref for ref, ok in zip(refs, results) if ok)
@@ -736,6 +759,112 @@ class Run:
                 done.setdefault(m['ck'], []).append(m['sent_unix'])
             if not m['full']:
                 self.counts['preview_only'] += 1
+
+    def prepare_attachments(self, mails: list[dict], matcher: Matcher, db: Path, files: Path) -> list[tuple[str, dict, dict, bytes]]:
+        from lib import outlook_attachments as att
+
+        prepared: list[tuple[str, dict, dict, bytes]] = []
+        done = self.state.setdefault('attachments_done', {})
+        self.state['attachments_pending'] = False
+        uncached = self.state.setdefault('attachments_uncached', {})
+        cutoff = (self.now - UNRESOLVED_DAYS).timestamp()
+        expired = [source for source, sent in uncached.items() if sent < cutoff]
+        if expired:
+            self.counts['attachments_uncached_refused'] = len(expired)
+            for source in expired:
+                del uncached[source]
+        candidates = []
+        for mail in mails:
+            if not mail.get('attachments') or not (self.now - UNRESOLVED_DAYS).timestamp() <= mail['sent_unix'] <= self.now.timestamp() + 300:
+                continue
+            parties = (_addresses(mail['recipients']) if _internal(mail['sender'], self.settings.internal_domain)
+                       else [mail['sender']])
+            refs = {matcher.ref(a) for a in parties if not _internal(a, self.settings.internal_domain)} - {None}
+            names = {parts[i + 1] for path in mail.get('folders', [])
+                     for parts in [path.split('/')] for i, part in enumerate(parts[:-1])
+                     if part.casefold() == 'active deals'}
+            if not refs:
+                continue
+            if len(refs) != 1 or len(names) != 1:
+                self.counts['attachments_unresolved'] = self.counts.get('attachments_unresolved', 0) + 1
+                continue
+            if all(f"{mail['ident']}/{a['id']}" in done for a in mail['attachments']):
+                continue
+            candidates.append((mail, next(iter(refs)), next(iter(names))))
+        if not candidates:
+            return prepared
+        try:
+            deals = self.ports.carr('read-deal-reconciliation', {'all': True})['deals']
+            selected = {}
+            for mail, ref, name in candidates:
+                matches = [d for d in deals if d['client_ref'] == ref and d['name'].casefold() == name.casefold()]
+                if len(matches) != 1:
+                    self.counts['attachments_unresolved'] = self.counts.get('attachments_unresolved', 0) + 1
+                    continue
+                for row_id in mail['row_ids']:
+                    selected[row_id] = (mail, matches[0])
+            pending_ids = {a['id'] for mail, _ in selected.values() for a in mail['attachments']
+                           if f"{mail['ident']}/{a['id']}" not in done}
+            rows = [a for a in att.rows(db) if a['message'] in selected and a['attachment'] in pending_ids]
+            for row in rows:
+                if not row['path']:
+                    mail, _ = selected[row['message']]
+                    uncached[f"{mail['ident']}/{row['attachment']}"] = mail['sent_unix']
+                    self.counts['attachments_uncached'] = self.counts.get('attachments_uncached', 0) + 1
+            paths = sorted({a['path'] for a in rows if a['path'] and att.CACHE_PATH.fullmatch(a['path'])
+                            and not any(ord(c) < 32 or ord(c) == 127 for c in a['path'])})
+            if paths:
+                if self.ports.copy_attachments:
+                    self.ports.copy_attachments(files, paths)
+                else:
+                    copied = subprocess.run([str(self.settings.copy_helper), '--attachments'],
+                        input=''.join(path + '\n' for path in paths), cwd=files.parent,
+                        capture_output=True, text=True, timeout=900)
+                    if copied.returncode:
+                        raise OSError('attachment copy failed')
+            pending_ids -= {a['attachment'] for a in rows if not a['path']}
+            for result in att.extract(db, files, files.parent / 'extracted', messages=set(selected), attachments=pending_ids):
+                mail, deal = selected[result['message']]
+                source = f"{mail['ident']}/{result['attachment']}"
+                if source in done:
+                    continue
+                if result['status'] == 'not_cached':
+                    uncached[source] = mail['sent_unix']
+                    self.counts['attachments_uncached'] = self.counts.get('attachments_uncached', 0) + 1
+                    continue
+                uncached.pop(source, None)
+                if result['status'] != 'stored':
+                    self.counts['attachments_' + result['status']] = self.counts.get('attachments_' + result['status'], 0) + 1
+                if result['status'] in ('type_refused', 'too_large', 'empty'):
+                    done[source] = int(self.now.timestamp())
+                    continue
+                if result['status'] != 'stored':
+                    self.state['attachments_pending'] = True
+                    continue
+                prepared.append((mail['ident'], deal, result, Path(result['stored']).read_bytes()))
+        except (CarrError, OSError, KeyError, sqlite3.Error, subprocess.TimeoutExpired):
+            self.state['attachments_pending'] = True
+            self.counts['attachments_failed'] = self.counts.get('attachments_failed', 0) + 1
+        return prepared
+
+    def file_attachments(self, prepared: list[tuple[str, dict, dict, bytes]]) -> None:
+        from lib import outlook_deal_files as filing
+
+        done = self.state.setdefault('attachments_done', {})
+        put = self.ports.put_object or filing.r2_put_object()
+        for ident, deal, result, data in prepared:
+            reply = filing.file_attachment(deal['id'], {'id': result['attachment'], 'name': result['name']},
+                data, message_id=ident, client_ref=f"{deal['client_ref']}.{deal['id']}",
+                put_object=put, carr=self.ports.carr)
+            status = reply['status']
+            self.counts['attachments_' + status] = self.counts.get('attachments_' + status, 0) + 1
+            if status in ('stored', 'existing'):
+                done[f"{ident}/{result['attachment']}"] = int(self.now.timestamp())
+            else:
+                self.state['attachments_pending'] = True
+        cutoff = int((self.now - UNRESOLVED_DAYS).timestamp())
+        self.state['attachments_done'] = {source: at for source, at in done.items() if at >= cutoff}
+        _save(self.out, self.state)
 
     def leads(self) -> None:
         """Queue each unknown inbound sender with business intent once for a partner's review."""
@@ -1160,7 +1289,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     hydration_due = bool(state.get('pending_full')) and now.timestamp() >= state.get('hydration_check_at', 0)
     review_due = 'calendar_review_at' not in state or (state['calendar_review_at'] is not None
                                                       and now.timestamp() >= state['calendar_review_at'])
-    if 'mail_other_accounts' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and not state.get('steps') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY:
+    if 'mail_other_accounts' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and not state.get('steps') and state.get('attachment_policy') == 1 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY:
         if state.get('pending_full'):
             Run(ports, state, now, out, settings).full_text([])
             _refresh_list(out, state['pending_full'])
@@ -1169,11 +1298,15 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
                   'mail_other_accounts': state['mail_other_accounts']}
         return Outcome('succeeded', 'store_unchanged', counts)
     try:
-        meta, mails, events = _decode(home, out, ports.decode)
+        with _decode(home, out, ports.decode) as (meta, mails, events, db, files):
+            return _process(out, ports, settings, state, signature, now, matcher, meta, mails, events, db, files)
     except FullDiskAccessRequired as error:
         return Outcome('failed', str(error))
     except (DecodeError, sqlite3.Error, OSError):
         return Outcome('failed', 'decode_failed')
+
+
+def _process(out, ports, settings, state, signature, now, matcher, meta, mails, events, db, files):
     found = meta.get('blocks_found') or 0
     if not found or (meta.get('blocks_verified') or 0) / found < VERIFIED_MIN:
         return Outcome('failed', 'store_verification_low')
@@ -1187,6 +1320,10 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     work = Run(ports, state, now, out, settings)
     work.counts['mail_other_accounts'] = meta['mail_other_accounts']
     try:
+        matcher = matcher or Matcher(ports.contacts(), settings.internal_domain)
+        prepared = work.prepare_attachments(mails, matcher, db, files)
+        _remove(files.parent)
+        work.file_attachments(prepared)
         _quarantine_calendar_requests(state)
         _save(out, state)
         for request in list(state.get('requests', {}).values()):
@@ -1197,7 +1334,6 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
                     request.update(disposition='blocked', retry_at=None,
                                    error_code='legacy_action_guard_required')
                 work.write(request['verb'], args, 'pending write')
-        matcher = matcher or Matcher(ports.contacts(), settings.internal_domain)
         work.emails(mails, matcher, since)
         work.leads()
         work.full_text(mails)
@@ -1232,11 +1368,12 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
                                                ('requests_blocked', 'request_blocked'),
                                                ('writes_deferred', 'writes_deferred'),
                                                ('model_failed', 'model_failed')) if work.counts[count]),
+                  'attachments_pending' if state.get('attachments_pending') else
                   'steps_pending' if state.get('steps') else None)
     if failed:
         _save(out, state)
         return Outcome('failed', failed, counts)
-    state.update(store=signature, high_water=int(now.timestamp()), contact_map=matcher.fingerprint(),
+    state.update(store=signature, high_water=int(now.timestamp()), contact_map=matcher.fingerprint(), attachment_policy=1,
                  mail_other_accounts=meta['mail_other_accounts'])
     _prune(state, now)
     _save(out, state)

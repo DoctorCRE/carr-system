@@ -58,7 +58,7 @@ async function fixture(extraOptions = {}) {
         const values = new Map();
         let queue = Promise.resolve();
         const storage = { values, get: async k => structuredClone(values.get(k)), put: async (k, v) => values.set(k, structuredClone(v)),
-          delete: async k => values.delete(k), deleteAll: async () => values.clear(), setAlarm: async () => {},
+          delete: async k => values.delete(k), deleteAll: async () => values.clear(), getAlarm: async () => null, setAlarm: async () => {},
           transaction: fn => { const result = queue.then(() => fn(storage)); queue = result.catch(() => {}); return result; } };
         objects.set(id, new OAuthConsentState({ storage }));
       }
