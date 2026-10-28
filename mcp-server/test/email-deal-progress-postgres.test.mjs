@@ -1550,6 +1550,21 @@ test('failed delivery requires a reason and is recorded once without an automati
   assert.deepEqual((await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader')).drafts, []);
 });
 
+test('the owner can resubmit a reply aborted before dispatch', async () => {
+  await c.query('delete from email_proposal');
+  await c.query("insert into actor(slug,kind,display_name,email) values('dell','human','Synthetic partner','partner@example.com') on conflict(slug) do update set email=excluded.email,active=true");
+  const proposal = await draftFor();
+  const first = await submitDraft(proposal, { cc: ['partner@example.com'] });
+  await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+    base_version: first.version, status: 'failed', sha256: first.sha256, reason: 'aborted_before_dispatch' }, machineFor('joe'), 'carr_writer');
+  const again = await submitDraft(proposal, { base_version: 3, cc: ['partner@example.com'] });
+  assert.equal(again.version, 4);
+  assert.equal(again.sha256, first.sha256);
+  const outbox = await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader');
+  assert.equal(outbox.drafts[0].version, 4);
+  assert.equal(outbox.drafts[0].sha256, first.sha256);
+});
+
 test('reply draft provenance cannot be forged or inferred from legacy display names', async () => {
   await c.query('delete from email_proposal');
   await refuses(command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
