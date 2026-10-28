@@ -1395,6 +1395,15 @@ class IntakeTest(unittest.TestCase):
             event('name-soon', timedelta(days=2), attendees=[('Rae Named', 'rae@example.test')])])
         self.assertEqual(self.fake.writes(), [])
 
+    def test_distinct_decoder_messages_preserve_each_subject(self):
+        subjects = ['Suite review', 'Re: Suite review', 'Fw: Suite review', 'Fwd: Suite review']
+        mails = [mail('pat@example.test', -timedelta(hours=2) + timedelta(seconds=i * 30),
+                      subject=subject, copy_key='normalized-suite-review', local_keys=str(9100 + i))
+                 for i, subject in enumerate(subjects)]
+        self.run_intake(mails)
+        self.assertEqual([args['email_context']['subject']
+                          for _, args in self.fake.writes('log-activity')], subjects)
+
     def test_duplicate_copies_collapse_and_the_full_body_wins(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1), body='the whole', kind='preview',
                               copy_key='k1'),
