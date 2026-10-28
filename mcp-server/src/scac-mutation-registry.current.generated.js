@@ -176,6 +176,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "adopt-rule": {
+    "ingress_key": "mcp-tool:adopt-rule",
+    "source_locator": "mcp-server/src/org-conventions.js",
+    "schema_digest": "0707691984dd5b505e6ac3d4b99a8e08b70d1a772c44cca38c3e940629c5b516",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
+    "authority_only": true,
+    "delegates_to": []
+  },
   "advance-leads": {
     "ingress_key": "mcp-tool:advance-leads",
     "source_locator": "mcp-server/src/lead-automation.js",
@@ -3007,6 +3017,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": true,
     "delegates_to": []
   },
+  "rule-cards": {
+    "ingress_key": "mcp-tool:rule-cards",
+    "source_locator": "mcp-server/src/org-conventions.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "run-migration-shadow": {
     "ingress_key": "mcp-tool:run-migration-shadow",
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
@@ -3771,6 +3791,21 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.register_client_portal(p_deal_id uuid, p_slug text, p_password text)",
       "volatility": "v",
       "ingress_key": "db-function-acl:ops.register_client_portal(p_deal_id uuid, p_slug text, p_password text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.adopt_rule(p_section_id uuid, p_base_version bigint, p_idempotency_key text, p_reason text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.adopt_rule(p_section_id uuid, p_base_version bigint, p_idempotency_key text, p_reason text):carr_authority:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true

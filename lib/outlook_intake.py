@@ -38,6 +38,13 @@ action stays pending in the state file until the verb acknowledges it and the
 retry replays the same key. A run with any write, model or cleanup failure
 reports failed and does not advance its watermark.
 
+Follow-up flags (flag_status, flag_due_unix, flag_completed_unix) become to-dos only on emails
+already filed to a deal (the server-confirmed filing email-router-queue reports): flagged files a
+"Follow up flagged email" deal item with the flag's due day, completed completes it, and un-flagging
+drops it with the source recorded. Due days are the UTC calendar day of the decoder's midnight-UTC
+stamp, never local time. An unknown or disagreeing flag is no change; one with no deal is counted
+(flags_unmatched, flags_unfiled), not filed. A due-date change after filing is not synced.
+
 Each decoded email carries its observed folder paths (Inbox, Sent Items, user
 subfolders such as Active Deals/<deal>) as `folders`; matched client attachments use them to resolve one deal.
 Attachment metadata travels as `attachments` with id, name, size, content_type and
@@ -91,7 +98,9 @@ REFRESH_LIST = 'needs-refresh.json'
 STATE = 'state.json'
 WORK_PREFIX = 'work-'
 WINDOW = (time(7, 0), time(19, 30))
-WRITE_VERBS = frozenset({'log-activity', 'set-next-action', 'publish-board-snapshot', 'propose-email-lead', 'attach-deal-file'})
+WRITE_VERBS = frozenset({'log-activity', 'set-next-action', 'publish-board-snapshot', 'propose-email-lead', 'attach-deal-file',
+                         'record-deal-item', 'complete-deal-item', 'drop-action'})
+FLAG_ITEM_TITLE = 'Follow up flagged email'
 RECORD_REF = re.compile(r'^[CLV]-')
 EXIT = {'succeeded': 0, 'skipped': 78, 'failed': 1}
 
@@ -126,11 +135,12 @@ def resolve_store(home: Path) -> Path:
     return store
 
 
-ERROR_CODES = frozenset({'timeout', 'auth_refused', 'key_reuse', 'transport_oversized',
+CLOSED_ELSEWHERE = frozenset({'action_not_open', 'deal_item_not_open'})
+ERROR_CODES = CLOSED_ELSEWHERE | frozenset({'timeout', 'auth_refused', 'key_reuse', 'transport_oversized',
                          'no_acknowledgement', 'reply_unreadable', 'transport_error',
                          'invalid_request', 'subject_unresolved', 'database_refused',
                          'setup_failed', 'contacts_empty', 'contacts_read_failed', 'next_action_conflict',
-                         'legacy_action_guard_required', 'agenda_version_conflict'})
+                         'legacy_action_guard_required', 'agenda_version_conflict', 'version_conflict'})
 BLOCKED_ERRORS = frozenset({'key_reuse', 'transport_oversized', 'invalid_request', 'subject_unresolved'})
 
 
@@ -138,7 +148,7 @@ def _reply_error(reply: dict) -> str:
     error = reply.get('error')
     if error == 'board_version_conflict':
         return 'agenda_version_conflict'
-    if error in ('key_reuse', 'next_action_conflict'):
+    if error in ('key_reuse', 'next_action_conflict', 'version_conflict', *CLOSED_ELSEWHERE):
         return error
     if error in ('unauthorized', 'forbidden'):
         return 'auth_refused'
@@ -374,7 +384,8 @@ def _load(db: Path, account: str | None = None) -> tuple[dict, list[dict], list[
         columns = {r['name'] for r in con.execute('PRAGMA table_info(messages)')}
         local_keys = 'local_keys' if 'local_keys' in columns else 'NULL AS local_keys'
         context_columns = ', '.join(name if name in columns else f'NULL AS {name}'
-                                    for name in ('conversation_id', 'cc'))
+                                    for name in ('conversation_id', 'cc', 'flag_status', 'flag_due_unix',
+                                                 'flag_completed_unix'))
         mails = [dict(r) for r in con.execute(
             'SELECT id, sender, sender_name, recipients, subject, body, preview, body_kind, sent_unix, copy_key, '
             f'{local_keys}, {context_columns} FROM messages')]
@@ -473,6 +484,24 @@ def _decode(home: Path, out: Path, decode: Callable[[Path, Path, Path], None]):
         _remove(work)
 
 
+def _flag_of(m: dict) -> tuple:
+    return m.get('flag_status'), m.get('flag_due_unix'), m.get('flag_completed_unix')
+
+
+def _flag_day(unix: int | None) -> str | None:
+    """A flag's due or completion day: the UTC calendar day of its midnight-UTC stamp, never local time."""
+    if not isinstance(unix, int) or not 946_684_800 <= unix < 4_102_444_800:  # 2000..2100; else no date
+        return None
+    return datetime.fromtimestamp(unix, timezone.utc).date().isoformat()
+
+
+def _parties(m: dict, domain: str) -> list[tuple[str, str | None]]:
+    """The outside addresses an email is filed against: its recipients if we sent it, else its sender."""
+    if _internal(m['sender'], domain):
+        return [(a, None) for a in _addresses(m['recipients']) if not _internal(a, domain)]
+    return [(m['sender'].lower(), _clean_name(m['sender_name'], m['subject']))]
+
+
 def _best_copies(mails: list[dict]) -> list[dict]:
     """One row per email: hxprobe collapses copies; any it left are joined here, full body first."""
     rows = []
@@ -488,6 +517,8 @@ def _best_copies(mails: list[dict]) -> list[dict]:
         last = out[-1] if out else None
         if last and last['ck'] == m['ck'] and m['sent_unix'] - last['first_sent'] <= COPY_WINDOW:
             m['local_keys'] = last['local_keys'] = sorted(set(last['local_keys']) | set(m['local_keys']))
+            if _flag_of(last) != _flag_of(m):  # copies that disagree on the flag leave it unknown
+                m['flag_status'] = last['flag_status'] = None
             m['row_ids'] = last['row_ids'] = sorted(set(last.get('row_ids', [])) | set(m.get('row_ids', [])))
             m['folders'] = last['folders'] = sorted(set(last.get('folders', [])) | set(m.get('folders', [])))
             attachments = {a['id']: a for a in last.get('attachments', []) + m.get('attachments', [])}
@@ -624,24 +655,31 @@ class Run:
                                       'model_failed', 'steps_pending', 'hydration_expired', 'writes_failed',
                                       'writes_deferred', 'requests_blocked', 'skipped_automated',
                                       'lead_proposed', 'lead_already_queued', 'lead_known_party',
-                                      'lead_not_business', 'lead_refused')}
+                                      'lead_not_business', 'lead_refused', 'flags_unfiled', 'flags_unmatched',
+                                      'flags_unknown', 'flags_untracked', 'flags_reflagged', 'flags_filed',
+                                      'flags_completed', 'flags_cleared', 'flags_closed_elsewhere')}
+        self.deals: dict[str, str] = {}
         self.written: list[tuple[str, str, str, str]] = []
         self.unmatched: set[tuple[str, str, str]] = set()
         self.balls: dict[str, tuple[str, int, int]] = {}
         self.attempted: set[str] = set()
         self.lead_candidates: list[tuple[dict, dict]] = []
 
-    def activity_key(self, ref: str, source: str) -> str:
-        legacy = key('log-activity', ref, source)
+    def owner_key(self, verb: str, ref: str, source: str) -> str:
+        legacy = key(verb, ref, source)
         if legacy in self.state.get('requests', {}):
             return legacy
-        return key('log-activity', ref, f'{self.settings.owner}|{source}')
+        return key(verb, ref, f'{self.settings.owner}|{source}')
+
+    def activity_key(self, ref: str, source: str) -> str:
+        return self.owner_key('log-activity', ref, source)
 
     def write(self, verb: str, args: dict, who: str, note: str = '') -> bool:
         requests = self.state.setdefault('requests', {})
         request = requests.setdefault(args['idempotency_key'], {
             'verb': verb, 'payload': json.dumps(args), 'acknowledged': False,
-            'created_at': int(self.now.timestamp()), 'source_kind': 'mail'})
+            'created_at': int(self.now.timestamp()), 'source_kind': 'mail',
+            **({'key_owner': self.settings.owner} if verb == 'set-next-action' else {})})
         _save(self.out, self.state)
         if not request['acknowledged']:
             if args['idempotency_key'] in self.attempted:
@@ -670,13 +708,20 @@ class Run:
                     _save(self.out, self.state)
                     self.written.append((who, args.get('ref', 'claim card'), verb, 'refused'))
                     return True
+                if verb in ('complete-deal-item', 'drop-action') and error.code in CLOSED_ELSEWHERE:
+                    request.update(acknowledged=True, disposition='closed_elsewhere', retry_at=None,
+                                   error_code=None)
+                    self.counts['flags_closed_elsewhere'] += 1
+                    _save(self.out, self.state)
+                    return True
                 if verb == 'set-next-action' and error.code == 'next_action_conflict':
                     request.update(acknowledged=True, disposition='superseded', retry_at=None,
                                    error_code=None)
                     self.counts['balls_kept'] += 1
                     _save(self.out, self.state)
                     return True
-                blocked = error.code in BLOCKED_ERRORS
+                blocked = error.code in BLOCKED_ERRORS or (
+                    verb in ('complete-deal-item', 'drop-action') and error.code == 'version_conflict')
                 request.update(error_code=error.code, disposition='blocked' if blocked else 'retry',
                                retry_at=None if blocked else int(self.now.timestamp()) +
                                min(1800, 60 * 2 ** min(request['attempts'] - 1, 5)))
@@ -685,6 +730,8 @@ class Run:
                 return False
             if verb == 'set-next-action':
                 request['next_action_id'] = reply.get('next_action_id')
+            if verb == 'record-deal-item':
+                request['item_id'] = (reply.get('item') or {}).get('id')
             if verb == 'propose-email-lead':
                 request['outcome'] = 'proposed' if reply.get('proposed') is True else str(reply.get('reason'))
             if verb == 'log-activity':
@@ -720,7 +767,7 @@ class Run:
             self.written.append((who, ref, 'set-next-action', 'kept newer ball'))
             return True
         note = 'no prior ball' if existing is None else 'replaced ball'
-        args = {'idempotency_key': key('set-next-action', ref, source), 'ref': ref,
+        args = {'idempotency_key': self.owner_key('set-next-action', ref, source), 'ref': ref,
                 'description': description, 'due_on': due_on, 'owner': self.settings.owner,
                 'expected_action': {k: action[k] for k in ('id', 'version')} if action else None}
         if not self.write('set-next-action', args, who, note):
@@ -754,8 +801,7 @@ class Run:
             if m['local_keys']:
                 keys[m['ident']] = sorted(set(keys.get(m['ident'], [])) | set(m['local_keys']))
             outbound = _internal(m['sender'], self.settings.internal_domain)
-            parties = ([(a, None) for a in _addresses(m['recipients']) if not _internal(a, self.settings.internal_domain)] if outbound
-                       else [(m['sender'].lower(), _clean_name(m['sender_name'], m['subject']))])
+            parties = _parties(m, self.settings.internal_domain)
             if not parties:
                 done.setdefault(m['ck'], []).append(m['sent_unix'])
                 continue
@@ -813,6 +859,89 @@ class Run:
             if not m['full']:
                 self.counts['preview_only'] += 1
 
+    # follow-up flags
+
+    def observe_flags(self, mails: list[dict], matcher: Matcher) -> None:
+        """Note each email's decoded flag against the activities already filed for it.
+
+        Only flagged, complete and none are understood (n=4 labelled samples); any other value, or a
+        copy disagreement, is no change. 'none' matters only for an email already tracked."""
+        flags = self.state.setdefault('flags', {})
+        for m in mails:
+            status = m.get('flag_status')
+            if status is None:
+                continue
+            if status not in ('flagged', 'complete', 'none'):
+                self.counts['flags_unknown'] += 1
+                continue
+            if status == 'none' and m['ident'] not in flags:
+                continue
+            seen = flags.get(m['ident'])
+            if seen is None:  # the activity ids are only readable while intake still remembers the logging
+                activities = sorted({
+                    self.state['requests'][k]['activity_id']
+                    for address, _ in _parties(m, self.settings.internal_domain) if (ref := matcher.ref(address))
+                    for k in (self.activity_key(ref, m['ident']),)
+                    if self.state['requests'].get(k, {}).get('activity_id')})
+                if not activities:
+                    self.counts['flags_unfiled'] += 1
+                    continue
+                seen = flags.setdefault(m['ident'], {'applied': {}, 'activities': activities})
+            seen.update(status=status, due=_flag_day(m.get('flag_due_unix')),
+                        done=_flag_day(m.get('flag_completed_unix')),
+                        subject=m['subject'] or '(no subject)', at=int(self.now.timestamp()))
+
+    def apply_flags(self) -> bool:
+        """File each observed flag on the deal its email is confirmed against. Idempotent per (email, state)."""
+        flags = self.state.setdefault('flags', {})
+        ok = True
+        for ident, f in sorted(flags.items()):
+            deals = sorted(set(f['applied']) | {self.deals[a] for a in f['activities'] if a in self.deals})
+            if not deals:
+                self.counts['flags_unmatched'] += 1
+                continue
+            for deal in deals:
+                ok = self._flag_on_deal(ident, f, deal) and ok
+        horizon = self.now.timestamp() - UNRESOLVED_DAYS.total_seconds()
+        for ident in [i for i, f in flags.items() if f['at'] < horizon
+                      and all(a['state'] != 'flagged' for a in f['applied'].values())]:
+            del flags[ident]
+        return ok
+
+    def _flag_on_deal(self, ident: str, f: dict, deal: str) -> bool:
+        applied = f['applied'].get(deal)
+        who = 'outlook flag'
+        if f['status'] == 'flagged':
+            if applied:
+                if applied['state'] != 'flagged':
+                    self.counts['flags_reflagged'] += 1
+                return True
+            text = re.sub(r'(?<=[.!?])\s+(?=[A-Z])', ' / ', re.sub(r'\s*;\s*|\s+', ' ', f['subject']).strip())
+            args = {'idempotency_key': self.owner_key('record-deal-item', deal, f'{ident}|flagged'), 'deal': deal,
+                    'title': FLAG_ITEM_TITLE, 'due_on': f['due'], 'source_ref': f'outlook-flag:{self.settings.owner}:{ident}',
+                    'bullets': [{'kind': 'promised', 'date': f['due'], 'text': f'Flagged in Outlook: {text}'[:240]}]}
+            if not self.write('record-deal-item', args, who, 'flagged'):
+                return False
+            f['applied'][deal] = {'state': 'flagged', 'item_id': self.state['requests'][args['idempotency_key']].get('item_id')}
+            self.counts['flags_filed'] += 1
+        elif not applied:
+            self.counts['flags_untracked'] += 1  # complete or cleared before we filed it: nothing to close
+        elif applied['state'] == 'flagged' and applied.get('item_id'):
+            if f['status'] == 'complete':
+                args = {'idempotency_key': self.owner_key('complete-deal-item', deal, f'{ident}|complete'),
+                        'deal': deal, 'item_id': applied['item_id']}
+                verb, state, count = 'complete-deal-item', 'complete', 'flags_completed'
+            else:
+                args = {'idempotency_key': self.owner_key('drop-action', deal, f'{ident}|cleared'),
+                        'action_id': applied['item_id'], 'base_version': 1,
+                        'reason': f'Outlook flag cleared without completing (source: outlook-flag:{ident})'}
+                verb, state, count = 'drop-action', 'cleared', 'flags_cleared'
+            if not self.write(verb, args, who, state):
+                return False
+            applied['state'] = state
+            self.counts[count] += 1
+        return True
+
     def file_links(self) -> bool:
         """Use server-confirmed filing, including matches made after local intake finished."""
         queue = self.ports.carr('email-router-queue', {
@@ -823,6 +952,8 @@ class Run:
                            for ident, pending in self.state.get('pending_full', {}).items()
                            for ref in pending['refs']}
         for mail in queue.get('emails', []):
+            if mail.get('deal'):
+                self.deals[mail['activity_id']] = mail['deal']
             if not mail.get('deal') or mail['activity_id'] in pending_sources:
                 continue
             links = sorted(email_links.extract_links(mail.get('body') or ''))
@@ -954,7 +1085,7 @@ class Run:
         for m, progress in self.lead_candidates:
             address = m['sender'].lower()
             source = _hash(address)
-            request = self.state.get('requests', {}).get(key('propose-email-lead', source, 'sender'))
+            request = self.state.get('requests', {}).get(self.owner_key('propose-email-lead', source, 'sender'))
             if request and request['acknowledged']:
                 continue
             if request is None and progress.get('intent') == 'not_business':
@@ -973,7 +1104,7 @@ class Run:
                 if progress['intent'] != 'business':
                     self.counts['lead_not_business'] += 1
                     continue
-            args = {'idempotency_key': key('propose-email-lead', source, 'sender'), 'address': address,
+            args = {'idempotency_key': self.owner_key('propose-email-lead', source, 'sender'), 'address': address,
                     'display_name': (_clean_name(m['sender_name'], m['subject']) or '')[:200] or None,
                     'summary': progress.get('summary') or '', 'first_seen_at': _iso(m['sent_unix']),
                     'message_ref': m['ident']}
@@ -1063,7 +1194,10 @@ class Run:
         oldest = self.now.timestamp() - UNRESOLVED_DAYS.total_seconds()
         for e in events:
             candidate = _hash(json.dumps(e, sort_keys=True))
-            evidence[candidate] = {'status': 'unsupported', 'reason': 'hxstore_lifecycle_unverified',
+            # Only a lifecycle the decoder proves leaves 'unsupported'; it is reported, not acted on.
+            canceled = e.get('lifecycle_status') == 'canceled'
+            evidence[candidate] = {'status': 'canceled' if canceled else 'unsupported',
+                                   'reason': e['lifecycle_reason'] if canceled else 'hxstore_lifecycle_unverified',
                                    'evidence': 'provisional_schedule',
                                    'start_unix': e['start_unix'], 'end_unix': e['end_unix']}
             people = [(email, name) for name, email in e['attendees'] if email and not _internal(email, self.settings.internal_domain)]
@@ -1106,7 +1240,7 @@ class Run:
             lines += [f'- {name}: {rate * 100:.1f}%' if rate is not None else f'- {name}: unavailable'
                       for name, rate in health['rates'].items()]
             lines += [f'- failing: {", ".join(health["failing"]) or "none"}',
-                      '- skipped: conversation_id and flag_state (not exported by hxprobe)', '']
+                      '- skipped: conversation_id (not exported by hxprobe)', '']
         lines += ['## Counts', '']
         lines += [f'- {k}: {v}' for k, v in sorted(self.counts.items())]
         lines += [f'- needs_refresh_listed: {refresh_count}', '', '## Writes', '']
@@ -1182,7 +1316,9 @@ def _prune(state: dict, now: datetime) -> None:
 
 
 def calendar_counts(state: dict) -> dict:
-    return {'calendar_lifecycle_unsupported': len(state.get('calendar_evidence', {})),
+    statuses = [e.get('status') for e in state.get('calendar_evidence', {}).values()]
+    return {'calendar_lifecycle_unsupported': statuses.count('unsupported'),
+            'calendar_lifecycle_canceled': statuses.count('canceled'),
             'calendar_requests_quarantined': sum(r.get('disposition') == 'calendar_unsupported'
                                                  for r in state.get('requests', {}).values())}
 
@@ -1314,12 +1450,33 @@ def publish_agenda(carr: Callable[[str, dict], dict], snapshot: dict) -> None:
         try:
             carr('publish-board-snapshot', {
                 'idempotency_key': key('publish-board-snapshot', AGENDA_BOARD,
-                                       f'{snapshot["observed_at"]}|{base}'),
+                                       f'{_hash(json.dumps(snapshot, sort_keys=True))}|{base}'),
                 'board_id': AGENDA_BOARD, 'base_version': base, 'snapshot': snapshot})
             return
         except CarrError as error:
             if error.code != 'agenda_version_conflict' or attempt == 2:
                 raise
+
+
+def _retry_owner_key_collisions(state: dict, owner: str) -> None:
+    requests = state.get('requests', {})
+    sources = {key('set-next-action', step['ref'], f'next|{source}'): f'next|{source}'
+               for source, step in state.get('steps', {}).items()}
+    for legacy, request in list(requests.items()):
+        if (request['verb'] != 'set-next-action' or request['acknowledged']
+                or request.get('disposition') != 'blocked' or request.get('error_code') != 'key_reuse'
+                or request.get('key_owner') == owner):
+            continue
+        args = json.loads(request['payload'])
+        if (args.get('owner') != owner or 'expected_action' not in args
+                or not (request.get('source_kind') == 'mail' or legacy in sources)):
+            continue
+        source = sources.get(legacy, f'legacy|{legacy}')
+        scoped = key('set-next-action', args['ref'], f'{owner}|{source}')
+        args['idempotency_key'] = scoped
+        requests.setdefault(scoped, {**request, 'payload': json.dumps(args), 'key_owner': owner,
+                                    'source_kind': 'mail', 'disposition': 'retry', 'error_code': None, 'retry_at': None})
+        del requests[legacy]
 
 
 def _quarantine_calendar_requests(state: dict) -> None:
@@ -1366,6 +1523,7 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
                 linked = work.file_links()
             except CarrError:
                 return Outcome('failed', 'email_links_read_failed', outcome.counts)
+            flagged = work.apply_flags()
             for name, count in work.counts.items():
                 outcome.counts[name] = outcome.counts.get(name, 0) + count
             for code in ERROR_CODES:
@@ -1374,6 +1532,8 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
             _save(out, state)
             if not linked:
                 return Outcome('failed', 'email_links_pending', outcome.counts)
+            if not flagged:
+                return Outcome('failed', 'flags_pending', outcome.counts)
             if work.counts['links_filed']:
                 outcome.reason = 'processed'
             return outcome
@@ -1477,9 +1637,12 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         prepared = work.prepare_attachments(mails, matcher, db, files)
         _remove(files.parent)
         work.file_attachments(prepared)
+        _retry_owner_key_collisions(state, settings.owner)
         _quarantine_calendar_requests(state)
         _save(out, state)
         for request in list(state.get('requests', {}).values()):
+            if request['verb'] in ('record-deal-item', 'complete-deal-item', 'drop-action'):
+                continue
             if not request['acknowledged'] and request.get('disposition') != 'calendar_unsupported':
                 args = json.loads(request['payload'])
                 if request['verb'] == 'set-next-action' and (
@@ -1488,6 +1651,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
                                    error_code='legacy_action_guard_required')
                 work.write(request['verb'], args, 'pending write')
         work.emails(mails, matcher, since)
+        work.observe_flags(mails, matcher)
         work.leads()
         work.full_text(mails)
         work.next_steps(mails)

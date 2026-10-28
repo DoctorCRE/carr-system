@@ -40,10 +40,11 @@ def plist(label: str, program: str = "/usr/bin/true") -> str:
     }).decode("utf-8")
 
 
-def check(label: str, condition: bool, detail: object = "") -> bool:
-    print(f"{'PASS' if condition else 'FAIL'}  {label}"
-          + ("" if condition or not detail else f": {detail}"))
-    return condition
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(ok="PASS  {label}", fail="FAIL  {label}", detail=": {detail}")
 
 
 def _fake_launchctl(root: Path, fail_bootstrap_times: int,

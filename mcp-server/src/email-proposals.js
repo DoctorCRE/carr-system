@@ -2,6 +2,9 @@
 import { sha256 } from './sha256.ts';
 import { partnerAuthoritySlugForActor } from './partner-authority.js';
 const LIMIT = 200;
+const RESUBMITTABLE_FAILURES = new Set([
+  'aborted_before_dispatch', // The sender recorded that dispatch was aborted before pressing Send.
+]);
 const MATCHING = new Set(['file_to_deal', 'possible_new_deal']);
 const ROLES = ['client', 'landlord_side', 'lender', 'attorney', 'other_vendor'];
 const KINDS = {
@@ -261,7 +264,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
         return withEnvelope(c, actor, 'submit-email-draft', args, async () => {
           const row = await draftRow(c, args.proposal_id, actor.slug);
-          if (row.status !== 'pending') fail('email_draft_already_submitted');
+          if (row.status === 'failed' && !RESUBMITTABLE_FAILURES.has(row.send_result?.reason))
+            fail('email_draft_failure_not_resubmittable', { reason: row.send_result?.reason ?? null });
+          if (row.status !== 'pending' && row.status !== 'failed') fail('email_draft_already_submitted');
           checkVersion(row, args.base_version);
           if (!args.body.trim()) fail('email_draft_empty_body');
           if (!args.subject.trim() || /[\r\n]/.test(args.subject)) fail('email_draft_subject_invalid');
@@ -271,7 +276,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           const submitted = { subject: args.subject, body: args.body,
             sha256: sha256(JSON.stringify({ subject: args.subject, body: args.body })), ...recipients };
           await c.query(`update email_proposal set status='approved_to_send',version=version+1,
-            submitted_email=$2::jsonb,submitted_at=now(),resolved_by=$3,resolved_at=now() where id=$1`,
+            submitted_email=$2::jsonb,submitted_at=now(),resolved_by=$3,resolved_at=now(),
+            send_result=null,result_recorded_at=null where id=$1`,
           [row.id, JSON.stringify(submitted), actor.id]);
           await writeEvent(c, actor, 'submit-email-draft', 'deal', row.deal_id, {
             new: { proposal_id: row.id, sha256: submitted.sha256, to: submitted.to, cc: submitted.cc },
@@ -561,7 +567,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'email-proposal-quality': {
       write: false,
-      description: 'WR-000441 QUALITY report: email proposals created in the last 1-90 days (default 7), by kind: how many were proposed, are still pending, were confirmed by Joe or dismissed, the dismissal rate among resolved ones, and the average router confidence of each outcome. over_threshold is true when at least 10 are resolved and more than 5% were dismissed, the point where that kind should stay propose-only until the router is fixed. corrections lists up to 20 dismissals made in the requested period with the reason given, regardless of when the proposal was created. Proposal counts use the creation date. Counts only; changes nothing.',
+      description: 'WR-000441 QUALITY report: email proposals created in the last 1-90 days (default 7), by kind: how many were proposed, are still pending, were confirmed by Joe or dismissed, the dismissal rate among resolved ones, and the average router confidence of each outcome. over_threshold is true when at least 10 are resolved and more than 5% were dismissed, the point where that kind should stay propose-only until the router is fixed. corrections lists up to 20 dismissals made in the requested period with the reason given, regardless of when the proposal was created. Proposal counts use the creation date. automatic_filings counts automatic thread filings recorded in the requested period, how many have a linked undo receipt at read time, and their undo_rate (null when empty). Its over_threshold is true with at least 10 filings and more than 5% undone. This is a separate filing cohort, not a proposal dismissal rate. Counts only; changes nothing and does not enforce a policy change.',
       inputSchema: { type: 'object', additionalProperties: false,
         properties: { days: { type: 'integer', minimum: 1, maximum: 90 } } },
       handler: async (c, _actor, args) => {
@@ -587,7 +593,16 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           where p.status='dismissed' and p.resolved_at>now()-make_interval(days=>$1)
           order by p.resolved_at desc,p.id limit 20`, [days])).rows
           .map(row => ({ ...row, resolved_at: new Date(row.resolved_at).toISOString() }));
-        return { schema_version: 'email-proposal-quality.v1', days, kinds, corrections, send: false };
+        const filingCounts = (await c.query(`select count(*)::int as filed,
+            count(*) filter (where exists (select 1 from v_email_thread_filing_event u
+              where u.verb='undo-email-thread-filing' and u.new_value->>'event_id'=f.id::text))::int as undone
+          from v_email_thread_filing_event f where f.verb='inherit-email-thread'
+            and f.recorded_at>now()-make_interval(days=>$1)`, [days])).rows[0];
+        const undoRate = filingCounts.filed ? filingCounts.undone / filingCounts.filed : null;
+        const automaticFilings = { ...filingCounts, undo_rate: undoRate,
+          over_threshold: filingCounts.filed >= 10 && undoRate > 0.05 };
+        return { schema_version: 'email-proposal-quality.v1', days, kinds, corrections,
+          automatic_filings: automaticFilings, send: false };
       },
     },
     'dismiss-email-proposal': {

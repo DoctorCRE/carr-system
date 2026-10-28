@@ -17,10 +17,11 @@ GENERATOR = ROOT / "bin" / "schema-snapshot.sh"
 SNAPSHOT = ROOT / "db" / "schema.sql"
 
 
-def check(label: str, condition: bool) -> None:
-    print(f"  {'ok' if condition else 'FAIL':4} {label}")
-    if not condition:
-        raise AssertionError(label)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(ok="  ok   {label}", fail="  FAIL {label}", detail=None, raises="{label}")
 
 
 def main() -> int:

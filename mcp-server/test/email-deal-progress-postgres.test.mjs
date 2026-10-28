@@ -1594,6 +1594,40 @@ test('failed delivery requires a reason and is recorded once without an automati
   assert.deepEqual((await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader')).drafts, []);
 });
 
+test('the owner can resubmit a reply aborted before dispatch', async () => {
+  await c.query('delete from email_proposal');
+  await c.query("insert into actor(slug,kind,display_name,email) values('dell','human','Synthetic partner','dell@example.test') on conflict(slug) do update set email=excluded.email,active=true");
+  const proposal = await draftFor();
+  const first = await submitDraft(proposal, { cc: ['dell@example.test'] });
+  await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+    base_version: first.version, status: 'failed', sha256: first.sha256, reason: 'aborted_before_dispatch' }, machineFor('joe'), 'carr_writer');
+  const dell = { ...(await c.query("select id,slug from actor where slug='dell'")).rows[0], human: true };
+  await refuses(submitDraft(proposal, { base_version: 3 }, dell), 'email_draft_not_owner');
+  const key = randomUUID();
+  const args = { base_version: 3, cc: ['dell@example.test'], idempotency_key: key };
+  const again = await submitDraft(proposal, args);
+  assert.equal((await submitDraft(proposal, args)).replayed, true);
+  await refuses(submitDraft(proposal, { ...args, idempotency_key: randomUUID() }), 'email_draft_already_submitted');
+  assert.equal(again.version, 4);
+  assert.equal(again.sha256, first.sha256);
+  const outbox = await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader');
+  assert.equal(outbox.drafts[0].version, 4);
+  assert.equal(outbox.drafts[0].sha256, first.sha256);
+});
+
+test('unknown and dynamic failure reasons remain final', async () => {
+  for (const reason of ['unknown_reason', 'failed:compose_field_not_found:to', 'aborted_before_dispatch:details']) {
+    await c.query('delete from email_proposal');
+    const proposal = await draftFor();
+    const first = await submitDraft(proposal, { cc: ['dell@example.test'] });
+    await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+      base_version: first.version, status: 'failed', sha256: first.sha256, reason }, machineFor('joe'), 'carr_writer');
+    await assert.rejects(submitDraft(proposal, { base_version: 3, cc: ['dell@example.test'] }),
+      error => error.payload?.error === 'email_draft_failure_not_resubmittable' && error.payload.reason === reason);
+    assert.deepEqual((await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader')).drafts, []);
+  }
+});
+
 test('reply draft provenance cannot be forged or inferred from legacy display names', async () => {
   await c.query('delete from email_proposal');
   await refuses(command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
@@ -1830,4 +1864,29 @@ test('legacy undo refuses when the deal owner is unknown', async () => {
     await assert.rejects(command('undo-email-thread-filing', { idempotency_key: randomUUID(), event_id: filing.event_id }),
       e => e.payload?.error === 'email_thread_filing_owner_unknown');
   } finally { await c.query("update deal set owner='joe' where id=$1", [deal]); }
+});
+
+
+test('quality reports automatic filing undo rates for the requested filing cohort', async () => {
+  await c.query("delete from event where verb in ('inherit-email-thread','undo-email-thread-filing')");
+  const report = (days = 7) => command('email-proposal-quality', { days }, actor, 'carr_reader');
+  assert.deepEqual((await report()).automatic_filings,
+    { filed: 0, undone: 0, undo_rate: null, over_threshold: false });
+  const filings = [];
+  for (let i = 0; i < 20; i++) filings.push((await automaticThreadFiling()).filing);
+  assert.deepEqual((await report()).automatic_filings,
+    { filed: 20, undone: 0, undo_rate: 0, over_threshold: false });
+  const undo = event_id => command('undo-email-thread-filing', { idempotency_key: randomUUID(), event_id }, actor, 'carr_writer');
+  await undo(filings[0].event_id);
+  assert.deepEqual((await report()).automatic_filings,
+    { filed: 20, undone: 1, undo_rate: 0.05, over_threshold: false });
+  await undo(filings[1].event_id);
+  assert.deepEqual((await report()).automatic_filings,
+    { filed: 20, undone: 2, undo_rate: 0.1, over_threshold: true });
+  await c.query("update event set recorded_at=now()-interval '10 days' where verb='inherit-email-thread' and id<>$1", [filings[1].event_id]);
+  assert.deepEqual((await report()).automatic_filings,
+    { filed: 1, undone: 1, undo_rate: 1, over_threshold: false });
+  assert.deepEqual((await report(30)).automatic_filings,
+    { filed: 20, undone: 2, undo_rate: 0.1, over_threshold: true });
+  assert.equal((await report()).send, false);
 });

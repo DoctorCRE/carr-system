@@ -59,9 +59,14 @@ from git_env import fixture_env  # noqa: E402
 results: list[tuple[str, bool, str]] = []
 
 
-def check(label, ok, detail=""):
-    results.append((label, ok, detail))
-    print(f"  {'ok  ' if ok else 'FAIL'}  {label}" + (f"  — {detail}" if (not ok and detail) else ""))
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(
+    detail="  — {detail}",
+    record=lambda label, ok, detail: results.append((label, ok, detail)),
+)
 
 
 def run(cmd, cwd, **kw):

@@ -89,14 +89,17 @@ CENSUS_V10_BLOCK4 = """
 """
 
 
-def check(label: str, condition: bool, detail: str = "") -> None:
-    global PASS
-    if condition:
-        PASS += 1
-        print(f"  ok    {label}")
-    else:
-        FAIL.append(label)
-        print(f"  FAIL  {label}  {detail}")
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(
+    fail="  FAIL  {label}  {detail}",
+    detail=None,
+    failures=FAIL,
+    counters={"PASS": "pass"},
+    ns=globals(),
+)
 
 
 def conninfo_text(value: str | int | None, name: str) -> str:
