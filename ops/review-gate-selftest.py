@@ -45,7 +45,7 @@ class ReviewGate(unittest.TestCase):
 
     def test_docs_only_needs_no_review(self):
         pr = {"changed_files": 2, "additions": 900, "deletions": 0, "head": {"sha": "abc"}}
-        changes = [{"body": "VERDICT: CHANGES\nReviewed-SHA: abc"}]
+        changes = [{"body": "VERDICT: CHANGES\nReviewed-SHA: abc\nReviewer: grok"}]
         for files, comments, expected in [
                 ([{"filename": "docs/plan.md", "status": "added"}, {"filename": "docs/outlook/notes.md"}], [], True),
                 ([{"filename": "docs/plan.md"}, {"filename": "lib/x.py"}], [], False),
@@ -57,15 +57,15 @@ class ReviewGate(unittest.TestCase):
 
     def test_sha_bound_comment_format(self):
         pr = {"changed_files": 0, "additions": 151, "deletions": 0, "head": {"sha": "abc"}}
-        for body, expected in [("VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok", True), ("VERDICT: APPROVE\r\nReviewed-SHA: abc\r\nReviewer: grok", True), ("VERDICT: CHANGES\nReviewed-SHA: abc", False), ("VERDICT: APPROVE\nReviewed-SHA: old\nReviewer: grok", False), ("prefix\nReviewed-SHA: abc\nReviewer: grok\nVERDICT: APPROVE", False), ("VERDICT: APPROVE\nReviewed-SHA: abcd\nReviewer: grok", False)]:
+        for body, expected in [("VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok", True), ("VERDICT: APPROVE\r\nReviewed-SHA: abc\r\nReviewer: grok", True), ("VERDICT: CHANGES\nReviewed-SHA: abc\nReviewer: grok", False), ("VERDICT: APPROVE\nReviewed-SHA: old\nReviewer: grok", False), ("prefix\nReviewed-SHA: abc\nReviewer: grok\nVERDICT: APPROVE", False), ("VERDICT: APPROVE\nReviewed-SHA: abcd\nReviewer: grok", False)]:
             with self.subTest(body=body):
                 self.assertEqual(gate.approved(pr, [], [{"body": body}]), expected)
 
-    def test_approval_ignores_reviewer_line(self):
+    def test_reviewer_header_required(self):
         pr = {"changed_files": 0, "additions": 151, "deletions": 0, "head": {"sha": "abc"}}
-        for suffix in ("", "\n", "\nReviewer: anyone", "\nReviewer: builder\nFindings", "\nReviewer:"):
-            with self.subTest(suffix=suffix):
-                self.assertTrue(gate.approved(pr, [], [{"body": "VERDICT: APPROVE\nReviewed-SHA: abc" + suffix}]))
+        for reviewer, expected in [("grok", True), ("claude-opus", True), ("codex", True), ("jev", True), ("anyone", True), ("Claude Sonnet 5.5 (independent)", True), ("", False), ("   ", False)]:
+            with self.subTest(reviewer=reviewer):
+                self.assertEqual(gate.approved(pr, [], [{"body": f"VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: {reviewer}"}]), expected)
 
     def test_skip_ci_title_fails_even_when_small_or_approved(self):
         comments = [{"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: Claude"}]
@@ -76,7 +76,7 @@ class ReviewGate(unittest.TestCase):
                 self.assertEqual(gate.approved(pr, [], comments), expected)
 
     def test_newest_verdict_at_head_wins(self):
-        changes, approve = {"body": "VERDICT: CHANGES\nReviewed-SHA: abc"}, {"body": "VERDICT: APPROVE\nReviewed-SHA: abc"}
+        changes, approve = {"body": "VERDICT: CHANGES\nReviewed-SHA: abc\nReviewer: grok"}, {"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok"}
         stale = [{"body": "VERDICT: CHANGES\nReviewed-SHA: old"}, {"body": "VERDICT: APPROVE\nReviewed-SHA: old"}]
         for additions in (1, 151):
             for comments, expected in [([changes, approve], True), ([approve, changes], False), ([approve, *stale], True),
@@ -90,12 +90,12 @@ class ReviewGate(unittest.TestCase):
         for event in ({"number": 4}, {"issue": {"number": 4}}):
             for approved in (False, True):
                 comments = [{"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok"}] if approved else []
-                with patch.object(gate, "api", side_effect=[pr, {}, [{"filename": "safe"}], comments, pr, {}]) as api:
+                with patch.object(gate, "api", side_effect=[pr, {}, [{"filename": "safe"}], comments, [], pr, {}]) as api:
                     gate.run(event, "owner/repo")
                     self.assertEqual(api.call_args.args[1]["state"], "success" if approved else "failure")
         pr["additions"] = 0
         for comments, expected in [([], "failure"), ([{"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok"}], "success")]:
-            with patch.object(gate, "api", side_effect=[pr, {}, [], comments, pr, {}]) as api:
+            with patch.object(gate, "api", side_effect=[pr, {}, [], comments, [], pr, {}]) as api:
                 gate.run({"number": 4}, "owner/repo")
                 self.assertEqual(api.call_args.args[1]["state"], expected)
         with patch.object(gate, "api", return_value={"base": {"ref": "feature"}}) as api:
@@ -106,10 +106,52 @@ class ReviewGate(unittest.TestCase):
             self.assertEqual(api.call_args.args[0], "repos/owner/repo/statuses/queue")
             self.assertEqual(api.call_args.args[1]["state"], "success")
 
+    def test_review_bodies_participate_in_chronological_verdicts(self):
+        pr = {"body": "Card: WR568.S1.J1", "base": {"ref": "main"}, "additions": 151,
+              "deletions": 0, "head": {"sha": "abc"}, "changed_files": 1}
+        approval = {"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok", "submitted_at": "2026-01-01T00:00:00Z"}
+        cases = [([approval], "success"),
+                 ([{**approval, "state": "DISMISSED"}], "failure"),
+                 ([{**approval, "body": approval["body"].replace("abc", "old")}], "failure"),
+                 ([{**approval, "body": approval["body"].replace("grok", "anyone")}], "success"),
+                 ([approval, {"body": "VERDICT: CHANGES\nReviewed-SHA: abc\nReviewer: grok", "submitted_at": "2026-01-02T00:00:00Z"}], "failure")]
+        for reviews, expected in cases:
+            with self.subTest(reviews=reviews), patch.object(gate, "api", side_effect=[pr, {}, [{"filename": "safe"}], [], reviews, pr, {}]) as api:
+                gate.run({"number": 4}, "owner/repo")
+                self.assertEqual(api.call_args.args[1]["state"], expected)
+
+    def test_mixed_sources_newest_valid_verdict_wins(self):
+        pr = {"body": "Card: WR568.S1.J1", "base": {"ref": "main"}, "additions": 151,
+              "deletions": 0, "head": {"sha": "abc"}, "changed_files": 1, "user": {"login": "jbookout"}}
+        def item(verdict, date, **extra):
+            return {"body": f"VERDICT: {verdict}\nReviewed-SHA: abc\nReviewer: grok", "user": {"login": "jbookout"}, **date, **extra}
+        early = {"created_at": "2026-01-01T00:00:00Z"}
+        late = {"submitted_at": "2026-01-02T00:00:00Z"}
+        cases = [(item("CHANGES", early), item("APPROVE", late), "success"),
+                 (item("APPROVE", early), item("CHANGES", late), "failure"),
+                 (item("APPROVE", early), item("CHANGES", late, body="VERDICT: CHANGES\nReviewed-SHA: abc\nReviewer: Claude Sonnet 5.5 (independent)"), "failure"),
+                 (item("APPROVE", early), item("CHANGES", late, state="DISMISSED"), "success")]
+        for comment, review, expected in cases:
+            with self.subTest(expected=expected, review=review), patch.object(gate, "api", side_effect=[pr, {}, [{"filename": "safe"}], [comment], [review], pr, {}]) as api:
+                gate.run({"pull_request": {"number": 4}, "review": {}}, "owner/repo")
+                self.assertEqual(api.call_args.args[1]["state"], expected)
+
+    def test_real_event_shapes(self):
+        pr = {"body": "Card: WR568.S1.J1", "base": {"ref": "main"}, "additions": 151,
+              "deletions": 0, "head": {"sha": "abc"}, "changed_files": 1}
+        events = [{"action": "created", "issue": {"number": 4}, "comment": {}},
+                  {"action": "opened", "number": 4, "pull_request": {"number": 4}},
+                  {"action": "synchronize", "number": 4, "pull_request": {"number": 4}},
+                  {"action": "submitted", "pull_request": {"number": 4}, "review": {}}]
+        for event in events:
+            with self.subTest(event=event), patch.object(gate, "api", side_effect=[pr, {}, [{"filename": "safe"}], [], [], pr, {}]) as api:
+                gate.run(event, "owner/repo")
+                self.assertEqual(api.call_args.args[1]["state"], "failure")
+
     def test_missing_card_fails_status(self):
         pr = {"base": {"ref": "main"}, "head": {"sha": "abc"}, "changed_files": 1,
               "additions": 1, "deletions": 0, "body": "", "user": {"type": "User"}}
-        with patch.object(gate, "api", side_effect=[pr, {}, [{"filename": "app.py"}], [], pr, {}]) as api:
+        with patch.object(gate, "api", side_effect=[pr, {}, [{"filename": "app.py"}], [], [], pr, {}]) as api:
             gate.run({"number": 4}, "owner/repo")
             status = api.call_args.args[1]
             self.assertEqual(status["state"], "failure")
