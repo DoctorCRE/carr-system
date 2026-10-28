@@ -161,152 +161,190 @@ fn trailing_name(data: &[u8]) -> Option<String> {
     (!name.chars().any(char::is_control)).then_some(name)
 }
 
-impl Index {
-    /// First pass: gather the catalog and message/view membership references.
-    pub fn observe(&mut self, block: usize, data: &[u8]) {
-        for (_, object) in envelopes(data, FOLDER) {
-            let Some((id, account_id)) = reference(object, 0x004d, &[2, 0x02ac]) else {
-                continue;
-            };
-            let Some(name) = trailing_name(object) else {
-                continue;
-            };
-            let up = parent(object, account_id);
-            let folder = self.folders.entry(id).or_insert_with(|| Folder {
-                id,
-                account_id,
-                name: Some(name.clone()),
-                parent: up,
-                block,
-            });
-            if folder.name.as_ref() != Some(&name) || folder.account_id != account_id {
-                folder.name = None;
-            }
-            if folder.parent != up {
-                folder.parent = Parent::Unknown;
-            }
-            // Two copies of the folder's view-collection reference. Require
-            // each reference's duplicated key, not an arbitrary nearby u64.
-            for at in [160, 360] {
-                if object.get(at..at + 10) != Some(signature(4).as_slice()) {
-                    continue;
-                }
-                if let Some(owner) = u64_at(object, at + 10) {
-                    if owner != 0 && Some(owner) == u64_at(object, at + 38) {
-                        self.owners.entry(owner).or_default().insert(id);
-                    }
-                }
-            }
+/// One block's contribution to the folder catalog and membership, in
+/// observation order, before any other block is consulted.
+#[derive(Debug)]
+pub enum Observation {
+    Folder { id: u64, account_id: u64, name: String, parent: Parent, owners: Vec<u64> },
+    Member { key: u64, folder: u64 },
+}
+
+/// IPM.Note anchors that name a folder by reference, resolved only once the
+/// whole catalog is known.
+#[derive(Debug, Default)]
+pub struct Candidates {
+    /// Anchor and view-collection owner.
+    pub views: Vec<(usize, u64)>,
+    /// Anchor and message key, for membership metadata.
+    pub messages: Vec<(usize, u64)>,
+    /// Anchor, folder and account of an expanded message header.
+    pub expanded: Vec<(usize, u64, u64)>,
+}
+
+/// First pass: the catalog and membership references in one block.
+pub fn observations(data: &[u8]) -> Vec<Observation> {
+    let mut found = Vec::new();
+    for (_, object) in envelopes(data, FOLDER) {
+        let Some((id, account_id)) = reference(object, 0x004d, &[2, 0x02ac]) else {
+            continue;
+        };
+        let Some(name) = trailing_name(object) else {
+            continue;
+        };
+        let parent = parent(object, account_id);
+        // Two copies of the folder's view-collection reference. Require
+        // each reference's duplicated key, not an arbitrary nearby u64.
+        let owners = [160, 360]
+            .into_iter()
+            .filter(|&at| object.get(at..at + 10) == Some(signature(4).as_slice()))
+            .filter_map(|at| u64_at(object, at + 10).filter(|&o| o != 0 && Some(o) == u64_at(object, at + 38)))
+            .collect();
+        found.push(Observation::Folder { id, account_id, name, parent, owners });
+    }
+    for (_, object) in envelopes(data, METADATA) {
+        let Some(key) = message_key(object, 0x00bf) else {
+            continue;
+        };
+        if metadata_tail(object).is_none() {
+            continue;
         }
-        for (_, object) in envelopes(data, METADATA) {
-            let Some(key) = message_key(object, 0x00bf) else {
-                continue;
-            };
-            if metadata_tail(object).is_none() {
-                continue;
+        if let Some(folder) = u64_at(object, object.len() - 8) {
+            found.push(Observation::Member { key, folder });
+        }
+    }
+    found
+}
+
+/// The anchor of an object holding exactly one IPM.Note anchor.
+fn single_anchor(start: usize, object: &[u8], needle: &[u8]) -> Option<usize> {
+    let mut anchors = memchr::memmem::find_iter(object, needle);
+    let anchor = anchors.next()?;
+    anchors.next().is_none().then_some(start + anchor)
+}
+
+/// IPM.Note anchors that name a folder, before the catalog is consulted.
+pub fn candidates(data: &[u8], needle: &[u8]) -> Candidates {
+    let mut found = Candidates::default();
+    for (start, object) in envelopes(data, VIEW) {
+        let Some((_, owner)) = reference(object, 0x004f, &[4]) else {
+            continue;
+        };
+        found.views.extend(single_anchor(start, object, needle).map(|a| (a, owner)));
+    }
+    for (start, object) in envelopes(data, MESSAGE) {
+        let Some(key) = message_key(object, 0x00ca) else {
+            continue;
+        };
+        found.messages.extend(single_anchor(start, object, needle).map(|a| (a, key)));
+    }
+    // Expanded message objects embedded in transaction wrappers include
+    // a full typed folder reference at +408. Only take their first
+    // ItemClass anchor.
+    for (start, object) in expanded(data) {
+        let Some(field) = object.get(408..) else {
+            continue;
+        };
+        let Some((id, account)) = reference(field, 0x004d, &[2, 0x02ac]) else {
+            continue;
+        };
+        let Some(rel) = memchr::memmem::find(object, needle) else {
+            continue;
+        };
+        if rel >= 454 {
+            found.expanded.push((start + rel, id, account));
+        }
+    }
+    found
+}
+
+/// Resolve IPM.Note anchor positions to the local message key of the
+/// message object holding them, so other objects can name the message.
+pub fn keys(data: &[u8], needle: &[u8]) -> BTreeMap<usize, u64> {
+    let mut keys = BTreeMap::new();
+    for (start, object) in envelopes(data, MESSAGE) {
+        let Some(key) = message_key(object, MESSAGE.1) else { continue };
+        if let Some(anchor) = single_anchor(start, object, needle) {
+            keys.insert(anchor, key);
+        }
+    }
+    for (start, object) in expanded(data) {
+        // Only a real message header carries its typed folder reference;
+        // a bare message reference inside another object does not.
+        if object.get(408..).and_then(|f| reference(f, 0x004d, &[2, 0x02ac])).is_none() {
+            continue;
+        }
+        let Some(key) = message_key(object, MESSAGE.1) else { continue };
+        if let Some(rel) = memchr::memmem::find(object, needle).filter(|&rel| rel >= 454) {
+            keys.entry(start + rel).or_insert(key);
+        }
+    }
+    keys
+}
+
+impl Index {
+    #[cfg(test)]
+    pub fn observe(&mut self, block: usize, data: &[u8]) {
+        for observation in observations(data) {
+            self.apply(block, observation);
+        }
+    }
+
+    /// Fold one observation into the catalog, in block order.
+    pub fn apply(&mut self, block: usize, observation: Observation) {
+        match observation {
+            Observation::Folder { id, account_id, name, parent: up, owners } => {
+                let folder = self.folders.entry(id).or_insert_with(|| Folder {
+                    id,
+                    account_id,
+                    name: Some(name.clone()),
+                    parent: up,
+                    block,
+                });
+                if folder.name.as_ref() != Some(&name) || folder.account_id != account_id {
+                    folder.name = None;
+                }
+                if folder.parent != up {
+                    folder.parent = Parent::Unknown;
+                }
+                for owner in owners {
+                    self.owners.entry(owner).or_default().insert(id);
+                }
             }
-            if let Some(folder) = u64_at(object, object.len() - 8) {
+            Observation::Member { key, folder } => {
                 self.members.entry(key).or_default().insert(folder);
             }
         }
     }
 
+    #[cfg(test)]
     /// Resolve IPM.Note anchor positions to observed folders within this block.
     pub fn links(&self, data: &[u8], needle: &[u8]) -> BTreeMap<usize, BTreeSet<u64>> {
-        let mut links = BTreeMap::new();
-        for (start, object) in envelopes(data, VIEW) {
-            let Some((_, owner)) = reference(object, 0x004f, &[4]) else {
-                continue;
-            };
-            if let Some(folders) = self.owners.get(&owner) {
-                self.link_single_anchor(&mut links, start, object, needle, folders);
+        self.resolve(&candidates(data, needle))
+    }
+
+    pub fn resolve(&self, found: &Candidates) -> BTreeMap<usize, BTreeSet<u64>> {
+        let mut links: BTreeMap<usize, BTreeSet<u64>> = BTreeMap::new();
+        let known = |folders: Option<&BTreeSet<u64>>| -> BTreeSet<u64> {
+            folders.into_iter().flatten().copied().filter(|id| self.folders.contains_key(id)).collect()
+        };
+        for &(anchor, owner) in &found.views {
+            let known = known(self.owners.get(&owner));
+            if !known.is_empty() {
+                links.entry(anchor).or_default().extend(known);
             }
         }
-        for (start, object) in envelopes(data, MESSAGE) {
-            let Some(key) = message_key(object, 0x00ca) else {
-                continue;
-            };
-            if let Some(folders) = self.members.get(&key) {
-                self.link_single_anchor(&mut links, start, object, needle, folders);
+        for &(anchor, key) in &found.messages {
+            let known = known(self.members.get(&key));
+            if !known.is_empty() {
+                links.entry(anchor).or_default().extend(known);
             }
         }
-        // Expanded message objects embedded in transaction wrappers include
-        // a full typed folder reference at +408. Only take their first
-        // ItemClass anchor.
-        for (start, object) in expanded(data) {
-            let Some(field) = object.get(408..) else {
-                continue;
-            };
-            let Some((id, account)) = reference(field, 0x004d, &[2, 0x02ac]) else {
-                continue;
-            };
-            if !self
-                .folders
-                .get(&id)
-                .is_some_and(|f| f.account_id == account)
-            {
-                continue;
+        for &(anchor, id, account) in &found.expanded {
+            if self.folders.get(&id).is_some_and(|f| f.account_id == account) {
+                links.entry(anchor).or_default().insert(id);
             }
-            let Some(rel) = memchr::memmem::find(object, needle) else {
-                continue;
-            };
-            if rel < 454 {
-                continue;
-            }
-            links
-                .entry(start + rel)
-                .or_insert_with(BTreeSet::new)
-                .insert(id);
         }
         links
-    }
-
-    /// Resolve IPM.Note anchor positions to the local message key of the
-    /// message object holding them, so other objects can name the message.
-    pub fn keys(&self, data: &[u8], needle: &[u8]) -> BTreeMap<usize, u64> {
-        let mut keys = BTreeMap::new();
-        for (start, object) in envelopes(data, MESSAGE) {
-            let Some(key) = message_key(object, MESSAGE.1) else { continue };
-            let mut anchors = memchr::memmem::find_iter(object, needle);
-            if let (Some(anchor), None) = (anchors.next(), anchors.next()) {
-                keys.insert(start + anchor, key);
-            }
-        }
-        for (start, object) in expanded(data) {
-            // Only a real message header carries its typed folder reference;
-            // a bare message reference inside another object does not.
-            if object.get(408..).and_then(|f| reference(f, 0x004d, &[2, 0x02ac])).is_none() {
-                continue;
-            }
-            let Some(key) = message_key(object, MESSAGE.1) else { continue };
-            if let Some(rel) = memchr::memmem::find(object, needle).filter(|&rel| rel >= 454) {
-                keys.entry(start + rel).or_insert(key);
-            }
-        }
-        keys
-    }
-
-    fn link_single_anchor(
-        &self,
-        links: &mut BTreeMap<usize, BTreeSet<u64>>,
-        start: usize,
-        object: &[u8],
-        needle: &[u8],
-        folders: &BTreeSet<u64>,
-    ) {
-        let mut anchors = memchr::memmem::find_iter(object, needle);
-        let Some(anchor) = anchors.next() else { return };
-        if anchors.next().is_some() {
-            return;
-        }
-        let known: BTreeSet<_> = folders
-            .iter()
-            .copied()
-            .filter(|id| self.folders.contains_key(id))
-            .collect();
-        if !known.is_empty() {
-            links.entry(start + anchor).or_default().extend(known);
-        }
     }
 }
 
@@ -506,19 +544,18 @@ mod tests {
 
     #[test]
     fn anchors_resolve_to_their_message_key() {
-        let index = Index::default();
         let mut compact = object(0xca, 70, 0, 70, 100);
         compact.extend(note());
-        assert_eq!(index.keys(&envelope(0x74e, &compact), &note()), BTreeMap::from([(110, 70)]));
+        assert_eq!(keys(&envelope(0x74e, &compact), &note()), BTreeMap::from([(110, 70)]));
         let mut twice = compact.clone();
         twice.extend(note());
-        assert!(index.keys(&envelope(0x74e, &twice), &note()).is_empty());
+        assert!(keys(&envelope(0x74e, &twice), &note()).is_empty());
         let mut expanded = object(0xca, 71, 0, 71, 500);
         expanded.extend(note());
         // A bare message reference with no folder reference at +408 is not a header.
-        assert!(index.keys(&expanded, &note()).is_empty());
+        assert!(keys(&expanded, &note()).is_empty());
         expanded[408..454].copy_from_slice(&object(0x4d, 50, 2, 7, 46));
-        assert_eq!(index.keys(&expanded, &note()), BTreeMap::from([(500, 71)]));
+        assert_eq!(keys(&expanded, &note()), BTreeMap::from([(500, 71)]));
     }
 
     #[test]
@@ -550,35 +587,34 @@ mod tests {
         let mut data = expanded.clone();
         data.extend(&early);
         data.extend(envelope(0x740, &compact));
-        let keys = index.keys(&data, &note());
-        assert_eq!(keys.get(&500), Some(&70));
-        assert_eq!(keys.len(), 2, "an anchor inside the fixed header is not keyed");
-        assert_eq!(keys.values().copied().collect::<BTreeSet<_>>(), BTreeSet::from([70, 72]));
+        let found = keys(&data, &note());
+        assert_eq!(found.get(&500), Some(&70));
+        assert_eq!(found.len(), 2, "an anchor inside the fixed header is not keyed");
+        assert_eq!(found.values().copied().collect::<BTreeSet<_>>(), BTreeSet::from([70, 72]));
         assert!(index.links(&data, &note()).is_empty(), "keys do not invent folder links");
         let mut bare = object(0xca, 74, 0, 74, 500);
         bare.extend(note());
-        assert!(index.keys(&bare, &note()).is_empty(), "no typed folder reference, no key");
+        assert!(keys(&bare, &note()).is_empty(), "no typed folder reference, no key");
     }
 
     #[test]
     fn keys_never_cross_an_envelope_or_the_header_bound() {
-        let index = Index::default();
         // A view envelope between the header and the next anchor ends the header.
         let mut data = header(70, 470);
         let mut view = object(0x4f, 71, 4, 60, 100);
         view.extend(note());
         data.extend(envelope(0x430, &view));
-        assert!(index.keys(&data, &note()).is_empty());
+        assert!(keys(&data, &note()).is_empty());
         // An anchor 4096 or more bytes past the header belongs to something else.
         let mut far = header(72, 4096);
         far.extend(note());
-        assert!(index.keys(&far, &note()).is_empty());
+        assert!(keys(&far, &note()).is_empty());
         // Only the first anchor inside one header takes its key.
         let mut twice = header(73, 500);
         twice.extend(note());
         twice.extend(vec![0; 40]);
         twice.extend(note());
-        assert_eq!(index.keys(&twice, &note()), BTreeMap::from([(500, 73)]));
+        assert_eq!(keys(&twice, &note()), BTreeMap::from([(500, 73)]));
     }
 
     #[test]

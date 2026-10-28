@@ -152,37 +152,47 @@ pub(crate) fn parse(object: &[u8]) -> Option<Attachment> {
     })
 }
 
+/// Every attachment envelope in one block, decoded where it parses.
+pub fn observations(data: &[u8]) -> Vec<Option<Attachment>> {
+    envelopes(data, ATTACHMENT).into_iter().map(|(_, object)| parse(object)).collect()
+}
+
 impl Index {
+    #[cfg(test)]
     pub fn observe(&mut self, data: &[u8]) {
-        for (_, object) in envelopes(data, ATTACHMENT) {
-            self.objects += 1;
-            let Some(a) = parse(object) else { continue };
-            if self.conflicting_metadata.contains(&a.id) {
-                continue;
+        for observation in observations(data) {
+            self.apply(observation);
+        }
+    }
+
+    pub fn apply(&mut self, observation: Option<Attachment>) {
+        self.objects += 1;
+        let Some(a) = observation else { return };
+        if self.conflicting_metadata.contains(&a.id) {
+            return;
+        }
+        if self.attachments.get(&a.id).is_some_and(|prev| prev.message_key != a.message_key || prev.name != a.name) {
+            self.attachments.remove(&a.id);
+            self.conflicting_metadata.insert(a.id);
+            return;
+        }
+        match self.attachments.get_mut(&a.id) {
+            None => {
+                self.attachments.insert(a.id, a);
             }
-            if self.attachments.get(&a.id).is_some_and(|prev| prev.message_key != a.message_key || prev.name != a.name) {
-                self.attachments.remove(&a.id);
-                self.conflicting_metadata.insert(a.id);
-                continue;
-            }
-            match self.attachments.get_mut(&a.id) {
-                None => {
-                    self.attachments.insert(a.id, a);
+            Some(prev) => {
+                // Revisions agree on the message; anything else is
+                // taken conservatively rather than by block order.
+                if prev.path != a.path {
+                    prev.path = None;
                 }
-                Some(prev) => {
-                    // Revisions agree on the message; anything else is
-                    // taken conservatively rather than by block order.
-                    if prev.path != a.path {
-                        prev.path = None;
-                    }
-                    prev.size = prev.size.max(a.size);
-                    prev.name_verified &= a.name_verified;
-                    if prev.content_id != a.content_id {
-                        prev.content_id = None;
-                    }
-                    if prev.content_type != a.content_type {
-                        prev.content_type = None;
-                    }
+                prev.size = prev.size.max(a.size);
+                prev.name_verified &= a.name_verified;
+                if prev.content_id != a.content_id {
+                    prev.content_id = None;
+                }
+                if prev.content_type != a.content_type {
+                    prev.content_type = None;
                 }
             }
         }

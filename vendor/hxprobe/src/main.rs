@@ -9,10 +9,11 @@
 //!
 //! ```text
 //!   hxprobe blocks <file>            verify every block, report coverage
-//!   hxprobe db     <file> [out.db] [files-dir]
+//!   hxprobe db     <file> [out.db] [files-dir] [--cache <file>]
 //!                                    build a SQLite database with FTS5 search;
 //!                                    files-dir is the profile's Files folder,
-//!                                    for EFMData sidecar bodies
+//!                                    for EFMData sidecar bodies; the private
+//!                                    cache file re-decodes only changed blocks
 //!   hxprobe map    <file> [n]        dump the named field map for n records
 //!   hxprobe find   <file> <term>     show records whose text contains <term>
 //! ```
@@ -31,6 +32,7 @@ mod attachment;
 mod block;
 mod body;
 mod calendar;
+mod facts;
 mod folder;
 mod header;
 mod identity;
@@ -212,22 +214,45 @@ fn cmd_find(path: &str, term: &str, limit: usize) {
 }
 
 /// Parse the whole store into a SQLite database with a full-text index.
-fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
+///
+/// With a cache, blocks whose offset and header match the previous run reuse
+/// that run's per-block facts; everything after extraction is the same code.
+fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>, cache_path: Option<&str>) {
     let mm = map(path);
     let needle = record::anchor_needle();
     let offs = block::find_all(&mm);
     println!("{} blocks -> {db_path}", offs.len());
+
+    // Every block is checked against both checksums on every run; only a
+    // verified block that is not in the cache is decompressed and parsed.
+    let mut cache = cache_path.map(|p| facts::Cache::open(std::path::Path::new(p)));
+    let mut blocks: Vec<(usize, facts::BlockFacts)> = offs
+        .iter()
+        .filter_map(|&o| {
+            let verified = block::verify(&mm, o).ok()?;
+            let found = match &mut cache {
+                Some(cache) => cache.facts(&mm, o, &verified, &needle).ok()?,
+                None => facts::extract(o, &block::inflate(&mm, &verified).ok()?.data, &needle),
+            };
+            Some((o, found))
+        })
+        .collect();
+    let blocks_ok = blocks.len();
 
     // Folder catalogs and membership metadata can occur after the messages.
     let mut folders = folder::Index::default();
     let mut events = calendar::Index::default();
     let mut attachments = attachment::Index::default();
     let mut sidecars = files_dir.map(|d| body::Sidecars::open(std::path::Path::new(d))).unwrap_or_default();
-    for &o in &offs {
-        if let Some(b) = block::parse(&mm, o) {
-            folders.observe(o, &b.data);
-            events.observe(&b.data);
-            attachments.observe(&b.data);
+    for (o, found) in &mut blocks {
+        for observation in std::mem::take(&mut found.folders) {
+            folders.apply(*o, observation);
+        }
+        for observation in std::mem::take(&mut found.events) {
+            events.apply(observation);
+        }
+        for observation in std::mem::take(&mut found.attachments) {
+            attachments.apply(observation);
         }
     }
 
@@ -337,7 +362,6 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     )
     .expect("schema");
 
-    let mut blocks_ok = 0usize;
     let mut best: std::collections::HashMap<String, record::Record> = Default::default();
     // `Topic` is a conversation-level field, so a record can legitimately hold
     // no subject of its own while its thread has one. These map each thread to
@@ -345,67 +369,23 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     let mut convo_subject: std::collections::HashMap<String, String> = Default::default();
     let mut convo_of: std::collections::HashMap<String, Vec<String>> = Default::default();
 
-    for &o in &offs {
-        let Some(b) = block::parse(&mm, o) else { continue };
-        blocks_ok += 1;
-        let folder_links = folders.links(&b.data, &needle);
-        let key_links = folders.keys(&b.data, &needle);
-
-        for loc in records(&b.data, &needle) {
-            let Some(mut r) = record::parse(o, &b.data, loc.anchor) else { continue };
-            r.folder_ids = folder_links.get(&loc.anchor).cloned().unwrap_or_default();
-            r.local_keys = key_links.get(&loc.anchor).into_iter().copied().collect();
-            let m = schema::build_bounded(&b.data, loc.anchor, loc.end, loc.back);
-
-            // The named map is authoritative for every field it covers: it
-            // assigns slots by their position in the run sequence and checks
-            // each against the type the protocol schema says it holds.
-            // `record::parse` supplies only what is not a string run -- the
-            // HTML body -- plus the send time, read here from the span.
-            r.sent_unix = record::read_time(loc.span);
-            // Take the map's value where it has one, but keep what
-            // `record::parse` found otherwise -- the two paths locate fields
-            // differently, and the shape-based path still covers records the
-            // map's stricter type checks reject.
-            if let Some(v) = m.get(schema::Key::SenderAddress) {
-                r.sender = Some(v.to_string());
-            }
-            if let Some(v) = m.get(schema::Key::SenderName) {
-                r.sender_name = Some(v.to_string());
-            }
-            if let Some(v) = m.get(schema::Key::InternetMessageId) {
-                r.message_id = Some(v.to_string());
-            }
-            // The subject is the exception: the map is the only path that
-            // requires the Topic/NormalizedSubject duplicate, and the
-            // shape-based fallback supplies attachment paths instead of
-            // subjects, so an empty map result must win.
-            r.subject = m.get(schema::Key::NormalizedSubject).map(str::to_string);
-            r.recipients = m
-                .all(schema::Key::Recipient)
-                .iter()
-                .filter(|t| Some(**t) != r.sender.as_deref())
-                .map(|t| t.to_string())
-                .collect();
-            r.preview = m.get(schema::Key::Preview).map(str::to_string);
-            if r.html.is_some() {
-                r.body_source = Some("inline");
-            } else if let Some(html) = sidecars.body_for(loc.span, &r) {
-                r.body = record::html_to_text(&html);
-                r.html = Some(html);
-                r.body_source = Some("efm");
+    for (_, found) in blocks {
+        let folder_links = folders.resolve(&found.candidates);
+        for facts::RecordFacts { anchor, record: mut r, convo_ids, sidecars: names } in found.records {
+            r.folder_ids = folder_links.get(&anchor).cloned().unwrap_or_default();
+            r.local_keys = found.keys.get(&anchor).into_iter().copied().collect();
+            if r.html.is_none() {
+                if let Some(html) = sidecars.body_from(&names, &r) {
+                    r.body = record::html_to_text(&html);
+                    r.html = Some(html);
+                    r.body_source = Some("efm");
+                }
             }
             if r.body.split_whitespace().count() < 3 {
                 if let Some(v) = &r.preview {
                     r.body = v.clone();
                 }
             }
-
-            // Built from every raw record, not the deduplicated set: a revision
-            // that loses the merge can still be the only one carrying the
-            // thread's subject.
-            let convo_ids: Vec<String> =
-                m.all(schema::Key::ConversationId).iter().map(|s| s.to_string()).collect();
 
             // A record with neither a sender nor readable text is a stub.
             if r.sender.is_none() && r.body.split_whitespace().count() < 5 {
@@ -473,8 +453,11 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     }
 
     // Collapse the copies `sender + send time` could not join. See body.rs.
-    let mut by_time: Vec<record::Record> = best.into_values().collect();
-    by_time.sort_by_key(|r| r.sent_unix);
+    // Ties on send time are broken by merge key, not hash order, so the same
+    // store always collapses and numbers its rows the same way.
+    let mut keyed: Vec<(String, record::Record)> = best.into_iter().collect();
+    keyed.sort_by(|(a, x), (b, y)| (x.sent_unix, a).cmp(&(y.sent_unix, b)));
+    let by_time = keyed.into_iter().map(|(_, r)| r);
     let mut best: Vec<record::Record> = Vec::with_capacity(by_time.len());
     let mut first_copy: std::collections::HashMap<(std::collections::BTreeSet<u64>, String), Vec<usize>> = Default::default();
     let mut collapsed = 0usize;
@@ -693,6 +676,15 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     )
     .expect("index");
 
+    if let (Some(cache), Some(cache_path)) = (&cache, cache_path) {
+        println!("  incremental: {} blocks reused, {} decoded", cache.reused, cache.decoded);
+        // The export above is complete either way; an unsaved cache only
+        // means the next run decodes every block.
+        if let Err(e) = cache.save(std::path::Path::new(cache_path)) {
+            eprintln!("decode cache not saved: {}", e.kind());
+        }
+    }
+
     println!("\n{blocks_ok}/{} blocks verified, {stored} messages stored", offs.len());
     for (label, sql) in [
         ("sender     ", "sender IS NOT NULL"),
@@ -758,9 +750,10 @@ hxprobe — parse HxStore.hxd, the New Outlook for Mac message store
 usage:
   hxprobe observe <copy>             emit count-only structural JSON
   hxprobe blocks <file>              verify every block, report coverage
-  hxprobe db     <file> [out.db] [files-dir]
+  hxprobe db     <file> [out.db] [files-dir] [--cache <file>]
                                      build a SQLite database (default mail.db);
-                                     files-dir reads EFMData sidecar bodies
+                                     files-dir reads EFMData sidecar bodies;
+                                     --cache reuses unchanged blocks' facts
   hxprobe map    <file> [n]          dump the field map for n records (0 = stats)
   hxprobe find   <file> <term> [n]   show records whose text contains <term>
 
@@ -828,11 +821,22 @@ fn main() {
 
     match args[1].as_str() {
         "blocks" => cmd_blocks(&args[2]),
-        "db" => cmd_db(
-            &args[2],
-            args.get(3).map(String::as_str).unwrap_or("mail.db"),
-            args.get(4).map(String::as_str),
-        ),
+        "db" => {
+            let (positional, cache) = match args.iter().position(|a| a == "--cache") {
+                Some(i) if i >= 3 && i + 2 == args.len() => (&args[..i], Some(args[i + 1].as_str())),
+                Some(_) => {
+                    eprintln!("--cache takes one path after the other arguments\n\n{USAGE}");
+                    std::process::exit(2);
+                }
+                None => (&args[..], None),
+            };
+            cmd_db(
+                &positional[2],
+                positional.get(3).map(String::as_str).unwrap_or("mail.db"),
+                positional.get(4).map(String::as_str),
+                cache,
+            )
+        }
         "map" => cmd_map(&args[2], num(3, 4)),
         "find" => match args.get(3) {
             Some(term) => cmd_find(&args[2], term, num(4, 4)),
