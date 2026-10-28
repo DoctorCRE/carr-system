@@ -303,6 +303,16 @@ class Window:
     def front(self) -> None:
         cua('bring_to_front', {'pid': self.pid, 'window_id': self.window_id})
 
+    def select_all_accounts(self) -> bool:
+        buttons = [e for e in self._walk(**PANE_WALK)
+                   if e.get('role') == 'AXButton' and e.get('label') == 'All Accounts']
+        if len(buttons) != 1:
+            return False
+        cua('click', {'pid': self.pid, 'element_token': buttons[0]['element_token'],
+                      'action': 'press'})
+        time.sleep(self.waits.settle_seconds)
+        return True
+
     def _folder_pane_visible(self) -> bool:
         return any(e.get('role') == 'AXOutline' for e in self._walk(**PANE_WALK))
 
