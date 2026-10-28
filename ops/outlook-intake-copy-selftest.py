@@ -280,7 +280,7 @@ class InstallerTest(unittest.TestCase):
         result = self.install()
         self.assertTrue(self.helper.is_file())
         self.assertEqual(stat.S_IMODE(self.helper.stat().st_mode), 0o700)
-        self.assertIn(f'grant Full Disk Access to {self.helper}', result.stdout)
+        self.assertIn(f'Full Disk Access must be re-granted for {self.helper}', result.stdout)
         self.assertFalse((self.home / 'Library/LaunchAgents').exists())
         for service in ('intake', 'refresh'):
             rendered = plistlib.loads((self.repo / f'out/com.carr.outlook-{service}.plist').read_bytes())
@@ -300,6 +300,41 @@ class InstallerTest(unittest.TestCase):
         before = self.helper.stat().st_mtime_ns
         self.install()
         self.assertEqual(self.helper.stat().st_mtime_ns, before, 'an unchanged helper retains its privacy identity')
+
+    def test_unchanged_install_keeps_binary_bytes_and_mtime_without_an_access_warning(self):
+        self.install()
+        before_bytes = self.helper.read_bytes()
+        before_mtime = self.helper.stat().st_mtime_ns
+        result = self.install()
+        self.assertEqual(self.helper.read_bytes(), before_bytes)
+        self.assertEqual(self.helper.stat().st_mtime_ns, before_mtime)
+        self.assertNotIn('Full Disk Access', result.stdout)
+
+    def test_source_change_rebuilds_once_and_names_the_binary_needing_access(self):
+        self.install()
+        before = self.helper.read_bytes()
+        source = self.repo / 'tools/outlook-intake-copy.c'
+        source.write_text(source.read_text().replace('snapshot failed', 'fixture snapshot failed'))
+        result = self.install()
+        self.assertNotEqual(self.helper.read_bytes(), before)
+        warning = f'Full Disk Access must be re-granted for {self.helper}'
+        self.assertEqual(sum(warning in line for line in result.stdout.splitlines()), 1)
+        before_bytes = self.helper.read_bytes()
+        before_mtime = self.helper.stat().st_mtime_ns
+        result = self.install()
+        self.assertEqual(self.helper.read_bytes(), before_bytes)
+        self.assertEqual(self.helper.stat().st_mtime_ns, before_mtime)
+        self.assertNotIn('Full Disk Access', result.stdout)
+
+    def test_compiled_settings_change_rebuilds_and_warns_for_the_configured_binary(self):
+        self.install()
+        values = json.loads(self.config.read_text())
+        values['profile'] = str(self.home / 'Changed Profile')
+        self.config.write_text(json.dumps(values))
+        result = self.install()
+        scope = subprocess.run([str(self.helper), '--scope'], capture_output=True, text=True, check=True)
+        self.assertEqual(scope.stdout.splitlines()[0], values['profile'])
+        self.assertIn(f'Full Disk Access must be re-granted for {self.helper}', result.stdout)
 
     def test_outbox_is_rendered_only_when_enabled_and_never_loaded(self):
         self.install()
