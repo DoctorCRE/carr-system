@@ -102,7 +102,12 @@ REFRESH_DAYS = timedelta(days=7)
 UNRESOLVED_DAYS = timedelta(days=30)
 REFRESH_INTERVAL = timedelta(minutes=30)
 COPY_WINDOW = 86_400
-VERIFIED_MIN = 0.95
+# Fractions and percentage-point drops for decoder health.
+DECODER_HEALTH_FLOORS = {'block_verification': 0.95, 'sender': 0.5,
+                         'subject': 0.5, 'recipients': 0.5, 'sent_time': 0.5, 'folder': 0.0,
+                         'attachment_metadata': 0.0}
+DECODER_HEALTH_DROP = 0.20
+DECODER_HEALTH_MIN_SAMPLE = 20
 MODEL_BODY_CHARS = 12_000
 AGENDA_BOARD = 'calendar-agenda'
 AGENDA_SCHEMA = 'carr-calendar-agenda.v1'
@@ -372,11 +377,12 @@ def _load(db: Path, account: str | None = None) -> tuple[dict, list[dict], list[
                                     for name in ('conversation_id', 'cc'))
         mails = [dict(r) for r in con.execute(
             'SELECT id, sender, sender_name, recipients, subject, body, preview, body_kind, sent_unix, copy_key, '
-            f'{local_keys}, {context_columns} FROM messages WHERE sent_unix IS NOT NULL AND sender IS NOT NULL')]
+            f'{local_keys}, {context_columns} FROM messages')]
         mail_count = len(mails)
+        meta['health_store_mails'] = list(mails)
         if account is not None:
             account = account.lower()
-            mails = [m for m in mails if account == m['sender'].lower()
+            mails = [m for m in mails if account == (m['sender'] or '').lower()
                      or account in _addresses(m['recipients']) or account in _addresses(m.get('cc'))]
         meta['mail_other_accounts'] = mail_count - len(mails)
         for m in mails:
@@ -384,6 +390,8 @@ def _load(db: Path, account: str | None = None) -> tuple[dict, list[dict], list[
             m['row_ids'] = [message_id]
             m['folders'] = paths.get(message_id, [])
             m['attachments'] = attachments.get(message_id, [])
+        meta['health_mails'] = mails
+        mails = [m for m in mails if m['sender'] and m['sent_unix'] is not None]
         events = [dict(r) for r in con.execute('SELECT * FROM events')]
         attendees: dict[int, list] = {}
         for r in con.execute('SELECT event_id, name, email FROM event_attendees'):
@@ -393,6 +401,34 @@ def _load(db: Path, account: str | None = None) -> tuple[dict, list[dict], list[
         return meta, mails, events
     finally:
         con.close()
+
+
+def _decoder_health(meta: dict, since: int, now: datetime, baseline: dict) -> dict:
+    rows = [m for m in meta['health_mails'] if m['sent_unix'] is not None
+            and since <= m['sent_unix'] <= now.timestamp() + 300]
+    found = meta.get('blocks_found') or 0
+    rates = {'block_verification': (meta.get('blocks_verified') or 0) / found if found else None}
+    store_rows = meta['health_store_mails']
+    samples = {'block_verification': found}
+    for name, field, sample in (('sender', 'sender', rows), ('subject', 'subject', rows),
+                                ('recipients', 'recipients', store_rows), ('sent_time', 'sent_unix', store_rows),
+                                ('folder', 'folders', rows)):
+        samples[name] = len(sample)
+        rates[name] = sum(bool(m[field] and (not isinstance(m[field], str) or m[field].strip()))
+                          for m in sample) / len(sample) if sample else None
+    attachments = [a for m in rows for a in m['attachments']]
+    samples['attachment_metadata'] = len(attachments)
+    rates['attachment_metadata'] = (sum(bool(a['name'] and a['size'] is not None) for a in attachments)
+                                    / len(attachments) if attachments else None)
+    eligible = {name: rate for name, rate in rates.items()
+                if rate is not None and samples[name] >= DECODER_HEALTH_MIN_SAMPLE}
+    failing = [name for name, rate in eligible.items() if
+               rate < DECODER_HEALTH_FLOORS[name] or
+               (name in baseline and rate < baseline[name] - DECODER_HEALTH_DROP)]
+    if not found:
+        failing.append('block_verification')
+    return {'rates': rates, 'eligible': eligible, 'failing': failing, 'messages': len(rows),
+            'store_messages': len(store_rows)}
 
 
 def _snapshot(home: Path, work: Path) -> None:
@@ -1045,8 +1081,27 @@ class Run:
         self.state.pop('upcoming', None)
         self.counts.update(calendar_counts(self.state))
 
-    def report(self, out: Path, refresh_count: int) -> None:
-        lines = [f'# Outlook intake {self.now.astimezone(self.settings.timezone):%Y-%m-%d %H:%M %Z}', '', '## Counts', '']
+    def report(self, out: Path, refresh_count: int, news: bool = False) -> None:
+        """Write a report when the run has news, health changed, or the decoder is degraded."""
+        health = self.state.get('decoder_health')
+        status = (health.get('status', 'degraded' if health['failing'] else 'healthy')
+                  if health else 'unavailable')
+        for path in out.glob('report-*.md'):
+            if path.is_file() and path.stat().st_mtime < (self.now - timedelta(days=14)).timestamp():
+                path.unlink()
+        if not news and status != 'degraded' and status == self.state.get('decoder_report_status'):
+            return
+        self.state['decoder_report_status'] = status
+        lines = [f'# Outlook intake {self.now.astimezone(self.settings.timezone):%Y-%m-%d %H:%M %Z}', '']
+        if health:
+            lines += ['## Decoder health', '', f'- status: {health.get("status", "degraded" if health["failing"] else "healthy")}',
+                      f'- messages in window: {health["messages"]}',
+                      f'- messages in store: {health.get("store_messages", "unavailable")}']
+            lines += [f'- {name}: {rate * 100:.1f}%' if rate is not None else f'- {name}: unavailable'
+                      for name, rate in health['rates'].items()]
+            lines += [f'- failing: {", ".join(health["failing"]) or "none"}',
+                      '- skipped: conversation_id and flag_state (not exported by hxprobe)', '']
+        lines += ['## Counts', '']
         lines += [f'- {k}: {v}' for k, v in sorted(self.counts.items())]
         lines += [f'- needs_refresh_listed: {refresh_count}', '', '## Writes', '']
         lines += [f'- {who} | {ref} | {verb}' + (f' | {note}' if note else '') for who, ref, verb, note in self.written]
@@ -1351,7 +1406,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     hydration_due = bool(state.get('pending_full')) and now.timestamp() >= state.get('hydration_check_at', 0)
     review_due = 'calendar_review_at' not in state or (state['calendar_review_at'] is not None
                                                       and now.timestamp() >= state['calendar_review_at'])
-    if 'mail_other_accounts' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and not state.get('steps') and state.get('attachment_policy') == 1 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY:
+    if not state.get('decoder_degraded') and 'mail_other_accounts' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and not state.get('steps') and state.get('attachment_policy') == 1 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY:
         if state.get('pending_full'):
             Run(ports, state, now, out, settings).full_text([])
             _refresh_list(out, state['pending_full'])
@@ -1369,18 +1424,46 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
 
 
 def _process(out, ports, settings, state, signature, now, matcher, meta, mails, events, db, files):
-    found = meta.get('blocks_found') or 0
-    if not found or (meta.get('blocks_verified') or 0) / found < VERIFIED_MIN:
-        return Outcome('failed', 'store_verification_low')
-    if (meta.get('event_identities') or 0) > 0 and not meta.get('events_decoded'):
-        return Outcome('failed', 'calendar_decode_empty')
-
     high = state.get('high_water')
     since = int((datetime.fromtimestamp(high, timezone.utc) - LOOKBACK if high else now - BACKFILL).timestamp())
+    try:
+        health = _decoder_health(meta, since, now, state.get('decoder_baseline', {}))
+    except Exception as error:
+        health = {'status': 'unavailable', 'error_class': (type(error).__name__.lower() if type(error) in
+                  (TypeError, ValueError, KeyError, IndexError, AttributeError, RuntimeError) else 'other'), 'rates': {},
+                  'eligible': {}, 'failing': [], 'messages': 0}
+    state['decoder_health'] = health
+    prior_failures = state.get('decoder_failures', [])
+    unresolved = [name for name in prior_failures if name not in health['eligible']]
+    alarm = int(bool(health['failing']) and not state.get('decoder_alarm_delivered', False))
+    state['decoder_failures'] = list(dict.fromkeys(health['failing'] + unresolved))
+    state['decoder_degraded'] = bool(state['decoder_failures'])
+    if not state['decoder_degraded'] and health.get('status') != 'unavailable':
+        state.pop('decoder_alarm_delivered', None)
+        state['decoder_baseline'] = {**state.get('decoder_baseline', {}), **health['eligible']}
+    _save(out, state)
+    if 'block_verification' in health['failing'] and 'block_verification' in health['eligible']:
+        work = Run(ports, state, now, out, settings)
+        work.counts.update(decoder_alarm=alarm, writes_deferred=1)
+        work.report(out, 0)
+        state['decoder_alarm_delivered'] = True
+        _save(out, state)
+        return Outcome('degraded', 'writes_deferred', work.counts)
+    if (meta.get('event_identities') or 0) > 0 and not meta.get('events_decoded'):
+        work = Run(ports, state, now, out, settings)
+        if health.get('error_class'):
+            work.counts['decoder_health_error_' + health['error_class']] = 1
+        work.report(out, 0)
+        _save(out, state)
+        return Outcome('failed', 'calendar_decode_empty', work.counts)
+
     mails = _best_copies(mails)
     state['hydration_check_at'] = int((now + REFRESH_INTERVAL).timestamp())
     work = Run(ports, state, now, out, settings)
     work.counts['mail_other_accounts'] = meta['mail_other_accounts']
+    work.counts['decoder_alarm'] = alarm
+    if health.get('error_class'):
+        work.counts['decoder_health_error_' + health['error_class']] = 1
     try:
         matcher = matcher or Matcher(ports.contacts(), settings.internal_domain)
         prepared = work.prepare_attachments(mails, matcher, db, files)
@@ -1401,7 +1484,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         work.full_text(mails)
         work.next_steps(mails)
         mail_processed = bool(work.written or any(value for key, value in work.counts.items()
-                                                  if key != 'mail_other_accounts'))
+                                                  if key not in ('mail_other_accounts', 'decoder_alarm')))
         work.events(events, matcher, since)
         snapshot, agenda_counts = agenda(events, meta, settings, now)
         work.counts.update(agenda_counts)
@@ -1416,6 +1499,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
             state.pop('calendar_review_at', None)
             work.counts.update(calendar_agenda_published=0, calendar_agenda_failed=1)
     except CarrError as error:
+        work.report(out, 0)
         _save(out, state)
         return Outcome('failed', 'carr_unreachable' if error.code == 'transport_error' else error.code, work.counts)
     work.counts.update(mapping_counts(state))
@@ -1423,8 +1507,8 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         work.counts['error_' + code] = sum(not r['acknowledged'] and r.get('error_code') == code
                                           for r in state.get('requests', {}).values())
     refresh = _refresh_list(out, state.get('pending_full', {}))
-    if mail_processed or work.unmatched or refresh or work.counts['calendar_requests_quarantined']:
-        work.report(out, refresh)
+    work.report(out, refresh, news=bool(mail_processed or work.unmatched or refresh
+                                        or work.counts['calendar_requests_quarantined']))
     counts = {**work.counts, 'needs_refresh_listed': refresh}
     failed = next((reason for count, reason in (('writes_failed', 'writes_failed'),
                                                ('requests_blocked', 'request_blocked'),
@@ -1440,6 +1524,10 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     _prune(state, now)
     _save(out, state)
     counts.update(mapping_counts(state))  # a run that expires items reports them itself
+    if health['failing']:
+        state['decoder_alarm_delivered'] = True
+        _save(out, state)
+        return Outcome('degraded', 'decoder_degraded', counts)
     return Outcome('succeeded', 'processed' if mail_processed else 'nothing_new', counts)
 
 
@@ -1533,4 +1621,6 @@ def main() -> int:
             email_router.step(repo, settings)
         except Exception:
             print('email-router-receipt ' + json.dumps({'state': 'failed', 'counts': {'error': 1}}))
+    if outcome.state == 'degraded':
+        return outcome.counts['decoder_alarm']
     return EXIT[outcome.state]

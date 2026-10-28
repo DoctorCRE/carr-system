@@ -71,6 +71,30 @@ class ScheduledRunTests(unittest.TestCase):
         self.assertNotIn("SYNTHETIC_PRIVATE", observed)
         self.assertFalse(list((self.root / "out").glob("outlook-intake-receipt.*")))
 
+    def test_decoder_degradation_records_one_failure_until_recovery(self):
+        receipt = {"state": "degraded", "reason": "decoder_degraded", "counts": {"decoder_alarm": 1}}
+        first = self.invoke_intake(receipt, code=1)
+        self.assertEqual(first.returncode, 1)
+        args = json.loads(self.rows()[-1][3])
+        self.assertEqual(args[args.index("--failure-class") + 1], "decoder_degraded")
+        self.assertEqual(json.loads(args[args.index("--detail") + 1]), receipt)
+        receipt["counts"]["decoder_alarm"] = 0
+        second = self.invoke_intake(receipt, code=0)
+        self.assertEqual(second.returncode, 0)
+        self.assertEqual(len(self.rows()), 1)
+        self.assertIn('"state": "degraded"', second.stdout)
+
+    def test_decoder_deferred_and_health_error_receipts_are_preserved(self):
+        deferred = {'state': 'degraded', 'reason': 'writes_deferred',
+                    'counts': {'decoder_alarm': 1, 'writes_deferred': 1}}
+        self.invoke_intake(deferred, code=1)
+        args = json.loads(self.rows()[-1][3])
+        self.assertEqual(json.loads(args[args.index('--detail') + 1]), deferred)
+        unavailable = {'state': 'succeeded', 'reason': 'processed',
+                       'counts': {'decoder_health_error_typeerror': 1}}
+        result = self.invoke_intake(unavailable, code=0)
+        self.assertIn('decoder_health_error_typeerror', result.stdout)
+
     def test_calendar_receipts_preserve_counts_and_failure_class(self):
         for reason, code in (('writes_failed', 1), ('calendar_lifecycle_unsupported', 0)):
             receipt = {'state': 'failed' if code else 'succeeded', 'reason': reason,
