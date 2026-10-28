@@ -2,7 +2,7 @@
 //
 // A retry within REPLAY_WINDOW replays the stored response; after it the key is
 // unknown and the write runs as new. The database enforces the same window:
-// migration 1048's tool_call_expire trigger frees an expired key for reuse and
+// migration 1053's tool_call_expire trigger frees an expired key for reuse and
 // deletes a bounded batch of expired rows on every insert. Durable receipts are
 // read back by key elsewhere; the trigger exempts the same verbs and rw02- keys.
 
