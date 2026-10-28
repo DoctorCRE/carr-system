@@ -54,6 +54,7 @@
 // repeat run replays. A loop filed for a finding and since CLOSED, whose
 // finding is true again, is filed under the next episode key: a new action.
 
+import { derivedIdempotencyKey } from "./derived-key.ts";
 import { randomUUID } from "node:crypto";
 
 import { digest } from "./artifact-trust.js";
@@ -932,7 +933,7 @@ export async function runSalesforceBrowserReadReconciliation(options = {}) {
   let outcomeRecorded = false;
   const recordOutcome = async (outcome, stop) => {
     await recorder.record("record-salesforce-run-outcome", {
-      idempotency_key: `rw02-run-outcome:${run_ref}`, run_ref, action_kind: V5_RW02_READ_RUN_KIND, outcome,
+      idempotency_key: derivedIdempotencyKey("rw02-run-outcome", run_ref), run_ref, action_kind: V5_RW02_READ_RUN_KIND, outcome,
       ...(stop ? { stop_class: V5_RW02_SAFE_STOP_REASONS[stop], reason_id: stop } : {}) });
     outcomeRecorded = true;
   };
@@ -945,7 +946,7 @@ export async function runSalesforceBrowserReadReconciliation(options = {}) {
       const verdict = evaluatePageObservation(kernel);
       if (verdict.decision === "stop") {
         await recorder.record("record-salesforce-page-stop",
-          { idempotency_key: `rw02-read:${run_ref}:page-stop:${index}`, page: kernel });
+          { idempotency_key: derivedIdempotencyKey("rw02-page-stop", `${run_ref}:${index}`), page: kernel });
         page_stop = { page_index: index, kernel_reason_id: verdict.reason_id,
           challenge: kernel.observation.challenge };
       }

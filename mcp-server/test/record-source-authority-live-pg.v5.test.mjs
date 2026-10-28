@@ -139,7 +139,7 @@ const RETENTION_POLICY = Object.freeze({
 const FIELD_REGISTRY = compileFieldAuthorityRegistry(FIELD_POLICY);
 const RETENTION_REGISTRY = compileRetentionRegistry(RETENTION_POLICY);
 const POLICY_ARGS = Object.freeze({
-  idempotency_key: "syn-live-policy-0001",
+  idempotency_key: "33215f84-22ad-5ee1-8c70-bc58b1e07026",
   field_registry: FIELD_POLICY, retention_registry: RETENTION_POLICY,
   field_registry_digest: FIELD_REGISTRY.registry_digest,
   retention_registry_digest: RETENTION_REGISTRY.registry_digest,
@@ -469,7 +469,7 @@ test("F01 on real PostgreSQL: migration, SQL fixtures and the registered verbs",
         { selector: { kind: "current_policy" } });
       assert.equal(read.readback.body, null);
       await refusedWith(call(pg, db, WRITER_AGENT, "record-source-observation",
-        { idempotency_key: "syn-live-obs-nopolicy", observation: observation() }), "no_installed_policy");
+        { idempotency_key: "64309637-a318-5984-87c5-895c1dd675f7", observation: observation() }), "no_installed_policy");
     });
 
     await t.test("field owners are installed only by a partner on the authority connection", async () => {
@@ -488,7 +488,7 @@ test("F01 on real PostgreSQL: migration, SQL fixtures and the registered verbs",
         "the installed policy reads back under the digest the install reported");
       // A second install against a stale prior refuses (CAS).
       await refusedWith(call(pg, db, AUTHORITY_JOE, "register-record-source-authority-policy",
-        { ...POLICY_ARGS, idempotency_key: "syn-live-policy-0002" }), "stale_policy_digest");
+        { ...POLICY_ARGS, idempotency_key: "b8a7fd46-3851-596c-bb56-e9bbccd62d2b" }), "stale_policy_digest");
     });
 
     await t.test("the read allows on the route mcp.js picks for it, and the reader bundle cannot attribute it", async () => {
@@ -522,7 +522,7 @@ test("F01 on real PostgreSQL: migration, SQL fixtures and the registered verbs",
 
     await t.test("owner observation establishes the field, with its four records", async () => {
       const answer = await call(pg, db, WRITER_AGENT, "record-source-observation",
-        { idempotency_key: "syn-live-obs-0001", observation: observation() });
+        { idempotency_key: "fba696d8-c464-5fba-b782-a5efbbd2436c", observation: observation() });
       assert.equal(answer.decision, "accept");
       assert.equal(answer.silent_last_write_wins, false);
       assert.ok(answer.event_digest && answer.mutation_receipt_digest && answer.current_state_transition_digest);
@@ -533,7 +533,7 @@ test("F01 on real PostgreSQL: migration, SQL fixtures and the registered verbs",
 
     await t.test("stale (older version) observation refuses", async () => {
       const answer = await call(pg, db, WRITER_AGENT, "record-source-observation", {
-        idempotency_key: "syn-live-obs-stale",
+        idempotency_key: "4a7844e9-dafe-55b6-827e-84d0384155b6",
         observation: observation({ version: 4, value_digest: VALUE_B,
           readback: { confirmed: true, readback_at: T.late, readback_value_digest: VALUE_B } }),
       });
@@ -544,7 +544,7 @@ test("F01 on real PostgreSQL: migration, SQL fixtures and the registered verbs",
 
     await t.test("a recycled native ID refuses", async () => {
       const answer = await call(pg, db, WRITER_AGENT, "record-source-observation", {
-        idempotency_key: "syn-live-obs-recycled",
+        idempotency_key: "d4d41240-8177-57dd-a478-80ec9fc61bf9",
         observation: observation({ version: 6, native_identity: {
           source_system: "salesforce", native_id: "SYNTHETIC-NATIVE-0001",
           native_id_epoch: "synthetic-epoch-2" } }),
@@ -555,7 +555,7 @@ test("F01 on real PostgreSQL: migration, SQL fixtures and the registered verbs",
 
     await t.test("a source writing against its registered direction refuses (forbidden overwrite)", async () => {
       const answer = await call(pg, db, WRITER_AGENT, "record-source-observation", {
-        idempotency_key: "syn-live-obs-forbidden",
+        idempotency_key: "8f160881-8150-52e4-8687-f812c6d2fa50",
         observation: observation({ source_system: "neon_record_layer", version: 6,
           value_digest: VALUE_B,
           native_identity: { source_system: "neon_record_layer", native_id: "SYNTHETIC-NATIVE-0001",
@@ -568,7 +568,7 @@ test("F01 on real PostgreSQL: migration, SQL fixtures and the registered verbs",
 
     await t.test("a same-version conflict surfaces a visible reconciliation item and leaves state alone", async () => {
       const answer = await call(pg, db, WRITER_AGENT, "record-source-observation", {
-        idempotency_key: "syn-live-obs-conflict",
+        idempotency_key: "67674f41-42e3-5e87-b7e3-37bc552cc120",
         observation: observation({ value_digest: VALUE_B,
           readback: { confirmed: true, readback_at: T.late, readback_value_digest: VALUE_B } }),
       });
@@ -585,12 +585,12 @@ test("F01 on real PostgreSQL: migration, SQL fixtures and the registered verbs",
 
     await t.test("a conflict on a refuse-behaviour field refuses", async () => {
       const first = await call(pg, db, WRITER_AGENT, "record-source-observation", {
-        idempotency_key: "syn-live-obs-refusefield-1",
+        idempotency_key: "0f478b6d-caa7-5644-a6ce-77492f683b2c",
         observation: observation({ field: "synthetic_refuse_field" }),
       });
       assert.equal(first.decision, "accept");
       const conflict = await call(pg, db, WRITER_AGENT, "record-source-observation", {
-        idempotency_key: "syn-live-obs-refusefield-2",
+        idempotency_key: "fc2c2dc7-d2e2-54d9-81b5-fb32b4948648",
         observation: observation({ field: "synthetic_refuse_field", value_digest: VALUE_B,
           readback: { confirmed: true, readback_at: T.late, readback_value_digest: VALUE_B } }),
       });
@@ -607,7 +607,7 @@ test("F01 on real PostgreSQL: migration, SQL fixtures and the registered verbs",
 
     await t.test("a newer owner version advances the field", async () => {
       const answer = await call(pg, db, WRITER_AGENT, "record-source-observation", {
-        idempotency_key: "syn-live-obs-newer",
+        idempotency_key: "2628776d-eb87-5356-b681-6f4062addaf4",
         observation: observation({ version: 6, value_digest: VALUE_B,
           readback: { confirmed: true, readback_at: T.late, readback_value_digest: VALUE_B } }),
       });
@@ -617,7 +617,7 @@ test("F01 on real PostgreSQL: migration, SQL fixtures and the registered verbs",
 
     await t.test("document state, hash and home round-trip through a read", async () => {
       const written = await call(pg, db, WRITER_AGENT, "record-document-identity", {
-        idempotency_key: "syn-live-doc-0001", document: DOCUMENT, source: ORIGINAL_SOURCE,
+        idempotency_key: "d4da57aa-45bd-5a7c-a690-dcd61aa87354", document: DOCUMENT, source: ORIGINAL_SOURCE,
         expected_prior_document_digest: null,
       });
       assert.equal(written.decision, "allow");
@@ -639,11 +639,11 @@ test("F01 on real PostgreSQL: migration, SQL fixtures and the registered verbs",
         object_storage_identity: { ...DOCUMENT.object_storage_identity, content_digest: VALUE_B },
         onedrive_identity: { ...DOCUMENT.onedrive_identity, content_digest: VALUE_B } };
       await refusedWith(call(pg, db, WRITER_AGENT, "record-document-identity", {
-        idempotency_key: "syn-live-doc-0002-stale", document: v2, source: ORIGINAL_SOURCE,
+        idempotency_key: "377b8615-aa1c-5dd3-8da2-04ee6b4275a7", document: v2, source: ORIGINAL_SOURCE,
         expected_prior_document_digest: null,
       }), "stale_document_digest");
       const second = await call(pg, db, WRITER_AGENT, "record-document-identity", {
-        idempotency_key: "syn-live-doc-0002", document: v2, source: ORIGINAL_SOURCE,
+        idempotency_key: "d4e51acc-7dc7-5e20-ab46-dba5a4ce2442", document: v2, source: ORIGINAL_SOURCE,
         expected_prior_document_digest: written.document_digest,
       });
       assert.equal(second.decision, "allow");
@@ -653,7 +653,7 @@ test("F01 on real PostgreSQL: migration, SQL fixtures and the registered verbs",
 
       // A replay of the first write returns the stored outcome, not a stale refusal.
       const replay = await call(pg, db, WRITER_AGENT, "record-document-identity", {
-        idempotency_key: "syn-live-doc-0001", document: DOCUMENT, source: ORIGINAL_SOURCE,
+        idempotency_key: "d4da57aa-45bd-5a7c-a690-dcd61aa87354", document: DOCUMENT, source: ORIGINAL_SOURCE,
         expected_prior_document_digest: null,
       });
       assert.equal(replay.document_digest, written.document_digest);
@@ -661,7 +661,7 @@ test("F01 on real PostgreSQL: migration, SQL fixtures and the registered verbs",
 
     await t.test("a document with no source statement is refused before any write", async () => {
       await assert.rejects(call(pg, db, WRITER_AGENT, "record-document-identity", {
-        idempotency_key: "syn-live-doc-nosource", document: DOCUMENT,
+        idempotency_key: "fe9168fe-8e9f-5de2-ac14-5d264346633b", document: DOCUMENT,
       }));
     });
   } finally {

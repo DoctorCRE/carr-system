@@ -25,7 +25,7 @@ const loser = "20000000-0000-4000-8000-000000000002";
 const unrelated = "20000000-0000-4000-8000-000000000003";
 const role = n => `30000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const options = {
-  idempotency_key: "synthetic-confirm-merge", survivor_party: "C-900001",
+  idempotency_key: "c7e4b237-30ef-5134-a745-736bcd1cb268", survivor_party: "C-900001",
   merged_party: "C-900002", match_basis: "matching synthetic phone and address",
 };
 
@@ -124,7 +124,7 @@ test("confirm-merge executes against the current activity schema", async t => {
         await db.query("delete from client");
         assert.equal((await merge({ survivor_party: survivor, merged_party: loser })).ok, true);
         await assert.rejects(() => merge({
-          idempotency_key: "synthetic-retired-endpoint",
+          idempotency_key: "c407c800-0392-5b16-ace6-42b0548816a5",
           survivor_party: retiredSide === "survivor" ? loser : unrelated,
           merged_party: retiredSide === "survivor" ? unrelated : loser,
         }), error => error.payload?.error === "party_already_merged");
@@ -159,7 +159,7 @@ test("confirm-merge executes against the current activity schema", async t => {
           values (now(),$1,'note','Synthetic interleaving activity',$2)`, [actor.id, role(2)]);
         let settled = false;
         secondCall = executeRegisteredTool(second, actor, "confirm-merge", {
-          ...options, idempotency_key: "synthetic-reverse-merge",
+          ...options, idempotency_key: "9dd438d6-22a3-507b-ab40-a9424d17d177",
           survivor_party: loser, merged_party: survivor,
         }).then(result => ({ result }), error => ({ error })).then(outcome => { settled = true; return outcome; });
         const deadline = performance.now() + 3000;
