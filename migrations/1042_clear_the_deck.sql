@@ -1,5 +1,5 @@
 -- rollback: forward fix only; restore an expired row with clear-the-deck-apply keep, never by deleting history.
--- lock-review: brief ACCESS EXCLUSIVE on next_action, loop_item and candidate_pool to widen one status check each and backfill confirmation (about 13k rows, touch triggers paused so versions stay put); no rewrite.
+-- lock-review: brief ACCESS EXCLUSIVE on next_action, loop_item and candidate_pool to widen one status check each (candidate_pool keeps the email lane's 'confirmed' too, so 1042 and 1043 leave the same full set in either order) and backfill confirmation (about 13k rows, touch triggers paused so versions stay put); no rewrite.
 -- WR577.S1.J1: confirm-or-expire for automation-made partner obligations.
 -- Partner-made: created by joe or dell, or through a shared local door
 -- (joe-local, dell-local) into a partner's own queue (owner joe, dell, a door,
@@ -37,7 +37,7 @@ alter table next_action drop constraint next_action_status_check,
 alter table loop_item drop constraint loop_item_status_check,
   add constraint loop_item_status_check check (status = any (array['open', 'done', 'dropped', 'expired']));
 alter table candidate_pool drop constraint candidate_pool_status_check,
-  add constraint candidate_pool_status_check check (status = any (array['pool', 'promoted', 'suppressed_dup', 'declined', 'expired']));
+  add constraint candidate_pool_status_check check (status = any (array['pool', 'promoted', 'suppressed_dup', 'declined', 'expired', 'confirmed']));
 
 -- Backfill from history: partner-made at creation, then a joe/dell last update,
 -- then the earliest joe/dell event on the row.
