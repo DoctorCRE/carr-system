@@ -61,7 +61,7 @@ fn u32_at(data: &[u8], at: usize) -> Option<u32> {
     ))
 }
 
-fn signature(class: u16) -> [u8; 10] {
+pub(crate) fn signature(class: u16) -> [u8; 10] {
     let mut s = [0; 10];
     s[..2].copy_from_slice(&class.to_le_bytes());
     s
