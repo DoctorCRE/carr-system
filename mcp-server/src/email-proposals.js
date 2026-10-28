@@ -387,6 +387,12 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           evidence_quote: args.evidence_quote, task_text: step || args.kind === 'possible_new_deal' ? args.text?.trim() ?? null : null,
           sender_role: matching ? args.sender_role : null, next_date: step ? args.next_date : null,
           owner: draft ? source.email_source.mailbox_owner : step ? args.owner || 'joe' : null };
+        if (row.kind === 'file_to_deal') {
+          await c.query('select id from activity where id=$1 for update', [row.activity_id]);
+          if ((await c.query(`select 1 from v_email_thread_filing_event where verb='undo-email-thread-filing'
+            and subject_id=$1 and new_value->>'activity_id'=$2 limit 1`, [row.deal_id,row.activity_id])).rows.length)
+            fail('email_thread_filing_suppressed');
+        }
         const existing = (await c.query(`select 1 from email_proposal where kind=$1 and deal_id is not distinct from $2::uuid
           and activity_id=$3 for update`, [row.kind,row.deal_id,row.activity_id])).rows.length > 0;
         if (!existing && !draft) await show(c, actor, row);
@@ -492,7 +498,10 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             next_cursor: more ? emails.at(-1).activity_id : null };
         }
         const { rows } = await c.query(`select a.id as activity_id,a.summary,a.detail as body,a.occurred_at,
-            a.email_context,a.email_source->>'mailbox_owner' as mailbox_owner,(select jsonb_build_object('party_id',p.id,'name',p.name,'email',null,
+            a.email_context,a.email_source->>'mailbox_owner' as mailbox_owner,
+            coalesce((select jsonb_agg(distinct e.subject_id) from v_email_thread_filing_event e
+              where e.verb='undo-email-thread-filing' and e.new_value->>'activity_id'=a.id::text), '[]'::jsonb) as suppressed_deals,
+            (select jsonb_build_object('party_id',p.id,'name',p.name,'email',null,
               'address_unavailable',true,'unknown',false,'internal',false) from party p where p.id=coalesce(
               (select party_id from client where id=a.client_id),(select party_id from vendor where id=a.vendor_id),
               (select party_id from lead where id=a.lead_id))) as recorded_sender,d.id as deal,d.name as deal_name,d.phase,d.deal_type
