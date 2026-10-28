@@ -36,6 +36,16 @@ class SettingsTest(unittest.TestCase):
         self.assertFalse(settings.mcp_credentials.exists())
         self.assertFalse(settings.database_credentials.exists())
 
+    def test_optional_signing_identity_is_validated(self):
+        self.assertEqual(load_settings(self.home).signing_identity, '')
+        write_settings(self.home, self.repo, signing_identity='Fixture Code Signing')
+        self.assertEqual(load_settings(self.home).signing_identity, 'Fixture Code Signing')
+        for value in ('', '-', ' surrounding ', 'bad\nname', None, 42):
+            with self.subTest(value=value):
+                write_settings(self.home, self.repo, signing_identity=value)
+                with self.assertRaisesRegex(SettingsError, 'signing_identity'):
+                    load_settings(self.home)
+
     def test_second_person_changes_the_returned_identity_and_profile(self):
         write_settings(self.home, self.repo, owner='other-owner', account='other@other.test',
                        internal_domain='other.test', profile=str(self.home / 'Other Profile'), timezone='Europe/London')

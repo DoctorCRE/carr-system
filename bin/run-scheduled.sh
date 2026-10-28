@@ -91,15 +91,22 @@ with open(sys.argv[1]) as output:
                 receipt = json.loads(line[len("outlook-intake-receipt "):])
             except ValueError:
                 receipt = None
-if (isinstance(receipt, dict) and isinstance(receipt.get("counts"), dict)
+# Counts are {"run": {...}, "backlog": {...}}; a flat dict from an older runtime is still read.
+counts = receipt.get("counts") if isinstance(receipt, dict) else None
+if isinstance(counts, dict) and set(counts) == {"run", "backlog"}:
+    groups, run_counts = [counts["run"], counts["backlog"]], counts["run"]
+else:
+    groups, run_counts = [counts], counts
+if (isinstance(receipt, dict) and isinstance(counts, dict)
         and (receipt.get("state") == sys.argv[2]
         or (receipt.get("state") == "degraded" and receipt.get("reason") in ("decoder_degraded", "writes_deferred")
-            and ((sys.argv[2] == "failed" and receipt.get("counts", {}).get("decoder_alarm") == 1)
-                 or (sys.argv[2] == "succeeded" and receipt.get("counts", {}).get("decoder_alarm") == 0))))
+            and isinstance(run_counts, dict)
+            and ((sys.argv[2] == "failed" and run_counts.get("decoder_alarm") == 1)
+                 or (sys.argv[2] == "succeeded" and run_counts.get("decoder_alarm") == 0))))
         and isinstance(receipt.get("reason"), str) and receipt["reason"] in reasons
-        and isinstance(receipt.get("counts"), dict)
+        and all(isinstance(group, dict) for group in groups)
         and all(count_key.fullmatch(k) and type(v) is int and 0 <= v <= 1_000_000_000
-                for k, v in receipt["counts"].items())):
+                for group in groups for k, v in group.items())):
     safe = {k: receipt[k] for k in ("state", "reason", "counts")}
     if (isinstance(receipt.get("detail"), str) and re.fullmatch(
             r"(?:outlook-intake-copy|hxprobe) exit=(?:None|-?[0-9]{1,10}) "

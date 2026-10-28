@@ -19,9 +19,10 @@ through the named record-layer verbs:
 
 A run outside 07:00-19:30 local does nothing. Matching requires one record with
 that exact address; every address written in a record's email field counts, and
-names alone never establish identity. Records are clients, leads and vendors, plus
-open deals for the participants with no such role that v_email_deal_contact lists
-(a partner-confirmed email sender, for one): their mail logs on the deal itself. Unmatched participants in mail and calendar
+names alone never establish identity. Every live party address counts, in any market
+(email-match-contacts); a participant of an open deal holding no client, lead or vendor
+role (a partner-confirmed email sender, for one) logs on that deal itself; any other party
+holding no such role is known but has no record to log on, so it is unsupported, never missing. Unmatched participants in mail and calendar
 stay unresolved and are retried when mappings change, even outside the rolling
 lookback. Records are never created, merged or renamed.
 
@@ -107,7 +108,6 @@ WRITE_VERBS = frozenset({'log-activity', 'set-next-action', 'publish-board-snaps
 FLAG_ITEM_TITLE = 'Follow up flagged email'
 RECORD_REF = re.compile(r'^[CLV]-')
 DEAL_REF = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
-DEAL_CONTACTS = 'v_email_deal_contact'
 
 
 def _step_ref(refs: list[str]) -> str | None:
@@ -226,10 +226,32 @@ class Outcome:
     detail: str = ''
 
 
+# Standing totals recomputed from state or the store every run; every other count is this run's.
+BACKLOG_COUNTS = frozenset((
+    'hydration_pending', 'hydration_expired', 'unresolved_messages', 'skipped_automated', 'unresolved_read',
+    'unresolved_read_abandoned', 'unresolved_expired', 'unresolved_calendar', 'unresolved_addresses', 'unmatched',
+    'steps_pending', 'requests_blocked', 'needs_refresh_listed', 'calendar_lifecycle_unsupported',
+    'calendar_lifecycle_canceled', 'calendar_requests_quarantined', 'calendar_unresolved_expired',
+    'calendar_follow_up_reviews', 'calendar_follow_up_trimmed', 'calendar_agenda_items'))
+BACKLOG_PREFIXES = ('mapping_', 'error_')
+RECEIPT_NAMES = {'calendar_lifecycle_unsupported': 'calendar_copies_in_store',
+                 'calendar_unresolved_expired': 'calendar_expired_total'}
+LEAD_OUTCOMES = {'proposed': 'lead_proposed', 'known_party': 'lead_known_party', 'refused': 'lead_refused'}
+
+
+def receipt_counts(counts: dict) -> dict:
+    """Split the flat counts into this run's deltas and the standing backlog totals."""
+    split: dict[str, dict] = {'run': {}, 'backlog': {}}
+    for name, value in counts.items():
+        standing = name in BACKLOG_COUNTS or name.startswith(BACKLOG_PREFIXES)
+        split['backlog' if standing else 'run'][RECEIPT_NAMES.get(name, name)] = value
+    return split
+
+
 def receipt_line(outcome: Outcome) -> str:
     """The machine receipt bin/run-scheduled.sh validates and records."""
     reason = 'full_disk_access_required' if outcome.reason.startswith('grant Full Disk Access') else outcome.reason
-    receipt = {'state': outcome.state, 'reason': reason, 'counts': outcome.counts}
+    receipt = {'state': outcome.state, 'reason': reason, 'counts': receipt_counts(outcome.counts)}
     if outcome.detail:
         receipt['detail'] = outcome.detail
     return 'outlook-intake-receipt ' + json.dumps(receipt)
@@ -248,9 +270,12 @@ def _hash(text: str) -> str:
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
 
-def mail_identity(copy_key: str | None, sender: str, subject: str, sent_unix: int) -> tuple[str, str]:
-    """(copy hash, intake id). hxprobe's copy_key is the identity all copies of one email share."""
-    ck = _hash(copy_key or f'{sender.lower()}\x1f{subject.lower()}')[:20]
+def mail_identity(copy_key: str | None, sender: str, subject: str, sent_unix: int,
+                  local_keys: list[str] | None = None) -> tuple[str, str]:
+    """Use decoder store-item identity when available, otherwise its content heuristic."""
+    identity = ('hxstore-local\x1f' + ','.join(sorted(set(local_keys)))) if local_keys else (
+        copy_key or f'{sender.lower()}\x1f{subject.lower()}')
+    ck = _hash(identity)[:20]
     return ck, f'{ck}:{sent_unix}'
 
 
@@ -298,9 +323,6 @@ def email_context(mail: dict, domain: str) -> dict:
 
 
 AUTOMATED_LOCAL = re.compile(r'^(?:no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounces?)(?:[-.+].*)?$')
-ROLE_LOCAL = re.compile(r'^(?:front-?desk|info|office|admin|contact|reception|billing|hello|team|support|'
-                        r'scheduling|appointments?|sales|inquiries|enquiries|referrals?|records|staff|help|general)'
-                        r'(?:[-.+].*)?$')
 # The same rule propose-email-lead applies; anything else (X.500 paths, non-ASCII) cannot be queued.
 PROPOSABLE = re.compile(r"^[a-z0-9._%+'-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+$")
 
@@ -316,14 +338,6 @@ def automated(address: str) -> bool:
 
 def proposable(address: str) -> bool:
     return bool(PROPOSABLE.match(address.strip().lower()))
-
-
-def record_contacts(email: str | None, ref: str, name: str) -> list[Contact]:
-    """One contact per address written in a record's email field, in order, without repeats.
-
-    Beside other addresses, a role address may be a shared practice inbox: it is flagged, not exact."""
-    found = list(dict.fromkeys(_addresses(email)))
-    return [Contact(a, ref, name, exact=len(found) == 1 or not ROLE_LOCAL.match(_local(a))) for a in found]
 
 
 def _clean_name(name: str | None, subject: str | None) -> str | None:
@@ -531,21 +545,34 @@ def _parties(m: dict, domain: str) -> list[tuple[str, str | None]]:
     return [(m['sender'].lower(), _clean_name(m['sender_name'], m['subject']))]
 
 
-def _best_copies(mails: list[dict]) -> list[dict]:
-    """One row per email: hxprobe collapses copies; any it left are joined here, full body first."""
+def _best_copies(mails: list[dict], state: dict | None = None) -> list[dict]:
+    """Preserve keyed decoder rows; collapse only rows without store-item identity."""
     rows = []
     for m in mails:
-        m['ck'], m['ident'] = mail_identity(m['copy_key'], m['sender'], m['subject'] or '', m['sent_unix'])
         m['local_keys'] = sorted(set((m['local_keys'] or '').split(',')) - {''})
+        m['ck'], m['ident'] = mail_identity(m['copy_key'], m['sender'], m['subject'] or '',
+                                          m['sent_unix'], m['local_keys'])
         m['full'] = m['body_kind'] == 'full' and bool((m['body'] or '').strip())
         m['text'] = (m['body'] or '').strip() or (m['preview'] or '').strip()
         rows.append(m)
+    claimed = set()
+    for ident, keys in sorted((state or {}).get('mail_keys', {}).items()):
+        candidates = [m for m in rows if set(m['local_keys']) & set(keys) and id(m) not in claimed]
+        if candidates:
+            ck = ident.rsplit(':', 1)[0]
+            for prior in candidates:
+                prior['legacy_merged_suppressed'] = len(keys) > 1 or len(candidates) > 1
+                prior['ck'], prior['ident'] = ck, ident
+                claimed.add(id(prior))
     rows.sort(key=lambda m: (m['ck'], m['sent_unix']))
     out: list[dict] = []
     for m in rows:
-        last = out[-1] if out else None
+        if m['local_keys']:
+            m['first_sent'] = m['sent_unix']
+            out.append(m)
+            continue
+        last = out[-1] if out and not out[-1]['local_keys'] else None
         if last and last['ck'] == m['ck'] and m['sent_unix'] - last['first_sent'] <= COPY_WINDOW:
-            m['local_keys'] = last['local_keys'] = sorted(set(last['local_keys']) | set(m['local_keys']))
             if _flag_of(last) != _flag_of(m):  # copies that disagree on the flag leave it unknown
                 m['flag_status'] = last['flag_status'] = None
             m['row_ids'] = last['row_ids'] = sorted(set(last.get('row_ids', [])) | set(m.get('row_ids', [])))
@@ -852,9 +879,10 @@ class Run:
                 **({'email_source': {'sender_email': m['sender'].lower(), 'mailbox_owner': self.settings.owner}}
                    if not outbound else {})}, who, '' if m['full'] else 'preview_only') for ref in refs]
             completed.extend(ref for ref, ok in zip(refs, results) if ok)
+            if any(results):
+                self.counts['logged'] += 1
             if not all(results):
                 continue
-            self.counts['logged'] += 1
             if not missing:
                 unresolved.pop(m['ident'], None)
                 done.setdefault(m['ck'], []).append(m['sent_unix'])
@@ -1095,11 +1123,12 @@ class Run:
         queued = {p['sender'] for p in self.state.get('mail_unresolved', {}).values() if p.get('sender')}
         deals, failures = None, 0
         for m, progress in self.lead_candidates:
-            if 'read' in progress:
-                continue
             address = m['sender'].lower()
             name = _clean_name(m['sender_name'], m['subject'])
             request_key = self.owner_key('propose-email-lead', _hash(address), f'read|{m["ident"]}')
+            if 'read' in progress:
+                self.count_lead_disposition(progress, request_key)
+                continue
             if _hash(address) in queued:
                 progress['read'] = 'sender_queued'
                 self.counts['lead_already_queued'] += 1
@@ -1152,11 +1181,19 @@ class Run:
                 if read['applies_to'] == 'not_business':
                     continue
                 outcome = self.state['requests'][request_key].get('outcome')
-                self.counts[{'proposed': 'lead_proposed', 'known_party': 'lead_known_party',
-                             'refused': 'lead_refused'}.get(outcome, 'lead_already_queued')] += 1
+                self.counts[LEAD_OUTCOMES.get(outcome, 'lead_already_queued')] += 1
                 if outcome != 'refused':
                     progress['sender'] = _hash(address)
                     queued.add(progress['sender'])
+
+    def count_lead_disposition(self, progress: dict, request_key: str) -> None:
+        """A sender read on an earlier run still has a disposition; report it on every run."""
+        if progress['read'] == 'sender_queued':
+            self.counts['lead_already_queued'] += 1
+            return
+        request = self.state.get('requests', {}).get(request_key)
+        if request and request['acknowledged']:
+            self.counts[LEAD_OUTCOMES.get(request.get('outcome'), 'lead_already_queued')] += 1
 
     def next_steps(self, mails: list[dict]) -> None:
         """Ask for each pending email's next step and set its ball; a step stays pending until both succeed."""
@@ -1355,7 +1392,8 @@ def _prune(state: dict, now: datetime) -> None:
     state['mail_done'] = {ck: ts for ck, ts in ((ck, [t for t in v if t >= horizon])
                                                  for ck, v in state.get('mail_done', {}).items()) if ts}
     state['mail_keys'] = {ident: k for ident, k in state.get('mail_keys', {}).items()
-                          if int(ident.rsplit(':', 1)[1]) >= horizon}
+                          if ident in unresolved or ident in state.get('pending_full', {}) or ident in state.get('flags', {})
+                          or int(ident.rsplit(':', 1)[1]) >= horizon}
     state['requests'] = {k: r for k, r in state.get('requests', {}).items()
                          if not r['acknowledged'] or r['created_at'] >= horizon}
     for name in ('events_logged', 'events_balled'):
@@ -1676,9 +1714,10 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         _save(out, state)
         return Outcome('failed', 'calendar_decode_empty', work.counts)
 
-    mails = _best_copies(mails)
+    mails = _best_copies(mails, state)
     state['hydration_check_at'] = int((now + REFRESH_INTERVAL).timestamp())
     work = Run(ports, state, now, out, settings)
+    work.counts['legacy_merged_suppressed'] = sum(bool(m.get('legacy_merged_suppressed')) for m in mails)
     work.counts['mail_other_accounts'] = meta['mail_other_accounts']
     work.counts['decoder_alarm'] = alarm
     work.counts.update(health_counts(health))
@@ -1794,24 +1833,13 @@ def _carr(repo: Path) -> Callable[[str, dict], dict]:
     return call
 
 
-def _contacts(repo: Path) -> Callable[[], list]:
+def _contacts(carr: Callable[[str, dict], dict]) -> Callable[[], list]:
+    """Every live party address in any market, through the record layer's one contact read."""
     def read() -> list:
-        from lib.loadpy import load_module_from_path
-        matcher = load_module_from_path('calendar_touch_matcher', str(repo / 'tools/calendar-touch-matcher.py'))
-        rows = []
         try:
-            for view, id_col, name_col, org_col in matcher.RECORD_VIEWS:
-                _, found = matcher.read_view(view, credential_file=load_settings().database_credentials)
-                for r in found:
-                    email = str(r.get('Email') or '').strip().lower()
-                    if not r.get('_out_of_market'):
-                        rows += record_contacts(email, str(r.get(id_col) or '').strip(),
-                                                str(r.get(name_col) or r.get(org_col) or '').strip())
-            _, found = matcher.read_view(DEAL_CONTACTS, credential_file=load_settings().database_credentials)
-            for r in found:
-                rows += record_contacts(str(r.get('Email') or '').strip().lower(), str(r.get('Deal ID') or '').strip(),
-                                        str(r.get('Name') or '').strip())
-        except (Exception, SystemExit):
+            rows = [Contact(c['address'], c['ref'], c['name'], c['exact'])
+                    for c in carr('email-match-contacts', {})['contacts']]
+        except (CarrError, KeyError, TypeError):
             raise CarrError(code='contacts_read_failed') from None
         if not rows:
             raise CarrError(code='contacts_empty')
@@ -1840,7 +1868,8 @@ def main() -> int:
     settings = load_settings(home)
     settings.require_repo(repo)
     settings.require_service('intake')
-    ports = Ports(carr=_carr(repo), contacts=_contacts(repo),
+    carr = _carr(repo)
+    ports = Ports(carr=carr, contacts=_contacts(carr),
                   next_step=lambda mail, today: ask_model(mail, today, settings.model),
                   decode=_decoder(home), now=lambda: datetime.now(timezone.utc),
                   read_unresolved=lambda mail, today, deals, parties: unresolved_email.ask(

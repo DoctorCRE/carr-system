@@ -70,7 +70,8 @@ def mail(sender, sent, subject='Suite question', body='Can we meet Thursday?', n
 
 
 def ident(m):
-    return intake.mail_identity(m['copy_key'], m['sender'], m['subject'], m['sent_unix'])[1]
+    return intake.mail_identity(m['copy_key'], m['sender'], m['subject'], m['sent_unix'],
+                                (m.get('local_keys') or '').split(',') if m.get('local_keys') else None)[1]
 
 
 def event(goid, start, minutes=60, subject='Site visit', attendees=(), organizer=('Owner', OWNER),
@@ -980,7 +981,8 @@ class IntakeTest(unittest.TestCase):
         with patch.object(intake, 'load_settings', return_value=load_settings(self.home)), patch.object(type(load_settings(self.home)), 'require_repo'), patch.object(intake, 'run', return_value=outcome), patch.object(email_router, 'step', return_value=0), patch('sys.stdout', new_callable=StringIO) as stdout:
             self.assertEqual(intake.main(), 1)
         receipt = stdout.getvalue().split('outlook-intake-receipt ', 1)[1]
-        self.assertEqual(json.loads(receipt), {'state': 'failed', 'reason': 'writes_failed', 'counts': {'writes_failed': 3}})
+        self.assertEqual(json.loads(receipt), {'state': 'failed', 'reason': 'writes_failed',
+                                                'counts': {'run': {'writes_failed': 3}, 'backlog': {}}})
 
     def test_main_runs_the_router_after_intake_releases_its_lock_without_changing_the_result(self):
         write_settings(self.home, ROOT, model='sonnet')
@@ -1035,19 +1037,56 @@ class IntakeTest(unittest.TestCase):
                 self.assertEqual(intake.main(), code)
 
     def test_contact_failures_have_safe_distinct_reasons(self):
-        from types import SimpleNamespace
-        for rows, code in (([], 'contacts_empty'), (ValueError('PRIVATE-SENTINEL'), 'contacts_read_failed')):
-            with self.subTest(code=code):
-                def read_view(view, **kwargs):
-                    if isinstance(rows, Exception):
-                        raise rows
-                    return [], rows
-                exporter = SimpleNamespace(RECORD_VIEWS=[('fake', 'id', 'name', 'org')], read_view=read_view)
-                with patch('lib.loadpy.load_module_from_path', return_value=exporter):
-                    self.fake.contacts = intake._contacts(self.repo)
-                    result = self.run_intake([])
+        def carr(replies):
+            def call(verb, args):
+                if isinstance(replies, Exception):
+                    raise replies
+                return replies
+            return call
+        for reply, code in (({'contacts': []}, 'contacts_empty'),
+                            (intake.CarrError(code='PRIVATE-SENTINEL'), 'contacts_read_failed'),
+                            ({'contacts': [{'address': 'PRIVATE-SENTINEL'}]}, 'contacts_read_failed'),
+                            ({'rows': []}, 'contacts_read_failed')):
+            with self.subTest(code=code, reply=str(reply)):
+                self.fake.contacts = intake._contacts(carr(reply))
+                result = self.run_intake([])
                 self.assertEqual(result.reason, code)
                 self.assertNotIn('PRIVATE-SENTINEL', intake.status_line(result))
+
+    def test_contacts_are_one_record_layer_read_of_every_live_party(self):
+        calls = []
+
+        def carr(verb, args):
+            calls.append((verb, args))
+            return {'schema_version': 'email-match-contacts.v1', 'contacts': [
+                {'address': 'pat@example.test', 'ref': 'C-901', 'name': 'Pat Example', 'exact': True},
+                {'address': 'far@example.test', 'ref': 'C-950', 'name': 'Out Of Market', 'exact': True},
+                {'address': 'frontdesk@example.test', 'ref': 'C-950', 'name': 'Out Of Market', 'exact': False},
+                {'address': 'lena@bank.test', 'ref': 'P-0003', 'name': 'Lena Lender', 'exact': True}]}
+        self.assertEqual(intake._contacts(carr)(), [
+            intake.Contact('pat@example.test', 'C-901', 'Pat Example'),
+            intake.Contact('far@example.test', 'C-950', 'Out Of Market'),
+            intake.Contact('frontdesk@example.test', 'C-950', 'Out Of Market', exact=False),
+            intake.Contact('lena@bank.test', 'P-0003', 'Lena Lender')])
+        self.assertEqual(calls, [('email-match-contacts', {})])
+
+    def test_an_out_of_market_client_matches_and_logs(self):
+        self.fake.contacts_rows.append(intake.Contact('far@example.test', 'C-950', 'Out Of Market'))
+        result = self.run_intake([mail('far@example.test', -timedelta(hours=1))])
+        [(_, args)] = self.fake.writes('log-activity')
+        self.assertEqual(args['ref'], 'C-950')
+        self.assertEqual((result.counts['mapping_missing'], result.counts['unmatched']), (0, 0))
+
+    def test_a_party_with_no_client_lead_or_vendor_row_is_known_not_missing(self):
+        self.fake.contacts_rows.append(intake.Contact('lena@bank.test', 'P-0003', 'Lena Lender'))
+        result = self.run_intake([mail('lena@bank.test', -timedelta(hours=1))])
+        self.assertEqual(self.fake.writes(), [], 'an activity has no party subject to log on')
+        self.assertEqual(self.fake.intent_calls, [], 'a known party is never read as a possible lead')
+        self.assertEqual((result.counts['mapping_missing'], result.counts['mapping_unsupported']), (0, 1))
+        self.fake.contacts_rows.append(intake.Contact('lena@bank.test', 'L-960', 'Lena Lender'))
+        self.run_intake([mail('lena@bank.test', -timedelta(hours=1))], touch=False)
+        [(_, args)] = self.fake.writes('log-activity')
+        self.assertEqual(args['ref'], 'L-960', 'a record for the address files the retained email')
 
     def test_partial_preview_recovery_refreshes_every_completed_participant(self):
         m = mail(OWNER, -timedelta(hours=1), recipients='pat@example.test,new@example.test', kind='preview')
@@ -1179,17 +1218,19 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.fake.model_calls, [])
         self.assertEqual(json.loads((self.out() / intake.STATE).read_text())['steps'], {})
 
-    def test_contacts_include_the_deal_contact_view(self):
-        from types import SimpleNamespace
+    def test_a_deal_contact_row_from_the_verb_wins_over_the_same_partys_p_ref(self):
         deal = '0b6c8a52-7d1e-4c55-9f0a-2e3d4c5b6a71'
-        views = {'fake': [{'id': 'C-901', 'name': 'Pat Example', 'Email': 'pat@example.test'}],
-                 intake.DEAL_CONTACTS: [{'Deal ID': deal, 'Name': 'Bayside suite', 'Email': 'Rep@Landlord.test'}]}
-        exporter = SimpleNamespace(RECORD_VIEWS=[('fake', 'id', 'name', 'org')],
-                                   read_view=lambda view, **kwargs: ([], views[view]))
-        with patch('lib.loadpy.load_module_from_path', return_value=exporter), \
-                patch.object(intake, 'load_settings', lambda home=None: load_settings(self.home)):
-            contacts = intake._contacts(self.repo)()
-        self.assertEqual([(c.email, c.ref) for c in contacts], [('pat@example.test', 'C-901'), ('rep@landlord.test', deal)])
+
+        def carr(verb, args):
+            return {'schema_version': 'email-match-contacts.v1', 'contacts': [
+                {'address': 'rep@landlord.test', 'ref': 'P-0011', 'name': 'Landlord Rep', 'exact': True},
+                {'address': 'rep@landlord.test', 'ref': deal, 'name': 'Bayside suite', 'exact': True}]}
+        self.fake.contacts = intake._contacts(carr)
+        result = self.run_intake([mail('rep@landlord.test', -timedelta(hours=1), name='Rep Example')])
+        self.assertEqual(result.state, 'succeeded')
+        [(_, args)] = self.fake.writes('log-activity')
+        self.assertEqual(args['ref'], deal)
+        self.assertEqual((result.counts['mapping_missing'], result.counts['unmatched']), (0, 0))
 
     def test_shared_inbound_message_has_a_separate_activity_key_for_each_mailbox(self):
         m = mail('pat@example.test', -timedelta(hours=1))
@@ -1652,6 +1693,138 @@ class IntakeTest(unittest.TestCase):
             event('name-soon', timedelta(days=2), attendees=[('Rae Named', 'rae@example.test')])])
         self.assertEqual(self.fake.writes(), [])
 
+    def test_distinct_decoder_messages_preserve_each_subject(self):
+        subjects = ['Suite review', 'Re: Suite review', 'Fw: Suite review', 'Fwd: Suite review']
+        mails = [mail('pat@example.test', -timedelta(hours=2) + timedelta(seconds=i * 30),
+                      subject=subject, copy_key='normalized-suite-review', local_keys=str(9100 + i))
+                 for i, subject in enumerate(subjects)]
+        self.run_intake(mails)
+        self.assertEqual([args['email_context']['subject']
+                          for _, args in self.fake.writes('log-activity')], subjects)
+
+    def seed_legacy_mail_keys(self, original, keys):
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        state.setdefault('mail_keys', {})[ident(original)] = keys
+        path.write_text(json.dumps(state))
+
+    def test_existing_receipt_is_not_replayed_when_keyed_messages_split(self):
+        original = mail('pat@example.test', -timedelta(hours=2), subject='Suite review',
+                        copy_key='normalized-suite-review')
+        self.run_intake([original])
+        self.seed_legacy_mail_keys(original, ['9100'])
+        reply = {**original, 'subject': 'Re: Suite review', 'local_keys': '9101',
+                 'sent_unix': original['sent_unix'] + 30}
+        keyed = {**original, 'local_keys': '9100'}
+        self.run_intake([reply, keyed])
+        self.assertEqual([args['email_context']['subject']
+                          for _, args in self.fake.writes('log-activity')], ['Suite review', 'Re: Suite review'])
+        self.run_intake([keyed, reply])
+        self.assertEqual(len(self.fake.writes('log-activity')), 2)
+
+    def test_missing_original_suppresses_reply_under_legacy_merged_receipt(self):
+        original = mail('pat@example.test', -timedelta(hours=2), subject='Suite review',
+                        copy_key='normalized-suite-review')
+        self.run_intake([original])
+        self.seed_legacy_mail_keys(original, ['9100', '9101'])
+        reply = {**original, 'subject': 'Re: Suite review', 'local_keys': '9101'}
+        result = self.run_intake([reply])
+        self.assertEqual((result.state, result.reason), ('succeeded', 'processed'))
+        self.assertEqual(result.counts['legacy_merged_suppressed'], 1)
+        self.assertEqual([args['email_context']['subject']
+                          for _, args in self.fake.writes('log-activity')], ['Suite review'])
+        self.assertEqual(self.mail_keys()[ident(original)], ['9100', '9101'])
+
+    def test_legacy_key_binding_stays_with_original_after_it_leaves(self):
+        original = mail('pat@example.test', -timedelta(hours=2), subject='Suite review',
+                        copy_key='normalized-suite-review', kind='preview', body='Preview')
+        self.run_intake([original])
+        self.seed_legacy_mail_keys(original, ['9100'])
+        keyed = {**original, 'local_keys': '9100'}
+        reply = {**original, 'subject': 'Re: Suite review', 'local_keys': '9101',
+                 'sent_unix': original['sent_unix'] + 30, 'body_kind': 'full', 'body': 'A distinct reply body'}
+        self.run_intake([keyed, reply])
+        self.assertEqual(self.mail_keys()[ident(original)], ['9100'])
+        self.run_intake([reply])
+        notes = [args for _, args in self.fake.writes('log-activity') if args['kind'] == 'note']
+        self.assertEqual(notes, [])
+
+    def test_legacy_merged_receipt_suppresses_overlaps_and_files_new_mail(self):
+        original = mail('pat@example.test', -timedelta(hours=2), subject='Suite review',
+                        copy_key='normalized-suite-review')
+        self.run_intake([original])
+        self.seed_legacy_mail_keys(original, ['9100', '9101'])
+        new = mail('lee@example.test', -timedelta(hours=1), subject='New matter', local_keys='9200')
+        rows = [{**original, 'local_keys': '9100'},
+                {**original, 'local_keys': '9101', 'subject': 'Re: Suite review'}, new]
+        for _ in range(2):
+            result = self.run_intake(rows)
+            self.assertEqual(result.state, 'succeeded')
+            self.assertEqual(result.counts['legacy_merged_suppressed'], 2)
+        self.assertEqual([args['email_context']['subject']
+                          for _, args in self.fake.writes('log-activity')], ['Suite review', 'New matter'])
+
+    def test_decoder_merged_receipt_suppresses_later_split_rows(self):
+        original = mail('pat@example.test', -timedelta(hours=2), local_keys='9100,9101')
+        self.run_intake([original])
+        new = mail('lee@example.test', -timedelta(hours=1), subject='New matter', local_keys='9200')
+        result = self.run_intake([{**original, 'local_keys': '9100'},
+                                  {**original, 'local_keys': '9101', 'subject': 'Re: Suite question'}, new])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['legacy_merged_suppressed'], 2)
+        self.assertEqual(len(self.fake.writes('log-activity')), 2)
+
+    def test_existing_preview_hydrates_from_its_keyed_row(self):
+        original = mail('pat@example.test', -timedelta(hours=2), subject='Suite review',
+                        copy_key='normalized-suite-review', kind='preview', body='Preview')
+        self.run_intake([original])
+        self.seed_legacy_mail_keys(original, ['9100'])
+        full = {**original, 'local_keys': '9100', 'body_kind': 'full', 'body': 'Complete original body'}
+        reply = {**full, 'local_keys': '9101', 'subject': 'Re: Suite review',
+                 'body': 'A distinct reply body', 'sent_unix': full['sent_unix'] + 30}
+        self.run_intake([reply, full])
+        notes = [args for _, args in self.fake.writes('log-activity') if args['kind'] == 'note']
+        self.assertEqual([args['detail'] for args in notes], ['Complete original body'])
+        self.assertEqual(notes[0]['email_context']['source_activity_id'],
+                         str(uuid.uuid5(uuid.NAMESPACE_URL,
+                             self.fake.writes('log-activity')[0][1]['idempotency_key'])))
+
+    def test_legacy_unmatched_mail_files_when_contact_arrives_after_twenty_days(self):
+        original = mail('later@example.test', -timedelta(hours=2), copy_key='waiting-for-contact')
+        self.assertEqual(self.run_intake([original]).state, 'succeeded')
+        self.seed_legacy_mail_keys(original, ['9100'])
+        keyed = {**original, 'local_keys': '9100'}
+        self.fake.now = NOW + timedelta(days=12)
+        self.assertEqual(self.run_intake([keyed]).state, 'succeeded')
+        self.assertEqual(self.fake.writes('log-activity'), [])
+        self.fake.now = NOW + timedelta(days=20)
+        self.fake.contacts_rows.append(intake.Contact('later@example.test', 'C-903', 'Later Contact'))
+        result = self.run_intake([keyed], touch=False)
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual([(args['ref'], args['detail']) for _, args in self.fake.writes('log-activity')],
+                         [('C-903', original['body'])])
+        self.assertEqual(result.counts['unresolved_messages'], 0)
+        self.assertEqual(self.run_intake([keyed]).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+
+    def test_legacy_preview_hydrates_after_identity_link_horizon(self):
+        original = mail('pat@example.test', -timedelta(hours=2), copy_key='waiting-for-body',
+                        kind='preview', body='Preview')
+        self.assertEqual(self.run_intake([original]).state, 'succeeded')
+        self.seed_legacy_mail_keys(original, ['9100'])
+        keyed = {**original, 'local_keys': '9100'}
+        self.fake.now = NOW + timedelta(days=12)
+        self.assertEqual(self.run_intake([keyed]).state, 'succeeded')
+        self.fake.now = NOW + timedelta(days=20)
+        full = {**keyed, 'body_kind': 'full', 'body': 'Complete original body'}
+        result = self.run_intake([full])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['hydration_pending'], 0)
+        notes = [args for _, args in self.fake.writes('log-activity') if args['kind'] == 'note']
+        self.assertEqual([args['detail'] for args in notes], ['Complete original body'])
+        self.assertEqual(self.run_intake([full]).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 2)
+
     def test_duplicate_copies_collapse_and_the_full_body_wins(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1), body='the whole', kind='preview',
                               copy_key='k1'),
@@ -1675,21 +1848,19 @@ class IntakeTest(unittest.TestCase):
         self.run_intake([unknown, internal_only])
         self.assertEqual(self.mail_keys(), {ident(unknown): ['77'], ident(internal_only): ['78']})
 
-    def test_identical_template_emails_joined_as_copies_keep_both_local_keys(self):
-        # Two distinct store items with the same sender, subject and opening
-        # (the WR-000502 twins) still collapse here; the record names both
-        # keys so slice B2 can split them.
+    def test_identical_template_emails_keep_distinct_decoder_keys(self):
         first = mail('pat@example.test', -timedelta(hours=2), copy_key='template', local_keys='9102')
-        second = mail('pat@example.test', -timedelta(hours=2) + timedelta(minutes=5), copy_key='template',
-                      local_keys='9101')
+        second = mail('pat@example.test', -timedelta(hours=2), copy_key='template', local_keys='9101')
         self.run_intake([first, second])
-        self.assertEqual(len(self.fake.writes('log-activity')), 1)
-        self.assertEqual(self.mail_keys(), {ident(first): ['9101', '9102']})
+        self.assertEqual(len(self.fake.writes('log-activity')), 2)
+        self.assertEqual(self.mail_keys(), {ident(first): ['9102'], ident(second): ['9101']})
 
     def test_a_decoder_row_that_merged_two_store_items_keeps_both_keys(self):
         m = mail('pat@example.test', -timedelta(hours=1), local_keys='9101,9102')
         self.run_intake([m])
         self.assertEqual(self.mail_keys(), {ident(m): ['9101', '9102']})
+        self.assertEqual(self.run_intake([m]).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
 
     def test_a_decoder_without_local_keys_logs_mail_and_records_no_keys(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
@@ -2352,19 +2523,9 @@ class IntakeTest(unittest.TestCase):
 
     # ---- sender classes: second addresses, automated senders, lead candidates ----
 
-    def test_every_address_in_a_record_email_field_is_a_contact(self):
-        rows = intake.record_contacts('Pat Example <PAT@a.test>; pat.home@b.test, note: office', 'C-901', 'Pat')
-        self.assertEqual(rows, [intake.Contact('pat@a.test', 'C-901', 'Pat'),
-                                intake.Contact('pat.home@b.test', 'C-901', 'Pat')])
-        self.assertEqual(intake.record_contacts('call the office', 'C-901', 'Pat'), [])
-        self.assertEqual(intake.record_contacts('Info@practice.test', 'C-901', 'Pat'),
-                         [intake.Contact('info@practice.test', 'C-901', 'Pat')], 'a lone address stays exact')
-
     def test_a_shared_role_address_in_a_multi_address_field_is_flagged_not_matched(self):
-        rows = intake.record_contacts('pat@practice.test; frontdesk@practice.test', 'C-901', 'Pat')
-        self.assertEqual(rows, [intake.Contact('pat@practice.test', 'C-901', 'Pat'),
-                                intake.Contact('frontdesk@practice.test', 'C-901', 'Pat', exact=False)])
-        self.fake.contacts_rows += rows
+        self.fake.contacts_rows += [intake.Contact('pat@practice.test', 'C-901', 'Pat'),
+                                    intake.Contact('frontdesk@practice.test', 'C-901', 'Pat', exact=False)]
         result = self.run_intake([mail('frontdesk@practice.test', -timedelta(hours=1))])
         self.assertEqual(self.fake.writes(), [])
         self.assertEqual(self.fake.intent_calls, [], 'a flagged role address is never a lead')
@@ -2380,8 +2541,9 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(result.counts['unmatched'], 0)
 
     def test_a_role_address_flagged_on_one_record_is_not_exact_on_any_record(self):
-        self.fake.contacts_rows += intake.record_contacts('pat@practice.test; info@practice.test', 'C-901', 'Pat')
-        self.fake.contacts_rows += intake.record_contacts('info@practice.test', 'L-905', 'Practice Office')
+        self.fake.contacts_rows += [intake.Contact('pat@practice.test', 'C-901', 'Pat'),
+                                    intake.Contact('info@practice.test', 'C-901', 'Pat', exact=False),
+                                    intake.Contact('info@practice.test', 'L-905', 'Practice Office')]
         result = self.run_intake([mail('info@practice.test', -timedelta(hours=1))])
         self.assertEqual(self.fake.writes(), [])
         self.assertEqual(result.counts['mapping_shared_role'], 1)
@@ -2645,6 +2807,66 @@ class IntakeTest(unittest.TestCase):
         state = json.loads((self.out() / intake.STATE).read_text())
         self.assertNotIn('intent', state['mail_unresolved'][ident(m)])
 
+    def test_receipt_splits_run_deltas_from_backlog_totals(self):
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=1)),
+                                  mail('stranger@example.test', -timedelta(minutes=10), subject='New inquiry')])
+        receipt = json.loads(intake.receipt_line(result).split(' ', 1)[1])
+        self.assertEqual((receipt['state'], receipt['reason']), (result.state, result.reason))
+        self.assertEqual(set(receipt['counts']), {'run', 'backlog'})
+        run, backlog = receipt['counts']['run'], receipt['counts']['backlog']
+        self.assertEqual((run['emails'], run['logged']), (2, 1))
+        for standing in ('unresolved_addresses', 'unresolved_messages', 'unmatched', 'hydration_pending',
+                         'calendar_copies_in_store', 'calendar_expired_total', 'mapping_missing'):
+            self.assertIn(standing, backlog)
+            self.assertNotIn(standing, run)
+        for old in ('calendar_lifecycle_unsupported', 'calendar_unresolved_expired'):
+            self.assertNotIn(old, {**run, **backlog})
+        self.assertEqual(result.counts['decoder_alarm'], run['decoder_alarm'])
+
+    def test_lead_outcomes_are_counted_from_the_disposition_on_every_run(self):
+        self.fake.intent_reply = read('new_matter', 'Wants a clinic suite.')
+        m = mail('new.doctor@practice.test', -timedelta(hours=2), name='Dana Doctor')
+        self.assertEqual(self.run_intake([m]).counts['lead_proposed'], 1)
+        again = self.run_intake([m])
+        self.assertEqual(len(self.fake.writes('propose-email-lead')), 1)
+        self.assertEqual(again.counts['lead_proposed'], 1, 'a standing proposal is still reported')
+        receipt = json.loads(intake.receipt_line(again).split(' ', 1)[1])
+        self.assertEqual(receipt['counts']['run']['lead_proposed'], 1)
+
+    def test_a_refused_lead_stays_counted_on_later_runs(self):
+        self.fake.intent_reply = read('new_matter', 'Wants a clinic suite.')
+        original = self.fake.carr
+
+        def carr(verb, args):
+            if verb == 'propose-email-lead':
+                raise intake.CarrError(code='invalid_request')
+            return original(verb, args)
+
+        self.fake.carr = carr
+        m = mail('new.doctor@practice.test', -timedelta(hours=2))
+        self.assertEqual(self.run_intake([m]).counts['lead_refused'], 1)
+        self.assertEqual(self.run_intake([m]).counts['lead_refused'], 1)
+
+    def test_known_party_outcomes_repeat_on_later_runs(self):
+        self.fake.intent_reply = read('new_matter', 'Asks about a renewal.')
+        self.fake.lead_reply = {'ok': True, 'proposed': False, 'reason': 'known_party'}
+        m = mail('known@example.test', -timedelta(hours=1))
+        self.run_intake([m])
+        self.assertEqual(self.run_intake([m]).counts['lead_known_party'], 1)
+
+    def test_logged_counts_an_email_filed_on_at_least_one_record(self):
+        original = self.fake.carr
+
+        def carr(verb, args):
+            if verb == 'log-activity' and args['ref'] == LEAD.ref:
+                raise intake.CarrError(code='subject_unresolved')
+            return original(verb, args)
+
+        self.fake.carr = carr
+        result = self.run_intake([mail(OWNER, -timedelta(hours=1), recipients='pat@example.test, lee@example.test')])
+        self.assertEqual(result.counts['logged'], 1)
+        self.assertEqual(result.counts['writes_failed'], 1)
+
     def test_a_sender_already_on_a_party_is_reported_not_proposed_again(self):
         self.fake.intent_reply = read('new_matter', 'Asks about a renewal.')
         self.fake.lead_reply = {'ok': True, 'proposed': False, 'reason': 'known_party'}
@@ -2693,7 +2915,7 @@ class IntakeTest(unittest.TestCase):
             self.assertEqual(result.counts['lead_refused'], 1)
             result = self.run_intake([m])
             self.assertEqual(result.state, 'succeeded')
-            self.assertEqual(result.counts['lead_refused'], 0)
+            self.assertEqual(result.counts['lead_refused'], 1, 'a refusal stays reported on later runs')
         for code in ('email_lead_input_invalid', 'email_lead_deal_invalid', 'email_lead_party_invalid'):
             self.assertEqual(intake._reply_error({'error': code}), 'invalid_request')
 
@@ -3023,6 +3245,37 @@ class IntakeTest(unittest.TestCase):
         self.flag_state(self.flagged(flag='flagged'))
         self.run_intake([self.flagged(flag='complete', done=self.OCT28)])
         self.assertEqual(self.flag_calls()[-1][0], 'complete-deal-item')
+
+    def test_legacy_flag_completed_after_twenty_days_completes_its_todo(self):
+        self.legacy_flag_closes_after_twenty_days('complete', 'complete-deal-item')
+
+    def test_legacy_flag_cleared_after_twenty_days_drops_its_todo(self):
+        self.legacy_flag_closes_after_twenty_days('none', 'drop-action')
+
+    def legacy_flag_closes_after_twenty_days(self, status, verb):
+        m = mail('pat@example.test', -timedelta(hours=1), subject=f'Follow up {status}',
+                 flag='flagged', due=self.OCT29)
+        self.fake.now = NOW
+        self.filed_deal(m)
+        self.assertEqual(self.run_intake([m], touch=False).state, 'succeeded')
+        self.seed_legacy_mail_keys(m, ['9100'])
+        item_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f'outlook-flag:joe:{ident(m)}'))
+        self.fake.email_queue = []
+        keyed = {**m, 'local_keys': '9100'}
+        self.fake.now = NOW + timedelta(days=12)
+        self.assertEqual(self.run_intake([keyed]).state, 'succeeded')
+        self.fake.now = NOW + timedelta(days=20)
+        closed = {**keyed, 'flag_status': status, 'flag_completed_unix': self.OCT28}
+        result = self.run_intake([closed])
+        self.assertEqual(result.state, 'succeeded')
+        calls = self.flag_calls()
+        self.assertEqual(calls[-1][0], verb)
+        self.assertEqual(calls[-1][1]['item_id' if status == 'complete' else 'action_id'], item_id)
+        self.assertEqual(result.counts['flags_unfiled'], 0)
+        self.assertEqual(result.counts['flags_unmatched'], 0)
+        count = len(calls)
+        self.assertEqual(self.run_intake([closed]).state, 'succeeded')
+        self.assertEqual(len(self.flag_calls()), count)
 
     def test_a_flag_closes_without_its_activity_on_the_current_links_page(self):
         m = self.flagged(flag='flagged')

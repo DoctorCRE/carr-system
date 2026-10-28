@@ -2346,6 +2346,19 @@ function assertSingleOwner(owner) {
   return raw.toLowerCase();
 }
 
+// Audit 3 F7: owner=claude is the autonomous drain queue, so only a full
+// (partner-attended) profile may fill it. No profile on the actor means a local
+// or break-glass door, which is already full authority.
+function assertClaudeOwnerAllowed(actor, owner) {
+  const profile = actor?.operational_profile;
+  if (profile && profile !== "full" && String(owner ?? "").trim().toLowerCase() === "claude")
+    throw new ToolError({ error: "claude_owner_requires_full_profile", profile,
+      hint: "owner=claude is the autonomous drain queue; a narrow profile files the loop for a partner (owner joe or dell) instead" });
+}
+// The surface that wrote a loop, shown on read-loop and loop-board so a reader
+// can weigh the text. Rows filed before this field existed read "unrecorded".
+const WRITER_SURFACE_SQL = "coalesce(extra_cells->>'writer_surface','unrecorded')";
+
 // ---------- Deal Room helpers (field-base concurrency, not record version) ----------
 
 
@@ -3943,6 +3956,35 @@ export const TOOLS = {
     },
   },
 
+  "email-match-contacts": {
+    write: false,
+    description: "The Outlook intake's contact list: every address written in a live party's email field, in any market, as {address, ref, name, exact}. ref is the party's client, lead or vendor ref, one row per live role, or its P- ref when it holds none. A participant of an open deal holding no client, lead or vendor role also comes back with the deal's id as ref and the deal's name (v_email_deal_contact), so its mail logs on that deal. Merged-away and deleted parties never appear. exact=false marks a role address (info, front desk, office...) sharing its field with other addresses: it may serve many people.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+    handler: async (c) => {
+      const ROLE = /^(?:front-?desk|info|office|admin|contact|reception|billing|hello|team|support|scheduling|appointments?|sales|inquiries|enquiries|referrals?|records|staff|help|general)(?:[-.+].*)?$/u;
+      const rows = (await c.query(`
+        select coalesce(r.ref, p.ref) as ref, coalesce(nullif(btrim(p.name), ''), org.name, '') as name, p.email
+          from party p
+          left join party org on org.id = p.org_id
+          left join lateral (
+            select roster_ref as ref from client where party_id = p.id and merged_into is null
+            union all select registry_ref from lead where party_id = p.id
+            union all select vendor_ref from vendor where party_id = p.id and merged_into is null) r on true
+         where p.merged_into is null and p.deleted_at is null and p.email like '%@%'
+           and coalesce(r.ref, p.ref) is not null
+        union all
+        select "Deal ID"::text, coalesce("Name", ''), "Email" from v_email_deal_contact where "Email" like '%@%'
+         order by 1`)).rows;
+      const contacts = rows.flatMap(({ ref, name, email }) => {
+        const found = [...new Set((email.match(/[\p{L}\p{M}\p{N}_.+'-]+@[\p{L}\p{M}\p{N}_-]+(?:\.[\p{L}\p{M}\p{N}_-]+)+/gu) ?? [])
+          .map(address => address.toLowerCase()))];
+        return found.map(address => ({ address, ref, name,
+          exact: found.length === 1 || !ROLE.test(address.split('@')[0].replaceAll('_', '-')) }));
+      });
+      return { schema_version: "email-match-contacts.v1", contacts };
+    },
+  },
+
   "mail-contact-policy": {
     write: false,
     description: "Read existing party do-not-contact and lead suppression instructions for exact email addresses. Returns one blocked boolean per normalized address, including unknown addresses. This is suppression evidence only, never permission to send. No contact details or reasons leave the record layer.",
@@ -4103,6 +4145,7 @@ export const TOOLS = {
     } },
     handler: async (c, _a, args) => {
       const cols = `id as loop_id, kind, number, domain, blocker_class, blocker_detail, status,
+                    ${WRITER_SURFACE_SQL} as writer_surface,
                     title, body, owner, marker, since_text, unblocks, source_note, tier, personal_to,
                     to_jsonb(due_on)#>>'{}' as due_on, close_outcome,
                     to_jsonb(closed_at)#>>'{}' as closed_at, version,
@@ -4171,7 +4214,7 @@ export const TOOLS = {
         // it blocked on, who owns it — from the SAME filtered query, so both
         // modes always agree on which rows exist.
         const s = await c.query(
-          `select number, kind, status, owner,
+          `select number, kind, status, owner, ${WRITER_SURFACE_SQL} as writer_surface,
                   -- LABEL: title or first 80 chars of body's first line, bold
                   -- markers stripped — the same fallback the full row uses.
                   left(coalesce(
@@ -4202,7 +4245,7 @@ export const TOOLS = {
         };
       }
       const r = await c.query(
-        `select number, kind, domain, status, owner, marker, title,
+        `select number, kind, domain, status, owner, ${WRITER_SURFACE_SQL} as writer_surface, marker, title,
                 -- LABEL, not title. Almost every loop predates the title column
                 -- and keeps its text in body, so a board keyed on title alone
                 -- returns a column of nulls and cannot identify anything. Fall
@@ -7409,6 +7452,7 @@ export const TOOLS = {
       // above for why: joint ownership is what stops the system ever draining
       // the backlog on its own initiative.
       args.owner = assertSingleOwner(args.owner);
+      assertClaudeOwnerAllowed(actor, args.owner);
 
       // THE CREATION-SIDE MIRROR of update-loop's due_date_needs_dated_marker.
       // Omitting the marker and passing a date INFERS 'dated', which is the
@@ -7474,7 +7518,7 @@ export const TOOLS = {
          args.drift_critical === true, tier, personal, actor.id, args.domain || null,
          blockerGated ? args.blocker : null,
          blockerGated ? args.blocker_detail.trim() : null,
-         JSON.stringify(residue ? { blocker_residue: residue } : {})]);
+         JSON.stringify({ writer_surface: actor.operational_profile || "local", ...(residue ? { blocker_residue: residue } : {}) })]);
 
       // The blocker goes on the EVENT as well as the row: an open_loop that was
       // filed under a blocker which later turns out to be false is a thing Joe
@@ -7525,6 +7569,7 @@ export const TOOLS = {
       section: { type: "string", enum: ["hot", "backlog", "open"], description: "move the row to this section of its file" } },
       required: ["idempotency_key"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "update-loop", args, async () => {
+      if (args.owner !== undefined) assertClaudeOwnerAllowed(actor, args.owner);
       const cur = await resolveLoop(c, args, { actor });
       await versionGuard(c, "loop_item", cur.id, args.base_version);
       if (cur.status !== "open")
