@@ -301,6 +301,15 @@ class InstallerTest(unittest.TestCase):
         self.install()
         self.assertEqual(self.helper.stat().st_mtime_ns, before, 'an unchanged helper retains its privacy identity')
 
+    def test_unchanged_install_keeps_binary_bytes_and_mtime_without_an_access_warning(self):
+        self.install()
+        before_bytes = self.helper.read_bytes()
+        before_mtime = self.helper.stat().st_mtime_ns
+        result = self.install()
+        self.assertEqual(self.helper.read_bytes(), before_bytes)
+        self.assertEqual(self.helper.stat().st_mtime_ns, before_mtime)
+        self.assertNotIn('Full Disk Access', result.stdout)
+
     def test_outbox_is_rendered_only_when_enabled_and_never_loaded(self):
         self.install()
         rendered = self.repo / 'out/com.carr.outlook-outbox.plist'
