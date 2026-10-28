@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { migrationNames, readMigration } from './migration-source.testhelper.mjs';
@@ -76,7 +76,12 @@ test('dream applies a synthetic memory consolidation in one doctrine change set'
     assert.match(after.sections.find(s => s.section_key === 'confirmed').body.text, /Verified from session synthetic-a/);
     const row = (await c.query("select review_after from doctrine_section where section_key='confirmed'")).rows[0];
     assert.ok(row.review_after > new Date('2000-01-01'));
-    const sets = await c.query("select count(*)::int as n from doctrine_change_set where idempotency_key ~ '^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$'");
+    // ops/dream.py files the change set under uuid5(NAMESPACE_URL, run key).
+    const hash = createHash('sha1').update(Buffer.concat([Buffer.from('6ba7b8119dad11d180b400c04fd430c8', 'hex'), Buffer.from('synthetic-dream')])).digest();
+    hash[6] = (hash[6] & 0x0f) | 0x50; hash[8] = (hash[8] & 0x3f) | 0x80;
+    const hex = hash.subarray(0, 16).toString('hex');
+    const dreamKey = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    const sets = await c.query('select count(*)::int as n from doctrine_change_set where idempotency_key=$1', [dreamKey]);
     assert.equal(sets.rows[0].n, 1);
   } finally { await c?.end(); await fixture.close(); rmSync(directory, { recursive: true, force: true }); }
 });
