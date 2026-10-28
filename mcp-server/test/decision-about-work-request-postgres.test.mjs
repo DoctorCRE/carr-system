@@ -43,6 +43,14 @@ before(async () => {
   if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
   else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
+  const doc = (await c.query("insert into doctrine_document(slug,title,content_class,visibility) values('old-about-test','Synthetic','reference','shared') returning id")).rows[0];
+  const section = (await c.query("insert into doctrine_section(document_id,section_key,title,ordinal,status,current_version) values($1,'origin','Synthetic',1,'active',1) returning id", [doc.id])).rows[0];
+  const revision = (await c.query("insert into doctrine_revision(section_id,version,actor_id,body,plain_text,content_hash) values($1,1,$2,'{}','Synthetic',$3) returning id", [section.id,actor.id,'a'.repeat(64)])).rows[0];
+  await c.query(`insert into ops.work_request (ref,title,requester_actor,owner_actor,capture_idempotency_key,organization_tenant_id,doctrine_section_id,doctrine_revision_id,sourced_capture_sequence,origin_ref)
+    values ('WR-000508','Synthetic request','joe','joe',$1,'carr-internal',$2,$3,508,'doctrine:old-about-test#origin')`, [randomUUID(),section.id,revision.id]);
+  await c.query(`insert into ops.work_request (ref,title,state,requester_actor,owner_actor,organization_tenant_id,program_key,program_ordinal)
+    values ('WR-AI-002','Synthetic program','ready','joe','joe','carr-internal','carr-ai-engineering-suite-v1',2)`);
+
 });
 after(async () => {
   try { await c?.end(); }
@@ -64,13 +72,13 @@ async function command(name, args = {}, identity = actor, role = null, client = 
 
 test('log-decision refuses Work Request about refs without writing a decision or replay', async () => {
   const before = (await c.query('select count(*) from event')).rows[0].count;
-  for (const [about, code] of [['WR-000508', 'decision_about_work_request_not_found'], [['WR-000508'], 'decision_about_work_request_not_found'], ['WR-AI-002', 'decision_about_work_request_not_found'], ['WR-SIEP-26', 'unsupported_decision_about']]) {
+  for (const about of ['WR-000508', ['WR-000508'], 'WR-AI-002', 'WR-SIEP-26']) {
     const idempotency_key = randomUUID();
     await assert.rejects(command('log-decision', {
       idempotency_key, title: 'Synthetic settled decision',
       rationale: 'Synthetic rationale', about,
     }, actor, 'carr_writer'), error => {
-      assert.equal(error.payload?.error, code);
+      assert.equal(error.payload?.error, 'unsupported_decision_about');
       assert.equal(error.payload.ref, Array.isArray(about) ? about[0] : about);
       assert.equal(error.payload.field, 'about');
       return true;
@@ -102,7 +110,7 @@ test('log-decision still attaches supported subjects and refuses a mixed list at
   const mixedKey = randomUUID();
   await assert.rejects(command('log-decision', {
     ...args, idempotency_key: mixedKey, about: [party.ref, 'WR-000508'],
-  }, actor, 'carr_writer'), error => error.payload?.error === 'decision_about_work_request_not_found');
+  }, actor, 'carr_writer'), error => error.payload?.error === 'unsupported_decision_about');
   assert.equal((await c.query('select count(*) from event where idempotency_key=$1', [mixedKey])).rows[0].count, '0');
   const out = await command('log-decision', {
     ...args, idempotency_key: randomUUID(), about: party.ref,
@@ -135,7 +143,7 @@ test('decision about Work Requests returns public errors and leaves mixed writes
         assert.equal(result.error, code);
         assert.match(result.hint, /about/i);
         assert.ok(result.hint.includes(Array.isArray(about) ? about[1] : about));
-        if (code === 'unsupported_decision_about') assert.match(result.hint, /omit about and name the Work Request in the rationale/i);
+        assert.match(result.hint, /omit about and name the Work Request in the rationale/i);
         return true;
       });
       assert.equal((await c.query('select count(*) from event')).rows[0].count, before);
