@@ -158,7 +158,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           e.new_value->>'activity_id' as activity_id,e.recorded_at,a.summary
           from v_email_thread_filing_event e join activity a on a.id::text=e.new_value->>'activity_id'
           where e.verb='inherit-email-thread' and (a.email_source->>'mailbox_owner'=$1 or
-            a.email_source is null)
+            (a.email_source->>'mailbox_owner' is null and exists
+              (select 1 from deal d where d.id=e.subject_id and d.owner=$1)))
           and not exists (select 1 from v_email_thread_filing_event u where u.verb='undo-email-thread-filing'
             and u.new_value->>'event_id'=e.id::text)
           order by e.mutation_order desc`, [actor.slug]);
@@ -173,11 +174,15 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           event_id: { type: 'string', format: 'uuid' } } },
       handler: (c, actor, args) => withEnvelope(c, actor, 'undo-email-thread-filing', args, async () => {
         if (actor.human !== true || !['joe','dell'].includes(actor.slug)) fail('partner_confirmation_required');
-        const filing = (await c.query(`select e.id,e.subject_id,e.new_value,e.mutation_order from v_email_thread_filing_event e
-          join activity a on a.id::text=e.new_value->>'activity_id'
-          where e.id=$1 and e.verb='inherit-email-thread' and (a.email_source->>'mailbox_owner'=$2 or
-            a.email_source is null) for update of a`, [args.event_id,actor.slug])).rows[0];
+        const filing = (await c.query(`select e.id,e.subject_id,e.new_value,e.mutation_order,
+          a.email_source->>'mailbox_owner' as mailbox_owner,
+          (select d.owner from deal d where d.id=e.subject_id) as deal_owner
+          from v_email_thread_filing_event e join activity a on a.id::text=e.new_value->>'activity_id'
+          where e.id=$1 and e.verb='inherit-email-thread' for update of a`, [args.event_id])).rows[0];
         if (!filing) fail('email_thread_filing_not_found');
+        const owner = filing.mailbox_owner ?? filing.deal_owner;
+        if (!owner) fail('email_thread_filing_owner_unknown');
+        if (owner !== actor.slug) fail('email_thread_filing_not_found');
         const activity = (await c.query('select deal_id,version from activity where id=$1', [filing.new_value.activity_id])).rows[0];
         const later = (await c.query(`select 1 from v_email_thread_filing_event where mutation_order>$1 and
           verb in ('inherit-email-thread','confirm-email-filing','undo-email-thread-filing')

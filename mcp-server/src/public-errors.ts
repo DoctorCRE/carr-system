@@ -23,6 +23,8 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["email_proposal_not_pending", "Re-read the proposal before confirming."],
   ["email_proposal_stale", "Re-read and review the current proposal before confirming."],
   ["email_sender_contact_required", "Create the sender contact before confirming the filing."],
+  ["partner_confirmation_required", "A verified partner must confirm this action."],
+  ["email_thread_filing_owner_unknown", "The filing owner is unknown, so it cannot be undone."],
   ["email_thread_filing_not_found", "Choose an available automatic filing."],
   ["email_thread_filing_changed", "The email filing has changed. Review it before making changes."],
   ["email_thread_filing_suppressed", "This email was previously unfiled by a partner."],
