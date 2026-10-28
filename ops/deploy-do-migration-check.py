@@ -21,12 +21,18 @@ def check(config, applied, account, base):
     for setting in ('workers_dev', 'preview_urls'):
         if config.get(setting) is not False:
             raise ValueError(f'{setting} must be false')
+    if 'route' in config or 'triggers' in config:
+        raise ValueError('singular route and triggers are not supported for automatic deploy')
     routes = config.get('routes', [])
-    expected = {route['pattern'] for route in routes if isinstance(route, dict) and route.get('custom_domain') is True}
+    if not isinstance(routes, list) or any(not isinstance(route, dict) or route.get('custom_domain') is not True for route in routes):
+        raise ValueError('only custom domain routes are supported for automatic deploy')
+    expected = {route['pattern'] for route in routes}
     if not expected:
         raise ValueError('wrangler.toml declares no custom domains')
     actual = set()
     page = 1
+    received = 0
+    total = None
     while True:
         request = urllib.request.Request(f'{base}/accounts/{account}/workers/domains?page={page}&per_page=100', headers={'Authorization': 'Bearer ' + os.environ.get('CLOUDFLARE_API_TOKEN', '')})
         with urllib.request.urlopen(request, timeout=20) as response:
@@ -38,13 +44,21 @@ def check(config, applied, account, base):
                 raise ValueError('Cloudflare domains API returned a malformed domain')
             if domain['service'] == 'carr-mcp' and domain['environment'] == 'production':
                 actual.add(domain['hostname'])
-        info = data.get('result_info') or {}
-        if 'total_pages' not in info and page == 1:
-            break
-        if info.get('page') != page or not isinstance(info.get('total_pages'), int) or info['total_pages'] < page:
+        info = data.get('result_info')
+        if not isinstance(info, dict):
             raise ValueError('Cloudflare domains API returned invalid pagination')
-        if page == info['total_pages']:
+        count, per_page, total_count = (info.get(key) for key in ('count', 'per_page', 'total_count'))
+        if (type(info.get('page')) is not int or info['page'] != page
+                or any(type(value) is not int for value in (count, per_page, total_count))
+                or per_page < 1 or count != len(data['result']) or count > per_page
+                or total_count < 0 or (total is not None and total != total_count)):
+            raise ValueError('Cloudflare domains API returned invalid pagination')
+        total = total_count
+        received += count
+        if received == total:
             break
+        if received > total or count == 0 or page >= 10:
+            raise ValueError('Cloudflare domains API returned incomplete pagination')
         page += 1
     if expected != actual:
         raise ValueError(f'custom domain mismatch; missing from production: {sorted(expected - actual)}; extra in production: {sorted(actual - expected)}')
