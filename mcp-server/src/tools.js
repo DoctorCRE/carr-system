@@ -667,6 +667,20 @@ function preferredMergeSurvivor(rows) {
   return new Date(a.created_at).getTime() <= new Date(b.created_at).getTime() ? a : b;
 }
 
+async function resolveDecisionAbout(client, actor, about) {
+  const refs = (Array.isArray(about) ? about : [about])
+    .map(r => String(r || "").trim()).filter(Boolean);
+  for (const ref of refs) {
+    if (/^WR-/i.test(ref)) {
+      const found = await client.query(
+        "select 1 from ops.work_request where ref = $1 and organization_tenant_id = $2", [ref.toUpperCase(), organizationTenantForActor(actor)]);
+      if (!found.rows.length) throw new ToolError({ error: "decision_about_work_request_not_found", field: "about", ref });
+      throw new ToolError({ error: "unsupported_decision_about", field: "about", ref });
+    }
+    await resolveSubject(client, ref);
+  }
+  return refs;
+}
 // [loop #278] The ONE place a decision gets mirrored onto the record it governs.
 // log-decision calls it at creation and update-decision calls it after the fact, so
 // attaching late and attaching at the time produce byte-identical rows — a manual path
@@ -676,20 +690,6 @@ function preferredMergeSurvivor(rows) {
 // includes rulings like the 2026-08-06 vendor merges, one ruling settling V-GC-001,
 // V-MSC-024 and T-004 together, which a single-ref parameter can only record a third of.
 //
-async function resolveDecisionAbout(client, actor, about) {
-  const refs = (Array.isArray(about) ? about : [about])
-    .map(r => String(r || "").trim()).filter(Boolean);
-  for (const ref of refs) {
-    if (/^WR-/i.test(ref)) {
-      const found = await client.query(
-        "select 1 from ops.work_request where ref = $1 and organization_tenant_id = $2", [ref, organizationTenantForActor(actor)]);
-      if (!found.rows.length) throw new ToolError({ error: "decision_about_work_request_not_found", field: "about" });
-      throw new ToolError({ error: "unsupported_decision_about", field: "about" });
-    }
-    await resolveSubject(client, ref);
-  }
-  return refs;
-}
 // Re-attaching is safe. A mirror already written for the same (subject, decision) pair
 // is skipped, not duplicated, so calling update-decision twice does not stack pointers
 // on a timeline.
