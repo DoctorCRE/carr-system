@@ -30,7 +30,7 @@ transport, timeout, setup or authorization failure on a write, or a failed queue
 leaves work for the next run and makes this run exit 1; an email that fails
 MAX_ATTEMPTS times is abandoned (still exit 1). State lives in
 out/email-router/state.json (0600) and is pruned after the queue window. The receipt
-line carries counts only.
+line carries counts and exception type names only.
 """
 from __future__ import annotations
 
@@ -97,8 +97,11 @@ class WriteFailed(Exception):
 
 
 def fenced(email: dict) -> str:
-    body = re.sub(r'(?i)</\s*email\s*>', '</ email>', email['body'][:MODEL_BODY_CHARS])
-    return f'<email>\nSubject: {email["summary"]}\n\n{body}\n</email>'
+    """The email inside one <email> fence: a closing tag in any field is escaped, the subject is one line."""
+    def escape(text: str) -> str:
+        return re.sub(r'(?i)</\s*email\s*>', '</ email>', text)
+    subject = ' '.join(escape(email['summary'] or '').split())
+    return f'<email>\nSubject: {subject}\n\n{escape(email["body"][:MODEL_BODY_CHARS])}\n</email>'
 
 
 def ask_model(email: dict, today: date, model: str) -> dict:
@@ -159,6 +162,7 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
     counts = {k: 0 for k in ('emails', 'routed', 'model_failed', 'abandoned', 'recorded', 'refused',
                              'dropped', 'write_failed', 'queue_failed', 'more', 'out_of_time', 'inherited', 'contact_only')}
     codes: dict[str, int] = {}
+    model_failed_types: dict[str, int] = {}
     routed, attempts = state.setdefault('routed', {}), state.setdefault('attempts', {})
     cutoff = (now - timedelta(days=WINDOW_DAYS + 1)).timestamp()
     for activity, at in list(routed.items()):
@@ -175,7 +179,7 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
         queue = call('email-router-queue', {'days': WINDOW_DAYS, 'limit': MAX_EMAILS, 'exclude': sorted(routed)})
     except Exception:
         counts['queue_failed'] = 1
-        return {**counts, 'refusal_codes': codes}
+        return {**counts, 'refusal_codes': codes, 'model_failed_types': model_failed_types}
     counts['more'] = int(bool(queue.get('more')))
     for email in queue.get('emails', [])[:MAX_EMAILS]:
         if clock() >= now + BUDGET:
@@ -210,7 +214,9 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
                     inheritance = {'activity_id': activity, 'thread_activity_id': decision.thread_activity_id}
                 else:
                     kept = matching_proposal(decision)
-        except Exception:
+        except Exception as error:
+            name = type(error).__name__
+            model_failed_types[name] = model_failed_types.get(name, 0) + 1
             counts['model_failed'] += 1
             failed(activity)
             continue
@@ -226,7 +232,9 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
                         raise WriteFailed() from error
                     try:
                         kept = matching_proposal(matching(email, queue['open_deals'], []))
-                    except Exception:
+                    except Exception as error:
+                        name = type(error).__name__
+                        model_failed_types[name] = model_failed_types.get(name, 0) + 1
                         counts['model_failed'] += 1
                         failed(activity)
                         continue
@@ -249,7 +257,7 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
         attempts.pop(activity, None)
         routed[activity] = now.timestamp()
         counts['routed'] += 1
-    return {**counts, 'refusal_codes': codes}
+    return {**counts, 'refusal_codes': codes, 'model_failed_types': model_failed_types}
 
 
 def _state(out: Path) -> dict:
@@ -288,8 +296,11 @@ def run(out: Path, carr: Callable[[str, dict], dict], classify: Callable[[dict, 
 
 def receipt(outcome: str, counts: dict) -> str:
     counts = counts.copy()
+    types = counts.pop('model_failed_types', {})
     codes = counts.pop('refusal_codes', {})
     result = {'state': outcome, 'counts': counts}
+    if types:
+        result['model_failed_types'] = types
     if codes:
         result['refusal_codes'] = codes
     return 'email-router-receipt ' + json.dumps(result)

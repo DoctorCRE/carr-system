@@ -181,8 +181,10 @@ def _windows(pid: int) -> list[dict]:
 
 def _readable(pid: int, window: dict) -> bool:
     state = cua('get_window_state', {'pid': pid, 'window_id': window['window_id'],
-                                     'include_screenshot': False, 'max_elements': 20})
-    return not str(state.get('degraded_reason') or '').startswith('ax_window_unresolved')
+                                     'include_screenshot': False, 'max_elements': LIST_WALK})
+    controls = {(e.get('role'), e.get('label')) for e in state.get('elements') or []}
+    return (not str(state.get('degraded_reason') or '').startswith('ax_window_unresolved')
+            and {('AXButton', 'New Mail'), ('AXTable', 'Message List')} <= controls)
 
 
 def usable_window(pid: int) -> dict | None:
@@ -252,6 +254,9 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
             windows = _windows(pid)
             if any(is_compose_window(w) for w in windows):
                 return Outcome('skipped', 'compose_window_open')
+            candidates = [w for w in windows if is_ordinary_main_window(w)]
+            if candidates and not any(_readable(pid, w) for w in candidates):
+                return Outcome('skipped', 'no_usable_main_window')
             if not _quit(pid, windows, waits):
                 return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
         launched = subprocess.run(['open', '-g', '-a', APP, '--args',

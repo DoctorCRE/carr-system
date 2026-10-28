@@ -1,6 +1,7 @@
 """Synthetic record replies exercise ambiguous board writes without a service."""
 import copy
 import unittest
+import uuid
 from unittest.mock import patch
 
 import progress_board as board
@@ -50,7 +51,7 @@ class BoardRecoveryTests(unittest.TestCase):
             self.assertEqual(board.publish_immutable_page("synthetic-page", {"notes": ["fixture"]}), 1)
         self.assertEqual(len(fixture.writes), 2)
         self.assertEqual(fixture.writes[0], fixture.writes[1])
-        self.assertTrue(fixture.writes[0]["idempotency_key"].startswith("board-"))
+        self.assertEqual(str(uuid.UUID(fixture.writes[0]["idempotency_key"])), fixture.writes[0]["idempotency_key"])
 
     def test_conflicting_or_unreadable_readback_never_resends(self):
         for mode in ("conflict", "unreadable"):

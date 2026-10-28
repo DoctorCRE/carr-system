@@ -18,6 +18,7 @@ import {
   createDellConsentSource, createLoopEpisodeSource, createServerClock, evaluateDellConsent,
   readCarrDealsForReconciliation,
 } from "../src/salesforce-browser-read-rw02.v5.js";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const DSN = process.env.DATABASE_URL || "";
 const REQUIRED = process.env.CARR_RW02_DB_REQUIRED === "1";
@@ -88,7 +89,7 @@ test("V5-RW02 run ledger, consent record, loop episodes and invoiced scope on re
     await t.test("five clean runs meet the threshold; one stop resets to zero; the ledger is append-only", async () => {
       const record = (outcome, extra = {}) => {
         const run_ref = hex24();
-        return verb(pg, copy, "record-salesforce-run-outcome", { idempotency_key: `rw02-run-outcome:${run_ref}`,
+        return verb(pg, copy, "record-salesforce-run-outcome", { idempotency_key: derivedIdempotencyKey("test", `rw02-run-outcome:${run_ref}`),
           run_ref, action_kind: KIND, outcome, ...extra });
       };
       let last;
@@ -125,7 +126,7 @@ test("V5-RW02 run ledger, consent record, loop episodes and invoiced scope on re
 
     await t.test("two concurrent first recordings of one run: one row, and a typed conflict or replay", async () => {
       const run_ref = hex24();
-      const args = outcome => ({ idempotency_key: `rw02-run-outcome:${run_ref}:${outcome}`, run_ref,
+      const args = outcome => ({ idempotency_key: derivedIdempotencyKey("test", `rw02-run-outcome:${run_ref}:${outcome}`), run_ref,
         action_kind: KIND, outcome, ...(outcome === "stopped" ? { stop_class: "ui_drift", reason_id: "ui_drift" } : {}) });
       const settled = await Promise.allSettled([
         verb(pg, copy, "record-salesforce-run-outcome", args("clean")),
@@ -148,10 +149,10 @@ test("V5-RW02 run ledger, consent record, loop episodes and invoiced scope on re
             signed_in_account_ref: "seat", ui_contract_digest: `sha256:${"1".repeat(64)}`,
             challenge: "captcha", result_consistency: "consistent" } } });
       await assert.rejects(verb(pg, copy, "record-salesforce-run-outcome", {
-        idempotency_key: `rw02-run-outcome:${run_ref}`, run_ref, action_kind: KIND, outcome: "clean" }),
+        idempotency_key: derivedIdempotencyKey("test", `rw02-run-outcome:${run_ref}`), run_ref, action_kind: KIND, outcome: "clean" }),
       e => e instanceof ToolError && e.payload.error === "clean_run_contradicted");
       const stopped = await verb(pg, copy, "record-salesforce-run-outcome", {
-        idempotency_key: `rw02-run-outcome:${run_ref}-s`, run_ref, action_kind: KIND, outcome: "stopped",
+        idempotency_key: derivedIdempotencyKey("test", `rw02-run-outcome:${run_ref}-s`), run_ref, action_kind: KIND, outcome: "stopped",
         stop_class: "auth_challenge", reason_id: "captcha" });
       assert.equal(stopped.run.outcome, "stopped");
     });

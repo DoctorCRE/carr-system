@@ -94,7 +94,8 @@ class FakeOutlook:
         if wid == 1:
             return [{'element_index': 0, 'role': 'AXWindow', 'label': MAIN['title'], 'depth': 0},
                     {'element_index': 1, 'role': 'AXButton', 'label': 'New Mail', 'depth': 1,
-                     'element_token': '1:1'}]
+                     'element_token': '1:1'},
+                    {'role': 'AXTable', 'label': 'Message List', 'depth': 4}]
         form = self.forms[wid]
         out: list[dict] = []
 
@@ -785,6 +786,40 @@ class SendTests(unittest.TestCase):
         self.assertEqual(h.fake.presses(), 1)
         self.assertTrue(any(tool == 'click' and args.get('element_token') == '1:1'
                             for tool, args in h.fake.calls))
+
+    def test_mailbox_with_twelve_toolbar_strips_allows_send(self):
+        h = Harness(self.out)
+        for wid in range(20, 32):
+            h.fake.windows[wid] = {'window_id': wid, 'title': '', 'is_on_screen': False,
+                                   'bounds': {'width': 1920, 'height': 30}}
+        self.assertEqual(h.send().state, State.DONE)
+        self.assertEqual(h.fake.presses(), 1)
+
+    def test_mailbox_requires_both_controls(self):
+        for missing in ('New Mail', 'Message List'):
+            with self.subTest(missing=missing):
+                h = Harness(self.out / missing)
+                elements = h.fake.elements
+                with patch.object(h.fake, 'elements', side_effect=lambda wid: [
+                        e for e in elements(wid) if e.get('label') != missing]):
+                    self.assertEqual(h.send().state, State.FAILED)
+                self.assertEqual(h.fake.presses(), 0)
+
+    def test_lone_draft_is_refused_without_quit_or_send(self):
+        for kind in ('mail', 'event'):
+            with self.subTest(kind=kind):
+                h = Harness(self.out / kind)
+                if kind == 'mail':
+                    h.fake.open_url('mailto:person-z@example.test?subject=leave-alone')
+                else:
+                    h.fake('invoke_menu', {'path': ['File', 'New', 'Event']})
+                del h.fake.windows[1]
+                before = json.dumps(h.fake.forms, sort_keys=True)
+                self.assertEqual(h.send().state, State.FAILED)
+                self.assertEqual(h.fake.presses(), 0)
+                self.assertEqual(json.dumps(h.fake.forms, sort_keys=True), before)
+                self.assertFalse(any(tool == 'invoke_menu' and args.get('path') == ui.QUIT
+                                     for tool, args in h.fake.calls))
 
     def test_existing_compose_is_left_untouched(self):
         h = Harness(self.out)

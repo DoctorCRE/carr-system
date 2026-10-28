@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { executeRegisteredTool, ToolError } from '../src/tools.js';
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const joe = { id: '10000000-0000-4000-8000-000000000001', slug: 'joe', human: true };
 const dell = { id: '10000000-0000-4000-8000-000000000002', slug: 'dell', human: true };
@@ -43,7 +44,7 @@ for (const [author, victim] of [[joe, dell], [dell, joe]]) {
   for (const edge_type of ['OVERRIDES', 'SUPERSEDES', 'EXCEPTION_TO']) {
     test(`${author.slug} cannot ${edge_type} ${victim.slug}'s personal section from an authorized source`, async () => {
       const db = database(author, victim);
-      const args = { idempotency_key: `target-${edge_type}`, section_id: sourceId, base_version: 2,
+      const args = { idempotency_key: derivedIdempotencyKey("test", `target-${edge_type}`), section_id: sourceId, base_version: 2,
         edges: [{ edge_type, target_section_id: targetId }] };
       await assert.rejects(() => executeRegisteredTool(db, author, 'set-doctrine-refs', args),
         e => e instanceof ToolError && e.payload.error === 'personal_doc_not_owner');
@@ -62,7 +63,7 @@ for (const [label, edge_type, shared, targetOwner] of [
 ]) test(`set-doctrine-refs preserves ${label}`, async () => {
   const db = database(joe, targetOwner, shared);
   const result = await executeRegisteredTool(db, joe, 'set-doctrine-refs', {
-    idempotency_key: label, section_id: sourceId, base_version: 2,
+    idempotency_key: derivedIdempotencyKey('test', label), section_id: sourceId, base_version: 2,
     links: [{ target_kind: 'doctrine_section', target_id: targetId }],
     edges: [{ edge_type, target_section_id: targetId }],
   });

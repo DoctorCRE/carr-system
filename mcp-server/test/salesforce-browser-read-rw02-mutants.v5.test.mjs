@@ -149,7 +149,7 @@ test("MUTANT F3 TOCTOU: no snapshot copy and a second read of each field", () =>
 
 test("MUTANT F4 the absent finding is keyed per run", () => killed(
   checkRepeatRunArgsIdentical,
-  ["idempotency_key: key(\"absent\", f.deal_id, f.reason_id)", "idempotency_key: key(\"absent\", f.deal_id, run_ref)"]));
+  ["key(\"absent\", f.deal_id, f.reason_id)", "key(\"absent\", f.deal_id, run_ref)"]));
 
 test("MUTANT F5 an empty complete read concludes every open deal absent", () => killed(
   checkEmptyReadInconclusive,
