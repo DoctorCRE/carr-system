@@ -48,6 +48,7 @@ const INTERNAL_ONLY = new Set([
   "capability_no_decider",
   "channels_required",
   "choose_deal_or_all",
+  "claude_owner_requires_full_profile",
   "client_merged_away",
   "client_not_found",
   "closing_outcome_needs_a_lead",

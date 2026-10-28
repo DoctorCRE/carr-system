@@ -11,6 +11,8 @@ from contextlib import nullcontext
 
 from typesafe_sdk import Choice, Noul, Score, TypeSafeClient, TypeSafeError
 
+from lib.fence import DATA_SENTENCE
+
 # Thin records remain visible without model advice.
 EVIDENCE_FLOOR_CHARS = 200
 
@@ -285,7 +287,7 @@ def questions():
     """The three judgments, one of each shape, over one deal's state."""
     return {
         "movement": Score(
-            instructions="Read only what `deal` records. How far has this commercial real "
+            instructions=DATA_SENTENCE + " Read only what `deal` records. How far has this commercial real "
             "estate transaction actually moved toward a signed lease or "
             "purchase agreement? Judge from what the record shows has "
             "happened, not from the `deal.recorded_phase` label, which is "
@@ -293,13 +295,13 @@ def questions():
             criteria=MOVEMENT_LEVELS,
         ),
         "waiting_on": Choice(
-            instructions="Read only what `deal` records. Who or what is this transaction "
+            instructions=DATA_SENTENCE + " Read only what `deal` records. Who or what is this transaction "
             "waiting on for its very next step? Choose who owes the next move, "
             "not who owes the most work overall.",
             criteria=WAITING_OPTIONS,
         ),
         "silence_is_bad": Noul(
-            instructions="`deal.days_since_the_record_was_touched` days have passed with "
+            instructions=DATA_SENTENCE + " `deal.days_since_the_record_was_touched` days have passed with "
             "nothing new recorded on this transaction. Given what `deal` says "
             "it was last waiting on, is that silence a sign this transaction "
             "is in trouble?",

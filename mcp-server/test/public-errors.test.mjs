@@ -25,8 +25,8 @@ async function failure(t, error, { correlated = true, method = "tools/call", out
   assert.match(payload.correlation_id, /^[a-f0-9-]{36}$/);
   if (correlated) assert.equal(payload.correlation_id, correlationId);
   assert.doesNotMatch(JSON.stringify(body), /stack|SELECT|private_table|private_constraint|synthetic-private-row|Failing row|\bat .+\(/i);
-  assert.ok(logs.some(log => log.correlation_id === payload.correlation_id &&
-    JSON.stringify(log).includes("synthetic-private-row")), "full diagnostics are logged under the public id");
+  assert.ok(logs.some(log => log.correlation_id === payload.correlation_id && log.diagnostic?.stack),
+    "diagnostics are logged under the public id");
   return payload;
 }
 
@@ -186,6 +186,21 @@ test("MCP names every client portal refusal instead of collapsing it to a server
 test("unknown ToolError codes cannot carry diagnostic text onto the wire", async t => {
   const payload = await failure(t, new ToolError({ error: privateText }));
   assert.equal(payload.error, "unhandled_verb_failure");
+});
+
+test("logged diagnostics drop row values: pg detail, hint, where and ToolError payload", async t => {
+  const { publicError } = await import("../src/public-errors.ts");
+  const logs = [];
+  t.mock.method(console, "error", line => logs.push(JSON.parse(line)));
+  const row = "Failing row contains (synthetic-row-value)";
+  const pg = Object.assign(new Error("new row violates check constraint"), {
+    code: "23514", constraint: "synthetic_check", detail: row, hint: row, where: row });
+  publicError(Object.assign(new ToolError({ error: "invalid_field_value", detail: row }), { cause: pg }),
+    { env: { CORRELATION_ID: correlationId } });
+  const logged = JSON.stringify(logs);
+  assert.doesNotMatch(logged, /synthetic-row-value|"payload"|"detail"|"hint"|"where"/);
+  assert.match(logged, /23514/);
+  assert.match(logged, /synthetic_check/);
 });
 
 test("outer JSON-RPC errors also hide diagnostics", async t => {

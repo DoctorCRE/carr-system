@@ -2176,7 +2176,7 @@ class PostCallJevChecksTests(unittest.TestCase):
         self.assertIn("Jev", result["review_questions"][0]["question"])
         self.assertFalse(result["review_questions"][0]["resolved"])
 
-    def test_evidence_segments_are_matched_by_token_overlap_within_a_small_window(self) -> None:
+    def test_only_the_segment_holding_the_quote_is_sent(self) -> None:
         segments = [
             {"speaker": "Joe", "text": "unrelated small talk about parking"},
             {"speaker": "Joe", "text": "I will call the Acme Clinic vendor about the lease renewal."},
@@ -2184,8 +2184,24 @@ class PostCallJevChecksTests(unittest.TestCase):
             {"speaker": "Dell", "text": "completely unrelated closing remarks"},
         ]
         matched = post_call_jev._evidence_segments("I will call the Acme Clinic vendor", segments)
-        self.assertIn(segments[1], matched)
-        self.assertLessEqual(len(matched), post_call_jev.MAX_SEGMENTS_SENT)
+        self.assertEqual(matched, [segments[1]])
+
+    def test_jev_receives_the_quote_and_segment_never_a_draft_body(self) -> None:
+        client = self.fake_client()
+        client.system_one = Mock(wraps=client.system_one)
+        post_call_jev.check_distillation(self.result(joe_tasks=[], draft_proposals=[{
+            "recipient_party_id": "p-1", "deal_id": "deal-a", "subject": "Next steps",
+            "body": "Private model-written reply body", "participant_ids": ["p-1"],
+            "evidence": "call the Acme Clinic vendor " + "x" * 2000,
+        }]), self.context, self.transcript, client=client)
+        state = client.system_one.call_args.kwargs["state"]
+        self.assertNotIn("Private model-written reply body", str(state))
+        self.assertLessEqual(len(state["item"]["evidence_excerpt"]), post_call_jev.MAX_QUOTE_CHARS)
+        self.assertEqual(len(state["transcript_excerpt"]), 1)
+
+    def test_distiller_prompt_says_the_transcript_is_data(self) -> None:
+        from lib.fence import DATA_SENTENCE
+        self.assertIn(DATA_SENTENCE, post_call._distiller_instruction())
 
     def test_candidate_deals_never_include_the_full_recorded_deal_list(self) -> None:
         many_deals = [{"id": f"deal-{n}", "name": f"Deal {n}", "owner": "Joe",
