@@ -1721,6 +1721,16 @@ test('a partner can undo an automatic thread filing and the router cannot refile
   await assert.rejects(command('inherit-email-thread', { idempotency_key: randomUUID(), activity_id: reply.activity_id,
     thread_activity_id: prior.activity_id }, router(), 'carr_writer'), e => e.payload?.error === 'email_thread_filing_suppressed');
 });
+test('undo prevents a new filing proposal for the same email and deal', async () => {
+  const { reply, filing } = await automaticThreadFiling();
+  await command('undo-email-thread-filing', { idempotency_key: randomUUID(), event_id: filing.event_id }, actor, 'carr_writer');
+  const args = { idempotency_key: randomUUID(), kind: 'file_to_deal', activity_id: reply.activity_id,
+    deal, evidence_quote: quote, confidence: 0.9, sender_role: 'client' };
+  await assert.rejects(command('record-email-proposal', args, router(), 'carr_writer'),
+    e => e.payload?.error === 'email_thread_filing_suppressed');
+  const pending = await command('list-email-proposals', { deal }, actor, 'carr_reader');
+  assert.equal(pending.proposals.some(p => p.activity_id === reply.activity_id && p.kind === 'file_to_deal'), false);
+});
 test('undo refuses an activity changed away and back', async () => {
   const { reply, filing } = await automaticThreadFiling();
   await c.query('update activity set deal_id=null, version=version+1 where id=$1', [reply.activity_id]);
