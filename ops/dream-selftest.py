@@ -2,7 +2,9 @@
 """Exercise dream cloning, verification, application, and recovery."""
 import copy
 import importlib.util
+import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,7 +22,7 @@ class Store:
         self.sections['confirmed'] = {'section_id': 'confirmed', 'section_key': 'confirmed', 'version': 1, 'content_hash': 'confirmed', 'title': 'confirmed', 'body': {'text': 'confirmed lesson'}}
         self.applies = []; self.logs = []
     def read(self): return {'generation': 1, 'sections': list(self.sections.values())}
-    def gate(self, item, attach): return True
+    def gate(self, item, attach, section_id=None): return True
     def apply(self, items, attach, key):
         self.applies.append(items)
         for item in items:
@@ -68,6 +70,19 @@ class DreamTest(unittest.TestCase):
             self.assertEqual(store.logs[0]['error'], 'case_colliding_section_keys')
             self.assertEqual(store.applies, [])
 
+    def test_clone_retries_same_path_after_case_collision(self):
+        store = Store()
+        section = copy.deepcopy(store.sections['stale'])
+        section['section_key'] = 'Stale'
+        store.sections['Stale'] = section
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'mem'
+            with self.assertRaisesRegex(ValueError, 'case_colliding_section_keys'):
+                dream.clone(store, root, 'fixture')
+            del store.sections['Stale']
+            self.assertEqual(dream.clone(store, root, 'fixture'), root)
+            self.assertEqual(dream.apply(store, root, [], ['a'], 'attach', 'fixture')['changed'], 0)
+
     def test_error_and_success_logs_use_distinct_idempotency_keys(self):
         calls = []
         class Response:
@@ -79,8 +94,13 @@ class DreamTest(unittest.TestCase):
         store = dream.VerbStore(call)
         store.log({'error': 'case_colliding_section_keys'}, 'night')
         store.log({'changed': 1}, 'night')
+        store.log({'error': 'version_conflict', 'attempts': 3}, 'night')
+        store.log({'attempts': 3, 'error': 'version_conflict'}, 'night')
         self.assertNotEqual(calls[0]['idempotency_key'], calls[1]['idempotency_key'])
         self.assertNotEqual(calls[0]['section_key'], calls[1]['section_key'])
+        self.assertNotEqual(calls[0]['idempotency_key'], calls[2]['idempotency_key'])
+        self.assertNotEqual(calls[0]['section_key'], calls[2]['section_key'])
+        self.assertEqual(calls[2], calls[3])
 
     def test_malformed_notes_refused_before_apply(self):
         store = Store()
@@ -89,6 +109,32 @@ class DreamTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'invalid change unit'):
                 dream.apply(store, root, [{}], ['a'], 'attach', 'fixture')
             self.assertEqual(store.applies, [])
+
+    def test_apply_gates_use_one_current_snapshot(self):
+        source = Store()
+        calls = []
+        def call(verb, args):
+            calls.append((verb, args))
+            result = source.read() if verb == 'read-doctrine' else {'result': 'pass'}
+            return subprocess.CompletedProcess([], 0, json.dumps({'ok': True, **result}), '')
+        store = dream.VerbStore(call)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = dream.clone(store, Path(tmp) / 'mem')
+            (root / 'stale.md').unlink()
+            path = root / 'confirmed.md'
+            path.write_text(path.read_text() + '\nconfirmed again')
+            (root / 'new lesson.md').write_text('---\n{"section_key": "new lesson", "title": "new", "version": 0}\n---\nnew lesson')
+            notes = [{'sections': ['confirmed', 'new lesson', 'stale'], 'sessions': ['a'], 'note': 'update lessons'}]
+            report = dream.apply(store, root, notes, ['a'], 'attach', 'fixture')
+            self.assertEqual(report['changed'], 3)
+        self.assertEqual(sum(verb == 'read-doctrine' for verb, _ in calls), 2)
+        gates = [args for verb, args in calls if verb == 'dry-run-doctrine-gates']
+        self.assertEqual(gates, [
+            {'document': 'team-memory', 'op': 'write', 'attach_id': 'attach',
+             'section_id': 'confirmed', 'body_text': 'confirmed lesson\nconfirmed again'},
+            {'document': 'team-memory', 'op': 'write', 'attach_id': 'attach', 'body_text': 'new lesson'},
+            {'document': 'team-memory', 'op': 'retire', 'attach_id': 'attach', 'section_id': 'stale'},
+        ])
 
     def test_repeat_apply_is_a_no_op(self):
         store = Store()
@@ -167,6 +213,37 @@ class DreamTest(unittest.TestCase):
             self.assertNotIn('stale', store.sections)
             self.assertEqual(len(store.applies), 1)
 
+    def test_exhausted_conflicts_are_logged_and_can_resume(self):
+        class RacingStore(Store):
+            def __init__(self):
+                super().__init__()
+                self.conflicts = iter(['duplicate/1', 'duplicate/2', 'duplicate/3'])
+            def apply(self, items, attach, key):
+                conflict = next(self.conflicts, None)
+                if conflict:
+                    raise dream.VersionConflict(conflict)
+                super().apply(items, attach, key)
+        store = RacingStore()
+        before = copy.deepcopy(store.sections)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = dream.clone(store, Path(tmp) / 'mem')
+            keys = ['duplicate/1', 'duplicate/2', 'duplicate/3', 'stale']
+            for key in keys:
+                (root / (key + '.md')).unlink()
+            notes = [{'sections': [key], 'sessions': ['a'], 'note': 'obsolete'} for key in keys]
+            with self.assertRaises(dream.VersionConflict) as raised:
+                dream.apply(store, root, notes, ['a'], 'attach', 'fixture')
+            self.assertEqual(raised.exception.section_key, 'duplicate/3')
+            self.assertEqual(store.sections, before)
+            self.assertEqual(store.logs, [{'error': 'version_conflict', 'attempts': 3,
+                                         'section_key': 'duplicate/3', 'notes': [],
+                                         'dropped': notes[:2], 'changed': 0}])
+            report = dream.apply(store, root, notes, ['a'], 'attach', 'fixture')
+            self.assertEqual(report, {'notes': notes[2:], 'dropped': notes[:2], 'changed': 2})
+            self.assertEqual(store.logs[-1], report)
+            self.assertEqual(len(store.applies), 1)
+            self.assertNotIn('stale', store.sections)
+
     def test_git_location_variables_cannot_redirect_clone(self):
         store = Store()
         with tempfile.TemporaryDirectory() as tmp:
@@ -218,7 +295,7 @@ class DreamTest(unittest.TestCase):
 
     def test_failing_gate_applies_nothing(self):
         store = Store()
-        store.gate = lambda item, attach: False
+        store.gate = lambda item, attach, section_id=None: False
         with tempfile.TemporaryDirectory() as tmp:
             root = dream.clone(store, Path(tmp) / 'mem')
             (root / 'stale.md').unlink()
