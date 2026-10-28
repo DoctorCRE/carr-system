@@ -33,7 +33,7 @@ sys.path.insert(0, str(ROOT))
 from lib import outlook_triage as triage
 from outlook_test_support import write_settings
 from lib.launchd_calendar import calendar_for_window
-from lib.outlook_ui import Row, Waits, is_compose_window
+from lib.outlook_ui import Row, Waits
 
 ZONE = ZoneInfo('America/Chicago')
 EVENING = datetime(2026, 10, 20, 19, 15, tzinfo=ZONE)
@@ -194,6 +194,13 @@ elif tool == 'get_window_state':
         elements.append(element)
         tokens[str(index)] = kind
         return index
+    if payload['window_id'] == 14:
+        print(json.dumps({'elements': [{'role': 'AXWindow'},
+                                       {'role': 'AXButton', 'label': 'Send', 'depth': 1}]}))
+        sys.exit(0)
+    if payload['window_id'] in state.get('unresolved_windows', []):
+        print(json.dumps({'elements': [], 'degraded_reason': 'ax_window_unresolved'}))
+        sys.exit(0)
     top = add('AXWindow', state['folder'] + ' • ' + ACCOUNT, 0)
     for label in ('New Mail', 'Delete', 'Archive', 'Move', 'Flag', 'Mark Unread'):
         add('AXButton', label, 1, top, ['button', label])
@@ -441,7 +448,7 @@ class PreflightQuitTest(FakeOutlookCase):
         self.assertEqual(outcome.reason, 'outlook_quit_timeout')
         self.assertEqual(json.loads(outcome.detail), {'windows': [
             {'kind': 'main', 'width': 1230, 'height': 768, 'is_on_screen': True},
-            {'kind': 'compose', 'width': 917, 'height': 911, 'is_on_screen': True},
+            {'kind': 'compose_or_unresolved', 'width': 917, 'height': 911, 'is_on_screen': True},
             {'kind': 'sheet', 'width': 700, 'height': 240, 'is_on_screen': True},
             {'kind': 'dialog', 'width': 600, 'height': 300, 'is_on_screen': True},
             {'kind': 'dialog', 'width': 1512, 'height': 32, 'is_on_screen': False}]})
@@ -483,6 +490,18 @@ class PreflightQuitTest(FakeOutlookCase):
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'outlook_quit_timeout'))
         self.assertEqual(self.called('open'), [])
 
+    def test_large_calendar_window_does_not_block_preflight(self):
+        calendar = window(16, 'Calendar', 900, 700)
+        self.given(windows=[ORDINARY, calendar])
+        self.assertIsNone(self.prepare())
+
+    def test_unresolved_window_blocks_with_snapshot(self):
+        self.given(windows=[ORDINARY, window(16, 'Unknown', 900, 700)], unresolved_windows=[16])
+        outcome = self.prepare()
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+        self.assertEqual(json.loads(outcome.detail)['windows'][1]['kind'], 'compose_or_unresolved')
+        self.assertEqual(self.called('open'), [])
+
     def test_possible_draft_prevents_both_quit_routes(self):
         self.given(windows=[UNTITLED_OFFSCREEN, ORDINARY, COMPOSE])
         outcome = self.prepare()
@@ -492,26 +511,6 @@ class PreflightQuitTest(FakeOutlookCase):
         self.assertTrue(json.loads(self.state.read_text())['running'])
 
 
-class ComposeWindowTest(unittest.TestCase):
-    def test_observed_untitled_offscreen_window_does_not_block_preflight(self):
-        self.assertFalse(is_compose_window(UNTITLED_OFFSCREEN))
-
-    def test_subjectless_and_resized_drafts_still_block_preflight(self):
-        for title in ('', None, 'UNTITLED', 'subject-000'):
-            for width, height in ((917, 911), (500, 501), (501, 500)):
-                with self.subTest(title=title, width=width, height=height):
-                    draft = window(16, title, width, height, None) | {'is_on_screen': False}
-                    self.assertTrue(is_compose_window(draft))
-        for draft in (UNTITLED_OFFSCREEN | {'is_on_screen': True},
-                      UNTITLED_OFFSCREEN | {'on_current_space': False},
-                      UNTITLED_OFFSCREEN | {'on_current_space': True},
-                      UNTITLED_OFFSCREEN | {'title': 'subject-000'},
-                      UNTITLED_OFFSCREEN | {'title': 'UNTITLED'}, UNTITLED_OFFSCREEN | {'title': None},
-                      {k: v for k, v in UNTITLED_OFFSCREEN.items() if k != 'is_on_screen'},
-                      {k: v for k, v in UNTITLED_OFFSCREEN.items() if k != 'on_current_space'},
-                      window(16, '', 500, 500)):
-            with self.subTest(draft=draft):
-                self.assertTrue(is_compose_window(draft))
 
 
 class OutlookTriageTest(FakeOutlookCase):
@@ -689,6 +688,8 @@ class OutlookTriageTest(FakeOutlookCase):
         self.given([FILE_A], windows=[TOOLBAR, ORDINARY, COMPOSE])
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+        self.assertIn('windows', json.loads(outcome.detail))
+        self.assertIn(outcome.detail, self.report())
         self.assertTrue(state['running'], 'Outlook left running')
         self.assertEqual(state['moved'], [])
 

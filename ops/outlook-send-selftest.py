@@ -794,6 +794,19 @@ class SendTests(unittest.TestCase):
         self.assertEqual(h.fake.presses(), 0)
         self.assertEqual(len(h.fake.forms), 1)
 
+    def test_existing_read_only_window_does_not_block_send(self):
+        h = Harness(self.out)
+        h.fake.windows[2] = {'window_id': 2, 'title': 'Synthetic message',
+                             'bounds': {'width': 900, 'height': 700}}
+        elements = h.fake.elements
+        def window_elements(wid):
+            if wid == 2:
+                return [{'role': 'AXWindow', 'label': 'Synthetic message'},
+                        {'role': 'AXStaticText', 'label': 'Message'}]
+            return elements(wid)
+        h.fake.elements = window_elements
+        self.assertEqual(h.send().state, State.DONE)
+
     def test_failed_discard_is_reported(self):
         h = Harness(self.out, corrupt=('subject', 'changed'))
         with patch.object(send_mod.ComposeWindow, 'discard', lambda _: None):
