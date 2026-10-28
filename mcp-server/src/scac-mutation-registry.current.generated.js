@@ -1922,10 +1922,10 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
-  "publish-census-cache-page": {
-    "ingress_key": "mcp-tool:publish-census-cache-page",
-    "source_locator": "mcp-server/src/census-cache.js",
-    "schema_digest": "f210a44e7fc115e27b1b7f48c2d5e51f06da72654c3fb7d34b22652ef17883c7",
+  "publish-census-inventory": {
+    "ingress_key": "mcp-tool:publish-census-inventory",
+    "source_locator": "mcp-server/src/census-inventory.js",
+    "schema_digest": "e4aa7ce018e2b08b4da37686d699eab0ca534cc0319d9df096401d96a4e31417",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -1966,16 +1966,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:read-call-outcomes",
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
-    "write": false,
-    "human_only": false,
-    "human_caller_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
-  "read-census-cache-page": {
-    "ingress_key": "mcp-tool:read-census-cache-page",
-    "source_locator": "mcp-server/src/census-cache.js",
-    "schema_digest": "8a7730c131280d6f1b9d4b20b6419509bc663503b2ab1ba688bfad82bd761061",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -3650,6 +3640,24 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "relation_kind": "r",
       "grantee": "carr_writer",
       "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:public.system_work_census_inventory:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "public.system_work_census_inventory",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:public.system_work_census_inventory:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation": "public.system_work_census_inventory",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "update",
       "grantable": false
     }
   ],

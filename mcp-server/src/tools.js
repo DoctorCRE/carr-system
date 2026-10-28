@@ -91,7 +91,7 @@ import { assuranceHealthStoreTools } from "./assurance-health-store.v5.ts";
 import { ruleContextRuntimeTools } from "./rule-context-runtime.v5.js";
 import { systemWorkTools } from "./system-work-census.v5.js";
 import { BOARD_ANSWER_WRITE_VERBS, boardAnswerTools } from "./board-answers.js";
-import { censusCacheTools } from "./census-cache.js";
+import { censusInventoryTools } from "./census-inventory.js";
 import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.ts";
 import { partyIdentityTools } from "./party-identity.js";
 import { partyDuplicateCandidateTools } from "./party-duplicate-candidates.js";
@@ -9086,7 +9086,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "rule-context-runtime": "mcp-server/src/rule-context-runtime.v5.js",
   "system-work-census": "mcp-server/src/system-work-census.v5.js",
   "board-answers": "mcp-server/src/board-answers.js",
-  "census-cache": "mcp-server/src/census-cache.js",
+  "census-inventory": "mcp-server/src/census-inventory.js",
   "org-conventions": "mcp-server/src/org-conventions.js",
   "research-sites": "mcp-server/src/research-sites.ts",
   "party-identity": "mcp-server/src/party-identity.js",
@@ -10555,7 +10555,7 @@ registerTools(doctrineTools({ withEnvelope, writeEvent, ToolError }), "doctrine"
 registerTools(orgConventionTools({ withEnvelope, writeEvent }), "org-conventions");
 registerTools(systemWorkTools(), "system-work-census");
 registerTools(boardAnswerTools({ withEnvelope, writeEvent }), "board-answers");
-registerTools(censusCacheTools({ withEnvelope }), "census-cache");
+registerTools(censusInventoryTools({ withEnvelope }), "census-inventory");
 registerTools(researchSiteTools({ withEnvelope, writeEvent }), "research-sites");
 registerTools(partyIdentityTools({ withEnvelope, writeEvent, versionGuard, resolvePartyForWrite }), "party-identity");
 registerTools(partyDuplicateCandidateTools(), "party-duplicate-candidates");

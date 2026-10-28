@@ -143,7 +143,7 @@
     "research_site": "the research-site index: useful sources tagged by topic, added and removed at runtime by any caller through add-research-site and remove-research-site, with per-row history. 0849 seeds a starting set of public source hosts; a rebuild without them loses only suggestions (no access depends on this table), so it is runtime data, not configuration",
     "system_config": "operational settings, not vocabulary, and the kind of table where a value that should never be committed can appear; staging sets its own",
     "tool_call": "the verb call ledger — runtime history",
-    "system_work_census_cache": "rebuildable cache of immutable system-work census pages; 1034 copies them from board_snapshot at migration time, the publisher rewrites every page the live manifest names, and pages untouched for 14 days are trimmed",
+    "system_work_census_inventory": "rebuildable cache of the latest external work inventory; the board publisher rewrites it on every run and migration 1034 inserts no rows",
     "ops.studio_leader": "Current host ownership, epoch, fence evidence and change time are runtime failover authority, not reference configuration. A schema-only rebuild deliberately has no owner and guarded jobs and transfers refuse until the runtime row is restored from a verified backup; never seed Studio ownership from a stale snapshot while MacBook may be active."
   },
   "carried_subset_must_not_contain": {
