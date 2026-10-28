@@ -185,9 +185,9 @@ check("two interval markers in one template are refused",
 # 3. The real tree.
 # --------------------------------------------------------------------------
 templates = lc.carr_templates(REPO)
-check("the template roster covers ops/launchd and the Call Mode override",
-      any(p.parent.name == "launchd" and p.parent.parent.name == "ops" for p in templates)
-      and any("dictation-rig" in str(p) for p in templates), len(templates))
+check("the template roster is ops/launchd, Call Mode included",
+      all(p.parent.name == "launchd" and p.parent.parent.name == "ops" for p in templates)
+      and any(p.name == "com.carr.call-mode.plist" for p in templates), len(templates))
 for path in templates:
     rel = path.relative_to(REPO)
     found = lc.audit_template(path.read_text(encoding="utf-8"))

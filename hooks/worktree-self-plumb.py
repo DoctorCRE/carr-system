@@ -27,9 +27,7 @@ extension point, on the reasonable assumption that it is the general
 SessionStart entry point every local session runs, and that "cwd is not a
 carr-system worktree" would just be the common case it skips. That assumption
 does not hold: session-brief.py is wired ONLY into the two VAULT project
-settings files (claude-tree/settings/my-drive-root.settings.json and
-carr-ai-project.settings.json, deployed by bin/sync-settings.sh to the
-"My Drive" and "My Drive/CARR AI" trees). It is never wired into any
+settings files (the "My Drive" and "My Drive/CARR AI" trees). It is never wired into any
 carr-system checkout's own settings — this repo's tracked .claude/settings.json
 carries no SessionStart hook at all today, and neither ~/.claude/settings.json
 (user-level; SessionStart there is gate-integrity.py only) reaches it for a
