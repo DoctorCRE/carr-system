@@ -599,6 +599,10 @@ class Run:
             if args['idempotency_key'] in self.attempted:
                 return False
             self.attempted.add(args['idempotency_key'])
+            if request.get('disposition') == 'blocked' and verb == 'log-activity' and args.get('summary') == 'Links from matched email':
+                request.update(acknowledged=True, disposition='refused', retry_at=None)
+                _save(self.out, self.state)
+                return True
             if request.get('disposition') == 'blocked':
                 self.counts['requests_blocked'] += 1
                 return False
@@ -612,12 +616,11 @@ class Run:
                 if not isinstance(reply, dict) or reply.get('ok') is not True:
                     raise CarrError(code=_reply_error(reply) if isinstance(reply, dict) else 'reply_unreadable')
             except CarrError as error:
-                if verb == 'propose-email-lead' and error.code in BLOCKED_ERRORS:
-                    # A queue refusal is a fact about this sender, not a failed run: never replay it.
+                if (verb == 'propose-email-lead' or (verb == 'log-activity' and args.get('summary') == 'Links from matched email')) and error.code in BLOCKED_ERRORS:
                     request.update(acknowledged=True, disposition='refused', outcome='refused',
                                    retry_at=None, error_code=error.code)
                     _save(self.out, self.state)
-                    self.written.append((who, 'claim card', verb, 'refused'))
+                    self.written.append((who, args.get('ref', 'claim card'), verb, 'refused'))
                     return True
                 if verb == 'set-next-action' and error.code == 'next_action_conflict':
                     request.update(acknowledged=True, disposition='superseded', retry_at=None,
@@ -777,13 +780,13 @@ class Run:
             links = sorted(email_links.extract_links(mail.get('body') or ''))
             if not links:
                 continue
-            request_key = key('log-activity', 'email-links', mail['activity_id'])
+            request_key = key('log-activity', 'email-links', json.dumps([mail['activity_id'], mail['deal']]))
             acknowledged = self.state.get('requests', {}).get(request_key, {}).get('acknowledged')
             if self.write('log-activity', {
                 'idempotency_key': request_key,
                 'ref': mail['deal'], 'kind': 'note', 'summary': 'Links from matched email',
                 'detail': '\n'.join(f'{kind}: {url}' for kind, url in links),
-                'occurred_at': mail['occurred_at']}, 'matched email', 'email links') and not acknowledged:
+                'occurred_at': mail['occurred_at']}, 'matched email', 'email links') and not acknowledged and self.state['requests'][request_key].get('disposition') == 'acknowledged':
                 self.counts['links_filed'] += 1
         if any(self.counts[k] for k in ('writes_failed', 'writes_deferred', 'requests_blocked')):
             return False
