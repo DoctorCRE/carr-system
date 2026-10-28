@@ -474,11 +474,21 @@ class PreflightQuitTest(FakeOutlookCase):
         self.assertTrue(json.loads(self.state.read_text())['running'])
 
     def test_quit_timeout_reports_fresh_sanitized_windows(self):
+        class Clock:
+            now = 0.0
+
+            def monotonic(self):
+                return self.now
+
+            def sleep(self, seconds):
+                self.now += seconds
+
         sheet = window(16, 'private subject and address@example.test', 700, 240) | {'role': 'AXSheet'}
         dialog = window(17, 'private confirmation', 600, 300) | {'subrole': 'AXDialog'}
         self.given(windows=[ORDINARY], after_quit=[ORDINARY, COMPOSE, sheet, dialog, TOOLBAR],
                    menu_quit_ignored=True, osascript_quit_ignored=True)
-        outcome = self.prepare(Waits(0.4, 0, 0, 0.01, 0, 0, 0))
+        with patch('lib.outlook_ui.time', Clock()):
+            outcome = self.prepare(Waits(poll_seconds=10))
         self.assertEqual(outcome.reason, 'outlook_quit_timeout')
         self.assertEqual(json.loads(outcome.detail), {'windows': [
             {'kind': 'main', 'width': 1230, 'height': 768, 'is_on_screen': True},
