@@ -102,7 +102,7 @@ fn tagged(data: &[u8], tag: u16, class: u16) -> Vec<(usize, &[u8])> {
 }
 
 /// A typed local reference repeats its own key and its owning object's key.
-fn reference(data: &[u8], class: u16, kinds: &[u32]) -> Option<(u64, u64)> {
+pub(crate) fn reference(data: &[u8], class: u16, kinds: &[u32]) -> Option<(u64, u64)> {
     if !data.starts_with(&signature(class)) || !kinds.contains(&u32_at(data, 18)?) {
         return None;
     }
@@ -133,7 +133,7 @@ pub(crate) fn metadata_tail(object: &[u8]) -> Option<&[u8; 51]> {
 
 /// Folder payloads end in the display name, following a binary sort key.
 /// Decode UTF-16 (including surrogate pairs), rather than scanning ASCII runs.
-fn trailing_name(data: &[u8]) -> Option<String> {
+pub(crate) fn trailing_name(data: &[u8]) -> Option<String> {
     if !data.ends_with(&[0, 0]) {
         return None;
     }
