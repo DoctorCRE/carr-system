@@ -217,10 +217,32 @@ class Outcome:
     detail: str = ''
 
 
+# Standing totals recomputed from state or the store every run; every other count is this run's.
+BACKLOG_COUNTS = frozenset((
+    'hydration_pending', 'hydration_expired', 'unresolved_messages', 'skipped_automated', 'unresolved_read',
+    'unresolved_read_abandoned', 'unresolved_expired', 'unresolved_calendar', 'unresolved_addresses', 'unmatched',
+    'steps_pending', 'requests_blocked', 'needs_refresh_listed', 'calendar_lifecycle_unsupported',
+    'calendar_lifecycle_canceled', 'calendar_requests_quarantined', 'calendar_unresolved_expired',
+    'calendar_follow_up_reviews', 'calendar_follow_up_trimmed', 'calendar_agenda_items'))
+BACKLOG_PREFIXES = ('mapping_', 'error_')
+RECEIPT_NAMES = {'calendar_lifecycle_unsupported': 'calendar_copies_in_store',
+                 'calendar_unresolved_expired': 'calendar_expired_total'}
+LEAD_OUTCOMES = {'proposed': 'lead_proposed', 'known_party': 'lead_known_party', 'refused': 'lead_refused'}
+
+
+def receipt_counts(counts: dict) -> dict:
+    """Split the flat counts into this run's deltas and the standing backlog totals."""
+    split = {'run': {}, 'backlog': {}}
+    for name, value in counts.items():
+        standing = name in BACKLOG_COUNTS or name.startswith(BACKLOG_PREFIXES)
+        split['backlog' if standing else 'run'][RECEIPT_NAMES.get(name, name)] = value
+    return split
+
+
 def receipt_line(outcome: Outcome) -> str:
     """The machine receipt bin/run-scheduled.sh validates and records."""
     reason = 'full_disk_access_required' if outcome.reason.startswith('grant Full Disk Access') else outcome.reason
-    receipt = {'state': outcome.state, 'reason': reason, 'counts': outcome.counts}
+    receipt = {'state': outcome.state, 'reason': reason, 'counts': receipt_counts(outcome.counts)}
     if outcome.detail:
         receipt['detail'] = outcome.detail
     return 'outlook-intake-receipt ' + json.dumps(receipt)
@@ -859,9 +881,10 @@ class Run:
                 **({'email_source': {'sender_email': m['sender'].lower(), 'mailbox_owner': self.settings.owner}}
                    if not outbound else {})}, who, '' if m['full'] else 'preview_only') for ref in refs]
             completed.extend(ref for ref, ok in zip(refs, results) if ok)
+            if any(results):
+                self.counts['logged'] += 1
             if not all(results):
                 continue
-            self.counts['logged'] += 1
             if not missing:
                 unresolved.pop(m['ident'], None)
                 done.setdefault(m['ck'], []).append(m['sent_unix'])
@@ -1102,11 +1125,12 @@ class Run:
         queued = {p['sender'] for p in self.state.get('mail_unresolved', {}).values() if p.get('sender')}
         deals, failures = None, 0
         for m, progress in self.lead_candidates:
-            if 'read' in progress:
-                continue
             address = m['sender'].lower()
             name = _clean_name(m['sender_name'], m['subject'])
             request_key = self.owner_key('propose-email-lead', _hash(address), f'read|{m["ident"]}')
+            if 'read' in progress:
+                self.count_lead_disposition(progress, request_key)
+                continue
             if _hash(address) in queued:
                 progress['read'] = 'sender_queued'
                 self.counts['lead_already_queued'] += 1
@@ -1159,11 +1183,19 @@ class Run:
                     **{k: read[k] for k in ('deal', 'party', 'evidence_quote') if read[k] is not None}}
             if self.write('propose-email-lead', args, name or _domain(address)):
                 outcome = self.state['requests'][request_key].get('outcome')
-                self.counts[{'proposed': 'lead_proposed', 'known_party': 'lead_known_party',
-                             'refused': 'lead_refused'}.get(outcome, 'lead_already_queued')] += 1
+                self.counts[LEAD_OUTCOMES.get(outcome, 'lead_already_queued')] += 1
                 if outcome != 'refused':
                     progress['sender'] = _hash(address)
                     queued.add(progress['sender'])
+
+    def count_lead_disposition(self, progress: dict, request_key: str) -> None:
+        """A sender read on an earlier run still has a disposition; report it on every run."""
+        if progress['read'] == 'sender_queued':
+            self.counts['lead_already_queued'] += 1
+            return
+        request = self.state.get('requests', {}).get(request_key)
+        if request and request['acknowledged']:
+            self.counts[LEAD_OUTCOMES.get(request.get('outcome'), 'lead_already_queued')] += 1
 
     def next_steps(self, mails: list[dict]) -> None:
         """Ask for each pending email's next step and set its ball; a step stays pending until both succeed."""
