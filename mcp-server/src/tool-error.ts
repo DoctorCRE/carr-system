@@ -1,7 +1,7 @@
 // ToolError lives in a LEAF module on purpose.
 //
 // mcp.js maps any thrown value that is not a ToolError to the literal string
-// "internal_error" (see mcp.js, the errorKind line). So a module that cannot
+// "internal_error" (see mcp.js, the publicError fallback). So a module that cannot
 // import this class cannot report a named failure, and its errors reach the
 // operator as an unreadable "internal error".
 //

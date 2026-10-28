@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-PLIST = REPO / "tools" / "dictation-rig" / "launchd" / "com.carr.call-mode.plist"
+PLIST = REPO / "ops" / "launchd" / "com.carr.call-mode.plist"
 REAL = "/Library/Developer/CommandLineTools/usr/bin/python3"
 
 
