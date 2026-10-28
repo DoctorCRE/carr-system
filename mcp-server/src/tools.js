@@ -49,6 +49,7 @@ import { resourceObservationTools } from "./resource-observation.v5.ts";
 import { invoiceAutomation } from "./invoice-automation.js";
 import { emailDealProgressTools } from "./email-deal-progress.ts";
 import { derivedIdempotencyKey } from "./derived-key.ts";
+import { DURABLE_KEY_SHAPES, REPLAY_WINDOW, durableReceipt, replayReceipt } from "./replay-receipt.ts";
 import { emailNextStepTools } from "./email-next-step.ts";
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
 import { clearTheDeckTools } from "./clear-the-deck.js";
@@ -318,20 +319,12 @@ export function auditIdentity(actor) {
 }
 
 const UUID_KEY = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
-// Two RW02 keys carry meaning the database reads back: ops.rw02_record_run finds a
-// run's page stops by the `rw02-read:<run_ref>:` key prefix, and ops.rw02_loop_episodes
-// finds a finding's loop episodes by the exact base/`:eN` shape. Only those exact
-// shapes, on those verbs, are accepted until a migration gives them a UUID form.
-const DB_READ_KEY_SHAPES = {
-  "record-salesforce-page-stop": /^rw02-read:[0-9a-f]{24}:page-stop:[0-9]{1,6}$/,
-  "add-loop": /^rw02-(?:missing-joe|unknown-to-carr):[0-9a-f]{32}(?::e(?:[2-9]|[1-9][0-9]{1,5}))?$/,
-};
 
 async function withEnvelope(client, actor, verb, args, fn) {
   const key = args.idempotency_key;
   if (!key) throw new ToolError({ error: "missing_idempotency_key",
     hint: "generate a UUID per intended action; retries reuse the SAME key" });
-  if (typeof key !== "string" || !(UUID_KEY.test(key) || DB_READ_KEY_SHAPES[verb]?.test(key)))
+  if (typeof key !== "string" || !(UUID_KEY.test(key) || DURABLE_KEY_SHAPES[verb]?.test(key)))
     throw new ToolError({ error: "invalid_idempotency_key", field: "idempotency_key" });
   const identity = auditIdentity(actor);
   // SIEP-11: replay authority is the exact operation manifest, never the bare
@@ -365,7 +358,11 @@ async function withEnvelope(client, actor, verb, args, fn) {
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
-  const prior = await client.query("select request_hash, response from tool_call where idempotency_key=$1", [key]);
+  // A receipt older than REPLAY_WINDOW is not a replay: the key is unknown and the
+  // write runs as new (tool_call_expire frees the key on insert). A durable
+  // receipt is read back by key elsewhere and keeps replaying.
+  const prior = await client.query(`select request_hash, response from tool_call where idempotency_key=$1
+    and ($2 or created_at > now() - interval '${REPLAY_WINDOW}')`, [key, durableReceipt(verb, key)]);
   if (prior.rows.length) {
     if (prior.rows[0].request_hash !== hash) throw new ToolError({ error: "key_reuse" });
     const response = prior.rows[0].response;
@@ -378,7 +375,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
     `insert into tool_call (idempotency_key, verb, actor_id, request_hash, response, via, client_id,
        organization_tenant_id, sponsoring_human_slug, personal_scope, authorization_class, correlation_id)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-    [key, verb, actor.id, hash, JSON.stringify(result), actor.via || null, actor.client_id || null,
+    [key, verb, actor.id, hash, replayReceipt(result), actor.via || null, actor.client_id || null,
      identity.organization_tenant_id, identity.sponsoring_human_slug, identity.personal_scope,
      identity.authorization_class, identity.correlation_id]);
   return result;
