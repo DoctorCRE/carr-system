@@ -135,7 +135,8 @@ class NoTrackedPinTest(unittest.TestCase):
         # Two decoder PRs conflict on any committed file derived from the source (WR-000440).
         want = gate.digest(gate.CRATE)
         holders = [str(path) for folder in (gate.CRATE, ROOT / 'spec/outlook') for path in folder.rglob('*')
-                   if path.is_file() and 'target' not in path.parts and want.encode() in path.read_bytes()]
+                   if path.is_file() and 'target' not in path.relative_to(folder).parts
+                   and want.encode() in path.read_bytes()]
         self.assertEqual(holders, [])
 
 if __name__ == '__main__':

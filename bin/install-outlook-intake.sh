@@ -6,7 +6,7 @@
 # from vendor/hxprobe in this checkout, the tree the hxprobe CI class tests, with
 # the same `cargo build --release --locked`. Cargo's target directory sits under
 # the settings `vendor` path. Locked tests and build run unless the local
-# receipt binds the installed binary to this source digest and toolchain. It
+# receipt binds the installed binary to this source digest. It
 # never loads the job: it renders the plist, creates the launchd log at 0600,
 # and prints the two commands the operator runs to load it.
 #
