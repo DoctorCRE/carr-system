@@ -1225,6 +1225,7 @@ class IntakeTest(unittest.TestCase):
         legacy = intake.key('set-next-action', 'C-901', f'next|{ident(m)}')
         args = json.loads(request['payload'])
         args['idempotency_key'] = legacy
+        request.pop('key_owner', None)
         request.update(payload=json.dumps(args), acknowledged=True, disposition='acknowledged', error_code=None)
         state['requests'][legacy] = request
         path.write_text(json.dumps(state))
