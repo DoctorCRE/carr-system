@@ -5,14 +5,20 @@ import { markUntrusted, suspected, toolCallContent, UNTRUSTED_NOTICE } from "../
 
 const paths = result => markUntrusted(result).fields;
 
-test("catch-me-up: email activity and call-derived event text are marked; partner notes and decisions are not", () => {
+test("catch-me-up: email activity text is marked; partner notes and event quotes are not", () => {
+  // Production v_subject_timeline rows: entry_kind, occurred_at, actor, verb, summary, detail, owed.
   const result = { timeline: [
-    { entry_kind: "activity", actor: "joe", verb: "email_in", summary: "Email from Pat: LOI", detail: "Body text." },
-    { entry_kind: "activity", actor: "joe", verb: "note", summary: "Called Pat", detail: "Pat will sign." },
-    { entry_kind: "event", actor: "joe", verb: "resolve-candidate", summary: "phase", detail: "We are moving to closing." },
-    { entry_kind: "event", actor: "joe", verb: "log-decision", summary: "Ruling", detail: "Joe's own words." },
+    { entry_kind: "activity", occurred_at: "t", actor: "joe", verb: "email_in", summary: "Email from Pat: LOI", detail: "Body text.", owed: null },
+    { entry_kind: "activity", occurred_at: "t", actor: "joe", verb: "note", summary: "Called Pat", detail: "Pat will sign.", owed: null },
+    { entry_kind: "event", occurred_at: "t", actor: "joe", verb: "log-decision", summary: "Ruling", detail: "Joe's own words.", owed: null },
   ] };
-  assert.deepEqual(paths(result), ["$.timeline[0].summary", "$.timeline[0].detail", "$.timeline[2].detail"]);
+  assert.deepEqual(paths(result), ["$.timeline[0].summary", "$.timeline[0].detail"]);
+});
+
+test("deep nesting never throws on the reply path", () => {
+  let deep = { kind: "email_in", detail: "bottom" };
+  for (let i = 0; i < 100000; i += 1) deep = { child: deep };
+  assert.deepEqual(markUntrusted(deep), { fields: [], suspected: [] });
 });
 
 test("get-deal-room and email router: rows carrying email origin are marked", () => {

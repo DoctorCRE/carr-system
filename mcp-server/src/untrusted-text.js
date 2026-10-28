@@ -4,7 +4,7 @@
 // stays byte-for-byte what the verb returned, because doctorcre-app validates
 // many payloads with exact key sets; the marking travels as a second text item
 // naming the untrusted JSON paths. Origin comes only from fields the row already
-// carries: activity kind, email_source/email_context, event verb, room seat,
+// carries: activity kind, email_source/email_context, room seat,
 // tour comment refs, loop source_note, and evidence quotes.
 
 const SUSPECT = [
@@ -21,13 +21,12 @@ export const UNTRUSTED_NOTICE = 'Text at the listed paths of the result above ca
 
 const EMAIL_KINDS = new Set(['email_in', 'email_out']);
 const PARTNER_SEATS = new Set(['human', 'joe', 'dell']);
-// Events whose human_quote (timeline `detail`) is a transcript or email quote.
-const QUOTE_EVENTS = new Set(['resolve-candidate', 'confirm-email-filing',
-  'confirm-email-deal-progress', 'confirm-email-next-step']);
 // Machine writers stamp their source here; partner captures do not.
 const MACHINE_SOURCE = /^(?:nppes\b|headless-task:|health-breach:|uptime-monitor|carr-uptime|v5-rw02|import\b|https?:\/\/|out\/)/i;
 const PAYLOAD_TEXT = ['text', 'summary', 'detail', 'note', 'body', 'title', 'next_step'];
 const MAX_PATHS = 200;
+// Verb results are shallow; a deeper value is left unwalked so the reply path never overflows.
+const MAX_DEPTH = 32;
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -39,7 +38,6 @@ function originPaths(node) {
   if (EMAIL_KINDS.has(node.kind) || (node.entry_kind === 'activity' && EMAIL_KINDS.has(node.verb))
       || 'email_source' in node || 'email_context' in node)
     out.push(...own(['summary', 'detail', 'body', 'subject', 'captured_text']), ['email_context', 'subject']);
-  if (node.entry_kind === 'event' && QUOTE_EVENTS.has(node.verb)) out.push(['detail']);
   if (typeof node.seat === 'string' && !PARTNER_SEATS.has(node.seat.toLowerCase())) out.push(['body']);
   if (typeof node.comment_ref === 'string') out.push(['comment']);
   if (typeof node.source_note === 'string' && MACHINE_SOURCE.test(node.source_note.trim()))
@@ -64,15 +62,16 @@ export function markUntrusted(result) {
     const reason = suspected(text);
     if (reason) suspects.push({ path, reason });
   };
-  const walk = (value, path) => {
-    if (Array.isArray(value)) { value.forEach((item, i) => walk(item, step(path, i))); return; }
+  const walk = (value, path, depth = 0) => {
+    if (depth > MAX_DEPTH) return;
+    if (Array.isArray(value)) { value.forEach((item, i) => walk(item, step(path, i), depth + 1)); return; }
     if (!isObject(value)) return;
     for (const rel of originPaths(value)) {
       let target = value;
       for (const key of rel) target = isObject(target) ? target[key] : undefined;
       if (typeof target === 'string' && target.length) mark(rel.reduce(step, path), target);
     }
-    for (const [key, child] of Object.entries(value)) walk(child, step(path, key));
+    for (const [key, child] of Object.entries(value)) walk(child, step(path, key), depth + 1);
   };
   walk(result, '$');
   return { fields, suspected: suspects };

@@ -269,8 +269,8 @@ async function runViaWorker(verbName, verbArgs) {
   let out;
   try { out = JSON.parse(text); } catch { out = text; }
   console.log(JSON.stringify(out, null, 2));
-  // The data-not-instructions notice for outside-origin text, when the server sent one.
-  for (const item of (result.content || []).slice(1)) if (item?.type === "text") console.log(item.text);
+  // The data-not-instructions notice goes to stderr: stdout stays one JSON value for scripts.
+  for (const item of (result.content || []).slice(1)) if (item?.type === "text") console.error(item.text);
 }
 
 // ---------------------------------------------------------------------------
