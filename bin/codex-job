@@ -37,6 +37,38 @@ def job_log():
         return None
 
 
+def output(argv, **options):
+    """A lookup's stdout, or None when it could not answer."""
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                              timeout=120, **options)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
+def delivery(clone, branch, start, wants_pr):
+    """Did the job push a new commit and open the PR it was asked for?
+
+    A job that exits cleanly without either loses its work (2026-10-28 retro: the
+    round-2 fix for #2624 reported success but never pushed), so both are checked
+    on the remote rather than trusted from the job's own report.
+    """
+    listing = output(['git', '-C', str(clone), 'ls-remote', 'origin', f'refs/heads/{branch}'])
+    remote = 'unchecked' if listing is None else next(
+        (line.split()[0] for line in listing.splitlines()
+         if line.split()[1:] == [f'refs/heads/{branch}']), 'none')
+    pr = 'not-requested'
+    if wants_pr:
+        found = output(['gh', 'pr', 'list', '--head', branch, '--state', 'all',
+                        '--json', 'url', '--jq', '.[0].url // empty'], cwd=clone)
+        pr = 'unchecked' if found is None else found.strip() or 'none'
+    missing = [name for name, gap in (('push', remote in ('unchecked', 'none', start)),
+                                      ('pr', pr in ('unchecked', 'none'))) if gap]
+    return missing, (f"Delivery: {'failed' if missing else 'ok'} missing={','.join(missing) or 'none'} "
+                     f'branch={branch} start={start} remote={remote} pr={pr}')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('repo', help='owner/repo, Git URL, or local Git repository')
@@ -92,6 +124,8 @@ def main():
                        check=True, stdin=subprocess.DEVNULL)
         cloned = True
         subprocess.run(['git', '-C', str(clone), 'checkout', '--quiet', '-b', args.branch], check=True)
+        start = subprocess.run(['git', '-C', str(clone), 'rev-parse', 'HEAD'], check=True,
+                               capture_output=True, text=True).stdout.strip()
         subprocess.run(['git', '-C', str(clone), 'config', 'user.email',
                         'jbookout@users.noreply.github.com'], check=True)
         brief, _ = prepare(args.brief, clone)
@@ -123,13 +157,16 @@ def main():
                 pass
             finally:
                 child.wait()
-        status = code
-        if result.exists():
-            try:
+        missing, report = delivery(clone, args.branch, start,
+                                   re.search(r'(?i:\bpull request\b)|\bPR\b', args.brief))
+        status = code or int(bool(missing))
+        try:
+            if result.exists():
                 print(result.read_text(), end='', flush=True)
-            except BrokenPipeError:
-                with open(os.devnull, 'w') as sink:
-                    os.dup2(sink.fileno(), sys.stdout.fileno())
+            print(report, flush=True)
+        except BrokenPipeError:
+            with open(os.devnull, 'w') as sink:
+                os.dup2(sink.fileno(), sys.stdout.fileno())
         return status
     finally:
         if status == 0 or not cloned:

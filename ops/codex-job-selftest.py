@@ -14,6 +14,8 @@ import unittest
 from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
+DELIVERED = ("Delivery: ok missing=none branch=test-job start=start remote=pushed "
+             "pr=not-requested\n")
 
 
 class CodexJobTests(unittest.TestCase):
@@ -29,7 +31,9 @@ class CodexJobTests(unittest.TestCase):
                 if result:
                     Path(argv[argv.index("-o") + 1]).write_text("job result\n")
                 return subprocess.CompletedProcess(argv, status)
-            return subprocess.CompletedProcess(argv, 0)
+            stdout = {"rev-parse": "start\n",  # the job delivered: a new remote commit
+                      "ls-remote": "pushed\trefs/heads/test-job\n"}.get(argv[3:4] and argv[3], "")
+            return subprocess.CompletedProcess(argv, 0, stdout=stdout)
 
         def spawn(argv, **kwargs):
             code = execute(argv, **kwargs).returncode
@@ -50,8 +54,12 @@ class CodexJobTests(unittest.TestCase):
         ):
             launcher = runpy.run_path(str(ROOT / "bin/codex-job"))
             code = launcher["main"]()
+        # Stale codex-job-* dirs in the host temp dir add a ps call first; before
+        # this filter, cleanup then removed Path("args=").parent, the cwd.
+        calls = [call for call in calls if call[0][0] != "ps"]
         self.addCleanup(shutil.rmtree, Path(calls[0][0][-1]).parent, True)
-        return code, output.getvalue(), calls, picker.prepare
+        codex = next(call for call in calls if call[0][:2] == ["codex", "exec"])
+        return code, output.getvalue(), [*calls[:2], codex], picker.prepare
 
     def test_final_codex_argv_uses_hook_trust_and_prepared_brief(self):
         code, output, calls, prepare = self.launch(configs=("model_reasoning_effort=high", "model=test"))
@@ -67,7 +75,7 @@ class CodexJobTests(unittest.TestCase):
         self.assertTrue(calls[-1][0][-1].endswith("\n\nprepared brief"))
         self.assertEqual(calls[-1][1]["stdin"], subprocess.DEVNULL)
         prepare.assert_called_once_with("original brief", Path(clone))
-        self.assertEqual((code, output), (0, "job result\n"))
+        self.assertEqual((code, output), (0, "job result\n" + DELIVERED))
         self.assertFalse(Path(clone).parent.exists(), "temporary clone must be cleaned up")
 
     def launch_with_stderr(self, target):
@@ -94,11 +102,11 @@ class CodexJobTests(unittest.TestCase):
 
     def test_child_failure_is_returned_with_its_final_message(self):
         code, output, _, _ = self.launch(status=7)
-        self.assertEqual((code, output), (7, "job result\n"))
+        self.assertEqual((code, output), (7, "job result\n" + DELIVERED))
 
     def test_missing_result_keeps_child_exit_without_inventing_output(self):
         code, output, _, _ = self.launch(status=9, result=False)
-        self.assertEqual((code, output), (9, ""))
+        self.assertEqual((code, output), (9, DELIVERED))
 
     def test_explicit_git_url_is_preserved(self):
         _, _, calls, _ = self.launch(repo="https://github.com/DoctorCRE/carr-system.git")
