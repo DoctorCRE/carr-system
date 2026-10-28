@@ -2,6 +2,7 @@
 // may not fill it, and every loop read names the surface that wrote the row.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { TOOLS, ToolError } from "../src/tools.js";
 
 const actor = profile => ({ id: "10000000-0000-0000-0000-000000000002", slug: "joe", display: "Joe",
@@ -24,7 +25,7 @@ class Recorder {
     return { rows: this.rows };
   }
 }
-const claudeLoop = { idempotency_key: "writer-surface-claude", kind: "open_loop", owner: "claude",
+const claudeLoop = { idempotency_key: randomUUID(), kind: "open_loop", owner: "claude",
   domain: "system", body: "writer surface probe", blocker: "capability", blocker_detail: "coverage only",
   residue_kind: "provider_login", residue_host: "github.com" };
 
@@ -49,7 +50,7 @@ test("update-loop refuses a narrow profile re-owning a loop to claude before tou
     if (text.replace(/\s+/g, " ").trim().startsWith("select request_hash, response")) return { rows: [] };
     throw new Error("must refuse before any other query"); } };
   await assert.rejects(() => TOOLS["update-loop"].handler(db, actor("capture"),
-    { idempotency_key: "writer-surface-update", number: "1", base_version: 1, owner: "claude" }),
+    { idempotency_key: randomUUID(), number: "1", base_version: 1, owner: "claude" }),
     e => e.payload?.error === "claude_owner_requires_full_profile");
 });
 
