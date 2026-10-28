@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -38,7 +39,8 @@ def install_helper(settings: OutlookSettings) -> None:
                                              check=True, capture_output=True, text=True)
                 designated = [line for line in (requirement.stdout + requirement.stderr).splitlines()
                               if line.startswith('designated =>')]
-                if (len(designated) != 1 or 'certificate' not in designated[0]
+                if (len(designated) != 1 or not re.search(
+                        r'\b(?:certificate\s+(?:leaf|root|-?\d+)|anchor\s*=?\s*H"[0-9a-fA-F]{40}")', designated[0])
                         or 'cdhash' in designated[0]):
                     raise SettingsError('Outlook helper signing must produce a certificate designated requirement, not a cdhash')
             os.replace(built, helper)

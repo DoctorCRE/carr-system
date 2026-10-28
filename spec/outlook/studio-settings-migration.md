@@ -82,6 +82,8 @@ Complete all steps on each Mac. Keep the same certificate and helper path for la
 The certificate is local to that Mac. Do not commit its name or export its private key.
 Without `signing_identity`, the installer uses ad-hoc signing and warns that rebuilds need a Full Disk Access re-grant.
 The installer rejects a configured identity that cannot sign or produces a cdhash designated requirement.
+Apple's [requirement language](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/RequirementLang/RequirementLang.html)
+defines a certificate hash anchor as a certificate requirement; the installer accepts that form too.
 
 1. Open Keychain Access on the intake Mac.
 2. Select **Keychain Access > Certificate Assistant > Create a Certificate**.

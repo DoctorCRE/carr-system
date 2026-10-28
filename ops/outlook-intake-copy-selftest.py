@@ -466,6 +466,16 @@ else:
         self.assertEqual(self.sign_log.read_text().count('"-d", "-r-"'), 2)
         load_settings(self.home).verify_helper()
 
+    def test_self_signed_certificate_anchor_requirement_is_accepted(self):
+        values = json.loads(self.config.read_text())
+        values['signing_identity'] = 'Fixture Signing Identity'
+        self.config.write_text(json.dumps(values))
+        requirement = 'designated => identifier "outlook-intake-copy" and anchor H"0123456789abcdef0123456789abcdef01234567"'
+        result = self.install(check=False, signing_env={'REQUIREMENT': requirement})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('re-grant', result.stdout)
+        load_settings(self.home).verify_helper()
+
     def test_signing_failure_preserves_existing_helper_and_pin(self):
         self.install()
         before = self.helper.read_bytes(), self.helper.with_suffix('.pin').read_text()
