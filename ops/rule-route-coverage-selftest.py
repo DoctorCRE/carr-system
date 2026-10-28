@@ -46,12 +46,17 @@ routes_lib = load("rule_routes_selftest_lib", REPO / "lib/rule_routes.py")
 FAILURES: list[str] = []
 
 
-def check(name: str, condition: bool, detail: object = "") -> None:
-    if condition:
-        print(f"PASS  {name}")
-    else:
-        FAILURES.append(f"{name}: {detail}")
-        print(f"FAIL  {name}: {detail}")
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(
+    ok="PASS  {label}",
+    fail="FAIL  {label}: {detail}",
+    detail=None,
+    entry="{label}: {detail}",
+    failures=FAILURES,
+)
 
 
 # ---------------------------------------------------------------- fixture

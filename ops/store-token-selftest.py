@@ -43,10 +43,11 @@ SPEC.loader.exec_module(st)
 FAILURES: list[str] = []
 
 
-def check(label: str, ok: bool) -> None:
-    print(("  ok   " if ok else "  FAIL ") + label)
-    if not ok:
-        FAILURES.append(label)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(ok="  ok   {label}", fail="  FAIL {label}", detail=None, failures=FAILURES)
 
 
 SECRET = "s3cr3t-value-should-never-leak-9f8e7d"  # ci-secret-scan: allow — hermetic fixture

@@ -16,10 +16,17 @@ spec.loader.exec_module(mod)
 bad: list[str] = []
 
 
-def check(name: str, cond: bool, detail: str = "") -> None:
-    print(("  ok   " if cond else "  FAIL ") + name + (f" {detail}" if detail else ""))
-    if not cond:
-        bad.append(name)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(
+    ok="  ok   {label}",
+    fail="  FAIL {label}",
+    detail=" {detail}",
+    detail_on_ok=True,
+    failures=bad,
+)
 
 
 known = [{
