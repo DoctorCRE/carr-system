@@ -11,8 +11,9 @@ emails already logged by the intake, filed or unfiled, oldest first, minus
 the ones this router already handled. It starts no new email after BUDGET (20
 minutes). Unfiled email goes through lib.email_matching: thread continuity files
 automatically; otherwise one pinned Jev call proposes a deal, a possible new matter,
-or contact-only logging. Filed email retains the isolated phase-move, next-step and
-reply-draft model call (lib/model_call.py, model from settings), each proposal with a
+or contact-only logging. That filing is written before any model call. Filed email retains the
+isolated phase-move, next-step and reply-draft model call (lib/model_call.py, model from settings);
+email just inherited or matched to a deal gets only its next step. Each proposal carries a
 literal evidence quote (capped at 2000 characters) and a confidence. Every surviving
 proposal is stored through `record-email-proposal`, which re-checks the evidence
 against the stored email and the deal, and flags a quote that reads like an injected
@@ -27,7 +28,8 @@ server; every other filing requires a partner confirmation. No mail is sent.
 An email counts as handled once the model answered and every proposal was either
 stored or refused by the server with a TOOL ERROR (bad evidence). A model failure, a
 transport, timeout, setup or authorization failure on a write, or a failed queue read
-leaves work for the next run and makes this run exit 1; an email that fails
+leaves work for the next run and makes this run exit 1; a filing already written stays
+written, so a model failure delays only the proposals. An email that fails
 MAX_ATTEMPTS times is abandoned (still exit 1). State lives in
 out/email-router/state.json (0600) and is pruned after the queue window. The receipt
 line carries counts and exception type names only.
@@ -190,7 +192,6 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
             routed[activity] = now.timestamp()
             attempts.pop(activity, None)
             continue
-        inheritance = None
         def matching_proposal(decision):
             if decision.kind == 'file_to_deal' and decision.deal in email.get('suppressed_deals', []):
                 return []
@@ -205,50 +206,14 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
             if decision.text:
                 args['text'] = decision.text
             return [args]
-        try:
-            if email.get('deal'):
-                reply = classify(email, now.date())
-                kept = proposals(reply, email, now.date())
-                if email.get('kind') == 'email_out':
-                    kept = [item for item in kept if item['kind'] == 'next_step']
-                counts['dropped'] += max(0, len(reply.get('proposals') or []) - len(kept))
-            else:
-                decision = matching(email, queue['open_deals'], email.get('thread_history', []))
-                kept = []
-                if decision.kind == 'inherit_thread':
-                    inheritance = {'activity_id': activity, 'thread_activity_id': decision.thread_activity_id}
-                else:
-                    kept = matching_proposal(decision)
-                if inheritance or (kept and decision.kind == 'file_to_deal'):
-                    selected = next(deal for deal in queue['open_deals'] if deal['id'] == decision.deal)
-                    source = {**email, 'deal': selected['id'], 'deal_name': selected.get('name'),
-                              'phase': selected.get('phase'), 'deal_type': selected.get('deal_type')}
-                    reply = classify(source, now.date())
-                    kept.extend(item for item in proposals(reply, source, now.date()) if item['kind'] == 'next_step')
-        except Exception as error:
+
+        def model_failed(error: Exception) -> None:
             name = type(error).__name__
             model_failed_types[name] = model_failed_types.get(name, 0) + 1
             counts['model_failed'] += 1
             failed(activity)
-            continue
-        try:
-            if inheritance:
-                digest = hashlib.sha256(json.dumps(inheritance, sort_keys=True).encode()).hexdigest()
-                try:
-                    call('inherit-email-thread', {'idempotency_key': str(uuid.uuid5(uuid.NAMESPACE_URL, digest)),
-                                                   **inheritance})
-                    counts['inherited'] += 1
-                except Exception as error:
-                    if not (refusal_code(error) or '').startswith('email_thread_'):
-                        raise WriteFailed() from error
-                    try:
-                        kept = matching_proposal(matching(email, queue['open_deals'], []))
-                    except Exception as error:
-                        name = type(error).__name__
-                        model_failed_types[name] = model_failed_types.get(name, 0) + 1
-                        counts['model_failed'] += 1
-                        failed(activity)
-                        continue
+
+        def record(kept: list[dict]) -> None:
             for args in kept:
                 digest = hashlib.sha256(json.dumps(args, sort_keys=True).encode()).hexdigest()
                 key = str(uuid.uuid5(uuid.NAMESPACE_URL, f'record-email-proposal|{digest}'))
@@ -261,10 +226,62 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
                         raise WriteFailed() from error
                     counts['refused'] += 1
                     codes[code] = codes.get(code, 0) + 1
-        except WriteFailed:
-            counts['write_failed'] += 1
-            failed(activity)
-            continue
+
+        # Filing first: matching and thread inheritance never wait on the next-step model below.
+        deal = email.get('deal')
+        if not deal:
+            try:
+                decision = matching(email, queue['open_deals'], email.get('thread_history', []))
+            except Exception as error:
+                model_failed(error)
+                continue
+            try:
+                if decision.kind == 'inherit_thread':
+                    inheritance = {'activity_id': activity, 'thread_activity_id': decision.thread_activity_id}
+                    digest = hashlib.sha256(json.dumps(inheritance, sort_keys=True).encode()).hexdigest()
+                    try:
+                        call('inherit-email-thread', {'idempotency_key': str(uuid.uuid5(uuid.NAMESPACE_URL, digest)),
+                                                       **inheritance})
+                        counts['inherited'] += 1
+                        deal = decision.deal
+                    except Exception as error:
+                        if not (refusal_code(error) or '').startswith('email_thread_'):
+                            raise WriteFailed() from error
+                        try:
+                            decision = matching(email, queue['open_deals'], [])
+                        except Exception as error:
+                            model_failed(error)
+                            continue
+                if decision.kind != 'inherit_thread':
+                    kept = matching_proposal(decision)
+                    record(kept)
+                    if kept and decision.kind == 'file_to_deal':
+                        deal = decision.deal
+            except WriteFailed:
+                counts['write_failed'] += 1
+                failed(activity)
+                continue
+        # A model failure from here on only delays the proposals; the filing above is already written.
+        if deal:
+            try:
+                source = email if email.get('deal') else next(
+                    {**email, 'deal': deal, 'deal_name': item.get('name'), 'phase': item.get('phase'),
+                     'deal_type': item.get('deal_type')} for item in queue['open_deals'] if item['id'] == deal)
+                reply = classify(source, now.date())
+            except Exception as error:
+                model_failed(error)
+                continue
+            kept = proposals(reply, source, now.date())
+            if email.get('kind') == 'email_out' or source is not email:
+                kept = [item for item in kept if item['kind'] == 'next_step']
+            if source is email:
+                counts['dropped'] += max(0, len(reply.get('proposals') or []) - len(kept))
+            try:
+                record(kept)
+            except WriteFailed:
+                counts['write_failed'] += 1
+                failed(activity)
+                continue
         attempts.pop(activity, None)
         routed[activity] = now.timestamp()
         counts['routed'] += 1

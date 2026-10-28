@@ -92,6 +92,29 @@ class RouterTests(unittest.TestCase):
                 self.assertEqual({verb for verb, _ in server.calls} - {'email-router-queue'},
                                  {'record-email-proposal'} if expected else set())
 
+    def test_model_failure_never_blocks_thread_filing(self):
+        source = dict(email('inherit', ASK), deal=None)
+        calls = []
+        def carr(verb, args):
+            calls.append((verb, args))
+            if verb == 'email-router-queue':
+                return {'emails': [source], 'open_deals': [{'id': DEAL, 'name': 'Synthetic purchase',
+                        'phase': 'site_selection', 'deal_type': 'purchase'}]}
+            return {'ok': True}
+        def broken(email, today):
+            raise RuntimeError('model unavailable')
+        state = {}
+        inherit = lambda *args: email_matching.MatchDecision('inherit_thread', DEAL, thread_activity_id='prior')
+        for _ in range(email_router.MAX_ATTEMPTS):
+            counts = email_router.route(carr, broken, refusal_code, state, NOW, matching=inherit)
+            self.assertEqual(counts['model_failed'], 1)
+        filed = [args for verb, args in calls if verb == 'inherit-email-thread']
+        self.assertEqual(len(filed), email_router.MAX_ATTEMPTS)
+        self.assertEqual(filed[0], {'idempotency_key': filed[0]['idempotency_key'], 'activity_id': 'inherit',
+                                    'thread_activity_id': 'prior'})
+        self.assertEqual(len({args['idempotency_key'] for args in filed}), 1)
+        self.assertEqual(counts['abandoned'], 1)
+
     def test_unfiled_intake_email_proposes_next_step_for_the_selected_deal(self):
         source = dict(email('unfiled', ASK), deal=None, kind='email_out',
                       sender={'email': 'sender@example.test'}, mailbox_owner='dell')
