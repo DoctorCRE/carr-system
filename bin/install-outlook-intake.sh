@@ -5,8 +5,8 @@
 # would also rewrite every unrelated hook and LaunchAgent. The decoder is built
 # from vendor/hxprobe in this checkout, the tree the hxprobe CI class tests, with
 # the same `cargo build --release --locked`. Cargo's target directory sits under
-# the settings `vendor` path. The source receipt must match before locked
-# tests and build; a local receipt records the installed binary and toolchain. It
+# the settings `vendor` path. Locked tests and build run unless the local
+# receipt binds the installed binary to this source digest. It
 # never loads the job: it renders the plist, creates the launchd log at 0600,
 # and prints the two commands the operator runs to load it.
 #
@@ -60,7 +60,6 @@ LOG="$REPO/out/outlook-intake-launchd.log"
 VENDOR="$("$PY" -m lib.outlook_settings field vendor)"
 # build.rs also reads the store atlas and its generator from the repository root.
 SOURCES=(vendor/hxprobe spec/outlook/hxstore-atlas.json ops/hxstore-atlas.py)
-DECODER="$VENDOR/hxprobe/target/release/hxprobe"
 PIN="$VENDOR/.carr-pin"
 TMP="$(mktemp -t carr-outlook-intake-plist)"
 trap 'rm -f "$TMP"' EXIT
@@ -74,18 +73,16 @@ if [ -n "$(git -C "$REPO" status --porcelain -- "${SOURCES[@]}")" ]; then
   print -u2 -- "install-outlook-intake: $REPO has uncommitted decoder sources; the decoder builds only from committed source"
   exit 1
 fi
-WANT_PIN="source $(git -C "$REPO" rev-parse "${SOURCES[@]/#/HEAD:}" | /usr/bin/paste -sd' ' -)"
+# Only the old upstream-plus-patch checkout is refused; a folder left by a
+# failed build of this installer has no crate and is retried. The decoder is
+# rebuilt unless .carr-build.json binds it to this source; see the script.
 HAVE_PIN="$(cat "$PIN" 2>/dev/null || true)"
-if [ ! -x "$DECODER" ] || [ "$HAVE_PIN" != "$WANT_PIN" ]; then
-  # Only the old upstream-plus-patch checkout is refused; a folder left by a
-  # failed build of this installer has no pin and no crate, and is retried.
-  if [ -e "$VENDOR/hxprobe/Cargo.toml" ] || { [ -n "$HAVE_PIN" ] && [ "${HAVE_PIN#source }" = "$HAVE_PIN" ]; }; then
-    print -u2 -- "install-outlook-intake: $VENDOR holds the old upstream decoder checkout; move it aside first"
-    exit 1
-  fi
-  "$PY" "$REPO/ops/hxprobe-source-digest.py" --build-into "$VENDOR"
-  print -- "$WANT_PIN" > "$PIN"
+if [ -e "$VENDOR/hxprobe/Cargo.toml" ] || { [ -n "$HAVE_PIN" ] && [ "${HAVE_PIN#source }" = "$HAVE_PIN" ]; }; then
+  print -u2 -- "install-outlook-intake: $VENDOR holds the old upstream decoder checkout; move it aside first"
+  exit 1
 fi
+"$PY" "$REPO/ops/hxprobe-source-digest.py" --build-into "$VENDOR"
+rm -f "$PIN"
 
 "$REPO/.venv/bin/python" - "$REPO" "$HOME" <<'PY'
 import hashlib

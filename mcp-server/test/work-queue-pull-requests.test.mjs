@@ -177,3 +177,21 @@ test('only a job first seen merged or closed is saved, once, as its finish', () 
   assert.deepEqual(view.finishes.map(({ key, finished }) => [key, finished.stage, finished.prs.map(pr => pr.card_id)]), [
     [['w1', 1, 1], 'merged', ['WR557.S1.J1.carr#21']], [['w1', 1, 2], 'closed', ['WR557.S1.J2.carr#22']]]);
 });
+
+test('a search GitHub flags incomplete_results saves no finish and no stale verdict, and a later complete read still works', async () => {
+  let clock = 0, incomplete = true;
+  const merged = item(21, 'Card: WR557.S1.J1', { state: 'closed', pull_request: { merged_at: '2026-10-27T13:00:00Z' } });
+  const fetchImpl = async () => new Response(JSON.stringify({ total_count: 1, incomplete_results: incomplete, items: [merged] }));
+  const read = createPullRequestSource({ token: 'synthetic', fetchImpl, now: () => clock });
+  const [partial] = await read(REPOS.slice(0, 1));
+  assert.equal(partial.truncated, true);
+  const partialView = queueView([jobRow(1), jobRow(2)], [{ ...partial, prs: [...partial.prs, livePr(22, ['WR557.S1.J2'], { draft: true })] }], at);
+  assert.deepEqual(partialView.finishes, []);
+  assert.deepEqual(partialView.jobs.map(job => job.stale), [false, false]);
+
+  incomplete = false;
+  clock = PULL_REQUEST_TTL_MS;
+  const [full] = await read(REPOS.slice(0, 1));
+  assert.equal(full.truncated, false);
+  assert.deepEqual(queueView([jobRow(1)], [full], at).finishes.map(({ finished }) => finished.stage), ['merged']);
+});

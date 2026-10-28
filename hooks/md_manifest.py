@@ -247,5 +247,7 @@ def md_write_verdict(rel, today=None, actor=None):
             f"14181e60, council decision 82a2fb62). The doctrine store is being built "
             f"(loop #242); until its write verbs land, route content through the verbs "
             f"that exist: log-decision (a settled call), add-loop (an open item or idea), "
-            f"record-finding (research), log-capture (a studied source). Propose standing guidance as an edit to "
-            f"CLAUDE.md, AGENTS.md or a skill in a PR; proposals bind nobody until merged.")
+            f"record-finding (research), log-capture (a studied source). Propose standing guidance as a "
+            f"team-memory convention (write-doctrine-section document=team-memory "
+            f"section_key=conventions/proposed/<slug>); it binds nobody until adopted in person through "
+            f"governance-queue (adopt-rule).")

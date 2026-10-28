@@ -97,8 +97,11 @@ the repository as editable source. Transitive dependencies stay on crates.io;
 this is not a `cargo vendor` directory or an offline build.
 All maintained test and release build commands use `--locked`.
 The compiler is pinned in `rust-toolchain.toml` for rustup installations.
-[BUILD-SHA256](BUILD-SHA256) identifies the local release binary and toolchain.
-The hash is a build receipt, not a cross-platform reproducibility guarantee.
+No binary hash or source digest is committed: every decoder PR would rewrite
+it, so any two in flight would conflict (WR-000440). The installer computes the
+source digest at install time and records it with the local binary hash and
+toolchain; that receipt is a local build record, not a cross-platform
+reproducibility guarantee.
 
 `cargo-audit 0.22.2 audit --file vendor/hxprobe/Cargo.lock --json` returned
 zero vulnerabilities and zero warnings across 32 packages. The RustSec database
@@ -115,17 +118,18 @@ The crate's 34 tests use synthetic data. Every example email address uses
 `@example.test`. No private Outlook store or profile is needed.
 
 For updates, retain a separate upstream import and CARR change commit, review
-the lockfile changes and license, rerun the CI class and cargo-audit, and
-refresh BUILD-SHA256 for the recorded target and toolchain.
+the lockfile changes and license, and rerun the CI class and cargo-audit.
 
 `bin/install-outlook-intake.sh` builds the installed decoder from this tree with
-the same `cargo build --release --locked`, using a target directory under the
-settings `vendor` path. It installs the binary only when its SHA-256 equals
-line 1 of BUILD-SHA256, so every change under this directory must refresh that
-line from a build on the Studio toolchain. `.carr-pin` records the git object
-IDs of this directory and the two atlas files; an unchanged pin skips the build.
-`ops/hxprobe-install-selftest.py` runs the installer and checks that its binary
-equals the in-tree build.
+the same locked tests and `cargo build --release --locked`, using a target
+directory under the settings `vendor` path, and only from committed source.
+`ops/hxprobe-source-digest.py` digests this crate and the two atlas files and
+keeps the digest, binary SHA-256 and toolchain in the vendor directory's
+`.carr-build.json`. The installer skips the build only when that receipt names
+this source digest and the installed binary's hash. A binary that does not
+match its receipt is removed before the rebuild; one from older source stays
+until a new build passes. `ops/hxprobe-install-selftest.py` runs the installer
+and checks that its binary equals a second clean build of the same tree.
 
 ## Source study
 
