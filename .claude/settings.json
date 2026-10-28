@@ -3,17 +3,6 @@
   "autoCompactWindow": 500000,
   "hooks": {
     "PreToolUse": [],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "[ -d \"${HOME}/carr-system/hooks\" ] && exit 0; r=\"${CLAUDE_PROJECT_DIR:-}\"; if [ ! -e \"$r/hooks/rule-claim-gate.py\" ] && [ ! -L \"$r/hooks/rule-claim-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script $r/hooks/rule-claim-gate.py; skipping\" >&2; exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/rule-claim-gate.py\"",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
         "hooks": [

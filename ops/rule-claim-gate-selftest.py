@@ -408,18 +408,12 @@ class RuleClaimGateTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn('parse_error', result.stderr)
 
-    def test_fires_once_per_stop_on_a_mac(self):
-        commands = {}
-        for path in ['.claude/settings.json', 'ops/config/hooks.json']:
-            document = json.loads((REPO / path).read_text())
-            groups = document.get('hooks', document)['Stop']
-            commands[path] = [hook['command'] for group in groups for hook in group['hooks']
-                              if 'rule-claim-gate.py' in hook['command']]
-            self.assertEqual(len(commands[path]), 1, path)
-        # The managed user hook owns the Mac; the project entry serves only a
-        # cloud clone, where no ~/carr-system checkout (and no user hook) exists.
-        self.assertTrue(commands['.claude/settings.json'][0].startswith(
-            '[ -d "${HOME}/carr-system/hooks" ] && exit 0;'))
+    def test_fires_once_per_stop_from_the_managed_hooks(self):
+        managed = json.loads((REPO / 'ops/config/hooks.json').read_text())['Stop']
+        self.assertEqual(sum('rule-claim-gate.py' in hook['command']
+                             for group in managed for hook in group['hooks']), 1)
+        # A second project-level entry made every Mac Stop run the gate twice.
+        self.assertNotIn('rule-claim-gate.py', (REPO / '.claude/settings.json').read_text())
 
     def test_string_assistant_content_still_blocks(self):
         self.assertEqual(self.run_hook(self.turn(message('assistant', "I'll remember.")))

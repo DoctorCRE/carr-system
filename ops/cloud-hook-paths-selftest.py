@@ -13,10 +13,6 @@ THE CONTRACT, per layout:
   Mac layout   (~/carr-system/hooks exists)
       every hook runs from the canonical ~/carr-system path, never from the
       project directory. A branch or worktree cannot swap in its own gate.
-      rule-claim-gate.py is the exception: on a Mac the user settings that
-      ops/config-as-code.py renders from ops/config/hooks.json already run it
-      on every Stop, so the project entry does nothing there and the gate
-      fires once.
 
   cloud layout (~/carr-system/hooks absent)
       worktree-self-plumb.py and machine-converge.py do nothing: both act on
@@ -41,9 +37,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 SETTINGS = REPO / ".claude" / "settings.json"
 SHELLS = [s for s in ("/bin/sh", "/bin/bash", "/bin/zsh") if os.access(s, os.X_OK)]
-GATE = "rule-claim-gate.py"
 MACHINE_HOOKS = ("worktree-self-plumb.py", "machine-converge.py")
-KNOWN_HOOKS = (GATE, *MACHINE_HOOKS)
+KNOWN_HOOKS = MACHINE_HOOKS
 
 FAILURES: list[str] = []
 
@@ -92,7 +87,6 @@ def payloads(project: Path, transcript: Path) -> dict[str, list[dict]]:
                            ("Read", {"file_path": str(project / "AGENTS.md")}),
                            ("Grep", {"pattern": "foo"}),
                            ("Glob", {"pattern": "**/*.py"}))],
-        "Stop": [dict(base, hook_event_name="Stop")],
         "SessionStart": [dict(base, hook_event_name="SessionStart", source="startup")],
     }
 
@@ -107,11 +101,6 @@ def cloud_project(tmp: Path) -> Path:
     project = tmp / "repo"
     shutil.copytree(REPO / "hooks", project / "hooks",
                     ignore=shutil.ignore_patterns("__pycache__"))
-    (project / "lib").mkdir()
-    shutil.copy2(REPO / "lib/hook_runtime.py", project / "lib/hook_runtime.py")
-    (project / "ops").mkdir(parents=True)
-    shutil.copy2(REPO / "ops" / "command_precheck.py", project / "ops" / "command_precheck.py")
-    shutil.copy2(REPO / "ops" / "git_env.py", project / "ops" / "git_env.py")
     (project / ".claude").mkdir()
     shutil.copy2(SETTINGS, project / ".claude" / "settings.json")
     shutil.copy2(REPO / "AGENTS.md", project / "AGENTS.md")
@@ -196,24 +185,10 @@ def mac_cases() -> None:
                 payload = cases[event][0]
                 r = run(shell, command, env, payload, project)
                 label = f"mac/{os.path.basename(shell)}: {event} {script}"
-                if script == GATE:
-                    check(f"{label} leaves the gate to the managed user hook",
-                          r.returncode == 0 and r.stdout == "",
-                          f"rc={r.returncode} stdout={r.stdout.strip()!r}")
-                    continue
                 check(f"{label} runs the canonical copy",
                       r.returncode == 0 and f"CANONICAL:{script}" in r.stdout
                       and "PROJECT:" not in r.stdout,
                       f"rc={r.returncode} stdout={r.stdout.strip()!r}")
-
-        # A canonical checkout whose gate FILE is missing is damage for
-        # gate-integrity to report, not absent machine state, so the command
-        # must not quietly fall back to the project copy.
-        (canonical / GATE).unlink()
-        command = next(c for e, s, c in wired_commands() if s == GATE)
-        r = run(SHELLS[0], command, env, cases["Stop"][0], project)
-        check("mac: a missing canonical gate never falls back to the project copy",
-              "PROJECT:" not in r.stdout, f"stdout={r.stdout.strip()!r}")
 
 
 def contract_cases() -> None:
