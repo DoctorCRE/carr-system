@@ -430,6 +430,69 @@ class Window:
                                 selected=bool(cell.get('selected') or e.get('selected'))))
         return _tab(elements), rows
 
+    def _scroll_list(self, direction: str) -> None:
+        elements = self._walk(max_elements=LIST_WALK)
+        tables = [e for e in elements if e.get('role') == 'AXTable' and e.get('label') == 'Message List']
+        if len(tables) != 1 or not tables[0].get('element_token'):
+            raise UiError('message_list_not_found', step='scan_rows')
+        cua('scroll', {'pid': self.pid, 'window_id': self.window_id,
+                       'element_token': tables[0]['element_token'],
+                       'direction': direction, 'by': 'line', 'amount': 50 if direction == 'up' else 1})
+        time.sleep(self.waits.settle_seconds)
+
+    def scan_rows(self, allowed: Callable[[], bool]) -> list[Row]:
+        """Collect overlapping viewports using wheel events, with bounded top restoration."""
+        def page() -> list[Row]:
+            rows = self.rows()[1]
+            if any(not r.sender or r.subject is None for r in rows) or len({r.key for r in rows}) != len(rows):
+                raise UiError('coverage_identity_ambiguous', step='scan_rows')
+            if any(r.selected and r.read_state is not ReadState.READ for r in rows):
+                raise UiError('unread_row_selected', step='scan_rows')
+            return rows
+
+        def signature(rows: list[Row]) -> list[tuple[str, bool]]:
+            return [(r.label, r.selected) for r in rows]
+
+        def top() -> list[Row]:
+            deadline = time.monotonic() + 30
+            previous = self.rows()[1]
+            for _ in range(50):
+                if time.monotonic() >= deadline:
+                    break
+                self._scroll_list('up')
+                current = self.rows()[1]
+                if signature(previous) == signature(current):
+                    return current
+                previous = current
+            raise UiError('coverage_restore_failed', step='scan_rows')
+
+        first = None
+        try:
+            first = top()
+            previous = page()
+            collected = {r.key: r for r in previous}
+            for _ in range(50):
+                if not allowed():
+                    raise UiError('coverage_deadline', step='scan_rows')
+                self._scroll_list('down')
+                current = page()
+                if signature(current) == signature(previous):
+                    return list(collected.values())
+                old_keys, keys = [r.key for r in previous], [r.key for r in current]
+                overlap = next((n for n in range(min(len(old_keys), len(keys)), 0, -1)
+                                if old_keys[-n:] == keys[:n]), 0)
+                if not overlap or any(r.key in collected for r in current[overlap:]):
+                    raise UiError('coverage_identity_ambiguous', step='scan_rows')
+                if any(signature([collected[r.key]]) != signature([r]) for r in current[:overlap]):
+                    raise UiError('coverage_changed', step='scan_rows')
+                collected.update((r.key, r) for r in current)
+                previous = current
+            raise UiError('coverage_page_limit', step='scan_rows')
+        finally:
+            restored = top()
+            if first is not None and signature(first) != signature(restored):
+                raise UiError('coverage_changed', step='scan_rows')
+
     def switch_tab(self, tab: str) -> None:
         before = self.rows()[0]
         if before == tab:

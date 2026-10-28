@@ -42,6 +42,7 @@ import re
 import stat
 import subprocess
 import sys
+import time
 from typing import Callable
 
 from lib.outlook_ui import (EXIT, CuaError, Moved, Outcome, ReadState, Refreshed, Row, UiError, Waits,
@@ -251,27 +252,92 @@ def _inbox(window: Window) -> tuple[int, dict[str | None, list[Row]]]:
 
 
 def _unread(tabs: dict[str | None, list[Row]]) -> Counter:
-    return Counter(r.label for rows in tabs.values() for r in rows if r.read_state is ReadState.UNREAD)
+    unique = {r.key: r for rows in tabs.values() for r in rows}
+    return Counter(r.label for r in unique.values() if r.read_state is ReadState.UNREAD)
+
+
+def _coverage(window: Window, badge: int, tabs: dict[str | None, list[Row]],
+              closed: Callable[[], bool]) -> dict[str | None, list[Row]]:
+    deadline = time.monotonic() + 120
+    allowed = lambda: time.monotonic() < deadline and not closed()
+
+    def scan() -> dict[str | None, list[Row]]:
+        result = {}
+        for tab in tabs:
+            if not allowed():
+                raise UiError('coverage_deadline')
+            if tab is not None:
+                window.switch_tab(tab)
+            result[tab] = window.scan_rows(allowed)
+        window.show_folder_pane(True)
+        try:
+            if window.inbox_badge() != badge:
+                raise UiError('coverage_changed')
+        finally:
+            window.show_folder_pane(False)
+        return result
+
+    first = scan()
+    for tab, rows in tabs.items():
+        initial = {r.key: (r.label, r.selected) for r in rows}
+        if len(initial) != len(rows):
+            raise UiError('coverage_identity_ambiguous')
+        observed = {r.key: (r.label, r.selected) for r in first[tab]}
+        if any(observed.get(key) != state for key, state in initial.items()):
+            raise UiError('coverage_changed')
+    second = scan()
+    fingerprint = lambda result: {tab: [(r.key, r.read_state, r.selected) for r in rows]
+                                  for tab, rows in result.items()}
+    if fingerprint(first) != fingerprint(second):
+        raise UiError('coverage_changed')
+    identities = {}
+    for rows in second.values():
+        for row in rows:
+            previous = identities.get(row.key)
+            if previous and (previous.label, previous.selected) != (row.label, row.selected):
+                raise UiError('coverage_identity_ambiguous')
+            identities[row.key] = row
+    if len(_unread(second)) != badge:
+        raise UiError('coverage_incomplete')
+    if not allowed():
+        raise UiError('coverage_deadline')
+    return second
 
 
 def file_inbox(window: Window, guide: FolderGuide, find, limits: Limits, report: Report,
                refresh_list: Path, closed: Callable[[], bool]) -> Outcome:
     return preserve_unread(window, report, lambda tabs: (
         refresh_all(window, refresh_list, limits, report, closed)
-        or _move_all(window, tabs, guide, find, limits, report, closed)))
+        or _move_all(window, tabs, guide, find, limits, report, closed)), closed)
 
 
-def preserve_unread(window: Window, report: Report, action: Callable[[dict], Outcome]) -> Outcome:
+def preserve_unread(window: Window, report: Report, action: Callable[[dict], Outcome],
+                    closed: Callable[[], bool]) -> Outcome:
     """Verify the unread set before and after any read-mail operation."""
     badge, tabs = _inbox(window)
     unread = _unread(tabs)
     if any(r.selected and r.read_state is not ReadState.READ for rows in tabs.values() for r in rows):
         return Outcome('failed', 'unread_row_selected')
-    if sum(unread.values()) != badge:
-        report.left['unread_set_unverified'] += sum(len(rows) for rows in tabs.values())
-        return Outcome('skipped', 'unread_set_unverified',
-                       f'badge={badge} visible_unread={sum(unread.values())} '
-                       f'visible_rows={sum(len(rows) for rows in tabs.values())} coverage=unconfirmed')
+    scanned = sum(unread.values()) != badge
+    if scanned:
+        try:
+            tabs = _coverage(window, badge, tabs, closed)
+            unread = _unread(tabs)
+        except UiError as exc:
+            if str(exc) == 'unread_row_selected':
+                return Outcome('failed', 'unread_row_selected')
+            report.left['unread_set_unverified'] += sum(len(rows) for rows in tabs.values())
+            return Outcome('skipped', 'unread_set_unverified',
+                           f'badge={badge} visible_unread={sum(unread.values())} '
+                           f'visible_rows={sum(len(rows) for rows in tabs.values())} coverage={exc}')
+    window.show_folder_pane(True)
+    try:
+        if window.inbox_badge() != badge:
+            return Outcome('skipped', 'unread_set_unverified', 'coverage=coverage_changed')
+    finally:
+        window.show_folder_pane(False)
+    if closed():
+        return Outcome('skipped', 'unread_set_unverified', 'coverage=coverage_deadline')
     try:
         outcome = action(tabs)
     except ValueError:
@@ -282,6 +348,11 @@ def preserve_unread(window: Window, report: Report, action: Callable[[dict], Out
     except CuaError:
         outcome = Outcome('failed', 'cua_driver_failed')
     end_badge, end_tabs = _inbox(window)
+    if scanned:
+        try:
+            end_tabs = _coverage(window, end_badge, end_tabs, closed)
+        except UiError:
+            return Outcome('failed', 'unread_set_changed')
     end_unread = _unread(end_tabs)
     changed = (unread - end_unread) + (end_unread - unread)
     report.unread_changed = sorted({short_hash(label) for label in changed})

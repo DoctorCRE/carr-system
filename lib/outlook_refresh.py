@@ -63,7 +63,7 @@ def run(repo: Path, now: datetime, waits: Waits = Waits(),
             window.front()
             return triage.preserve_unread(window, report, lambda tabs: (
                 triage.refresh_all(window, path, triage.Limits(), report, closed)
-                or Outcome('succeeded', 'refreshed')))
+                or Outcome('succeeded', 'refreshed')), closed)
         finally:
             window.show_folder_pane(True)
     except ValueError:
