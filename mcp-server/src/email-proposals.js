@@ -261,7 +261,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           if (args.status === 'sent' && !args.sent_item_id?.trim()) fail('email_draft_sent_confirmation_required');
           const result = args.status === 'sent' ? { status: 'sent', sent_item_id: args.sent_item_id }
             : { status: 'failed', reason: args.reason };
-          await c.query(`update email_proposal set status=$2,version=version+1,send_result=$3::jsonb
+          await c.query(`update email_proposal set status=$2,version=version+1,send_result=$3::jsonb,result_recorded_at=now()
             where id=$1`, [row.id, args.status, JSON.stringify(result)]);
           await writeEvent(c, actor, 'record-email-sent', 'deal', row.deal_id, {
             new: { proposal_id: row.id, sha256: args.sha256, ...result },
@@ -353,7 +353,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'list-email-proposals': {
       write: false,
-      description: 'List email proposals for Home across deals, or only the optional deal UUID, oldest first. Status defaults to pending; select confirmed, dismissed, approved_to_send, sent or failed to read resolved proposals. Reply drafts include subject, body and owner in reply_draft. Pending drafts also include exact to/cc arrays for verified human Joe or Dell. Missing source/copy addresses set preview_error and disable confirm_verb; machine callers receive no pending recipient addresses. Submit must echo the displayed arrays through submit-email-draft. Every item includes its status, kind, deal, confidence, source email sender, subject, quote, activity_id and suspected_instruction warning. Pending items have a fresh preview and confirm_verb; confirm with the preview fields or dismiss with dismiss-email-proposal and the version. A stale pending item has preview null and preview_error. Resolved items have resolution (resolved_at, resolved_by actor ID, reason), the stored proposed_next_step when applicable, and null confirm_verb, preview and preview_error. Phase history retains the quote; exact phase changes remain in deal history. Without limit, refuses above 200 matching proposals. For pagination, pass limit and then next_cursor until more is false; a cursor remains valid after resolution, but must belong to the selected deal when deal is supplied.',
+      description: 'List email proposals for Home across deals, or only the optional deal UUID, oldest first. Status defaults to pending; select confirmed, dismissed, approved_to_send, sent or failed to read resolved proposals. Reply drafts include subject, body and owner in reply_draft, send_result with the outcome, and nullable result_recorded_at when the outcome was recorded. Pending drafts also include exact to/cc arrays for verified human Joe or Dell. Missing source/copy addresses set preview_error and disable confirm_verb; machine callers receive no pending recipient addresses. Submit must echo the displayed arrays through submit-email-draft. Every item includes its status, kind, deal, confidence, source email sender, subject, quote, activity_id and suspected_instruction warning. Pending items have a fresh preview and confirm_verb; confirm with the preview fields or dismiss with dismiss-email-proposal and the version. A stale pending item has preview null and preview_error. Resolved items have resolution (resolved_at, resolved_by actor ID, reason), the stored proposed_next_step when applicable, and null confirm_verb, preview and preview_error. Phase history retains the quote; exact phase changes remain in deal history. Without limit, refuses above 200 matching proposals. For pagination, pass limit and then next_cursor until more is false; a cursor remains valid after resolution, but must belong to the selected deal when deal is supplied.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         deal: { type: 'string', format: 'uuid' },
         status: { type: 'string', enum: ['pending', 'confirmed', 'dismissed', 'approved_to_send', 'sent', 'failed'], default: 'pending' },
@@ -368,7 +368,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const { rows } = await c.query(`select p.id,p.version,p.kind,p.status,p.resolved_at,p.resolved_by,
             p.resolution_reason,p.deal_id,d.name as deal_name,
             p.activity_id,p.evidence_quote,p.task_text,p.sender_role,p.next_date::text as next_date,p.owner,
-            p.confidence::float8 as confidence,p.draft_subject,p.draft_body,p.submitted_email,p.send_result,a.summary,a.occurred_at
+            p.confidence::float8 as confidence,p.draft_subject,p.draft_body,p.submitted_email,p.send_result,p.result_recorded_at,a.summary,a.occurred_at
           from email_proposal p left join deal d on d.id=p.deal_id join activity a on a.id=p.activity_id
           where p.status=$4 and ($3::uuid is null or p.deal_id=$3) and ($1::uuid is null or (p.created_at,p.id) >
             (select created_at,id from email_proposal where id=$1))
@@ -393,7 +393,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             proposed_matter: row.kind === 'possible_new_deal' ? row.task_text : null,
             resolution: pending ? null : { resolved_at: new Date(row.resolved_at).toISOString(),
               resolved_by: row.resolved_by, reason: row.resolution_reason },
-            ...(row.kind === 'reply_draft' ? { reply_draft: { subject: row.draft_subject, body: row.draft_body, owner: row.owner, ...recipients }, submitted_email: row.submitted_email, send_result: row.send_result } : {}),
+            ...(row.kind === 'reply_draft' ? { reply_draft: { subject: row.draft_subject, body: row.draft_body, owner: row.owner, ...recipients }, submitted_email: row.submitted_email, send_result: row.send_result, result_recorded_at: row.result_recorded_at ? new Date(row.result_recorded_at).toISOString() : null } : {}),
             proposed_next_step: row.kind === 'next_step'
               ? { text: row.task_text, next_date: row.next_date, owner: row.owner } : null,
             suspected_instruction: suspected(row.evidence_quote),
