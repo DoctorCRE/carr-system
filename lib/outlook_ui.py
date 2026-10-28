@@ -65,7 +65,11 @@ class CuaError(Exception):
 
 
 class UiError(Exception):
-    """The window did not show the shape this module relies on; the reason is a short code."""
+    """The window did not show the expected shape; labeled details must be non-secret codes."""
+
+    def __init__(self, detail: str, *, step: str | None = None):
+        super().__init__(detail)
+        self.step = step
 
 
 class Moved(Enum):
@@ -177,8 +181,10 @@ def _windows(pid: int) -> list[dict]:
 
 def _readable(pid: int, window: dict) -> bool:
     state = cua('get_window_state', {'pid': pid, 'window_id': window['window_id'],
-                                     'include_screenshot': False, 'max_elements': 20})
-    return not str(state.get('degraded_reason') or '').startswith('ax_window_unresolved')
+                                     'include_screenshot': False, 'max_elements': LIST_WALK})
+    controls = {(e.get('role'), e.get('label')) for e in state.get('elements') or []}
+    return (not str(state.get('degraded_reason') or '').startswith('ax_window_unresolved')
+            and {('AXButton', 'New Mail'), ('AXTable', 'Message List')} <= controls)
 
 
 def usable_window(pid: int) -> dict | None:
@@ -248,6 +254,9 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
             windows = _windows(pid)
             if any(is_compose_window(w) for w in windows):
                 return Outcome('skipped', 'compose_window_open')
+            candidates = [w for w in windows if is_ordinary_main_window(w)]
+            if candidates and not any(_readable(pid, w) for w in candidates):
+                return Outcome('skipped', 'no_usable_main_window')
             if not _quit(pid, windows, waits):
                 return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
         launched = subprocess.run(['open', '-g', '-a', APP, '--args',
@@ -293,7 +302,7 @@ class Window:
         state = cua('get_window_state', {'pid': self.pid, 'window_id': self.window_id,
                                          'include_screenshot': False, **bounds})
         if str(state.get('degraded_reason') or '').startswith('ax_window_unresolved'):
-            raise UiError('ax_window_unresolved')
+            raise UiError('ax_window_unresolved', step='_walk')
         return state.get('elements') or []
 
     def _menu(self, path: list[str]) -> None:
@@ -302,6 +311,16 @@ class Window:
 
     def front(self) -> None:
         cua('bring_to_front', {'pid': self.pid, 'window_id': self.window_id})
+
+    def select_all_accounts(self) -> bool:
+        buttons = [e for e in self._walk(**PANE_WALK)
+                   if e.get('role') == 'AXButton' and e.get('label') == 'All Accounts']
+        if len(buttons) != 1:
+            return False
+        cua('click', {'pid': self.pid, 'element_token': buttons[0]['element_token'],
+                      'action': 'press'})
+        time.sleep(self.waits.settle_seconds)
+        return True
 
     def _folder_pane_visible(self) -> bool:
         return any(e.get('role') == 'AXOutline' for e in self._walk(**PANE_WALK))
@@ -312,7 +331,7 @@ class Window:
                 return
             self._menu(SIDEBAR)
         if self._folder_pane_visible() != visible:
-            raise UiError('folder_pane_toggle_failed')
+            raise UiError('folder_pane_toggle_failed', step='show_folder_pane')
 
     def _inbox_rows(self) -> tuple[list[dict], list[tuple[dict, list[str]]]]:
         """(walk, the folder pane's Inbox rows as (row, child texts)); needs the folder pane showing."""
@@ -327,7 +346,7 @@ class Window:
             if 'Inbox' in texts:
                 found.append((row, texts))
         if not found:
-            raise UiError('inbox_row_not_found')
+            raise UiError('inbox_row_not_found', step='_inbox_rows')
         return elements, found
 
     def select_inbox(self) -> None:
@@ -338,14 +357,14 @@ class Window:
             time.sleep(self.waits.settle_seconds)
             elements, found = self._inbox_rows()
         if not (any(row.get('selected') for row, _ in found) and _in_inbox(elements)):
-            raise UiError('inbox_not_selected')
+            raise UiError('inbox_not_selected', step='select_inbox')
 
     def inbox_badge(self) -> int:
         """Unread count on the Inbox folder row; needs the folder pane showing."""
         texts = self._inbox_rows()[1][0][1]
         counts = [int(m.group(1)) for t in texts if (m := re.fullmatch(r'(\d+)(?: unread)?', t))]
         if len(counts) > 1:
-            raise UiError('inbox_badge_ambiguous')
+            raise UiError('inbox_badge_ambiguous', step='inbox_badge')
         return counts[0] if counts else 0
 
     def rows(self, require_inbox: bool = True) -> tuple[str | None, list[Row]]:
@@ -356,10 +375,10 @@ class Window:
         """
         elements = self._walk(max_elements=LIST_WALK)
         if require_inbox and not _in_inbox(elements):
-            raise UiError('not_inbox')
+            raise UiError('not_inbox', step='rows')
         tables = [e for e in elements if e.get('role') == 'AXTable' and e.get('label') == 'Message List']
         if len(tables) != 1:
-            raise UiError('message_list_not_found')
+            raise UiError('message_list_not_found', step='rows')
         table = tables[0]['element_index']
         cells: dict[int, dict] = {}
         for e in elements:
@@ -378,7 +397,7 @@ class Window:
             return
         self._menu(SWITCH[tab])
         if self.rows()[0] != tab:
-            raise UiError('tab_switch_failed')
+            raise UiError('tab_switch_failed', step='switch_tab')
 
     def move(self, label: str, leaf: str, allowed: Callable[[], bool]) -> Moved:
         """Move the read row with this label to the folder named leaf, then confirm it left the list.
@@ -439,7 +458,7 @@ class Window:
                          if e.get('role') == 'AXTextField' and e.get('label') == 'Search'),
                         key=lambda e: e.get('depth', 0))
         if not fields:
-            raise UiError('search_field_not_found')
+            raise UiError('search_field_not_found', step='search')
         cua('type_text', {'pid': self.pid, 'element_token': fields[0]['element_token'], 'text': query})
         cua('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'return'})
         time.sleep(self.waits.settle_seconds)

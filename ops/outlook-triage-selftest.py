@@ -194,7 +194,12 @@ elif tool == 'get_window_state':
         elements.append(element)
         tokens[str(index)] = kind
         return index
+    if payload['window_id'] == 14:
+        print(json.dumps({'elements': [{'role': 'AXButton', 'label': 'Send'}]}))
+        sys.exit(0)
     top = add('AXWindow', state['folder'] + ' • ' + ACCOUNT, 0)
+    if not state.get('account_button_missing'):
+        add('AXButton', 'All Accounts', 1, top, ['account'])
     for label in ('New Mail', 'Delete', 'Archive', 'Move', 'Flag', 'Mark Unread'):
         add('AXButton', label, 1, top, ['button', label])
     for depth in (1, 2, 3):
@@ -258,6 +263,13 @@ elif tool in ('click', 'type_text'):
             state['picker'] = payload['text']
         else:
             fail('not a text field')
+    elif kind == ['account']:
+        if payload.get('action', 'press') != 'press':
+            fail('account selection requires AXPress')
+        state['presses'].append('All Accounts')
+        if not state.get('account_press_ignored'):
+            for w in state['windows']:
+                w['title'] = state['folder'] + ' • ' + ACCOUNT
     elif kind and kind[0] == 'row':
         if not (state.get('search') and state.get('search_click_ignored')):
             select(kind[1])
@@ -381,6 +393,21 @@ class PreflightQuitTest(FakeOutlookCase):
         from lib.outlook_ui import prepare_outlook
         with patch.dict(os.environ, self.env, clear=True):
             return prepare_outlook(waits)
+
+    def test_mailbox_with_twelve_toolbar_strips_allows_restart(self):
+        strips = [window(wid, '', 1920, 30, False) for wid in range(20, 32)]
+        self.given(windows=strips + [ORDINARY], after_launch=strips + [ORDINARY])
+        self.assertIsNone(self.prepare())
+
+    def test_mailbox_with_suffixed_compose_preserves_restart(self):
+        self.given(windows=[ORDINARY, COMPOSE | {'title': f'Draft • {ACCOUNT}'}])
+        self.assertIsNone(self.prepare())
+
+    def test_lone_draft_is_refused_without_quitting(self):
+        self.given(windows=[COMPOSE | {'title': f'Draft • {ACCOUNT}'}])
+        self.assertIsNotNone(self.prepare())
+        self.assertEqual(self.called('osascript') + self.called('open'), [])
+        self.assertFalse(any(call[1] == 'invoke_menu' for call in self.called('cua-driver')))
 
     def test_quit_uses_mailbox_when_unassigned_window_is_first(self):
         self.given(windows=[UNTITLED_OFFSCREEN, ORDINARY], quit_window_id=13)
@@ -844,6 +871,40 @@ class RefreshTest(FakeOutlookCase):
         self.assertNotIn('opened_at', entries[1])
         self.assertEqual(len(entries), 2, 'opening is not a body-decoded acknowledgement')
 
+    def test_refresh_ui_error_names_failed_step(self):
+        from lib import outlook_refresh
+        from lib.outlook_ui import UiError
+        self.given([self.READ_BODY])
+        self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+        output = io.StringIO()
+        with patch.dict(os.environ, self.env, clear=True), \
+                patch('lib.outlook_refresh.Window._inbox_rows',
+                      side_effect=UiError('inbox_row_not_found', step='_inbox_rows')), \
+                redirect_stderr(output):
+            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0))
+        self.assertEqual((result.state, result.reason), ('failed', 'ui_error'))
+        self.assertIn('outlook-refresh UiError at _inbox_rows: inbox_row_not_found',
+                      output.getvalue())
+        self.assertEqual(result.detail, 'at _inbox_rows: inbox_row_not_found')
+
+    def test_refresh_search_error_detail_reaches_cli(self):
+        from lib import outlook_refresh
+        from lib.outlook_ui import UiError
+        self.given([self.READ_BODY])
+        self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+        with patch.dict(os.environ, self.env, clear=True), \
+                patch('lib.outlook_refresh.Window.search',
+                      side_effect=UiError('search_field_not_found', step='search')):
+            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0))
+        self.assertEqual((result.state, result.reason), ('failed', 'search_field_not_found'))
+        self.assertEqual(result.detail, 'at search: search_field_not_found')
+        output = io.StringIO()
+        with patch('lib.outlook_refresh.run', return_value=result), redirect_stdout(output):
+            self.assertEqual(outlook_refresh.main(), 1)
+        self.assertIn('at search: search_field_not_found', output.getvalue())
+
     def test_refresh_failure_logs_category_without_exception_content(self):
         from lib import outlook_refresh
         from lib.outlook_ui import CuaError, UiError
@@ -868,19 +929,29 @@ class RefreshTest(FakeOutlookCase):
 
     def test_refresh_worker_refuses_wrong_account_and_active_user(self):
         from lib import outlook_refresh
-        self.given([self.READ_BODY])
-        self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
-        write_settings(self.home, self.repo, account='wrong@example.test', driver=str(self.tmp / 'bin/cua-driver'))
-        with patch.dict(os.environ, self.env, clear=True):
-            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                         waits=Waits(2, 0, 0, 0, 0, 0, 0))
-        self.assertEqual(result.reason, 'wrong_account')
-        self.assertEqual(json.loads(self.state.read_text())['selections'], [])
-        self.given([self.READ_BODY], idle_seconds=1)
-        with patch.dict(os.environ, self.env, clear=True):
-            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10))
-        self.assertEqual(result.reason, 'user_active')
-        self.assertEqual(json.loads(self.state.read_text())['selections'], [])
+        wrong = window(13, 'Inbox • other@example.test', 1230, 768)
+        for ignored, missing, idle, reason, presses in (
+                (False, False, 3600, 'refreshed', ['All Accounts']),
+                (True, False, 3600, 'wrong_account', ['All Accounts']),
+                (False, True, 3600, 'wrong_account', []),
+                (False, False, 1, 'user_active', [])):
+            with self.subTest(ignored=ignored, missing=missing, idle=idle):
+                self.given([self.READ_BODY], after_launch=[wrong], idle_seconds=idle,
+                           account_press_ignored=ignored, account_button_missing=missing)
+                path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+                with patch.dict(os.environ, self.env, clear=True):
+                    result = outlook_refresh.run(
+                        self.repo, EVENING.replace(hour=10),
+                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                        now_fn=lambda: EVENING.replace(hour=10))
+                self.assertEqual(result.reason, reason)
+                state = json.loads(self.state.read_text())
+                self.assertEqual(state['presses'], presses)
+                self.assertEqual(state['moved'], [])
+                self.assertEqual(state['selections'],
+                                 [self.READ_BODY['label']] if reason == 'refreshed' else [])
+                self.assertEqual('opened_at' in json.loads(path.read_text())[0],
+                                 reason == 'refreshed')
 
     def test_read_email_is_opened_unchanged_and_stamped(self):
         self.given([FILE_A, self.READ_BODY, NEWS])

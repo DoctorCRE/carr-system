@@ -108,6 +108,11 @@ FLAG_ITEM_TITLE = 'Follow up flagged email'
 RECORD_REF = re.compile(r'^[CLV]-')
 DEAL_REF = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
 DEAL_CONTACTS = 'v_email_deal_contact'
+
+
+def _step_ref(refs: list[str]) -> str | None:
+    """The record a next step goes on: a client, lead or vendor. A deal contact's mail sets none."""
+    return next((ref for ref in refs if RECORD_REF.match(ref)), None)
 EXIT = {'succeeded': 0, 'skipped': 78, 'failed': 1}
 
 BACKFILL = timedelta(hours=48)
@@ -184,6 +189,10 @@ class DecodeError(RuntimeError):
 class FullDiskAccessRequired(RuntimeError):
     """macOS denied the dedicated snapshot helper access to Outlook."""
 
+    def __init__(self, message: str, detail: str = ''):
+        super().__init__(message)
+        self.detail = detail
+
 
 class CleanupError(RuntimeError):
     """A private work folder could not be deleted."""
@@ -214,12 +223,16 @@ class Outcome:
     state: str
     reason: str
     counts: dict = field(default_factory=dict)
+    detail: str = ''
 
 
 def receipt_line(outcome: Outcome) -> str:
     """The machine receipt bin/run-scheduled.sh validates and records."""
     reason = 'full_disk_access_required' if outcome.reason.startswith('grant Full Disk Access') else outcome.reason
-    return 'outlook-intake-receipt ' + json.dumps({'state': outcome.state, 'reason': reason, 'counts': outcome.counts})
+    receipt = {'state': outcome.state, 'reason': reason, 'counts': outcome.counts}
+    if outcome.detail:
+        receipt['detail'] = outcome.detail
+    return 'outlook-intake-receipt ' + json.dumps(receipt)
 
 
 def status_line(outcome: Outcome) -> str:
@@ -454,6 +467,10 @@ def health_counts(health: dict | None) -> dict:
             for name, rate in ((health or {}).get('rates') or {}).items() if rate is not None}
 
 
+def _tool_detail(tool: str, code: int | None, failure: str) -> str:
+    return f'{tool} exit={code} code={failure}'
+
+
 def _snapshot(home: Path, work: Path) -> None:
     settings = load_settings(home)
     settings.verify_helper()
@@ -461,13 +478,19 @@ def _snapshot(home: Path, work: Path) -> None:
     try:
         done = subprocess.run([str(helper)], cwd=work, capture_output=True, timeout=900)
         if done.returncode in (errno.EPERM, errno.EACCES):
-            raise PermissionError(done.returncode, 'Outlook copy denied')
+            raise FullDiskAccessRequired(f'grant Full Disk Access to {helper}',
+                                         _tool_detail('outlook-intake-copy', done.returncode, 'exit_nonzero'))
         if done.returncode:
-            raise DecodeError(f'Outlook copy helper exit {done.returncode}')
+            raise DecodeError(_tool_detail('outlook-intake-copy', done.returncode, 'exit_nonzero'))
     except PermissionError:
-        raise FullDiskAccessRequired(f'grant Full Disk Access to {helper}') from None
+        raise FullDiskAccessRequired(f'grant Full Disk Access to {helper}',
+                                     _tool_detail('outlook-intake-copy', None,
+                                                  'permission_denied')) from None
     except subprocess.TimeoutExpired:
-        raise DecodeError('Outlook copy helper timed out') from None
+        raise DecodeError(_tool_detail('outlook-intake-copy', None, 'timeout')) from None
+    except OSError:
+        raise DecodeError(_tool_detail('outlook-intake-copy', None,
+                                      'launch_failed')) from None
 
 
 def _remove(work: Path) -> None:
@@ -644,17 +667,21 @@ class Run:
         self.attempted: set[str] = set()
         self.lead_candidates: list[tuple[dict, dict]] = []
 
-    def activity_key(self, ref: str, source: str) -> str:
-        legacy = key('log-activity', ref, source)
+    def owner_key(self, verb: str, ref: str, source: str) -> str:
+        legacy = key(verb, ref, source)
         if legacy in self.state.get('requests', {}):
             return legacy
-        return key('log-activity', ref, f'{self.settings.owner}|{source}')
+        return key(verb, ref, f'{self.settings.owner}|{source}')
+
+    def activity_key(self, ref: str, source: str) -> str:
+        return self.owner_key('log-activity', ref, source)
 
     def write(self, verb: str, args: dict, who: str, note: str = '') -> bool:
         requests = self.state.setdefault('requests', {})
         request = requests.setdefault(args['idempotency_key'], {
             'verb': verb, 'payload': json.dumps(args), 'acknowledged': False,
-            'created_at': int(self.now.timestamp()), 'source_kind': 'mail'})
+            'created_at': int(self.now.timestamp()), 'source_kind': 'mail',
+            **({'key_owner': self.settings.owner} if verb == 'set-next-action' else {})})
         _save(self.out, self.state)
         if not request['acknowledged']:
             if args['idempotency_key'] in self.attempted:
@@ -742,7 +769,7 @@ class Run:
             self.written.append((who, ref, 'set-next-action', 'kept newer ball'))
             return True
         note = 'no prior ball' if existing is None else 'replaced ball'
-        args = {'idempotency_key': key('set-next-action', ref, source), 'ref': ref,
+        args = {'idempotency_key': self.owner_key('set-next-action', ref, source), 'ref': ref,
                 'description': description, 'due_on': due_on, 'owner': self.settings.owner,
                 'expected_action': {k: action[k] for k in ('id', 'version')} if action else None}
         if not self.write('set-next-action', args, who, note):
@@ -813,8 +840,8 @@ class Run:
                                                 'subject_hash': _hash(m['subject'] or ''),
                                                 'who': who, 'outbound': outbound})
                 pending[m['ident']]['refs'] = sorted(set(pending[m['ident']]['refs']) | set(refs))
-            if m['full'] and m['ident'] not in pending:
-                steps.setdefault(m['ident'], {'ck': m['ck'], 'sent': m['sent_unix'], 'ref': refs[0],
+            if m['full'] and m['ident'] not in pending and (step_ref := _step_ref(refs)):
+                steps.setdefault(m['ident'], {'ck': m['ck'], 'sent': m['sent_unix'], 'ref': step_ref,
                                            'who': who, 'outbound': outbound,
                                            'activity_keys': [self.activity_key(ref, m['ident']) for ref in refs]})
             results = [self.write('log-activity', {
@@ -892,8 +919,8 @@ class Run:
                     self.counts['flags_reflagged'] += 1
                 return True
             text = re.sub(r'(?<=[.!?])\s+(?=[A-Z])', ' / ', re.sub(r'\s*;\s*|\s+', ' ', f['subject']).strip())
-            args = {'idempotency_key': key('record-deal-item', deal, f'{ident}|flagged'), 'deal': deal,
-                    'title': FLAG_ITEM_TITLE, 'due_on': f['due'], 'source_ref': f'outlook-flag:{ident}',
+            args = {'idempotency_key': self.owner_key('record-deal-item', deal, f'{ident}|flagged'), 'deal': deal,
+                    'title': FLAG_ITEM_TITLE, 'due_on': f['due'], 'source_ref': f'outlook-flag:{self.settings.owner}:{ident}',
                     'bullets': [{'kind': 'promised', 'date': f['due'], 'text': f'Flagged in Outlook: {text}'[:240]}]}
             if not self.write('record-deal-item', args, who, 'flagged'):
                 return False
@@ -903,11 +930,11 @@ class Run:
             self.counts['flags_untracked'] += 1  # complete or cleared before we filed it: nothing to close
         elif applied['state'] == 'flagged' and applied.get('item_id'):
             if f['status'] == 'complete':
-                args = {'idempotency_key': key('complete-deal-item', deal, f'{ident}|complete'),
+                args = {'idempotency_key': self.owner_key('complete-deal-item', deal, f'{ident}|complete'),
                         'deal': deal, 'item_id': applied['item_id']}
                 verb, state, count = 'complete-deal-item', 'complete', 'flags_completed'
             else:
-                args = {'idempotency_key': key('drop-action', deal, f'{ident}|cleared'),
+                args = {'idempotency_key': self.owner_key('drop-action', deal, f'{ident}|cleared'),
                         'action_id': applied['item_id'], 'base_version': 1,
                         'reason': f'Outlook flag cleared without completing (source: outlook-flag:{ident})'}
                 verb, state, count = 'drop-action', 'cleared', 'flags_cleared'
@@ -1072,7 +1099,7 @@ class Run:
                 continue
             address = m['sender'].lower()
             name = _clean_name(m['sender_name'], m['subject'])
-            request_key = key('propose-email-lead', _hash(address), f'read|{m["ident"]}')
+            request_key = self.owner_key('propose-email-lead', _hash(address), f'read|{m["ident"]}')
             if _hash(address) in queued:
                 progress['read'] = 'sender_queued'
                 self.counts['lead_already_queued'] += 1
@@ -1191,13 +1218,14 @@ class Run:
                 self.counts['full_text_notes'] += 1
                 steps = self.state.setdefault('steps', {})
                 steps.pop(ident, None)
-                steps.setdefault(f'fullbody|{ident}', {
-                    'ck': p['ck'], 'sent': p['sent'], 'ref': p['refs'][0],
-                    'who': p.get('who', p['sender_email']),
-                    'outbound': p.get('outbound', _internal(p['sender_email'], self.settings.internal_domain)),
-                    'activity_keys': [self.activity_key(ref, ident) for ref in p['refs']
-                                      if self.activity_key(ref, ident) in self.state['requests']] +
-                                     [self.activity_key(ref, f'fullbody|{ident}') for ref in p['refs']]})
+                if step_ref := _step_ref(p['refs']):
+                    steps.setdefault(f'fullbody|{ident}', {
+                        'ck': p['ck'], 'sent': p['sent'], 'ref': step_ref,
+                        'who': p.get('who', p['sender_email']),
+                        'outbound': p.get('outbound', _internal(p['sender_email'], self.settings.internal_domain)),
+                        'activity_keys': [self.activity_key(ref, ident) for ref in p['refs']
+                                          if self.activity_key(ref, ident) in self.state['requests']] +
+                                         [self.activity_key(ref, f'fullbody|{ident}') for ref in p['refs']]})
                 del pending[ident]
 
     # calendar
@@ -1210,7 +1238,10 @@ class Run:
         oldest = self.now.timestamp() - UNRESOLVED_DAYS.total_seconds()
         for e in events:
             candidate = _hash(json.dumps(e, sort_keys=True))
-            evidence[candidate] = {'status': 'unsupported', 'reason': 'hxstore_lifecycle_unverified',
+            # Only a lifecycle the decoder proves leaves 'unsupported'; it is reported, not acted on.
+            canceled = e.get('lifecycle_status') == 'canceled'
+            evidence[candidate] = {'status': 'canceled' if canceled else 'unsupported',
+                                   'reason': e['lifecycle_reason'] if canceled else 'hxstore_lifecycle_unverified',
                                    'evidence': 'provisional_schedule',
                                    'start_unix': e['start_unix'], 'end_unix': e['end_unix']}
             people = [(email, name) for name, email in e['attendees'] if email and not _internal(email, self.settings.internal_domain)]
@@ -1331,7 +1362,9 @@ def _prune(state: dict, now: datetime) -> None:
 
 
 def calendar_counts(state: dict) -> dict:
-    return {'calendar_lifecycle_unsupported': len(state.get('calendar_evidence', {})),
+    statuses = [e.get('status') for e in state.get('calendar_evidence', {}).values()]
+    return {'calendar_lifecycle_unsupported': statuses.count('unsupported'),
+            'calendar_lifecycle_canceled': statuses.count('canceled'),
             'calendar_requests_quarantined': sum(r.get('disposition') == 'calendar_unsupported'
                                                  for r in state.get('requests', {}).values())}
 
@@ -1463,12 +1496,33 @@ def publish_agenda(carr: Callable[[str, dict], dict], snapshot: dict) -> None:
         try:
             carr('publish-board-snapshot', {
                 'idempotency_key': key('publish-board-snapshot', AGENDA_BOARD,
-                                       f'{snapshot["observed_at"]}|{base}'),
+                                       f'{_hash(json.dumps(snapshot, sort_keys=True))}|{base}'),
                 'board_id': AGENDA_BOARD, 'base_version': base, 'snapshot': snapshot})
             return
         except CarrError as error:
             if error.code != 'agenda_version_conflict' or attempt == 2:
                 raise
+
+
+def _retry_owner_key_collisions(state: dict, owner: str) -> None:
+    requests = state.get('requests', {})
+    sources = {key('set-next-action', step['ref'], f'next|{source}'): f'next|{source}'
+               for source, step in state.get('steps', {}).items()}
+    for legacy, request in list(requests.items()):
+        if (request['verb'] != 'set-next-action' or request['acknowledged']
+                or request.get('disposition') != 'blocked' or request.get('error_code') != 'key_reuse'
+                or request.get('key_owner') == owner):
+            continue
+        args = json.loads(request['payload'])
+        if (args.get('owner') != owner or 'expected_action' not in args
+                or not (request.get('source_kind') == 'mail' or legacy in sources)):
+            continue
+        source = sources.get(legacy, f'legacy|{legacy}')
+        scoped = key('set-next-action', args['ref'], f'{owner}|{source}')
+        args['idempotency_key'] = scoped
+        requests.setdefault(scoped, {**request, 'payload': json.dumps(args), 'key_owner': owner,
+                                    'source_kind': 'mail', 'disposition': 'retry', 'error_code': None, 'retry_at': None})
+        del requests[legacy]
 
 
 def _quarantine_calendar_requests(state: dict) -> None:
@@ -1576,9 +1630,14 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         with _decode(home, out, ports.decode) as (meta, mails, events, db, files):
             return _process(out, ports, settings, state, signature, now, matcher, meta, mails, events, db, files)
     except FullDiskAccessRequired as error:
-        return Outcome('failed', str(error))
-    except (DecodeError, sqlite3.Error, OSError):
-        return Outcome('failed', 'decode_failed')
+        return Outcome('failed', str(error), detail=error.detail)
+    except DecodeError as error:
+        return Outcome('failed', 'decode_failed', detail=str(error))
+    except (sqlite3.Error, OSError) as error:
+        detail = type(error).__name__
+        if isinstance(error, OSError):
+            detail += f' errno={error.errno}'
+        return Outcome('failed', 'decode_failed', detail=detail)
 
 
 def _process(out, ports, settings, state, signature, now, matcher, meta, mails, events, db, files):
@@ -1629,6 +1688,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         prepared = work.prepare_attachments(mails, matcher, db, files)
         _remove(files.parent)
         work.file_attachments(prepared)
+        _retry_owner_key_collisions(state, settings.owner)
         _quarantine_calendar_requests(state)
         _save(out, state)
         for request in list(state.get('requests', {}).values()):
@@ -1763,10 +1823,13 @@ def _decoder(home: Path) -> Callable[[Path, Path, Path], None]:
         try:
             done = subprocess.run([str(load_settings(home).decoder), 'db', str(copy), str(db), str(files)],
                                   capture_output=True, timeout=900)
-        except (OSError, subprocess.TimeoutExpired):
-            raise DecodeError('hxprobe did not run') from None
+        except subprocess.TimeoutExpired:
+            raise DecodeError(_tool_detail('hxprobe', None, 'timeout')) from None
+        except OSError:
+            raise DecodeError(_tool_detail('hxprobe', None,
+                                          'launch_failed')) from None
         if done.returncode:
-            raise DecodeError(f'hxprobe exit {done.returncode}')
+            raise DecodeError(_tool_detail('hxprobe', done.returncode, 'exit_nonzero'))
     return decode
 
 

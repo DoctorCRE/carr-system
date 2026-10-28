@@ -42,14 +42,15 @@ failures: list[str] = []
 checked = 0
 
 
-def check(name, cond, detail=""):
-    global checked
-    checked += 1
-    if cond:
-        print(f"  ok    {name}")
-    else:
-        print(f"  FAIL  {name}  {detail}")
-        failures.append(name)
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(
+    fail="  FAIL  {label}  {detail}",
+    detail=None,
+    failures=failures,
+    counters={"checked": "all"},
+    ns=globals(),
+)
 
 
 BASE = "a" * 64      # what last night's rebaseline captured

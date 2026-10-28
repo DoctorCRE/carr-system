@@ -66,9 +66,11 @@ PASSED: list[str] = []
 FAILED: list[str] = []
 
 
-def check(label: str, ok: bool) -> None:
-    (PASSED if ok else FAILED).append(label)
-    print(f"{'PASS' if ok else 'FAIL'}  {label}")
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(ok="PASS  {label}", fail="FAIL  {label}", detail=None, failures=FAILED, passes=PASSED)
 
 
 def present(path: str, age_hours: float) -> dict:

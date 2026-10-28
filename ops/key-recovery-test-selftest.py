@@ -140,13 +140,9 @@ AGE_KEYGEN = "age-key" "gen"
 FAILED: list[str] = []
 
 
-def check(label: str, cond: bool, detail: str = "") -> bool:
-    if cond:
-        print(f"  ok    {label}")
-    else:
-        print(f"  FAIL  {label}" + (f"\n        {detail}" if detail else ""))
-        FAILED.append(label)
-    return bool(cond)
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(detail="\n        {detail}", failures=FAILED)
 
 
 def unreachable_env(extra: Optional[dict] = None) -> dict:

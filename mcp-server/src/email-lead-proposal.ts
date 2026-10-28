@@ -9,6 +9,7 @@
 // who the sender is so the next intake run files their mail through the normal
 // path, and decline-candidate says no. An email quote is not research, so a
 // confirmation never passes through promote-pool's research gate or claims it.
+import { derivedIdempotencyKey } from './derived-key.ts';
 import { sha256 } from './sha256.ts';
 import { ToolError } from './tool-error.ts';
 import { mailboxOwnerForActor, partnerAuthoritySlugForActor } from './partner-authority.js';
@@ -175,7 +176,7 @@ export function emailLeadProposalTools({ withEnvelope, writeEvent, updatePartyCo
             if (carried.some(id => id !== partyId)) fail('email_lead_address_known');
             if (!carried.length) {
               const current = (await c.query('select email, version from party where id=$1 for update', [partyId])).rows[0];
-              await updatePartyContact(c, actor, { idempotency_key: `${args.idempotency_key}:party-contact`, party,
+              await updatePartyContact(c, actor, { idempotency_key: derivedIdempotencyKey('email-lead-party-contact', args.idempotency_key), party,
                 base_version: current.version, fields: { email: current.email ? `${current.email}; ${address}` : address },
                 source: `outlook-intake email ${row.source_row.message_ref}, confirmed by ${owner}` });
             }
@@ -191,7 +192,7 @@ export function emailLeadProposalTools({ withEnvelope, writeEvent, updatePartyCo
           } else {
             partyId = await sender();
             const quote = provenance.evidence_quote;
-            lead = await newLead(c, actor, { idempotency_key: `${args.idempotency_key}:new-lead`, party_id: partyId,
+            lead = await newLead(c, actor, { idempotency_key: derivedIdempotencyKey('email-lead-new-lead', args.idempotency_key), party_id: partyId,
               stage: args.stage ?? 'new', owner, source_type: 'email',
               source_detail: `Inbound email to ${owner}'s mailbox, confirmed by ${owner}; `
                 + (quote ? `untrusted email text: ${JSON.stringify(quote)}` : 'no literal quote recorded') });

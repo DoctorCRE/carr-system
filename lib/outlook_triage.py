@@ -275,7 +275,8 @@ def preserve_unread(window: Window, report: Report, action: Callable[[dict], Out
     except ValueError:
         outcome = Outcome('failed', 'refresh_list_invalid')
     except UiError as exc:
-        outcome = Outcome('failed', str(exc))
+        outcome = Outcome('failed', str(exc),
+                          f'at {exc.step}: {exc}' if exc.step else '')
     except CuaError:
         outcome = Outcome('failed', 'cua_driver_failed')
     end_badge, end_tabs = _inbox(window)
