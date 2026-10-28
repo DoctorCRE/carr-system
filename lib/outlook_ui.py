@@ -247,7 +247,9 @@ def _quit(pid: int, windows: list[dict], waits: Waits) -> bool:
     return True
 
 
-def _quit_window_detail(pid: int) -> str:
+def window_detail(pid: int | None) -> str:
+    if pid is None:
+        return 'process_missing'
     try:
         windows = _windows(pid)
     except CuaError:
@@ -285,9 +287,11 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
                 return Outcome('skipped', 'compose_window_open')
             candidates = [w for w in windows if is_ordinary_main_window(w)]
             if candidates and not any(_readable(pid, w) for w in candidates):
-                return Outcome('skipped', 'no_usable_main_window')
+                return Outcome('skipped', 'no_usable_main_window',
+                               'phase=before_quit ordinary_candidates_unreadable '
+                               + window_detail(pid))
             if not _quit(pid, windows, waits):
-                return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
+                return Outcome('failed', 'outlook_quit_timeout', window_detail(pid))
         launched = subprocess.run(['open', '-g', '-a', APP, '--args',
                                    '-ApplePersistenceIgnoreState', 'YES'],
                                   capture_output=True, timeout=60)
@@ -307,7 +311,10 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
             except CuaError:
                 pass
             time.sleep(waits.new_window_seconds)
-        return None if usable_window(pid) else Outcome('failed', 'no_usable_main_window')
+        if usable_window(pid):
+            return None
+        return Outcome('failed', 'no_usable_main_window',
+                       'phase=after_launch_and_new_window ' + window_detail(pid))
     except ComposeWindowOpen:
         return Outcome('skipped', 'compose_window_open')
     except CuaError:
@@ -424,11 +431,14 @@ class Window:
         return _tab(elements), rows
 
     def switch_tab(self, tab: str) -> None:
-        if self.rows()[0] == tab:
+        before = self.rows()[0]
+        if before == tab:
             return
         self._menu(SWITCH[tab])
-        if self.rows()[0] != tab:
-            raise UiError('tab_switch_failed', step='switch_tab')
+        after = self.rows()[0]
+        if after != tab:
+            raise UiError(f'tab_switch_failed requested={tab} before={before} observed={after}',
+                          step='switch_tab')
 
     def move(self, label: str, leaf: str, allowed: Callable[[], bool]) -> Moved:
         """Move the read row with this label to the folder named leaf, then confirm it left the list.

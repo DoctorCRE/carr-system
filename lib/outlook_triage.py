@@ -269,7 +269,9 @@ def preserve_unread(window: Window, report: Report, action: Callable[[dict], Out
         return Outcome('failed', 'unread_row_selected')
     if sum(unread.values()) != badge:
         report.left['unread_set_unverified'] += sum(len(rows) for rows in tabs.values())
-        return Outcome('failed', 'unread_set_unverified')
+        return Outcome('skipped', 'unread_set_unverified',
+                       f'badge={badge} visible_unread={sum(unread.values())} '
+                       f'visible_rows={sum(len(rows) for rows in tabs.values())} coverage=unconfirmed')
     try:
         outcome = action(tabs)
     except ValueError:

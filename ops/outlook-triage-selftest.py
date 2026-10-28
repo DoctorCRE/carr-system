@@ -222,7 +222,7 @@ elif tool == 'get_window_state':
         add('AXCheckBox', label, 4, top, value='0')
     table = add('AXTable', 'Message List', 4, top)
     add('AXCell', 'Today, Expanded', 6, table)
-    for r in current():
+    for r in current()[:state.get("visible_limit", len(current()))]:
         row = add('AXRow', '', 5, table, selected=r['label'] == state.get('selected'))
         shown = ('Unread, ' if r['unread'] else '') + r['label']
         add('AXCell', shown, 6, row, ['row', r['label']], selected=r['label'] == state.get('selected'))
@@ -249,9 +249,9 @@ elif tool == 'invoke_menu':
     elif path == ['View', 'Sidebar']:
         if not state.get('sidebar_stuck'):
             state['sidebar'] = not state['sidebar']
-    elif path == ['View', 'Switch to Other'] and state['tab']:
+    elif path == ['View', 'Switch to Other'] and state['tab'] and not state.get('tab_switch_ignored'):
         state['tab'] = 'other'
-    elif path == ['View', 'Switch to Focused'] and state['tab']:
+    elif path == ['View', 'Switch to Focused'] and state['tab'] and not state.get('tab_switch_ignored'):
         state['tab'] = 'focused'
     elif path == ['File', 'New', 'Main Window'] and 'after_new_window' in state:
         state['windows'] = state['after_new_window']
@@ -610,7 +610,18 @@ class PreflightQuitTest(FakeOutlookCase):
         self.given(windows=[ORDINARY], unresolved_window_ids=[13])
         outcome = self.prepare()
         self.assertEqual((outcome.state, outcome.reason), ('skipped', 'no_usable_main_window'))
+        self.assertIn('phase=before_quit ordinary_candidates_unreadable', outcome.detail)
+        self.assertIn('"width":1230', outcome.detail)
+        self.assertNotIn(ACCOUNT, outcome.detail)
         self.assert_no_restart()
+
+    def test_unresolved_window_after_launch_reports_phase_and_shape(self):
+        self.given(windows=[], after_launch=[ORDINARY], unresolved_window_ids=[13])
+        outcome = self.prepare()
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'no_usable_main_window'))
+        self.assertIn('phase=after_launch_and_new_window', outcome.detail)
+        self.assertIn('"kind":"main"', outcome.detail)
+        self.assertNotIn(ACCOUNT, outcome.detail)
 
     def test_draft_opened_after_menu_quit_prevents_fallback_and_relaunch(self):
         self.given(windows=[ORDINARY], menu_quit_ignored=True,
@@ -789,7 +800,7 @@ class OutlookTriageTest(FakeOutlookCase):
     def test_unread_rows_that_do_not_add_up_to_the_badge_block_every_move(self):
         self.given([FILE_A, VENDOR, UNREAD], badge=2)
         outcome, state = self.run_triage()
-        self.assertEqual((outcome.state, outcome.reason), ('failed', 'unread_set_unverified'))
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'unread_set_unverified'))
         self.assertEqual(state['selections'], [])
         self.assertNotIn('Move', state['presses'])
 
@@ -944,6 +955,44 @@ def listed(message_id, row, sender_email, **extra):
 class RefreshTest(FakeOutlookCase):
     READ_BODY = msg('sender-news', 'subject-010', email='news@news.test')
     UNREAD_BODY = msg('folder-A, client-001', 'subject-011', '8:15 AM', unread=True, email='c1@client.test')
+
+    def test_busy_inbox_skips_refresh_without_changing_hidden_unread_mail(self):
+        from lib import outlook_refresh
+        hidden = msg('sender-hidden', 'subject-hidden', unread=True)
+        self.given(tabs={'focused': [self.READ_BODY, self.UNREAD_BODY, hidden],
+                         'other': [UNREAD]}, visible_limit=2)
+        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+        before_queue = path.read_bytes()
+        before_unread = self.unread_labels(json.loads(self.state.read_text()))
+        with patch.dict(os.environ, self.env, clear=True):
+            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0))
+        self.assertEqual((result.state, result.reason), ('skipped', 'unread_set_unverified'))
+        self.assertEqual(result.detail, 'badge=3 visible_unread=2 visible_rows=3 coverage=unconfirmed')
+        state = json.loads(self.state.read_text())
+        self.assertEqual(self.unread_labels(state), before_unread)
+        self.assertEqual(state['selections'], [])
+        self.assertEqual(state['moved'], [])
+        self.assertNotIn('Mark Unread', state['presses'])
+        self.assertEqual(path.read_bytes(), before_queue)
+        self.assertEqual(triage.EXIT[result.state], 78)
+
+    def test_failed_tab_switch_reports_requested_and_observed_tabs(self):
+        from lib import outlook_refresh
+        self.given(tabs={'focused': [self.READ_BODY], 'other': [UNREAD]},
+                   tab_switch_ignored=True)
+        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+        before = path.read_bytes()
+        with patch.dict(os.environ, self.env, clear=True), redirect_stderr(io.StringIO()):
+            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0))
+        self.assertEqual((result.state, result.reason), ('failed', 'ui_error'))
+        self.assertEqual(result.detail, 'at switch_tab: tab_switch_failed requested=other '
+                         'before=focused observed=focused')
+        self.assertEqual(path.read_bytes(), before)
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state['selections'], [])
+        self.assertEqual(self.unread_labels(state), {UNREAD['label']})
 
     def test_titled_and_untitled_drafts_skip_refresh_without_restart(self):
         from lib import outlook_refresh
