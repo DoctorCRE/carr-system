@@ -404,7 +404,7 @@ test("triage moves one detected incident and returns fields visible in both read
     "from ops.v_trace": [],
   });
   const out = await TOOLS["triage-incident"].handler(fake, agent, {
-    idempotency_key: "97eae481-bd90-553c-ab65-5a584a463281", ref: before.ref,
+    idempotency_key: "00000571-0000-4000-8000-000000000129", ref: before.ref,
     next_action: after.next_action, impact_assessment: "unknown",
   });
   assert.deepEqual(out, { ref: before.ref, state: "triaged",
@@ -424,7 +424,7 @@ test("triage moves one detected incident and returns fields visible in both read
 });
 
 test("triage refuses missing assessment, missing row, and stale state without a second write", async () => {
-  const args = { idempotency_key: "e325949f-349a-555a-b5b5-0f4219b494b3", ref: "INC-20260823-01",
+  const args = { idempotency_key: "00000571-0000-4000-8000-000000000130", ref: "INC-20260823-01",
     next_action: "inspect failed run", impact_assessment: "unknown" };
   const blank = new Fake({ "from tool_call where idempotency_key": [] });
   assert.equal((await refuse(() => TOOLS["triage-incident"].handler(blank, joe,
@@ -449,7 +449,7 @@ test("triage same-key retry replays the receipt before attempting another transi
     "from tool_call where idempotency_key": [],
     "update ops.incident set state = 'triaged'": [row],
   });
-  const args = { idempotency_key: "cabbcbd9-78e4-5591-b8cb-c56f8c74b3e0", ref: row.ref,
+  const args = { idempotency_key: "00000571-0000-4000-8000-000000000131", ref: row.ref,
     next_action: row.next_action, impact_assessment: "unknown" };
   await TOOLS["triage-incident"].handler(fake, agent, args);
   const receipt = fake.sql.find(([sql]) => sql.startsWith("insert into tool_call"));
@@ -477,7 +477,7 @@ test("triage same-key retry replays the receipt before attempting another transi
 test("no incident verb accepts a caller-claimed authority field", async () => {
   for (const name of ["incident-board", "triage-incident"]) {
     const payload = await refuse(() => executeRegisteredTool(new Fake(), joe, name,
-      { idempotency_key: "da6d6fe2-138f-5f35-99a3-01d9b2aa6e5c", ref: "INC-1", sponsor: "joe" }));
+      { idempotency_key: "00000571-0000-4000-8000-000000000132", ref: "INC-1", sponsor: "joe" }));
     assert.equal(payload.error, "caller_authority_field_forbidden", name);
   }
 });

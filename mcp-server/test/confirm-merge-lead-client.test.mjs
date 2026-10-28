@@ -118,7 +118,7 @@ test("the stated basis is recorded on the event, so the reason survives the merg
 test("deterministic precedence refuses a human-selected loser with fewer cited facts", async () => {
   const fake = new Fake({ [ids.leadSide]: ["lead"], [ids.clientSide]: ["client"] });
   await assert.rejects(() => verb.handler(fake, joe, {
-    idempotency_key: "c2adaca5-24ac-504d-aab8-ebac4ad199dd", survivor_party: ids.leadSide, merged_party: ids.clientSide,
+    idempotency_key: "00000571-0000-4000-8000-000000000066", survivor_party: ids.leadSide, merged_party: ids.clientSide,
     match_basis: "exact phone and address", same_person_because: "same NPI and address in the intake evidence",
   }), /wrong_merge_survivor/);
   assert.deepEqual(fake.updates, [], "the wrong survivor is refused before any row moves");
@@ -169,7 +169,7 @@ test("a vendor row on either side takes it out of scope", async () => {
 test("the gate is symmetric — it does not depend on which side is the survivor", async () => {
   const fake = new Fake({ [ids.leadSide]: ["lead"], [ids.clientSide]: ["client"] });
   await assert.rejects(() => verb.handler(fake, joe, {
-    idempotency_key: "8dff438f-3add-5436-b79d-87d3e8297391",
+    idempotency_key: "00000571-0000-4000-8000-000000000067",
     survivor_party: ids.leadSide,
     merged_party: ids.clientSide,
     match_basis: "exact email domain",

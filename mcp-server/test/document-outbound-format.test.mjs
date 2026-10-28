@@ -160,7 +160,7 @@ test("draft and handed_to_joe are not gated — only the send is", async () => {
 test("a status-free update (recording lint results) is not gated", async () => {
   const fake = new Fake({ kind: "docx" });
   const out = await verb.handler(fake, joe, {
-    idempotency_key: "cc76bb31-6edb-5937-ad53-48a937f84265", document_id: ids.doc, lint_passed: true,
+    idempotency_key: "00000571-0000-4000-8000-000000000122", document_id: ids.doc, lint_passed: true,
   });
   assert.equal(out.ok, true, "this verb is also where lint and leak-check results land");
 });

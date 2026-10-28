@@ -114,7 +114,7 @@ const update = (db, args) => TOOLS["update-loop"].handler(db, joe, args);
 test("update-loop: THE BUG — a due date with no marker is REFUSED, not accepted and dropped", async () => {
   const db = new LoopFake({ marker: "none", due_on: null });
   await assert.rejects(
-    () => update(db, { idempotency_key: "3bc819f5-de74-52cb-9327-07823bd36fa4", loop_id: ids.loop, base_version: 1,
+    () => update(db, { idempotency_key: "00000571-0000-4000-8000-000000000165", loop_id: ids.loop, base_version: 1,
                        due_on: "2026-09-01" }),
     (err) => {
       assert.ok(err instanceof ToolError, "must be a typed refusal, not a bare 500");
@@ -142,7 +142,7 @@ test("update-loop: a date explicitly cleared alongside a marker change is not th
   // Passing marker 'none' on a dated row SHOULD null the date. That is a
   // deliberate demotion, and the refusal must not block it.
   const db = new LoopFake({ marker: "dated", due_on: "2026-09-01" });
-  await update(db, { idempotency_key: "3b43b466-a36d-5f5b-afd9-289c78d69c48", loop_id: ids.loop, base_version: 1,
+  await update(db, { idempotency_key: "00000571-0000-4000-8000-000000000166", loop_id: ids.loop, base_version: 1,
                      marker: "none" });
   assert.equal(db.loop.marker, "none");
   assert.equal(db.loop.due_on, null, "demoting off 'dated' correctly clears the date");
@@ -152,7 +152,7 @@ test("update-loop: a date explicitly cleared alongside a marker change is not th
 
 test("update-loop: marker + date together stores the date", async () => {
   const db = new LoopFake({ marker: "none" });
-  await update(db, { idempotency_key: "ac34bd39-8e0a-556d-86b4-93695dae7cce", loop_id: ids.loop, base_version: 1,
+  await update(db, { idempotency_key: "00000571-0000-4000-8000-000000000167", loop_id: ids.loop, base_version: 1,
                      marker: "dated", due_on: "2026-09-01" });
   assert.equal(db.loop.marker, "dated");
   assert.equal(db.loop.due_on, "2026-09-01");
@@ -163,7 +163,7 @@ test("update-loop: RESCHEDULING an already-dated row needs no marker repeated", 
   // This is the shape that must NOT be caught by the new refusal: the row is
   // already 'dated', so a bare due_on is unambiguous and has always worked.
   const db = new LoopFake({ marker: "dated", due_on: "2026-09-01" });
-  await update(db, { idempotency_key: "3ca90bfd-8b09-5dc3-ae25-d4d89dd19424", loop_id: ids.loop, base_version: 1,
+  await update(db, { idempotency_key: "00000571-0000-4000-8000-000000000168", loop_id: ids.loop, base_version: 1,
                      due_on: "2026-10-15" });
   assert.equal(db.loop.marker, "dated");
   assert.equal(db.loop.due_on, "2026-10-15", "the new date must actually be stored");
@@ -172,7 +172,7 @@ test("update-loop: RESCHEDULING an already-dated row needs no marker repeated", 
 test("update-loop: a 'dated' marker with no date anywhere is still refused", async () => {
   const db = new LoopFake({ marker: "none", due_on: null });
   await assert.rejects(
-    () => update(db, { idempotency_key: "41f376cb-8ad4-5baa-b9b2-9005678dc3fb", loop_id: ids.loop,
+    () => update(db, { idempotency_key: "00000571-0000-4000-8000-000000000169", loop_id: ids.loop,
                        base_version: 1, marker: "dated" }),
     (err) => err.payload?.error === "dated_marker_needs_date");
   assert.equal(db.loop.marker, "none");
@@ -231,7 +231,7 @@ const addLoop = (db, args) => TOOLS["add-loop"].handler(db, joe, args);
 test("add-loop: a blocker on a kind that does not carry one is REFUSED, not dropped", async () => {
   const db = new AddLoopFake();
   await assert.rejects(
-    () => addLoop(db, { idempotency_key: "7998d53e-3944-559b-a06a-45ab430d985c", kind: "idea", owner: "joe",
+    () => addLoop(db, { idempotency_key: "00000571-0000-4000-8000-000000000170", kind: "idea", owner: "joe",
                         title: "a parked idea", blocker: "other_lane",
                         blocker_detail: "some other lane picks this up later" }),
     (err) => {
@@ -246,7 +246,7 @@ test("add-loop: a blocker on a kind that does not carry one is REFUSED, not drop
 test("add-loop: an explicit non-dated marker alongside a due date is REFUSED", async () => {
   const db = new AddLoopFake();
   await assert.rejects(
-    () => addLoop(db, { idempotency_key: "caae33f3-4eb8-5b7b-a8d1-09c6a6acaf7d", kind: "idea", owner: "joe",
+    () => addLoop(db, { idempotency_key: "00000571-0000-4000-8000-000000000171", kind: "idea", owner: "joe",
                         title: "bell and a date", marker: "bell", due_on: "2026-09-01" }),
     (err) => err.payload?.error === "due_date_needs_dated_marker");
   assert.equal(db.inserted, null, "a refused call must not have inserted a row");
@@ -254,7 +254,7 @@ test("add-loop: an explicit non-dated marker alongside a due date is REFUSED", a
 
 test("add-loop: a due date with NO marker still infers 'dated' — that path is unchanged", async () => {
   const db = new AddLoopFake();
-  const res = await addLoop(db, { idempotency_key: "246e52f4-d614-5d3d-98fe-102b4f5ee7d8", kind: "idea", owner: "joe",
+  const res = await addLoop(db, { idempotency_key: "00000571-0000-4000-8000-000000000172", kind: "idea", owner: "joe",
                                   title: "dated by inference", due_on: "2026-09-01" });
   assert.equal(res.ok, true);
   assert.ok(db.inserted.includes("dated"), "marker must have been inferred as dated");

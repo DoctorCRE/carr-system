@@ -23,7 +23,7 @@ class NationalFake {
 test("create-national-account rejects an unresearched synthetic org before insert", async () => {
   const db = new NationalFake();
   await assert.rejects(() => TOOLS["create-national-account"].handler(db, joe, {
-    idempotency_key: "c96d9a4c-d5fe-563a-9368-bd64818df7ee", name: "Thin Brand", owner: "joe",
+    idempotency_key: "00000571-0000-4000-8000-000000000204", name: "Thin Brand", owner: "joe",
   }), e => e instanceof ToolError && e.payload.error === "research_evidence_required" && e.payload.gate === "create-national-account");
   assert.equal(db.partyInserts, 0);
 });
@@ -31,7 +31,7 @@ test("create-national-account rejects an unresearched synthetic org before inser
 test("create-national-market-deal rejects an unresearched franchisee before insert", async () => {
   const db = new NationalFake();
   await assert.rejects(() => TOOLS["create-national-market-deal"].handler(db, joe, {
-    idempotency_key: "477a07e5-8650-5c4b-bf39-7b66e2f5d23c", account_client_id: "account-client",
+    idempotency_key: "00000571-0000-4000-8000-000000000205", account_client_id: "account-client",
     client_name: "Thin Franchisee", deal_name: "Thin Franchisee lease", market: "Pensacola",
   }), e => e instanceof ToolError && e.payload.error === "research_evidence_required" && e.payload.gate === "create-national-market-deal");
   assert.equal(db.partyInserts, 0);

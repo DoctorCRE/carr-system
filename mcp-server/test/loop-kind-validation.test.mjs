@@ -43,7 +43,7 @@ test("add-loop: THE BUG — an omitted kind is refused as missing_kind, never as
   const db = new RefuseBeforeDbFake();
   await assert.rejects(
     () => TOOLS["add-loop"].handler(db, joe, {
-      idempotency_key: "937793ad-1a3f-598c-b1a7-4938fc1cdbf5",
+      idempotency_key: "00000571-0000-4000-8000-000000000181",
       // the live failing shape: title present, kind absent
       title: "Worktree lifecycle build in flight",
       owner: "claude",
@@ -64,7 +64,7 @@ test("add-loop: a misspelled kind is refused by name with the allowed list", asy
   const db = new RefuseBeforeDbFake();
   await assert.rejects(
     () => TOOLS["add-loop"].handler(db, joe, {
-      idempotency_key: "bdf9f180-782f-5541-8ffe-1aab5792a882",
+      idempotency_key: "00000571-0000-4000-8000-000000000182",
       kind: "work_claim", title: "not a real kind", owner: "claude",
     }),
     (err) => {
@@ -118,7 +118,7 @@ class AddLoopHappyFake {
 test("add-loop: a legal kind still reaches a genuine ok:true (the validation does not over-refuse)", async () => {
   const db = new AddLoopHappyFake();
   const result = await TOOLS["add-loop"].handler(db, joe, {
-    idempotency_key: "8902c8f7-8eca-55eb-9519-ff348a10b8aa",
+    idempotency_key: "00000571-0000-4000-8000-000000000183",
     kind: "open_loop", owner: "claude", domain: "system",
     body: "kind-validation self-test, close immediately",
     blocker: "capability", blocker_detail: "coverage only, not a real block",

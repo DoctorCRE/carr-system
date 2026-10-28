@@ -158,7 +158,7 @@ test("detach-decision resolves the short form too, instead of reporting not_atta
   let error = null;
   try {
     await TOOLS["detach-decision"].handler(fake, joe, {
-      idempotency_key: "da8114eb-03f7-5c38-98f8-82d3b1c643e1", decision_id: SHORT, from: "C-127",
+      idempotency_key: "00000571-0000-4000-8000-000000000118", decision_id: SHORT, from: "C-127",
       reason: "this ruling is not about that client" });
   } catch (e) { error = e instanceof ToolError ? (e.payload ?? e.detail ?? e) : e; }
 

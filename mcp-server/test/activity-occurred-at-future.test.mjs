@@ -84,7 +84,7 @@ test("a touch dated in the past is fine — backfilling is normal work", async (
 test("omitting the date entirely is fine — it defaults to now", async () => {
   const fake = new Fake();
   const out = await TOOLS["log-activity"].handler(fake, joe, {
-    idempotency_key: "b89909b1-a3a4-5d79-b842-0d0a6c502543", ref: "V-SUP-007", kind: "call", summary: "called them",
+    idempotency_key: "00000571-0000-4000-8000-000000000021", ref: "V-SUP-007", kind: "call", summary: "called them",
   });
   assert.equal(out.ok, true);
 });
@@ -106,7 +106,7 @@ test("the tolerance is minutes, not hours — it cannot be used to schedule", as
 test("stamp-touch is covered too, since it routes through the same handler", async () => {
   const fake = new Fake();
   await assert.rejects(() => TOOLS["stamp-touch"].handler(fake, joe, {
-    idempotency_key: "2da93898-109d-5dcc-a3b5-da5bbc599607", ref: "V-SUP-007", summary: "called",
+    idempotency_key: "00000571-0000-4000-8000-000000000022", ref: "V-SUP-007", summary: "called",
     occurred_at: iso(5 * DAY),
   }), /occurred_at_in_future/,
     "the truck-shorthand verb must not be the way around the guard");
@@ -160,7 +160,7 @@ test('captured email context reaches the activity record', async () => {
     sender: { email: 'vendor@example.test', name: 'Vendor', internal: false },
     recipients: [{ email: 'doctor@example.test', name: null, kind: 'cc', internal: false }] };
   await TOOLS['log-activity'].handler(fake, joe, {
-    idempotency_key: '90a95b48-03f5-52ff-8253-c8b1befe6bd9', ref: 'V-SUP-007', kind: 'email_in',
+    idempotency_key: '00000571-0000-4000-8000-000000000023', ref: 'V-SUP-007', kind: 'email_in',
     summary: 'Email from Vendor: Synthetic new practice', email_context: context,
   });
   assert.deepEqual(JSON.parse(fake.inserts[0][7]), context);

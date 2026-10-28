@@ -49,7 +49,7 @@ test("add-industry-event rejects a timestamp without an explicit timezone before
   const fake = new Fake();
   await assert.rejects(
     () => TOOLS["add-industry-event"].handler(fake, JOE, {
-      idempotency_key: "bccfc47b-ed2c-565b-9b4a-7e8afadd7072", title: "A", organizer: "B",
+      idempotency_key: "00000571-0000-4000-8000-000000000133", title: "A", organizer: "B",
       kind: "conference", starts_at: "2026-11-05T09:00:00",
       ends_at: "2026-11-05T10:00:00-05:00", owner_partner: "joe", source: "calendar",
     }),
@@ -62,7 +62,7 @@ test("add-industry-event enforces the table's title length before SQL", async ()
   const fake = new Fake();
   await assert.rejects(
     () => TOOLS["add-industry-event"].handler(fake, JOE, {
-      idempotency_key: "94fa12e6-14df-51c7-8788-0f261db54217", title: "x".repeat(501), organizer: "ASCO",
+      idempotency_key: "00000571-0000-4000-8000-000000000134", title: "x".repeat(501), organizer: "ASCO",
       kind: "conference", starts_at: EVENT.starts_at, ends_at: EVENT.ends_at,
       owner_partner: "joe", source: EVENT.source,
     }),
@@ -95,7 +95,7 @@ test("add-industry-event writes the row and audit event through the envelope", a
     "insert into event": [{ id: "30000000-0000-0000-0000-000000000001" }],
   });
   const result = await TOOLS["add-industry-event"].handler(fake, JOE, {
-    idempotency_key: "a7f97892-f0a5-5f0e-842d-d0754f8b45ff", title: EVENT.title, organizer: EVENT.organizer,
+    idempotency_key: "00000571-0000-4000-8000-000000000135", title: EVENT.title, organizer: EVENT.organizer,
     kind: EVENT.kind, starts_at: EVENT.starts_at, ends_at: EVENT.ends_at,
     location: EVENT.location, is_virtual: EVENT.is_virtual, url: EVENT.url,
     relevance_note: EVENT.relevance_note, attendance_intent: EVENT.attendance_intent,
@@ -116,7 +116,7 @@ test("update-industry-event uses base_version and tenant in its optimistic updat
     "insert into event": [{ id: "30000000-0000-0000-0000-000000000002" }],
   });
   const result = await TOOLS["update-industry-event"].handler(fake, JOE, {
-    idempotency_key: "c2067739-08b1-5ed1-8a32-4c0dc141cb85", event_id: EVENT.id, base_version: 1,
+    idempotency_key: "00000571-0000-4000-8000-000000000136", event_id: EVENT.id, base_version: 1,
     title: updated.title,
   });
   assert.equal(result.ok, true);
@@ -129,7 +129,7 @@ test("update-industry-event uses base_version and tenant in its optimistic updat
 
 const parseBigint = pg.types.getTypeParser(20, "text");
 const addArgs = {
-  idempotency_key: "1eedeb3c-93eb-579f-bf89-8918d0f73615", title: EVENT.title, organizer: EVENT.organizer,
+  idempotency_key: "00000571-0000-4000-8000-000000000137", title: EVENT.title, organizer: EVENT.organizer,
   kind: EVENT.kind, starts_at: EVENT.starts_at, ends_at: EVENT.ends_at,
   owner_partner: EVENT.owner_partner, source: EVENT.source,
 };
@@ -142,7 +142,7 @@ for (const verb of ["list-industry-events", "add-industry-event", "update-indust
       "update industry_event": [{ ...EVENT, version: parseBigint(version) }],
     });
     const args = verb === "list-industry-events" ? {} : verb === "add-industry-event" ? addArgs
-      : { idempotency_key: "1129be0c-1f19-50b3-ac7d-2f4bd93cfb0e", event_id: EVENT.id, base_version: 1, title: "Updated event" };
+      : { idempotency_key: "00000571-0000-4000-8000-000000000138", event_id: EVENT.id, base_version: 1, title: "Updated event" };
     return TOOLS[verb].handler(fake, JOE, args);
   };
   test(`${verb} publishes PostgreSQL bigint versions as safe integers`, async () => {
@@ -164,7 +164,7 @@ for (const verb of ["list-industry-events", "add-industry-event", "update-indust
 test("update-industry-event refuses an unsafe base version before SQL", async () => {
   const fake = new Fake();
   await assert.rejects(() => TOOLS["update-industry-event"].handler(fake, JOE, {
-    idempotency_key: "bb411bf0-1884-503d-b031-ed055a2b4e94", event_id: EVENT.id,
+    idempotency_key: "00000571-0000-4000-8000-000000000139", event_id: EVENT.id,
     base_version: Number.MAX_SAFE_INTEGER + 1, title: "Updated event",
   }), error => error instanceof ToolError && error.payload.error === "industry_event_base_version_invalid");
   assert.deepEqual(fake.sql, []);
@@ -172,7 +172,7 @@ test("update-industry-event refuses an unsafe base version before SQL", async ()
 
 for (const verb of ["add-industry-event", "update-industry-event"]) {
   const args = verb === "add-industry-event" ? addArgs
-    : { idempotency_key: "1488ecf6-11f2-550d-9fb3-2883e323cae9", event_id: EVENT.id, base_version: 1, title: "Updated event" };
+    : { idempotency_key: "00000571-0000-4000-8000-000000000140", event_id: EVENT.id, base_version: 1, title: "Updated event" };
   async function replay(version) {
     const fake = new Fake({
       "insert into industry_event": [{ ...EVENT, version: 2 }],
@@ -195,7 +195,7 @@ for (const verb of ["add-industry-event", "update-industry-event"]) {
       assert.match(fake.sql[0][0], /^select request_hash, response from tool_call/);
       const update = new Fake({ "update industry_event": [{ ...EVENT, version: 3 }] });
       await TOOLS["update-industry-event"].handler(update, JOE, {
-        idempotency_key: "35fce4b8-c173-50f1-8307-6d55a3cda28e", event_id: result.event.id,
+        idempotency_key: "00000571-0000-4000-8000-000000000141", event_id: result.event.id,
         base_version: result.event.version, title: "After replay",
       });
       assert.equal(update.sql.find(([sql]) => sql.startsWith("update industry_event"))[1].at(-1), Number(version));

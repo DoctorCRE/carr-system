@@ -46,7 +46,7 @@ test("record-finding retains a multi-page Dot report with metadata and citations
     + "[Source](https://example.org/research)\r\n";
   const value = { job: "030-UX-synthetic", topic: "Synthetic UX report", date: "2026-01-01", text,
     citations: ["https://example.org/research"], claims_independently_verified: false };
-  const args = { idempotency_key: "aac92dc7-4e92-5066-bf39-5ac07f0534a2", subject: "repo:jbookout/doctorcre-app",
+  const args = { idempotency_key: "00000571-0000-4000-8000-000000000123", subject: "repo:jbookout/doctorcre-app",
     kind: "research_report", internal: true, epistemic_status: "observed",
     source: "/synthetic/reports/030-UX-synthetic.txt", observed_at: "2026-01-01T00:00:00+00:00", value };
   const first = await TOOLS["record-finding"].handler(db, actor, args);

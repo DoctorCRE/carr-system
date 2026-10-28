@@ -7,7 +7,7 @@ import { derivedIdempotencyKey } from "../src/derived-key.ts";
 const actor = { id: "10000000-0000-4000-8000-000000000002", slug: "joe", human: true };
 const proposalId = "20000000-0000-4000-8000-000000000001";
 const approval = {
-  idempotency_key: "bad482bc-001b-50d5-92e5-39f2632a48a9", proposal_ids: [proposalId],
+  idempotency_key: "00000571-0000-4000-8000-000000000243", proposal_ids: [proposalId],
   base_versions: { [proposalId]: 2 }, golden_suite_digest: "synthetic-golden-suite",
 };
 
@@ -91,7 +91,7 @@ test("retrieval retirement verbs refuse unsafe or nonnumeric base versions befor
   for (const verb of ["propose-retrieval-retirement", "retire-retrieval-curation"])
     for (const base_version of [9007199254740992, "2", 0, -1, 1.5, null, undefined])
       await assert.rejects(() => TOOLS[verb].handler(db, actor, {
-        idempotency_key: "093319ee-12eb-5843-8915-e69598190809", target_type: "concept", target_id: proposalId,
+        idempotency_key: "00000571-0000-4000-8000-000000000244", target_type: "concept", target_id: proposalId,
         reason: "Synthetic retirement", golden_suite_digest: "synthetic", base_version,
       }), error => error instanceof ToolError && error.payload.error === "retrieval_base_version_invalid");
 });
@@ -122,7 +122,7 @@ test("retrieval approval conflicts report the exact safe numeric current version
 });
 
 test("unsafe proposal versions refuse insertion, row replay, and legacy envelope replay", async () => {
-  const args = { idempotency_key: "6822e96d-5547-59dc-a34a-b42e36ce645f", reason: "Synthetic proposal", concept_key: "synthetic-concept",
+  const args = { idempotency_key: "00000571-0000-4000-8000-000000000245", reason: "Synthetic proposal", concept_key: "synthetic-concept",
     label: "Synthetic", definition: "Synthetic definition" };
   for (const version of ["9007199254740993", 9007199254740992]) {
     for (const rowReplay of [false, true]) {
@@ -150,7 +150,7 @@ test("unsafe proposal versions refuse insertion, row replay, and legacy envelope
 });
 
 test("retirement responses normalize safe BIGINT versions and refuse unsafe legacy replay", async () => {
-  const args = { idempotency_key: "7693c35e-7f49-5da7-a8cf-93c2c5e5b8b1", target_type: "concept", target_id: proposalId,
+  const args = { idempotency_key: "00000571-0000-4000-8000-000000000246", target_type: "concept", target_id: proposalId,
     base_version: 1, reason: "Synthetic retirement", golden_suite_digest: "synthetic" };
   for (const [version, expected] of [["2", 2], ["9007199254740991", 9007199254740991]]) {
     let retirements = 0;

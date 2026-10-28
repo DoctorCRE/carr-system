@@ -36,7 +36,7 @@ for (const bad of ["synthetic-fixed-key", "calcap-123", "12345", " 00000000-0000
 
 test("write envelope still runs with a UUID idempotency_key", async () => {
   const db = store();
-  await assert.rejects(TOOLS["record-finding"].handler(db, actor, args("0b0f6a52-3c5e-4d7a-9a41-8f2d1c9e7b10")),
+  await assert.rejects(TOOLS["record-finding"].handler(db, actor, args("00000571-0000-4000-8000-000000000128")),
     (e) => !/idempotency/.test(String(e.error)));
   assert.ok(db.calls.some((s) => s.startsWith("select request_hash, response")));
 });

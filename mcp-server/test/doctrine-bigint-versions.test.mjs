@@ -34,7 +34,7 @@ test("doctrine-sections returns a numeric version that writes back unchanged", a
   assert.equal(read.sections[0].current_version, 2);
   assert.equal(read.sections[0].body.version, "opaque");
   const write = await TOOLS["write-doctrine-section"].handler(db, actor, {
-    idempotency_key: "713de79c-6bdd-5cab-80b9-80356bf887a9", document: "test-doc", section_key: "test",
+    idempotency_key: "00000571-0000-4000-8000-000000000119", document: "test-doc", section_key: "test",
     base_version: read.sections[0].current_version, body_text: "Updated synthetic text",
   });
   assert.equal(write.version, 3);
@@ -69,7 +69,7 @@ test("doctrine-sections refuses unsafe stored versions and preserves the safe ma
 });
 
 test("doctrine creation accepts zero and refuses an exhausted revision", async () => {
-  const args = { idempotency_key: "beb70adb-520d-5423-92cc-22990df36813", document: "test-doc", section_key: "test", body_text: "Updated" };
+  const args = { idempotency_key: "00000571-0000-4000-8000-000000000120", document: "test-doc", section_key: "test", body_text: "Updated" };
   const out = await TOOLS["write-doctrine-section"].handler(database("0"), actor, { ...args, base_version: 0 });
   assert.equal(out.version, 1);
   const db = database("9007199254740991");
@@ -80,7 +80,7 @@ test("doctrine creation accepts zero and refuses an exhausted revision", async (
 
 test("doctrine conflict reports normalize the current and last-writer versions", async () => {
   await assert.rejects(() => TOOLS["set-doctrine-refs"].handler(database("2"), actor, {
-    idempotency_key: "17173c45-5ee2-518b-a16d-148cc694df38", section_id: id, base_version: 1,
+    idempotency_key: "00000571-0000-4000-8000-000000000121", section_id: id, base_version: 1,
   }), error => {
     assert.equal(error.payload.error, "version_conflict");
     assert.equal(error.payload.current_version, 2);

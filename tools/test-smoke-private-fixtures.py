@@ -24,7 +24,7 @@ content={"ok":True,"existing":True,"replayed":True,"organizations":[],"matching_
 print(json.dumps({"result":{"content":[{"type":"text","text":json.dumps(content,separators=(",",":"))}]}},separators=(",",":")))
 ''')
             curl.chmod(0o755)
-            frozen = {"idempotency_key": "895e448d-6b97-5b11-95e1-517ba69dcaf8", "ref": "V-BNK-013",
+            frozen = {"idempotency_key": "00000571-0000-4000-8000-000000000260", "ref": "V-BNK-013",
                       "kind": "note", "summary": "smoke links probe — edge already exists, replayed for ever after",
                       "links": [{"from_ref": "V-BNK-013", "to_ref": "C-TEST", "kind": "intro"}]}
             fixtures = root / "fixtures.env"

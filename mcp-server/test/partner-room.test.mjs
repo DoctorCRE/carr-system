@@ -103,7 +103,7 @@ const HEALTH_BODY = JSON.stringify({ queue_projection_health: {
 test("add-room-turn: a partner's turn lands verbatim, attributed to the verified sponsor", async () => {
   const db = new RoomFake();
   const out = await TOOLS["add-room-turn"].handler(db, joe, {
-    idempotency_key: "719f639c-1182-5cf8-a589-39faf89d5518", seat: "claude", body: "raw text, exactly as spoken",
+    idempotency_key: "00000571-0000-4000-8000-000000000206", seat: "claude", body: "raw text, exactly as spoken",
   });
   assert.equal(out.ok, true);
   assert.equal(out.sponsor, "joe");
@@ -134,7 +134,7 @@ test("read-room-latest returns the newest window in conversation order without c
 test("add-room-turn: provenance is server-derived MCP identity, never a claimed human seat", async () => {
   const db = new RoomFake();
   const out = await TOOLS["add-room-turn"].handler(db, dellLocal, {
-    idempotency_key: "505259fc-c77f-5480-97d3-a17cd880ab3c", seat: "human", body: "@queue enqueue target=joe cap=production :: ship it",
+    idempotency_key: "00000571-0000-4000-8000-000000000207", seat: "human", body: "@queue enqueue target=joe cap=production :: ship it",
     origin_channel: "browser-human", origin_actor: "joe",
   });
   assert.equal(out.origin_channel, "mcp");
@@ -146,7 +146,7 @@ test("add-room-turn: provenance is server-derived MCP identity, never a claimed 
 test("add-room-turn: a caller-supplied sponsor is ignored in favour of the verified one", async () => {
   const db = new RoomFake();
   const out = await TOOLS["add-room-turn"].handler(db, joe, {
-    idempotency_key: "10c28641-bd44-52b6-a174-2c2a05fde385", seat: "claude", body: "hi", sponsor: "dell",
+    idempotency_key: "00000571-0000-4000-8000-000000000208", seat: "claude", body: "hi", sponsor: "dell",
   });
   assert.equal(out.sponsor, "joe");
   assert.equal(db.inserted[0][1], "joe");
@@ -155,7 +155,7 @@ test("add-room-turn: a caller-supplied sponsor is ignored in favour of the verif
 test("add-room-turn: a sponsored machine door speaks as its partner (dell-local -> dell)", async () => {
   const db = new RoomFake();
   const out = await TOOLS["add-room-turn"].handler(db, dellLocal, {
-    idempotency_key: "e44a8c9b-015f-52f8-a21a-07401f67a2b6", seat: "claude", body: "from dell's mac",
+    idempotency_key: "00000571-0000-4000-8000-000000000209", seat: "claude", body: "from dell's mac",
   });
   assert.equal(out.sponsor, "dell");
   assert.equal(db.inserted[0][1], "dell");
@@ -165,7 +165,7 @@ test("add-room-turn: a credential with no sponsoring partner is refused, and wri
   const db = new RoomFake();
   await assert.rejects(
     TOOLS["add-room-turn"].handler(db, reviewer, {
-      idempotency_key: "2811d69c-554c-5caa-a733-db7cebb19bb4", seat: "claude", body: "should not land",
+      idempotency_key: "00000571-0000-4000-8000-000000000210", seat: "claude", body: "should not land",
     }),
     (err) => err.payload?.error === "no_sponsoring_partner",
   );
@@ -175,7 +175,7 @@ test("add-room-turn: a credential with no sponsoring partner is refused, and wri
 test("add-room-turn: an empty turn is refused, and writes nothing", async () => {
   const db = new RoomFake();
   await assert.rejects(
-    TOOLS["add-room-turn"].handler(db, joe, { idempotency_key: "b460a263-9c3c-5a0b-a171-1599e80ae191", seat: "claude", body: "   " }),
+    TOOLS["add-room-turn"].handler(db, joe, { idempotency_key: "00000571-0000-4000-8000-000000000211", seat: "claude", body: "   " }),
     (err) => err.payload?.error === "body_required",
   );
   assert.equal(db.inserted.length, 0);
@@ -185,7 +185,7 @@ test("add-room-turn: an oversized turn is refused by size, named", async () => {
   const db = new RoomFake();
   await assert.rejects(
     TOOLS["add-room-turn"].handler(db, joe, {
-      idempotency_key: "8cecf9e5-a913-5bcc-b026-21cf03370af0", seat: "claude", body: "x".repeat(20001),
+      idempotency_key: "00000571-0000-4000-8000-000000000212", seat: "claude", body: "x".repeat(20001),
     }),
     (err) => err.payload?.error === "body_too_long",
   );
@@ -196,7 +196,7 @@ test("add-room-turn: a seat that is not a plain slug is refused", async () => {
   const db = new RoomFake();
   await assert.rejects(
     TOOLS["add-room-turn"].handler(db, joe, {
-      idempotency_key: "503873f9-3a4c-5909-9882-b14b59a653ca", seat: "Not A Seat!", body: "hi",
+      idempotency_key: "00000571-0000-4000-8000-000000000213", seat: "Not A Seat!", body: "hi",
     }),
     (err) => err.payload?.error === "seat_invalid",
   );
@@ -205,7 +205,7 @@ test("add-room-turn: a seat that is not a plain slug is refused", async () => {
 
 test("add-room-turn: replaying the same idempotency_key returns the stored response, no second row", async () => {
   const db = new RoomFake();
-  const args = { idempotency_key: "e448e44a-8533-5028-a68e-c6d54c70dca2", seat: "claude", body: "once only" };
+  const args = { idempotency_key: "00000571-0000-4000-8000-000000000214", seat: "claude", body: "once only" };
   const first = await TOOLS["add-room-turn"].handler(db, joe, args);
   const second = await TOOLS["add-room-turn"].handler(db, joe, args);
   assert.equal(second.replayed, true);
@@ -219,7 +219,7 @@ test("add-room-turn: a msg_id already in the room dedups instead of double-landi
     rows: [{ msg_id: MSG, id: 42, room_id: "partner-line", sponsor: "joe", seat: "claude" }],
   });
   const out = await TOOLS["add-room-turn"].handler(db, joe, {
-    idempotency_key: "c3b26dfa-a19a-5f2d-a0e2-5d2c801a8dfd", seat: "claude", body: "same turn via a second transport", msg_id: MSG,
+    idempotency_key: "00000571-0000-4000-8000-000000000215", seat: "claude", body: "same turn via a second transport", msg_id: MSG,
   });
   assert.equal(out.ok, true);
   assert.equal(out.deduplicated, true);
@@ -231,7 +231,7 @@ test("add-room-turn: a malformed msg_id is refused", async () => {
   const db = new RoomFake();
   await assert.rejects(
     TOOLS["add-room-turn"].handler(db, joe, {
-      idempotency_key: "161baf73-1214-5d8c-87a2-bf41d1d9f87b", seat: "claude", body: "hi", msg_id: "not-a-uuid",
+      idempotency_key: "00000571-0000-4000-8000-000000000216", seat: "claude", body: "hi", msg_id: "not-a-uuid",
     }),
     (err) => err.payload?.error === "msg_id_invalid",
   );
