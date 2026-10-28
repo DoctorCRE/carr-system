@@ -3488,7 +3488,7 @@ export const TOOLS = {
 
   "today-triage": {
     write: false,
-    description: "What needs attention now: due actions, critical dates inside 14 days, and untriaged ingest. Due and overdue actions lead, then critical dates due today through 14 days, then remaining rows. Due actions and remaining rows sort most recent first, critical dates soonest first, with kind and id breaking ties; stale automation-created next actions (see clear-the-deck) are left out. Optional owners='partners' selects both partners, machine seats, and unowned rows before limiting; default 'all' preserves shared triage. Optional limit is 1..50 (default 50). Pass next_cursor as cursor with the same owners filter to continue. Returns items, total for the filtered queue, has_more, and next_cursor. Continuation uses live rows and pins ordering to the first page's business date; it is not a snapshot.",
+    description: "What needs attention now: due actions, critical dates inside 14 days, and untriaged ingest. Due and overdue actions lead, then critical dates due today through 14 days, then remaining rows. Due actions and remaining rows sort most recent first, critical dates soonest first, with kind and id breaking ties. Optional owners='partners' selects both partners, machine seats, and unowned rows before limiting; default 'all' preserves shared triage. Optional limit is 1..50 (default 50). Pass next_cursor as cursor with the same owners filter to continue. Returns items, total for the filtered queue, has_more, and next_cursor. Continuation uses live rows and pins ordering to the first page's business date; it is not a snapshot.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       owners: { type: "string", enum: ["all", "partners"] },
       limit: { type: "integer", minimum: 1, maximum: 50 },
@@ -9289,7 +9289,6 @@ registerTools({
                  a.status, to_jsonb(a.hold_until)#>>'{}' as hold_until
             from v_deal_room_action a join scoped s on s.id = a.deal_id
            where a.status = 'open'
-             and not exists (select 1 from v_deck_item d where d.kind = 'next_action' and d.id = a.id and d.stale)
            order by a.deal_id, a.updated_at desc, a.id desc limit 10001
         ), items as materialized (
           select a.deal_id, a.id, a.item_title as title, to_jsonb(a.due_on)#>>'{}' as due_on,

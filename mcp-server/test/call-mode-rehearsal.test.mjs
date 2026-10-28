@@ -27,7 +27,6 @@ import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { createCaptureHandler } from '../src/capture.js';
 import { agentActorForToken } from '../src/identity.js';
-import { applyPendingClearTheDeck } from './helpers/snapshot-schema.mjs';
 
 const REPO = fileURLToPath(new URL('../../', import.meta.url));
 const BIN = path.join(REPO, 'tools/dictation-rig/bin');
@@ -111,7 +110,6 @@ before(async () => {
     if (ciDsn) await run('psql', [connection.connectionString, ...restore], { maxBuffer: 4 * 1024 * 1024 });
     else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
   }
-  await applyPendingClearTheDeck(c);
   pool = new pg.Pool({ ...connection, max: 4 });
   for (const actor of [joe, joeLocal]) actor.id = (await c.query('select id from actor where slug=$1', [actor.slug])).rows[0].id;
 

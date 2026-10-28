@@ -4,25 +4,27 @@
   "card": "WR577.S1.J1",
   "transport": "Authenticated MCP clear-the-deck and clear-the-deck-apply",
   "rule": {
-    "eligible": "Open next actions, open loops (open_loop, team_loop, action_required) and pool candidates whose creating actor is not a human partner. Partner-created rows never expire. Renewal-radar candidates are excluded because their sealed daily snapshot owns that membership.",
-    "clock": "Latest of created_at, the last keep (confirmed_at), and the last update by a human partner.",
+    "partner": "A human partner or a partner door (joe-local, dell-local); public.carr_is_partner_actor is the one rule. System, merge-queue and intake actors are automation.",
+    "confirmed": "Any partner create, edit, history event or keep stamps confirmed_by and confirmed_at once. A confirmed row never goes stale.",
+    "eligible": "Open next actions, open loops (open_loop, team_loop, action_required) and pool candidates made by automation and never confirmed. Renewal-radar candidates are excluded because their sealed daily snapshot owns that membership.",
     "days": { "next_action": 30, "loop": 30, "candidate": 60 },
-    "stale": "Clock plus days is in the past. Stale next actions leave today-triage and the Home agenda; stale loops leave the morning brief loop queue. Stale candidates stay on the claim card until expired.",
-    "expired": "Stored status written only by drop or expire_all_matching. Kept for history and reversible with keep."
+    "stale": "created_at plus days is in the past. Stale only fills the Clear the deck list and hides nothing elsewhere.",
+    "expired": "Stored status written only by drop or expire_all_matching. Only expired rows leave triage, Home and briefs. Kept for history and reversible with keep."
   },
   "read": {
     "verb": "clear-the-deck",
-    "access": "Verified partner or a partner-sponsored agent. Rows another partner owns are left out.",
+    "access": "Either partner or a partner-sponsored agent sees every deck row, whoever owns it.",
     "groups": "One group per kind and bucket (stale, expiring_this_week) with total and up to limit rows (default 50, max 200).",
     "row_fields": ["id", "version", "owner", "title", "created_by", "created_at", "expires_at", "actions"]
   },
   "apply": {
     "verb": "clear-the-deck-apply",
-    "items": "[{kind, id, version, action: keep|drop}], 1-500 rows, one idempotency_key. Any not-found, other-partner or version refusal changes nothing.",
-    "keep": "Assigns the partner as owner (next actions, loops), sets confirmed_at, restores an expired row.",
-    "drop": "Stores status expired; loops also record closed_at and an 'expired:' close_outcome.",
-    "expire_all_matching": "{kind, created_by, created_from, created_before, owner?, text_prefixes?}; timestamps carry an offset; partner creators refused; other-partner rows skipped and counted; at most 10000 matches.",
-    "dry_run": "true returns would-counts, matched, skipped_other_partner and a 10-row sample with no write and no idempotency key."
+    "authority": "Partners are equal operators: either may keep or drop any deck row. Events record the acting partner and each row's prior owner and status.",
+    "items": "[{kind, id, version, action: keep|drop}], 1-500 rows, one idempotency_key. Any not-found or version refusal changes nothing.",
+    "keep": "Confirms the row for good, assigns the calling partner as owner (next actions, loops) and restores an expired row.",
+    "drop": "Stores status expired and does not confirm; loops also record closed_at and an 'expired:' close_outcome.",
+    "expire_all_matching": "{kind, created_by, created_from, created_before, owner?, text_prefixes?}; timestamps carry an offset; partner creators refused; owner refused for candidates; at most 10000 matches.",
+    "dry_run": "true returns would-counts, matched and a 10-row sample with no write and no idempotency key."
   },
   "consumer_adoption": "The app pins this contract before rendering the Home Clear the deck card. Use the row version from the latest read; a version_conflict means re-read."
 }
