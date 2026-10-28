@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ci: runs-outside-ci — SQL and fixture helpers used by Dot authorization and producer role-boundary tests
+# ci: runs-outside-ci — SQL and fixture helpers for Dot authorization and role-boundary tests
 # doctrine: runbook
 """Disposable-Postgres acceptance for immutable A3a assurance persistence."""
 
@@ -233,15 +233,17 @@ def one(cur, query: str, args: tuple = ()):
     return row
 
 
-def check(label: str, condition: bool, detail: str = "") -> None:
-    global PASS, FAIL
-    if condition:
-        PASS += 1
-        print(f"  ok    {label}")
-    else:
-        FAIL += 1
-        FAILED_LABELS.append(label)
-        print(f"  FAIL  {label}  {detail}")
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(
+    fail="  FAIL  {label}  {detail}",
+    detail=None,
+    failures=FAILED_LABELS,
+    counters={"PASS": "pass", "FAIL": "fail"},
+    ns=globals(),
+)
 
 
 def assert_secret_absent(value: object, label: str) -> None:

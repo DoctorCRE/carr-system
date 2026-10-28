@@ -19,10 +19,9 @@ from lib.claude_scheduler_native import (
 FAILED: list[str] = []
 
 
-def check(label: str, condition: bool) -> None:
-    print(("  ok    " if condition else "  FAIL  ") + label)
-    if not condition:
-        FAILED.append(label)
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(detail=None, failures=FAILED)
 
 
 def refuses(fn) -> bool:

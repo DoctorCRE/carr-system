@@ -95,7 +95,7 @@ class CloseLoopFake {
 test("close-loop completes a formerly directional action-required row after 0096 canonicalizes its owner", async () => {
   const db = new CloseLoopFake();
   const result = await TOOLS["close-loop"].handler(db, joe, {
-    idempotency_key: "close-formerly-directional-a17",
+    idempotency_key: "00000571-0000-4000-8000-000000000184",
     loop_id: ids.loop,
     base_version: 4,
     outcome: "Historical joe→dell owner canonicalized to Dell; close now succeeds.",

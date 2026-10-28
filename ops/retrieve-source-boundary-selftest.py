@@ -40,11 +40,18 @@ SPEC.loader.exec_module(retrieve)
 checks = 0
 
 
-def check(label: str, condition: bool) -> None:
-    global checks
-    if not condition:
-        raise AssertionError(label)
-    checks += 1
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(
+    ok=None,
+    fail=None,
+    detail=None,
+    counters={"checks": "pass"},
+    raises="{label}",
+    ns=globals(),
+)
 
 
 def _raises(fn, error_type: type[BaseException]) -> bool:

@@ -84,6 +84,51 @@ class CopyTest(unittest.TestCase):
         return subprocess.run([str(self.helper), *args], cwd=cwd or self.work,
                               env=env, input=input, capture_output=True)
 
+    def sidecar_open_fault(self, action):
+        race = self.root / 'remove-sidecar.c'
+        race.write_text("""
+#define _DARWIN_C_SOURCE
+#define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#include <dlfcn.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stdarg.h>
+#include <string.h>
+#include <unistd.h>
+int openat(int fd, const char *name, int flags, ...) {
+    int mode = 0;
+    if (flags & O_CREAT) {
+        va_list args;
+        va_start(args, flags);
+        mode = va_arg(args, int);
+        va_end(args);
+    }
+    if (!(flags & O_CREAT) && strcmp(name, "7.dat") == 0) { SIDECAR_FAULT; }
+    int (*real_openat)(int, const char *, int, ...) = dlsym(RTLD_NEXT, "openat");
+    return real_openat(fd, name, flags, mode);
+}
+""".replace('SIDECAR_FAULT', action))
+        self.build(str(race))
+
+    def test_sidecar_disappearing_at_open_does_not_fail_snapshot(self):
+        self.sidecar_open_fault('unlinkat(fd, name, 0)')
+        result = self.copy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.sidecars / '7.dat').exists(), 'the race deleted the source after listing')
+        self.assertFalse((self.work / 'Files/S0/845/EFMData/7.dat').exists())
+        self.assertEqual((self.work / 'store.hxd').read_bytes(), b'synthetic-store')
+
+    def test_sidecar_open_errors_other_than_enoent_still_fail(self):
+        self.sidecar_open_fault('errno = EACCES; return -1')
+        result = self.copy()
+        self.assertEqual(result.returncode, 13)
+        self.assertIn(b'errno 13', result.stderr)
+
+    def test_missing_required_store_still_fails(self):
+        (self.profile / 'HxStore.hxd').unlink()
+        self.assertEqual(self.copy().returncode, 2)
+
     def test_selected_attachments_are_copied_privately_without_refreshing_snapshot(self):
         selected = self.profile / 'Files/S0/845/Attachments/9'
         selected.mkdir(parents=True)

@@ -2,11 +2,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError } from "../src/tools.js";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const actor = { id: "10000000-0000-4000-8000-000000000002", slug: "joe", human: true };
 const proposalId = "20000000-0000-4000-8000-000000000001";
 const approval = {
-  idempotency_key: "retrieval-approval", proposal_ids: [proposalId],
+  idempotency_key: "00000571-0000-4000-8000-000000000243", proposal_ids: [proposalId],
   base_versions: { [proposalId]: 2 }, golden_suite_digest: "synthetic-golden-suite",
 };
 
@@ -63,7 +64,7 @@ test("retrieval proposal versions round-trip through insertion and both replay p
         "where idempotency_key=": [row],
         "where id = any": [row],
       });
-      const args = { ...input, reason: "Synthetic proposal", idempotency_key: `proposal-${type}` };
+      const args = { ...input, reason: "Synthetic proposal", idempotency_key: derivedIdempotencyKey("test", `proposal-${type}`) };
       const tool = TOOLS[`propose-retrieval-${type}`];
       const inserted = await tool.handler(db, actor, args);
       assert.equal(inserted.proposal.version, expected);
@@ -73,7 +74,7 @@ test("retrieval proposal versions round-trip through insertion and both replay p
       assert.equal(replay.proposal.version, expected);
       assert.equal(db.receipts.get(args.idempotency_key).response.proposal.version, version);
       assert.equal(inserts, 1);
-      const rowReplay = await tool.handler(db, actor, { ...args, idempotency_key: `row-replay-${type}` });
+      const rowReplay = await tool.handler(db, actor, { ...args, idempotency_key: derivedIdempotencyKey("test", `row-replay-${type}`) });
       assert.equal(rowReplay.replay, true);
       assert.equal(rowReplay.proposal.version, expected);
       const approved = await TOOLS["approve-retrieval-proposals"].handler(db, actor, {
@@ -90,7 +91,7 @@ test("retrieval retirement verbs refuse unsafe or nonnumeric base versions befor
   for (const verb of ["propose-retrieval-retirement", "retire-retrieval-curation"])
     for (const base_version of [9007199254740992, "2", 0, -1, 1.5, null, undefined])
       await assert.rejects(() => TOOLS[verb].handler(db, actor, {
-        idempotency_key: "invalid-retirement", target_type: "concept", target_id: proposalId,
+        idempotency_key: "00000571-0000-4000-8000-000000000244", target_type: "concept", target_id: proposalId,
         reason: "Synthetic retirement", golden_suite_digest: "synthetic", base_version,
       }), error => error instanceof ToolError && error.payload.error === "retrieval_base_version_invalid");
 });
@@ -121,7 +122,7 @@ test("retrieval approval conflicts report the exact safe numeric current version
 });
 
 test("unsafe proposal versions refuse insertion, row replay, and legacy envelope replay", async () => {
-  const args = { idempotency_key: "unsafe-proposal", reason: "Synthetic proposal", concept_key: "synthetic-concept",
+  const args = { idempotency_key: "00000571-0000-4000-8000-000000000245", reason: "Synthetic proposal", concept_key: "synthetic-concept",
     label: "Synthetic", definition: "Synthetic definition" };
   for (const version of ["9007199254740993", 9007199254740992]) {
     for (const rowReplay of [false, true]) {
@@ -149,7 +150,7 @@ test("unsafe proposal versions refuse insertion, row replay, and legacy envelope
 });
 
 test("retirement responses normalize safe BIGINT versions and refuse unsafe legacy replay", async () => {
-  const args = { idempotency_key: "retire-curation", target_type: "concept", target_id: proposalId,
+  const args = { idempotency_key: "00000571-0000-4000-8000-000000000246", target_type: "concept", target_id: proposalId,
     base_version: 1, reason: "Synthetic retirement", golden_suite_digest: "synthetic" };
   for (const [version, expected] of [["2", 2], ["9007199254740991", 9007199254740991]]) {
     let retirements = 0;

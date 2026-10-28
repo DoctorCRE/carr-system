@@ -591,7 +591,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'email-proposal-quality': {
       write: false,
-      description: 'WR-000441 QUALITY report: email proposals created in the last 1-90 days (default 7), by kind: how many were proposed, are still pending, were confirmed by Joe or dismissed, the dismissal rate among resolved ones, and the average router confidence of each outcome. over_threshold is true when at least 10 are resolved and more than 5% were dismissed, the point where that kind should stay propose-only until the router is fixed. corrections lists up to 20 dismissals made in the requested period with the reason given, regardless of when the proposal was created. Proposal counts use the creation date. Counts only; changes nothing.',
+      description: 'WR-000441 QUALITY report: email proposals created in the last 1-90 days (default 7), by kind: how many were proposed, are still pending, were confirmed by Joe or dismissed, the dismissal rate among resolved ones, and the average router confidence of each outcome. over_threshold is true when at least 10 are resolved and more than 5% were dismissed, the point where that kind should stay propose-only until the router is fixed. corrections lists up to 20 dismissals made in the requested period with the reason given, regardless of when the proposal was created. Proposal counts use the creation date. automatic_filings counts automatic thread filings recorded in the requested period, how many have a linked undo receipt at read time, and their undo_rate (null when empty). Its over_threshold is true with at least 10 filings and more than 5% undone. This is a separate filing cohort, not a proposal dismissal rate. Counts only; changes nothing and does not enforce a policy change.',
       inputSchema: { type: 'object', additionalProperties: false,
         properties: { days: { type: 'integer', minimum: 1, maximum: 90 } } },
       handler: async (c, _actor, args) => {
@@ -617,7 +617,16 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           where p.status='dismissed' and p.resolved_at>now()-make_interval(days=>$1)
           order by p.resolved_at desc,p.id limit 20`, [days])).rows
           .map(row => ({ ...row, resolved_at: new Date(row.resolved_at).toISOString() }));
-        return { schema_version: 'email-proposal-quality.v1', days, kinds, corrections, send: false };
+        const filingCounts = (await c.query(`select count(*)::int as filed,
+            count(*) filter (where exists (select 1 from v_email_thread_filing_event u
+              where u.verb='undo-email-thread-filing' and u.new_value->>'event_id'=f.id::text))::int as undone
+          from v_email_thread_filing_event f where f.verb='inherit-email-thread'
+            and f.recorded_at>now()-make_interval(days=>$1)`, [days])).rows[0];
+        const undoRate = filingCounts.filed ? filingCounts.undone / filingCounts.filed : null;
+        const automaticFilings = { ...filingCounts, undo_rate: undoRate,
+          over_threshold: filingCounts.filed >= 10 && undoRate > 0.05 };
+        return { schema_version: 'email-proposal-quality.v1', days, kinds, corrections,
+          automatic_filings: automaticFilings, send: false };
       },
     },
     'dismiss-email-proposal': {

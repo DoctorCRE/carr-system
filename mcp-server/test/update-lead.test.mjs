@@ -29,6 +29,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError } from "../src/tools.js";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const ids = {
   joe: "10000000-0000-0000-0000-000000000002",
@@ -115,7 +116,7 @@ class UpdateLeadFake {
 test("update-lead: moves an existing lead OFF nurture_drip — the exact loop #383 shape (L-118)", async () => {
   const db = new UpdateLeadFake({ leadId: ids.lead118, ref: "L-118", stage: "nurture_drip", version: 3 });
   const result = await TOOLS["update-lead"].handler(db, joe, {
-    idempotency_key: "update-lead-118-stage",
+    idempotency_key: "00000571-0000-4000-8000-000000000247",
     lead: "L-118",
     base_version: 3,
     fields: { stage: "active_deal" },
@@ -132,7 +133,7 @@ test("update-lead: moves an existing lead OFF nurture_drip — the exact loop #3
 test("update-lead: L-135, same shape, confirms this isn't a one-off fixture fluke", async () => {
   const db = new UpdateLeadFake({ leadId: ids.lead135, ref: "L-135", stage: "nurture_drip", version: 1 });
   const result = await TOOLS["update-lead"].handler(db, joe, {
-    idempotency_key: "update-lead-135-stage",
+    idempotency_key: "00000571-0000-4000-8000-000000000248",
     lead: "L-135",
     base_version: 1,
     fields: { stage: "active_deal" },
@@ -145,7 +146,7 @@ test("update-lead: an unknown stage names the field and lists the valid slugs, d
   const db = new UpdateLeadFake({ leadId: ids.lead118, ref: "L-118", stage: "nurture_drip", version: 3 });
   await assert.rejects(
     () => TOOLS["update-lead"].handler(db, joe, {
-      idempotency_key: "update-lead-118-bad-stage",
+      idempotency_key: "00000571-0000-4000-8000-000000000249",
       lead: "L-118",
       base_version: 3,
       fields: { stage: "won" }, // plausible, not real — the real slug is closed_won
@@ -166,7 +167,7 @@ test("update-lead: a stale base_version surfaces version_conflict and is never a
     old_value: { stage: "outreach_active" }, new_value: { stage: "nurture_drip" } });
   await assert.rejects(
     () => TOOLS["update-lead"].handler(db, joe, {
-      idempotency_key: "update-lead-118-stale",
+      idempotency_key: "00000571-0000-4000-8000-000000000250",
       lead: "L-118",
       base_version: 3, // stale — current is 5
       fields: { stage: "active_deal" },
@@ -184,7 +185,7 @@ test("update-lead: identity and conversion fields are silently out of reach — 
   const db = new UpdateLeadFake({ leadId: ids.lead118, ref: "L-118", stage: "nurture_drip", version: 3 });
   await assert.rejects(
     () => TOOLS["update-lead"].handler(db, joe, {
-      idempotency_key: "update-lead-118-identity",
+      idempotency_key: "00000571-0000-4000-8000-000000000251",
       lead: "L-118",
       base_version: 3,
       fields: { party_id: "99999999-0000-0000-0000-000000000000", client_id: "88888888-0000-0000-0000-000000000000" },
@@ -204,7 +205,7 @@ test("update-lead: a ref that resolves to a vendor, not a lead, is refused by na
   const db = new UpdateLeadFake({ leadId: ids.vendor, ref: "V-CPA-006", stage: null, version: 1, subjectType: "vendor" });
   await assert.rejects(
     () => TOOLS["update-lead"].handler(db, joe, {
-      idempotency_key: "update-lead-wrong-type",
+      idempotency_key: "00000571-0000-4000-8000-000000000252",
       lead: "V-CPA-006",
       base_version: 1,
       fields: { stage: "active_deal" },
@@ -219,7 +220,7 @@ test("update-lead: a ref that resolves to a vendor, not a lead, is refused by na
 test("update-lead: multiple business-state fields land together, each with its own event", async () => {
   const db = new UpdateLeadFake({ leadId: ids.lead118, ref: "L-118", stage: "nurture_drip", version: 3 });
   const result = await TOOLS["update-lead"].handler(db, joe, {
-    idempotency_key: "update-lead-118-multi",
+    idempotency_key: "00000571-0000-4000-8000-000000000253",
     lead: "L-118",
     base_version: 3,
     fields: { stage: "active_deal", segment: "dental", notes: "moved to active deal per loop #383" },
@@ -232,7 +233,7 @@ test("update-lead: do_not_contact is inseparable from suppression", async () => 
   const db = new UpdateLeadFake({ leadId: ids.lead118, ref: "L-118", stage: "outreach_active", version: 3 });
   await assert.rejects(
     () => TOOLS["update-lead"].handler(db, joe, {
-      idempotency_key: "update-lead-118-dnc-without-suppression",
+      idempotency_key: "00000571-0000-4000-8000-000000000254",
       lead: "L-118",
       base_version: 3,
       fields: { stage: "do_not_contact" },
@@ -246,7 +247,7 @@ test("update-lead: do_not_contact is inseparable from suppression", async () => 
 
   const accepted = new UpdateLeadFake({ leadId: ids.lead118, ref: "L-118", stage: "outreach_active", version: 3 });
   const result = await TOOLS["update-lead"].handler(accepted, joe, {
-    idempotency_key: "update-lead-118-dnc-with-suppression",
+    idempotency_key: "00000571-0000-4000-8000-000000000255",
     lead: "L-118",
     base_version: 3,
     fields: { stage: "do_not_contact", suppressed: true },
@@ -260,7 +261,7 @@ test("update-lead: clearing a standing suppression instruction is an explicit hu
     suppressed: true, version: 3 });
   await assert.rejects(
     () => TOOLS["update-lead"].handler(refused, machine, {
-      idempotency_key: "update-lead-118-machine-clear-dnc",
+      idempotency_key: "00000571-0000-4000-8000-000000000256",
       lead: "L-118",
       base_version: 3,
       fields: { stage: "engaged", suppressed: false },
@@ -275,7 +276,7 @@ test("update-lead: clearing a standing suppression instruction is an explicit hu
   const human = new UpdateLeadFake({ leadId: ids.lead118, ref: "L-118", stage: "do_not_contact",
     suppressed: true, version: 3 });
   const result = await TOOLS["update-lead"].handler(human, joe, {
-    idempotency_key: "update-lead-118-human-clear-dnc",
+    idempotency_key: "00000571-0000-4000-8000-000000000257",
     lead: "L-118",
     base_version: 3,
     fields: { stage: "engaged", suppressed: false },
@@ -288,13 +289,13 @@ test("archive decisions require a partner, while notes on an archived lead remai
   for (const [stage, next] of [["new", "archived"], ["archived", "new"]]) {
     const db = new UpdateLeadFake({ leadId: ids.lead118, ref: "L-999999", stage, version: 1 });
     await assert.rejects(() => TOOLS["update-lead"].handler(db, machine, {
-      idempotency_key: `synthetic-stage-${stage}`, lead: "L-999999", base_version: 1, fields: { stage: next },
+      idempotency_key: derivedIdempotencyKey("test", `synthetic-stage-${stage}`), lead: "L-999999", base_version: 1, fields: { stage: next },
     }), /archive_requires_partner/);
     assert.equal(db.updated, null);
   }
   const db = new UpdateLeadFake({ leadId: ids.lead118, ref: "L-999999", stage: "archived", version: 1 });
   assert.deepEqual(await TOOLS["update-lead"].handler(db, machine, {
-    idempotency_key: "synthetic-archive-note", lead: "L-999999", base_version: 1,
+    idempotency_key: "00000571-0000-4000-8000-000000000258", lead: "L-999999", base_version: 1,
     fields: { notes: "Synthetic reviewed note" },
   }), { ok: true, updated: ["notes"] });
 });

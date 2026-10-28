@@ -45,12 +45,11 @@ _spec.loader.exec_module(br)
 FAILS: list[str] = []
 
 
-def check(label, condition, detail=""):
-    if condition:
-        print(f"  ok    {label}")
-    else:
-        print(f"  FAIL  {label}  {detail}")
-        FAILS.append(label)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(fail="  FAIL  {label}  {detail}", detail=None, failures=FAILS)
 
 
 def main() -> int:

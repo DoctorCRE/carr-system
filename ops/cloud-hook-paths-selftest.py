@@ -44,10 +44,11 @@ KNOWN_HOOKS = (GATE, *MACHINE_HOOKS)
 FAILURES: list[str] = []
 
 
-def check(name: str, ok: bool, detail: str = "") -> None:
-    print(("ok   " if ok else "FAIL ") + name + (f" — {detail}" if detail and not ok else ""))
-    if not ok:
-        FAILURES.append(name)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(ok="ok   {label}", fail="FAIL {label}", failures=FAILURES)
 
 
 def wired_commands() -> list[tuple[str, str, str]]:

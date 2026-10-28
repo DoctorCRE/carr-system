@@ -64,14 +64,11 @@ PASSED = 0
 FAILED: list[str] = []
 
 
-def check(name: str, ok: bool, detail: str = "") -> None:
-    global PASSED
-    if ok:
-        PASSED += 1
-        print(f"  ok  {name}")
-    else:
-        FAILED.append(name)
-        print(f"  FAIL  {name}" + (f" — {detail}" if detail else ""))
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(ok="  ok  {label}", failures=FAILED, counters={"PASSED": "pass"}, ns=globals())
 
 
 # ── the acceptance is exactly what was decided, and no wider ────────────────

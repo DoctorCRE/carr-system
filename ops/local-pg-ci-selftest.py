@@ -30,12 +30,18 @@ passed = 0
 failed: list[str] = []
 
 
-def check(label: str, condition: bool) -> None:
-    global passed
-    if condition:
-        passed += 1
-    else:
-        failed.append(label)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(
+    ok=None,
+    fail=None,
+    detail=None,
+    failures=failed,
+    counters={"passed": "pass"},
+    ns=globals(),
+)
 
 
 check("valid loopback port accepted", mod.validate_port(55432) == 55432)
