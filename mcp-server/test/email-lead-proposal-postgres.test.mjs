@@ -334,7 +334,7 @@ test('the partner may override the reading: another deal, or another outcome', a
   const { open, closed } = await fixtures();
   const client = (await c.query("select id from client where roster_ref='C-999451'")).rows[0].id;
   const other = (await c.query(`insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by)
-    values('Synthetic override suite',$1,'purchase','site_selection','joe',$2,$2) returning id`, [client, actor.id])).rows[0].id;
+    values('Second open deal',$1,'purchase','site_selection','joe',$2,$2) returning id`, [client, actor.id])).rows[0].id;
   const toDeal = await queued(joeHome(), 'override.deal@confirm.test', { applies_to: 'existing_deal', deal: open });
   const moved = await confirm(joeHome(), { pool_id: toDeal, base_version: 1, deal: other });
   assert.equal(moved.deal_id, other);
