@@ -20,6 +20,7 @@ import {
   hermesCosPremisesRefusal, HERMES_COS_DEAL_FIELDS,
 } from "../src/mcp.js";
 import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const PLAIN = JSON.stringify({ "hermes-pilot": "plain-secret" });
 const COS = JSON.stringify({ "hermes-pilot": "cos-secret" });
@@ -181,7 +182,7 @@ class FakeDB {
 test("Example CoS handoff selects Joe, replaces Joe's ball, and keeps runtime provenance", async () => {
   const db = new FakeDB();
   const result = await TOOLS["set-next-action"].handler(db, cos(), {
-    idempotency_key: "cos-459-example", ref: EXAMPLE, owner: "joe",
+    idempotency_key: "00000571-0000-4000-8000-000000000125", ref: EXAMPLE, owner: "joe",
     description: "Confirm lease-vs-purchase preference before the tour", due_on: "2026-08-27",
   });
   assert.equal(result.owner, "joe");
@@ -200,7 +201,7 @@ for (const [label, seat] of [["CoS", cos], ["plain Hermes", plain],
     test(`${label} seat sets a ${partner} to-do; created_by stays the real runtime`, async () => {
       const db = new FakeDB();
       const result = await TOOLS["set-next-action"].handler(db, seat(), {
-        idempotency_key: `seat-${label}-${partner}`, ref: EXAMPLE, owner: partner, description: "Agent-assigned to-do",
+        idempotency_key: derivedIdempotencyKey("test", `seat-${label}-${partner}`), ref: EXAMPLE, owner: partner, description: "Agent-assigned to-do",
       });
       assert.equal(result.owner, partner);
       assert.equal(db.inserted.owner_id, IDS[partner]);
@@ -216,7 +217,7 @@ for (const [label, seat] of [["CoS", cos], ["plain Hermes", plain],
 test("a seat still cannot name an owner outside itself, Joe, and Dell", async () => {
   const db = new FakeDB();
   await assert.rejects(() => TOOLS["set-next-action"].handler(db, cos(), {
-    idempotency_key: "cos-459-codex", ref: EXAMPLE, owner: "codex", description: "forbidden",
+    idempotency_key: "00000571-0000-4000-8000-000000000126", ref: EXAMPLE, owner: "codex", description: "forbidden",
   }), (e) => e instanceof ToolError && e.payload.error === "owner_not_permitted");
   assert.equal(db.inserted, undefined);
   assert.equal(db.events.length, 0);
@@ -225,7 +226,7 @@ test("a seat still cannot name an owner outside itself, Joe, and Dell", async ()
 test("CoS defaults to its own ball when owner is omitted", async () => {
   const db = new FakeDB();
   const result = await TOOLS["set-next-action"].handler(db, cos(), {
-    idempotency_key: "fixture", ref: EXAMPLE, description: "Doc keeps this one",
+    idempotency_key: "00000571-0000-4000-8000-000000000127", ref: EXAMPLE, description: "Doc keeps this one",
   });
   assert.equal(result.owner, "hermes-pilot");
   assert.equal(db.inserted.owner_id, IDS.hermes);

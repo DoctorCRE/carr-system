@@ -66,9 +66,9 @@ static int profile_directory(void) {
     return fd;
 }
 
-static off_t copy_file(int source, const char *name, int target, const char *copy, off_t limit) {
+static off_t copy_file(int source, const char *name, int target, const char *copy, off_t limit, int missing_ok) {
     int reader = openat(source, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
-    if (reader < 0 && limit && errno == ENOENT) return -1;
+    if (reader < 0 && missing_ok && errno == ENOENT) return -1;
     if (reader < 0) fail();
     struct stat info;
     if (fstat(reader, &info) != 0) fail();
@@ -169,7 +169,7 @@ static void copy_sidecars(int profile, int work) {
                 while ((body = next_entry(bodies))) {
                     size_t length = strlen(body->d_name);
                     if (length > 4 && strcmp(body->d_name + length - 4, ".dat") == 0)
-                        copy_file(efm, body->d_name, efm_copy, body->d_name, 0);
+                        copy_file(efm, body->d_name, efm_copy, body->d_name, 0, 1);
                 }
                 closedir(bodies);
                 close(efm_copy);
@@ -246,7 +246,7 @@ static void copy_attachments(int profile, int work) {
         }
         off_t limit = 100 * 1024 * 1024 - total;
         if (limit > 25 * 1024 * 1024) limit = 25 * 1024 * 1024;
-        off_t copied = copy_file(source, parts[3], target, parts[3], limit);
+        off_t copied = copy_file(source, parts[3], target, parts[3], limit, 1);
         if (copied >= 0) { count++; total += copied; }
         close(target);
         close(source);
@@ -298,7 +298,7 @@ int main(int argc, char **argv) {
     int profile = profile_directory();
     if (attachments) copy_attachments(profile, work);
     else {
-        copy_file(profile, "HxStore.hxd", work, "store.hxd", 0);
+        copy_file(profile, "HxStore.hxd", work, "store.hxd", 0, 0);
         copy_sidecars(profile, work);
     }
     close(profile);

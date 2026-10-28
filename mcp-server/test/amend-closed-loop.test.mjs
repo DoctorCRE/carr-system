@@ -3,6 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError } from "../src/tools.js";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const joe = { id: "10000000-0000-0000-0000-000000000002", slug: "joe",
   display: "Joe", human: true, via: "mcp", client_id: "claude" };
@@ -65,7 +66,7 @@ class Fake {
 }
 
 function args(overrides = {}) {
-  return { idempotency_key: `k-${Math.random()}`, loop_id: CLOSED.id, base_version: 3,
+  return { idempotency_key: derivedIdempotencyKey("test", `k-${Math.random()}`), loop_id: CLOSED.id, base_version: 3,
     outcome: GOOD_OUTCOME, reason: GOOD_REASON, ...overrides };
 }
 

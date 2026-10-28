@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { executeRegisteredTool, ToolError, TOOLS } from "../src/tools.js";
 import { agentActorForToken } from "../src/identity.js";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 // All identities and records are synthetic. Exercise registered dispatch and
 // the real envelope; the adapter records domain writes and conflict reads.
@@ -19,7 +20,7 @@ const loopVerbs = ["update-loop", "close-loop", "amend-closed-loop"];
 
 function argsFor(verb, base_version = 2, byNumber = false) {
   const section = { section_key: "test", body_text: "Updated synthetic text", base_version };
-  const args = { idempotency_key: `ownership-${verb}`, document: "test-doc",
+  const args = { idempotency_key: derivedIdempotencyKey("test", `ownership-${verb}`), document: "test-doc",
     section_id: sectionId, section_ids: [sectionId], ...section, items: [section],
     ...(byNumber ? { number: "123", kind: "open_loop" } : { loop_id: loopId }),
     title: "Updated synthetic title", outcome: "The synthetic work was completed.",

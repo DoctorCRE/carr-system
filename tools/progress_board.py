@@ -26,6 +26,7 @@ import subprocess
 import time
 import sys
 import tempfile
+import uuid
 import urllib.request
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -2146,7 +2147,7 @@ def reconcile_board_write(verb: str, args: dict[str, Any]) -> str:
 
 def stable_key(verb: str, args: dict[str, Any]) -> str:
     body = json.dumps([verb, args], sort_keys=True, separators=(",", ":"))
-    return "board-" + hashlib.sha256(body.encode()).hexdigest()
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, "carr-progress-board:" + body))
 
 
 

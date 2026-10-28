@@ -166,7 +166,7 @@ def payload_for(path, entry, text):
         citation_url(url) for url in re.findall(r"https?://[^\s<>\"']+", text)
     ))
     return {
-        "idempotency_key": "dot-report:" + digest(path.stem),
+        "idempotency_key": str(uuid.uuid5(uuid.NAMESPACE_URL, "dot-report:" + digest(path.stem))),
         "subject": SUBJECT,
         "kind": "research_report",
         "internal": True,
