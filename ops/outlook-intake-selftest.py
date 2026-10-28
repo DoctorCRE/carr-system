@@ -1031,19 +1031,56 @@ class IntakeTest(unittest.TestCase):
                 self.assertEqual(intake.main(), code)
 
     def test_contact_failures_have_safe_distinct_reasons(self):
-        from types import SimpleNamespace
-        for rows, code in (([], 'contacts_empty'), (ValueError('PRIVATE-SENTINEL'), 'contacts_read_failed')):
-            with self.subTest(code=code):
-                def read_view(view, **kwargs):
-                    if isinstance(rows, Exception):
-                        raise rows
-                    return [], rows
-                exporter = SimpleNamespace(RECORD_VIEWS=[('fake', 'id', 'name', 'org')], read_view=read_view)
-                with patch('lib.loadpy.load_module_from_path', return_value=exporter):
-                    self.fake.contacts = intake._contacts(self.repo)
-                    result = self.run_intake([])
+        def carr(replies):
+            def call(verb, args):
+                if isinstance(replies, Exception):
+                    raise replies
+                return replies
+            return call
+        for reply, code in (({'contacts': []}, 'contacts_empty'),
+                            (intake.CarrError(code='PRIVATE-SENTINEL'), 'contacts_read_failed'),
+                            ({'contacts': [{'address': 'PRIVATE-SENTINEL'}]}, 'contacts_read_failed'),
+                            ({'rows': []}, 'contacts_read_failed')):
+            with self.subTest(code=code, reply=str(reply)):
+                self.fake.contacts = intake._contacts(carr(reply))
+                result = self.run_intake([])
                 self.assertEqual(result.reason, code)
                 self.assertNotIn('PRIVATE-SENTINEL', intake.status_line(result))
+
+    def test_contacts_are_one_record_layer_read_of_every_live_party(self):
+        calls = []
+
+        def carr(verb, args):
+            calls.append((verb, args))
+            return {'schema_version': 'email-match-contacts.v1', 'contacts': [
+                {'address': 'pat@example.test', 'ref': 'C-901', 'name': 'Pat Example', 'exact': True},
+                {'address': 'far@example.test', 'ref': 'C-950', 'name': 'Out Of Market', 'exact': True},
+                {'address': 'frontdesk@example.test', 'ref': 'C-950', 'name': 'Out Of Market', 'exact': False},
+                {'address': 'lena@bank.test', 'ref': 'P-0003', 'name': 'Lena Lender', 'exact': True}]}
+        self.assertEqual(intake._contacts(carr)(), [
+            intake.Contact('pat@example.test', 'C-901', 'Pat Example'),
+            intake.Contact('far@example.test', 'C-950', 'Out Of Market'),
+            intake.Contact('frontdesk@example.test', 'C-950', 'Out Of Market', exact=False),
+            intake.Contact('lena@bank.test', 'P-0003', 'Lena Lender')])
+        self.assertEqual(calls, [('email-match-contacts', {})])
+
+    def test_an_out_of_market_client_matches_and_logs(self):
+        self.fake.contacts_rows.append(intake.Contact('far@example.test', 'C-950', 'Out Of Market'))
+        result = self.run_intake([mail('far@example.test', -timedelta(hours=1))])
+        [(_, args)] = self.fake.writes('log-activity')
+        self.assertEqual(args['ref'], 'C-950')
+        self.assertEqual((result.counts['mapping_missing'], result.counts['unmatched']), (0, 0))
+
+    def test_a_party_with_no_client_lead_or_vendor_row_is_known_not_missing(self):
+        self.fake.contacts_rows.append(intake.Contact('lena@bank.test', 'P-0003', 'Lena Lender'))
+        result = self.run_intake([mail('lena@bank.test', -timedelta(hours=1))])
+        self.assertEqual(self.fake.writes(), [], 'an activity has no party subject to log on')
+        self.assertEqual(self.fake.intent_calls, [], 'a known party is never read as a possible lead')
+        self.assertEqual((result.counts['mapping_missing'], result.counts['mapping_unsupported']), (0, 1))
+        self.fake.contacts_rows.append(intake.Contact('lena@bank.test', 'L-960', 'Lena Lender'))
+        self.run_intake([mail('lena@bank.test', -timedelta(hours=1))], touch=False)
+        [(_, args)] = self.fake.writes('log-activity')
+        self.assertEqual(args['ref'], 'L-960', 'a record for the address files the retained email')
 
     def test_partial_preview_recovery_refreshes_every_completed_participant(self):
         m = mail(OWNER, -timedelta(hours=1), recipients='pat@example.test,new@example.test', kind='preview')
@@ -2433,19 +2470,9 @@ class IntakeTest(unittest.TestCase):
 
     # ---- sender classes: second addresses, automated senders, lead candidates ----
 
-    def test_every_address_in_a_record_email_field_is_a_contact(self):
-        rows = intake.record_contacts('Pat Example <PAT@a.test>; pat.home@b.test, note: office', 'C-901', 'Pat')
-        self.assertEqual(rows, [intake.Contact('pat@a.test', 'C-901', 'Pat'),
-                                intake.Contact('pat.home@b.test', 'C-901', 'Pat')])
-        self.assertEqual(intake.record_contacts('call the office', 'C-901', 'Pat'), [])
-        self.assertEqual(intake.record_contacts('Info@practice.test', 'C-901', 'Pat'),
-                         [intake.Contact('info@practice.test', 'C-901', 'Pat')], 'a lone address stays exact')
-
     def test_a_shared_role_address_in_a_multi_address_field_is_flagged_not_matched(self):
-        rows = intake.record_contacts('pat@practice.test; frontdesk@practice.test', 'C-901', 'Pat')
-        self.assertEqual(rows, [intake.Contact('pat@practice.test', 'C-901', 'Pat'),
-                                intake.Contact('frontdesk@practice.test', 'C-901', 'Pat', exact=False)])
-        self.fake.contacts_rows += rows
+        self.fake.contacts_rows += [intake.Contact('pat@practice.test', 'C-901', 'Pat'),
+                                    intake.Contact('frontdesk@practice.test', 'C-901', 'Pat', exact=False)]
         result = self.run_intake([mail('frontdesk@practice.test', -timedelta(hours=1))])
         self.assertEqual(self.fake.writes(), [])
         self.assertEqual(self.fake.intent_calls, [], 'a flagged role address is never a lead')
@@ -2461,8 +2488,9 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(result.counts['unmatched'], 0)
 
     def test_a_role_address_flagged_on_one_record_is_not_exact_on_any_record(self):
-        self.fake.contacts_rows += intake.record_contacts('pat@practice.test; info@practice.test', 'C-901', 'Pat')
-        self.fake.contacts_rows += intake.record_contacts('info@practice.test', 'L-905', 'Practice Office')
+        self.fake.contacts_rows += [intake.Contact('pat@practice.test', 'C-901', 'Pat'),
+                                    intake.Contact('info@practice.test', 'C-901', 'Pat', exact=False),
+                                    intake.Contact('info@practice.test', 'L-905', 'Practice Office')]
         result = self.run_intake([mail('info@practice.test', -timedelta(hours=1))])
         self.assertEqual(self.fake.writes(), [])
         self.assertEqual(result.counts['mapping_shared_role'], 1)
