@@ -14,7 +14,15 @@
   },
   "submit": {
     "verb": "submit-email-draft",
-    "arguments": ["idempotency_key", "proposal_id", "base_version", "subject", "body", "to", "cc"],
+    "arguments": [
+      "idempotency_key",
+      "proposal_id",
+      "base_version",
+      "subject",
+      "body",
+      "to",
+      "cc"
+    ],
     "recipient_binding": "Send the exact displayed to and cc arrays. The server resolves recipients again under transaction locks and compares them byte for byte before recording approval or queuing. No trimming, case folding, extra recipients or client-selected destinations.",
     "mismatch_error": "email_draft_recipients_mismatch",
     "recovery": "After a mismatch, read and display the current recipient addresses before submitting a newly reviewed request. Keep the original payload and idempotency key when an outcome is unknown.",
@@ -28,5 +36,21 @@
   "delivery_result": {
     "outcome": "list-email-proposals returns send_result.status as sent or failed after recording; null while waiting.",
     "result_recorded_at": "Nullable ISO 8601 timestamp when record-email-sent recorded the outcome. Historical results without a recorded time remain null. This is not the submission time or a claimed delivery time."
+  },
+  "recent_outcomes": {
+    "transport": "list-email-proposals with mode=recent_outcomes",
+    "schema_version": "email-reply-outcomes.v1",
+    "scope": "Authenticated partner or their local machine; proposal owner and captured mailbox owner must match. Optional deal restricts results.",
+    "ordering": "Recorded outcomes only, result_recorded_at descending then proposal id descending. Historical null timestamps are excluded.",
+    "pagination": "limit defaults to 20 and is at most 50; pass next_cursor until more is false. Cursor must identify a matching outcome in the same scope.",
+    "fields": {
+      "id": "proposal UUID",
+      "deal": "deal UUID",
+      "subject": "submitted subject",
+      "outcome": "sent or failed",
+      "result_recorded_at": "ISO 8601 recorded result time",
+      "failure_reason_code": "One of invalid_submission, submission_hash_mismatch, submission_recipients_invalid, aborted_before_dispatch, unconfirmed_after_dispatch, or delivery_failed for failure; null for sent"
+    },
+    "privacy": "No body, recipients, addresses, or free-text failure reason."
   }
 }
