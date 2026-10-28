@@ -320,13 +320,21 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              organizer_name  TEXT,
              organizer_email TEXT,
              body            TEXT,
+             -- 'canceled' (Outlook stored its cancellation subject) or
+             -- 'unsupported' (no lifecycle is proven by the bytes).
              lifecycle_status TEXT NOT NULL,
-             lifecycle_reason TEXT NOT NULL
+             lifecycle_reason TEXT NOT NULL,
+             -- 'occurrence' (one instance of a recurring series) or 'item'.
+             recurrence       TEXT NOT NULL
          );
          CREATE TABLE event_attendees (
-             event_id INTEGER NOT NULL REFERENCES events(id),
-             name     TEXT,
-             email    TEXT
+             event_id      INTEGER NOT NULL REFERENCES events(id),
+             name          TEXT,
+             email         TEXT,
+             kind          TEXT,              -- 'required' / 'optional'; NULL if unverified
+             kind_code     INTEGER NOT NULL,
+             response      TEXT,              -- 'no_response'; NULL if unverified
+             response_code INTEGER NOT NULL
          );
          -- Counts a caller checks before trusting the export.
          CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
@@ -633,24 +641,37 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         let mut ins_event = tx
             .prepare(
                 "INSERT INTO events(goid,start_unix,end_unix,start_utc,end_utc,subject,location,
-                                    organizer_name,organizer_email,body,lifecycle_status,lifecycle_reason)
-                 VALUES (?1,?2,?3,datetime(?2,'unixepoch'),datetime(?3,'unixepoch'),?4,?5,?6,?7,?8,
-                         'unsupported','hxstore_lifecycle_unverified')",
+                                    organizer_name,organizer_email,body,lifecycle_status,lifecycle_reason,
+                                    recurrence)
+                 VALUES (?1,?2,?3,datetime(?2,'unixepoch'),datetime(?3,'unixepoch'),?4,?5,?6,?7,?8,?9,?10,?11)",
             )
             .expect("prepare events");
         let mut ins_attendee = tx
-            .prepare("INSERT INTO event_attendees(event_id,name,email) VALUES (?1,?2,?3)")
+            .prepare(
+                "INSERT INTO event_attendees(event_id,name,email,kind,kind_code,response,response_code)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            )
             .expect("prepare attendees");
         for ev in events.events.values() {
+            let (status, reason) = if ev.canceled {
+                ("canceled", "outlook_canceled_subject")
+            } else {
+                ("unsupported", "hxstore_lifecycle_unverified")
+            };
+            let recurrence = if ev.occurrence { "occurrence" } else { "item" };
             ins_event
                 .execute(rusqlite::params![
                     ev.goid, ev.start_unix, ev.end_unix, ev.subject, ev.location,
-                    ev.organizer_name, ev.organizer_email, ev.body,
+                    ev.organizer_name, ev.organizer_email, ev.body, status, reason, recurrence,
                 ])
                 .expect("insert event");
             let event_id = tx.last_insert_rowid();
             for a in &ev.attendees {
-                ins_attendee.execute(rusqlite::params![event_id, a.name, a.email]).expect("insert attendee");
+                ins_attendee
+                    .execute(rusqlite::params![
+                        event_id, a.name, a.email, a.kind(), a.kind_code, a.response(), a.response_code,
+                    ])
+                    .expect("insert attendee");
             }
         }
         let mut ins_meta = tx.prepare("INSERT INTO meta(key,value) VALUES (?1,?2)").expect("prepare meta");
@@ -667,7 +688,9 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             ("event_objects", events.objects),
             ("event_identities", events.identities.len()),
             ("events_decoded", events.events.len()),
-            ("calendar_lifecycle_unsupported", events.events.len()),
+            ("calendar_lifecycle_unsupported", events.events.values().filter(|e| !e.canceled).count()),
+            ("calendar_lifecycle_canceled", events.events.values().filter(|e| e.canceled).count()),
+            ("event_occurrences", events.events.values().filter(|e| e.occurrence).count()),
             ("folders", folders.folders.len()),
             ("messages_with_folder", with_folder),
             ("attachment_objects", attachments.objects),
@@ -678,9 +701,10 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         }
     }
     println!(
-        "  {} calendar objects; {} unsupported candidates across {} GOID/start groups",
+        "  {} calendar objects; {} canceled and {} unsupported candidates across {} GOID/start groups",
         events.objects,
-        events.events.len(),
+        events.events.values().filter(|e| e.canceled).count(),
+        events.events.values().filter(|e| !e.canceled).count(),
         events.identities.len()
     );
     tx.commit().expect("commit");
