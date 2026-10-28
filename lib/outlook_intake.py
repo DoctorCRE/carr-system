@@ -19,7 +19,9 @@ through the named record-layer verbs:
 
 A run outside 07:00-19:30 local does nothing. Matching requires one record with
 that exact address; every address written in a record's email field counts, and
-names alone never establish identity. Unmatched participants in mail and calendar
+names alone never establish identity. Every live party address counts, in any market
+(email-match-contacts); a party holding no client, lead or vendor role is known but has
+no record to log on, so it is unsupported, never missing. Unmatched participants in mail and calendar
 stay unresolved and are retried when mappings change, even outside the rolling
 lookback. Records are never created, merged or renamed.
 
@@ -314,9 +316,6 @@ def email_context(mail: dict, domain: str) -> dict:
 
 
 AUTOMATED_LOCAL = re.compile(r'^(?:no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounces?)(?:[-.+].*)?$')
-ROLE_LOCAL = re.compile(r'^(?:front-?desk|info|office|admin|contact|reception|billing|hello|team|support|'
-                        r'scheduling|appointments?|sales|inquiries|enquiries|referrals?|records|staff|help|general)'
-                        r'(?:[-.+].*)?$')
 # The same rule propose-email-lead applies; anything else (X.500 paths, non-ASCII) cannot be queued.
 PROPOSABLE = re.compile(r"^[a-z0-9._%+'-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+$")
 
@@ -332,14 +331,6 @@ def automated(address: str) -> bool:
 
 def proposable(address: str) -> bool:
     return bool(PROPOSABLE.match(address.strip().lower()))
-
-
-def record_contacts(email: str | None, ref: str, name: str) -> list[Contact]:
-    """One contact per address written in a record's email field, in order, without repeats.
-
-    Beside other addresses, a role address may be a shared practice inbox: it is flagged, not exact."""
-    found = list(dict.fromkeys(_addresses(email)))
-    return [Contact(a, ref, name, exact=len(found) == 1 or not ROLE_LOCAL.match(_local(a))) for a in found]
 
 
 def _clean_name(name: str | None, subject: str | None) -> str | None:
@@ -1834,20 +1825,13 @@ def _carr(repo: Path) -> Callable[[str, dict], dict]:
     return call
 
 
-def _contacts(repo: Path) -> Callable[[], list]:
+def _contacts(carr: Callable[[str, dict], dict]) -> Callable[[], list]:
+    """Every live party address in any market, through the record layer's one contact read."""
     def read() -> list:
-        from lib.loadpy import load_module_from_path
-        matcher = load_module_from_path('calendar_touch_matcher', str(repo / 'tools/calendar-touch-matcher.py'))
-        rows = []
         try:
-            for view, id_col, name_col, org_col in matcher.RECORD_VIEWS:
-                _, found = matcher.read_view(view, credential_file=load_settings().database_credentials)
-                for r in found:
-                    email = str(r.get('Email') or '').strip().lower()
-                    if not r.get('_out_of_market'):
-                        rows += record_contacts(email, str(r.get(id_col) or '').strip(),
-                                                str(r.get(name_col) or r.get(org_col) or '').strip())
-        except (Exception, SystemExit):
+            rows = [Contact(c['address'], c['ref'], c['name'], c['exact'])
+                    for c in carr('email-match-contacts', {})['contacts']]
+        except (CarrError, KeyError, TypeError):
             raise CarrError(code='contacts_read_failed') from None
         if not rows:
             raise CarrError(code='contacts_empty')
@@ -1876,7 +1860,8 @@ def main() -> int:
     settings = load_settings(home)
     settings.require_repo(repo)
     settings.require_service('intake')
-    ports = Ports(carr=_carr(repo), contacts=_contacts(repo),
+    carr = _carr(repo)
+    ports = Ports(carr=carr, contacts=_contacts(carr),
                   next_step=lambda mail, today: ask_model(mail, today, settings.model),
                   decode=_decoder(home), now=lambda: datetime.now(timezone.utc),
                   read_unresolved=lambda mail, today, deals, parties: unresolved_email.ask(
