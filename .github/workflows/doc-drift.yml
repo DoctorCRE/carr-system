@@ -55,7 +55,7 @@ jobs:
           path: out/doc-drift/public-report.json
           if-no-files-found: error
       - name: Summarize drift and fail on stale claims beyond the baseline
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: >-
           python ops/doc-drift-product.py --report out/doc-drift/public-report.json
           --baseline scripts/doc-drift/baseline.json --summary "$GITHUB_STEP_SUMMARY"

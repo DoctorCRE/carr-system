@@ -412,14 +412,38 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'list-email-proposals': {
       write: false,
-      description: 'With mode=recent_outcomes, return partner-scoped recorded reply outcomes newest first, without body or addresses; limit defaults to 20 and max 50, cursor pages by result time and ID. Historical outcomes with no result time are excluded. Otherwise list email proposals for Home across deals, or only the optional deal UUID, oldest first. Status defaults to pending; select confirmed, dismissed, approved_to_send, sent or failed to read resolved proposals. Reply drafts include subject, body and owner in reply_draft, send_result with the outcome, and nullable result_recorded_at when the outcome was recorded. Pending drafts also include exact to/cc arrays for verified human Joe or Dell. Missing source/copy addresses set preview_error and disable confirm_verb; machine callers receive no pending recipient addresses. Submit must echo the displayed arrays through submit-email-draft. Every item includes its status, kind, deal, confidence, source email sender, subject, quote, activity_id and suspected_instruction warning. Pending items have a fresh preview and confirm_verb; confirm with the preview fields or dismiss with dismiss-email-proposal and the version. A stale pending item has preview null and preview_error. Resolved items have resolution (resolved_at, resolved_by actor ID, reason), the stored proposed_next_step when applicable, and null confirm_verb, preview and preview_error. Phase history retains the quote; exact phase changes remain in deal history. Without limit, refuses above 200 matching proposals. For pagination, pass limit and then next_cursor until more is false; a cursor remains valid after resolution, but must belong to the selected deal when deal is supplied.',
+      description: 'With mode=lead_proposals, return pending outlook-intake lead candidates only for the authenticated partner mailbox, with sender name, domain and address, stored structured reading, current deal/contact names, pool and party versions, and evidence_quote_untrusted=true. limit defaults to 25; cursor pages oldest first and remains valid after resolution. Rejects status/deal arguments. not_business rows never appear; not_business_count counts distinct recorded exclusions over the mailbox recorded lifetime, without reconstructing older local-only exclusions. Ownerless legacy candidates are excluded. With mode=recent_outcomes, return partner-scoped recorded reply outcomes newest first, without body or addresses; limit defaults to 20 and max 50, cursor pages by result time and ID. Historical outcomes with no result time are excluded. Otherwise list email proposals for Home across deals, or only the optional deal UUID, oldest first. Status defaults to pending; select confirmed, dismissed, approved_to_send, sent or failed to read resolved proposals. Reply drafts include subject, body and owner in reply_draft, send_result with the outcome, and nullable result_recorded_at when the outcome was recorded. Pending drafts also include exact to/cc arrays for verified human Joe or Dell. Missing source/copy addresses set preview_error and disable confirm_verb; machine callers receive no pending recipient addresses. Submit must echo the displayed arrays through submit-email-draft. Every item includes its status, kind, deal, confidence, source email sender, subject, quote, activity_id and suspected_instruction warning. Pending items have a fresh preview and confirm_verb; confirm with the preview fields or dismiss with dismiss-email-proposal and the version. A stale pending item has preview null and preview_error. Resolved items have resolution (resolved_at, resolved_by actor ID, reason), the stored proposed_next_step when applicable, and null confirm_verb, preview and preview_error. Phase history retains the quote; exact phase changes remain in deal history. Without limit, refuses above 200 matching proposals. For pagination, pass limit and then next_cursor until more is false; a cursor remains valid after resolution, but must belong to the selected deal when deal is supplied.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         deal: { type: 'string', format: 'uuid' },
-        mode: { type: 'string', enum: ['recent_outcomes'] },
+        mode: { type: 'string', enum: ['recent_outcomes', 'lead_proposals'] },
         status: { type: 'string', enum: ['pending', 'confirmed', 'dismissed', 'approved_to_send', 'sent', 'failed'], default: 'pending' },
         limit: { type: 'integer', minimum: 1, maximum: LIMIT },
         cursor: { type: 'string', format: 'uuid' } } },
       handler: async (c, actor, args) => {
+        if (args.mode === 'lead_proposals') {
+          const owner = senderOwner(actor);
+          if (args.deal !== undefined || args.status !== undefined) fail('email_leads_arguments_invalid');
+          const limit = args.limit ?? 25;
+          if (args.cursor && !(await c.query(`select 1 from v_email_lead_proposal
+            where pool_id=$1 and mailbox_owner=$2`, [args.cursor, owner])).rows.length)
+            fail('email_proposals_cursor_invalid');
+          const { rows } = await c.query(`select * from v_email_lead_proposal
+            where mailbox_owner=$1 and status='pool' and ($2::uuid is null or (created_at,pool_id) >
+              (select created_at,pool_id from v_email_lead_proposal where pool_id=$2 and mailbox_owner=$1))
+            order by created_at,pool_id limit $3`, [owner, args.cursor ?? null, limit + 1]);
+          const more = rows.length > limit;
+          const proposals = rows.slice(0, limit).map(row => ({ pool_id: row.pool_id, base_version: row.base_version,
+            sender: { display_name: row.display_name, domain: row.sender_domain }, sender_email: row.sender_email,
+            reading: row.reading, evidence_quote_untrusted: true,
+            deal: row.deal_id ? { id: row.deal_id, name: row.deal_name } : null,
+            contact: row.party_id ? { ref: row.party_ref, party_id: row.party_id, name: row.party_name,
+              base_version: row.party_version } : null }));
+          const count = (await c.query(`select not_business_count from v_email_lead_exclusion_count
+            where mailbox_owner=$1`, [owner])).rows[0]?.not_business_count ?? 0;
+          return { schema_version: 'email-lead-proposals.v1', proposals, more,
+            next_cursor: more ? proposals.at(-1).pool_id : null, not_business_count: count,
+            not_business_count_scope: 'recorded_lifetime', historical_exclusions_available: false, send: false };
+        }
         if (args.mode === 'recent_outcomes') {
           const owner = senderOwner(actor);
           if (args.status !== undefined || (args.limit !== undefined && args.limit > 50)) fail('email_outcomes_arguments_invalid');

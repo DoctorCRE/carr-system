@@ -25,6 +25,8 @@ For each track present, this script:
   3. Asks the on-device diarizer (speaker_split.py) who spoke when within the
      track, so several voices on one channel get separate per-recording
      labels. Any diarizer failure leaves the channel label in place.
+     The transcript's speaker_tracks records, per track, whether the
+     diarizer ran and how many voices it heard.
   4. Shifts every segment's offsets by that track's start_offset_ms so both
      tracks land on one shared clock, and tags each segment's speaker.
 Segments from both tracks are then merged, sorted by start time, and written
@@ -101,6 +103,13 @@ class Segment(TypedDict):
     text: str
 
 
+class TrackSpeakers(TypedDict):
+    """Whether the diarizer ran on one track and how many voices it heard."""
+
+    diarized: bool
+    speakers: int
+
+
 class TranscriptJson(TypedDict):
     engine: str
     model: str
@@ -110,6 +119,7 @@ class TranscriptJson(TypedDict):
     consent: Any
     speaker_labels: dict[str, str]
     speaker_method: str
+    speaker_tracks: dict[str, TrackSpeakers]
     segments: list[Segment]
 
 
@@ -379,6 +389,7 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
     all_segments: list[Segment] = []
     missing_tracks: list[str] = []
     split_tracks: list[str] = []
+    speaker_tracks: dict[str, TrackSpeakers] = {}
 
     with tempfile.TemporaryDirectory(prefix="carr-transcribe-") as tmp_str:
         tmp_dir = Path(tmp_str)
@@ -403,6 +414,9 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
 
             turns = speaker_split.run_diarizer(wav_path, tmp_dir, log)
             speakers = speaker_split.label_segments(raw_segments, turns, speaker, label)
+            # Post-call trusts the weekly-call system label only when this says one voice.
+            speaker_tracks[label] = {"diarized": bool(turns),
+                                     "speakers": len({turn.speaker_id for turn in turns})}
             distinct = len(set(speakers))
             if distinct > 1:
                 split_tracks.append(label)
@@ -427,6 +441,7 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
         "consent": consent,
         "speaker_labels": speaker_labels,
         "speaker_method": speaker_method,
+        "speaker_tracks": speaker_tracks,
         "segments": merged_segments,
     }
     write_outputs(session_dir, transcript)
