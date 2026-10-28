@@ -667,6 +667,21 @@ function preferredMergeSurvivor(rows) {
   return new Date(a.created_at).getTime() <= new Date(b.created_at).getTime() ? a : b;
 }
 
+async function resolveDecisionAbout(client, actor, about) {
+  const refs = (Array.isArray(about) ? about : [about])
+    .map(r => String(r || "").trim()).filter(Boolean);
+  for (const ref of refs) {
+    if (/^WR-/i.test(ref)) {
+      const found = await client.query(
+        "select 1 from ops.work_request where ref = $1 and organization_tenant_id = $2", [ref.toUpperCase(), organizationTenantForActor(actor)]);
+      if (!found.rows.length) throw new ToolError({ error: "decision_about_work_request_not_found", field: "about", ref });
+      throw new ToolError({ error: "unsupported_decision_about", field: "about", ref });
+    }
+    await resolveSubject(client, ref);
+  }
+  return refs;
+}
+
 // [loop #278] The ONE place a decision gets mirrored onto the record it governs.
 // log-decision calls it at creation and update-decision calls it after the fact, so
 // attaching late and attaching at the time produce byte-identical rows — a manual path
@@ -4256,15 +4271,7 @@ export const TOOLS = {
       summary: { type: "string" }, detail: { type: "string" },
       email_context: { type: 'object', additionalProperties: false,
         required: ['subject', 'conversation_id', 'sender', 'recipients'], properties: {
-          subject: { type: 'string' }, conversation_id: { type: ['string', 'null'] },
-          sender: { type: 'object', additionalProperties: false, required: ['email', 'internal'],
-            properties: { email: { type: 'string' }, name: { type: ['string', 'null'] }, internal: { type: 'boolean' } } },
-          recipients: { type: 'array', items: { type: 'object', additionalProperties: false,
-            required: ['email', 'kind', 'internal'], properties: { email: { type: 'string' },
-              name: { type: ['string', 'null'] }, kind: { enum: ['to', 'cc'] }, internal: { type: 'boolean' } } } },
-        } },
-      email_context: { type: 'object', additionalProperties: false,
-        required: ['subject', 'conversation_id', 'sender', 'recipients'], properties: {
+          source_activity_id: { type: 'string', format: 'uuid' },
           subject: { type: 'string' }, conversation_id: { type: ['string', 'null'] },
           sender: { type: 'object', additionalProperties: false, required: ['email', 'internal'],
             properties: { email: { type: 'string' }, name: { type: ['string', 'null'] }, internal: { type: 'boolean' } } },
@@ -6992,15 +6999,7 @@ export const TOOLS = {
       // record this loop exists to stop creating. Resolution happens twice on the happy
       // path (here to validate, again inside mirrorDecision to write); that is a couple
       // of indexed reads against correctness, which is not a trade worth making.
-      const aboutRefs = args.about
-        ? (Array.isArray(args.about) ? args.about : [args.about]).map(r => String(r || "").trim()).filter(Boolean)
-        : [];
-      for (const ref of aboutRefs) {
-        if (/^WR-/i.test(ref))
-          throw new ToolError({ error: "unsupported_decision_about", field: "about", ref,
-            hint: "Work Request refs are not supported in about. Use a lead, client, vendor, party or deal ref. For a system-wide ruling, omit about and name the Work Request in the rationale." });
-        await resolveSubject(c, ref);
-      }
+      const aboutRefs = await resolveDecisionAbout(c, actor, args.about);
 
       // [idea 68, 0085] BOTH HALVES OF A PRICE OR NEITHER. A cost with no
       // quality number is a complaint and a quality number with no cost is a
@@ -7118,6 +7117,8 @@ export const TOOLS = {
           where subject_id = $1 and verb = 'log-decision' limit 1`, [decisionId])).rows[0];
       if (!cur) throw new ToolError({ error: "decision_not_found", decision_id: args.decision_id,
         hint: "pass the decision_id log-decision returned, not the event_id" });
+
+      await resolveDecisionAbout(c, actor, args.about);
 
       const nv = cur.new_value || {};
       const quote = args.human_quote !== undefined ? args.human_quote : cur.human_quote;

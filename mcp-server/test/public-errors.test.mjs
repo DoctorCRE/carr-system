@@ -1,7 +1,7 @@
 // Tests public error projection and internal diagnostic handling.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dispatch } from "../src/mcp.js";
+import { dispatch } from "./helpers/budgeted-dispatch.mjs";
 import { ToolError, coerceArgsToSchema, pgConstraintError, TOOLS } from "../src/tools.js";
 import { Pool } from "@neondatabase/serverless";
 
@@ -65,6 +65,9 @@ for (const [code, extra] of [
   ["invalid_completion", {}], ["missing_criterion_evidence", {}], ["missing_change_ref", {}],
   ["missing_user_journey_ref", {}], ["completion_capsule_refused", {}], ["sponsored_actor_required", {}],
   ["memory_attach_required", {}], ["memory_read_only", {}],
+  ["decision_id_required", { field: "decision_id" }], ["decision_id_malformed", { field: "decision_id", got: privateText }],
+  ["decision_not_found", { field: "decision_id", got: "00000000" }],
+  ["ambiguous_decision_id", { field: "decision_id", got: "0", candidates: [{ decision_id: privateText, title: privateText }] }],
 ]) test(`MCP preserves the public ${code} contract`, async t => {
   const payload = await failure(t, new ToolError({ error: code, ...extra,
     detail: privateText, hint: privateText, nested: { stack: privateText } }));

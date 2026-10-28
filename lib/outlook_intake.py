@@ -84,7 +84,7 @@ import tempfile
 from typing import Callable
 import uuid
 
-from lib import model_call
+from lib import email_links, model_call
 from lib.outlook_settings import load_settings, OutlookSettings
 OUT = Path('out/outlook-intake')
 REFRESH_LIST = 'needs-refresh.json'
@@ -198,6 +198,12 @@ class Outcome:
     state: str
     reason: str
     counts: dict = field(default_factory=dict)
+
+
+def receipt_line(outcome: Outcome) -> str:
+    """The machine receipt bin/run-scheduled.sh validates and records."""
+    reason = 'full_disk_access_required' if outcome.reason.startswith('grant Full Disk Access') else outcome.reason
+    return 'outlook-intake-receipt ' + json.dumps({'state': outcome.state, 'reason': reason, 'counts': outcome.counts})
 
 
 def status_line(outcome: Outcome) -> str:
@@ -635,6 +641,10 @@ class Run:
             if args['idempotency_key'] in self.attempted:
                 return False
             self.attempted.add(args['idempotency_key'])
+            if request.get('disposition') == 'blocked' and verb == 'log-activity' and args.get('summary') == 'Links from matched email':
+                request.update(acknowledged=True, disposition='refused', retry_at=None)
+                _save(self.out, self.state)
+                return True
             if request.get('disposition') == 'blocked':
                 self.counts['requests_blocked'] += 1
                 return False
@@ -648,12 +658,11 @@ class Run:
                 if not isinstance(reply, dict) or reply.get('ok') is not True:
                     raise CarrError(code=_reply_error(reply) if isinstance(reply, dict) else 'reply_unreadable')
             except CarrError as error:
-                if verb == 'propose-email-lead' and error.code in BLOCKED_ERRORS:
-                    # A queue refusal is a fact about this sender, not a failed run: never replay it.
+                if (verb == 'propose-email-lead' or (verb == 'log-activity' and args.get('summary') == 'Links from matched email')) and error.code in BLOCKED_ERRORS:
                     request.update(acknowledged=True, disposition='refused', outcome='refused',
                                    retry_at=None, error_code=error.code)
                     _save(self.out, self.state)
-                    self.written.append((who, 'claim card', verb, 'refused'))
+                    self.written.append((who, args.get('ref', 'claim card'), verb, 'refused'))
                     return True
                 if verb == 'set-next-action' and error.code == 'next_action_conflict':
                     request.update(acknowledged=True, disposition='superseded', retry_at=None,
@@ -672,6 +681,8 @@ class Run:
                 request['next_action_id'] = reply.get('next_action_id')
             if verb == 'propose-email-lead':
                 request['outcome'] = 'proposed' if reply.get('proposed') is True else str(reply.get('reason'))
+            if verb == 'log-activity':
+                request['activity_id'] = reply.get('activity_id')
             request.update(acknowledged=True, disposition='acknowledged', retry_at=None, error_code=None)
             _save(self.out, self.state)
         self.written.append((who, args.get('ref', 'claim card'), verb, note))
@@ -795,6 +806,34 @@ class Run:
                 done.setdefault(m['ck'], []).append(m['sent_unix'])
             if not m['full']:
                 self.counts['preview_only'] += 1
+
+    def file_links(self) -> bool:
+        """Use server-confirmed filing, including matches made after local intake finished."""
+        queue = self.ports.carr('email-router-queue', {
+            'purpose': 'links', 'limit': 200,
+            **({'after': self.state['links_cursor']} if self.state.get('links_cursor') else {})})
+        self.counts['links_filed'] = 0
+        pending_sources = {self.state.get('requests', {}).get(self.activity_key(ref, ident), {}).get('activity_id')
+                           for ident, pending in self.state.get('pending_full', {}).items()
+                           for ref in pending['refs']}
+        for mail in queue.get('emails', []):
+            if not mail.get('deal') or mail['activity_id'] in pending_sources:
+                continue
+            links = sorted(email_links.extract_links(mail.get('body') or ''))
+            if not links:
+                continue
+            request_key = key('log-activity', 'email-links', json.dumps([mail['activity_id'], mail['deal']]))
+            acknowledged = self.state.get('requests', {}).get(request_key, {}).get('acknowledged')
+            if self.write('log-activity', {
+                'idempotency_key': request_key,
+                'ref': mail['deal'], 'kind': 'note', 'summary': 'Links from matched email',
+                'detail': '\n'.join(f'{kind}: {url}' for kind, url in links),
+                'occurred_at': mail['occurred_at']}, 'matched email', 'email links') and not acknowledged and self.state['requests'][request_key].get('disposition') == 'acknowledged':
+                self.counts['links_filed'] += 1
+        if any(self.counts[k] for k in ('writes_failed', 'writes_deferred', 'requests_blocked')):
+            return False
+        self.state['links_cursor'] = queue.get('next_cursor')
+        return True
 
     def prepare_attachments(self, mails: list[dict], matcher: Matcher, db: Path, files: Path) -> list[tuple[str, dict, dict, bytes]]:
         from lib import outlook_attachments as att
@@ -990,6 +1029,10 @@ class Run:
             ok = all([self.write('log-activity', {
                 'idempotency_key': self.activity_key(ref, f'fullbody|{ident}'), 'ref': ref, 'kind': 'note',
                 'summary': f'Full text of email: {m["subject"] or "(no subject)"}', 'detail': m['text'],
+                **({'email_context': {**email_context(m, self.settings.internal_domain),
+                                      'source_activity_id': source}}
+                   if (source := self.state.get('requests', {}).get(self.activity_key(ref, ident), {}).get('activity_id'))
+                   else {}),
                 'occurred_at': _iso(p['sent'])}, p['sender_email'], 'full text follow-up') for ref in p['refs']])
             if ok:
                 self.counts['full_text_notes'] += 1
@@ -1308,7 +1351,26 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
         try:
             for stale in out.glob(WORK_PREFIX + '*'):
                 _remove(stale)
-            return _run(out, home, ports)
+            outcome = _run(out, home, ports)
+            if outcome.state != 'succeeded':
+                return outcome
+            state = json.loads((out / STATE).read_text())
+            work = Run(ports, state, ports.now(), out, settings)
+            try:
+                linked = work.file_links()
+            except CarrError:
+                return Outcome('failed', 'email_links_read_failed', outcome.counts)
+            for name, count in work.counts.items():
+                outcome.counts[name] = outcome.counts.get(name, 0) + count
+            for code in ERROR_CODES:
+                outcome.counts['error_' + code] = sum(
+                    not r['acknowledged'] and r.get('error_code') == code for r in state.get('requests', {}).values())
+            _save(out, state)
+            if not linked:
+                return Outcome('failed', 'email_links_pending', outcome.counts)
+            if work.counts['links_filed']:
+                outcome.reason = 'processed'
+            return outcome
         except CleanupError:
             return Outcome('failed', 'cleanup_failed')
     finally:
@@ -1552,8 +1614,7 @@ def main() -> int:
                   lead_intent=lambda mail, today: ask_lead_intent(mail, today, settings.model))
     outcome = run(repo, home, ports)
     print(status_line(outcome))
-    reason = 'full_disk_access_required' if outcome.reason.startswith('grant Full Disk Access') else outcome.reason
-    print('outlook-intake-receipt ' + json.dumps({'state': outcome.state, 'reason': reason, 'counts': outcome.counts}))
+    print(receipt_line(outcome))
     if outcome.reason not in ('outside_window', 'previous_run_active'):
         try:
             from lib import email_router

@@ -122,6 +122,8 @@ class ScheduledRunTests(unittest.TestCase):
             {"state": "failed", "reason": ["SYNTHETIC_PRIVATE_REASON"], "counts": {}},
             {"state": "succeeded", "reason": "processed", "counts": {}},
             {"state": "failed", "reason": "writes_failed", "counts": {"SYNTHETIC_PRIVATE_KEY": 1}},
+            {"state": "failed", "reason": "writes_failed", "counts": {"SYNTHETIC_PRIVATE@example.test".lower(): 1}},
+            {"state": "failed", "reason": "writes_failed", "counts": {"synthetic_private_" + "x" * 60: 1}},
             {"state": "failed", "reason": "writes_failed", "counts": {"writes_failed": "SYNTHETIC_PRIVATE_VALUE"}},
             {"state": "failed", "reason": "writes_failed", "counts": {"writes_failed": True}},
             {"state": "failed", "reason": "writes_failed", "counts": {"writes_failed": -1}},

@@ -1,7 +1,8 @@
 // Test Doc tool discovery, authorization, and input restrictions.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dispatch, allowedIn, profileForActor, mcpApiHandler, callTool } from "../src/mcp.js";
+import { allowedIn, profileForActor, mcpApiHandler, callTool } from "../src/mcp.js";
+import { dispatch } from "./helpers/budgeted-dispatch.mjs";
 import { TOOLS } from "../src/tools.js";
 import { authenticatedIdentity } from "../src/identity.js";
 import { Pool } from "@neondatabase/serverless";

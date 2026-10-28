@@ -2,7 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { neonConfig, Pool } from '@neondatabase/serverless';
-import { callTool, dispatch } from '../src/mcp.js';
+import { callTool } from "../src/mcp.js";
+import { dispatch } from "./helpers/budgeted-dispatch.mjs";
 import { authenticatedIdentity } from '../src/identity.js';
 
 const env = { DATABASE_URL_READER: 'postgres://fixture@synthetic.invalid/fixture',

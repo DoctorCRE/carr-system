@@ -108,6 +108,17 @@ class LeakGuardTest(unittest.TestCase):
         for value in values:
             self.assertNotIn(value, result.stdout + result.stderr)
 
+    def test_range_scans_commits_already_pushed_to_origin(self):
+        base = self.write_commit('sample.txt', 'safe\n')
+        address = '843' + ' Imaginary Avenue'
+        head = self.write_commit('sample.txt', address + '\nreader@example.test\n')
+        self.git('remote', 'add', 'origin', str(self.receiver('range')))
+        self.git('push', '-q', 'origin', 'HEAD:refs/heads/feature')
+        result = self.run_guard('--range', base + '..' + head, '--generic-only')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('sample.txt:1 pii-address', result.stdout)
+        self.assertNotIn(address, result.stdout + result.stderr)
+
     def test_removed_secret_still_blocks_range_and_pre_push(self):
         (self.root / 'sample.txt').write_text('safe\n')
         subprocess.run(['git', '-C', str(self.root), 'add', 'sample.txt'], check=True)
@@ -156,7 +167,8 @@ class LeakGuardTest(unittest.TestCase):
         self.git('push', '-q', 'origin', 'main', before_merge + ':refs/heads/feature')
         # ops/ci.sh check_secret runs this when CARR_CI_RANGE is set outside a pull request.
         result = self.run_guard('--range', before_merge + '..' + head, '--generic-only')
-        self.assertEqual(result.returncode, 0, 'ci.sh pre-push range: ' + result.stdout + result.stderr)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('main-side.txt:1', result.stdout)
         hook = subprocess.run(['python3', str(SCRIPT), '--root', str(self.root), '--pre-push', '--generic-only'],
                               input=refs, env=self.env, capture_output=True, text=True)
         self.assertEqual(hook.returncode, 0, hook.stdout + hook.stderr)

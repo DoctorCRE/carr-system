@@ -16,7 +16,9 @@ import sys
 import tempfile
 import unittest
 import uuid
+from urllib.parse import quote
 from unittest.mock import patch
+from contextlib import closing
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -27,6 +29,7 @@ from lib.outlook_settings import load_settings
 from outlook_test_support import write_settings
 
 NOW = datetime(2026, 10, 20, 15, 0, tzinfo=timezone.utc)
+REAL_RUN = subprocess.run  # IntakeTest patches subprocess.run for the store copy
 SCHEMA = """
 CREATE TABLE messages (id INTEGER PRIMARY KEY, block INTEGER, sender TEXT, sender_name TEXT,
   recipients TEXT, subject TEXT, message_id TEXT, body TEXT, html TEXT, body_words INTEGER,
@@ -107,6 +110,8 @@ class Fake:
     def __init__(self, test):
         self.test = test
         self.calls = []
+        self.email_queue = []
+        self.hydrated_bodies = {}
         self.model_calls = []
         self.decodes = 0
         self.fixture = None
@@ -132,6 +137,17 @@ class Fake:
         self.calls.append((verb, args))
         if verb in self.fail_verbs:
             raise intake.CarrError()
+        if verb == 'email-router-queue':
+            rows = sorted([m for m in self.email_queue if m['activity_id'] > args.get('after', '')],
+                          key=lambda m: m['activity_id'])
+            page = [{**m, 'body': self.hydrated_bodies.get(m['activity_id'], m.get('body'))}
+                    for m in rows[:args['limit']]]
+            return {'emails': page, 'next_cursor': page[-1]['activity_id'] if len(rows) > len(page) else None}
+        if verb == 'log-activity':
+            source = args.get('email_context', {}).get('source_activity_id')
+            if source:
+                self.hydrated_bodies[source] = args['detail']
+            return {'ok': True, 'activity_id': str(uuid.uuid5(uuid.NAMESPACE_URL, args['idempotency_key']))}
         if verb == 'find':
             return {'parties': self.parties.get(args['query'], []), 'deals': []}
         if verb == 'catch-me-up':
@@ -260,6 +276,178 @@ class IntakeTest(unittest.TestCase):
 
     def report_text(self):
         return '\n'.join(p.read_text() for p in sorted(self.out().glob('report-*.md')))
+
+    def test_confirmed_email_links_attach_once_to_existing_deal(self):
+        urls = ['https://www.loopnet.com/Listing/123', 'https://www.crexi.com/properties/456',
+                'https://docs.google.com/document/d/synthetic',
+                'https://drive.google.com/drive/folders/synthetic']
+        wrapped = ['https://example.safelinks.protection.outlook.com/?url=' + quote(url, safe='')
+                   for url in urls]
+        self.fake.email_queue = [{'activity_id': 'email-1', 'deal': 'synthetic-deal',
+                                 'body': ' '.join(wrapped), 'occurred_at': NOW.isoformat()}]
+        self.assertEqual(self.run_intake().state, 'succeeded')
+        writes = self.fake.writes('log-activity')
+        self.assertEqual(len(writes), 1)
+        payload = writes[0][1]
+        self.assertEqual(payload['ref'], 'synthetic-deal')
+        self.assertEqual(payload['kind'], 'note')
+        self.assertEqual(payload['detail'], '\n'.join([
+            'document: ' + urls[2], 'listing: ' + urls[1],
+            'listing: ' + urls[0], 'shared_folder: ' + urls[3]]))
+        self.assertEqual(self.run_intake(touch=False).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+
+    def test_unfiled_email_links_remain_unattached_until_confirmed(self):
+        self.fake.email_queue = [{'activity_id': 'email-2', 'deal': None,
+                                 'body': 'https://loopnet.com/Listing/789',
+                                 'occurred_at': (NOW - timedelta(days=30)).isoformat()}]
+        self.assertEqual(self.run_intake().state, 'succeeded')
+        self.assertEqual(self.fake.writes('log-activity'), [])
+        self.fake.email_queue[0]['deal'] = 'confirmed-deal'
+        self.assertEqual(self.run_intake(touch=False).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+        self.assertEqual(self.fake.writes('log-activity')[0][1]['ref'], 'confirmed-deal')
+
+    def test_reordered_links_replay_identically_after_local_state_expires(self):
+        first = 'https://loopnet.com/Listing/123'
+        second = 'https://crexi.com/properties/456'
+        self.fake.email_queue = [{'activity_id': 'email-4', 'deal': 'confirmed-deal',
+                                 'body': first + ' ' + second, 'occurred_at': NOW.isoformat()}]
+        records = {}
+        original = self.fake.carr
+
+        def carr(verb, args):
+            if verb == 'log-activity':
+                prior = records.setdefault(args['idempotency_key'], dict(args))
+                if prior != args:
+                    raise intake.CarrError(code='key_reuse')
+            return original(verb, args)
+
+        self.fake.carr = carr
+        self.assertEqual(self.run_intake().state, 'succeeded')
+        shutil.rmtree(self.out())
+        self.fake.email_queue[0]['body'] = second + ' ' + first
+        self.assertEqual(self.run_intake(touch=False).state, 'succeeded')
+        self.assertEqual(len(records), 1)
+
+    def test_preview_links_wait_for_full_body(self):
+        preview = mail('pat@example.test', -timedelta(hours=1), body='https://loopnet.com/Listing/12',
+                       kind='preview', copy_key='preview-links')
+        self.assertEqual(self.run_intake([preview]).state, 'succeeded')
+        original = self.fake.writes('log-activity')[0][1]
+        source = str(uuid.uuid5(uuid.NAMESPACE_URL, original['idempotency_key']))
+        self.fake.email_queue = [{'activity_id': source, 'deal': 'confirmed-deal',
+                                 'body': preview['body'], 'occurred_at': NOW.isoformat()}]
+        self.assertEqual(self.run_intake([preview], touch=False).state, 'succeeded')
+        self.assertEqual([a for _, a in self.fake.writes('log-activity') if a['summary'] == 'Links from matched email'], [])
+        full = {**preview, 'body_kind': 'full', 'body': 'https://loopnet.com/Listing/123-Main https://crexi.com/properties/1'}
+        self.assertEqual(self.run_intake([full]).state, 'succeeded')
+        notes = [a for _, a in self.fake.writes('log-activity') if a['summary'] == 'Links from matched email']
+        self.assertEqual(len(notes), 1)
+        self.assertIn('123-Main', notes[0]['detail'])
+        self.assertIn('crexi.com', notes[0]['detail'])
+
+    def test_link_key_is_shared_across_intake_owners(self):
+        self.fake.email_queue = [{'activity_id': 'email-shared', 'deal': 'confirmed-deal',
+                                 'body': 'https://loopnet.com/Listing/123', 'occurred_at': NOW.isoformat()}]
+        self.assertEqual(self.run_intake().state, 'succeeded')
+        first = self.fake.writes('log-activity')[-1][1]['idempotency_key']
+        shutil.rmtree(self.out())
+        write_settings(self.home, self.repo, owner='dell')
+        self.assertEqual(self.run_intake().state, 'succeeded')
+        second = self.fake.writes('log-activity')[-1][1]['idempotency_key']
+        self.assertEqual(first, second)
+
+    def test_refiled_email_gets_a_link_note_for_each_deal(self):
+        self.fake.email_queue = [{'activity_id': 'email-refiled', 'deal': 'deal-one',
+                                 'body': 'https://loopnet.com/Listing/123', 'occurred_at': NOW.isoformat()}]
+        self.assertEqual(self.run_intake().state, 'succeeded')
+        self.fake.email_queue[0]['deal'] = 'deal-two'
+        self.assertEqual(self.run_intake(touch=False).state, 'succeeded')
+        notes = [a for _, a in self.fake.writes('log-activity') if a['summary'] == 'Links from matched email']
+        self.assertEqual([a['ref'] for a in notes], ['deal-one', 'deal-two'])
+        self.assertNotEqual(notes[0]['idempotency_key'], notes[1]['idempotency_key'])
+
+    def test_refused_link_does_not_block_later_intake(self):
+        self.fake.email_queue = [{'activity_id': 'email-refused', 'deal': 'deal-one',
+                                 'body': 'https://loopnet.com/Listing/123', 'occurred_at': NOW.isoformat()},
+                                {'activity_id': 'email-valid', 'deal': 'deal-two',
+                                 'body': 'https://crexi.com/properties/456', 'occurred_at': NOW.isoformat()}]
+        original = self.fake.carr
+        def carr(verb, args):
+            if verb == 'log-activity' and args.get('ref') == 'deal-one':
+                raise intake.CarrError(code='key_reuse')
+            return original(verb, args)
+        self.fake.carr = carr
+        self.assertEqual(self.run_intake().state, 'succeeded')
+        self.assertEqual(self.run_intake(touch=False).state, 'succeeded')
+        self.assertEqual([a['ref'] for _, a in self.fake.writes('log-activity')], ['deal-two'])
+
+    def test_hydrated_links_follow_original_confirmed_email(self):
+        preview = mail('pat@example.test', -timedelta(hours=1), body='Still loading the full message',
+                       kind='preview', copy_key='hydration-fixture')
+        self.assertEqual(self.run_intake([preview]).state, 'succeeded')
+        original = self.fake.writes('log-activity')[0][1]
+        source = str(uuid.uuid5(uuid.NAMESPACE_URL, original['idempotency_key']))
+        self.fake.email_queue = [{'activity_id': source, 'deal': 'confirmed-deal',
+                                 'body': preview['body'], 'occurred_at': NOW.isoformat()}]
+        listing = 'https://loopnet.com/Listing/123'
+        full = {**preview, 'body_kind': 'full',
+                'body': 'https://example.safelinks.protection.outlook.com/?url=' + quote(listing, safe='')}
+        self.assertEqual(self.run_intake([full]).state, 'succeeded')
+        notes = [a for _, a in self.fake.writes('log-activity') if a['summary'] == 'Links from matched email']
+        self.assertEqual(len(notes), 1)
+        self.assertEqual((notes[0]['ref'], notes[0]['detail']), ('confirmed-deal', 'listing: ' + listing))
+        self.assertEqual(self.fake.hydrated_bodies, {source: full['body']})
+        self.assertEqual(self.run_intake([full], touch=False).state, 'succeeded')
+        self.assertEqual(len([a for _, a in self.fake.writes('log-activity')
+                              if a['summary'] == 'Links from matched email']), 1)
+
+    def test_link_write_replays_after_lost_acknowledgement(self):
+        self.fake.email_queue = [{'activity_id': 'email-3', 'deal': 'synthetic-deal',
+                                 'body': 'https://loopnet.com/Listing/123',
+                                 'occurred_at': NOW.isoformat()}]
+        recorded = {}
+        original = self.fake.carr
+
+        def carr(verb, args):
+            reply = original(verb, args)
+            if verb == 'log-activity':
+                first = args['idempotency_key'] not in recorded
+                recorded.setdefault(args['idempotency_key'], dict(args))
+                if first:
+                    raise intake.CarrError(code='timeout')
+            return reply
+
+        self.fake.carr = carr
+        failed = self.run_intake()
+        self.assertEqual(failed.state, 'failed')
+        self.assertEqual(failed.counts['writes_failed'], 1)
+        self.assertEqual(failed.counts['error_timeout'], 1)
+        self.fake.now += timedelta(minutes=2)
+        self.assertEqual(self.run_intake(touch=False).state, 'succeeded')
+        attempts = self.fake.writes('log-activity')
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(attempts[0], attempts[1])
+        self.assertEqual(len(recorded), 1)
+        self.assertEqual(self.run_intake(touch=False).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 2)
+
+    def test_link_queue_progress_survives_restart_and_revisits_completed_scan(self):
+        self.fake.email_queue = [
+            {'activity_id': f'unfiled-{i}', 'deal': None, 'body': 'https://loopnet.com/Listing/1'}
+            for i in range(200)]
+        self.fake.email_queue.append({'activity_id': 'z-filed-201', 'deal': 'synthetic-deal',
+                                     'body': 'https://loopnet.com/Listing/123',
+                                     'occurred_at': NOW.isoformat()})
+        self.assertEqual(self.run_intake().state, 'succeeded')
+        self.assertEqual(self.fake.writes('log-activity'), [])
+        self.assertEqual(self.run_intake(touch=False).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+        self.assertEqual(self.fake.writes('log-activity')[0][1]['ref'], 'synthetic-deal')
+        self.fake.email_queue[0].update(deal='later-confirmed', occurred_at=NOW.isoformat())
+        self.assertEqual(self.run_intake(touch=False).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 2)
 
     def attachment_fixture(self, *, sender='pat@example.test', folders=('Inbox/Active Deals/Synthetic Deal',)):
         write_db(self.fake.fixture, [mail(sender, -timedelta(hours=1))])
@@ -504,6 +692,47 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(result.counts['mail_other_accounts'], 1)
         [(_, activity)] = self.fake.writes('log-activity')
         self.assertEqual(activity['summary'], 'Email from lee@example.test: Configured mailbox')
+
+    def scheduled(self, outcome):
+        """Feed the intake's own receipt line through bin/run-scheduled.sh and return the spool row."""
+        root = self.tmp / f'scheduler-{outcome.state}'
+        for name in ('bin/run-scheduled.sh', 'tools/ops-spool.py'):
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / name, root / name)
+        (root / '.venv/bin').mkdir(parents=True)
+        (root / '.venv/bin/python').symlink_to(sys.executable)
+        child = root / 'child.py'
+        child.write_text(f'import sys\nprint({intake.receipt_line(outcome)!r})\nsys.exit({intake.EXIT[outcome.state]})\n')
+        spool = root / 'out/run-spool.sqlite3'
+        done = REAL_RUN(['/bin/zsh', str(root / 'bin/run-scheduled.sh'), 'outlook-intake', 'outlook.intake',
+                         sys.executable, str(child)], cwd=root, text=True, capture_output=True, timeout=15,
+                        env={'HOME': str(root), 'PATH': os.environ['PATH'], 'CARR_RUN_SPOOL_DB': str(spool)})
+        self.assertEqual(done.returncode, intake.EXIT[outcome.state])
+        with closing(sqlite3.connect(spool)) as connection:
+            [(state, argv)] = connection.execute('select state, argv from spool').fetchall()
+        args = json.loads(argv)
+        return state, args[args.index('--detail') + 1], args
+
+    def test_scheduler_accepts_receipts_built_by_the_real_intake(self):
+        mails = [mail('pat@example.test', -timedelta(hours=1)),
+                 mail('stranger@example.test', -timedelta(minutes=50), subject='New inquiry'),
+                 mail('noreply@example.test', -timedelta(minutes=40), subject='Automated notice'),
+                 mail('lee@example.test', -timedelta(minutes=30), subject='Foreign', recipients='personal@example.test')]
+        succeeded = self.run_intake(mails)
+        self.fake.fail_verbs.add('log-activity')
+        self.fake.now += timedelta(minutes=30)
+        failed = self.run_intake([*mails, mail('pat@example.test', -timedelta(minutes=5), subject='Follow-up')])
+        self.assertEqual((succeeded.state, failed.state), ('succeeded', 'failed'))
+        for outcome in (succeeded, failed):
+            with self.subTest(state=outcome.state):
+                for key in ('skipped_automated', 'mail_other_accounts', 'lead_proposed', 'lead_refused'):
+                    self.assertIn(key, outcome.counts)
+                state, detail, args = self.scheduled(outcome)
+                self.assertEqual(state, outcome.state)
+                self.assertNotRegex(detail, r'^outlook\.intake exited', 'the scheduler rejected a real receipt')
+                self.assertEqual(json.loads(detail), json.loads(intake.receipt_line(outcome).split(' ', 1)[1]))
+                if outcome.state == 'failed':
+                    self.assertEqual(args[args.index('--failure-class') + 1], outcome.reason)
 
     def test_receipt_counts_header_exclusions_without_claiming_mail_was_processed(self):
         excluded = [mail('lee@example.test', -timedelta(hours=1),
@@ -985,19 +1214,19 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(result.state, 'succeeded')
         self.assertEqual(len(self.fake.writes()), before, 'each email is handled once')
 
-    def test_an_unchanged_store_is_neither_copied_nor_decoded_and_calls_nothing(self):
+    def test_unchanged_store_checks_confirmed_filing_without_decoding(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         calls, decodes, models = len(self.fake.calls), self.fake.decodes, len(self.fake.model_calls)
         result = self.run_intake(touch=False)
         self.assertEqual((result.state, result.reason), ('succeeded', 'store_unchanged'))
         self.assertEqual(self.fake.decodes, decodes, 'no copy or decode')
-        self.assertEqual(len(self.fake.calls), calls, 'no record-layer call')
+        self.assertEqual([verb for verb, _ in self.fake.calls[calls:]], ['email-router-queue'])
         self.assertEqual(len(self.fake.model_calls), models, 'no model call')
 
-    def test_a_changed_store_with_nothing_new_is_a_quiet_success_with_no_calls(self):
+    def test_changed_store_with_nothing_new_only_checks_confirmed_filing(self):
         result = self.run_intake([mail('pat@example.test', -timedelta(days=5))])
         self.assertEqual((result.state, result.reason), ('succeeded', 'nothing_new'))
-        self.assertEqual(self.fake.calls, [])
+        self.assertEqual([verb for verb, _ in self.fake.calls], ['email-router-queue'])
         self.assertEqual(self.fake.model_calls, [])
 
     def test_first_run_backfills_48_hours_only(self):
@@ -1891,7 +2120,7 @@ class IntakeTest(unittest.TestCase):
                  mail('mailer-daemon@relay.test', -timedelta(hours=1), subject='Undeliverable')]
         result = self.run_intake(mails)
         self.assertEqual(result.state, 'succeeded')
-        self.assertEqual(self.fake.calls, [])
+        self.assertEqual([verb for verb, _ in self.fake.calls], ['email-router-queue'])
         self.assertEqual(self.fake.intent_calls, [])
         self.assertEqual(result.counts['skipped_automated'], 3)
         self.assertEqual(result.counts['unresolved_messages'], 0)
@@ -1899,7 +2128,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(result.counts['unmatched'], 0)
         self.assertNotIn('vendor.test', self.report_text())
         result = self.run_intake(mails)
-        self.assertEqual(self.fake.calls, [])
+        self.assertEqual([verb for verb, _ in self.fake.calls], ['email-router-queue', 'email-router-queue'])
         self.assertEqual(result.counts['skipped_automated'], 3, 'a count of retained mail, not per run')
 
     def test_role_and_human_senders_are_never_skipped_as_machines(self):
