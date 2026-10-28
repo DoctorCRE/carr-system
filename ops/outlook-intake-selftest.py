@@ -1432,7 +1432,8 @@ class IntakeTest(unittest.TestCase):
         self.seed_legacy_mail_keys(original, ['9100', '9101'])
         reply = {**original, 'subject': 'Re: Suite review', 'local_keys': '9101'}
         result = self.run_intake([reply])
-        self.assertEqual((result.state, result.reason), ('failed', 'decode_failed'))
+        self.assertEqual((result.state, result.reason), ('succeeded', 'processed'))
+        self.assertEqual(result.counts['legacy_merged_suppressed'], 1)
         self.assertEqual([args['email_context']['subject']
                           for _, args in self.fake.writes('log-activity')], ['Suite review'])
         self.assertEqual(self.mail_keys()[ident(original)], ['9100', '9101'])
@@ -1451,15 +1452,30 @@ class IntakeTest(unittest.TestCase):
         notes = [args for _, args in self.fake.writes('log-activity') if args['kind'] == 'note']
         self.assertEqual(notes, [])
 
-    def test_ambiguous_legacy_key_binding_refuses_new_writes(self):
+    def test_legacy_merged_receipt_suppresses_overlaps_and_files_new_mail(self):
         original = mail('pat@example.test', -timedelta(hours=2), subject='Suite review',
                         copy_key='normalized-suite-review')
         self.run_intake([original])
         self.seed_legacy_mail_keys(original, ['9100', '9101'])
+        new = mail('lee@example.test', -timedelta(hours=1), subject='New matter', local_keys='9200')
+        rows = [{**original, 'local_keys': '9100'},
+                {**original, 'local_keys': '9101', 'subject': 'Re: Suite review'}, new]
+        for _ in range(2):
+            result = self.run_intake(rows)
+            self.assertEqual(result.state, 'succeeded')
+            self.assertEqual(result.counts['legacy_merged_suppressed'], 2)
+        self.assertEqual([args['email_context']['subject']
+                          for _, args in self.fake.writes('log-activity')], ['Suite review', 'New matter'])
+
+    def test_decoder_merged_receipt_suppresses_later_split_rows(self):
+        original = mail('pat@example.test', -timedelta(hours=2), local_keys='9100,9101')
+        self.run_intake([original])
+        new = mail('lee@example.test', -timedelta(hours=1), subject='New matter', local_keys='9200')
         result = self.run_intake([{**original, 'local_keys': '9100'},
-                                  {**original, 'local_keys': '9101', 'subject': 'Re: Suite review'}])
-        self.assertEqual((result.state, result.reason), ('failed', 'decode_failed'))
-        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+                                  {**original, 'local_keys': '9101', 'subject': 'Re: Suite question'}, new])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['legacy_merged_suppressed'], 2)
+        self.assertEqual(len(self.fake.writes('log-activity')), 2)
 
     def test_existing_preview_hydrates_from_its_keyed_row(self):
         original = mail('pat@example.test', -timedelta(hours=2), subject='Suite review',
