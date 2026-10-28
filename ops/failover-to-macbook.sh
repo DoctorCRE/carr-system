@@ -1,5 +1,0 @@
-#!/bin/bash
-# Launch the MacBook failover takeover.
-set -euo pipefail
-TASK_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-exec "${TASK_ROOT}/.venv/bin/python" "${TASK_ROOT}/ops/studio-failover.py" takeover --target macbook "$@"
