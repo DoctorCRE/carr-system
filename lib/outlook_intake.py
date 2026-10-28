@@ -1190,7 +1190,10 @@ class Run:
         oldest = self.now.timestamp() - UNRESOLVED_DAYS.total_seconds()
         for e in events:
             candidate = _hash(json.dumps(e, sort_keys=True))
-            evidence[candidate] = {'status': 'unsupported', 'reason': 'hxstore_lifecycle_unverified',
+            # Only a lifecycle the decoder proves leaves 'unsupported'; it is reported, not acted on.
+            canceled = e.get('lifecycle_status') == 'canceled'
+            evidence[candidate] = {'status': 'canceled' if canceled else 'unsupported',
+                                   'reason': e['lifecycle_reason'] if canceled else 'hxstore_lifecycle_unverified',
                                    'evidence': 'provisional_schedule',
                                    'start_unix': e['start_unix'], 'end_unix': e['end_unix']}
             people = [(email, name) for name, email in e['attendees'] if email and not _internal(email, self.settings.internal_domain)]
@@ -1309,7 +1312,9 @@ def _prune(state: dict, now: datetime) -> None:
 
 
 def calendar_counts(state: dict) -> dict:
-    return {'calendar_lifecycle_unsupported': len(state.get('calendar_evidence', {})),
+    statuses = [e.get('status') for e in state.get('calendar_evidence', {}).values()]
+    return {'calendar_lifecycle_unsupported': statuses.count('unsupported'),
+            'calendar_lifecycle_canceled': statuses.count('canceled'),
             'calendar_requests_quarantined': sum(r.get('disposition') == 'calendar_unsupported'
                                                  for r in state.get('requests', {}).values())}
 

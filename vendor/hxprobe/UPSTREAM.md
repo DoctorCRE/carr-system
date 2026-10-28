@@ -34,8 +34,10 @@ WHAT CARR ADDS to `hxprobe db <file> [out.db] [files-dir]`:
 - Calendar events (`src/calendar.rs`) in `events` and `event_attendees`: GOID,
   start and end, subject, location, organizer and attendees. Byte-distinct
   candidates remain separate; only exact serialized copies collapse. GOID and
-  start are observed grouping fields. Every row exports unsupported lifecycle
-  status. Current occurrence state and attendance remain unverified. An item
+  start are observed grouping fields. A row is `canceled` when Outlook stored
+  its cancellation subject and `unsupported` otherwise; `recurrence` marks
+  occurrences, and attendees carry raw kind and response codes. Current
+  occurrence state and attendance remain unverified. An item
   with no attendee block (an own appointment, some recurring series) decodes
   with no attendees; on the 2026-10-21 study copies that took decoded GOID/start
   groups from 169 to all 191, including the TEST account's new appointment. See
@@ -171,11 +173,26 @@ candidates instead of merging the longest body and largest attendee list.
 Exact byte copies collapse only inside this decode. GOID and start remain
 observed schedule grouping fields, not an authoritative occurrence identity.
 
-Every exported candidate has `lifecycle_status=unsupported` and
-`lifecycle_reason=hxstore_lifecycle_unverified`. The meta field
-`calendar_lifecycle_unsupported` counts those candidates. The decoder does not
-establish cancellation, deletion, revision order, recurrence exception identity,
-attendee response semantics, current schedule state, or attendance. Candidate
+A candidate whose first subject copy is the subject prefixed `Canceled: ` or
+`Cancelled: ` exports `lifecycle_status=canceled` and
+`lifecycle_reason=outlook_canceled_subject` (WR-000440). Every other candidate
+has `lifecycle_status=unsupported` and
+`lifecycle_reason=hxstore_lifecycle_unverified`. The meta fields
+`calendar_lifecycle_canceled` and `calendar_lifecycle_unsupported` count them.
+`events.recurrence` is `occurrence` when the start is repeated at +2, the
+layout of a recurring series' occurrences, and `item` otherwise.
+
+Attendee status words export raw as `kind_code` and `response_code`. One
+TEST-account invitation labels kind 0 `required`, kind 1 `optional` and
+response 4 `no_response`; codes 0, 1 and 2 have no ground truth and stay
+unlabelled. An attendee's own copy of a meeting does not track the others'
+replies, and it does not record its owner's own reply there either: after
+Joe's 23 sent replies (21 accepted, 2 declined) in the 2026-10-28 copy, his
+attendee entry on the 65 matching candidates read code 0 on 63 and code 4 on 2.
+
+The decoder does not establish deletion, revision order, recurrence exception
+identity, accepted, tentative, declined or proposed-time responses, current
+schedule state, or attendance. Candidate
 bytes stay in decoder memory and are not exported to SQLite.
 
 Synthetic tests prove candidate separation and fail-closed labeling only.

@@ -63,10 +63,12 @@ def ident(m):
     return intake.mail_identity(m['copy_key'], m['sender'], m['subject'], m['sent_unix'])[1]
 
 
-def event(goid, start, minutes=60, subject='Site visit', attendees=(), organizer=('Owner', OWNER)):
+def event(goid, start, minutes=60, subject='Site visit', attendees=(), organizer=('Owner', OWNER),
+          lifecycle=None):
     return dict(goid=goid, start_unix=ts(start), end_unix=ts(start + timedelta(minutes=minutes)),
                 subject=subject, location='Example Room', organizer_name=organizer[0],
-                organizer_email=organizer[1], body='Agenda', attendees=list(attendees))
+                organizer_email=organizer[1], body='Agenda', attendees=list(attendees),
+                lifecycle=lifecycle)
 
 
 def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identities=None, decoded=None):
@@ -94,6 +96,9 @@ def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identiti
                           'organizer_name,organizer_email,body) VALUES (?,?,?,?,?,?,?,?,?,?)',
                           (e['goid'], e['start_unix'], e['end_unix'], '', '', e['subject'], e['location'],
                            e['organizer_name'], e['organizer_email'], e['body']))
+        if e.get('lifecycle'):
+            con.execute('UPDATE events SET lifecycle_status=?, lifecycle_reason=? WHERE id=?',
+                        (*e['lifecycle'], cur.lastrowid))
         for name, email in e['attendees']:
             con.execute('INSERT INTO event_attendees VALUES (?,?,?)', (cur.lastrowid, name, email))
     con.executemany('INSERT INTO meta VALUES (?,?)',
@@ -878,6 +883,17 @@ class IntakeTest(unittest.TestCase):
         state = json.loads((self.out() / intake.STATE).read_text())
         self.assertTrue(all(r['disposition'] == 'calendar_unsupported' and not r['acknowledged']
                             for r in state['requests'].values()))
+
+    def test_decoded_canceled_candidates_leave_the_unsupported_count(self):
+        result = self.run_intake(events=[
+            event('live', timedelta(days=1)),
+            event('gone', timedelta(days=2), lifecycle=('canceled', 'outlook_canceled_subject'))])
+        self.assertEqual(result.counts['calendar_lifecycle_unsupported'], 1)
+        self.assertEqual(result.counts['calendar_lifecycle_canceled'], 1)
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertEqual(sorted(e['status'] for e in state['calendar_evidence'].values()),
+                         ['canceled', 'unsupported'])
+        self.assertEqual(self.fake.writes(), [], 'a decoded lifecycle is reported, not acted on')
 
     def test_internal_calendar_candidates_are_not_unresolved_meetings(self):
         result = self.run_intake(events=[event('internal', timedelta(days=1),
