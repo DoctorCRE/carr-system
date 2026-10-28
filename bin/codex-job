@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run one Codex job in a fresh clone; return its final message and exit code."""
 import argparse
+import contextlib
 import fcntl
 import os
 from pathlib import Path
@@ -22,10 +23,12 @@ from skill_picker import prepare
 
 
 def job_log():
-    """The file this job's output is redirected to: its transcript for attach-memory."""
+    """The file this job's output is redirected to: its transcript for attach-memory, made owner-only."""
     try:
         if not stat.S_ISREG(os.fstat(2).st_mode):
             return None
+        with contextlib.suppress(OSError):
+            os.fchmod(2, 0o600)
         if sys.platform == 'darwin':
             return os.fsdecode(fcntl.fcntl(2, fcntl.F_GETPATH, bytes(1024)).rstrip(b'\0'))
         return os.readlink('/proc/self/fd/2')
