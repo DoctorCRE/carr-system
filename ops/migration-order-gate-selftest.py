@@ -141,12 +141,13 @@ def run_gate(repo: pathlib.Path, *args: str,
     gate_env = dict(env)
     for key in ("GITHUB_BASE_REF", "GITHUB_EVENT_NAME", "GITHUB_EVENT_PATH"):
         gate_env.pop(key, None)
-    if event is not None:
-        path = pathlib.Path(tempfile.mkdtemp()) / "event.json"
-        path.write_text(json.dumps(event["payload"]))
-        gate_env.update(GITHUB_EVENT_NAME=event["name"], GITHUB_EVENT_PATH=str(path))
-    return subprocess.run([sys.executable, str(GATE), "--repo", str(repo), *args],
-                          env=gate_env, capture_output=True, text=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        if event is not None:
+            path = pathlib.Path(tmp) / "event.json"
+            path.write_text(json.dumps(event["payload"]))
+            gate_env.update(GITHUB_EVENT_NAME=event["name"], GITHUB_EVENT_PATH=str(path))
+        return subprocess.run([sys.executable, str(GATE), "--repo", str(repo), *args],
+                              env=gate_env, capture_output=True, text=True)
 
 
 with tempfile.TemporaryDirectory() as tmp:
