@@ -107,9 +107,11 @@ test('each write deletes a bounded batch of expired rows and never a durable one
   await c.query('alter table tool_call enable trigger tool_call_expire');
   assert.equal(await count(`idempotency_key like 'sweep-%'`), 150);
   await call('publish-board-snapshot', { idempotency_key: randomUUID(), board_id: 'sweep-proof', base_version: 0, snapshot: {} });
-  assert.equal(await count(`idempotency_key like 'sweep-%'`), 50, 'one write removes at most 100 expired rows, oldest first');
-  assert.equal(await count(`idempotency_key like 'sweep-%' and created_at < now() - interval '31 days' - interval '100 seconds'`), 0);
-  await call('publish-board-snapshot', { idempotency_key: randomUUID(), board_id: 'sweep-proof-2', base_version: 0, snapshot: {} });
+  assert.equal(await count(`idempotency_key like 'sweep-%'`), 130, 'one write removes at most 20 expired rows, oldest first');
+  assert.equal(await count(`idempotency_key = any($1)`, [Array.from({ length: 20 }, (_, i) => `sweep-${131 + i}`)]), 0,
+    'the 20 oldest went first');
+  for (let i = 2; i <= 8; i++)
+    await call('publish-board-snapshot', { idempotency_key: randomUUID(), board_id: `sweep-proof-${i}`, base_version: 0, snapshot: {} });
   assert.equal(await count(`idempotency_key like 'sweep-%'`), 0);
   assert.equal(await count(`idempotency_key like 'rw02-keep-%'`), 3);
 });
@@ -117,7 +119,8 @@ test('each write deletes a bounded batch of expired rows and never a durable one
 test('the database and the server agree on which receipts are durable', async () => {
   const uuid = '00000000-0000-4000-8000-000000000001';
   const cases = [['add-loop', 'rw02-missing-joe:' + 'a'.repeat(32)], ['add-loop', 'rw02-unknown-to-carr:' + 'c'.repeat(32) + ':e2'],
-    ['record-salesforce-page-stop', `rw02-read:${'b'.repeat(24)}:page-stop:3`], ['review-and-triage', uuid],
+    ['record-salesforce-page-stop', `rw02-read:${'b'.repeat(24)}:page-stop:3`], ['record-finding', 'rw02-absent:' + 'd'.repeat(32)],
+    ['record-finding', uuid], ['review-and-triage', uuid],
     ['accept-ready-plan', uuid], ['accept-outcome-feedback', uuid], ['add-loop', uuid], ['publish-board-snapshot', uuid],
     ['ask-jev-attempt', 'jev-attempt-1']];
   const { predicate } = (await c.query(`select pg_get_expr(indpred, indrelid) as predicate from pg_index

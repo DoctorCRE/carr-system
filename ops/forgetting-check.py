@@ -19,6 +19,10 @@ import sys
 
 TRACKED = ["event", "tool_call", "tool_read_call", "record_flag", "ingest_inbox",
            "activity", "source_capture", "loop_item"]
+# tool_call is the exception to the no-DELETE posture below since migration
+# 1040: a 30-day idempotency replay window, enforced by its tool_call_expire
+# trigger (up to 20 expired rows per insert). Its growth line should flatten
+# near 30 days of writes; a rising slope means the trigger stopped running.
 # tool_read_call (0108, Phase 1): the read-side sibling of tool_call, added
 # the same day it shipped. Same no-DELETE posture as every table in this
 # list — see 0108's own header for why observability here IS the lifecycle

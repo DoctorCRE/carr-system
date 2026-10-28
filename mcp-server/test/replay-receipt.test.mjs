@@ -31,6 +31,8 @@ test("the replay window in code matches the one the database enforces", () => {
 test("a receipt the database reads back by key outlives the replay window", () => {
   assert.equal(durableReceipt("add-loop", "rw02-missing-joe:" + "a".repeat(32)), true);
   assert.equal(durableReceipt("record-salesforce-page-stop", `rw02-read:${"b".repeat(24)}:page-stop:3`), true);
+  assert.equal(durableReceipt("record-finding", "rw02-absent:" + "d".repeat(32)), true);
+  assert.equal(durableReceipt("record-finding", "00000000-0000-4000-8000-000000000001"), false);
   for (const verb of ["review-and-triage", "accept-ready-plan", "accept-outcome-feedback"])
     assert.equal(durableReceipt(verb, "00000000-0000-4000-8000-000000000001"), true, verb);
   assert.equal(durableReceipt("add-loop", "00000000-0000-4000-8000-000000000001"), false);
