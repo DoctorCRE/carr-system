@@ -1190,7 +1190,8 @@ def _prune(state: dict, now: datetime) -> None:
     state['mail_done'] = {ck: ts for ck, ts in ((ck, [t for t in v if t >= horizon])
                                                  for ck, v in state.get('mail_done', {}).items()) if ts}
     state['mail_keys'] = {ident: k for ident, k in state.get('mail_keys', {}).items()
-                          if int(ident.rsplit(':', 1)[1]) >= horizon}
+                          if ident in unresolved or ident in state.get('pending_full', {})
+                          or int(ident.rsplit(':', 1)[1]) >= horizon}
     state['requests'] = {k: r for k, r in state.get('requests', {}).items()
                          if not r['acknowledged'] or r['created_at'] >= horizon}
     for name in ('events_logged', 'events_balled'):
