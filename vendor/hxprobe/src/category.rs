@@ -5,7 +5,7 @@
 //! and end with the display name after a binary sort key, like folders. The
 //! colour index follows Outlook's `OlCategoryColor` numbering (1 red, 2 orange,
 //! 4 yellow, 5 green, 8 blue, 9 purple for the six default categories).
-//! Which messages carry a category is not decoded here.
+//! Message assignments are read from detail objects; see `detail.rs`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
