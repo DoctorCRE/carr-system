@@ -69,6 +69,38 @@ class CaptureOutcomesTests(unittest.TestCase):
         request.assert_called_once()
         self.assertTrue((self.session / "mic.caf").exists())
 
+    def test_claim_refusal_logs_public_error_code(self) -> None:
+        (self.session / ".capture.json").unlink()
+        (self.session / "announcement.json").write_text('{"announcement_fired_at":"2026-01-05T12:00:00Z"}')
+        (self.session / "meta.json").write_text('{"started":"2026-01-05T12:00:00Z"}')
+        (self.session / "call-context.json").write_text('{"mode":"other_call"}')
+        with patch.object(bridge, "http_request", return_value=(503, {"error": "device_actor_not_provisioned"})):
+            self.assertNotEqual(bridge.claim_cmd(self.cfg, self.session), 0)
+        self.assertIn("error=device_actor_not_provisioned", bridge.LOG_PATH.read_text())
+
+    def test_rejections_log_only_valid_public_codes(self) -> None:
+        calls = (
+            lambda: bridge.status_cmd(self.cfg, self.session, "recording", None),
+            lambda: bridge.post_batch(self.cfg, self.session, "/capture/items", [{}], [], "fixture"),
+            lambda: bridge.file_post_call_report(self.cfg, self.session, "fixture", 0),
+        )
+        with patch.object(bridge.post_call, "report_sha256", return_value="fixture"):
+            for call in calls:
+                for status, response, expected in (
+                    (503, {"error": "database_unavailable", "hint": "private-hint"}, "database_unavailable"),
+                    (409, {"error": "bad code", "hint": "private-hint"}, "unparsed"),
+                    (503, {"error": "a" * 65}, "unparsed"),
+                    (503, {"error": 123}, "unparsed"),
+                    (503, {}, "unparsed"),
+                ):
+                    with self.subTest(status=status, response=response), patch.object(bridge, "http_request", return_value=(status, response)):
+                        bridge.LOG_PATH.unlink(missing_ok=True)
+                        call()
+                        log = bridge.LOG_PATH.read_text()
+                        self.assertIn(f"error={expected}", log)
+                        self.assertNotIn("private-hint", log)
+                        self.assertNotIn("bad code", log)
+
     def test_claim_outage_remains_retryable_with_same_nonce(self) -> None:
         (self.session / ".capture.json").unlink()
         (self.session / "announcement.json").write_text(json.dumps({"announcement_fired_at": "2026-01-05T12:00:00Z"}))
