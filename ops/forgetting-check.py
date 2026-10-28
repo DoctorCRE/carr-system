@@ -19,6 +19,10 @@ import sys
 
 TRACKED = ["event", "tool_call", "tool_read_count", "record_flag", "ingest_inbox",
            "activity", "source_capture", "loop_item"]
+# tool_call is the exception to the no-DELETE posture below since migration
+# 1048: a 30-day idempotency replay window, enforced by its tool_call_expire
+# trigger (up to 20 expired rows per insert). Its growth line should flatten
+# near 30 days of writes; a rising slope means the trigger stopped running.
 # tool_read_count (1041): the read-side sibling of tool_call, one counter per
 # day, verb, actor, sponsor, door and outcome; it replaced 0108's row-per-read
 # tool_read_call, which stopped growing. Like tool_call, record_flag,

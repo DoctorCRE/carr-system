@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import * as mod from "../src/salesforce-browser-read-rw02.v5.js";
+import { durableReceipt } from "../src/replay-receipt.ts";
 import {
   FakeReaderDriver, FakeCodeDriver, FakeClockClient, SpyRecorder, bindingSource, carr, opp, page, runWith, pressed,
   assertSafeStop, findingCalls,
@@ -495,6 +496,9 @@ test("findings are recorded: missing Joe as a Dell loop, unknown as a partner lo
   assert.equal(finding.subject, carr("Q").deal_id);
   assert.equal(finding.kind, "salesforce_presence:salesforce_id_not_seen");
   assert.match(finding.source, /reason salesforce_id_not_seen$/);
+  // A repeat run relies on replaying this key forever, so it must be a durable receipt shape.
+  assert.match(finding.idempotency_key, /^rw02-absent:[0-9a-f]{32}$/);
+  assert.equal(durableReceipt("record-finding", finding.idempotency_key), true);
   // Nothing the browser showed about sign-in or the seat leaks into a record.
   for (const c of recorder.calls) {
     assert.ok(!JSON.stringify(c.args).includes("dell-seat"), `${c.verb} carries the seat ref`);

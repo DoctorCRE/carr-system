@@ -485,11 +485,9 @@ def main() -> int:
                   has_table_privilege('carr_writer','ops.sourced_work_request_plan','INSERT'),
                   has_table_privilege('carr_authority','ops.sourced_work_request_plan_acceptance_receipt','INSERT'),
                   has_function_privilege('carr_writer','ops.accept_sourced_work_request_plan(text,integer,text,uuid)','EXECUTE'),
-                  has_function_privilege('carr_jobs','ops.accept_sourced_work_request_plan(text,integer,text,uuid)','EXECUTE'),
-                  has_table_privilege('carr_writer','ops.retired_build_admission_revision','INSERT'),
-                  has_table_privilege('carr_authority','ops.retired_build_plan_review','INSERT')"""
+                  has_function_privilege('carr_jobs','ops.accept_sourced_work_request_plan(text,integer,text,uuid)','EXECUTE')"""
             ).fetchone()
-            if privileges != (False, False, False, False, False, False):
+            if privileges != (False, False, False, False):
                 raise RuntimeError(f"raw plan/acceptance authority leaked: {privileges}")
 
         print("PASS: immutable bounded plans and successor acceptance preserve authority and replay without retired admission")

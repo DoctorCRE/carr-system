@@ -718,6 +718,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "confirm-email-lead": {
+    "ingress_key": "mcp-tool:confirm-email-lead",
+    "source_locator": "mcp-server/src/email-lead-proposal.ts",
+    "schema_digest": "35118ab0f70731f846bbc5c49e38dbbf072ee81f264c5e0c554183b036dd78d8",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "confirm-email-next-step": {
     "ingress_key": "mcp-tool:confirm-email-next-step",
     "source_locator": "mcp-server/src/email-next-step.ts",
@@ -3950,6 +3960,132 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "grantable": false,
       "privilege": "update",
       "ingress_key": "db-relation-acl:ops.provider_route:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.actor_profile",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.actor_profile:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.actor_profile",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.actor_profile:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.ammo_item",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.ammo_item:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.ammo_item",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.ammo_item:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.claude_continuity_event",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.claude_continuity_event:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.claude_continuity_revision",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.claude_continuity_revision:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.codex_continuity_event",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.codex_continuity_event:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.codex_continuity_revision",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.codex_continuity_revision:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.investigation_evidence",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.investigation_evidence:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.investigation_evidence",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.investigation_evidence:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.search_candidate",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.search_candidate:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.search_candidate",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.search_candidate:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.sensitive_blob",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.sensitive_blob:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.sensitive_blob",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.sensitive_blob:carr_writer:update",
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
     }

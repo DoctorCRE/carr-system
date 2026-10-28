@@ -247,7 +247,9 @@ def _quit(pid: int, windows: list[dict], waits: Waits) -> bool:
     return True
 
 
-def _quit_window_detail(pid: int) -> str:
+def window_detail(pid: int | None) -> str:
+    if pid is None:
+        return 'process_missing'
     try:
         windows = _windows(pid)
     except CuaError:
@@ -285,9 +287,11 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
                 return Outcome('skipped', 'compose_window_open')
             candidates = [w for w in windows if is_ordinary_main_window(w)]
             if candidates and not any(_readable(pid, w) for w in candidates):
-                return Outcome('skipped', 'no_usable_main_window')
+                return Outcome('skipped', 'no_usable_main_window',
+                               'phase=before_quit ordinary_candidates_unreadable '
+                               + window_detail(pid))
             if not _quit(pid, windows, waits):
-                return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
+                return Outcome('failed', 'outlook_quit_timeout', window_detail(pid))
         launched = subprocess.run(['open', '-g', '-a', APP, '--args',
                                    '-ApplePersistenceIgnoreState', 'YES'],
                                   capture_output=True, timeout=60)
@@ -307,7 +311,10 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
             except CuaError:
                 pass
             time.sleep(waits.new_window_seconds)
-        return None if usable_window(pid) else Outcome('failed', 'no_usable_main_window')
+        if usable_window(pid):
+            return None
+        return Outcome('failed', 'no_usable_main_window',
+                       'phase=after_launch_and_new_window ' + window_detail(pid))
     except ComposeWindowOpen:
         return Outcome('skipped', 'compose_window_open')
     except CuaError:
@@ -423,12 +430,103 @@ class Window:
                                 selected=bool(cell.get('selected') or e.get('selected'))))
         return _tab(elements), rows
 
+    def _scroll_list(self, direction: str) -> None:
+        elements = self._walk(max_elements=LIST_WALK)
+        tables = [e for e in elements if e.get('role') == 'AXTable' and e.get('label') == 'Message List']
+        if len(tables) != 1 or not tables[0].get('element_token'):
+            raise UiError('message_list_not_found', step='scan_rows')
+        cua('scroll', {'pid': self.pid, 'window_id': self.window_id,
+                       'element_token': tables[0]['element_token'],
+                       'direction': direction, 'by': 'line', 'amount': 50 if direction == 'up' else 1})
+        time.sleep(self.waits.settle_seconds)
+
+    def scan_rows(self, allowed: Callable[[], bool]) -> list[Row]:
+        """Collect overlapping viewports using wheel events, with bounded top restoration."""
+        observed: dict[str, Row] = {}
+
+        def page(rows: list[Row] | None = None) -> list[Row]:
+            if rows is None:
+                rows = self.rows()[1]
+            if any(not r.sender or r.subject is None for r in rows) or len({r.key for r in rows}) != len(rows):
+                raise UiError('coverage_identity_ambiguous', step='scan_rows')
+            if any(r.selected and r.read_state is not ReadState.READ for r in rows):
+                raise UiError('unread_row_selected', step='scan_rows')
+            for row in rows:
+                previous = observed.get(row.key)
+                if previous is not None and (previous.label, previous.selected) != (row.label, row.selected):
+                    raise UiError('coverage_changed', step='scan_rows')
+                observed[row.key] = row
+            return rows
+
+        def signature(rows: list[Row]) -> list[tuple[str, bool]]:
+            return [(r.label, r.selected) for r in rows]
+
+        def top() -> list[Row]:
+            deadline = time.monotonic() + 30
+            error = None
+
+            def snapshot() -> list[Row]:
+                nonlocal error
+                rows = self.rows()[1]
+                try:
+                    page(rows)
+                except UiError as exc:
+                    error = error or exc
+                return rows
+
+            previous = snapshot()
+            for _ in range(50):
+                if time.monotonic() >= deadline:
+                    break
+                self._scroll_list('up')
+                current = snapshot()
+                if signature(previous) == signature(current):
+                    if error is not None:
+                        raise error
+                    return current
+                previous = current
+            raise UiError('coverage_restore_failed', step='scan_rows')
+
+        first = None
+        collected: dict[str, Row] = {}
+        try:
+            first = top()
+            previous = page()
+            collected = {r.key: r for r in previous}
+            for _ in range(50):
+                if not allowed():
+                    raise UiError('coverage_deadline', step='scan_rows')
+                self._scroll_list('down')
+                current = page()
+                if signature(current) == signature(previous):
+                    if observed.keys() != collected.keys():
+                        raise UiError('coverage_changed', step='scan_rows')
+                    return list(collected.values())
+                old_keys, keys = [r.key for r in previous], [r.key for r in current]
+                overlap = next((n for n in range(min(len(old_keys), len(keys)), 0, -1)
+                                if old_keys[-n:] == keys[:n]), 0)
+                if not overlap or any(r.key in collected for r in current[overlap:]):
+                    raise UiError('coverage_identity_ambiguous', step='scan_rows')
+                if any(signature([collected[r.key]]) != signature([r]) for r in current[:overlap]):
+                    raise UiError('coverage_changed', step='scan_rows')
+                collected.update((r.key, r) for r in current)
+                previous = current
+            raise UiError('coverage_page_limit', step='scan_rows')
+        finally:
+            restored = top()
+            if first is not None and (signature(first) != signature(restored)
+                                      or observed.keys() != collected.keys()):
+                raise UiError('coverage_changed', step='scan_rows')
+
     def switch_tab(self, tab: str) -> None:
-        if self.rows()[0] == tab:
+        before = self.rows()[0]
+        if before == tab:
             return
         self._menu(SWITCH[tab])
-        if self.rows()[0] != tab:
-            raise UiError('tab_switch_failed', step='switch_tab')
+        after = self.rows()[0]
+        if after != tab:
+            raise UiError(f'tab_switch_failed requested={tab} before={before} observed={after}',
+                          step='switch_tab')
 
     def move(self, label: str, leaf: str, allowed: Callable[[], bool]) -> Moved:
         """Move the read row with this label to the folder named leaf, then confirm it left the list.

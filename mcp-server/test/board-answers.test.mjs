@@ -97,7 +97,7 @@ test("board reads overlap independent queries and batch links at every board siz
   }
 });
 
-test("board publication bounds database payload work and replays the complete snapshot", async () => {
+test("board publication bounds database payload work and replies with only the board version", async () => {
   for (const base_version of [0, 7]) {
     const snapshot = { schema: "carr-progress-board.v4", tasks: Object.fromEntries(
       Array.from({ length: 1000 }, (_, i) => [`task-${i}`, { title: `Task ${i}` }])) };
@@ -118,7 +118,8 @@ test("board publication bounds database payload work and replays the complete sn
     assert.deepEqual(event.slice(2, 5), ["publish-board-snapshot", "board_snapshot", metadata.id]);
     assert.deepEqual(JSON.parse(event[7]), { board_id: "project", version: metadata.version });
     assert.deepEqual(JSON.parse(params[base_version ? 0 : 3]), snapshot);
-    assert.deepEqual(result.snapshot, { ...metadata, version: base_version + 1, snapshot_json: snapshot });
+    assert.deepEqual(result, { ok: true, board_id: "project", version: base_version + 1 },
+      "the reply names the board and its new version, never the snapshot");
     const receipt = fake.calls.find(([sql]) => sql.includes("insert into tool_call"));
     assert.deepEqual(JSON.parse(receipt[1][4]), { ok: true, snapshot: { ...metadata, version: base_version + 1 } });
     assert.ok(receipt[1][4].length < 512, "receipt storage must stay bounded as the board grows");
@@ -129,10 +130,10 @@ test("board publication bounds database payload work and replays the complete sn
     assert.deepEqual(retried, { replayed: true, ...result });
     assert.equal(replay.calls.length, 2, "replay only locks and reads the bounded receipt");
     const legacyReplay = new Fake({ "select request_hash, response": [{
-      request_hash: receipt[1][3], response: result,
+      request_hash: receipt[1][3], response: { ok: true, snapshot: { ...metadata, snapshot_json: snapshot } },
     }] });
     assert.deepEqual(await TOOLS["publish-board-snapshot"].handler(legacyReplay, sponsoredRobot, args),
-      { replayed: true, ...result }, "existing full receipts remain readable");
+      { replayed: true, ...result }, "a full receipt from before the bounded reply replays the same reply");
     await assert.rejects(() => TOOLS["publish-board-snapshot"].handler(replay, sponsoredRobot,
       { ...args, snapshot: { ...snapshot, title: "Different publication" } }),
     error => error.payload?.error === "key_reuse");
@@ -182,9 +183,8 @@ test("concurrent same-key board writes replay the first result", async () => {
   await readStarted;
   const second = run(client());
   const [a, b] = await Promise.all([first, second]);
-  assert.equal(a.snapshot.id, "board-1");
-  assert.equal(b.replayed, true);
-  assert.deepEqual(b.snapshot, a.snapshot);
+  assert.deepEqual(a, { ok: true, board_id: "project", version: 1 });
+  assert.deepEqual(b, { replayed: true, ...a });
 });
 
 test("board answers and acknowledgments refuse a different sponsor within the same tenant", async () => {
@@ -371,4 +371,19 @@ test('hierarchy snapshots preserve evidence beyond the old display budget with a
     error => error.payload?.error === 'board_snapshot_invalid');
   await assert.rejects(() => run({ schema: 'carr-progress-board.v3', evidence: 'x'.repeat(300000) }),
     error => error.payload?.error === 'board_snapshot_invalid');
+});
+
+test("board publication replies with a safe numeric version and refuses an unsafe one before its receipt", async () => {
+  const publish = (version) => {
+    const fake = new Fake({ "update board_snapshot": [{ id: "9007199254740993", board_id: "project", version }] });
+    return [fake, TOOLS["publish-board-snapshot"].handler(fake, joe, { board_id: "project", base_version: 2,
+      snapshot: { version: "display-version" }, idempotency_key: derivedIdempotencyKey("test", `safe-${version}`) })];
+  };
+  for (const version of ["3", "9007199254740991"])
+    assert.deepEqual(await publish(version)[1], { ok: true, board_id: "project", version: Number(version) });
+  for (const version of ["9007199254740992", "0", "1.5", null]) {
+    const [fake, run] = publish(version);
+    await assert.rejects(run, error => error instanceof ToolError && error.payload.error === "board_version_invalid");
+    assert.ok(!fake.calls.some(([sql]) => sql.includes("insert into tool_call")), "no receipt for a refused reply");
+  }
 });

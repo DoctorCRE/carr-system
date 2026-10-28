@@ -1,6 +1,6 @@
 // Expose and resolve email-derived proposals.
 import { sha256 } from './sha256.ts';
-import { partnerAuthoritySlugForActor } from './partner-authority.js';
+import { mailboxOwnerForActor, partnerAuthoritySlugForActor } from './partner-authority.js';
 import { suspected } from './untrusted-text.js';
 const LIMIT = 200;
 const RESUBMITTABLE_FAILURES = new Set([
@@ -77,12 +77,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
   }
   const show = (c, actor, row) => MATCHING.has(row.kind)
     ? matchingPreview(c, row) : preview(c, actor, KINDS[row.kind].preview, previewArgs(row));
-  const senderOwner = actor => {
-    const owner = partnerAuthoritySlugForActor(actor);
-    if (!owner || (actor.human !== true && actor.slug !== `${owner}-local`))
-      fail('email_sender_identity_required');
-    return owner;
-  };
+  const senderOwner = actor => mailboxOwnerForActor(actor) ?? fail('email_sender_identity_required');
   const draftRow = async (c, id, owner) => {
     const row = (await c.query('select * from email_proposal where id=$1 for update', [id])).rows[0];
     if (!row || row.kind !== 'reply_draft') fail('email_draft_not_found');

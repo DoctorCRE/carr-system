@@ -1,5 +1,4 @@
 {
-  "schema": "leak-guard-allowlist.v1",
   "entries": [
     {
       "path": "security/fixtures/synthetic-contact.json",
@@ -664,6 +663,21 @@
       "sha256": "4f0dbb9a2e197f11fbbb1b3efa0e5b035f5c018b7fa30c355717bfcad320bd65",
       "rule": "pii-phone",
       "reason": "The integer maximum in commit a2b9482df tests the retention batch clamp. It is not a phone number and was replaced by 1001 in 929431cc6. Only this historical blob is exempt."
+    },
+    {
+      "path": "mcp-server/test/email-lead-proposal-postgres.test.mjs",
+      "sha256": "3cd48d89d3d4c536744e6e355369fd95604dda53c547baab3fd4ad2acbcb07ce",
+      "rule": "client-data",
+      "reason": "Pushed PR history (e9e50256..913d2ade) named a synthetic fixture deal whose words collide with a client fingerprint; renamed at the next commit, so only these historical blobs carry it.",
+      "value_sha256": "b5d8dfb4d92c397df16cda0399e543925f248f2e1172876a39bd40d4812dc1ab"
+    },
+    {
+      "path": "mcp-server/test/email-lead-proposal-postgres.test.mjs",
+      "sha256": "794e6401739d917fac5777e98a602df5a44cb9f93db9281926014de42e886be5",
+      "rule": "client-data",
+      "reason": "Pushed PR history (e9e50256..913d2ade) named a synthetic fixture deal whose words collide with a client fingerprint; renamed at the next commit, so only these historical blobs carry it.",
+      "value_sha256": "b5d8dfb4d92c397df16cda0399e543925f248f2e1172876a39bd40d4812dc1ab"
     }
-  ]
+  ],
+  "schema": "leak-guard-allowlist.v1"
 }
