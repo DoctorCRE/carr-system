@@ -9,7 +9,7 @@ set -eu
 TOOL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="$(cd "$TOOL_DIR/../.." && pwd)"
 LABEL="com.carr.call-mode"
-SOURCE="$TOOL_DIR/launchd/$LABEL.plist"
+SOURCE="$REPO/ops/launchd/$LABEL.plist"
 DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
 TMP="$(mktemp -t carr-call-mode-plist)"
 trap 'rm -f "$TMP"' EXIT
