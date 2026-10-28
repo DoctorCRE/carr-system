@@ -1,5 +1,6 @@
 // Apply deal progress proposed from email.
 import { sha256 } from './sha256.ts';
+import { derivedIdempotencyKey } from './derived-key.ts';
 import { ToolError } from './tool-error.ts';
 import type { Actor, Db, DelegatedHandler, LockDealField, ResolveEmailProposal, VerbInputs, WithEnvelope, WriteEvent } from './verb-contract.ts';
 
@@ -72,7 +73,7 @@ export function emailDealProgressTools({ withEnvelope, writeEvent, lockDealField
           await lockDealField(c, args.deal.toLowerCase(), 'phase');
           const current = await proposal(c, args, true);
           if (current.proposal_digest !== args.proposal_digest) fail('email_deal_proposal_stale');
-          await updateDeal(c, actor, { idempotency_key: `${args.idempotency_key}:deal-update`,
+          await updateDeal(c, actor, { idempotency_key: derivedIdempotencyKey("email-deal-update", args.idempotency_key),
             deal: current.deal, base_version: current.base_version, fields: { phase: current.to_phase } });
           await writeEvent(c, actor, 'confirm-email-deal-progress', 'deal', current.deal,
             { old: { phase: current.from_phase }, new: { phase: current.to_phase,
