@@ -419,7 +419,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "attach-memory": {
     "ingress_key": "mcp-tool:attach-memory",
     "source_locator": "mcp-server/src/doctrine.js",
-    "schema_digest": "9c9cc40926c4aff44d8c9008ca1b9065aa1b022ac3cfa2b7c777c7af1f370e26",
+    "schema_digest": "917c19ae0cfe50cfd328508750f37b6b59b9d26a79296066e053901e52eca0b4",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -973,6 +973,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "4e3c661894bac221f812e9381c7c6d1ab898a2b3de74c850c2db187864593a7c",
     "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "email-match-contacts": {
+    "ingress_key": "mcp-tool:email-match-contacts",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
     "human_only": false,
     "human_caller_only": false,
     "authority_only": false,
@@ -1825,7 +1835,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "propose-email-lead": {
     "ingress_key": "mcp-tool:propose-email-lead",
     "source_locator": "mcp-server/src/email-lead-proposal.ts",
-    "schema_digest": "4ec94c09f595baa72fd5c6d82c7f1bab50f656d58d6e6fd6543c765509f33e25",
+    "schema_digest": "31ba38aa5047ef64f62c3c105e7f9c28ca3bf8219e385de931a5ac5942a5f3c8",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

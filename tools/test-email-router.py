@@ -111,6 +111,21 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(written[1]['deal'], DEAL)
         self.assertEqual(written[1]['owner'], 'dell')
 
+    def test_receipt_counts_model_exception_types_without_messages(self):
+        server = Server([email('type1', LOI), email('type2', LOI), email('type3', LOI)])
+        errors = iter([ModuleNotFoundError('private mail text'),
+                       ModuleNotFoundError('other private text'), ValueError('private value')])
+
+        def broken(email, today):
+            raise next(errors)
+
+        counts = route(server, broken)
+        receipt = json.loads(email_router.receipt('failed', counts).split(' ', 1)[1])
+        self.assertEqual(receipt['counts']['model_failed'], 3)
+        self.assertEqual(receipt['model_failed_types'], {'ModuleNotFoundError': 2, 'ValueError': 1})
+        self.assertNotIn('private', json.dumps(receipt))
+        self.assertEqual(server.recorded(), [])
+
     def test_one_model_answer_records_reply_draft_with_other_proposals(self):
         source = email('reply1', f'{LOI} {ASK}')
         source['mailbox_owner'] = 'dell'

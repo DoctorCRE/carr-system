@@ -1,5 +1,6 @@
 // Apply next steps and actions proposed from email.
 import { sha256 } from './sha256.ts';
+import { derivedIdempotencyKey } from './derived-key.ts';
 import { isCalendarDate } from './calendar-date.ts';
 import { ToolError } from './tool-error.ts';
 import type { Actor, Db, DelegatedHandler, LockDealField, ResolveEmailProposal, VerbInputs, WithEnvelope, WriteEvent } from './verb-contract.ts';
@@ -71,9 +72,9 @@ export function emailNextStepTools({ withEnvelope, writeEvent, lockDealField, se
           const current = await proposal(c, args, true);
           if (current.proposal_digest !== args.proposal_digest) fail('email_next_step_proposal_stale');
           const result = current.owner === 'joe'
-            ? await setNextStep(c, actor, { idempotency_key: `${args.idempotency_key}:next-step`,
+            ? await setNextStep(c, actor, { idempotency_key: derivedIdempotencyKey("email-next-step", args.idempotency_key),
               deal: current.deal, base_version: current.base_version, text: current.text, next_date: current.next_date })
-            : await setNextAction(c, actor, { idempotency_key: `${args.idempotency_key}:next-action`,
+            : await setNextAction(c, actor, { idempotency_key: derivedIdempotencyKey("email-next-action", args.idempotency_key),
               ref: current.deal, description: current.text, due_on: current.next_date, owner: current.owner });
           await writeEvent(c, actor, 'confirm-email-next-step', 'deal', current.deal,
             { new: { ...(current.owner === 'joe' ? { next_step: current.text } : {}),

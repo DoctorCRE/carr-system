@@ -14,6 +14,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError } from "../src/tools.js";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const ids = {
   joe: "10000000-0000-0000-0000-000000000002",
@@ -62,7 +63,7 @@ class AddLoopFake {
 
 let n = 0;
 const addLoop = (db, extra) => TOOLS["add-loop"].handler(db, joe, {
-  idempotency_key: `residue-add-${++n}`, kind: "open_loop", owner: "joe", domain: "system",
+  idempotency_key: derivedIdempotencyKey("test", `residue-add-${++n}`), kind: "open_loop", owner: "joe", domain: "system",
   body: "residue gate self-test", ...extra });
 
 const storedExtraCells = (db) => {
@@ -89,7 +90,7 @@ for (const blocker of ["human_only", "ruling", "capability"]) {
         residue_kind: kind, residue_host: "  github.com  " });
       assert.equal(r.ok, true);
       assert.deepEqual(r.residue, { kind, host: "github.com" });
-      assert.deepEqual(storedExtraCells(db), { blocker_residue: { kind, host: "github.com" } });
+      assert.deepEqual(storedExtraCells(db), { writer_surface: "local", blocker_residue: { kind, host: "github.com" } });
       assert.equal(db.events.length, 1);
       assert.ok(db.events[0].payload.includes(`"kind":"${kind}"`), "the event keeps the claim as made");
     });
@@ -102,7 +103,7 @@ for (const blocker of ["counterparty", "external_event", "other_lane"]) {
     const r = await addLoop(db, { blocker, blocker_detail: "Sanders, the listing broker on C-112" });
     assert.equal(r.ok, true);
     assert.equal(r.residue, undefined);
-    assert.deepEqual(storedExtraCells(db), {});
+    assert.deepEqual(storedExtraCells(db), { writer_surface: "local" });
   });
 }
 
@@ -114,10 +115,10 @@ test("add-loop: a kind without a blocker (idea) is untouched by the gate", async
       return { rows: [{ id: ids.block, rel_path: "00_Context/idea-bank.md", col_order: null }] };
     return orig.call(db, text, params);
   })(db.query);
-  const r = await TOOLS["add-loop"].handler(db, joe, { idempotency_key: `residue-idea-${++n}`,
+  const r = await TOOLS["add-loop"].handler(db, joe, { idempotency_key: derivedIdempotencyKey("test", `residue-idea-${++n}`),
     kind: "idea", owner: "joe", body: "a parked idea" });
   assert.equal(r.ok, true);
-  assert.deepEqual(storedExtraCells(db), {});
+  assert.deepEqual(storedExtraCells(db), { writer_surface: "local" });
 });
 
 // ── add-loop: refusal ───────────────────────────────────────────────────
@@ -165,7 +166,7 @@ test("add-loop: a residue on a class that does not wait on Joe is refused, not s
 
 test("add-loop: a residue on a kind that carries no blocker is refused", async () => {
   const db = new AddLoopFake();
-  await assert.rejects(() => TOOLS["add-loop"].handler(db, joe, { idempotency_key: `residue-team-${++n}`,
+  await assert.rejects(() => TOOLS["add-loop"].handler(db, joe, { idempotency_key: derivedIdempotencyKey("test", `residue-team-${++n}`),
     kind: "team_loop", owner: "dell", title: "handoff", residue_kind: "physical_act", residue_host: "the site" }),
     refusedAs("blocker_not_carried_by_kind"));
 });
@@ -215,7 +216,7 @@ class UpdateLoopFake {
 }
 
 const update = (db, extra) => TOOLS["update-loop"].handler(db, joe, {
-  idempotency_key: `residue-update-${++n}`, loop_id: ids.loop, base_version: 1, ...extra });
+  idempotency_key: derivedIdempotencyKey("test", `residue-update-${++n}`), loop_id: ids.loop, base_version: 1, ...extra });
 
 const extraCellsAssignments = (sql) => sql.match(/extra_cells=/g)?.length ?? 0;
 

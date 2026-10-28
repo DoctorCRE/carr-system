@@ -194,6 +194,9 @@ elif tool == 'get_window_state':
         elements.append(element)
         tokens[str(index)] = kind
         return index
+    if payload['window_id'] == 14:
+        print(json.dumps({'elements': [{'role': 'AXButton', 'label': 'Send'}]}))
+        sys.exit(0)
     top = add('AXWindow', state['folder'] + ' • ' + ACCOUNT, 0)
     if not state.get('account_button_missing'):
         add('AXButton', 'All Accounts', 1, top, ['account'])
@@ -213,9 +216,10 @@ elif tool == 'get_window_state':
                 if unread:
                     add('AXStaticText', str(unread), 6, row, value=str(unread))
     if state['tab'] and state['folder'] == 'Inbox':
-        focused = 'Selected' if state['tab'] == 'focused' else 'Unselected'
-        other = 'Unselected' if state['tab'] == 'focused' else 'Selected'
-        add('AXCheckBox', f'Focused Inbox {focused};  Other Inbox {other}', 4, top, value='0')
+        # Live Outlook names the selected tab first (read 2026-10-28).
+        label = ('Focused Inbox Selected;  Other Inbox Unselected' if state['tab'] == 'focused'
+                 else 'Other Inbox Selected;  Focused Inbox Unselected')
+        add('AXCheckBox', label, 4, top, value='0')
     table = add('AXTable', 'Message List', 4, top)
     add('AXCell', 'Today, Expanded', 6, table)
     for r in current():
@@ -390,6 +394,21 @@ class PreflightQuitTest(FakeOutlookCase):
         from lib.outlook_ui import prepare_outlook
         with patch.dict(os.environ, self.env, clear=True):
             return prepare_outlook(waits)
+
+    def test_mailbox_with_twelve_toolbar_strips_allows_restart(self):
+        strips = [window(wid, '', 1920, 30, False) for wid in range(20, 32)]
+        self.given(windows=strips + [ORDINARY], after_launch=strips + [ORDINARY])
+        self.assertIsNone(self.prepare())
+
+    def test_mailbox_with_suffixed_compose_preserves_restart(self):
+        self.given(windows=[ORDINARY, COMPOSE | {'title': f'Draft • {ACCOUNT}'}])
+        self.assertIsNone(self.prepare())
+
+    def test_lone_draft_is_refused_without_quitting(self):
+        self.given(windows=[COMPOSE | {'title': f'Draft • {ACCOUNT}'}])
+        self.assertIsNotNone(self.prepare())
+        self.assertEqual(self.called('osascript') + self.called('open'), [])
+        self.assertFalse(any(call[1] == 'invoke_menu' for call in self.called('cua-driver')))
 
     def test_quit_uses_mailbox_when_unassigned_window_is_first(self):
         self.given(windows=[UNTITLED_OFFSCREEN, ORDINARY], quit_window_id=13)
@@ -585,6 +604,12 @@ class OutlookTriageTest(FakeOutlookCase):
         self.assertEqual(outcome.state, 'succeeded')
         self.assertEqual([m[1] for m in state['moved']], ['folder-A', 'folder-C'])
         self.assertEqual(self.unread_labels(state), {UNREAD['label']})
+
+    def test_reads_both_tabs_when_outlook_opens_on_other(self):
+        self.given(tabs={'focused': [NEWS, FILE_A], 'other': [FIRM, NEWS, UNREAD]}, tab='other')
+        outcome, state = self.run_triage()
+        self.assertEqual(outcome.state, 'succeeded')
+        self.assertEqual(sorted(m[1] for m in state['moved']), ['folder-A', 'folder-C'])
 
     def test_selects_the_inbox_before_reading_and_never_files_another_folder(self):
         self.given([FILE_A, NEWS], folder='Sent Items', elsewhere=[ELSEWHERE, VENDOR])

@@ -1,6 +1,7 @@
 // Expose and resolve email-derived proposals.
 import { sha256 } from './sha256.ts';
 import { partnerAuthoritySlugForActor } from './partner-authority.js';
+import { suspected } from './untrusted-text.js';
 const LIMIT = 200;
 const RESUBMITTABLE_FAILURES = new Set([
   'aborted_before_dispatch', // The sender recorded that dispatch was aborted before pressing Send.
@@ -16,14 +17,6 @@ const KINDS = {
     args: row => ({ text: row.task_text, next_date: row.next_date, owner: row.owner }) },
   reply_draft: { confirm: 'submit-email-draft' },
 };
-const SUSPECT = [
-  [/\b(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+|the\s+|your\s+|my\s+)?(?:previous\s+|prior\s+|above\s+|earlier\s+|other\s+)?(?:instructions|rules|prompts?)\b/i,
-    'asks to ignore instructions'],
-  [/\byou\s+are\s+(?:now\s+)?(?:an?\s+)?(?:AI|assistant|language model|LLM|chatbot|[a-z]*\s?bot)\b/i, 'tells the reader it is an AI'],
-  [/\b(?:note to|dear|hey|attention)\s+(?:the\s+)?(?:AI|LLM|chatbot|language model)\b/i, 'addresses an AI'],
-  [/\bsystem\s+prompt\b/i, 'mentions a system prompt'],
-];
-const suspected = quote => SUSPECT.find(([pattern]) => pattern.test(quote))?.[1] ?? null;
 const sender = summary => /^Email from (.+?): (.*)$/s.exec(summary ?? '');
 
 export function emailProposalTools({ ToolError, withEnvelope, writeEvent, preview }) {

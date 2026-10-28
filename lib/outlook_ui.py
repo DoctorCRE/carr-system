@@ -35,7 +35,8 @@ from lib.outlook_settings import load_settings
 EXIT = {'succeeded': 0, 'skipped': 78, 'timed_out': 124, 'failed': 1}
 SIDEBAR = ['View', 'Sidebar']
 QUIT = ['Outlook', 'Quit Outlook']
-TABS = re.compile(r'Focused Inbox (Selected|Unselected);\s*Other Inbox (Selected|Unselected)')
+# Outlook names the selected tab first: "Other Inbox Selected;  Focused Inbox Unselected".
+TABS = re.compile(r'(Focused|Other) Inbox Selected;\s*(?:Focused|Other) Inbox Unselected')
 SWITCH = {'focused': ['View', 'Switch to Focused'], 'other': ['View', 'Switch to Other']}
 LIST_WALK = 1500
 PANE_WALK = {'max_elements': 1500, 'max_depth': 3}
@@ -181,8 +182,10 @@ def _windows(pid: int) -> list[dict]:
 
 def _readable(pid: int, window: dict) -> bool:
     state = cua('get_window_state', {'pid': pid, 'window_id': window['window_id'],
-                                     'include_screenshot': False, 'max_elements': 20})
-    return not str(state.get('degraded_reason') or '').startswith('ax_window_unresolved')
+                                     'include_screenshot': False, 'max_elements': LIST_WALK})
+    controls = {(e.get('role'), e.get('label')) for e in state.get('elements') or []}
+    return (not str(state.get('degraded_reason') or '').startswith('ax_window_unresolved')
+            and {('AXButton', 'New Mail'), ('AXTable', 'Message List')} <= controls)
 
 
 def usable_window(pid: int) -> dict | None:
@@ -252,6 +255,9 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
             windows = _windows(pid)
             if any(is_compose_window(w) for w in windows):
                 return Outcome('skipped', 'compose_window_open')
+            candidates = [w for w in windows if is_ordinary_main_window(w)]
+            if candidates and not any(_readable(pid, w) for w in candidates):
+                return Outcome('skipped', 'no_usable_main_window')
             if not _quit(pid, windows, waits):
                 return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
         launched = subprocess.run(['open', '-g', '-a', APP, '--args',
@@ -503,5 +509,5 @@ def _tab(elements: list[dict]) -> str | None:
     for e in elements:
         match = TABS.search(e.get('label') or '')
         if e.get('role') == 'AXCheckBox' and match:
-            return 'focused' if match.group(1) == 'Selected' else 'other'
+            return match.group(1).lower()
     return None

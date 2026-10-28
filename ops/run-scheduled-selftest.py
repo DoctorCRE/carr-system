@@ -78,12 +78,47 @@ class ScheduledRunTests(unittest.TestCase):
         args = json.loads(self.rows()[-1][3])
         self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
 
+    def test_intake_tool_detail_and_router_exception_types_survive_wrapper(self):
+        receipt = {'state': 'failed', 'reason': 'decode_failed', 'counts': {},
+                   'detail': 'hxprobe exit=42 code=exit_nonzero'}
+        router = {'state': 'failed', 'counts': {'model_failed': 2},
+                  'model_failed_types': {'ModuleNotFoundError': 2}}
+        result = self.invoke_intake(receipt, router_lines=['email-router-receipt ' + json.dumps(router)])
+        args = json.loads(self.rows()[0][3])
+        self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
+        self.assertEqual(json.loads(result.stdout.split('email-router-receipt ', 1)[1]), router)
+
     def test_router_counts_and_refusal_codes_reach_output(self):
         intake = {"state": "succeeded", "reason": "processed", "counts": {}}
         router = {"state": "succeeded", "counts": {"inherited": 2, "contact_only": 1, "refused": 2},
                   "refusal_codes": {"email_deal_quote_invalid": 2}}
         result = self.invoke_intake(intake, code=0, router_lines=['email-router-receipt ' + json.dumps(router)])
         self.assertEqual(json.loads(result.stdout.split('email-router-receipt ', 1)[1]), router)
+
+    def test_split_run_and_backlog_counts_are_validated_and_preserved(self):
+        receipt = {"state": "degraded", "reason": "decoder_degraded",
+                   "counts": {"run": {"decoder_alarm": 1, "logged": 2, "lead_proposed": 1},
+                              "backlog": {"unresolved_addresses": 5, "calendar_copies_in_store": 940,
+                                          "calendar_expired_total": 102}}}
+        first = self.invoke_intake(receipt, code=1)
+        args = json.loads(self.rows()[-1][3])
+        self.assertEqual(args[args.index("--failure-class") + 1], "decoder_degraded")
+        self.assertEqual(json.loads(args[args.index("--detail") + 1]), receipt)
+        self.assertEqual(json.loads(first.stdout.split("outlook-intake-receipt ", 1)[1]), receipt)
+        receipt["counts"]["run"]["decoder_alarm"] = 0
+        second = self.invoke_intake(receipt, code=0)
+        self.assertEqual(len(self.rows()), 1, "a quiet degraded run records no second failure")
+        self.assertIn('"state": "degraded"', second.stdout)
+
+    def test_split_counts_reject_private_names_and_nested_values(self):
+        for counts in ({"run": {"lee@example.test": 1}, "backlog": {}},
+                       {"run": {"logged": "2"}, "backlog": {}},
+                       {"run": {"logged": 1}, "backlog": {"unmatched": {"deep": 1}}},
+                       {"run": {"logged": 1}}):
+            with self.subTest(counts=counts):
+                result = self.invoke_intake({"state": "succeeded", "reason": "processed", "counts": counts}, code=0)
+                self.assertNotIn("lee@example.test", result.stdout)
+                self.assertNotIn("outlook-intake-receipt", result.stdout)
 
     def test_decoder_degradation_records_one_failure_until_recovery(self):
         receipt = {"state": "degraded", "reason": "decoder_degraded", "counts": {"decoder_alarm": 1}}
@@ -97,6 +132,19 @@ class ScheduledRunTests(unittest.TestCase):
         self.assertEqual(second.returncode, 0)
         self.assertEqual(len(self.rows()), 1)
         self.assertIn('"state": "degraded"', second.stdout)
+
+    def test_intake_detail_rejects_private_text_and_unknown_codes(self):
+        for detail in ('lee@example.test Subject: Lease offer /Users/x/Deals/Acme Medical/LOI.docx',
+                       'hxprobe exit=42 code=unknown',
+                       'hxprobe exit=42 code=exit_nonzero\nlee@example.test',
+                       'other exit=42 code=exit_nonzero'):
+            with self.subTest(detail=detail):
+                receipt = {'state': 'failed', 'reason': 'decode_failed', 'counts': {}, 'detail': detail}
+                result = self.invoke_intake(receipt)
+                args = json.loads(self.rows()[-1][3])
+                expected = {k: v for k, v in receipt.items() if k != 'detail'}
+                self.assertEqual(json.loads(args[args.index('--detail') + 1]), expected)
+                self.assertNotIn(detail, result.stdout)
 
     def test_decoder_deferred_and_health_error_receipts_are_preserved(self):
         deferred = {'state': 'degraded', 'reason': 'writes_deferred',

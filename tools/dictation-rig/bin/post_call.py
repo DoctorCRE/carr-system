@@ -29,6 +29,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from lib.fence import DATA_SENTENCE  # noqa: E402
 
 SCHEMA_VERSION = 1
 CONTEXT_FILE = "call-context.json"
@@ -593,7 +594,7 @@ def command_distiller(request: dict[str, Any], command: str | None = None, runne
 def _distiller_instruction() -> str:
     """Require exact context IDs and transcript-supported proposals."""
     return (
-        "You distill a Joe-and-Dell weekly commercial-real-estate call. "
+        "You distill a Joe-and-Dell weekly commercial-real-estate call. " + DATA_SENTENCE + " "
         "Use only exact deal_id and party_id values present in CONTEXT; never copy display names into ID fields. "
         "Extract each distinct action once, with exactly one accountable owner in joe_tasks or dell_tasks. "
         "Assign it to the partner who explicitly commits to doing it, even if the other partner owns the deal. "
