@@ -160,13 +160,29 @@ test('only a job first seen merged or closed is saved, once, as its finish', () 
 
 const readQueue = (rows, pullRequests) => workQueueTools({})['work-queue'].handler({ query: async () => ({ rows }), pullRequests }, 'joe', {});
 
-test('queued jobs without a runner start do not widen the search window', async () => {
+test('queued Codex jobs without a runner start do not widen the search window', async () => {
   const bounds = [];
-  await readQueue([jobRow(1, { created_at: '2026-01-01T00:00:00Z', started_at: null }),
+  await readQueue([jobRow(1, { executor: 'codex', created_at: '2026-01-01T00:00:00Z', started_at: null }),
     jobRow(2, { started_at: '2026-10-20T12:00:00Z' }),
     jobRow(3, { started_at: '2026-10-10T12:00:00Z', finished: { stage: 'merged', prs: [] } })],
   async (repos, since) => { bounds.push(since); return repos.map(repo => ({ repo, state: 'ok', prs: [] })); });
   assert.deepEqual(bounds, ['2026-10-20T12:00:00.000Z']);
+});
+
+test('an unstarted Claude job finds its merged PR before a later Codex start', async () => {
+  const merged = item(50, 'Card: WR557.S1.J1', { state: 'closed', updated_at: '2026-10-15T12:00:00Z',
+    pull_request: { merged_at: '2026-10-15T12:00:00Z' } });
+  const fetchImpl = async url => {
+    const query = new URL(url).searchParams.get('q');
+    const since = query.match(/updated:>=(\S+)/)?.[1];
+    const items = query.startsWith('repo:DoctorCRE/carr-system ') && (!since || merged.updated_at >= since) ? [merged] : [];
+    return new Response(JSON.stringify({ total_count: items.length, items }));
+  };
+  const view = await readQueue([
+    jobRow(1, { executor: 'claude', created_at: '2026-10-10T12:00:00Z', started_at: null }),
+    jobRow(2, { executor: 'codex', started_at: '2026-10-20T12:00:00Z' }),
+  ], createPullRequestSource({ token: 'synthetic', fetchImpl }));
+  assert.equal(view.jobs[0].stage, 'merged');
 });
 
 test('a merged job is found before its first board read despite 100 newer Card PRs', async () => {
