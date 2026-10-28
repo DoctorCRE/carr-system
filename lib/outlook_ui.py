@@ -194,7 +194,8 @@ def usable_window(pid: int) -> dict | None:
     return next((w for w in _windows(pid) if is_ordinary_main_window(w) and _readable(pid, w)), None)
 
 
-def _compose_window_open(pid: int, windows: list[dict]) -> bool:
+def compose_window_open(pid: int, windows: list[dict]) -> bool:
+    """True on positive draft evidence: a draft title, or readable Send/Subject controls."""
     for window in windows:
         if is_compose_window(window):
             return True
@@ -213,7 +214,7 @@ def _compose_window_open(pid: int, windows: list[dict]) -> bool:
 
 
 def _quit(pid: int, windows: list[dict], waits: Waits) -> bool:
-    if _compose_window_open(pid, windows):
+    if compose_window_open(pid, windows):
         raise ComposeWindowOpen
     window = next((w for w in windows if is_ordinary_main_window(w)), None)
     fallback_at = time.monotonic()
@@ -230,7 +231,7 @@ def _quit(pid: int, windows: list[dict], waits: Waits) -> bool:
         if now >= deadline:
             return False
         if now >= fallback_at:
-            if _compose_window_open(pid, _windows(pid)):
+            if compose_window_open(pid, _windows(pid)):
                 raise ComposeWindowOpen
             now = time.monotonic()
             if now >= deadline:
