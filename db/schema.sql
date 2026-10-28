@@ -1518,6 +1518,165 @@ end $$;
 COMMENT ON FUNCTION ops.adopt_legacy_active_rule_v1(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text) IS 'WR-000262 (0867). Internal continuation of ops.approve_rule for an ACTIVE legacy admission (ops.legacy_rule_admission_note non-null): binds nothing itself (ops.bind_rule_controls already did), verifies every requested control is installed, verified, gate-class and bound to the current statement, flips the admitted contract to hard_enforced/authority_enforced and writes the approval and activation authority receipts for the CURRENT rule version without updating the rule. Revoked from every role.';
 
 
+--
+-- Name: adopt_rule(uuid, bigint, text, text); Type: FUNCTION; Schema: ops; Owner: -
+--
+
+CREATE FUNCTION ops.adopt_rule(p_section_id uuid, p_base_version bigint, p_idempotency_key text, p_reason text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'ops', 'public', 'pg_temp'
+    AS $_$
+declare
+  v_slug text := ops.authority_actor_slug();
+  v_actor uuid;
+  v_section record;
+  v_text text;
+  v_statement text;
+  v_card_text text;
+  v_card jsonb;
+  v_rule uuid;
+  v_layer text;
+  v_packs_text text;
+  v_packs text[];
+  v_approval jsonb;
+  v_generation bigint;
+  v_attach uuid;
+  v_change_set uuid;
+begin
+  select id into v_actor from public.actor where slug=v_slug and kind='human' and active;
+  if v_actor is null then
+    raise exception 'adopt_rule_requires_human_authority';
+  end if;
+  if btrim(coalesce(p_idempotency_key,''))='' or btrim(coalesce(p_reason,''))='' then
+    raise exception 'adopt_rule_reason_required';
+  end if;
+  perform 1 from public.doctrine_document d join public.doctrine_section s on s.document_id=d.id
+   where s.id=p_section_id for update of d;
+  select s.id,s.document_id,s.section_key,s.status,s.current_version,d.slug,r.body
+    into v_section
+    from public.doctrine_section s
+    join public.doctrine_document d on d.id=s.document_id
+    left join public.doctrine_revision r on r.id=s.current_revision_id
+   where s.id=p_section_id for update of s;
+  if not found or v_section.slug<>'team-memory' or v_section.status<>'active'
+     or v_section.section_key not like 'conventions/proposed/%' then
+    raise exception 'convention_proposal_not_found';
+  end if;
+  if v_section.current_version<>p_base_version then
+    raise exception 'version_conflict';
+  end if;
+
+  -- Proposal body: "Convention: <statement>" on the first line, then either a
+  -- "Card: <json object>" line or a "Packs: <pack>, <pack>" line, then free
+  -- notes that are never adopted.
+  v_text := v_section.body->>'text';
+  v_statement := btrim(substring(v_text from '^Convention: ([^\n]+)'));
+  if coalesce(v_statement,'')='' then
+    raise exception 'convention_proposal_malformed';
+  end if;
+  v_card_text := substring(v_text from '\nCard: (\{[^\n]*\})[ \t]*(?:\n|$)');
+  if v_card_text is not null then
+    begin
+      v_card := v_card_text::jsonb;
+    exception when others then
+      raise exception 'convention_proposal_malformed';
+    end;
+    if jsonb_typeof(v_card)<>'object' or coalesce(v_card->>'id','')='' or v_card ? 'wording'
+       or coalesce(v_card->>'placement','') not in ('CORE','PROMPT','TOOL','PLANNING') then
+      raise exception 'convention_proposal_malformed';
+    end if;
+    v_card := v_card - 'word_count';
+    if exists (select 1 from public.rule where status='active' and card->>'id'=v_card->>'id') then
+      raise exception 'convention_card_already_active';
+    end if;
+  end if;
+
+  -- A card is delivered by the generated core block or the rule-card hook, so
+  -- it names no packs. A convention without a card names the existing packs
+  -- that deliver it; there is no default pack and no new pack.
+  v_packs_text := substring(v_text from '\nPacks: ([^\n]*)');
+  if v_card is not null then
+    if v_packs_text is not null then
+      raise exception 'convention_proposal_malformed';
+    end if;
+  else
+    select array_agg(distinct btrim(p) order by btrim(p)) into v_packs
+      from regexp_split_to_table(coalesce(v_packs_text,''), ',') p
+     where btrim(p)<>'';
+    if v_packs is null then
+      raise exception 'convention_proposal_malformed';
+    end if;
+    if exists (select 1 from unnest(v_packs) n where not exists
+                 (select 1 from ops.rule_pack rp where rp.pack=n)) then
+      raise exception 'convention_pack_unknown';
+    end if;
+  end if;
+
+  insert into public.rule(statement,taught_by,status,card)
+  values (v_statement,v_actor,'proposed',v_card) returning id into v_rule;
+  -- Delivery, never the capped shared layer0 boot recitation: a card on the
+  -- control layer, a card-less convention on the pack layer of its named packs.
+  v_layer := case when v_card is null then 'pack' else 'control' end;
+  insert into ops.rule_load_layer(rule_id,short_id,load_layer,packs,scope,why,source,map_digest)
+  values (v_rule,left(v_rule::text,8),v_layer,
+          coalesce(v_packs,'{}'::text[]),'shared',
+          case when v_card is null then null
+               else 'adopted rule card; delivered by the generated core block or the rule-card hook' end,
+          'ops.adopt_rule',encode(public.digest(coalesce(v_card::text,array_to_string(v_packs,','))||v_statement,'sha256'),'hex'));
+  v_approval := ops.approve_rule(v_rule,'human_only',array['human_authority_runtime'],
+                                 p_idempotency_key,p_reason);
+
+  -- Retire the proposal as the approval surface's own attach (surface 'app').
+  select generation into v_generation from public.doctrine_meta where id=1;
+  insert into public.memory_session(surface,actor_id,access,attached_generation,attached_index_digest)
+  values ('app',v_actor,'read_write',v_generation,
+          encode(public.digest(p_section_id::text||':'||p_base_version::text,'sha256'),'hex'))
+  returning attach_id into v_attach;
+  insert into public.doctrine_change_set(actor_id,session_key,idempotency_key,state,committed_at)
+  values (v_actor,v_attach::text,'adopt-rule:'||p_idempotency_key,'committed',now())
+  returning id into v_change_set;
+  insert into public.doctrine_change_item(change_set_id,section_id,op,expected_version)
+  values (v_change_set,p_section_id,'retire',p_base_version);
+  update public.doctrine_section set status='retired',updated_at=now(),current_version=current_version+1
+   where id=p_section_id;
+  update public.doctrine_meta set generation=generation+1,updated_at=now() where id=1
+  returning generation into v_generation;
+  -- Same snapshot shape as rebuildSnapshot in mcp-server/src/doctrine.js.
+  insert into public.doctrine_snapshot(document_id,generation,snapshot_json,content_hash,built_at)
+  select d.id,v_generation,
+         jsonb_build_object(
+           'document',jsonb_build_object('id',d.id,'slug',d.slug,'title',d.title,
+             'content_class',d.content_class,'visibility',d.visibility),
+           'sections',coalesce((
+             select jsonb_agg(jsonb_build_object(
+                      'section_id',s.id,'section_key',s.section_key,'title',s.title,
+                      'ordinal',s.ordinal,'version',s.current_version,
+                      'status',s.status,'review_after',s.review_after,
+                      'body',r.body,'content_hash',r.content_hash) order by s.ordinal)
+               from public.doctrine_section s
+               left join public.doctrine_revision r on r.id=s.current_revision_id
+              where s.document_id=d.id and s.status='active'),'[]'::jsonb),
+           'edges_out',coalesce((
+             select jsonb_agg(jsonb_build_object('edge_type',e.edge_type,
+                      'source_section_id',e.source_section_id,
+                      'target_section_id',e.target_section_id,'scope',e.scope))
+               from public.doctrine_edge e
+               join public.doctrine_section s on s.id=e.source_section_id
+              where s.document_id=d.id and e.retired_by_revision_id is null),'[]'::jsonb)),
+         md5((select coalesce(string_agg(s.body_hash,'' order by s.ordinal),'')
+                from public.doctrine_section s where s.document_id=d.id)),
+         now()
+    from public.doctrine_document d where d.id=v_section.document_id
+  on conflict (document_id) do update
+    set generation=excluded.generation,snapshot_json=excluded.snapshot_json,
+        content_hash=excluded.content_hash,built_at=excluded.built_at;
+
+  return jsonb_build_object('ok',true,'rule_id',v_rule,'card_id',v_card->>'id',
+    'load_layer',v_layer,'packs',to_jsonb(coalesce(v_packs,'{}'::text[])),'approval',v_approval,'retired_section_id',p_section_id,
+    'attach_id',v_attach,'generation',v_generation);
+end $_$;
+
+
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
@@ -11366,7 +11525,7 @@ CREATE TABLE ops.work_request (
     CONSTRAINT work_request_program_ordinal_positive CHECK (((program_ordinal IS NULL) OR (program_ordinal > 0))),
     CONSTRAINT work_request_shape_disposition_complete CHECK ((((shape_disposition IS NULL) AND (shape_fixed_surface_ref IS NULL) AND (shape_rationale IS NULL) AND (shape_decided_by_actor_id IS NULL) AND (shape_decided_at IS NULL)) OR ((shape_disposition = 'required'::text) AND (shape_fixed_surface_ref IS NULL) AND (shape_rationale IS NOT NULL) AND (btrim(shape_rationale) <> ''::text) AND (shape_decided_by_actor_id IS NOT NULL) AND (shape_decided_at IS NOT NULL)) OR ((shape_disposition = 'not_required'::text) AND (shape_fixed_surface_ref IS NOT NULL) AND (btrim(shape_fixed_surface_ref) <> ''::text) AND (shape_rationale IS NOT NULL) AND (btrim(shape_rationale) <> ''::text) AND (shape_decided_by_actor_id IS NOT NULL) AND (shape_decided_at IS NOT NULL)))),
     CONSTRAINT work_request_shape_disposition_valid CHECK (((shape_disposition IS NULL) OR (shape_disposition = ANY (ARRAY['required'::text, 'not_required'::text])))),
-    CONSTRAINT work_request_sourced_capture_shape CHECK ((((capture_idempotency_key IS NULL) AND (organization_tenant_id IS NULL) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL)) OR ((capture_idempotency_key IS NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key = ANY (ARRAY['carr-ai-engineering-suite-v1'::text, 'carr-system-integrity-elimination-v1'::text])) AND (program_ordinal IS NOT NULL) AND (program_ordinal > 0) AND (NOT (requester_actor IS DISTINCT FROM 'joe'::text)) AND (NOT (owner_actor IS DISTINCT FROM 'joe'::text))) OR ((capture_idempotency_key IS NOT NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NOT NULL) AND (doctrine_revision_id IS NOT NULL) AND (sourced_capture_sequence IS NOT NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL) AND (origin_ref IS NOT NULL) AND (origin_ref ~ '^doctrine:[a-z0-9][a-z0-9-]*#[a-z0-9][a-z0-9-]*$'::text) AND (((state = 'captured'::text) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['triaged'::text, 'ready'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (((triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL))) AND (exit_reason IS NOT NULL) AND (btrim(exit_reason) <> ''::text) AND (closed_at IS NOT NULL) AND (((state = 'declined'::text) AND (superseded_by IS NULL)) OR ((state = 'superseded'::text) AND (superseded_by IS NOT NULL)))))))),
+    CONSTRAINT work_request_sourced_capture_shape CHECK ((((capture_idempotency_key IS NULL) AND (organization_tenant_id IS NULL) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL)) OR ((capture_idempotency_key IS NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key = ANY (ARRAY['carr-ai-engineering-suite-v1'::text, 'carr-system-integrity-elimination-v1'::text])) AND (program_ordinal IS NOT NULL) AND (program_ordinal > 0) AND (NOT (requester_actor IS DISTINCT FROM 'joe'::text)) AND (NOT (owner_actor IS DISTINCT FROM 'joe'::text))) OR ((capture_idempotency_key IS NOT NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NOT NULL) AND (doctrine_revision_id IS NOT NULL) AND (sourced_capture_sequence IS NOT NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL) AND (origin_ref IS NOT NULL) AND (origin_ref ~ '^doctrine:[a-z0-9][a-z0-9-]*#[a-z0-9][a-z0-9-]*$'::text) AND (((state = ANY (ARRAY['captured'::text, 'confirmed_closed'::text])) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['triaged'::text, 'ready'::text, 'verification'::text, 'confirmed_closed'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (((triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL))) AND (exit_reason IS NOT NULL) AND (btrim(exit_reason) <> ''::text) AND (closed_at IS NOT NULL) AND (((state = 'declined'::text) AND (superseded_by IS NULL)) OR ((state = 'superseded'::text) AND (superseded_by IS NOT NULL)))))))),
     CONSTRAINT work_request_state_check CHECK ((state = ANY (ARRAY['captured'::text, 'triaged'::text, 'ready'::text, 'claimed'::text, 'in_progress'::text, 'verification'::text, 'awaiting_release'::text, 'released'::text, 'confirmed_closed'::text, 'needs_joe'::text, 'blocked'::text, 'declined'::text, 'superseded'::text, 'failed'::text])))
 );
 
@@ -18148,6 +18307,22 @@ $_$;
 --
 
 COMMENT ON FUNCTION ops.gate_zero_record_read_only_outcome(p_idempotency_key uuid, p_receipt jsonb) IS 'The only way to record a Gate Zero read-only outcome. The producing seat, actor and outcome digest are derived; the receipt and idempotency key are the only parameters. It admits only the staffed non-human oracle seat and validates the closed receipt and identity schemas. One insert is arbitrated by candidate_digest; its fallback always returns the immutable first row, including when later evidence, identity or time bytes differ, so the caller can report convergence and heal a missing outer audit event. No receipt is replaced. outcome_digest is the tagged digest r7 declares; candidate_scoped_digest is informational only.';
+
+
+--
+-- Name: guard_captured_email_source(); Type: FUNCTION; Schema: ops; Owner: -
+--
+
+CREATE FUNCTION ops.guard_captured_email_source() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog'
+    AS $$
+begin
+  if new.email_source is distinct from old.email_source then
+    raise exception 'email_source_immutable' using errcode='23514';
+  end if;
+  return new;
+end $$;
 
 
 --
@@ -31418,6 +31593,17 @@ CREATE FUNCTION ops.read_governance_queue() RETURNS jsonb
       ) order by p.created_at asc, p.id)
       from public.retrieval_proposal p
       where p.status = 'pending'
+    ), '[]'::jsonb),
+    'pending_convention_proposals', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'section_id', s.id, 'section_key', s.section_key, 'base_version', s.current_version,
+        'updated_at', s.updated_at, 'body_text', rv.body->>'text'
+      ) order by s.section_key)
+      from public.doctrine_section s
+      join public.doctrine_document d on d.id = s.document_id
+      left join public.doctrine_revision rv on rv.id = s.current_revision_id
+      where d.slug = 'team-memory' and s.status = 'active'
+        and s.section_key like 'conventions/proposed/%'
     ), '[]'::jsonb)
   )
 $$;
@@ -35790,6 +35976,52 @@ end $$;
 
 
 --
+-- Name: register_client_portal(uuid, text, text); Type: FUNCTION; Schema: ops; Owner: -
+--
+
+CREATE FUNCTION ops.register_client_portal(p_deal_id uuid, p_slug text, p_password text) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $_$
+declare
+  owner_client uuid;
+  existing ops.client_portal%rowtype;
+begin
+  if p_slug is null or p_slug !~ '^[a-z0-9][a-z0-9-]{0,62}$' then
+    raise exception 'portal_slug_invalid' using errcode='22023';
+  end if;
+  if p_password is null or length(p_password) not between 1 and 1024 then
+    raise exception 'portal_password_invalid' using errcode='22023';
+  end if;
+  select d.client_id into owner_client from public.deal d
+    join public.client cl on cl.id=d.client_id and cl.merged_into is null
+   where d.id=p_deal_id;
+  if owner_client is null then
+    raise exception 'portal_deal_not_found' using errcode='22023';
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended('client-portal:'||p_slug,0));
+  perform pg_advisory_xact_lock(hashtextextended('client-portal-deal:'||p_deal_id::text,0));
+  select p.* into existing from ops.client_portal p where p.slug=p_slug;
+  if found then
+    if existing.client_id=owner_client and existing.deal_id=p_deal_id and existing.disabled_at is null then
+      if existing.password_hash=public.crypt(encode(public.digest(p_password,'sha256'),'hex'),existing.password_hash) then
+        return 'existing';
+      end if;
+      raise exception 'portal_password_differs' using errcode='23505';
+    end if;
+    raise exception 'portal_slug_taken' using errcode='23505';
+  end if;
+  if exists (select 1 from ops.client_portal p where p.deal_id=p_deal_id and p.disabled_at is null) then
+    raise exception 'portal_deal_already_registered' using errcode='23505';
+  end if;
+  insert into ops.client_portal(slug,client_id,deal_id,password_hash)
+  values (p_slug,owner_client,p_deal_id,
+    public.crypt(encode(public.digest(p_password,'sha256'),'hex'),public.gen_salt('bf',12)));
+  return 'created';
+end $_$;
+
+
+--
 -- Name: register_execution_environment_provider(jsonb, uuid); Type: FUNCTION; Schema: ops; Owner: -
 --
 
@@ -38248,7 +38480,7 @@ end $$;
 CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
     LANGUAGE sql IMMUTABLE
     SET search_path TO 'pg_catalog'
-    AS $$SELECT '{"relation_dml": [{"grantee": "carr_writer", "relation": "public.deal_vendor_assignment", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "public.deal_vendor_assignment", "grantable": false, "privilege": "update", "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:update", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "public.doctrine_embedding", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:public.doctrine_embedding:carr_writer:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "public.email_proposal", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:public.email_proposal:carr_writer:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "public.email_proposal", "grantable": false, "privilege": "update", "ingress_key": "db-relation-acl:public.email_proposal:carr_writer:update", "ingress_kind": "db_relation_acl", "relation_kind": "r"}], "secdef_execute": [{"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text)", "volatility": "v", "ingress_key": "db-function-acl:ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text)", "volatility": "v", "ingress_key": "db-function-acl:ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.transfer_studio_leader(p_source text, p_target text, p_epoch bigint, p_evidence jsonb)", "volatility": "v", "ingress_key": "db-function-acl:ops.transfer_studio_leader(p_source text, p_target text, p_epoch bigint, p_evidence jsonb):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.write_feature_switch(p_action text, p_args jsonb)", "volatility": "v", "ingress_key": "db-function-acl:ops.write_feature_switch(p_action text, p_args jsonb):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[])", "volatility": "s", "ingress_key": "db-function-acl:public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[]):carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[])", "volatility": "s", "ingress_key": "db-function-acl:public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[]):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.read_client_portal(p_slug text, p_password text)", "volatility": "v", "ingress_key": "db-function-acl:ops.read_client_portal(p_slug text, p_password text):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.record_fact_observations(p_tenant text, p_actor_id uuid, p_idempotency_key uuid, p_entity_ref text, p_observations jsonb)", "volatility": "v", "ingress_key": "db-function-acl:ops.record_fact_observations(p_tenant text, p_actor_id uuid, p_idempotency_key uuid, p_entity_ref text, p_observations jsonb):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.promote_fact(p_tenant text, p_actor_id uuid, p_idempotency_key uuid, p_entity_ref text, p_fact_key text, p_basis text, p_observation_ids uuid[], p_base_version integer)", "volatility": "v", "ingress_key": "db-function-acl:ops.promote_fact(p_tenant text, p_actor_id uuid, p_idempotency_key uuid, p_entity_ref text, p_fact_key text, p_basis text, p_observation_ids uuid[], p_base_version integer):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.list_fact_conflicts(p_tenant text, p_entity_ref text, p_limit integer)", "volatility": "s", "ingress_key": "db-function-acl:ops.list_fact_conflicts(p_tenant text, p_entity_ref text, p_limit integer):carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}], "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d", "registry_version": "scac-mutation-registry.v118", "runtime_dml_grants": {"count": 341, "digest": "sha256:417178cb46966205a188bafec1ceb5d7490249d9dd924264c6f811fb31697ed1"}, "retired_relation_dml": [{"grantee": "carr_writer", "relation": "ops.cognition_job", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:ops.cognition_job:carr_writer:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "ops.cognition_job", "grantable": false, "privilege": "update", "ingress_key": "db-relation-acl:ops.cognition_job:carr_writer:update", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "ops.cognition_result_cache", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:ops.cognition_result_cache:carr_writer:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "ops.cognition_result_cache", "grantable": false, "privilege": "update", "ingress_key": "db-relation-acl:ops.cognition_result_cache:carr_writer:update", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_jobs", "relation": "ops.provider_observation", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:ops.provider_observation:carr_jobs:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "ops.provider_route", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:ops.provider_route:carr_writer:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "ops.provider_route", "grantable": false, "privilege": "update", "ingress_key": "db-relation-acl:ops.provider_route:carr_writer:update", "ingress_kind": "db_relation_acl", "relation_kind": "r"}], "retired_secdef_execute": [{"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text)", "volatility": "v", "ingress_key": "db-function-acl:ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.classify_sourced_work_request_build(p_work_request text, p_base_version integer, p_scope_summary text, p_dependency_refs jsonb, p_caps jsonb)", "volatility": "s", "ingress_key": "db-function-acl:ops.classify_sourced_work_request_build(p_work_request text, p_base_version integer, p_scope_summary text, p_dependency_refs jsonb, p_caps jsonb):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "public", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.heavy_build_ready_plan_gate()", "volatility": "v", "ingress_key": "db-function-acl:ops.heavy_build_ready_plan_gate():public:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.jev_call_receipt_integrity()", "volatility": "v", "ingress_key": "db-function-acl:ops.jev_call_receipt_integrity():carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.jev_call_receipt_integrity()", "volatility": "v", "ingress_key": "db-function-acl:ops.jev_call_receipt_integrity():carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_heavy_build jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_heavy_build jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text)", "volatility": "v", "ingress_key": "db-function-acl:ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text):carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text)", "volatility": "v", "ingress_key": "db-function-acl:ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text)", "volatility": "v", "ingress_key": "db-function-acl:ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.record_sourced_heavy_build_admission(p_plan_id uuid, p_work_request text, p_base_version integer, p_classifier_reasons jsonb, p_contract jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.record_sourced_heavy_build_admission(p_plan_id uuid, p_work_request text, p_base_version integer, p_classifier_reasons jsonb, p_contract jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.review_sourced_heavy_build_plan(p_work_request text, p_plan_hash text, p_admission_hash text, p_reviewer_actor_id uuid, p_verdict text, p_reviewer_session_ref text, p_review_summary text, p_evidence_refs jsonb, p_gaps jsonb, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.review_sourced_heavy_build_plan(p_work_request text, p_plan_hash text, p_admission_hash text, p_reviewer_actor_id uuid, p_verdict text, p_reviewer_session_ref text, p_review_summary text, p_evidence_refs jsonb, p_gaps jsonb, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.sourced_heavy_build_review_target(p_work_request text, p_plan_hash text, p_admission_hash text)", "volatility": "s", "ingress_key": "db-function-acl:ops.sourced_heavy_build_review_target(p_work_request text, p_plan_hash text, p_admission_hash text):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.admit_job_cost(p_job_id uuid, p_lease_token uuid, p_route_key text, p_estimated_cost_usd numeric)", "volatility": "v", "ingress_key": "db-function-acl:ops.admit_job_cost(p_job_id uuid, p_lease_token uuid, p_route_key text, p_estimated_cost_usd numeric):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.get_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_cache_key text)", "volatility": "v", "ingress_key": "db-function-acl:ops.get_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_cache_key text):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.invalidate_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_dependency_ref text)", "volatility": "v", "ingress_key": "db-function-acl:ops.invalidate_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_dependency_ref text):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.put_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_cache_key text, p_cognition_key text, p_cognition_version integer, p_output_schema_version integer, p_proposal jsonb, p_dependency_refs text[], p_ttl_seconds integer)", "volatility": "v", "ingress_key": "db-function-acl:ops.put_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_cache_key text, p_cognition_key text, p_cognition_version integer, p_output_schema_version integer, p_proposal jsonb, p_dependency_refs text[], p_ttl_seconds integer):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_admit_mutation(p_token_ref_digest text, p_operation_manifest jsonb, p_admission_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_admit_mutation(p_token_ref_digest text, p_operation_manifest jsonb, p_admission_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_admit_mutation(p_token_ref_digest text, p_operation_manifest jsonb, p_admission_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_admit_mutation(p_token_ref_digest text, p_operation_manifest jsonb, p_admission_idempotency_key uuid):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_admit_mutation(p_token_ref_digest text, p_operation_manifest jsonb, p_admission_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_admit_mutation(p_token_ref_digest text, p_operation_manifest jsonb, p_admission_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_capability_token_status(p_token_ref_digest text)", "volatility": "s", "ingress_key": "db-function-acl:ops.scac_capability_token_status(p_token_ref_digest text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_capability_token_status(p_token_ref_digest text)", "volatility": "s", "ingress_key": "db-function-acl:ops.scac_capability_token_status(p_token_ref_digest text):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_consume_verified_pop_challenge(p_challenge_id uuid, p_challenge_digest text, p_nonce text, p_pop_verification_digest text, p_consume_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_consume_verified_pop_challenge(p_challenge_id uuid, p_challenge_digest text, p_nonce text, p_pop_verification_digest text, p_consume_idempotency_key uuid):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_device_enrollment_status(p_device_ref text)", "volatility": "s", "ingress_key": "db-function-acl:ops.scac_device_enrollment_status(p_device_ref text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_issue_pop_challenge(p_principal_digest text, p_device_ref text, p_workload_digest text, p_ingress_key text, p_operation_manifest_digest text, p_idempotency_digest text, p_ttl_seconds integer, p_issue_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_issue_pop_challenge(p_principal_digest text, p_device_ref text, p_workload_digest text, p_ingress_key text, p_operation_manifest_digest text, p_idempotency_digest text, p_ttl_seconds integer, p_issue_idempotency_key uuid):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_record_capability_token_receipt(p_challenge_digest text, p_token_ref_digest text, p_signed_payload_digest text, p_signature_digest text, p_issuer_key_digest text, p_issuer_root_event_digest text, p_external_verification_receipt_digest text, p_issued_at timestamp with time zone, p_expires_at timestamp with time zone, p_record_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_record_capability_token_receipt(p_challenge_digest text, p_token_ref_digest text, p_signed_payload_digest text, p_signature_digest text, p_issuer_key_digest text, p_issuer_root_event_digest text, p_external_verification_receipt_digest text, p_issued_at timestamp with time zone, p_expires_at timestamp with time zone, p_record_idempotency_key uuid):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_record_token_verification_binding(p_token_ref_digest text, p_token_payload jsonb, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_record_token_verification_binding(p_token_ref_digest text, p_token_payload jsonb, p_idempotency_key uuid):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_reference_monitor_state()", "volatility": "s", "ingress_key": "db-function-acl:ops.scac_reference_monitor_state():carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_reference_monitor_state()", "volatility": "s", "ingress_key": "db-function-acl:ops.scac_reference_monitor_state():carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_reference_monitor_state()", "volatility": "s", "ingress_key": "db-function-acl:ops.scac_reference_monitor_state():carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_register_operation_effect_binding(p_registry_version text, p_ingress_key text, p_privilege_bundle text, p_registry_entry_digest text, p_effect_keys text[], p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_register_operation_effect_binding(p_registry_version text, p_ingress_key text, p_privilege_bundle text, p_registry_entry_digest text, p_effect_keys text[], p_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_register_token_issuer_binding(p_issuer_key_digest text, p_issuer_root_event_digest text, p_certification_receipt_digest text, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_register_token_issuer_binding(p_issuer_key_digest text, p_issuer_root_event_digest text, p_certification_receipt_digest text, p_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_revoke_token_subject(p_subject_kind text, p_subject_digest text, p_reason_digest text, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_revoke_token_subject(p_subject_kind text, p_subject_digest text, p_reason_digest text, p_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_token_control_snapshot()", "volatility": "s", "ingress_key": "db-function-acl:ops.scac_token_control_snapshot():carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_token_control_snapshot()", "volatility": "s", "ingress_key": "db-function-acl:ops.scac_token_control_snapshot():carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_transition_reference_monitor_mode(p_mode text, p_reason_digest text, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_transition_reference_monitor_mode(p_mode text, p_reason_digest text, p_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_transition_token_kill_switch(p_action text, p_reason_digest text, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_transition_token_kill_switch(p_action text, p_reason_digest text, p_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_acquire_lane_lock(p_component text, p_session_ref text, p_lease_seconds integer, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.siep_acquire_lane_lock(p_component text, p_session_ref text, p_lease_seconds integer, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_attach_evidence(p_component text, p_evidence_kind text, p_ledger_id uuid, p_ledger_kind text, p_evidence_digest text, p_note text, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.siep_attach_evidence(p_component text, p_evidence_kind text, p_ledger_id uuid, p_ledger_kind text, p_evidence_digest text, p_note text, p_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_attach_evidence(p_component text, p_evidence_kind text, p_ledger_id uuid, p_ledger_kind text, p_evidence_digest text, p_note text, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.siep_attach_evidence(p_component text, p_evidence_kind text, p_ledger_id uuid, p_ledger_kind text, p_evidence_digest text, p_note text, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_bind_evidence_job(p_component text, p_base_version integer, p_evidence_kind text, p_job_id uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.siep_bind_evidence_job(p_component text, p_base_version integer, p_evidence_kind text, p_job_id uuid, p_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_claim_package(p_component text, p_session_ref text, p_lease_token uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.siep_claim_package(p_component text, p_session_ref text, p_lease_token uuid, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_manifest_digest()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_manifest_digest():carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_manifest_digest()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_manifest_digest():carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_manifest_digest()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_manifest_digest():carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_manifest_digest()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_manifest_digest():carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_read_evidence_graph(p_component text)", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_read_evidence_graph(p_component text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_read_evidence_graph(p_component text)", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_read_evidence_graph(p_component text):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_read_evidence_graph(p_component text)", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_read_evidence_graph(p_component text):carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_read_evidence_graph(p_component text)", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_read_evidence_graph(p_component text):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_read_program()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_read_program():carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_read_program()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_read_program():carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_read_program()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_read_program():carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_read_program()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_read_program():carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_record_joe_decision(p_component text, p_gate text, p_decision text, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.siep_record_joe_decision(p_component text, p_gate text, p_decision text, p_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_release_lane_lock(p_component text, p_session_ref text, p_lease_token uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.siep_release_lane_lock(p_component text, p_session_ref text, p_lease_token uuid, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_terminal_status()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_terminal_status():carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_terminal_status()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_terminal_status():carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_terminal_status()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_terminal_status():carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_terminal_status()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_terminal_status():carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_transition_package(p_component text, p_base_version integer, p_target_state text, p_session_ref text, p_lease_token uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.siep_transition_package(p_component text, p_base_version integer, p_target_state text, p_session_ref text, p_lease_token uuid, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.approve_staging_release(p_release_key text, p_plan_hash text, p_idempotency_key uuid, p_expires_hours integer, p_verifier_actor text, p_verifier_evidence_ref text)", "volatility": "v", "ingress_key": "db-function-acl:ops.approve_staging_release(p_release_key text, p_plan_hash text, p_idempotency_key uuid, p_expires_hours integer, p_verifier_actor text, p_verifier_evidence_ref text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.disable_legacy_schedule(p_workflow_key text, p_surface_id text, p_locator text, p_reason text, p_pre_observation_ref text, p_post_observation_ref text, p_sibling_surface_id text, p_sibling_locator text, p_sibling_pre_observation_ref text, p_sibling_post_observation_ref text, p_idempotency_key text)", "volatility": "v", "ingress_key": "db-function-acl:ops.disable_legacy_schedule(p_workflow_key text, p_surface_id text, p_locator text, p_reason text, p_pre_observation_ref text, p_post_observation_ref text, p_sibling_surface_id text, p_sibling_locator text, p_sibling_pre_observation_ref text, p_sibling_post_observation_ref text, p_idempotency_key text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.get_cognition_cache(p_cache_key text)", "volatility": "s", "ingress_key": "db-function-acl:ops.get_cognition_cache(p_cache_key text):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.invalidate_cognition_cache(p_dependency_ref text)", "volatility": "v", "ingress_key": "db-function-acl:ops.invalidate_cognition_cache(p_dependency_ref text):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.invalidate_cognition_cache(p_dependency_ref text)", "volatility": "v", "ingress_key": "db-function-acl:ops.invalidate_cognition_cache(p_dependency_ref text):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.put_cognition_cache(p_cache_key text, p_cognition_key text, p_cognition_version integer, p_output_schema_version integer, p_proposal jsonb, p_dependency_refs text[], p_ttl_seconds integer)", "volatility": "v", "ingress_key": "db-function-acl:ops.put_cognition_cache(p_cache_key text, p_cognition_key text, p_cognition_version integer, p_output_schema_version integer, p_proposal jsonb, p_dependency_refs text[], p_ttl_seconds integer):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_device_evidence", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.record_claude_scheduler_observation(p_surface_id text, p_provider_task_id text, p_cron_expression text, p_timezone text, p_enabled boolean, p_definition_sha256 text, p_provider_revision text, p_source_fingerprint text, p_observed_at timestamp with time zone, p_idempotency_key text)", "volatility": "v", "ingress_key": "db-function-acl:ops.record_claude_scheduler_observation(p_surface_id text, p_provider_task_id text, p_cron_expression text, p_timezone text, p_enabled boolean, p_definition_sha256 text, p_provider_revision text, p_source_fingerprint text, p_observed_at timestamp with time zone, p_idempotency_key text):carr_device_evidence:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_device_evidence", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.record_launchd_scheduler_observation(p_surface_id text, p_label text, p_timezone text, p_enabled boolean, p_plist_sha256 text, p_schedule_sha256 text, p_launchctl_revision text, p_source_fingerprint text, p_observed_at timestamp with time zone, p_idempotency_key text)", "volatility": "v", "ingress_key": "db-function-acl:ops.record_launchd_scheduler_observation(p_surface_id text, p_label text, p_timezone text, p_enabled boolean, p_plist_sha256 text, p_schedule_sha256 text, p_launchctl_revision text, p_source_fingerprint text, p_observed_at timestamp with time zone, p_idempotency_key text):carr_device_evidence:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.record_provider_observation(p_route_key text, p_status text, p_latency_ms integer, p_error_class text, p_ttl_seconds integer, p_source_ref text)", "volatility": "v", "ingress_key": "db-function-acl:ops.record_provider_observation(p_route_key text, p_status text, p_latency_ms integer, p_error_class text, p_ttl_seconds integer, p_source_ref text):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.release_job_cost(p_reservation_id uuid, p_job_id uuid, p_lease_token uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.release_job_cost(p_reservation_id uuid, p_job_id uuid, p_lease_token uuid):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.reserve_job_cost(p_job_id uuid, p_lease_token uuid, p_route_key text, p_estimated_cost_usd numeric)", "volatility": "v", "ingress_key": "db-function-acl:ops.reserve_job_cost(p_job_id uuid, p_lease_token uuid, p_route_key text, p_estimated_cost_usd numeric):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.retire_workflow_cutover_plan(p_plan_id uuid, p_disable_receipt_id uuid, p_reason text, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.retire_workflow_cutover_plan(p_plan_id uuid, p_disable_receipt_id uuid, p_reason text, p_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.select_provider_routes(p_requested text[])", "volatility": "s", "ingress_key": "db-function-acl:ops.select_provider_routes(p_requested text[]):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.settle_job_cost(p_reservation_id uuid, p_job_id uuid, p_lease_token uuid, p_input_tokens integer, p_output_tokens integer, p_actual_cost_usd numeric)", "volatility": "v", "ingress_key": "db-function-acl:ops.settle_job_cost(p_reservation_id uuid, p_job_id uuid, p_lease_token uuid, p_input_tokens integer, p_output_tokens integer, p_actual_cost_usd numeric):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}]}'::jsonb$$;
+    AS $$select '{"relation_dml": [{"grantee": "carr_writer", "relation": "public.deal_vendor_assignment", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "public.deal_vendor_assignment", "grantable": false, "privilege": "update", "ingress_key": "db-relation-acl:public.deal_vendor_assignment:carr_writer:update", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "public.doctrine_embedding", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:public.doctrine_embedding:carr_writer:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "public.email_proposal", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:public.email_proposal:carr_writer:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "public.email_proposal", "grantable": false, "privilege": "update", "ingress_key": "db-relation-acl:public.email_proposal:carr_writer:update", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "public.memory_session", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:public.memory_session:carr_writer:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "ops.work_request_slice", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:ops.work_request_slice:carr_writer:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "ops.work_request_job", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:ops.work_request_job:carr_writer:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "ops.work_request_job", "grantable": false, "privilege": "update", "ingress_key": "db-relation-acl:ops.work_request_job:carr_writer:update", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "public.email_lead_exclusion", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:public.email_lead_exclusion:carr_writer:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}], "secdef_execute": [{"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text)", "volatility": "v", "ingress_key": "db-function-acl:ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text)", "volatility": "v", "ingress_key": "db-function-acl:ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.transfer_studio_leader(p_source text, p_target text, p_epoch bigint, p_evidence jsonb)", "volatility": "v", "ingress_key": "db-function-acl:ops.transfer_studio_leader(p_source text, p_target text, p_epoch bigint, p_evidence jsonb):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.write_feature_switch(p_action text, p_args jsonb)", "volatility": "v", "ingress_key": "db-function-acl:ops.write_feature_switch(p_action text, p_args jsonb):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[])", "volatility": "s", "ingress_key": "db-function-acl:public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[]):carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[])", "volatility": "s", "ingress_key": "db-function-acl:public.search_doctrine_semantic(p_query text, p_actor_id uuid, p_content_classes text[], p_limit integer, p_policy_id text, p_embeddings vector[]):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.read_client_portal(p_slug text, p_password text)", "volatility": "v", "ingress_key": "db-function-acl:ops.read_client_portal(p_slug text, p_password text):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.record_fact_observations(p_tenant text, p_actor_id uuid, p_idempotency_key uuid, p_entity_ref text, p_observations jsonb)", "volatility": "v", "ingress_key": "db-function-acl:ops.record_fact_observations(p_tenant text, p_actor_id uuid, p_idempotency_key uuid, p_entity_ref text, p_observations jsonb):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.promote_fact(p_tenant text, p_actor_id uuid, p_idempotency_key uuid, p_entity_ref text, p_fact_key text, p_basis text, p_observation_ids uuid[], p_base_version integer)", "volatility": "v", "ingress_key": "db-function-acl:ops.promote_fact(p_tenant text, p_actor_id uuid, p_idempotency_key uuid, p_entity_ref text, p_fact_key text, p_basis text, p_observation_ids uuid[], p_base_version integer):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.list_fact_conflicts(p_tenant text, p_entity_ref text, p_limit integer)", "volatility": "s", "ingress_key": "db-function-acl:ops.list_fact_conflicts(p_tenant text, p_entity_ref text, p_limit integer):carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.register_client_portal(p_deal_id uuid, p_slug text, p_password text)", "volatility": "v", "ingress_key": "db-function-acl:ops.register_client_portal(p_deal_id uuid, p_slug text, p_password text):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.adopt_rule(p_section_id uuid, p_base_version bigint, p_idempotency_key text, p_reason text)", "volatility": "v", "ingress_key": "db-function-acl:ops.adopt_rule(p_section_id uuid, p_base_version bigint, p_idempotency_key text, p_reason text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}], "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d", "registry_version": "scac-mutation-registry.v118", "runtime_dml_grants": {"count": 341, "digest": "sha256:417178cb46966205a188bafec1ceb5d7490249d9dd924264c6f811fb31697ed1"}, "retired_relation_dml": [{"grantee": "carr_writer", "relation": "ops.cognition_job", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:ops.cognition_job:carr_writer:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "ops.cognition_job", "grantable": false, "privilege": "update", "ingress_key": "db-relation-acl:ops.cognition_job:carr_writer:update", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "ops.cognition_result_cache", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:ops.cognition_result_cache:carr_writer:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "ops.cognition_result_cache", "grantable": false, "privilege": "update", "ingress_key": "db-relation-acl:ops.cognition_result_cache:carr_writer:update", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_jobs", "relation": "ops.provider_observation", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:ops.provider_observation:carr_jobs:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "ops.provider_route", "grantable": false, "privilege": "insert", "ingress_key": "db-relation-acl:ops.provider_route:carr_writer:insert", "ingress_kind": "db_relation_acl", "relation_kind": "r"}, {"grantee": "carr_writer", "relation": "ops.provider_route", "grantable": false, "privilege": "update", "ingress_key": "db-relation-acl:ops.provider_route:carr_writer:update", "ingress_kind": "db_relation_acl", "relation_kind": "r"}], "retired_secdef_execute": [{"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text)", "volatility": "v", "ingress_key": "db-function-acl:ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.classify_sourced_work_request_build(p_work_request text, p_base_version integer, p_scope_summary text, p_dependency_refs jsonb, p_caps jsonb)", "volatility": "s", "ingress_key": "db-function-acl:ops.classify_sourced_work_request_build(p_work_request text, p_base_version integer, p_scope_summary text, p_dependency_refs jsonb, p_caps jsonb):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "public", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.heavy_build_ready_plan_gate()", "volatility": "v", "ingress_key": "db-function-acl:ops.heavy_build_ready_plan_gate():public:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.jev_call_receipt_integrity()", "volatility": "v", "ingress_key": "db-function-acl:ops.jev_call_receipt_integrity():carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.jev_call_receipt_integrity()", "volatility": "v", "ingress_key": "db-function-acl:ops.jev_call_receipt_integrity():carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_heavy_build jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.propose_ready_plan_amendment(p_work_request text, p_base_version integer, p_predecessor_plan_hash text, p_scope_summary text, p_runbook_ref text, p_dependency_refs jsonb, p_recovery_ref text, p_observability_ref text, p_caps jsonb, p_heavy_build jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text)", "volatility": "v", "ingress_key": "db-function-acl:ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text):carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text)", "volatility": "v", "ingress_key": "db-function-acl:ops.read_jev_call_receipts(p_session text, p_since timestamp with time zone, p_lim integer, p_actor_slug text):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text)", "volatility": "v", "ingress_key": "db-function-acl:ops.record_jev_call_receipt(p_session_id text, p_purpose text, p_question_ids text[], p_facets text[], p_model_requested text, p_model_answered text, p_state_sha256 text, p_questions_sha256 text, p_answers_sha256 text, p_prompt_sha256 text, p_answers jsonb, p_usage jsonb, p_actor_id uuid, p_actor_slug text, p_idempotency_key text):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.record_sourced_heavy_build_admission(p_plan_id uuid, p_work_request text, p_base_version integer, p_classifier_reasons jsonb, p_contract jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.record_sourced_heavy_build_admission(p_plan_id uuid, p_work_request text, p_base_version integer, p_classifier_reasons jsonb, p_contract jsonb, p_proposed_by_actor_id uuid, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.review_sourced_heavy_build_plan(p_work_request text, p_plan_hash text, p_admission_hash text, p_reviewer_actor_id uuid, p_verdict text, p_reviewer_session_ref text, p_review_summary text, p_evidence_refs jsonb, p_gaps jsonb, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.review_sourced_heavy_build_plan(p_work_request text, p_plan_hash text, p_admission_hash text, p_reviewer_actor_id uuid, p_verdict text, p_reviewer_session_ref text, p_review_summary text, p_evidence_refs jsonb, p_gaps jsonb, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.sourced_heavy_build_review_target(p_work_request text, p_plan_hash text, p_admission_hash text)", "volatility": "s", "ingress_key": "db-function-acl:ops.sourced_heavy_build_review_target(p_work_request text, p_plan_hash text, p_admission_hash text):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.admit_job_cost(p_job_id uuid, p_lease_token uuid, p_route_key text, p_estimated_cost_usd numeric)", "volatility": "v", "ingress_key": "db-function-acl:ops.admit_job_cost(p_job_id uuid, p_lease_token uuid, p_route_key text, p_estimated_cost_usd numeric):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.get_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_cache_key text)", "volatility": "v", "ingress_key": "db-function-acl:ops.get_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_cache_key text):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.invalidate_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_dependency_ref text)", "volatility": "v", "ingress_key": "db-function-acl:ops.invalidate_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_dependency_ref text):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.put_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_cache_key text, p_cognition_key text, p_cognition_version integer, p_output_schema_version integer, p_proposal jsonb, p_dependency_refs text[], p_ttl_seconds integer)", "volatility": "v", "ingress_key": "db-function-acl:ops.put_cognition_cache_for_job(p_job_id uuid, p_lease_token uuid, p_cache_key text, p_cognition_key text, p_cognition_version integer, p_output_schema_version integer, p_proposal jsonb, p_dependency_refs text[], p_ttl_seconds integer):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_admit_mutation(p_token_ref_digest text, p_operation_manifest jsonb, p_admission_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_admit_mutation(p_token_ref_digest text, p_operation_manifest jsonb, p_admission_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_admit_mutation(p_token_ref_digest text, p_operation_manifest jsonb, p_admission_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_admit_mutation(p_token_ref_digest text, p_operation_manifest jsonb, p_admission_idempotency_key uuid):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_admit_mutation(p_token_ref_digest text, p_operation_manifest jsonb, p_admission_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_admit_mutation(p_token_ref_digest text, p_operation_manifest jsonb, p_admission_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_capability_token_status(p_token_ref_digest text)", "volatility": "s", "ingress_key": "db-function-acl:ops.scac_capability_token_status(p_token_ref_digest text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_capability_token_status(p_token_ref_digest text)", "volatility": "s", "ingress_key": "db-function-acl:ops.scac_capability_token_status(p_token_ref_digest text):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_consume_verified_pop_challenge(p_challenge_id uuid, p_challenge_digest text, p_nonce text, p_pop_verification_digest text, p_consume_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_consume_verified_pop_challenge(p_challenge_id uuid, p_challenge_digest text, p_nonce text, p_pop_verification_digest text, p_consume_idempotency_key uuid):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_device_enrollment_status(p_device_ref text)", "volatility": "s", "ingress_key": "db-function-acl:ops.scac_device_enrollment_status(p_device_ref text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_issue_pop_challenge(p_principal_digest text, p_device_ref text, p_workload_digest text, p_ingress_key text, p_operation_manifest_digest text, p_idempotency_digest text, p_ttl_seconds integer, p_issue_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_issue_pop_challenge(p_principal_digest text, p_device_ref text, p_workload_digest text, p_ingress_key text, p_operation_manifest_digest text, p_idempotency_digest text, p_ttl_seconds integer, p_issue_idempotency_key uuid):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_record_capability_token_receipt(p_challenge_digest text, p_token_ref_digest text, p_signed_payload_digest text, p_signature_digest text, p_issuer_key_digest text, p_issuer_root_event_digest text, p_external_verification_receipt_digest text, p_issued_at timestamp with time zone, p_expires_at timestamp with time zone, p_record_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_record_capability_token_receipt(p_challenge_digest text, p_token_ref_digest text, p_signed_payload_digest text, p_signature_digest text, p_issuer_key_digest text, p_issuer_root_event_digest text, p_external_verification_receipt_digest text, p_issued_at timestamp with time zone, p_expires_at timestamp with time zone, p_record_idempotency_key uuid):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_record_token_verification_binding(p_token_ref_digest text, p_token_payload jsonb, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_record_token_verification_binding(p_token_ref_digest text, p_token_payload jsonb, p_idempotency_key uuid):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_reference_monitor_state()", "volatility": "s", "ingress_key": "db-function-acl:ops.scac_reference_monitor_state():carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_reference_monitor_state()", "volatility": "s", "ingress_key": "db-function-acl:ops.scac_reference_monitor_state():carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_reference_monitor_state()", "volatility": "s", "ingress_key": "db-function-acl:ops.scac_reference_monitor_state():carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_register_operation_effect_binding(p_registry_version text, p_ingress_key text, p_privilege_bundle text, p_registry_entry_digest text, p_effect_keys text[], p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_register_operation_effect_binding(p_registry_version text, p_ingress_key text, p_privilege_bundle text, p_registry_entry_digest text, p_effect_keys text[], p_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_register_token_issuer_binding(p_issuer_key_digest text, p_issuer_root_event_digest text, p_certification_receipt_digest text, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_register_token_issuer_binding(p_issuer_key_digest text, p_issuer_root_event_digest text, p_certification_receipt_digest text, p_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_revoke_token_subject(p_subject_kind text, p_subject_digest text, p_reason_digest text, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_revoke_token_subject(p_subject_kind text, p_subject_digest text, p_reason_digest text, p_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_token_control_snapshot()", "volatility": "s", "ingress_key": "db-function-acl:ops.scac_token_control_snapshot():carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_token_control_snapshot()", "volatility": "s", "ingress_key": "db-function-acl:ops.scac_token_control_snapshot():carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_transition_reference_monitor_mode(p_mode text, p_reason_digest text, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_transition_reference_monitor_mode(p_mode text, p_reason_digest text, p_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, public, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.scac_transition_token_kill_switch(p_action text, p_reason_digest text, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.scac_transition_token_kill_switch(p_action text, p_reason_digest text, p_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_acquire_lane_lock(p_component text, p_session_ref text, p_lease_seconds integer, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.siep_acquire_lane_lock(p_component text, p_session_ref text, p_lease_seconds integer, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_attach_evidence(p_component text, p_evidence_kind text, p_ledger_id uuid, p_ledger_kind text, p_evidence_digest text, p_note text, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.siep_attach_evidence(p_component text, p_evidence_kind text, p_ledger_id uuid, p_ledger_kind text, p_evidence_digest text, p_note text, p_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_attach_evidence(p_component text, p_evidence_kind text, p_ledger_id uuid, p_ledger_kind text, p_evidence_digest text, p_note text, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.siep_attach_evidence(p_component text, p_evidence_kind text, p_ledger_id uuid, p_ledger_kind text, p_evidence_digest text, p_note text, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_bind_evidence_job(p_component text, p_base_version integer, p_evidence_kind text, p_job_id uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.siep_bind_evidence_job(p_component text, p_base_version integer, p_evidence_kind text, p_job_id uuid, p_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_claim_package(p_component text, p_session_ref text, p_lease_token uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.siep_claim_package(p_component text, p_session_ref text, p_lease_token uuid, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_manifest_digest()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_manifest_digest():carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_manifest_digest()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_manifest_digest():carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_manifest_digest()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_manifest_digest():carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_manifest_digest()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_manifest_digest():carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_read_evidence_graph(p_component text)", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_read_evidence_graph(p_component text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_read_evidence_graph(p_component text)", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_read_evidence_graph(p_component text):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_read_evidence_graph(p_component text)", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_read_evidence_graph(p_component text):carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_read_evidence_graph(p_component text)", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_read_evidence_graph(p_component text):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_read_program()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_read_program():carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_read_program()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_read_program():carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_read_program()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_read_program():carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_read_program()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_read_program():carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_record_joe_decision(p_component text, p_gate text, p_decision text, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.siep_record_joe_decision(p_component text, p_gate text, p_decision text, p_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_release_lane_lock(p_component text, p_session_ref text, p_lease_token uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.siep_release_lane_lock(p_component text, p_session_ref text, p_lease_token uuid, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_terminal_status()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_terminal_status():carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_terminal_status()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_terminal_status():carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_reader", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_terminal_status()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_terminal_status():carr_reader:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_terminal_status()", "volatility": "s", "ingress_key": "db-function-acl:ops.siep_terminal_status():carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.siep_transition_package(p_component text, p_base_version integer, p_target_state text, p_session_ref text, p_lease_token uuid, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.siep_transition_package(p_component text, p_base_version integer, p_target_state text, p_session_ref text, p_lease_token uuid, p_idempotency_key uuid):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.approve_staging_release(p_release_key text, p_plan_hash text, p_idempotency_key uuid, p_expires_hours integer, p_verifier_actor text, p_verifier_evidence_ref text)", "volatility": "v", "ingress_key": "db-function-acl:ops.approve_staging_release(p_release_key text, p_plan_hash text, p_idempotency_key uuid, p_expires_hours integer, p_verifier_actor text, p_verifier_evidence_ref text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.disable_legacy_schedule(p_workflow_key text, p_surface_id text, p_locator text, p_reason text, p_pre_observation_ref text, p_post_observation_ref text, p_sibling_surface_id text, p_sibling_locator text, p_sibling_pre_observation_ref text, p_sibling_post_observation_ref text, p_idempotency_key text)", "volatility": "v", "ingress_key": "db-function-acl:ops.disable_legacy_schedule(p_workflow_key text, p_surface_id text, p_locator text, p_reason text, p_pre_observation_ref text, p_post_observation_ref text, p_sibling_surface_id text, p_sibling_locator text, p_sibling_pre_observation_ref text, p_sibling_post_observation_ref text, p_idempotency_key text):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.get_cognition_cache(p_cache_key text)", "volatility": "s", "ingress_key": "db-function-acl:ops.get_cognition_cache(p_cache_key text):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.invalidate_cognition_cache(p_dependency_ref text)", "volatility": "v", "ingress_key": "db-function-acl:ops.invalidate_cognition_cache(p_dependency_ref text):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_writer", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.invalidate_cognition_cache(p_dependency_ref text)", "volatility": "v", "ingress_key": "db-function-acl:ops.invalidate_cognition_cache(p_dependency_ref text):carr_writer:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.put_cognition_cache(p_cache_key text, p_cognition_key text, p_cognition_version integer, p_output_schema_version integer, p_proposal jsonb, p_dependency_refs text[], p_ttl_seconds integer)", "volatility": "v", "ingress_key": "db-function-acl:ops.put_cognition_cache(p_cache_key text, p_cognition_key text, p_cognition_version integer, p_output_schema_version integer, p_proposal jsonb, p_dependency_refs text[], p_ttl_seconds integer):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_device_evidence", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.record_claude_scheduler_observation(p_surface_id text, p_provider_task_id text, p_cron_expression text, p_timezone text, p_enabled boolean, p_definition_sha256 text, p_provider_revision text, p_source_fingerprint text, p_observed_at timestamp with time zone, p_idempotency_key text)", "volatility": "v", "ingress_key": "db-function-acl:ops.record_claude_scheduler_observation(p_surface_id text, p_provider_task_id text, p_cron_expression text, p_timezone text, p_enabled boolean, p_definition_sha256 text, p_provider_revision text, p_source_fingerprint text, p_observed_at timestamp with time zone, p_idempotency_key text):carr_device_evidence:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_device_evidence", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.record_launchd_scheduler_observation(p_surface_id text, p_label text, p_timezone text, p_enabled boolean, p_plist_sha256 text, p_schedule_sha256 text, p_launchctl_revision text, p_source_fingerprint text, p_observed_at timestamp with time zone, p_idempotency_key text)", "volatility": "v", "ingress_key": "db-function-acl:ops.record_launchd_scheduler_observation(p_surface_id text, p_label text, p_timezone text, p_enabled boolean, p_plist_sha256 text, p_schedule_sha256 text, p_launchctl_revision text, p_source_fingerprint text, p_observed_at timestamp with time zone, p_idempotency_key text):carr_device_evidence:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.record_provider_observation(p_route_key text, p_status text, p_latency_ms integer, p_error_class text, p_ttl_seconds integer, p_source_ref text)", "volatility": "v", "ingress_key": "db-function-acl:ops.record_provider_observation(p_route_key text, p_status text, p_latency_ms integer, p_error_class text, p_ttl_seconds integer, p_source_ref text):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.release_job_cost(p_reservation_id uuid, p_job_id uuid, p_lease_token uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.release_job_cost(p_reservation_id uuid, p_job_id uuid, p_lease_token uuid):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.reserve_job_cost(p_job_id uuid, p_lease_token uuid, p_route_key text, p_estimated_cost_usd numeric)", "volatility": "v", "ingress_key": "db-function-acl:ops.reserve_job_cost(p_job_id uuid, p_lease_token uuid, p_route_key text, p_estimated_cost_usd numeric):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=pg_catalog, ops, pg_temp"], "grantee": "carr_authority", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.retire_workflow_cutover_plan(p_plan_id uuid, p_disable_receipt_id uuid, p_reason text, p_idempotency_key uuid)", "volatility": "v", "ingress_key": "db-function-acl:ops.retire_workflow_cutover_plan(p_plan_id uuid, p_disable_receipt_id uuid, p_reason text, p_idempotency_key uuid):carr_authority:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.select_provider_routes(p_requested text[])", "volatility": "s", "ingress_key": "db-function-acl:ops.select_provider_routes(p_requested text[]):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}, {"config": ["search_path=ops, public, pg_temp"], "grantee": "carr_jobs", "parallel": "u", "grantable": false, "privilege": "execute", "signature": "ops.settle_job_cost(p_reservation_id uuid, p_job_id uuid, p_lease_token uuid, p_input_tokens integer, p_output_tokens integer, p_actual_cost_usd numeric)", "volatility": "v", "ingress_key": "db-function-acl:ops.settle_job_cost(p_reservation_id uuid, p_job_id uuid, p_lease_token uuid, p_input_tokens integer, p_output_tokens integer, p_actual_cost_usd numeric):carr_jobs:execute", "ingress_kind": "db_function_acl", "function_kind": "f", "security_definer": true}]}'::jsonb$$;
 
 
 --
@@ -60208,6 +60440,14 @@ begin
     return new;
   end if;
 
+  -- built completion delegates evidence rules to enforce_completion_capsule.
+  if old.state in ('captured','triaged','ready','verification') and new.state='confirmed_closed'
+     and new.completion_kind='built' and new.version=old.version+1
+     and (to_jsonb(new)-array['state','completion_kind','completion_evidence','verification_accepted_at','closed_at','version','updated_at'])
+       is not distinct from
+       (to_jsonb(old)-array['state','completion_kind','completion_evidence','verification_accepted_at','closed_at','version','updated_at']) then
+    return new;
+  end if;
   if old.state = 'captured'
      and new.state = 'triaged'
      and new.version = old.version + 1
@@ -61091,6 +61331,20 @@ begin
            concat('timeout:',j.id,':',j.attempt),
            jsonb_build_object('failure_class','execution_timeout','detail',p_detail,'next_state',next_state));
   return next_state;
+end $$;
+
+
+--
+-- Name: touch_client_portal(); Type: FUNCTION; Schema: ops; Owner: -
+--
+
+CREATE FUNCTION ops.touch_client_portal() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+begin
+  new.updated_at := clock_timestamp();
+  return new;
 end $$;
 
 
@@ -67493,6 +67747,7 @@ CREATE TABLE ops.client_portal (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     failed_attempts integer DEFAULT 0 NOT NULL,
     attempt_window_started_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT now(),
     CONSTRAINT client_portal_failed_attempts_check CHECK (((failed_attempts >= 0) AND (failed_attempts <= 5))),
     CONSTRAINT client_portal_password_hash_check CHECK ((password_hash ~ '^\$2[aby]\$12\$[./A-Za-z0-9]{53}$'::text)),
     CONSTRAINT client_portal_slug_check CHECK ((slug ~ '^[a-z0-9][a-z0-9-]{0,62}$'::text))
@@ -74183,6 +74438,8 @@ CREATE TABLE public.rule (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     retired_by uuid,
     retired_at timestamp with time zone,
+    card jsonb,
+    CONSTRAINT rule_card_check CHECK (((card IS NULL) OR ((jsonb_typeof(card) = 'object'::text) AND (card ? 'id'::text) AND (NOT (card ? 'wording'::text))))),
     CONSTRAINT rule_check CHECK (((status <> 'active'::text) OR (activated_by IS NOT NULL))),
     CONSTRAINT rule_enforcement_check CHECK ((enforcement = ANY (ARRAY['prose'::text, 'checklist'::text, 'gate'::text, 'constraint'::text, 'code'::text]))),
     CONSTRAINT rule_status_check CHECK ((status = ANY (ARRAY['proposed'::text, 'active'::text, 'retired'::text, 'superseded'::text])))
@@ -74201,6 +74458,13 @@ COMMENT ON COLUMN public.rule.human_quote IS 'verbatim words of the teacher. IMM
 --
 
 COMMENT ON COLUMN public.rule.version IS '[A2] optimistic-concurrency token for amend-rule; bumped by trg_touch_row on every update';
+
+
+--
+-- Name: COLUMN rule.card; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.rule.card IS 'Rule card metadata (WR-000562 D16) without its wording, which is the statement. Rendered into ops/config/rule-cards.v1.json and the CLAUDE.md/AGENTS.md block by ops/sync-core-rule-cards.py --from-store.';
 
 
 --
@@ -76942,6 +77206,39 @@ CREATE TABLE ops.work_request_execution_environment_binding (
 
 
 --
+-- Name: work_request_job; Type: TABLE; Schema: ops; Owner: -
+--
+
+CREATE TABLE ops.work_request_job (
+    work_request_id uuid NOT NULL,
+    slice_ordinal integer NOT NULL,
+    j_number integer NOT NULL,
+    priority integer NOT NULL,
+    executor text NOT NULL,
+    model text NOT NULL,
+    effort text NOT NULL,
+    card_title text NOT NULL,
+    description text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    repository text,
+    runner_job_id text,
+    started_at timestamp with time zone,
+    finished jsonb,
+    CONSTRAINT work_request_job_card_title_check CHECK (((length(card_title) <= 80) AND (card_title ~ '^[A-Za-z'']+( [A-Za-z'']+){1,2}$'::text))),
+    CONSTRAINT work_request_job_description_check CHECK (((length(btrim(description)) >= 1) AND (length(btrim(description)) <= 500))),
+    CONSTRAINT work_request_job_effort_check CHECK (((length(btrim(effort)) >= 1) AND (length(btrim(effort)) <= 100))),
+    CONSTRAINT work_request_job_executor_check CHECK (((length(btrim(executor)) >= 1) AND (length(btrim(executor)) <= 100))),
+    CONSTRAINT work_request_job_finished_check CHECK (((finished IS NULL) OR ((jsonb_typeof(finished) = 'object'::text) AND ((finished ->> 'stage'::text) = ANY (ARRAY['merged'::text, 'closed'::text])) AND (jsonb_typeof((finished -> 'prs'::text)) = 'array'::text)))),
+    CONSTRAINT work_request_job_j_number_check CHECK ((j_number > 0)),
+    CONSTRAINT work_request_job_model_check CHECK (((length(btrim(model)) >= 1) AND (length(btrim(model)) <= 100))),
+    CONSTRAINT work_request_job_priority_check CHECK ((priority > 0)),
+    CONSTRAINT work_request_job_repository_check CHECK ((repository = ANY (ARRAY['DoctorCRE/carr-system'::text, 'jbookout/doctorcre-app'::text, 'jbookout/software-factory'::text]))),
+    CONSTRAINT work_request_job_runner_job_id_check CHECK (((length(btrim(runner_job_id)) >= 1) AND (length(btrim(runner_job_id)) <= 100))),
+    CONSTRAINT work_request_job_start_pair CHECK (((runner_job_id IS NULL) = (started_at IS NULL)))
+);
+
+
+--
 -- Name: work_request_joe_answer_receipt; Type: TABLE; Schema: ops; Owner: -
 --
 
@@ -76983,6 +77280,19 @@ CREATE SEQUENCE ops.work_request_ref_seq
     NO MINVALUE
     NO MAXVALUE
     CACHE 1;
+
+
+--
+-- Name: work_request_slice; Type: TABLE; Schema: ops; Owner: -
+--
+
+CREATE TABLE ops.work_request_slice (
+    work_request_id uuid NOT NULL,
+    ordinal integer NOT NULL,
+    title text NOT NULL,
+    CONSTRAINT work_request_slice_ordinal_check CHECK ((ordinal > 0)),
+    CONSTRAINT work_request_slice_title_check CHECK (((length(btrim(title)) >= 1) AND (length(btrim(title)) <= 200)))
+);
 
 
 --
@@ -77236,7 +77546,11 @@ CREATE TABLE public.activity (
     version integer DEFAULT 1 NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_by uuid,
-    connected boolean
+    connected boolean,
+    email_source jsonb,
+    email_context jsonb,
+    CONSTRAINT activity_email_context_object CHECK (((email_context IS NULL) OR (jsonb_typeof(email_context) = 'object'::text))),
+    CONSTRAINT activity_email_source_check CHECK ((((email_source IS NULL) OR ((kind = 'email_in'::text) AND (jsonb_typeof(email_source) = 'object'::text) AND (email_source ?& ARRAY['mailbox_owner'::text, 'sender_email'::text]) AND ((email_source ->> 'mailbox_owner'::text) = ANY (ARRAY['joe'::text, 'dell'::text])) AND ((email_source ->> 'sender_email'::text) ~ '^[^[:space:]<>@]+@[^[:space:]<>@]+[.][^[:space:]<>@]+$'::text))) IS TRUE))
 );
 
 
@@ -78955,13 +79269,26 @@ CREATE TABLE public.document (
 
 
 --
+-- Name: email_lead_exclusion; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.email_lead_exclusion (
+    mailbox_owner text NOT NULL,
+    message_hash text NOT NULL,
+    recorded_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT email_lead_exclusion_mailbox_owner_check CHECK ((mailbox_owner = ANY (ARRAY['joe'::text, 'dell'::text]))),
+    CONSTRAINT email_lead_exclusion_message_hash_check CHECK ((message_hash ~ '^[a-f0-9]{64}$'::text))
+);
+
+
+--
 -- Name: email_proposal; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.email_proposal (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     kind text NOT NULL,
-    deal_id uuid NOT NULL,
+    deal_id uuid,
     activity_id uuid NOT NULL,
     evidence_quote text NOT NULL,
     task_text text,
@@ -78975,14 +79302,24 @@ CREATE TABLE public.email_proposal (
     resolved_by uuid,
     resolved_at timestamp with time zone,
     resolution_reason text,
-    CONSTRAINT email_proposal_check CHECK ((((kind = 'phase_move'::text) AND (task_text IS NULL) AND (next_date IS NULL) AND (owner IS NULL)) OR ((kind = 'next_step'::text) AND (task_text IS NOT NULL) AND (next_date IS NOT NULL) AND (owner IS NOT NULL)))),
-    CONSTRAINT email_proposal_check1 CHECK ((((status = 'pending'::text) AND (resolved_by IS NULL) AND (resolved_at IS NULL) AND (resolution_reason IS NULL)) OR ((status = 'confirmed'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL)) OR ((status = 'dismissed'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL) AND (resolution_reason IS NOT NULL)))),
+    draft_subject text,
+    draft_body text,
+    submitted_email jsonb,
+    submitted_at timestamp with time zone,
+    send_result jsonb,
+    sender_role text,
+    result_recorded_at timestamp with time zone,
     CONSTRAINT email_proposal_confidence_check CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric))),
-    CONSTRAINT email_proposal_evidence_quote_check CHECK (((length(evidence_quote) >= 10) AND (length(evidence_quote) <= 2000))),
-    CONSTRAINT email_proposal_kind_check CHECK ((kind = ANY (ARRAY['phase_move'::text, 'next_step'::text]))),
+    CONSTRAINT email_proposal_evidence_quote_check CHECK (((length(evidence_quote) >= 1) AND (length(evidence_quote) <= 2000))),
+    CONSTRAINT email_proposal_kind_check CHECK ((kind = ANY (ARRAY['phase_move'::text, 'next_step'::text, 'reply_draft'::text, 'file_to_deal'::text, 'possible_new_deal'::text]))),
     CONSTRAINT email_proposal_owner_check CHECK ((owner = ANY (ARRAY['joe'::text, 'dell'::text]))),
+    CONSTRAINT email_proposal_resolution CHECK ((((status = 'pending'::text) AND (resolved_by IS NULL) AND (resolved_at IS NULL) AND (resolution_reason IS NULL)) OR ((status = 'confirmed'::text) AND (kind <> 'reply_draft'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL)) OR ((status = 'dismissed'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL) AND (resolution_reason IS NOT NULL)) OR ((status = ANY (ARRAY['approved_to_send'::text, 'sent'::text, 'failed'::text])) AND (kind = 'reply_draft'::text) AND (resolved_by IS NOT NULL) AND (resolved_at IS NOT NULL)))),
     CONSTRAINT email_proposal_resolution_reason_check CHECK (((length(btrim(resolution_reason)) >= 1) AND (length(btrim(resolution_reason)) <= 500))),
-    CONSTRAINT email_proposal_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'confirmed'::text, 'dismissed'::text]))),
+    CONSTRAINT email_proposal_send_result CHECK (((((status <> ALL (ARRAY['sent'::text, 'failed'::text])) AND (send_result IS NULL)) OR ((status = ANY (ARRAY['sent'::text, 'failed'::text])) AND ((send_result ->> 'status'::text) = status))) IS TRUE)),
+    CONSTRAINT email_proposal_sender_role_check CHECK ((sender_role = ANY (ARRAY['client'::text, 'landlord_side'::text, 'lender'::text, 'attorney'::text, 'other_vendor'::text]))),
+    CONSTRAINT email_proposal_shape CHECK ((((kind = 'phase_move'::text) AND (deal_id IS NOT NULL) AND (task_text IS NULL) AND (next_date IS NULL) AND (owner IS NULL) AND (sender_role IS NULL)) OR ((kind = 'next_step'::text) AND (deal_id IS NOT NULL) AND (task_text IS NOT NULL) AND (next_date IS NOT NULL) AND (owner IS NOT NULL) AND (sender_role IS NULL)) OR ((kind = 'reply_draft'::text) AND (task_text IS NULL) AND (next_date IS NULL) AND (owner IS NOT NULL) AND ((length(draft_subject) >= 1) AND (length(draft_subject) <= 998)) AND ((length(btrim(draft_body)) >= 1) AND (length(btrim(draft_body)) <= 20000)) AND (sender_role IS NULL)) OR ((kind = 'file_to_deal'::text) AND (deal_id IS NOT NULL) AND (task_text IS NULL) AND (next_date IS NULL) AND (owner IS NULL) AND (sender_role IS NOT NULL) AND (draft_subject IS NULL) AND (draft_body IS NULL)) OR ((kind = 'possible_new_deal'::text) AND (deal_id IS NULL) AND (next_date IS NULL) AND (owner IS NULL) AND (sender_role IS NOT NULL) AND (draft_subject IS NULL) AND (draft_body IS NULL)))),
+    CONSTRAINT email_proposal_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'confirmed'::text, 'dismissed'::text, 'approved_to_send'::text, 'sent'::text, 'failed'::text]))),
+    CONSTRAINT email_proposal_submission CHECK (((((submitted_email IS NULL) AND (submitted_at IS NULL) AND (status <> ALL (ARRAY['approved_to_send'::text, 'sent'::text, 'failed'::text]))) OR ((kind = 'reply_draft'::text) AND (submitted_at IS NOT NULL) AND (status = ANY (ARRAY['approved_to_send'::text, 'sent'::text, 'failed'::text])) AND (jsonb_typeof(submitted_email) = 'object'::text) AND (submitted_email ?& ARRAY['subject'::text, 'body'::text, 'sha256'::text, 'to'::text, 'cc'::text]))) IS TRUE)),
     CONSTRAINT email_proposal_task_text_check CHECK (((length(btrim(task_text)) >= 1) AND (length(btrim(task_text)) <= 500)))
 );
 
@@ -79653,6 +79990,38 @@ CREATE TABLE public.memory_item (
     CONSTRAINT memory_item_statement_check CHECK ((length(btrim(statement)) > 0)),
     CONSTRAINT memory_item_status_check CHECK ((status = ANY (ARRAY['candidate'::text, 'promoted'::text, 'corrected'::text, 'forgotten'::text])))
 );
+
+
+--
+-- Name: memory_session; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.memory_session (
+    attach_id uuid DEFAULT gen_random_uuid() NOT NULL,
+    surface text NOT NULL,
+    native_session_id text,
+    transcript_ref text,
+    host text,
+    actor_id uuid NOT NULL,
+    access text NOT NULL,
+    attached_generation bigint NOT NULL,
+    attached_index_digest text NOT NULL,
+    attached_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT memory_session_access_check CHECK ((access = ANY (ARRAY['read_only'::text, 'read_write'::text]))),
+    CONSTRAINT memory_session_attached_generation_check CHECK ((attached_generation >= 0)),
+    CONSTRAINT memory_session_attached_index_digest_check CHECK ((attached_index_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT memory_session_host_check CHECK (((length(btrim(host)) >= 1) AND (length(btrim(host)) <= 200))),
+    CONSTRAINT memory_session_native_session_id_check CHECK (((length(btrim(native_session_id)) >= 1) AND (length(btrim(native_session_id)) <= 200))),
+    CONSTRAINT memory_session_surface_check CHECK ((surface = ANY (ARRAY['claude_code'::text, 'codex'::text, 'routine'::text, 'dot'::text, 'dream'::text, 'app'::text]))),
+    CONSTRAINT memory_session_transcript_ref_check CHECK (((length(btrim(transcript_ref)) >= 1) AND (length(btrim(transcript_ref)) <= 1000)))
+);
+
+
+--
+-- Name: TABLE memory_session; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.memory_session IS 'One attach-memory call (WR-000562 D7): what a session read (generation + index digest) and its access. Writes link back through doctrine_revision.session_key = attach_id.';
 
 
 --
@@ -81545,6 +81914,30 @@ CREATE VIEW public.v_client_lease_radar AS
 
 
 --
+-- Name: v_client_portal_list; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_client_portal_list AS
+ SELECT p.slug,
+    p.client_id,
+    party.name AS client_name,
+    p.deal_id,
+    d.name AS deal_name,
+    ('https://share.doctorcre.com/'::text || p.slug) AS client_portal_url,
+        CASE
+            WHEN (p.disabled_at IS NULL) THEN 'active'::text
+            ELSE 'disabled'::text
+        END AS status,
+    p.created_at AS registered_at,
+    p.updated_at,
+    ((p.failed_attempts >= 5) AND (p.attempt_window_started_at > (now() - '00:15:00'::interval))) AS locked
+   FROM (((ops.client_portal p
+     JOIN public.deal d ON ((d.id = p.deal_id)))
+     JOIN public.client cl ON ((cl.id = p.client_id)))
+     JOIN public.party party ON ((party.id = cl.party_id)));
+
+
+--
 -- Name: v_code_finding; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -83157,6 +83550,17 @@ CREATE VIEW public.v_deal_board AS
 
 
 --
+-- Name: v_deal_client_portal; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_deal_client_portal AS
+ SELECT deal_id,
+    ('https://share.doctorcre.com/'::text || slug) AS client_portal_url
+   FROM ops.client_portal
+  WHERE (disabled_at IS NULL);
+
+
+--
 -- Name: v_deal_reconciliation_read; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -83855,6 +84259,70 @@ CREATE VIEW public.v_drip_conflict AS
 --
 
 COMMENT ON VIEW public.v_drip_conflict IS 'Leads queued on a PROSPECTING drip whose linked client is live. Empty is the correct state. Added 0045 after four clients in active deals were found on the Monthly Newsletter — latent, since loop #47 (first send) has never fired, which is exactly why nothing caught it. "not ilike client care" rather than a list of prospecting campaigns: a list goes stale the first time someone adds a campaign and forgets this view exists.';
+
+
+--
+-- Name: v_email_lead_exclusion_count; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_email_lead_exclusion_count AS
+ SELECT mailbox_owner,
+    (count(*))::integer AS not_business_count
+   FROM public.email_lead_exclusion
+  GROUP BY mailbox_owner;
+
+
+--
+-- Name: v_email_lead_proposal; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_email_lead_proposal AS
+ SELECT cp.id AS pool_id,
+    cp.version AS base_version,
+    cp.status,
+    cp.created_at,
+    (cp.source_row ->> 'mailbox_owner'::text) AS mailbox_owner,
+    cp.name AS display_name,
+    cp.email AS sender_email,
+    split_part(cp.email, '@'::text, 2) AS sender_domain,
+    (cp.source_row -> 'reading'::text) AS reading,
+    d.id AS deal_id,
+    d.name AS deal_name,
+    r.ref AS party_ref,
+    p.id AS party_id,
+    p.name AS party_name,
+    p.version AS party_version
+   FROM (((public.candidate_pool cp
+     LEFT JOIN public.deal d ON (((d.id)::text = ((cp.source_row -> 'reading'::text) ->> 'deal_id'::text))))
+     LEFT JOIN public.v_ref_index r ON (((r.ref = ((cp.source_row -> 'reading'::text) ->> 'party_ref'::text)) AND (r.subject_type = ANY (ARRAY['client'::text, 'lead'::text, 'vendor'::text])) AND (NOT r.merged))))
+     LEFT JOIN public.party p ON (((p.id = r.party_id) AND (p.merged_into IS NULL) AND (p.deleted_at IS NULL))))
+  WHERE ((cp.source = 'outlook-intake'::text) AND ((cp.source_row ->> 'mailbox_owner'::text) = ANY (ARRAY['joe'::text, 'dell'::text])));
+
+
+--
+-- Name: v_email_reply_partner; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_email_reply_partner WITH (security_barrier='true') AS
+ SELECT slug,
+    email
+   FROM public.actor
+  WHERE ((kind = 'human'::text) AND active AND (slug = ANY (ARRAY['joe'::text, 'dell'::text])));
+
+
+--
+-- Name: v_email_thread_filing_event; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_email_thread_filing_event AS
+ SELECT id,
+    subject_id,
+    verb,
+    new_value,
+    recorded_at,
+    mutation_order
+   FROM public.event
+  WHERE (verb = ANY (ARRAY['inherit-email-thread'::text, 'confirm-email-filing'::text, 'undo-email-thread-filing'::text]));
 
 
 --
@@ -85755,7 +86223,8 @@ CREATE VIEW public.v_rule_lookup AS
     r.created_at,
     r.scope,
     r.statement,
-    a.slug AS personal_to
+    a.slug AS personal_to,
+    r.card
    FROM (public.rule r
      LEFT JOIN public.actor a ON ((a.id = r.personal_to)));
 
@@ -92362,6 +92831,14 @@ ALTER TABLE ONLY ops.work_request_execution_environment_binding
 
 
 --
+-- Name: work_request_job work_request_job_pkey; Type: CONSTRAINT; Schema: ops; Owner: -
+--
+
+ALTER TABLE ONLY ops.work_request_job
+    ADD CONSTRAINT work_request_job_pkey PRIMARY KEY (work_request_id, slice_ordinal, j_number);
+
+
+--
 -- Name: work_request_joe_answer_receipt work_request_joe_answer_receipt_idempotency_key_key; Type: CONSTRAINT; Schema: ops; Owner: -
 --
 
@@ -92399,6 +92876,14 @@ ALTER TABLE ONLY ops.work_request
 
 ALTER TABLE ONLY ops.work_request
     ADD CONSTRAINT work_request_ref_key UNIQUE (ref);
+
+
+--
+-- Name: work_request_slice work_request_slice_pkey; Type: CONSTRAINT; Schema: ops; Owner: -
+--
+
+ALTER TABLE ONLY ops.work_request_slice
+    ADD CONSTRAINT work_request_slice_pkey PRIMARY KEY (work_request_id, ordinal);
 
 
 --
@@ -93490,11 +93975,19 @@ ALTER TABLE ONLY public.document
 
 
 --
+-- Name: email_lead_exclusion email_lead_exclusion_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_lead_exclusion
+    ADD CONSTRAINT email_lead_exclusion_pkey PRIMARY KEY (mailbox_owner, message_hash);
+
+
+--
 -- Name: email_proposal email_proposal_kind_deal_id_activity_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.email_proposal
-    ADD CONSTRAINT email_proposal_kind_deal_id_activity_id_key UNIQUE (kind, deal_id, activity_id);
+    ADD CONSTRAINT email_proposal_kind_deal_id_activity_id_key UNIQUE NULLS NOT DISTINCT (kind, deal_id, activity_id);
 
 
 --
@@ -93775,6 +94268,14 @@ ALTER TABLE ONLY public.memory_evidence
 
 ALTER TABLE ONLY public.memory_item
     ADD CONSTRAINT memory_item_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: memory_session memory_session_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memory_session
+    ADD CONSTRAINT memory_session_pkey PRIMARY KEY (attach_id);
 
 
 --
@@ -94436,6 +94937,13 @@ CREATE UNIQUE INDEX capability_one_open_session_per_request ON ops.capability_ag
 --
 
 CREATE INDEX client_portal_material_shared ON ops.client_portal_material USING btree (portal_slug, shared_at, id) WHERE ((shared_at IS NOT NULL) AND (withdrawn_at IS NULL));
+
+
+--
+-- Name: client_portal_one_active_per_deal; Type: INDEX; Schema: ops; Owner: -
+--
+
+CREATE UNIQUE INDEX client_portal_one_active_per_deal ON ops.client_portal USING btree (deal_id) WHERE (disabled_at IS NULL);
 
 
 --
@@ -95244,6 +95752,13 @@ CREATE UNIQUE INDEX work_request_criterion_evidence_receipt_once ON ops.work_req
 
 
 --
+-- Name: work_request_job_priority; Type: INDEX; Schema: ops; Owner: -
+--
+
+CREATE INDEX work_request_job_priority ON ops.work_request_job USING btree (priority, work_request_id, slice_ordinal, j_number);
+
+
+--
 -- Name: work_request_program_ordinal_uniq; Type: INDEX; Schema: ops; Owner: -
 --
 
@@ -95726,10 +96241,24 @@ CREATE INDEX doctrine_section_title_search_idx ON public.doctrine_section USING 
 
 
 --
+-- Name: email_proposal_outbox; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX email_proposal_outbox ON public.email_proposal USING btree (owner, submitted_at, id) WHERE (status = 'approved_to_send'::text);
+
+
+--
 -- Name: email_proposal_pending; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX email_proposal_pending ON public.email_proposal USING btree (created_at, id) WHERE (status = 'pending'::text);
+
+
+--
+-- Name: email_proposal_recent_outcomes; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX email_proposal_recent_outcomes ON public.email_proposal USING btree (owner, result_recorded_at DESC, id DESC) WHERE ((kind = 'reply_draft'::text) AND (status = ANY (ARRAY['sent'::text, 'failed'::text])) AND (result_recorded_at IS NOT NULL));
 
 
 --
@@ -96192,6 +96721,13 @@ CREATE INDEX room_dispatch_link_session_idx ON public.room_dispatch_link USING b
 --
 
 CREATE INDEX room_dispatch_link_turn_idx ON public.room_dispatch_link USING btree (turn_id);
+
+
+--
+-- Name: rule_active_card_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX rule_active_card_id ON public.rule USING btree (((card ->> 'id'::text))) WHERE ((status = 'active'::text) AND (card IS NOT NULL));
 
 
 --
@@ -96817,6 +97353,13 @@ CREATE TRIGGER capability_verification_immutable_before_change BEFORE DELETE OR 
 --
 
 CREATE TRIGGER client_portal_binding_immutable BEFORE UPDATE ON ops.client_portal FOR EACH ROW EXECUTE FUNCTION ops.client_portal_binding_immutable();
+
+
+--
+-- Name: client_portal client_portal_updated; Type: TRIGGER; Schema: ops; Owner: -
+--
+
+CREATE TRIGGER client_portal_updated BEFORE UPDATE ON ops.client_portal FOR EACH ROW WHEN ((((((old.slug IS DISTINCT FROM new.slug) OR (old.client_id IS DISTINCT FROM new.client_id)) OR (old.deal_id IS DISTINCT FROM new.deal_id)) OR (old.password_hash IS DISTINCT FROM new.password_hash)) OR (old.disabled_at IS DISTINCT FROM new.disabled_at))) EXECUTE FUNCTION ops.touch_client_portal();
 
 
 --
@@ -99792,6 +100335,13 @@ CREATE TRIGGER campaign_channels_check BEFORE INSERT OR UPDATE OF channels ON pu
 --
 
 CREATE TRIGGER campaign_touch BEFORE UPDATE ON public.campaign FOR EACH ROW EXECUTE FUNCTION public.trg_touch_row();
+
+
+--
+-- Name: activity captured_email_source_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER captured_email_source_immutable BEFORE UPDATE OF email_source ON public.activity FOR EACH ROW EXECUTE FUNCTION ops.guard_captured_email_source();
 
 
 --
@@ -104659,6 +105209,14 @@ ALTER TABLE ONLY ops.work_request_execution_environment_binding
 
 
 --
+-- Name: work_request_job work_request_job_work_request_id_slice_ordinal_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: -
+--
+
+ALTER TABLE ONLY ops.work_request_job
+    ADD CONSTRAINT work_request_job_work_request_id_slice_ordinal_fkey FOREIGN KEY (work_request_id, slice_ordinal) REFERENCES ops.work_request_slice(work_request_id, ordinal);
+
+
+--
 -- Name: work_request_joe_answer_receipt work_request_joe_answer_receipt_answered_by_actor_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: -
 --
 
@@ -104688,6 +105246,14 @@ ALTER TABLE ONLY ops.work_request
 
 ALTER TABLE ONLY ops.work_request
     ADD CONSTRAINT work_request_shape_decided_by_actor_id_fkey FOREIGN KEY (shape_decided_by_actor_id) REFERENCES public.actor(id);
+
+
+--
+-- Name: work_request_slice work_request_slice_work_request_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: -
+--
+
+ALTER TABLE ONLY ops.work_request_slice
+    ADD CONSTRAINT work_request_slice_work_request_id_fkey FOREIGN KEY (work_request_id) REFERENCES ops.work_request(id);
 
 
 --
@@ -106723,6 +107289,14 @@ ALTER TABLE ONLY public.memory_item
 
 
 --
+-- Name: memory_session memory_session_actor_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memory_session
+    ADD CONSTRAINT memory_session_actor_id_fkey FOREIGN KEY (actor_id) REFERENCES public.actor(id);
+
+
+--
 -- Name: national_account_owner national_account_owner_account_client_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -107565,6 +108139,7 @@ revoke all on function ops.activate_guidance_registry(p_registry_id uuid, p_mani
 revoke all on function ops.activate_guidance_situation_mapping(p_proposed_mapping_id uuid, p_authority_binding_id uuid, p_reason text) from public;
 revoke all on function ops.add_meeting_note(p_meeting uuid, p_body text, p_revises_note_number integer, p_base_revision integer, p_client_instance text, p_idempotency_key uuid) from public;
 revoke all on function ops.adopt_legacy_active_rule_v1(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text) from public;
+revoke all on function ops.adopt_rule(p_section_id uuid, p_base_version bigint, p_idempotency_key text, p_reason text) from public;
 revoke all on function ops.advance_workflow_cutover_stage(p_plan_id uuid, p_to_stage text, p_evidence_ref text, p_reason text, p_idempotency_key uuid) from public;
 revoke all on function ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text) from public;
 revoke all on function ops.amend_rule_statement(p_rule_id uuid, p_new_statement text, p_idempotency_key text, p_reason text) from public;
@@ -107856,6 +108431,7 @@ revoke all on function ops.gate_zero_producer_actor_id() from public;
 revoke all on function ops.gate_zero_producer_login_role() from public;
 revoke all on function ops.gate_zero_producer_seat_holder_ref() from public;
 revoke all on function ops.gate_zero_record_read_only_outcome(p_idempotency_key uuid, p_receipt jsonb) from public;
+revoke all on function ops.guard_captured_email_source() from public;
 revoke all on function ops.guard_engineering_actor_authority_update() from public;
 revoke all on function ops.guard_engineering_envelope_supersession() from public;
 revoke all on function ops.guard_engineering_job_definition_currentness_update() from public;
@@ -108122,6 +108698,7 @@ revoke all on function ops.refuse_assurance_persistence_rewrite() from public;
 revoke all on function ops.refuse_guidance_history_rewrite() from public;
 revoke all on function ops.refuse_rw02_runtime_record_rewrite() from public;
 revoke all on function ops.refuse_rw02_safe_stop_rewrite() from public;
+revoke all on function ops.register_client_portal(p_deal_id uuid, p_slug text, p_password text) from public;
 revoke all on function ops.register_execution_environment_provider(p_manifest jsonb, p_idempotency_key uuid) from public;
 revoke all on function ops.register_slice_checkable_done(p_slice_id text, p_criteria jsonb, p_idempotency_key uuid) from public;
 revoke all on function ops.register_slice_criteria_from_catalog(p_slice_id text, p_idempotency_key uuid) from public;
@@ -108808,6 +109385,7 @@ revoke all on function ops.suggest_doc_work(p_conversation uuid, p_sequence inte
 revoke all on function ops.supersede_sourced_work_request(p_work_request text, p_base_version integer, p_exit_reason text, p_superseded_by text, p_actor_slug text, p_idempotency_key uuid) from public;
 revoke all on function ops.sync_system_rule_control_bindings() from public;
 revoke all on function ops.timeout_job(p_job_id uuid, p_lease_token uuid, p_detail text) from public;
+revoke all on function ops.touch_client_portal() from public;
 revoke all on function ops.tour_assertion_rights_guard() from public;
 revoke all on function ops.tour_canonical_projection_digest(p_tenant text, p_projection_id uuid) from public;
 revoke all on function ops.tour_client_field_allowed(p_field_key text) from public;
@@ -109990,9 +110568,15 @@ grant select on table ops.work_request_criterion_evidence to dot_reader;
 grant select on table ops.work_request_execution_assignment to dot_reader;
 grant select on table ops.work_request_execution_environment_binding to carr_authority;
 grant select on table ops.work_request_execution_environment_binding to dot_reader;
+grant select on table ops.work_request_job to carr_reader;
+grant insert, select, update on table ops.work_request_job to carr_writer;
+grant select on table ops.work_request_job to dot_reader;
 grant select on table ops.work_request_joe_answer_receipt to carr_reader;
 grant select on table ops.work_request_joe_answer_receipt to dot_reader;
 grant select on sequence ops.work_request_ref_seq to dot_reader;
+grant select on table ops.work_request_slice to carr_reader;
+grant insert, select on table ops.work_request_slice to carr_writer;
+grant select on table ops.work_request_slice to dot_reader;
 grant select on table ops.work_request_triage_receipt to carr_reader;
 grant select on table ops.work_request_triage_receipt to dot_reader;
 grant select on table ops.work_request_withdrawal_receipt to carr_reader;
@@ -110224,6 +110808,8 @@ grant select on table public.doctrine_snapshot to dot_reader;
 grant select on table public.document to carr_jobs;
 grant insert, select, update on table public.document to carr_writer;
 grant select on table public.document to dot_reader;
+grant insert, select on table public.email_lead_exclusion to carr_writer;
+grant select on table public.email_lead_exclusion to dot_reader;
 grant select on table public.email_proposal to carr_reader;
 grant insert, select, update on table public.email_proposal to carr_writer;
 grant select on table public.email_proposal to dot_reader;
@@ -110298,6 +110884,9 @@ grant select on table public.memory_evidence to dot_reader;
 grant select on table public.memory_item to carr_reader;
 grant insert, select, update on table public.memory_item to carr_writer;
 grant select on table public.memory_item to dot_reader;
+grant select on table public.memory_session to carr_reader;
+grant insert, select on table public.memory_session to carr_writer;
+grant select on table public.memory_session to dot_reader;
 grant insert, select, update on table public.national_account_owner to carr_writer;
 grant select on table public.national_account_owner to dot_reader;
 grant select on table public.negotiation_claim to carr_reader;
@@ -110444,12 +111033,15 @@ grant select on table public.v_client_engagement_status to carr_writer;
 grant select on table public.v_client_engagement_status to dot_reader;
 grant select on table public.v_client_lease_radar to carr_reader;
 grant select on table public.v_client_lease_radar to dot_reader;
+grant select on table public.v_client_portal_list to carr_reader;
+grant select on table public.v_client_portal_list to carr_writer;
 grant select on table public.v_code_finding to carr_exporter;
 grant select on table public.v_code_finding to carr_reader;
 grant select on table public.v_code_finding to carr_writer;
 grant select on table public.v_code_finding to dot_reader;
 grant select on table public.v_compiled_rules to carr_jobs;
 grant select on table public.v_compiled_rules to carr_reader;
+grant select on table public.v_compiled_rules to carr_writer;
 grant select on table public.v_compiled_rules to dot_reader;
 grant select on table public.v_contact to dot_reader;
 grant select on table public.v_control_plane_content_fuel_rotation to carr_jobs;
@@ -110492,6 +111084,8 @@ grant select on table public.v_counterparty_scorecard to dot_reader;
 grant select on table public.v_deal_board to carr_reader;
 grant select on table public.v_deal_board to carr_writer;
 grant select on table public.v_deal_board to dot_reader;
+grant select on table public.v_deal_client_portal to carr_reader;
+grant select on table public.v_deal_client_portal to carr_writer;
 grant select on table public.v_deal_reconciliation_read to carr_reader;
 grant select on table public.v_deal_reconciliation_read to dot_reader;
 grant select on table public.v_deal_room_account to carr_reader;
@@ -110561,6 +111155,16 @@ grant select on table public.v_defect_class to carr_writer;
 grant select on table public.v_defect_class to dot_reader;
 grant select on table public.v_detector_health to dot_reader;
 grant select on table public.v_drip_conflict to dot_reader;
+grant select on table public.v_email_lead_exclusion_count to carr_reader;
+grant select on table public.v_email_lead_exclusion_count to carr_writer;
+grant select on table public.v_email_lead_exclusion_count to dot_reader;
+grant select on table public.v_email_lead_proposal to carr_reader;
+grant select on table public.v_email_lead_proposal to carr_writer;
+grant select on table public.v_email_lead_proposal to dot_reader;
+grant select on table public.v_email_reply_partner to carr_reader;
+grant select on table public.v_email_thread_filing_event to carr_reader;
+grant select on table public.v_email_thread_filing_event to carr_writer;
+grant select on table public.v_email_thread_filing_event to dot_reader;
 grant select on table public.v_expired_verification to carr_reader;
 grant select on table public.v_expired_verification to carr_writer;
 grant select on table public.v_expired_verification to dot_reader;
@@ -110809,11 +111413,12 @@ grant select (slug, label) on table public.client_type to carr_reader;
 grant select (id) on table public.content_piece to carr_jobs;
 grant select (id, client_id, name) on table public.deal to carr_jobs;
 grant select (deal_id, actor_id, role, to_at) on table public.deal_participant to carr_jobs;
+grant select (deal_id, party_id, role, to_at) on table public.deal_participant to carr_reader;
 grant select (id, registry_ref, party_id, est_lease_event, client_id, owner_id) on table public.lead to carr_jobs;
 grant select (id, registry_ref, party_id, stage, suppressed, segment, notes, owner_id) on table public.lead to carr_reader;
 grant select (slug, side) on table public.participant_role to carr_writer;
 grant select (id, name) on table public.party to carr_jobs;
-grant select (id, kind, name, phone, email, city, state, npi, merged_into, deleted_at, specialty, county, title, ref, contact_state, contact_state_reason, contact_state_until, contact_state_cadence, cell) on table public.party to carr_reader;
+grant select (id, kind, name, org_id, phone, email, city, state, npi, merged_into, deleted_at, specialty, county, title, ref, contact_state, contact_state_reason, contact_state_until, contact_state_cadence, cell) on table public.party to carr_reader;
 grant select (id) on table public.placement to carr_jobs;
 grant update (removed_at, removed_by_actor_id, removal_reason) on table public.research_site to carr_writer;
 grant select (id, status) on table public.rule to carr_jobs;
@@ -110840,6 +111445,7 @@ grant execute on function ops.activate_context_bundle(p_work_request text, p_pla
 grant execute on function ops.activate_guidance_registry(p_registry_id uuid, p_manifest_digest text, p_idempotency_key text, p_reason text) to carr_authority;
 grant execute on function ops.activate_guidance_situation_mapping(p_proposed_mapping_id uuid, p_authority_binding_id uuid, p_reason text) to carr_authority;
 grant execute on function ops.add_meeting_note(p_meeting uuid, p_body text, p_revises_note_number integer, p_base_revision integer, p_client_instance text, p_idempotency_key uuid) to carr_writer;
+grant execute on function ops.adopt_rule(p_section_id uuid, p_base_version bigint, p_idempotency_key text, p_reason text) to carr_authority;
 grant execute on function ops.advance_workflow_cutover_stage(p_plan_id uuid, p_to_stage text, p_evidence_ref text, p_reason text, p_idempotency_key uuid) to carr_authority;
 grant execute on function ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text) to carr_authority;
 grant execute on function ops.amend_rule_statement(p_rule_id uuid, p_new_statement text, p_idempotency_key text, p_reason text) to carr_authority;
@@ -111757,6 +112363,7 @@ grant execute on function ops.record_tour_pdf_render_result(p_tenant text, p_ren
 grant execute on function ops.record_workflow_acceptance(p_workflow_key text, p_mode text, p_status text, p_receipt_ref text) to carr_authority;
 grant execute on function ops.record_workflow_caller(p_workflow_key text, p_workflow_version integer, p_caller_locator text, p_caller_kind text, p_status text, p_blocked_reason text, p_evidence_ref text, p_actor_slug text) to carr_writer;
 grant execute on function ops.redeem_program6_browser_action_challenge(p_token_digest text, p_session_digest text, p_action text, p_material_digest text, p_idempotency_key uuid) to carr_authority;
+grant execute on function ops.register_client_portal(p_deal_id uuid, p_slug text, p_password text) to carr_writer;
 grant execute on function ops.register_execution_environment_provider(p_manifest jsonb, p_idempotency_key uuid) to carr_authority;
 grant execute on function ops.register_execution_environment_provider(p_manifest jsonb, p_idempotency_key uuid) to carr_writer;
 grant execute on function ops.register_slice_checkable_done(p_slice_id text, p_criteria jsonb, p_idempotency_key uuid) to carr_authority;
@@ -113059,6 +113666,22 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 1003_notification_morning_midnight.sql	7b3eb4a20aeed80ce5c01bd17a4b2fe02c43184e5903957ac4edee459b80d050	1970-01-01 00:00:00+00
 1004_phase_start_undo.sql	921899f7e36a786c3570d2da68645051b710c7fd51ec7fbe6c8b74488bd93e52	1970-01-01 00:00:00+00
 1005_calendar_intake_retained_control_ref.sql	2d1910179c7f719c91b55416062725031a447a0ce711621dace61e3049488751	1970-01-01 00:00:00+00
+1006_complete_work_request.sql	5e378cf45c69a0d974684f7538f86649a0fdf1f0a61694a677a962f904fd10fa	1970-01-01 00:00:00+00
+1008_email_reply_draft.sql	2a3faa08aa0088f8946fac0678d2a250dd90a493c28c7a6635f5cbc38f5808b3	1970-01-01 00:00:00+00
+1010_email_reply_recipients.sql	12f43a47da714557b17ec3c3e95209388a88f67898b4ea24089475d38f1fbb74	1970-01-01 00:00:00+00
+1013_register_client_portal.sql	32b72e529672ad038dff45399ac54c2138130b7031211b35c593ee69270b80da	1970-01-01 00:00:00+00
+1014_dell_actor_email.sql	442f0259945dfb8fb82bbbee525d1ecb526b148ad38e0eeae129f7a295811d7a	1970-01-01 00:00:00+00
+1015_team_memory_store.sql	49148c8fab6fa55d910361e4420cc06411b47ba46640df6d2c15ca59151ce56e	1970-01-01 00:00:00+00
+1016_list_client_portals.sql	20b27c39481b60aad92d73f579cd62ae6fee5b892b49758648f15d5678eb6aba	1970-01-01 00:00:00+00
+1017_work_request_queue.sql	e4a0b60bfdfa748b404740eb2d3ffccbbfba5b199e71cc2f3a9f74bcf2f3d195	1970-01-01 00:00:00+00
+1020_email_deal_matching.sql	f9f088ad33ee028e0f1f8fa4730e6ce0fbc16afa2d1ce0f384daff571e49f2ed	1970-01-01 00:00:00+00
+1022_email_send_result_time.sql	747c27f8e74ed3f544367fb84772a7fa71617fefb7b7d3e0c29c00ddd789fd26	1970-01-01 00:00:00+00
+1023_email_thread_filing_events.sql	61f9844a7174260452aa35388f3d888c94e922fc957f37223f4bc6e24bd9fa3f	1970-01-01 00:00:00+00
+1024_work_request_job_start.sql	649e9bd25ca5e9e2fb6cc7fb574ea126d17ff2384f7916f21dedff960bd7adaf	1970-01-01 00:00:00+00
+1025_work_request_job_finished.sql	2e1b579c6979eea230aa5a8ca2a20bb41aeaecd81cfb777f7fe2547d29894e5c	1970-01-01 00:00:00+00
+1026_email_recent_outcomes_index.sql	4b165c827ca9087624a17de13197c1a78647bcbd2d7f59b33bbb53b786b192b6	1970-01-01 00:00:00+00
+1027_rule_card_adoption.sql	9c8563d99d2a8fccc9e4453e80a0904c02ab9d26a45b4adc8b7fe2efe00e1dbf	1970-01-01 00:00:00+00
+1028_email_lead_proposal_read.sql	e2c2eeee90c0a081adabc11477ced7f0f1768f9441270a1b824250182199e028	1970-01-01 00:00:00+00
 \.
 
 
@@ -113105,7 +113728,6 @@ SET row_security = off;
 --
 
 COPY public.actor (id, slug, kind, display_name, email, active, phone) FROM stdin;
-722901b8-efb3-4bd6-bef0-c5d481c0a35e	dell	human	Dell McCraney	\N	t	\N
 c659db8e-1920-4ddf-b795-ae30b8bd3380	automation	automation	Scheduled jobs	\N	t	\N
 c16ce9d1-0b9e-4306-baab-dabaedda9961	system	system	System (migrations, exporters)	\N	t	\N
 b6c38b27-d006-4fad-9c38-49edf3130a07	joe	human	Joe Bookout	joe.bookout@carr.us	t	850.361.2208
@@ -113129,6 +113751,7 @@ b0e0c932-f529-4a1b-8f0e-fc6241a0e8d6	codex-fa-execution	automation	Codex Global 
 1130ec99-97f9-4aad-a5a7-86cea352c822	codex-fa-secrets	automation	Codex Global Secrets Boundary Oracle	\N	t	\N
 bc43680e-8468-4258-9856-e5bf325b5840	codex-fa-source	automation	Codex Global Source Authority Oracle	\N	t	\N
 3c4a3e52-211a-4926-8ba3-a5e58418b7aa	codex-fa-minimum	automation	Codex Foundation Assurance Minimum Oracle	\N	t	\N
+722901b8-efb3-4bd6-bef0-c5d481c0a35e	dell	human	Dell McCraney	dell.mccraney@carr.us	t	\N
 \.
 
 
@@ -113314,6 +113937,7 @@ COPY public.doctrine_review_policy (id, name, max_age_days, revalidate_on_dep_ch
 787d9649-467d-4887-b1a2-6659176e62e6	standing-doctrine	180	t	{playbook,sop,reference}
 67de5b2b-d0b5-4f0a-8fe3-1a2586f7b618	routing	90	t	{index}
 766982f1-b4ef-459f-85be-d03d17d4bd09	narrative	\N	t	{dossier_narrative,distillation}
+ecb341ac-80c5-4c56-9a4a-d57f70554ccb	team-memory	30	t	\N
 \.
 
 
@@ -113388,6 +114012,11 @@ capital_partner	Capital Partner	\N
 lead	Lead	actor
 client_contact	Client Contact	party
 listing_side	Listing Side	party
+client	Client	party
+landlord_side	Landlord side	party
+lender	Lender	party
+attorney	Attorney	party
+other_vendor	Other vendor	party
 \.
 
 
@@ -113994,11 +114623,15 @@ insert into public.doctrine_gate_check ("applies_to","check_key","config","creat
 insert into public.doctrine_gate_check ("applies_to","check_key","config","created_at","description","enabled","impl_key","severity") select "applies_to","check_key","config","created_at","description","enabled","impl_key","severity" from jsonb_populate_record(null::public.doctrine_gate_check, '{"applies_to": {"ops": ["write", "move", "retire"]}, "check_key": "claim_holder_or_free", "config": {}, "created_at": "2026-08-08T03:20:20.503334+00:00", "description": "no foreign unexpired claim on the section", "enabled": true, "impl_key": "gates.claim_holder_or_free", "severity": "block"}'::jsonb);
 insert into public.doctrine_gate_check ("applies_to","check_key","config","created_at","description","enabled","impl_key","severity") select "applies_to","check_key","config","created_at","description","enabled","impl_key","severity" from jsonb_populate_record(null::public.doctrine_gate_check, '{"applies_to": {"ops": ["refs_set"]}, "check_key": "edge_acyclic", "config": {}, "created_at": "2026-08-08T03:20:20.503334+00:00", "description": "acyclic edge types stay acyclic after the write", "enabled": true, "impl_key": "gates.edge_acyclic", "severity": "block"}'::jsonb);
 insert into public.doctrine_gate_check ("applies_to","check_key","config","created_at","description","enabled","impl_key","severity") select "applies_to","check_key","config","created_at","description","enabled","impl_key","severity" from jsonb_populate_record(null::public.doctrine_gate_check, '{"applies_to": {"ops": ["refs_set"]}, "check_key": "edge_class_allowed", "config": {}, "created_at": "2026-08-08T03:20:20.503334+00:00", "description": "edge source/target classes legal for the edge_type", "enabled": true, "impl_key": "gates.edge_class_allowed", "severity": "block"}'::jsonb);
+insert into public.doctrine_gate_check ("applies_to","check_key","config","created_at","description","enabled","impl_key","severity") select "applies_to","check_key","config","created_at","description","enabled","impl_key","severity" from jsonb_populate_record(null::public.doctrine_gate_check, '{"applies_to": {"content_classes": ["distillation"], "ops": ["write", "retire"]}, "check_key": "memory_attach_required", "config": {"slugs": ["team-memory"]}, "created_at": "2026-10-28T17:04:45.594627+00:00", "description": "Team memory writes and retires need a known attach_id from attach-memory with read_write access.", "enabled": true, "impl_key": "gates.memory_attach_required", "severity": "block"}'::jsonb);
 insert into public.doctrine_gate_check ("applies_to","check_key","config","created_at","description","enabled","impl_key","severity") select "applies_to","check_key","config","created_at","description","enabled","impl_key","severity" from jsonb_populate_record(null::public.doctrine_gate_check, '{"applies_to": {"ops": ["write"]}, "check_key": "no_md_escape", "config": {}, "created_at": "2026-08-08T03:20:20.503334+00:00", "description": "body text does not instruct writing vault .md outside the manifest", "enabled": true, "impl_key": "gates.no_md_escape", "severity": "block"}'::jsonb);
 insert into public.doctrine_gate_check ("applies_to","check_key","config","created_at","description","enabled","impl_key","severity") select "applies_to","check_key","config","created_at","description","enabled","impl_key","severity" from jsonb_populate_record(null::public.doctrine_gate_check, '{"applies_to": {"ops": ["create", "write"]}, "check_key": "personal_owner_required", "config": {}, "created_at": "2026-08-08T03:20:20.503334+00:00", "description": "visibility=personal requires owner_actor_id", "enabled": true, "impl_key": "gates.personal_owner_required", "severity": "block"}'::jsonb);
 insert into public.doctrine_gate_check ("applies_to","check_key","config","created_at","description","enabled","impl_key","severity") select "applies_to","check_key","config","created_at","description","enabled","impl_key","severity" from jsonb_populate_record(null::public.doctrine_gate_check, '{"applies_to": {"ops": ["create", "rename"]}, "check_key": "slug_unique", "config": {}, "created_at": "2026-08-08T03:20:20.503334+00:00", "description": "document slug free among documents and aliases", "enabled": true, "impl_key": "gates.slug_unique", "severity": "block"}'::jsonb);
 insert into public.doctrine_gate_check ("applies_to","check_key","config","created_at","description","enabled","impl_key","severity") select "applies_to","check_key","config","created_at","description","enabled","impl_key","severity" from jsonb_populate_record(null::public.doctrine_gate_check, '{"applies_to": {"ops": ["refs_set", "write"]}, "check_key": "target_exists", "config": {}, "created_at": "2026-08-08T03:20:20.503334+00:00", "description": "every link/edge target resolves to a live row", "enabled": true, "impl_key": "gates.target_exists", "severity": "block"}'::jsonb);
 insert into public.doctrine_gate_check ("applies_to","check_key","config","created_at","description","enabled","impl_key","severity") select "applies_to","check_key","config","created_at","description","enabled","impl_key","severity" from jsonb_populate_record(null::public.doctrine_gate_check, '{"applies_to": {"ops": ["refs_set"]}, "check_key": "unresolved_conflict", "config": {}, "created_at": "2026-08-08T03:20:20.503334+00:00", "description": "CONFLICTS_WITH present without a resolving edge", "enabled": true, "impl_key": "gates.unresolved_conflict", "severity": "block"}'::jsonb);
+-- CARR REVIEWED SEED public.doctrine_document (1015_team_memory_store.sql)
+insert into public.doctrine_document ("content_class","created_by","id","owner_actor_id","review_policy_id","slug","title","visibility") select "content_class","created_by","id","owner_actor_id","review_policy_id","slug","title","visibility" from jsonb_populate_record(null::public.doctrine_document, '{"content_class": "distillation", "created_by": null, "id": "a14550f7-e970-458d-b734-286a4ef07ac0", "owner_actor_id": null, "review_policy_id": null, "slug": "dreams-log", "title": "Dreams log", "visibility": "shared"}'::jsonb);
+insert into public.doctrine_document ("content_class","created_by","id","owner_actor_id","review_policy_id","slug","title","visibility") select "content_class","created_by","id","owner_actor_id","review_policy_id","slug","title","visibility" from jsonb_populate_record(null::public.doctrine_document, '{"content_class": "distillation", "created_by": null, "id": "6fbc96e7-42e7-40b0-9b81-9cd02d36fd24", "owner_actor_id": null, "review_policy_id": "ecb341ac-80c5-4c56-9a4a-d57f70554ccb", "slug": "team-memory", "title": "Team memory", "visibility": "shared"}'::jsonb);
 -- CARR REVIEWED SEED public.agent_profile (0284_named_agent_profiles.sql)
 insert into public.agent_profile ("charter","created_at","current_desk","current_model","display_name","id","profile_key","sponsor_scope","status","updated_at","version") select "charter","created_at","current_desk","current_model","display_name","id","profile_key","sponsor_scope","status","updated_at","version" from jsonb_populate_record(null::public.agent_profile, '{"charter": ["implementation in the repo worktree lanes", "migrations and Worker verbs", "tests written before the thing", "release mechanics through the sanctioned doors"], "created_at": "2026-08-23T03:20:17.201266+00:00", "current_desk": "hermes-desktop", "current_model": "openrouter/stealth/ox-alpha", "display_name": "Builder", "id": "1f116c08-8e2c-4ab3-834a-6b4a5c7deea1", "profile_key": "builder", "sponsor_scope": "shared", "status": "active", "updated_at": "2026-08-25T03:31:03.957747+00:00", "version": 3}'::jsonb);
 insert into public.agent_profile ("charter","created_at","current_desk","current_model","display_name","id","profile_key","sponsor_scope","status","updated_at","version") select "charter","created_at","current_desk","current_model","display_name","id","profile_key","sponsor_scope","status","updated_at","version" from jsonb_populate_record(null::public.agent_profile, '{"charter": ["deal watch and next-action hygiene", "critical-date and follow-up triage", "draft-only partner escalations"], "created_at": "2026-08-25T03:31:03.957747+00:00", "current_desk": "hermes-desktop", "current_model": "xai-oauth/grok-4.6", "display_name": "Deal Steward", "id": "d01a2a96-70d9-42d8-beb3-82fe26eb079c", "profile_key": "deal-steward", "sponsor_scope": "shared", "status": "active", "updated_at": "2026-08-25T03:31:03.957747+00:00", "version": 2}'::jsonb);
