@@ -21,8 +21,8 @@ type reference such as `actor.slug%type` is outside what the audit can see.
 
 What else it asserts. The audit refuses a known-unsafe control body, so a
 broken tokenizer cannot pass vacuously; the live SCAC frontier catalog still
-matches its seal and every historical registry seal still validates (body
-qualification must not touch ACLs, owners or configs); and the live registry
+matches its seal (body qualification must not touch ACLs, owners or configs;
+migration 1033 removed the historical registry copies); and the live registry
 frontier is one the SIEP-11 gate supports, which is the predecessor regression
 for the v100 entry that gate once dropped.
 """
@@ -201,15 +201,6 @@ def main() -> int:
             ordinal = int(live.rsplit(".v", 1)[1])
             if cur.execute(f"select ops.scac_mutation_catalog_v{ordinal}_current()").fetchall()[0][0] is not True:
                 raise RuntimeError(f"live catalog no longer matches the {live} seal")
-            invalid = [
-                version for (version,) in cur.execute(
-                    "select registry_version from ops.scac_mutation_registry_version order by 1"
-                ).fetchall()
-                if cur.execute("select ops.scac_mutation_registry_seal_valid(%s)", (version,)).fetchall()[0][0]
-                is not True
-            ]
-            if invalid:
-                raise RuntimeError(f"historical registry seal(s) no longer validate: {invalid!r}")
             conn.rollback()
     except Exception as exc:  # noqa: BLE001 - a gate reports every failure the same way
         print(f"definer-hardening-local-pg-gate: FAIL — {exc}", file=sys.stderr)
