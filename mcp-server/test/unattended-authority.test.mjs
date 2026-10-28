@@ -107,10 +107,10 @@ test("each runner holds its own token, and the ledger names the runner that acte
   assert.equal(unattendedActorForToken(BEARER, revoked), null);
   assert.equal(unattendedActorForToken("Bearer model-room-secret", revoked)?.slug, "joe-local");
   // The door rides into the daily read counter; the runner label stays on the
-  // write ledger (tool_call) only, since 1032 counts reads per door.
+  // write ledger (tool_call) only, since 1041 counts reads per door.
   const { text, params } = readCallCountSQL(unattended(), "standing-context", true);
-  assert.match(text, /\bsponsoring_human_slug, via, ok\b/);
-  assert.equal(params[2], "unattended-token", "via missing from the read counter");
+  assert.match(text, /\bactor_slug, sponsoring_human_slug, via, ok\b/);
+  assert.equal(params[3], "unattended-token", "via missing from the read counter");
 });
 
 test("a runner name outside the server's vocabulary resolves to nothing", () => {

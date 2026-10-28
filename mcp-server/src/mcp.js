@@ -561,31 +561,33 @@ function toolList(profile = "full") {
     }));
 }
 
-// ---------- read-call counting (0108, counted per day since 1032) ----------
+// ---------- read-call counting (0108, counted per day since 1041) ----------
 //
 // withEnvelope() in tools.js records writes in tool_call; read verbs never pass
 // through it, so this is the read side's only trace. 0108 logged one
 // tool_read_call row per read to answer "did a session boot from the store, and
 // whose?" for Dell's 2026-08-21 cutover. Every question asked since is a count
-// or a latest time per verb and sponsor, so 1032 replaced the row per call with
-// one tool_read_count counter per (UTC day, verb, sponsor, via, ok).
+// or a latest time per verb and sponsor, so 1041 replaced the row per call with
+// one tool_read_count counter per (UTC day, verb, actor, sponsor, via, ok).
+// The actor stays separate from its sponsor, so an agent reading through
+// Joe's grant is counted as the agent.
 //
 // readCallCountSQL is pure — no DB, no env, no ctx — so it is unit-testable on
 // its own (mcp-server/test/tool-read-call.test.mjs). By construction it can only
 // see (actor, verb, ok): no argument value or response body can reach it.
 export function readCallCountSQL(actor, verb, ok) {
   return {
-    text: `insert into tool_read_count as c (day, verb, sponsoring_human_slug, via, ok, n, last_at)
-           values ((now() at time zone 'UTC')::date, $1, $2, $3, $4, 1, now())
+    text: `insert into tool_read_count as c (day, verb, actor_slug, sponsoring_human_slug, via, ok, n, last_at)
+           values ((now() at time zone 'UTC')::date, $1, $2, $3, $4, $5, 1, now())
            on conflict on constraint tool_read_count_key
            do update set n = c.n + 1, last_at = greatest(c.last_at, excluded.last_at)`,
-    params: [verb, auditIdentity(actor).sponsoring_human_slug, actor.via || null, ok],
+    params: [verb, actor.slug, auditIdentity(actor).sponsoring_human_slug, actor.via || null, ok],
   };
 }
 
 // insertFn is (text, params) => Promise<rows>. Production passes a thin neon()
 // wrapper against DATABASE_URL_WRITER (carr_reader is views-only and cannot
-// upsert — see 1032's grants); tests pass a fake that just records the call.
+// upsert — see 1041's grants); tests pass a fake that just records the call.
 // NEVER THROWS: a logging failure must not become a read failure, so any
 // rejection from insertFn is swallowed here, not propagated to the caller
 // that scheduled this via ctx.waitUntil.

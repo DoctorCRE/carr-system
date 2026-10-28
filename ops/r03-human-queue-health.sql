@@ -4,8 +4,8 @@
 -- notification-feed uses a read-only writer connection; before read-call audit
 -- coverage of that route is deployed, zero counted reads do not establish
 -- zero feed reads. Even after coverage, a successful call does not prove sight.
--- Feed reads come from tool_read_count (1032), keyed by sponsoring human; every
--- notification-feed row in the old per-call log had actor_slug = sponsor.
+-- Feed reads come from tool_read_count (1041), counted by the reading actor, so
+-- an agent reading through a human's grant is not counted as that human.
 -- failed_attempts is historical; unresolved_failed_attempts counts failures
 -- only while their recipient still lacks an in-app row.
 with targeted as (
@@ -109,12 +109,12 @@ select r.slug as recipient,
        end as breach_response,
        count(m.device_id) as device_rows,
        (select coalesce(sum(tr.n),0) from public.tool_read_count tr
-         where tr.verb='notification-feed' and tr.sponsoring_human_slug=r.slug) as feed_call_observations,
+         where tr.verb='notification-feed' and tr.actor_slug=r.slug) as feed_call_observations,
        (select coalesce(sum(tr.n),0) from public.tool_read_count tr
-         where tr.verb='notification-feed' and tr.sponsoring_human_slug=r.slug and tr.ok)
+         where tr.verb='notification-feed' and tr.actor_slug=r.slug and tr.ok)
          as successful_feed_call_observations,
        (select max(tr.last_at) from public.tool_read_count tr
-         where tr.verb='notification-feed' and tr.sponsoring_human_slug=r.slug)
+         where tr.verb='notification-feed' and tr.actor_slug=r.slug)
          as latest_feed_call_at
   from recipients r left join measured m on m.recipient_actor=r.id
  group by r.id,r.slug order by r.slug;

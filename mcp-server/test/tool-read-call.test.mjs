@@ -1,7 +1,8 @@
 // tool-read-call.test.mjs — coverage for read-call counting (0108's read
-// trace, a per-day counter since 1032). withEnvelope() in tools.js records
+// trace, a per-day counter since 1041). withEnvelope() in tools.js records
 // writes only, so this is the only trace a read verb leaves. This file proves a
-// read verb bumps exactly one counter keyed by (day, verb, sponsor, via, ok), a
+// read verb bumps exactly one counter keyed by (day, verb, actor, sponsor, via,
+// ok), a
 // failed read is still counted (ok:false), no response body or argument value
 // can reach the statement, the per-call actor lookup is gone, and a counting
 // failure never surfaces to the caller.
@@ -21,13 +22,20 @@ const JOE = { slug: "joe", display: "Joe", human: true, via: "oauth-google", cli
 // function's only inputs are (actor, verb, ok).
 // ────────────────────────────────────────────────────────────────────────
 
-test("readCallCountSQL: upserts one daily tool_read_count counter keyed by day, verb, sponsor, via and ok", () => {
+test("readCallCountSQL: upserts one daily tool_read_count counter keyed by day, verb, actor, sponsor, via and ok", () => {
   const { text, params } = readCallCountSQL(JOE, "standing-context", true);
-  assert.match(text, /insert into tool_read_count as c \(day, verb, sponsoring_human_slug, via, ok, n, last_at\)/);
+  assert.match(text, /insert into tool_read_count as c \(day, verb, actor_slug, sponsoring_human_slug, via, ok, n, last_at\)/);
   assert.match(text, /\(now\(\) at time zone 'UTC'\)::date/);
   assert.match(text, /on conflict on constraint tool_read_count_key/);
   assert.match(text, /do update set n = c\.n \+ 1, last_at = greatest\(c\.last_at, excluded\.last_at\)/);
-  assert.deepEqual(params, ["standing-context", "joe", "oauth-google", true]);
+  assert.deepEqual(params, ["standing-context", "joe", "joe", "oauth-google", true]);
+});
+
+test("readCallCountSQL: an agent reading through Joe's grant stays the agent, with Joe as sponsor", () => {
+  const codex = { slug: "codex", human: false, via: "oauth-google", client_id: "codex", sponsoring_human_slug: "joe" };
+  const { params } = readCallCountSQL(codex, "notification-feed", true);
+  assert.equal(params[1], "codex");
+  assert.equal(params[3], "oauth-google");
 });
 
 test("readCallCountSQL: no per-call actor lookup and no tool_read_call row", () => {
@@ -37,12 +45,12 @@ test("readCallCountSQL: no per-call actor lookup and no tool_read_call row", () 
 
 test("readCallCountSQL: a failed call is counted under ok:false", () => {
   const { params } = readCallCountSQL(JOE, "get-deal-room", false);
-  assert.equal(params[3], false);
+  assert.equal(params[4], false);
 });
 
 test("readCallCountSQL: a caller with no sponsor or door label is still counted under null keys", () => {
   const { params } = readCallCountSQL({ slug: "codex", human: false }, "find", true);
-  assert.deepEqual(params, ["find", null, null, true]);
+  assert.deepEqual(params, ["find", "codex", null, null, true]);
 });
 
 test("readCallCountSQL: the function's own signature proves no argument value or response body can reach it", () => {
@@ -68,7 +76,7 @@ test("recordReadCall: a successful read sends exactly one counter upsert", async
   await recordReadCall(insertFn, JOE, "standing-context", true);
   assert.equal(calls.length, 1);
   assert.match(calls[0].text, /insert into tool_read_count/);
-  assert.deepEqual(calls[0].params, ["standing-context", "joe", "oauth-google", true]);
+  assert.deepEqual(calls[0].params, ["standing-context", "joe", "joe", "oauth-google", true]);
 });
 
 test("recordReadCall: a failed read is still counted, with ok:false", async () => {
@@ -76,7 +84,7 @@ test("recordReadCall: a failed read is still counted, with ok:false", async () =
   const insertFn = async (text, params) => { calls.push({ text, params }); return []; };
   await recordReadCall(insertFn, JOE, "get-deal-room", false);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].params[3], false);
+  assert.equal(calls[0].params[4], false);
 });
 
 test("recordReadCall: never stores a response body or an argument value — the insert function only ever sees what readCallCountSQL built", async () => {
@@ -103,8 +111,8 @@ test("notification-feed writer read: one synthetic call bumps one metadata-only 
   await Promise.all(pending);
   assert.equal(rows.length, 1);
   assert.match(rows[0].text, /insert into tool_read_count/);
-  assert.deepEqual(rows[0].params, ["notification-feed", "joe", "oauth-google", true],
-    "only sponsor, door and outcome reach the counter");
+  assert.deepEqual(rows[0].params, ["notification-feed", "joe", "joe", "oauth-google", true],
+    "only actor, sponsor, door and outcome reach the counter");
 });
 
 test("mutating writer: synthetic calls never create a read-call row", async () => {
@@ -116,6 +124,15 @@ test("mutating writer: synthetic calls never create a read-call row", async () =
   }
   assert.equal(pending.length, 0);
   assert.equal(rows.length, 0);
+});
+
+test("R03 counts feed reads by the reading actor, so an agent's read is not the human's", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const sql = await readFile(new URL("../../ops/r03-human-queue-health.sql", import.meta.url), "utf8");
+  const feed = sql.slice(sql.indexOf("as device_rows"), sql.lastIndexOf("\n  from recipients r"));
+  assert.equal((feed.match(/tr\.actor_slug=r\.slug/g) || []).length, 3);
+  assert.doesNotMatch(feed, /sponsoring_human_slug/);
+  assert.match(feed, /from public\.tool_read_count tr/);
 });
 
 test("R03 standing report keeps the migration proof's existing CSV fields in place", async () => {

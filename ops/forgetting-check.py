@@ -19,11 +19,11 @@ import sys
 
 TRACKED = ["event", "tool_call", "tool_read_count", "record_flag", "ingest_inbox",
            "activity", "source_capture", "loop_item"]
-# tool_read_count (1032): the read-side sibling of tool_call, one counter per
-# day, verb, sponsor, door and outcome; it replaced 0108's row-per-read
+# tool_read_count (1041): the read-side sibling of tool_call, one counter per
+# day, verb, actor, sponsor, door and outcome; it replaced 0108's row-per-read
 # tool_read_call, which stopped growing. Like tool_call, record_flag,
 # activity, source_capture and loop_item above, carr_jobs holds no SELECT on
-# it (1032 grants select only to carr_writer/carr_reader/carr_exporter,
+# it (1041 grants select only to carr_writer/carr_reader/carr_exporter,
 # deliberately not carr_jobs — ORDER 19(a)), so this entry's count query is
 # skipped the same way its siblings' already are.
 WARN_INGEST_NEW = 50          # unprocessed intake rows before the row goes amber

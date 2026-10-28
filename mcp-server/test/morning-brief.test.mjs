@@ -330,7 +330,7 @@ test("a sealed true-zero renewal source is explicit empty, never unavailable or 
 test("the read counter remains metadata-only for the composite response", () => {
   const output = { private_body: "Candidate Safe", sections: { renewals: { items: [{ display_name: "Renewal Safe" }] } } };
   const receipt = readCallCountSQL(JOE, "morning-brief", true);
-  assert.doesNotMatch(receipt.text, /response|argument|body|\$5/i);
+  assert.doesNotMatch(receipt.text, /response|argument|body|\$6/i);
   assert.doesNotMatch(JSON.stringify(receipt.params), /Candidate Safe|Renewal Safe|private_body/);
   assert.equal(output.sections.renewals.items.length, 1); // Guard against a vacuous metadata-only test.
 });

@@ -144,6 +144,7 @@
     "system_config": "operational settings, not vocabulary, and the kind of table where a value that should never be committed can appear; staging sets its own",
     "tool_call": "the verb call ledger — runtime history",
     "tool_read_count": "daily read-verb call counters backfilled from tool_read_call — usage data",
+    "tool_read_count_backfill": "tool_read_call grouped at 1041 for the contract top-up — usage data",
     "ops.studio_leader": "Current host ownership, epoch, fence evidence and change time are runtime failover authority, not reference configuration. A schema-only rebuild deliberately has no owner and guarded jobs and transfers refuse until the runtime row is restored from a verified backup; never seed Studio ownership from a stale snapshot while MacBook may be active."
   },
   "carried_subset_must_not_contain": {

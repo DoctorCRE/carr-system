@@ -5,24 +5,17 @@ free-text moment descriptions do not invoke a classifier.
 """
 from __future__ import annotations
 
-import fcntl
-import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
-import time
 from typing import Callable
 
 from lib.rule_operations import structural_matches
 
 REPO = Path(__file__).resolve().parent.parent
 MATCH_KEYS = ("tools", "verbs", "bash_patterns", "path_globs")
-# How long a session reuses one fetched catalog before it asks the store again.
-# The re-read is the only way to see a changed corpus_digest (another session's
-# or partner's rule edit), so this bounds how stale a long session's rules get.
-CATALOG_SECONDS = 600
 
 
 def _scope_condition(scope: object) -> dict:
@@ -93,7 +86,8 @@ def select_rules(catalog: dict, event: dict) -> dict:
             "models": [], "complete": not defects}
 
 
-def _fetch_catalog(runner: Callable) -> dict:
+def fetch_catalog(runner: Callable = subprocess.run) -> dict:
+    """Read the sponsor-scoped rule catalog from the store. Not yet validated: see select_rules."""
     env = {k: v for k, v in os.environ.items()
            if k not in {"DATABASE_URL", "CARR_BREAK_GLASS", "CARR_BREAK_GLASS_REASON", "CARR_MCP_CLIENT_PROFILE"}}
     try:
@@ -106,53 +100,9 @@ def _fetch_catalog(runner: Callable) -> dict:
         raise RuntimeError("scope_catalog_unavailable") from None
 
 
-def _catalog_path(session_id: str) -> Path:
-    root = Path(os.environ.get("CARR_RULE_SCOPE_CACHE_DIR",
-                               Path.home() / ".config/carr/claude-rule-delivery/scope-catalog"))
-    return root / (hashlib.sha256(session_id.encode("utf-8")).hexdigest() + ".json")
+def lookup(event: dict, *, runner: Callable = subprocess.run) -> dict:
+    """Read current sponsor-scoped records once and select for any hook event.
 
-
-def _session_catalog(session_id: str, runner: Callable, now: float) -> dict:
-    """One catalog per session, re-read from the store every CATALOG_SECONDS.
-
-    The hook fires on every tool call; the corpus changes only when a rule does.
-    A re-read replaces the cached copy, so a changed corpus_digest reaches the
-    session at the next re-read and an unchanged one changes nothing. A failed
-    read is never cached and a corrupt file is simply re-read. The lock makes
-    parallel tool calls in one session wait for one fetch instead of each
-    starting its own.
+    No credentials, runtime settings, delivery receipts, or local snapshots are written.
     """
-    path = _catalog_path(session_id)
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with open(path.with_suffix(".lock"), "a", encoding="utf-8") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        try:
-            cached = json.loads(path.read_text(encoding="utf-8"))
-            if 0 <= now - cached["fetched_at"] < CATALOG_SECONDS and isinstance(cached["catalog"], dict):
-                return cached["catalog"]
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
-        catalog = _fetch_catalog(runner)
-        temp = path.with_suffix(".tmp")
-        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump({"fetched_at": now, "catalog": catalog}, handle)
-        os.replace(temp, path)
-        return catalog
-
-
-def lookup(event: dict, *, runner: Callable = subprocess.run, session_id: str | None = None,
-           now: float | None = None) -> dict:
-    """Read current sponsor-scoped records and select for any hook event.
-
-    With a session_id the catalog is reused across that session's events (see
-    _session_catalog); without one every call reads the store. No credentials,
-    runtime settings or delivery receipts are written.
-    """
-    if not session_id:
-        return select_rules(_fetch_catalog(runner), event)
-    try:
-        catalog = _session_catalog(session_id, runner, time.time() if now is None else now)
-    except OSError:
-        catalog = _fetch_catalog(runner)  # an unwritable cache must not cost the rules
-    return select_rules(catalog, event)
+    return select_rules(fetch_catalog(runner), event)

@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
+import time
 import tempfile
 import os
 from unittest.mock import patch
@@ -379,7 +380,7 @@ class CardDeliveryTests(unittest.TestCase):
 
 
 class CatalogCacheTests(unittest.TestCase):
-    """The hook reads standing-context once per session, not once per tool call (WR573.S1.J2)."""
+    """standing-context is read once per user prompt, not once per tool call (WR573.S1.J2)."""
     RULE = dict(id='11111111', statement='Inspect the diff.', scope={'tools': ['Bash']}, personal_to=None)
 
     def setUp(self):
@@ -390,48 +391,82 @@ class CatalogCacheTests(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
         self.calls = []
-        self.digest = 'a' * 64
-        self.rules = [self.RULE]
+        self.source = {'ok': True, 'schema': 'rule-scope-catalog/v1', 'corpus_digest': 'a' * 64,
+                       'identity': {'agent_principal_id': 'joe-local', 'runtime_principal': 'joe-local',
+                                    'sponsoring_human_id': 'joe'}, 'rules': [self.RULE]}
 
     def runner(self, command, **kwargs):
         self.calls.append(command)
-        return subprocess.CompletedProcess(command, 0, json.dumps({
-            'ok': True, 'schema': 'rule-scope-catalog/v1', 'corpus_digest': self.digest,
-            'identity': {'agent_principal_id': 'joe-local', 'runtime_principal': 'joe-local',
-                         'sponsoring_human_id': 'joe'}, 'rules': self.rules}), '')
+        return subprocess.CompletedProcess(command, 0, json.dumps(self.source), '')
 
-    def call(self, session='s1', n=0, cache=True):
+    def prompt(self, session='s1'):
+        return hook.process({'hook_event_name': 'UserPromptSubmit', 'session_id': session,
+                             'prompt': 'Review this change'}, runner=self.runner, dedupe=False)
+
+    def tool(self, session='s1', n=0, cache=True, tool_name='Bash', tool_input=None):
         payload = {'hook_event_name': 'PreToolUse', 'session_id': session, 'tool_use_id': f'call-{n}',
-                   'tool_name': 'Bash', 'tool_input': {'command': 'git diff'}, 'prompt': 'Review this change'}
+                   'tool_name': tool_name, 'tool_input': tool_input or {'command': 'git diff'},
+                   'prompt': 'Review this change'}
         return hook.process(payload, runner=self.runner, dedupe=False, cache=cache)
 
-    def test_one_fetch_per_session_per_corpus_digest(self):
-        outputs = [self.call(n=n) for n in range(25)]
+    @staticmethod
+    def rule_ids(output):
+        return json.loads(output['hookSpecificOutput']['additionalContext'])['rule_ids']
+
+    def test_one_fetch_per_prompt_and_tool_calls_reuse_it(self):
+        self.prompt()
+        outputs = [self.tool(n=n) for n in range(25)]
         self.assertEqual(len(self.calls), 1)
-        self.call(session='s2')
-        self.assertEqual(len(self.calls), 2, 'a second session reads its own catalog once')
-        self.assertTrue(all(json.loads(o['hookSpecificOutput']['additionalContext'])['rule_ids'] == ['11111111']
-                            for o in outputs))
+        self.assertTrue(all(self.rule_ids(o) == ['11111111'] for o in outputs))
+        self.prompt()
+        self.tool(n=99)
+        self.assertEqual(len(self.calls), 2, 'every user prompt reads the store once')
+        self.tool(session='s2')
+        self.assertEqual(len(self.calls), 3, 'another session reads its own catalog')
 
-    def test_cached_output_is_identical_to_an_uncached_lookup(self):
-        warm = [self.call(n=n) for n in range(3)]
-        cold = [self.call(n=n, cache=False) for n in range(3)]
-        self.assertEqual(warm, cold)
-        self.assertEqual(len(self.calls), 4)
+    def test_a_rule_changed_mid_prompt_applies_from_the_next_prompt(self):
+        self.prompt()
+        self.source.update(corpus_digest='b' * 64, rules=[])
+        self.assertEqual(self.rule_ids(self.tool(n=1)), ['11111111'])
+        self.prompt()
+        self.assertEqual(self.rule_ids(self.tool(n=2)), [])
 
-    def test_changed_corpus_digest_replaces_the_catalog_at_the_next_read(self):
-        lookup = hook.lookup
-        event = {'hook_event_name': 'PreToolUse', 'tool_name': 'Bash', 'tool_input': {'command': 'git diff'}}
-        first = lookup(event, runner=self.runner, session_id='s1', now=1000.0)
-        self.digest, self.rules = 'b' * 64, []
-        within = lookup(event, runner=self.runner, session_id='s1', now=1000.0 + 599)
-        self.assertEqual((len(self.calls), within), (1, first))
-        after = lookup(event, runner=self.runner, session_id='s1', now=1000.0 + 600)
-        self.assertEqual((len(self.calls), after['corpus_digest'], after['rules']), (2, 'b' * 64, []))
-        lookup(event, runner=self.runner, session_id='s1', now=1000.0 + 601)
-        self.assertEqual(len(self.calls), 2, 'the new digest is read once, then reused')
+    def test_a_tool_call_before_any_prompt_fetches_once_and_caches(self):
+        self.tool(n=1)
+        self.tool(n=2)
+        self.assertEqual(len(self.calls), 1)
 
-    def test_failed_or_corrupt_reads_are_never_served_from_cache(self):
+    def test_a_rule_writing_verb_clears_the_cache_for_the_next_call(self):
+        self.prompt()
+        for name, tool_input in (('mcp__carr__adopt-rule', {'rule_id': 'x'}),
+                                 ('Bash', {'command': "./run.sh call bind-rule-context-contract '{}'"})):
+            with self.subTest(name=name):
+                before = len(self.calls)
+                self.tool(n=1, tool_name=name, tool_input=tool_input)
+                self.assertEqual(len(self.calls), before + 1, 'the write call reads the store itself')
+                self.source.update(corpus_digest='c' * 64, rules=[])
+                self.assertEqual(self.rule_ids(self.tool(n=2)), [], 'the call after the write sees the new corpus')
+                self.tool(n=3)
+                self.assertEqual(len(self.calls), before + 2, 'then the new catalog is reused')
+                self.source.update(corpus_digest='a' * 64, rules=[self.RULE])
+
+    def test_a_catalog_that_fails_validation_is_never_cached(self):
+        for bad in ({'ok': False}, {'rules': [dict(self.RULE, id='not-an-id')]},
+                    {'rules': [dict(self.RULE, personal_to='dell')]}):
+            with self.subTest(bad=bad):
+                good = dict(self.source)
+                self.source = dict(good, **bad)
+                denied = self.prompt()
+                self.assertEqual(denied.get('decision'), 'block')
+                self.assertEqual(list(self.root.glob('*.json')), [], 'a refused catalog is not written')
+                self.source = good
+                before = len(self.calls)
+                self.assertEqual(self.rule_ids(self.tool(n=1)), ['11111111'])
+                self.assertEqual(len(self.calls), before + 1, 'the fixed data is read on the next call')
+                for cached in self.root.glob('*.json'):
+                    cached.unlink()
+
+    def test_outages_and_corrupt_files_are_not_served(self):
         def down(command, **kwargs):
             self.calls.append(command)
             return subprocess.CompletedProcess(command, 1, '', 'store down')
@@ -439,13 +474,41 @@ class CatalogCacheTests(unittest.TestCase):
                  'tool_name': 'Bash', 'tool_input': {'command': 'git diff'}}
         out = hook.process(event, runner=down, dedupe=False)
         self.assertIn('RULE LOOKUP UNAVAILABLE', out['hookSpecificOutput']['additionalContext'])
-        self.call()
-        self.assertEqual(len(self.calls), 2, 'an outage is not cached; the next call reads the store')
+        self.tool()
+        self.assertEqual(len(self.calls), 2)
         cached = next(self.root.glob('*.json'))
         self.assertEqual(cached.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.root.stat().st_mode & 0o777, 0o700)
         cached.write_text('{not json')
-        self.call(n=1)
+        self.tool(n=1)
         self.assertEqual(len(self.calls), 3)
+
+    def test_cached_output_is_identical_to_an_uncached_lookup(self):
+        self.prompt()
+        warm = [self.tool(n=n) for n in range(3)]
+        cold = [self.tool(n=n, cache=False) for n in range(3)]
+        self.assertEqual(warm, cold)
+
+    def test_files_older_than_a_day_are_removed_when_a_catalog_is_written(self):
+        stale, recent = self.root / ('0' * 64 + '.json'), self.root / ('1' * 64 + '.json')
+        for path, age in ((stale, 86400 + 60), (recent, 60)):
+            path.write_text('{}')
+            os.utime(path, (time.time() - age, time.time() - age))
+        self.prompt()
+        self.assertFalse(stale.exists())
+        self.assertTrue(recent.exists())
+
+    def test_a_busy_lock_falls_back_to_a_direct_read_without_waiting(self):
+        import fcntl
+        self.root.mkdir(exist_ok=True)
+        lock_path = hook._catalog_path('s1').with_suffix('.lock')
+        with open(lock_path, 'a') as held, patch.object(hook, 'CATALOG_LOCK_SECONDS', 0.2):
+            fcntl.flock(held, fcntl.LOCK_EX)
+            started = time.monotonic()
+            self.assertEqual(self.rule_ids(self.tool()), ['11111111'])
+            self.assertLess(time.monotonic() - started, 2)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(list(self.root.glob('*.json')), [])
 
 
 if __name__ == '__main__':
