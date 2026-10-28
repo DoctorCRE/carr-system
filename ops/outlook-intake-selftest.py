@@ -7,6 +7,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import sqlite3
@@ -47,6 +48,8 @@ CLIENT = intake.Contact(email='pat@example.test', ref='C-901', name='Pat Example
 LEAD = intake.Contact(email='lee@example.test', ref='L-902', name='Lee Sample')
 OWNER = 'owner@example.test'
 PARTNER = 'partner@example.test'
+# The server's get-next-action refuses a deal; the parity selftest also runs this fake against older intakes.
+DEAL_UUID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
 
 
 def read(applies_to, summary=None, deal=None, party=None, quote=None, confidence=0.9):
@@ -172,7 +175,7 @@ class Fake:
         if verb == 'read-deal-reconciliation':
             return {'deals': self.deal_rows}
         if verb == 'get-next-action':
-            if intake.DEAL_REF.match(args['ref']):
+            if DEAL_UUID.match(args['ref']):
                 raise intake.CarrError(code='not_a_record')  # the server refuses deals here
             return {'ok': True, 'owner': args['owner'], 'action': self.actions.get((args['ref'], args['owner']))}
         if verb == 'set-next-action':
