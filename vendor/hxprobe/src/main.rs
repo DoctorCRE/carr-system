@@ -31,6 +31,8 @@ mod attachment;
 mod block;
 mod body;
 mod calendar;
+mod category;
+mod detail;
 mod folder;
 mod header;
 mod identity;
@@ -222,12 +224,16 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     let mut folders = folder::Index::default();
     let mut events = calendar::Index::default();
     let mut attachments = attachment::Index::default();
+    let mut categories = category::Index::default();
+    let mut details = detail::Index::default();
     let mut sidecars = files_dir.map(|d| body::Sidecars::open(std::path::Path::new(d))).unwrap_or_default();
     for &o in &offs {
         if let Some(b) = block::parse(&mm, o) {
             folders.observe(o, &b.data);
             events.observe(&b.data);
             attachments.observe(&b.data);
+            categories.observe(&b.data);
+            details.observe(&b.data);
         }
     }
 
@@ -278,7 +284,15 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              -- store-local keys of the message objects merged into this row,
              -- decimal, comma-separated and ascending; NULL when none linked.
              -- More than one means this row joined distinct store items.
-             local_keys   TEXT
+             local_keys   TEXT,
+             -- From the message detail object (class 00c9, tag 060f) joined by
+             -- local key; NULL when no detail, several keyed details, or
+             -- disagreeing newest revisions.
+             flag_status  TEXT,      -- 'none', 'flagged' or 'complete'
+             flag_due_unix INTEGER,  -- NULL also when the flag has no due date
+             flag_completed_unix INTEGER,
+             moved_to_other INTEGER, -- 1 after a one-time move to Other
+             pinned       INTEGER
          );
          CREATE TABLE message_folders (
              message_id INTEGER NOT NULL REFERENCES messages(id),
@@ -306,6 +320,19 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              path          TEXT                 -- NULL if revisions disagree
          );
          CREATE INDEX attachments_message ON attachments(message_key);
+         -- Categories assigned to a message, limited to defined category names.
+         CREATE TABLE message_categories (
+             message_id INTEGER NOT NULL REFERENCES messages(id),
+             category   TEXT NOT NULL,
+             PRIMARY KEY (message_id, category)
+         );
+         -- Category definitions.
+         CREATE TABLE categories (
+             id       INTEGER PRIMARY KEY, -- local store key
+             owner_id INTEGER NOT NULL,    -- owning list object, not folders.account_id
+             name     TEXT,                -- NULL if revisions disagree
+             color    INTEGER              -- OlCategoryColor; NULL if revisions disagree
+         );
          CREATE INDEX messages_sent ON messages(sent_unix);
          CREATE INDEX messages_sender ON messages(sender);
          CREATE TABLE events (
@@ -590,6 +617,14 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8)"
             )
             .expect("prepare attachments");
+        let mut ins_category = tx
+            .prepare("INSERT INTO categories(id,owner_id,name,color) VALUES (?1,?2,?3,?4)")
+            .expect("prepare categories");
+        for c in categories.categories.values() {
+            ins_category
+                .execute(rusqlite::params![c.id as i64, c.owner_id as i64, c.name, c.color])
+                .expect("insert category");
+        }
         for a in attachments.attachments.values() {
             ins_attachment
                 .execute(rusqlite::params![a.id as i64, a.message_key as i64, a.name, a.name_verified as i64,
@@ -601,13 +636,20 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 "INSERT INTO messages
                    (block,sender,sender_name,recipients,subject,message_id,body,
                     html,body_words,html_bytes,body_kind,sent_unix,sent_utc,
-                    subject_inherited,preview,body_source,copies,copy_key,local_keys)
+                    subject_inherited,preview,body_source,copies,copy_key,local_keys,
+                    flag_status,flag_due_unix,flag_completed_unix,moved_to_other,pinned)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,
-                         datetime(?12,'unixepoch'),?13,?14,?15,?16,?17,?18)",
+                         datetime(?12,'unixepoch'),?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)",
             )
             .expect("prepare");
 
+        let defined: std::collections::BTreeSet<&str> =
+            categories.categories.values().filter_map(|c| c.name.as_deref()).collect();
+        let mut ins_message_category = tx
+            .prepare("INSERT OR IGNORE INTO message_categories(message_id,category) VALUES (?1,?2)")
+            .expect("prepare message categories");
         for r in &best {
+            let d = details.for_keys(&r.local_keys);
             ins.execute(rusqlite::params![
                 r.offset as i64,
                 r.sender,
@@ -627,9 +669,20 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 r.copies as i64,
                 body::copy_key(r),
                 local_keys(r),
+                d.and_then(|d| d.flag).map(detail::Flag::as_str),
+                d.and_then(|d| d.due_unix).flatten(),
+                d.and_then(|d| d.completed_unix).flatten(),
+                d.and_then(|d| d.moved_to_other),
+                d.and_then(|d| d.pinned),
             ])
             .expect("insert");
             let message_id = tx.last_insert_rowid();
+            for name in d.and_then(|d| d.categories.as_ref()).into_iter().flatten() {
+                if defined.contains(name.as_str()) {
+                    ins_message_category.execute(rusqlite::params![message_id, name])
+                        .expect("insert message category");
+                }
+            }
             for folder_id in &r.folder_ids {
                 ins_link.execute(rusqlite::params![message_id, *folder_id as i64])
                     .expect("insert folder link");
@@ -698,6 +751,10 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             ("messages_with_folder", with_folder),
             ("attachment_objects", attachments.objects),
             ("attachments", attachments.attachments.len()),
+            ("category_objects", categories.objects),
+            ("categories", categories.categories.len()),
+            ("detail_objects", details.objects),
+            ("messages_with_detail", best.iter().filter(|r| details.for_keys(&r.local_keys).is_some()).count()),
             ("messages_with_key", best.iter().filter(|r| !r.local_keys.is_empty()).count()),
         ] {
             ins_meta.execute(rusqlite::params![key, value as i64]).expect("insert meta");

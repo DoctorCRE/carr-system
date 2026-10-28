@@ -17,6 +17,7 @@ import { budgetedAi } from "./ai-budget.js";
 import { publicError } from "./public-errors.ts";
 import { mcpOriginRefusal } from "./oauth-policy.ts";
 import { DOC_TOOL_NAMES, DOC_INSTRUCTIONS, docToolAnnotations } from "./doc-profile.ts";
+import { isolatePullRequests } from "./work-queue.js";
 import { MEMORY_ATTACH_LINE } from "./doctrine.js";
 import { TOOLS, ToolError, executeRegisteredTool, assertRegisteredToolInput, UNATTENDED_AUTHORITY_VERBS,
   auditIdentity, assertNoCallerAuthorityFields, coerceArgsToSchema,
@@ -830,6 +831,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
     // must treat the write as optional: losing it costs a record, never a reply.
     const client = {
       ai: budgetedAi(env),
+      pullRequests: isolatePullRequests(env.GITHUB_TOKEN),
       query: async (text, params = []) => ({ rows: await retrySafeDatabaseOperation(() => sql.query(text, params)) }),
       sideWrite: env?.DATABASE_URL_WRITER
         ? (text, params = []) => {
