@@ -1088,41 +1088,6 @@
       "target": "pull_placement_metrics.py"
     },
     {
-      "file": "ops/fixtures/brief-check/gap1.md",
-      "kind": "path",
-      "target": "ops/release-pipeline.py"
-    },
-    {
-      "file": "ops/fixtures/brief-check/gap17.md",
-      "kind": "command",
-      "target": "are"
-    },
-    {
-      "file": "ops/fixtures/brief-check/gap9.md",
-      "kind": "path",
-      "target": "ops/claude-continuity-hook.py"
-    },
-    {
-      "file": "ops/fixtures/brief-check/gap9.md",
-      "kind": "path",
-      "target": "ops/claude-continuity-selftest.py"
-    },
-    {
-      "file": "ops/fixtures/brief-check/gap9.md",
-      "kind": "path",
-      "target": "ops/fixtures/real-replay/hook-advisories.jsonl"
-    },
-    {
-      "file": "ops/fixtures/brief-check/gatefix.md",
-      "kind": "path",
-      "target": "hooks/escalation-gate.py"
-    },
-    {
-      "file": "ops/fixtures/brief-check/gatefix.md",
-      "kind": "path",
-      "target": "hooks/escalation-gate.py"
-    },
-    {
       "file": "ops/scheduled-tasks/ai-capability-builder.SKILL.md",
       "kind": "path",
       "target": "SKILL.md"
