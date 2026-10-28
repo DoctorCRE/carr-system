@@ -126,13 +126,13 @@ class Row:
         return re.sub(r'\s+', ' ', re.split(r',\s*Message preview:', self.label)[0]).strip()
 
 
-def is_main_window(window: dict) -> bool:
+def is_account_window(window: dict) -> bool:
     return (window.get('title') or '').endswith(' • ' + load_settings().account)
 
 
 def is_ordinary_main_window(window: dict) -> bool:
     bounds = window.get('bounds') or {}
-    return (is_main_window(window) and window.get('is_on_screen') is True
+    return (is_account_window(window) and window.get('is_on_screen') is True
             and bounds.get('width', 0) >= 400 and bounds.get('height', 0) >= 400)
 
 
@@ -207,8 +207,8 @@ def _quit_window_detail(pid: int, windows: list[dict] | None = None) -> str:
             bounds = window.get('bounds') or {}
             entry = {key: bounds.get(key) if type(bounds.get(key)) in (int, float) else None
                      for key in ('width', 'height')}
-            entry.update(has_title=bool(window.get('title')), mailbox_suffix=is_main_window(window), controls=[])
-            if not entry['mailbox_suffix']:
+            entry.update(has_title=bool(window.get('title')), account_suffix=is_account_window(window), controls=[])
+            if not entry['account_suffix']:
                 try:
                     state = cua('get_window_state', {'pid': pid, 'window_id': window['window_id'],
                                 'include_screenshot': False, 'max_elements': 20, 'max_depth': 2})
@@ -231,7 +231,7 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
         pid = outlook_pid()
         if pid is not None:
             windows = _windows(pid)
-            if any(not is_main_window(w) for w in windows):
+            if len(windows) != 1 or not is_ordinary_main_window(windows[0]):
                 return Outcome('skipped', 'compose_window_open', _quit_window_detail(pid, windows))
             if not _quit(pid, windows, waits):
                 return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
@@ -245,20 +245,7 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
         if pid is None:
             return Outcome('failed', 'outlook_not_running_after_launch')
         windows = _windows(pid)
-        if any(not is_main_window(w) for w in windows):
-            return Outcome('skipped', 'compose_window_open', _quit_window_detail(pid, windows))
-        if usable_window(pid):
-            return None
-        windows = _windows(pid)
-        if windows:
-            try:
-                cua('invoke_menu', {'pid': pid, 'window_id': windows[0]['window_id'],
-                                    'path': ['File', 'New', 'Main Window']})
-            except CuaError:
-                pass
-            time.sleep(waits.new_window_seconds)
-        windows = _windows(pid)
-        if any(not is_main_window(w) for w in windows):
+        if len(windows) != 1 or not is_ordinary_main_window(windows[0]):
             return Outcome('skipped', 'compose_window_open', _quit_window_detail(pid, windows))
         return None if usable_window(pid) else Outcome('failed', 'no_usable_main_window')
     except CuaError:
