@@ -1047,6 +1047,31 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual(receipts[0]['base_version'], 2)
         self.assertEqual(receipts[0]['sha256'], self.draft['sha256'])
 
+    def test_open_partner_draft_defers_without_quit_relaunch_or_failure_receipt(self):
+        for title in (f'Partner draft • {ACCOUNT}', '', None):
+            for recovery in (False, True):
+                with self.subTest(title=title, recovery=recovery):
+                    fake = FakeOutlook(self.clock, self.mailbox)
+                    fake.open_url('mailto:other@example.test?subject=Partner%20draft&body=keep')
+                    fake.windows[100]['title'] = title
+                    fake.windows[1]['is_on_screen'] = not recovery
+                    fake.windows[100]['is_on_screen'] = not recovery
+                    self.calls.clear()
+                    self.ports.open_form = lambda item: send_mod.open_form(item, ui.Waits(
+                        quit_seconds=0, sync_seconds=0, new_window_seconds=0))
+                    with patch.object(ui, 'cua', fake), \
+                            patch.object(ui, 'outlook_pid', return_value=42), \
+                            patch.object(ui.subprocess, 'run') as command:
+                        counts = self.worker.run(self.settings, self.ports)
+                    self.assertEqual(counts['deferred'], 1)
+                    self.assertEqual(counts['compose_window_open'], 1)
+                    self.assertEqual((counts['failed'], counts['sent']), (0, 0))
+                    self.assertEqual([v for v, _ in self.calls if v == 'record-email-sent'], [])
+                    self.assertEqual(fake.presses(), 0)
+                    self.assertEqual(len(fake.forms), 1)
+                    self.assertFalse(any(tool == 'invoke_menu' for tool, _ in fake.calls))
+                    command.assert_not_called()
+
     def test_invalid_rows_record_failure_and_do_not_block_later_draft(self):
         bad = dict(self.draft, cc=['wrong@example.test'])
         good = dict(self.draft, proposal_id='22222222-2222-4222-8222-222222222222')
