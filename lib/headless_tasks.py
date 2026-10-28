@@ -503,7 +503,7 @@ def record_failure(repo: Path, task_id: str, code: int, reason: str, log_path: P
     # The live add-loop taxonomy has no defect kind. Use its supported
     # open_loop kind, explicitly titled as a defect. Success starts a new
     # failure episode; failures within one episode deduplicate by task.
-    args = {'idempotency_key': f'headless-defect:{task_id}:{episode}', 'kind': 'open_loop',
+    args = {'idempotency_key': str(uuid.uuid5(uuid.NAMESPACE_URL, f'headless-defect:{task_id}:{episode}')), 'kind': 'open_loop',
             'domain': 'system', 'owner': 'Claude',
             'title': f'Defect: headless task {task_id} failed',
             'body': f'Defect: headless task {task_id} failed. '

@@ -100,7 +100,12 @@ if (isinstance(receipt, dict) and isinstance(receipt.get("counts"), dict)
         and isinstance(receipt.get("counts"), dict)
         and all(count_key.fullmatch(k) and type(v) is int and 0 <= v <= 1_000_000_000
                 for k, v in receipt["counts"].items())):
-    print(json.dumps({k: receipt[k] for k in ("state", "reason", "counts")}, sort_keys=True))
+    safe = {k: receipt[k] for k in ("state", "reason", "counts")}
+    if (isinstance(receipt.get("detail"), str) and re.fullmatch(
+            r"(?:outlook-intake-copy|hxprobe) exit=(?:None|-?[0-9]{1,10}) "
+            r"code=(?:exit_nonzero|permission_denied|timeout|launch_failed)", receipt["detail"])):
+        safe["detail"] = receipt["detail"]
+    print(json.dumps(safe, sort_keys=True))
     print(receipt["reason"])
 PY_RECEIPT
 )"
@@ -117,6 +122,7 @@ PY_RECEIPT
   "$PY" - "$receipt_file" <<'PY_ROUTER_RECEIPT'
 import json
 import sys
+import re
 
 counts = frozenset("emails routed model_failed abandoned recorded refused dropped write_failed "
                    "queue_failed more out_of_time inherited contact_only error".split())
@@ -147,6 +153,12 @@ if (isinstance(receipt, dict) and receipt.get("state") in ("succeeded", "failed"
             "counts": {k: v for k, v in receipt["counts"].items() if k in counts}}
     if "refusal_codes" in receipt:
         safe["refusal_codes"] = {k: v for k, v in receipt["refusal_codes"].items() if k in refusal_codes}
+    types = receipt.get("model_failed_types", {})
+    if isinstance(types, dict):
+        types = {k: v for k, v in types.items() if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", k)
+                 and type(v) is int and 0 <= v <= 1_000_000_000}
+        if types:
+            safe["model_failed_types"] = types
     print("email-router-receipt " + json.dumps(safe, sort_keys=True))
 PY_ROUTER_RECEIPT
   rm -f "$receipt_file"

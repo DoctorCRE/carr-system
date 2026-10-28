@@ -36,6 +36,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError } from "../src/tools.js";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const ids = {
   joe: "10000000-0000-0000-0000-000000000002",
@@ -113,7 +114,7 @@ const update = (db, args) => TOOLS["update-loop"].handler(db, joe, args);
 test("update-loop: THE BUG — a due date with no marker is REFUSED, not accepted and dropped", async () => {
   const db = new LoopFake({ marker: "none", due_on: null });
   await assert.rejects(
-    () => update(db, { idempotency_key: "due-1", loop_id: ids.loop, base_version: 1,
+    () => update(db, { idempotency_key: "00000571-0000-4000-8000-000000000165", loop_id: ids.loop, base_version: 1,
                        due_on: "2026-09-01" }),
     (err) => {
       assert.ok(err instanceof ToolError, "must be a typed refusal, not a bare 500");
@@ -130,7 +131,7 @@ test("update-loop: the refusal fires for bell and decision markers too, not only
   for (const marker of ["bell", "decision"]) {
     const db = new LoopFake({ marker });
     await assert.rejects(
-      () => update(db, { idempotency_key: `due-${marker}`, loop_id: ids.loop,
+      () => update(db, { idempotency_key: derivedIdempotencyKey("test", `due-${marker}`), loop_id: ids.loop,
                          base_version: 1, due_on: "2026-09-01" }),
       (err) => err.payload?.error === "due_date_needs_dated_marker");
     assert.equal(db.loop.due_on, null, `${marker}: no date may be stored`);
@@ -141,7 +142,7 @@ test("update-loop: a date explicitly cleared alongside a marker change is not th
   // Passing marker 'none' on a dated row SHOULD null the date. That is a
   // deliberate demotion, and the refusal must not block it.
   const db = new LoopFake({ marker: "dated", due_on: "2026-09-01" });
-  await update(db, { idempotency_key: "demote-1", loop_id: ids.loop, base_version: 1,
+  await update(db, { idempotency_key: "00000571-0000-4000-8000-000000000166", loop_id: ids.loop, base_version: 1,
                      marker: "none" });
   assert.equal(db.loop.marker, "none");
   assert.equal(db.loop.due_on, null, "demoting off 'dated' correctly clears the date");
@@ -151,7 +152,7 @@ test("update-loop: a date explicitly cleared alongside a marker change is not th
 
 test("update-loop: marker + date together stores the date", async () => {
   const db = new LoopFake({ marker: "none" });
-  await update(db, { idempotency_key: "due-ok", loop_id: ids.loop, base_version: 1,
+  await update(db, { idempotency_key: "00000571-0000-4000-8000-000000000167", loop_id: ids.loop, base_version: 1,
                      marker: "dated", due_on: "2026-09-01" });
   assert.equal(db.loop.marker, "dated");
   assert.equal(db.loop.due_on, "2026-09-01");
@@ -162,7 +163,7 @@ test("update-loop: RESCHEDULING an already-dated row needs no marker repeated", 
   // This is the shape that must NOT be caught by the new refusal: the row is
   // already 'dated', so a bare due_on is unambiguous and has always worked.
   const db = new LoopFake({ marker: "dated", due_on: "2026-09-01" });
-  await update(db, { idempotency_key: "resched-1", loop_id: ids.loop, base_version: 1,
+  await update(db, { idempotency_key: "00000571-0000-4000-8000-000000000168", loop_id: ids.loop, base_version: 1,
                      due_on: "2026-10-15" });
   assert.equal(db.loop.marker, "dated");
   assert.equal(db.loop.due_on, "2026-10-15", "the new date must actually be stored");
@@ -171,7 +172,7 @@ test("update-loop: RESCHEDULING an already-dated row needs no marker repeated", 
 test("update-loop: a 'dated' marker with no date anywhere is still refused", async () => {
   const db = new LoopFake({ marker: "none", due_on: null });
   await assert.rejects(
-    () => update(db, { idempotency_key: "dated-nodate", loop_id: ids.loop,
+    () => update(db, { idempotency_key: "00000571-0000-4000-8000-000000000169", loop_id: ids.loop,
                        base_version: 1, marker: "dated" }),
     (err) => err.payload?.error === "dated_marker_needs_date");
   assert.equal(db.loop.marker, "none");
@@ -230,7 +231,7 @@ const addLoop = (db, args) => TOOLS["add-loop"].handler(db, joe, args);
 test("add-loop: a blocker on a kind that does not carry one is REFUSED, not dropped", async () => {
   const db = new AddLoopFake();
   await assert.rejects(
-    () => addLoop(db, { idempotency_key: "al-1", kind: "idea", owner: "joe",
+    () => addLoop(db, { idempotency_key: "00000571-0000-4000-8000-000000000170", kind: "idea", owner: "joe",
                         title: "a parked idea", blocker: "other_lane",
                         blocker_detail: "some other lane picks this up later" }),
     (err) => {
@@ -245,7 +246,7 @@ test("add-loop: a blocker on a kind that does not carry one is REFUSED, not drop
 test("add-loop: an explicit non-dated marker alongside a due date is REFUSED", async () => {
   const db = new AddLoopFake();
   await assert.rejects(
-    () => addLoop(db, { idempotency_key: "al-2", kind: "idea", owner: "joe",
+    () => addLoop(db, { idempotency_key: "00000571-0000-4000-8000-000000000171", kind: "idea", owner: "joe",
                         title: "bell and a date", marker: "bell", due_on: "2026-09-01" }),
     (err) => err.payload?.error === "due_date_needs_dated_marker");
   assert.equal(db.inserted, null, "a refused call must not have inserted a row");
@@ -253,7 +254,7 @@ test("add-loop: an explicit non-dated marker alongside a due date is REFUSED", a
 
 test("add-loop: a due date with NO marker still infers 'dated' — that path is unchanged", async () => {
   const db = new AddLoopFake();
-  const res = await addLoop(db, { idempotency_key: "al-3", kind: "idea", owner: "joe",
+  const res = await addLoop(db, { idempotency_key: "00000571-0000-4000-8000-000000000172", kind: "idea", owner: "joe",
                                   title: "dated by inference", due_on: "2026-09-01" });
   assert.equal(res.ok, true);
   assert.ok(db.inserted.includes("dated"), "marker must have been inferred as dated");
@@ -265,7 +266,7 @@ for (const owner of ["joe", "dell"]) {
     const agent = { id: "10000000-0000-0000-0000-000000000009", slug: "codex", human: false, via: "agent-token" };
     const added = new AddLoopFake();
     const result = await TOOLS["add-loop"].handler(added, agent, {
-      idempotency_key: `agent-loop-${owner}`, kind: "open_loop", owner, number: "701",
+      idempotency_key: derivedIdempotencyKey("test", `agent-loop-${owner}`), kind: "open_loop", owner, number: "701",
       body: "Example partner follow-up", blocker: "other_lane", blocker_detail: "Waiting for example.test reply",
     });
     assert.equal(result.ok, true);
@@ -273,7 +274,7 @@ for (const owner of ["joe", "dell"]) {
     assert.equal(added.inserted[16], agent.id);
     const updated = new LoopFake();
     await TOOLS["update-loop"].handler(updated, agent, {
-      idempotency_key: `agent-reassign-${owner}`, loop_id: ids.loop, base_version: 1, owner,
+      idempotency_key: derivedIdempotencyKey("test", `agent-reassign-${owner}`), loop_id: ids.loop, base_version: 1, owner,
     });
     assert.equal(updated.loop.owner, owner);
     assert.equal(updated.loop.updated_by, agent.id);

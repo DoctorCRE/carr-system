@@ -72,6 +72,7 @@ import os
 import re
 import shutil
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -319,7 +320,7 @@ def draft_from_row(row, index) -> dict:
     call: dict[str, Any] = {
         "verb": "log-activity",
         "args": {
-            "idempotency_key": f"ingest:{row_id}",
+            "idempotency_key": str(uuid.uuid5(uuid.NAMESPACE_URL, f"ingest:{row_id}")),
             "ref": (subject or {}).get("ref"),
             "kind": kind,
             "summary": summary,

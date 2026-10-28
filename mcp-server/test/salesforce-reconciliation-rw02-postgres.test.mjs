@@ -27,6 +27,7 @@ import {
   V5RW02StoreError,
   createSalesforceReconciliationStore,
 } from "../src/salesforce-reconciliation-store-rw02.v5.js";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const DSN = process.env.DATABASE_URL || "";
 const REQUIRED = process.env.CARR_RW02_DB_REQUIRED === "1";
@@ -128,7 +129,7 @@ test("V5-RW02 evidence store replay and write-time refusals on real PostgreSQL",
       // The store's own replay branch: reached whenever the store runs outside
       // the MCP envelope's tool_call replay (and on a replay the envelope has
       // no row for). It used to return the raw stored row, decision undefined.
-      const args = { idempotency_key: `rw02-pg-page-${randomUUID()}`, page: page() };
+      const args = { idempotency_key: derivedIdempotencyKey("test", `rw02-pg-page-${randomUUID()}`), page: page() };
       const call = () => asWriter(pg, copy, (client, actor) =>
         storeOn(client).recordPageStop(args, { actor }));
       const first = await call();
@@ -151,7 +152,7 @@ test("V5-RW02 evidence store replay and write-time refusals on real PostgreSQL",
     });
 
     await t.test("through the MCP verb a replay returns the first response byte for byte", async () => {
-      const args = { idempotency_key: `rw02-pg-verb-${randomUUID()}`, page: page() };
+      const args = { idempotency_key: derivedIdempotencyKey("test", `rw02-pg-verb-${randomUUID()}`), page: page() };
       const first = await verb(pg, copy, "record-salesforce-page-stop", args);
       assert.equal(first.decision, "recorded");
       const before = await rows();
@@ -161,7 +162,7 @@ test("V5-RW02 evidence store replay and write-time refusals on real PostgreSQL",
     });
 
     await t.test("a key reused over a different request is a typed conflict", async () => {
-      const key = `rw02-pg-conflict-${randomUUID()}`;
+      const key = randomUUID();
       await asWriter(pg, copy, (client, actor) => storeOn(client).recordPageStop(
         { idempotency_key: key, page: page("mfa_challenge") }, { actor }));
       const before = await rows();
@@ -171,7 +172,7 @@ test("V5-RW02 evidence store replay and write-time refusals on real PostgreSQL",
         e => e instanceof V5RW02StoreError && e.code === "idempotency_conflict");
       assert.equal(await rows(), before);
       // Through the MCP verb the envelope refuses first, with its own typed code.
-      const verbKey = `rw02-pg-verb-conflict-${randomUUID()}`;
+      const verbKey = randomUUID();
       await verb(pg, copy, "record-salesforce-page-stop", { idempotency_key: verbKey, page: page("mfa_challenge") });
       await assert.rejects(
         verb(pg, copy, "record-salesforce-page-stop", { idempotency_key: verbKey, page: page("captcha") }),
@@ -182,7 +183,7 @@ test("V5-RW02 evidence store replay and write-time refusals on real PostgreSQL",
       const good = sealed();
       const recorded = await asWriter(pg, copy, (client, actor) =>
         storeOn(client, readbackEvaluator(good)).recordWriteReadback(
-          { idempotency_key: `rw02-pg-readback-${randomUUID()}`, observation: { synthetic: true } },
+          { idempotency_key: derivedIdempotencyKey("test", `rw02-pg-readback-${randomUUID()}`), observation: { synthetic: true } },
           { actor }));
       assert.equal(recorded.decision, "recorded");
       const before = await rows();
@@ -195,7 +196,7 @@ test("V5-RW02 evidence store replay and write-time refusals on real PostgreSQL",
         await assert.rejects(
           asWriter(pg, copy, (client, actor) =>
             storeOn(client, readbackEvaluator(evidence)).recordWriteReadback(
-              { idempotency_key: `rw02-pg-poison-${randomUUID()}`, observation: { synthetic: label } },
+              { idempotency_key: derivedIdempotencyKey("test", `rw02-pg-poison-${randomUUID()}`), observation: { synthetic: label } },
               { actor })),
           e => e instanceof V5RW02StoreError && e.code === "evidence_invalid", label);
       }
@@ -203,7 +204,7 @@ test("V5-RW02 evidence store replay and write-time refusals on real PostgreSQL",
       await assert.rejects(
         asWriter(pg, copy, (client, actor) =>
           storeOn(client, readbackEvaluator(good)).recordWriteReadback(
-            { idempotency_key: `rw02-pg-again-${randomUUID()}`, observation: { synthetic: "again" } },
+            { idempotency_key: derivedIdempotencyKey("test", `rw02-pg-again-${randomUUID()}`), observation: { synthetic: "again" } },
             { actor })),
         e => e instanceof V5RW02StoreError && e.code === "evidence_counted_twice");
       assert.equal(await rows(), before, "no refused readback landed");

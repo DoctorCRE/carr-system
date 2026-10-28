@@ -84,7 +84,7 @@ check() {
 # moved that real deal name out of the tracked script).
 cat > "$TMP_ROOT/fixtures.env" <<'FIXTURES'
 SMOKE_BALL_PROBE_REF="Synthetic Closed Deal"
-SMOKE_LINKS_PROBE_ARGS='{"idempotency_key":"smoke-links-probe-permanent","ref":"V-BNK-013","kind":"note","summary":"smoke links probe — edge already exists, replayed for ever after","links":[{"from_ref":"V-BNK-013","to_ref":"C-SYNTHETIC","kind":"intro"}]}'
+SMOKE_LINKS_PROBE_ARGS='{"idempotency_key":"00000571-0000-4000-8000-000000000260","ref":"V-BNK-013","kind":"note","summary":"smoke links probe — edge already exists, replayed for ever after","links":[{"from_ref":"V-BNK-013","to_ref":"C-SYNTHETIC","kind":"intro"}]}'
 FIXTURES
 
 run_smoke() {
@@ -152,15 +152,15 @@ check "partner bearer is absent from curl process arguments" \
 check "partner bearer reaches curl through stdin config" \
   grep -Fq 'header = "Authorization: Bearer partner-token"' "$PARTNER_CALLS.headers"
 check "partner mode retains the fixed-key log-activity probe" \
-  has_call "$PARTNER_CALLS" 'smoke-write-probe-permanent'
+  has_call "$PARTNER_CALLS" '00000571-0000-4000-8000-000000000001'
 check "partner mode retains the set-next-action probe" \
-  has_call "$PARTNER_CALLS" 'smoke-ball-probe-permanent'
+  has_call "$PARTNER_CALLS" '00000571-0000-4000-8000-000000000002'
 check "partner mode retains the complete-action probe" \
-  has_call "$PARTNER_CALLS" 'smoke-complete-probe-permanent'
+  has_call "$PARTNER_CALLS" '00000571-0000-4000-8000-000000000003'
 check "partner mode retains the auto-edge probe" \
-  has_call "$PARTNER_CALLS" 'smoke-links-probe-permanent'
+  has_call "$PARTNER_CALLS" '00000571-0000-4000-8000-000000000260'
 check "partner mode retains the analysis probe" \
-  has_call "$PARTNER_CALLS" 'smoke-analysis-probe-permanent'
+  has_call "$PARTNER_CALLS" '00000571-0000-4000-8000-000000000004'
 
 printf '\npassed %s · failed %s\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
