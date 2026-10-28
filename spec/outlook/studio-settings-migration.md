@@ -85,15 +85,43 @@ The installer rejects a configured identity that cannot sign or produces a cdhas
 Apple's [requirement language](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/RequirementLang/RequirementLang.html)
 defines a certificate hash anchor as a certificate requirement; the installer accepts that form too.
 
-1. Open Keychain Access on the intake Mac.
+The first installer run after this PR merges rebuilds the helper on every Mac because the pin format changed.
+This includes Macs without `signing_identity`. The rebuild requires a fresh Full Disk Access grant.
+Run steps 5 and 6 together, back to back. Do not run the installer alone first.
+All numbered steps are required. The final step checks that the grant survives a rebuild.
+
+1. In Finder, select **Go > Go to Folder**.
+   Paste `/System/Library/CoreServices/Applications/Keychain Access.app`.
+   Press **Return** to open Keychain Access.
 2. Select **Keychain Access > Certificate Assistant > Create a Certificate**.
-3. Create one self-signed root certificate with **Certificate Type > Code Signing** and a unique name for this Mac.
+3. Enter a unique certificate name for this Mac.
+   Select **Self Signed Root** for **Identity Type**.
+   Select **Code Signing** for **Certificate Type**.
+   Click **Create**.
 4. Set `signing_identity` in `~/.config/carr/outlook.json` to that certificate's exact name.
-5. Run `./bin/install-outlook-intake.sh` from the source checkout.
-6. Re-grant the configured `copy_helper` Full Disk Access in **System Settings > Privacy & Security > Full Disk Access**.
+   Run `.venv/bin/python -m lib.outlook_settings validate` from the source checkout.
+5. You MUST run this step in Terminal on the Mac itself, never over SSH.
+   `codesign` raises a keychain prompt. Over SSH, there is no prompt and `codesign` fails.
+   Run `./bin/install-outlook-intake.sh` from the source checkout.
+   At the `codesign` keychain prompt, enter the Mac login password.
+   Click **Always Allow**.
+6. Open **System Settings > Privacy & Security > Full Disk Access** immediately after step 5.
+   Select the old **outlook-intake-copy** row.
+   Click the minus button.
+   Click the plus button.
+   Press **Cmd-Shift-G**.
+   Paste the configured `copy_helper` path, default `~/carr-local/bin/outlook-intake-copy`.
+   Click **Open**.
+   Turn the helper's switch on.
 7. Delete the configured helper's `.pin` file to request one deliberate rebuild.
-8. Run `./bin/install-outlook-intake.sh` again.
-9. Confirm the rebuilt helper retains Full Disk Access without another grant through the next successful scheduled intake copy.
+8. You MUST run this step in Terminal on the Mac itself, never over SSH.
+   `codesign` can raise another keychain prompt. Over SSH, there is no prompt and `codesign` fails.
+   Run `./bin/install-outlook-intake.sh` again from the source checkout.
+   If `codesign` prompts, enter the Mac login password.
+   Click **Always Allow** if prompted.
+   Inspect the configured helper's designated requirement with `codesign -d -r- ~/carr-local/bin/outlook-intake-copy` for the default path.
+   Confirm the requirement contains `certificate root = H"..."` or `anchor H"..."`, rather than `cdhash`.
+9. Confirm the next scheduled intake copy succeeds without another Full Disk Access grant.
 
 For step 7, `.pin` replaces the helper's filename suffix. For `outlook-intake-copy`, the pin is `outlook-intake-copy.pin`.
 Do not create another certificate for the rebuild check. Certificate replacement changes the helper's identity.
