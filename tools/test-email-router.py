@@ -431,6 +431,22 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual(writes[1][0], 'inherit-email-thread')
         self.assertEqual(writes[1][1]['thread_activity_id'], 'prior')
 
+    def test_undone_filing_is_not_proposed_again_to_the_same_deal(self):
+        pending = []
+        def carr(verb, args):
+            if verb == 'email-router-queue':
+                return {'open_deals': [{'id': DEAL}], 'emails': [self.mail(thread_history=[self.prior()], suppressed_deals=[DEAL])]}
+            if verb == 'inherit-email-thread':
+                raise Refused('email_thread_filing_suppressed')
+            pending.append(args)
+            return {'ok': True}
+        def matching(mail, deals, history):
+            if history:
+                return email_matching.MatchDecision('inherit_thread', DEAL, thread_activity_id='prior')
+            return email_matching.MatchDecision('file_to_deal', DEAL, sender_role='client', confidence=0.9)
+        email_router.route(carr, None, refusal_code, {}, NOW, matching=matching)
+        self.assertFalse(any(p.get('deal') == DEAL for p in pending))
+
     def test_router_matches_after_thread_refusal(self):
         self.assertIsNotNone(email_router.REFUSAL.fullmatch('email_thread_ambiguous'))
         calls = []
