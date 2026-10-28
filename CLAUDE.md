@@ -8,8 +8,10 @@ To find a script and its purpose, run `./run.sh map` for a fresh path-and-descri
 
 ## Always-on rules
 
-<!-- Generated from ops/config/rule-cards.v1.json by ops/sync-core-rule-cards.py. -->
-These twelve core cards are loaded natively with this file. No boot fetch is required.
+<!-- Generated from mcp-server/src/doctrine.js and ops/config/rule-cards.v1.json by ops/sync-core-rule-cards.py. -->
+OPENING ACT, every session: call attach-memory once, first, with surface claude_code for a Claude Code session (terminal or Desktop) or codex for a Codex job (pass the job log named on the brief's first line as transcript_ref); a claude.ai or other chat app does not attach and calls standing-context instead. Check its team-memory index before starting, read any section that bears on your task with doctrine-sections, and skip work a current section records as done or ruled out, citing it; as you learn or rule something out, write it with write-doctrine-section document=team-memory and your attach_id.
+
+These twelve core cards are loaded natively with this file.
 Before acting when a card applies, answer one line with applies yes/no and the action or reason.
 
 [K01] Assess when asked; finish when authorized: When Joe asks what you think, assess and stop. Once work is authorized, finish it and its necessary follow-ups without re-asking; backlog out-of-scope work with the product task it blocks.

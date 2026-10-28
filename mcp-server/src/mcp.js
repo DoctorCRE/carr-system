@@ -17,6 +17,7 @@ import { budgetedAi } from "./ai-budget.js";
 import { publicError } from "./public-errors.ts";
 import { mcpOriginRefusal } from "./oauth-policy.ts";
 import { DOC_TOOL_NAMES, DOC_INSTRUCTIONS, docToolAnnotations } from "./doc-profile.ts";
+import { MEMORY_ATTACH_LINE } from "./doctrine.js";
 import { TOOLS, ToolError, executeRegisteredTool, assertRegisteredToolInput, UNATTENDED_AUTHORITY_VERBS,
   auditIdentity, assertNoCallerAuthorityFields, coerceArgsToSchema,
   pgConstraintError, describeConstraint } from "./tools.js";
@@ -461,6 +462,43 @@ export function profileForActor(actor, request) {
   if (actor?.hermesCos === true && actor?.via === "hermes-cos-token") return "hermes-cos";
   if (actor?.hermes) return "hermes";
   return profileFor(request);
+}
+
+// The opening act follows the profile's authority: a profile that may call
+// attach-memory opens with the attach line; any other opens with standing-context.
+function openingAct(profile) {
+  return allowedIn(profile, "attach-memory", TOOLS["attach-memory"])
+    ? MEMORY_ATTACH_LINE + " Its org-conventions store carries the taught-rule counts to " +
+      "recite in your first response; standing-context returns the rule text, open " +
+      "action-required items and the doctrine pointer."
+    : "OPENING ACT, every session: call standing-context FIRST — it returns the taught rules " +
+      "with the counts to recite in your first response, open action-required items, and the " +
+      "doctrine pointer.";
+}
+
+/** The initialize instructions a profile receives. */
+export function serverInstructions(profile) {
+  if (profile === "doc") return DOC_INSTRUCTIONS;
+  return (
+    "CARR's record layer AND the doctrine store — the ONE source of truth for Joe Bookout's " +
+    "healthcare-CRE practice (partner Dell McCraney; business only, personal life is Life AI). " +
+    openingAct(profile) + " There are NO doctrine files: read via doctrine-index / search-doctrine / " +
+    "read-doctrine; state via catch-me-up / today-triage. Discovery advertises a compact core. " +
+    "For any other verb, use list-verbs with a filter to fetch its schema, then call-verb. " +
+    "Reuse discovered schemas in this session; do not load the complete catalog at startup. " +
+    "WRITE LAW (rule 14181e60): database " +
+    "first — content goes through verbs, NEVER into a .md file. Writes need a fresh " +
+    "idempotency_key (UUID) per intended action; mutations need base_version from a fresh read. " +
+    "version_conflict and needs_confirm are questions for the human, never auto-retried. Claude sends email and other outbound messages on Joe's behalf whenever Joe asks (one message or a standing instruction); with no ask, the default is a draft (decision 41906a30). This server has no send verb; sends go through Joe's own accounts. If this server is unreachable mid-task, " +
+    "STOP AND SAY SO — never improvise files. DELEGATION LATCH: when a partner says delegate, " +
+    "subagent, or cheapest qualified model for an active task, that authority survives new logins " +
+    "or data sources, phase changes, retries, continuation and compaction until the task ends " +
+    "or the partner revokes it. Choose the cheapest model still qualified to do the task " +
+    "correctly; this may be a peer-tier agent, never a forced downgrade. The main seat " +
+    "orchestrates, verifies and performs authorized " +
+    "writes; it does not reclaim the mechanical sweep. State the executor before each phase; " +
+    "a second inline mechanical tool call is the tripwire." + RULE_DELIVERY_RAIL +
+    (profile === "full" ? "" : ` ACTIVE PROFILE: ${profile}.` + (PROFILE_NOTICE[profile] || "")));
 }
 
 export function allowedIn(profile, name, tool) {
@@ -988,28 +1026,7 @@ export async function dispatch(request, env, ctx, actor, sessionKey) {
           protocolVersion: PROTOCOL,
           capabilities: { tools: {} },
           serverInfo: { name: "carr-record-layer", version: "0.1.0" },
-          instructions: profile === "doc" ? DOC_INSTRUCTIONS :
-           "CARR's record layer AND the doctrine store — the ONE source of truth for Joe Bookout's " +
-           "healthcare-CRE practice (partner Dell McCraney; business only, personal life is Life AI). " +
-           "OPENING ACT, every session: call standing-context FIRST — it returns the taught rules " +
-           "with the counts to recite in your first response, open action-required items, and the " +
-           "doctrine pointer. There are NO doctrine files: read via doctrine-index / search-doctrine / " +
-           "read-doctrine; state via catch-me-up / today-triage. Discovery advertises a compact core. " +
-           "For any other verb, use list-verbs with a filter to fetch its schema, then call-verb. " +
-           "Reuse discovered schemas in this session; do not load the complete catalog at startup. " +
-           "WRITE LAW (rule 14181e60): database " +
-           "first — content goes through verbs, NEVER into a .md file. Writes need a fresh " +
-           "idempotency_key (UUID) per intended action; mutations need base_version from a fresh read. " +
-           "version_conflict and needs_confirm are questions for the human, never auto-retried. Claude sends email and other outbound messages on Joe's behalf whenever Joe asks (one message or a standing instruction); with no ask, the default is a draft (decision 41906a30). This server has no send verb; sends go through Joe's own accounts. If this server is unreachable mid-task, " +
-           "STOP AND SAY SO — never improvise files. DELEGATION LATCH: when a partner says delegate, " +
-           "subagent, or cheapest qualified model for an active task, that authority survives new logins " +
-           "or data sources, phase changes, retries, continuation and compaction until the task ends " +
-           "or the partner revokes it. Choose the cheapest model still qualified to do the task " +
-           "correctly; this may be a peer-tier agent, never a forced downgrade. The main seat " +
-           "orchestrates, verifies and performs authorized " +
-           "writes; it does not reclaim the mechanical sweep. State the executor before each phase; " +
-           "a second inline mechanical tool call is the tripwire." + RULE_DELIVERY_RAIL +
-            (profile === "full" ? "" : ` ACTIVE PROFILE: ${profile}.` + (PROFILE_NOTICE[profile] || "")),
+          instructions: serverInstructions(profile),
         });
       case "notifications/initialized":
         return new Response(null, { status: 202 });
