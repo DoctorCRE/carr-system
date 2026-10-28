@@ -269,6 +269,53 @@ class RuleClaimGateTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.run_hook(self.turn(assistant(text))).get('decision'), 'block')
 
+    def test_infrastructure_rules_do_not_require_guidance_enforcement(self):
+        for text in [
+            'I added a Cloudflare firewall rule that blocks the control room…',
+            'I added a firewall rule.',
+            'The WAF rule is now in place.',
+            'I created a rate-limit rule.',
+            'I saved a rate limit rule.',
+            'I added a ruleset rule.',
+            'I created a route rule.',
+            'The DNS rule has been created.',
+            'I added a Cloudflare ruleset.',
+            'I added a rule to the Cloudflare firewall.',
+            'I created a rule in the WAF.',
+            'I added a rule to the Cloudflare firewall and a DNS rule.',
+        ]:
+            with self.subTest(text=text):
+                self.assertNotEqual(self.run_hook(self.turn(assistant(text)))
+                                    .get('decision'), 'block')
+
+    def test_infrastructure_rules_do_not_exempt_guidance_claims(self):
+        for text in [
+            'I added a firewall rule and a durable rule.',
+            'I added a WAF rule and saved a lesson.',
+            'I created a DNS rule and added a taught rule.',
+            "The rate-limit rule is now in place and I'll remember this.",
+            'I added a route rule. The rule is saved.',
+            'I saved a lesson after creating the firewall rule.',
+            'I added a guidance rule about firewall configuration.',
+            'I added a rule to CLAUDE.md about WAF configuration.',
+            'I added a rule to AGENTS.md about DNS configuration.',
+            'I added a skill rule about rate-limit configuration.',
+            'I created a doctrine rule about route configuration.',
+            'I added a firewall rule to AGENTS.md.',
+            'I added a firewall rule to `AGENTS.md`.',
+            'I added a WAF rule to `docs/CLAUDE.md`.',
+            'I added a DNS rule to `.agents/skills/check/SKILL.md`.',
+            'I added a WAF rule to CLAUDE.md.',
+            'I added a doctrine firewall rule.',
+            'I added a behavioural DNS rule.',
+            'I added a taught WAF rule.',
+            'I added a skill firewall rule.',
+            'I added a rule to the Cloudflare firewall and a durable rule.',
+        ]:
+            with self.subTest(text=text):
+                self.assertEqual(self.run_hook(self.turn(assistant(text)))
+                                 .get('decision'), 'block')
+
     def test_email_rule_reports_do_not_require_local_enforcement_code(self):
         for text in [
             'I created an Outlook mail rule. I checked Gmail delivery.',
