@@ -8,6 +8,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
+import { migrationNames, readMigration } from './migration-source.testhelper.mjs';
 
 let fixture, admin, database, c, actor, connection;
 before(async () => {
@@ -40,6 +41,8 @@ before(async () => {
   const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
   if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
   else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
+  const applied = new Set((await c.query('select filename from schema_migrations')).rows.map(row => row.filename));
+  for (const name of migrationNames().filter(name => !applied.has(name)).sort()) await c.query(readMigration(name));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('fixture-intake','automation','Synthetic intake') returning id,slug")).rows[0], human: false };
   await c.query("insert into party(kind,name,email,created_by,updated_by) values('person','Synthetic known person','first@known.test; second@known.test',$1,$1)", [actor.id]);
 });
