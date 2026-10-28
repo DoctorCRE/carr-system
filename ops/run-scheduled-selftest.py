@@ -71,6 +71,20 @@ class ScheduledRunTests(unittest.TestCase):
         self.assertNotIn("SYNTHETIC_PRIVATE", observed)
         self.assertFalse(list((self.root / "out").glob("outlook-intake-receipt.*")))
 
+    def test_link_failure_reason_reaches_receipt_and_spool(self):
+        receipt = {"state": "failed", "reason": "email_links_read_failed", "counts": {"email_links_pending": 2}}
+        result = self.invoke_intake(receipt)
+        self.assertEqual(json.loads(result.stdout.split('outlook-intake-receipt ', 1)[1]), receipt)
+        args = json.loads(self.rows()[-1][3])
+        self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
+
+    def test_router_counts_and_refusal_codes_reach_output(self):
+        intake = {"state": "succeeded", "reason": "processed", "counts": {}}
+        router = {"state": "succeeded", "counts": {"inherited": 2, "contact_only": 1, "refused": 2},
+                  "refusal_codes": {"email_deal_quote_invalid": 2}}
+        result = self.invoke_intake(intake, code=0, router_lines=['email-router-receipt ' + json.dumps(router)])
+        self.assertEqual(json.loads(result.stdout.split('email-router-receipt ', 1)[1]), router)
+
     def test_decoder_degradation_records_one_failure_until_recovery(self):
         receipt = {"state": "degraded", "reason": "decoder_degraded", "counts": {"decoder_alarm": 1}}
         first = self.invoke_intake(receipt, code=1)
@@ -167,13 +181,24 @@ class ScheduledRunTests(unittest.TestCase):
                 self.assertNotIn("--failure-class", args)
                 self.assertNotIn("SYNTHETIC_PRIVATE", result.stdout + result.stderr + json.dumps(self.rows()))
 
+    def test_router_receipt_filters_unknown_names_and_keeps_known_codes(self):
+        intake = {"state": "succeeded", "reason": "processed", "counts": {}}
+        router = {"state": "succeeded", "counts": {"refused": 2, "SYNTHETIC_PRIVATE_COUNT": 7},
+                  "refusal_codes": {"email_thread_ambiguous": 1, "SYNTHETIC_PRIVATE_CODE": 1}}
+        result = self.invoke_intake(intake, code=0, router_lines=[
+            'email-router-receipt ' + json.dumps(router)])
+        self.assertEqual(result.stdout.splitlines()[-1], 'email-router-receipt ' + json.dumps({
+            "state": "succeeded", "counts": {"refused": 2},
+            "refusal_codes": {"email_thread_ambiguous": 1}}, sort_keys=True))
+        self.assertNotIn("SYNTHETIC_PRIVATE", result.stdout + result.stderr)
+
     def test_router_invalid_receipts_do_not_leak_or_change_intake_failure(self):
         intake = {"state": "failed", "reason": "writes_failed", "counts": {"writes_failed": 1}}
         cases = ["SYNTHETIC_PRIVATE_INVALID_JSON", [],
                  {"state": ["SYNTHETIC_PRIVATE_STATE"], "counts": {}},
                  {"state": "SYNTHETIC_PRIVATE_STATE", "counts": {}},
                  {"state": "failed", "counts": []},
-                 {"state": "failed", "counts": {"SYNTHETIC_PRIVATE_KEY": 1}},
+                 {"state": "failed", "counts": {}, "refusal_codes": {"email_deal_quote_invalid": "SYNTHETIC_PRIVATE"}},
                  *({"state": "failed", "counts": {"error": value}}
                    for value in (True, -1, 10**20, 1.5, "SYNTHETIC_PRIVATE_VALUE"))]
         for router in cases:
