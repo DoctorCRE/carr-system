@@ -1,7 +1,7 @@
 // Pin the live stage derivation: one GitHub search per repository per minute, Card lines map PRs to jobs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createPullRequestSource, isolatePullRequests, queueView, jobStage, PULL_REQUEST_TTL_MS, STALE_AFTER_MS } from '../src/work-queue.js';
+import { createPullRequestSource, isolatePullRequests, queueView, jobStage, workQueueTools, PULL_REQUEST_TTL_MS, STALE_AFTER_MS } from '../src/work-queue.js';
 
 const REPOS = ['DoctorCRE/carr-system', 'jbookout/doctorcre-app'];
 const item = (number, body, extra = {}) => ({ number, body, title: `PR ${number}`, html_url: `https://github.com/x/y/pull/${number}`,
@@ -108,7 +108,7 @@ test('a truncated search never makes an old job stale, even a building one', () 
   assert.deepEqual(view.jobs.map(job => [job.stage, job.stale]), [['queued', false]]);
 });
 
-test('the search only spans PRs updated since the oldest visible job, since no earlier PR can carry its minted card ID', async () => {
+test('searches use the supplied day and cache separately by bound', async () => {
   let clock = 0;
   const queries = [];
   const fetchImpl = async url => { queries.push(new URL(url).searchParams.get('q')); return new Response(JSON.stringify({ total_count: 0, items: [] })); };
@@ -156,4 +156,29 @@ test('only a job first seen merged or closed is saved, once, as its finish', () 
     livePr(21, ['WR557.S1.J1'], { state: 'merged' }), livePr(22, ['WR557.S1.J2'], { state: 'closed' }), livePr(23, ['WR557.S1.J3']), livePr(24, ['WR557.S1.J4'], { state: 'merged' })] }], at);
   assert.deepEqual(view.finishes.map(({ key, finished }) => [key, finished.stage, finished.prs.map(pr => pr.card_id)]), [
     [['w1', 1, 1], 'merged', ['WR557.S1.J1.carr#21']], [['w1', 1, 2], 'closed', ['WR557.S1.J2.carr#22']]]);
+});
+
+const readQueue = (rows, pullRequests) => workQueueTools({})['work-queue'].handler({ query: async () => ({ rows }), pullRequests }, 'joe', {});
+
+test('queued jobs without a runner start do not widen the search window', async () => {
+  const bounds = [];
+  await readQueue([jobRow(1, { created_at: '2026-01-01T00:00:00Z', started_at: null }),
+    jobRow(2, { started_at: '2026-10-20T12:00:00Z' }),
+    jobRow(3, { started_at: '2026-10-10T12:00:00Z', finished: { stage: 'merged', prs: [] } })],
+  async (repos, since) => { bounds.push(since); return repos.map(repo => ({ repo, state: 'ok', prs: [] })); });
+  assert.deepEqual(bounds, ['2026-10-20T12:00:00.000Z']);
+});
+
+test('a merged job is found before its first board read despite 100 newer Card PRs', async () => {
+  const newer = Array.from({ length: 100 }, (_, i) => item(i + 1, `Card: WR999.S1.J${i + 1}`, { updated_at: '2026-10-22T12:00:00Z' }));
+  const merged = item(101, 'Card: WR557.S1.J1', { state: 'closed', updated_at: '2026-10-21T12:00:00Z', pull_request: { merged_at: '2026-10-21T12:00:00Z' } });
+  const fetchImpl = async url => {
+    const params = new URL(url).searchParams;
+    const items = params.get('q').startsWith('repo:DoctorCRE/carr-system ') ? [...newer, merged] : [];
+    const page = Number(params.get('page') || 1);
+    return new Response(JSON.stringify({ total_count: items.length, items: items.slice((page - 1) * 100, page * 100) }));
+  };
+  const view = await readQueue([jobRow(1, { started_at: '2026-10-20T12:00:00Z' })], createPullRequestSource({ token: 'synthetic', fetchImpl }));
+  assert.equal(view.jobs[0].stage, 'merged');
+  assert.equal(view.jobs[0].prs[0].number, 101);
 });
