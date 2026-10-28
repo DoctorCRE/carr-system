@@ -232,7 +232,7 @@ LEAD_OUTCOMES = {'proposed': 'lead_proposed', 'known_party': 'lead_known_party',
 
 def receipt_counts(counts: dict) -> dict:
     """Split the flat counts into this run's deltas and the standing backlog totals."""
-    split = {'run': {}, 'backlog': {}}
+    split: dict[str, dict] = {'run': {}, 'backlog': {}}
     for name, value in counts.items():
         standing = name in BACKLOG_COUNTS or name.startswith(BACKLOG_PREFIXES)
         split['backlog' if standing else 'run'][RECEIPT_NAMES.get(name, name)] = value
