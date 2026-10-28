@@ -37,7 +37,7 @@ WINDOW = 70
 # `event` and `tool_call` store the pre-amend text on purpose so a change stays
 # reversible, and that "a sweep that 'cleans' those is falsifying the record,
 # not repairing it." They are scanned but reported separately and never counted
-# as damage. Since migration 1040 `tool_call` is a 30-day replay ledger: rows
+# as damage. Since migration 1048 `tool_call` is a 30-day replay ledger: rows
 # expire by age and an oversized response is stored as a stand-in, so the
 # durable pre-amend copy is `event`; nothing here edits either table.
 AUDIT_TABLES = {"event", "tool_call"}

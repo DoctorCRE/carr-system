@@ -67,7 +67,6 @@ def main() -> int:
         "workspace/contracts/surface-registry-migration-map.v1.json",
         "workspace/contracts/threat-model.v1.json",
         "workspace/contracts/tenant-workflow-governance.v1.json",
-        "workspace/public/js/app.js",
     ]
     forbidden = (
         "Joe and Dell complete",

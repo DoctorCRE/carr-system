@@ -17,20 +17,19 @@ yet migrated — prints SKIP line, never a traceback).
 import os
 import sys
 
-TRACKED = ["event", "tool_call", "tool_read_call", "record_flag", "ingest_inbox",
+TRACKED = ["event", "tool_call", "tool_read_count", "record_flag", "ingest_inbox",
            "activity", "source_capture", "loop_item"]
 # tool_call is the exception to the no-DELETE posture below since migration
-# 1040: a 30-day idempotency replay window, enforced by its tool_call_expire
+# 1048: a 30-day idempotency replay window, enforced by its tool_call_expire
 # trigger (up to 20 expired rows per insert). Its growth line should flatten
 # near 30 days of writes; a rising slope means the trigger stopped running.
-# tool_read_call (0108, Phase 1): the read-side sibling of tool_call, added
-# the same day it shipped. Same no-DELETE posture as every table in this
-# list — see 0108's own header for why observability here IS the lifecycle
-# rule rather than a promise to prune later. Like tool_call, record_flag,
+# tool_read_count (1041): the read-side sibling of tool_call, one counter per
+# day, verb, actor, sponsor, door and outcome; it replaced 0108's row-per-read
+# tool_read_call, which stopped growing. Like tool_call, record_flag,
 # activity, source_capture and loop_item above, carr_jobs holds no SELECT on
-# it (0108 grants select only to carr_reader/carr_exporter, deliberately not
-# carr_jobs — ORDER 19(a)), so this entry's count query will be skipped the
-# same way its five siblings' already are, not a new gap this line creates.
+# it (1041 grants select only to carr_writer/carr_reader/carr_exporter,
+# deliberately not carr_jobs — ORDER 19(a)), so this entry's count query is
+# skipped the same way its siblings' already are.
 WARN_INGEST_NEW = 50          # unprocessed intake rows before the row goes amber
 WARN_EXPIRED = 25             # re-verify queue depth before amber
 

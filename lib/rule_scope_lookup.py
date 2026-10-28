@@ -86,11 +86,8 @@ def select_rules(catalog: dict, event: dict) -> dict:
             "models": [], "complete": not defects}
 
 
-def lookup(event: dict, *, runner: Callable = subprocess.run) -> dict:
-    """Read current sponsor-scoped records once and select for any hook event.
-
-    No credentials, runtime settings, delivery receipts, or local snapshots are written.
-    """
+def fetch_catalog(runner: Callable = subprocess.run) -> dict:
+    """Read the sponsor-scoped rule catalog from the store. Not yet validated: see select_rules."""
     env = {k: v for k, v in os.environ.items()
            if k not in {"DATABASE_URL", "CARR_BREAK_GLASS", "CARR_BREAK_GLASS_REASON", "CARR_MCP_CLIENT_PROFILE"}}
     try:
@@ -98,7 +95,14 @@ def lookup(event: dict, *, runner: Callable = subprocess.run) -> dict:
                           cwd=str(REPO), env=env, capture_output=True, text=True, timeout=15, check=False)
         if response.returncode != 0:
             raise RuntimeError("scope_catalog_unavailable")
-        catalog = json.loads(response.stdout)
+        return json.loads(response.stdout)
     except Exception:
         raise RuntimeError("scope_catalog_unavailable") from None
-    return select_rules(catalog, event)
+
+
+def lookup(event: dict, *, runner: Callable = subprocess.run) -> dict:
+    """Read current sponsor-scoped records once and select for any hook event.
+
+    No credentials, runtime settings, delivery receipts, or local snapshots are written.
+    """
+    return select_rules(fetch_catalog(runner), event)
