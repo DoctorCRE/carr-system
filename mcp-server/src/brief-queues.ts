@@ -55,7 +55,8 @@ export async function readBriefLoops(c: Pick<ClientBase, "query">) {
         nullif(regexp_replace(split_part(body, E'\\n', 1), '\\*\\*', '', 'g'), '')) as label,
       blocker_class, blocker_detail, since_text, due_on::text as due_on, version
     from loop_item
-    where kind='open_loop' and status='open' and lower(owner) in ('joe','dell')`)).rows
+    where kind='open_loop' and status='open' and lower(owner) in ('joe','dell')
+      and not exists (select 1 from v_deck_item d where d.kind='loop' and d.id=loop_item.id and d.stale)`)).rows
     .map(row => ({ ...row, owner_partner: row.owner.toLowerCase() }));
 }
 
