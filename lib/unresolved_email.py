@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from datetime import date
 import re
+import subprocess
 
 from lib import model_call
 from lib.email_router import fenced
@@ -138,7 +139,17 @@ def parse(reply: dict, mail: dict, deals: list[dict], parties: list[dict]) -> di
     return read
 
 
+def outage(error: Exception) -> bool:
+    """A failed call that says nothing about the email: the CLI exited non-zero (signed out, usage
+    limit, auth, transport), timed out, or could not start. lib/model_call raises exactly these
+    for a call that did not complete; everything else is about the email and spends an attempt."""
+    return isinstance(error, (RuntimeError, subprocess.TimeoutExpired, OSError))
+
+
 def ask(mail: dict, today: date, deals: list[dict], parties: list[dict], model: str) -> dict:
-    reply = model_call.ask(prompt(mail, today, deals, parties), model=model, schema=SCHEMA,
-                           system_prompt=SYSTEM_PROMPT)
+    try:
+        reply = model_call.ask(prompt(mail, today, deals, parties), model=model, schema=SCHEMA,
+                               system_prompt=SYSTEM_PROMPT)
+    except ValueError as error:  # the call completed, but this email's reply carries no result
+        raise InvalidRead('the reply carries no read') from error
     return parse(reply, mail, deals, parties)

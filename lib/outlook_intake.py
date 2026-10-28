@@ -1054,8 +1054,9 @@ class Run:
 
         At most unresolved_email.MAX_READS model reads per run, oldest email first; the rest wait
         and reads_due keeps the next run decoding an unchanged store. A call that fails (signed
-        out, usage limit, timeout) stops reading for this run and spends no attempt; an answer
-        that cannot stand is retried on later runs and the email left unread after MAX_ATTEMPTS.
+        out, usage limit, timeout: unresolved_email.outage) stops reading for this run and spends
+        no attempt; any other failure is about that email and is retried on later runs, the email
+        left unread after MAX_ATTEMPTS, so one poison email never blocks the rest.
         Once a sender is on the queue, that address's later email is not read again: the queue
         holds one row per address. A refused proposal does not count as queued."""
         self.state['reads_due'] = False
@@ -1089,7 +1090,10 @@ class Run:
             self.counts['reads'] += 1
             try:
                 read = self.ports.read_unresolved(m, self.today, deals, parties)
-            except unresolved_email.InvalidRead:
+            except Exception as error:
+                if unresolved_email.outage(error):
+                    self.counts['model_failed'] += 1
+                    return
                 progress['read_attempts'] = progress.get('read_attempts', 0) + 1
                 if progress['read_attempts'] >= unresolved_email.MAX_ATTEMPTS:
                     progress['read'] = 'abandoned'
@@ -1098,9 +1102,6 @@ class Run:
                     self.counts['model_failed'] += 1
                 _save(self.out, self.state)
                 continue
-            except Exception:
-                self.counts['model_failed'] += 1
-                return
             for stale in ('intent', 'summary', 'read_attempts'):
                 progress.pop(stale, None)
             progress['read'] = read['applies_to']
