@@ -290,6 +290,13 @@ class RuleClaimGateTest(unittest.TestCase):
 
     def test_infrastructure_rules_do_not_exempt_guidance_claims(self):
         for text in [
+            'I saved a rule on DNS questions: always check Cloudflare before asking Joe.',
+            'I added a rule for route reviews: never merge without a screenshot.',
+            'I created a rule for rate limit incidents: always page Joe first.',
+            'I saved a DNS rule in memory: always check Cloudflare before asking Joe.',
+            'I added a route rule so I always run the tests before merging.',
+            'I added a rule in the ruleset of standing instructions: always ask first.',
+            'I added a guidance and firewall rule.',
             'I added a firewall rule and a durable rule.',
             'I added a WAF rule and saved a lesson.',
             'I created a DNS rule and added a taught rule.',
