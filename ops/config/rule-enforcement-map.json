@@ -1390,7 +1390,7 @@
     "bd4a6d22": {
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "No control can judge whether a human chose a state on purpose, nor whether an acceptance was named narrowly enough to keep the check honest. The fixtures in ops/hermes-autonomy-check-selftest.py prove the discipline for the worked example by failing if the acceptance is ever widened into a pattern, and nothing today notices the skip-checks escape becoming a habit."
+      "why_unenforceable": "No control can judge whether a human chose a state on purpose, nor whether an acceptance was named narrowly enough to keep the check honest. Nothing today notices the skip-checks escape becoming a habit."
     },
     "bddb0e7b": {
       "category": "judgment_advisory",

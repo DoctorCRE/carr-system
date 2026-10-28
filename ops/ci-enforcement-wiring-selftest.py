@@ -113,6 +113,13 @@ class EnforcementWiringTest(unittest.TestCase):
         self.assertEqual(['example: ops/example-check.py'], unwired_checks(
             self.catalog, ci, {'ops/ci-migration.py': '"ops/example-check.py"'}))
 
+    @unittest.expectedFailure
+    def test_guarded_checker_is_not_reachable(self):
+        ci = self.ci('  if false; then\n'
+                     '    run_quiet "$LOGDIR/example.log" "$PY" ops/example-check.py\n'
+                     '  fi')
+        self.assertEqual(['example: ops/example-check.py'], unwired_checks(self.catalog, ci))
+
     def test_inventory_requires_execution(self):
         ci = self.ci('  for inv in example-check; do\n'
                      '    run_quiet "$LOGDIR/$inv.log" "$PY" "ops/$inv.py"\n'
