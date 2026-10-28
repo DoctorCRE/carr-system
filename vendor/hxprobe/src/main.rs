@@ -31,6 +31,7 @@ mod attachment;
 mod block;
 mod body;
 mod calendar;
+mod category;
 mod folder;
 mod header;
 mod identity;
@@ -222,12 +223,14 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     let mut folders = folder::Index::default();
     let mut events = calendar::Index::default();
     let mut attachments = attachment::Index::default();
+    let mut categories = category::Index::default();
     let mut sidecars = files_dir.map(|d| body::Sidecars::open(std::path::Path::new(d))).unwrap_or_default();
     for &o in &offs {
         if let Some(b) = block::parse(&mm, o) {
             folders.observe(o, &b.data);
             events.observe(&b.data);
             attachments.observe(&b.data);
+            categories.observe(&b.data);
         }
     }
 
@@ -306,6 +309,13 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              path          TEXT                 -- NULL if revisions disagree
          );
          CREATE INDEX attachments_message ON attachments(message_key);
+         -- Category definitions. Which messages carry them is not decoded.
+         CREATE TABLE categories (
+             id       INTEGER PRIMARY KEY, -- local store key
+             owner_id INTEGER NOT NULL,    -- owning list object, not folders.account_id
+             name     TEXT,                -- NULL if revisions disagree
+             color    INTEGER              -- OlCategoryColor; NULL if revisions disagree
+         );
          CREATE INDEX messages_sent ON messages(sent_unix);
          CREATE INDEX messages_sender ON messages(sender);
          CREATE TABLE events (
@@ -579,6 +589,14 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8)"
             )
             .expect("prepare attachments");
+        let mut ins_category = tx
+            .prepare("INSERT INTO categories(id,owner_id,name,color) VALUES (?1,?2,?3,?4)")
+            .expect("prepare categories");
+        for c in categories.categories.values() {
+            ins_category
+                .execute(rusqlite::params![c.id as i64, c.owner_id as i64, c.name, c.color])
+                .expect("insert category");
+        }
         for a in attachments.attachments.values() {
             ins_attachment
                 .execute(rusqlite::params![a.id as i64, a.message_key as i64, a.name, a.name_verified as i64,
@@ -672,6 +690,8 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             ("messages_with_folder", with_folder),
             ("attachment_objects", attachments.objects),
             ("attachments", attachments.attachments.len()),
+            ("category_objects", categories.objects),
+            ("categories", categories.categories.len()),
             ("messages_with_key", best.iter().filter(|r| !r.local_keys.is_empty()).count()),
         ] {
             ins_meta.execute(rusqlite::params![key, value as i64]).expect("insert meta");
