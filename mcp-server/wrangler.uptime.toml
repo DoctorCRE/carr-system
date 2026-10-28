@@ -16,8 +16,12 @@ class_name = "UptimeLedger"
 tag = "uptime-v1"
 new_sqlite_classes = ["UptimeLedger"]
 
+[limits]
+cpu_ms = 5000
+
 [observability]
 enabled = true
+head_sampling_rate = 0.1
 
 # Provision separately from carr-mcp. No Studio file or interactive login is read at runtime.
 # CARR_MCP_PROBE_TOKEN: existing long-lived read-only probe bearer.

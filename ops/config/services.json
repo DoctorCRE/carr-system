@@ -213,7 +213,7 @@
       "environments": [
         {
           "environment": "production",
-          "endpoint": "api.practicecre.com",
+          "endpoint": "api.doctorcre.com",
           "deploy_mechanism": ".github/workflows/deploy.yml"
         },
         {

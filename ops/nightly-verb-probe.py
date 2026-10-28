@@ -20,9 +20,9 @@ WHAT THIS CHECKS, and the reasoning for each half.
 (1) THE WORKER IS DEPLOYED AND ITS AUTH GATE IS LIVE. /health must answer 200
 and /mcp must REFUSE an unauthenticated call with 401. The second is the load-
 bearing one: a Worker that stops rejecting anonymous callers is a security
-failure that a reachability check alone would score green. Both hosts are
-probed, because api.doctorcre.com became primary on 2026-08-01 and the alias
-api.practicecre.com is what several scripts still name.
+failure that a reachability check alone would score green. Only the primary
+host api.doctorcre.com is probed. The retiring alias must not receive requests
+from repository callers.
 
 (2) EVERY VIEW THE VERBS READ IS STILL QUERYABLE. This is the half that replaces
 real coverage rather than gesturing at it. The read verbs are thin wrappers over
@@ -63,7 +63,7 @@ sys.path.insert(0, str(REPO))
 
 from exporters.common import connect  # noqa: E402
 
-HOSTS = ["api.doctorcre.com", "api.practicecre.com"]
+HOSTS = ["api.doctorcre.com"]
 TIMEOUT = 15
 
 

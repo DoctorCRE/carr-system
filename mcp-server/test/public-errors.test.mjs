@@ -73,6 +73,12 @@ for (const [code, extra] of [
   if (code === "value_not_in_declared_vocabulary") assert.deepEqual(payload.fields, ["filter"]);
 });
 
+for (const code of ["email_source_owner_mismatch", "email_proposal_confidence_invalid", "email_proposal_fields_invalid", "email_proposal_source_missing", "email_proposal_quote_invalid", "email_proposal_evidence_invalid", "email_proposal_deal_invalid", "email_proposal_not_pending", "email_proposal_stale", "email_sender_contact_required", "email_thread_not_continuous", "email_thread_ambiguous", "email_thread_recipient_changed", "email_new_deal_not_found", "email_new_deal_client_mismatch"]) test(`MCP projects ${code}`, async t => {
+  const payload = await failure(t, new ToolError({ error: code, detail: privateText }));
+  assert.equal(payload.error, code);
+  assert.ok(payload.hint);
+});
+
 test("MCP preserves a missing_required refusal and names only declared fields", async t => {
   // Regression: #2194's closed allowlist omitted missing_required, so every
   // verb called without a required argument answered unhandled_verb_failure
