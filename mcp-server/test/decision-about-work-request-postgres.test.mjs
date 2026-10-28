@@ -50,7 +50,6 @@ before(async () => {
     values ('WR-000508','Synthetic request','joe','joe',$1,'carr-internal',$2,$3,508,'doctrine:old-about-test#origin')`, [randomUUID(),section.id,revision.id]);
   await c.query(`insert into ops.work_request (ref,title,state,requester_actor,owner_actor,organization_tenant_id,program_key,program_ordinal)
     values ('WR-AI-002','Synthetic program','ready','joe','joe','carr-internal','carr-ai-engineering-suite-v1',2)`);
-
 });
 after(async () => {
   try { await c?.end(); }
