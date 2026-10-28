@@ -280,7 +280,8 @@ trade-off; they bind nobody until Joe or Dell adopts them in the app
 (docs/memory/team-memory-design.md). Changes to the files themselves go through
 a pull request. Edit generated guidance at its source and regenerate it:
 `python3 ops/sync-core-rule-cards.py` renders the core cards from
-`ops/config/rule-cards.v1.json`. Keep attribution and review in Git history.
+`ops/config/rule-cards.v1.json`, and `--from-store` first rewrites that file
+from the rule cards adopted in the store. Keep attribution and review in Git history.
 
 ## Writing
 

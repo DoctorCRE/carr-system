@@ -74,6 +74,8 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
 
     "accept-ready-plan",
     "accept-ready-plan-amendment",
+    // WR-000562 S4: the one door from a convention proposal to an active rule.
+    "adopt-rule",
 
     "answer-board-question",
     "answer-work-request-for-joe",
