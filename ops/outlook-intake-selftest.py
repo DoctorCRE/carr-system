@@ -1660,33 +1660,37 @@ class IntakeTest(unittest.TestCase):
 
 
 
-    def test_decoder_health_reports_and_alerts_once_per_episode(self):
+    def test_decoder_health_reports_and_alerts_once_without_stopping_intake(self):
         healthy = [mail(OWNER, -timedelta(hours=1), subject=f'Synthetic {i}', recipients='pat@example.test')
-                   for i in range(4)]
-        first = self.run_intake(healthy)
-        self.assertEqual(first.state, 'succeeded')
-        self.assertIn('## Decoder health', self.report_text())
-        for label in ('block_verification: 99.9%', 'sender: 100.0%', 'subject: 100.0%',
-                      'recipients: 100.0%', 'folder: 0.0%', 'attachment_metadata: unavailable',
-                      'sent_time', 'conversation_id', 'flag_state'):
-            self.assertIn(label, self.report_text())
-        broken = [{**m, 'recipients': None} for m in healthy]
-        first_bad = self.run_intake(broken)
-        self.assertEqual((first_bad.state, first_bad.reason, first_bad.counts['decoder_alarm']),
-                         ('degraded', 'decoder_degraded', 1))
-        self.assertIn('recipients: 0.0%', self.report_text())
-        second_bad = self.run_intake(broken)
-        self.assertEqual((second_bad.state, second_bad.counts['decoder_alarm']), ('degraded', 0))
+                   for i in range(20)]
+        self.assertEqual(self.run_intake(healthy).state, 'succeeded')
+        broken = [{**m, 'recipients': None, 'sent_unix': None} for m in healthy]
+        first = self.run_intake(broken + [mail('pat@example.test', -timedelta(hours=1))])
+        self.assertEqual((first.state, first.counts['decoder_alarm']), ('degraded', 1))
+        self.assertIn('recipients: 4.8%', self.report_text())
+        self.assertIn('sent_time: 4.8%', self.report_text())
+        self.assertIn('recipients', self.report_text().split('failing: ')[1].splitlines()[0])
+        self.assertIn('sent_time', self.report_text().split('failing: ')[1].splitlines()[0])
+        self.assertTrue(self.fake.calls)
+        self.assertEqual(self.run_intake(broken).counts['decoder_alarm'], 0)
         self.assertEqual(self.run_intake(healthy).state, 'succeeded')
         self.assertEqual(self.run_intake(broken).counts['decoder_alarm'], 1)
 
-    def test_low_verification_fails_without_calling_the_record_layer(self):
+    def test_small_message_sample_does_not_raise_fill_rate_alarm(self):
+        sample = [mail(OWNER, -timedelta(hours=1), subject='', recipients=None)]
+        result = self.run_intake(sample)
+        self.assertEqual(result.state, 'succeeded')
+        self.assertIn('subject: 0.0%', self.report_text())
+        self.assertIn('recipients: 0.0%', self.report_text())
+        self.assertIn('failing: none', self.report_text())
+
+    def test_low_verification_alarms_but_processes_mail(self):
         result = self.run_intake([mail('pat@example.test', -timedelta(hours=1))], found=1000, verified=900)
         self.assertEqual((result.state, result.reason, result.counts['decoder_alarm']),
                          ('degraded', 'decoder_degraded', 1))
         self.assertIn('block_verification: 90.0%', self.report_text())
         self.assertIn('failing: block_verification', self.report_text())
-        self.assertEqual(self.fake.calls, [])
+        self.assertTrue(self.fake.calls)
 
     def test_a_missing_store_fails(self):
         self.store.unlink()
