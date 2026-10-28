@@ -195,6 +195,8 @@ elif tool == 'get_window_state':
         tokens[str(index)] = kind
         return index
     top = add('AXWindow', state['folder'] + ' • ' + ACCOUNT, 0)
+    if not state.get('account_button_missing'):
+        add('AXButton', 'All Accounts', 1, top, ['account'])
     for label in ('New Mail', 'Delete', 'Archive', 'Move', 'Flag', 'Mark Unread'):
         add('AXButton', label, 1, top, ['button', label])
     for depth in (1, 2, 3):
@@ -258,6 +260,13 @@ elif tool in ('click', 'type_text'):
             state['picker'] = payload['text']
         else:
             fail('not a text field')
+    elif kind == ['account']:
+        if payload.get('action', 'press') != 'press':
+            fail('account selection requires AXPress')
+        state['presses'].append('All Accounts')
+        if not state.get('account_press_ignored'):
+            for w in state['windows']:
+                w['title'] = state['folder'] + ' • ' + ACCOUNT
     elif kind and kind[0] == 'row':
         if not (state.get('search') and state.get('search_click_ignored')):
             select(kind[1])
@@ -868,19 +877,29 @@ class RefreshTest(FakeOutlookCase):
 
     def test_refresh_worker_refuses_wrong_account_and_active_user(self):
         from lib import outlook_refresh
-        self.given([self.READ_BODY])
-        self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
-        write_settings(self.home, self.repo, account='wrong@example.test', driver=str(self.tmp / 'bin/cua-driver'))
-        with patch.dict(os.environ, self.env, clear=True):
-            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                         waits=Waits(2, 0, 0, 0, 0, 0, 0))
-        self.assertEqual(result.reason, 'wrong_account')
-        self.assertEqual(json.loads(self.state.read_text())['selections'], [])
-        self.given([self.READ_BODY], idle_seconds=1)
-        with patch.dict(os.environ, self.env, clear=True):
-            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10))
-        self.assertEqual(result.reason, 'user_active')
-        self.assertEqual(json.loads(self.state.read_text())['selections'], [])
+        wrong = window(13, 'Inbox • other@example.test', 1230, 768)
+        for ignored, missing, idle, reason, presses in (
+                (False, False, 3600, 'refreshed', ['All Accounts']),
+                (True, False, 3600, 'wrong_account', ['All Accounts']),
+                (False, True, 3600, 'wrong_account', []),
+                (False, False, 1, 'user_active', [])):
+            with self.subTest(ignored=ignored, missing=missing, idle=idle):
+                self.given([self.READ_BODY], after_launch=[wrong], idle_seconds=idle,
+                           account_press_ignored=ignored, account_button_missing=missing)
+                path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+                with patch.dict(os.environ, self.env, clear=True):
+                    result = outlook_refresh.run(
+                        self.repo, EVENING.replace(hour=10),
+                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                        now_fn=lambda: EVENING.replace(hour=10))
+                self.assertEqual(result.reason, reason)
+                state = json.loads(self.state.read_text())
+                self.assertEqual(state['presses'], presses)
+                self.assertEqual(state['moved'], [])
+                self.assertEqual(state['selections'],
+                                 [self.READ_BODY['label']] if reason == 'refreshed' else [])
+                self.assertEqual('opened_at' in json.loads(path.read_text())[0],
+                                 reason == 'refreshed')
 
     def test_read_email_is_opened_unchanged_and_stamped(self):
         self.given([FILE_A, self.READ_BODY, NEWS])
