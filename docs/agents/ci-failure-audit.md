@@ -18,7 +18,8 @@ artifacts; the ledger was removed during the machinery purge. Its
 [historical version](https://github.com/DoctorCRE/carr-system/blob/da2ff1eb16d9068c717ec90ecd67802731ee67b7/tools/ci/ci-failure-audit-2026-10-15.json) preserves the collected digests and evidence. The linked
 GitHub runs below remain the source for inspecting individual failures.
 
-Use `gh run list` and `gh run view --log-failed` for new investigations.
+For a new failure, run `bin/ci-why <pr> [--repo owner/name]` (or `--run <run-id>`): it prints
+each failed step and about 40 lines around its first error, and names a review-gate-only failure.
 
 The collector keys new entries by repository, run ID, and attempt. Every log
 and metadata request passes the inventoried `--attempt`; returned metadata must
