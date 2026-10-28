@@ -56,6 +56,7 @@ export async function doctrineEmbeddingDatabase() {
     }
     await c.query(readMigration('0958_doctrine_embeddings.sql'));
     await c.query(readMigration('0978_doctrine_title_topic_ranking.sql'));
+    await c.query(readMigration('1035_doctrine_semantic_index_scan.sql'));
     return fixture;
   } catch (error) { await fixture.close(); throw error; }
 }
