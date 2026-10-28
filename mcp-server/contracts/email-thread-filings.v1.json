@@ -18,5 +18,15 @@
     }
   },
   "undo": "Send event_id and a new idempotency_key to undo-email-thread-filing. The server checks the recorded version and later filing events. Legacy events have no recorded version; the server still checks later events and the current deal. Refusals leave the filing intact.",
-  "consumer_adoption": "The app must pin the producer and update contracts/carr-interface.v1.json before displaying these fields. Do not infer missing email fields or activity versions."
+  "consumer_adoption": "The app must pin the producer and update contracts/carr-interface.v1.json before displaying these fields. Do not infer missing email fields or activity versions.",
+  "quality_report": {
+    "verb": "email-proposal-quality",
+    "scope": "Shared aggregate, matching the existing proposal quality report. Counts only and never changes router policy.",
+    "automatic_filings": {
+      "filed": "Automatic thread filing events recorded within days, default 7, allowed 1-90.",
+      "undone": "Filings in that cohort with at least one linked undo receipt at read time, counted once per filing.",
+      "undo_rate": "undone divided by filed, or null for an empty cohort. Separate from proposal dismissal rates.",
+      "over_threshold": "True when filed is at least 10 and undo_rate is strictly greater than 0.05."
+    }
+  }
 }
