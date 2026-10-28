@@ -13,6 +13,8 @@ RISKY = ("*launchagents*", "*.plist", "install-*.sh", "*/install-*.sh",
 
 
 # GitHub skips every push workflow for these title markers, so a merged PR would never deploy.
+REVIEWERS = {"grok", "claude-opus", "codex", "jev"}
+
 SKIP_CI = re.compile(r"\[(skip ci|ci skip|no ci|skip actions|actions skip)\]", re.I)
 
 
@@ -33,7 +35,9 @@ def approved(pr, files, comments):
     sha_line = f'Reviewed-SHA: {pr["head"]["sha"]}'
     # The newest verdict naming the current head wins across both sources.
     verdicts = [lines[0] for lines in ((c.get("body") or "").splitlines() for c in comments)
-                if lines[:1] in (["VERDICT: APPROVE"], ["VERDICT: CHANGES"]) and sha_line in lines]
+                if len(lines) >= 3 and lines[0] in ("VERDICT: APPROVE", "VERDICT: CHANGES")
+                and lines[1] == sha_line and lines[2].startswith("Reviewer: ")
+                and lines[2][10:] in REVIEWERS]
     if verdicts[-1:] == ["VERDICT: CHANGES"]:
         return False
     # Markdown-only PRs carry no runtime behaviour, so they merge on green CI at any size (Joe 2026-10-27).
@@ -67,7 +71,7 @@ def run(event, repo):
     if "merge_group" in event:
         status(event["merge_group"]["head_sha"], "success")
         return
-    number = event.get("number") or event["issue"]["number"]
+    number = event.get("number") or (event.get("pull_request") or event["issue"])["number"]
     pr = api(f"{root}/pulls/{number}")
     if pr["base"]["ref"] != "main":
         return
