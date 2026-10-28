@@ -1,5 +1,5 @@
 -- rollback: forward-only — the dropped rows have no reader; the continuity verbs' audit trail stays in event (claude-record-event, codex-record-event). Recreate a table from db/schema.sql history with a new migration if one is ever needed.
--- expand-contract: contract — no verb, view, function, policy, trigger, script or doctorcre-app code reads or writes these fourteen tables; the verbs that wrote the continuity event/revision tables are retired (ops/config/retired-verbs.v1.json).
+-- expand-contract: contract — no active application reader or writer uses these fourteen tables; the verbs that wrote the continuity event/revision tables are retired (ops/config/retired-verbs.v1.json).
 -- lock-review: ACCESS EXCLUSIVE on fourteen tables nothing touches (largest codex_continuity_revision 25 MB, claude_continuity_event 23 MB); lock acquisition is bounded to five seconds.
 --
 -- WR573.S3.J1, database audit 2026-10-28 F7 / plan P8.
@@ -9,10 +9,10 @@
 -- read-session-identity). No trigger on a checkpoint writes a revision row,
 -- so dropping the revision tables does not touch the checkpoint verbs.
 --
--- Left in place because a reader exists (see the PR's Unmet list):
+-- Retained candidates have current readers, dependencies or provider ownership:
 -- doctrine_migration_batch, cadence_rule, ops.settings_change,
 -- ops.staging_release_approval_receipt, ops.completion_relation,
--- neon_auth.*; ops.tour_* belongs to the tour_* retirement migration.
+-- neon_auth.* remains provider-owned; ops.tour_* stays live under WR-000012.
 --
 -- RESTRICT throughout: an unexpected dependent object fails the migration
 -- instead of being dropped with it.

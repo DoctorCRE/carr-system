@@ -188,11 +188,11 @@ def test_excluded_tables_never_reach_writer(tmp_path: Path):
     table_count, row_count = export_tables(
         object(),
         tmp_path / "csv",
-        ["z_table", "tool_call", "a_table"],
+        ["z_table", "sensitive_blob", "tool_call", "a_table"],
         fake_writer,
     )
 
-    assert EXCLUDED_TABLES == {"tool_call"}
+    assert EXCLUDED_TABLES == {"sensitive_blob", "tool_call"}
     assert seen == [("a_table", "a_table.csv"), ("z_table", "z_table.csv")]
     assert (table_count, row_count) == (2, 6)
 

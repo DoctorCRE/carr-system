@@ -46,7 +46,7 @@ test("list-my-codex-sessions reads only first-hand checkpoints for the authentic
     seen.push({ sql, params });
     assert.match(sql, /from codex_continuity_checkpoint/);
     assert.match(sql, /owner_actor_id=\(select id from actor where slug=\$2\)/);
-    assert.doesNotMatch(sql, /session_identity/);
+    assert.doesNotMatch(sql, /codex_continuity_event|session_identity/);
     return { rows: params[1] === "joe" ? [{ native_task_id: nativeId,
       checkpoint_version: "3", updated_at: "2026-09-29T12:00:00Z" }] : [] };
   } };

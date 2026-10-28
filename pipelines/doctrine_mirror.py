@@ -21,7 +21,7 @@ from typing import Any, TextIO
 from uuid import uuid4
 
 
-EXCLUDED_TABLES = frozenset({"tool_call"})
+EXCLUDED_TABLES = frozenset({"sensitive_blob", "tool_call"})
 MANIFEST_WARNING = (
     "SNAPSHOT — never edit, never read in normal operation. Restore path: "
     "markdown re-imports via pipelines/doctrine_import.py; CSV reloads via COPY."
