@@ -1316,17 +1316,20 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.fake.writes('record-deal-item'), [('record-deal-item', args)])
 
     def test_lead_proposals_from_different_mailboxes_have_distinct_keys(self):
-        keys = []
+        keys, payloads = [], []
         self.fake.intent_reply = read('new_matter', 'Needs office space')
-        for owner, subject in (('joe', 'Office request'), ('dell', 'Lease request')):
+        same = mail('unknown@example.test', -timedelta(hours=1), subject='Office request')
+        for owner in ('joe', 'dell'):
             shutil.rmtree(self.out(), ignore_errors=True)
             self.fake.calls.clear()
             write_settings(self.home, self.repo, owner=owner)
-            result = self.run_intake([mail('unknown@example.test', -timedelta(hours=1), subject=subject)])
+            result = self.run_intake([same])
             self.assertEqual(result.state, 'succeeded', result)
             [(_, args)] = self.fake.writes('propose-email-lead')
-            keys.append(args['idempotency_key'])
-        self.assertNotEqual(*keys)
+            keys.append(args.pop('idempotency_key'))
+            payloads.append(args)
+        self.assertEqual(payloads[0], payloads[1], 'the same email, ident and subject in both mailboxes')
+        self.assertNotEqual(*keys, 'only the mailbox owner separates the keys')
 
     def test_simultaneous_different_agendas_use_distinct_keys(self):
         keys = []
