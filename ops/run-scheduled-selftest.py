@@ -71,6 +71,39 @@ class ScheduledRunTests(unittest.TestCase):
         self.assertNotIn("SYNTHETIC_PRIVATE", observed)
         self.assertFalse(list((self.root / "out").glob("outlook-intake-receipt.*")))
 
+    def test_runtime_fields_reach_ops_detail(self):
+        for behind in (3, None):
+            receipt = {"state": "succeeded", "reason": "processed", "counts": {},
+                       "runtime_sha": "abc1234", "runtime_behind": behind}
+            result = self.invoke_intake(receipt, code=0)
+            self.assertEqual(result.returncode, 0)
+            args = json.loads(self.rows()[-1][3])
+            self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
+
+    def test_invalid_runtime_fields_do_not_enter_ops_detail(self):
+        for sha, behind in (('PRIVATE_TEXT', 2), ('abc1234', -1), ('abc1234', True),
+                            ('abc1234', 'PRIVATE_TEXT')):
+            receipt = {'state': 'succeeded', 'reason': 'processed', 'counts': {},
+                       'runtime_sha': sha, 'runtime_behind': behind}
+            self.invoke_intake(receipt, code=0)
+            args = json.loads(self.rows()[-1][3])
+            self.assertEqual(json.loads(args[args.index('--detail') + 1]),
+                             {'state': 'succeeded', 'reason': 'processed', 'counts': {}})
+
+    def test_other_outlook_receipts_reach_ops_detail(self):
+        for service in ('outlook-refresh', 'outlook-triage', 'outlook-outbox'):
+            receipt = {'state': 'succeeded', 'reason': 'processed', 'counts': {},
+                       'runtime_sha': 'abc1234', 'runtime_behind': None,
+                       'runtime_note': 'main_unknown_locally'}
+            child = self.root / 'other.py'
+            child.write_text(f"print({(service + '-receipt ' + json.dumps(receipt))!r})")
+            result = subprocess.run(['/bin/zsh', str(self.root / 'bin/run-scheduled.sh'),
+                                     service, service + '.run', sys.executable, str(child)],
+                                    cwd=self.root, env=self.env, text=True, capture_output=True, timeout=15)
+            self.assertEqual(result.returncode, 0)
+            args = json.loads(self.rows()[-1][3])
+            self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
+
     def test_link_failure_reason_reaches_receipt_and_spool(self):
         receipt = {"state": "failed", "reason": "email_links_read_failed", "counts": {"email_links_pending": 2}}
         result = self.invoke_intake(receipt)

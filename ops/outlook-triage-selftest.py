@@ -500,7 +500,10 @@ class PreflightQuitTest(FakeOutlookCase):
         with patch('lib.outlook_refresh.run', return_value=Outcome('failed', 'outlook_quit_timeout', detail)), \
                 redirect_stdout(output):
             self.assertEqual(outlook_refresh.main(), 1)
-        self.assertEqual(output.getvalue(), f'outlook-refresh failed outlook_quit_timeout {detail}\n')
+        self.assertEqual(output.getvalue().splitlines()[0], f'outlook-refresh failed outlook_quit_timeout {detail}')
+        receipt = json.loads(output.getvalue().split('outlook-refresh-receipt ', 1)[1])
+        self.assertIn('runtime_sha', receipt)
+        self.assertIn('runtime_behind', receipt)
 
     def test_hanging_graceful_quit_cannot_extend_quit_deadline(self):
         self.given(windows=[ORDINARY], menu_quit_ignored=True, osascript_quit_delay=5)

@@ -975,7 +975,11 @@ class IntakeTest(unittest.TestCase):
         with patch.object(intake, 'load_settings', return_value=load_settings(self.home)), patch.object(type(load_settings(self.home)), 'require_repo'), patch.object(intake, 'run', return_value=outcome), patch.object(email_router, 'step', return_value=0), patch('sys.stdout', new_callable=StringIO) as stdout:
             self.assertEqual(intake.main(), 1)
         receipt = stdout.getvalue().split('outlook-intake-receipt ', 1)[1]
-        self.assertEqual(json.loads(receipt), {'state': 'failed', 'reason': 'writes_failed', 'counts': {'writes_failed': 3}})
+        value = json.loads(receipt)
+        self.assertEqual({k: value[k] for k in ('state', 'reason', 'counts')},
+                         {'state': 'failed', 'reason': 'writes_failed', 'counts': {'writes_failed': 3}})
+        self.assertIn('runtime_sha', value)
+        self.assertIn('runtime_behind', value)
 
     def test_main_runs_the_router_after_intake_releases_its_lock_without_changing_the_result(self):
         write_settings(self.home, ROOT, model='sonnet')

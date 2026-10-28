@@ -12,6 +12,7 @@ from pathlib import Path
 from lib import outlook_intake as intake
 from lib import outlook_triage as triage
 from lib.outlook_settings import load_settings
+from lib.outlook_runtime import receipt_line
 from lib.outlook_ui import (CuaError, Outcome, UiError, Waits, Window,
                             outlook_pid, prepare_outlook, usable_window)
 
@@ -89,4 +90,5 @@ def main() -> int:
     outcome = run(repo, datetime.now(timezone.utc))
     print(f'outlook-refresh {outcome.state} {outcome.reason}'
           + (f' {outcome.detail}' if outcome.detail else ''))
+    print(receipt_line('outlook-refresh', outcome.state, outcome.reason, {}, repo))
     return triage.EXIT[outcome.state]

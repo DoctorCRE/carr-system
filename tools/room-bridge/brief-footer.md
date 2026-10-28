@@ -1,3 +1,5 @@
+Done means live and proven: installed on every machine that runs it, the next scheduled run succeeded, and one partner-visible proof exists.
+
 Never run env, printenv or ps eww or print environment variables.
 
 Follow the Skills line and Required skills block supplied by bin/codex-job. Size first: tiny -> build now; one session -> grill-with-docs; bigger -> wayfinder. PR body must include a "Skills used:" line.

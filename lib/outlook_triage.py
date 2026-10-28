@@ -48,6 +48,7 @@ from lib.outlook_ui import (EXIT, CuaError, Moved, Outcome, ReadState, Refreshed
                             Window, outlook_pid, prepare_outlook, private_file, usable_window)
 
 from lib.outlook_settings import load_settings
+from lib.outlook_runtime import receipt_line
 OUT = Path('out/outlook-triage')
 REFRESH_LIST = Path('out/outlook-intake/needs-refresh.json')
 REFRESH_FIELDS = ('message_id', 'subject_hash', 'sent_utc', 'sender_email')
@@ -481,4 +482,5 @@ def fire(repo: Path | None = None, now: datetime | None = None) -> int:
 def main() -> int:
     load_settings().require_service('triage')
     outcome = run(Path(__file__).resolve().parents[1], Path.home(), datetime.now(load_settings().timezone))
+    print(receipt_line('outlook-triage', outcome.state, outcome.reason, {}, Path(__file__).resolve().parents[1]))
     return EXIT[outcome.state]

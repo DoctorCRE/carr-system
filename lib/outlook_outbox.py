@@ -10,6 +10,7 @@ import uuid
 
 from lib import outlook_send as send
 from lib.outlook_settings import OutlookSettings, load_settings
+from lib.outlook_runtime import receipt_line
 
 
 @dataclass(frozen=True)
@@ -148,9 +149,12 @@ def main() -> int:
         settings.require_repo(Path(__file__).resolve().parents[1])
         counts = run(settings, send.default_ports())
         print('outlook-outbox ' + ' '.join(f'{key}={value}' for key, value in counts.items()))
-        return 1 if counts['failed'] or counts['receipt_failed'] or counts['deferred'] else 0
+        failed = bool(counts['failed'] or counts['receipt_failed'] or counts['deferred'])
+        print(receipt_line('outlook-outbox', 'failed' if failed else 'succeeded', 'processed', counts, settings.repo))
+        return int(failed)
     except Exception as exc:
         print(f'outlook-outbox failed {type(exc).__name__}')
+        print(receipt_line('outlook-outbox', 'failed', 'setup_failed', {}, Path(__file__).resolve().parents[1]))
         return 1
 
 
