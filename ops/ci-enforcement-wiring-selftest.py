@@ -11,6 +11,8 @@ import unittest
 
 REPO = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location("ci_selftest", REPO / "ops/ci-selftest.py")
+if spec is None or spec.loader is None:
+    raise ImportError("Cannot load CI fixture module")
 fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 
@@ -50,6 +52,7 @@ def unwired_checks(catalog, mutate=lambda root: None):
             env = fixture.fixture_env()
             env.update(CARR_CI_DATABASE_URL="postgres://fixture@localhost/fixture",
                        CARR_CI_PROGRAM_RECORDS=str(records), RUNNER_TEMP=str(root),
+                       NODE_COMPILE_CACHE=str(root / "node-compile-cache"),
                        PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
             result = subprocess.run([str(root / "ops/ci.sh"), "--migration-part", "acceptance"],
                                     cwd=root, env=env, capture_output=True, text=True, timeout=60)
