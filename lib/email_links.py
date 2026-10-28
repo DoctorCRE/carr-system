@@ -1,6 +1,6 @@
 """Extract useful, untrusted URLs from decoded email text without fetching them."""
 import re
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit, urlunsplit
 
 URL = re.compile(r'https?://[^\s<>"\']+', re.I)
 CONTROL = re.compile(r'[\x00-\x1f\x7f]')
@@ -13,12 +13,14 @@ def extract_links(text: str) -> list[tuple[str, str]]:
     for match in URL.finditer(text):
         url = match.group().rstrip('.,;!?)]')
         for _ in range(8):
-            if CONTROL.search(unquote(url)):
+            if CONTROL.search(unquote(url)) or '\\' in unquote(url):
                 break
             try:
                 parts = urlsplit(url)
                 host = (parts.hostname or '').lower()
-                if parts.scheme.lower() not in ('http', 'https') or not host or parts.username is not None or parts.password is not None:
+                if (parts.scheme.lower() not in ('http', 'https') or not host
+                        or not re.fullmatch(r'[A-Za-z0-9.-]+(?::[0-9]+)?', parts.netloc)
+                        or parts.username is not None or parts.password is not None):
                     break
                 if host.endswith('.safelinks.protection.outlook.com'):
                     values = parse_qs(parts.query).get('url', [])
@@ -36,6 +38,7 @@ def extract_links(text: str) -> list[tuple[str, str]]:
                     kind = 'shared_folder' if '/folders/' in parts.path.lower() else 'document'
                 else:
                     break
+                url = urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, parts.fragment))
                 if url not in seen:
                     seen.add(url)
                     found.append((kind, url))

@@ -328,6 +328,34 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.run_intake(touch=False).state, 'succeeded')
         self.assertEqual(len(records), 1)
 
+    def test_preview_links_wait_for_full_body(self):
+        preview = mail('pat@example.test', -timedelta(hours=1), body='https://loopnet.com/Listing/12',
+                       kind='preview', copy_key='preview-links')
+        self.assertEqual(self.run_intake([preview]).state, 'succeeded')
+        original = self.fake.writes('log-activity')[0][1]
+        source = str(uuid.uuid5(uuid.NAMESPACE_URL, original['idempotency_key']))
+        self.fake.email_queue = [{'activity_id': source, 'deal': 'confirmed-deal',
+                                 'body': preview['body'], 'occurred_at': NOW.isoformat()}]
+        self.assertEqual(self.run_intake([preview], touch=False).state, 'succeeded')
+        self.assertEqual([a for _, a in self.fake.writes('log-activity') if a['summary'] == 'Links from matched email'], [])
+        full = {**preview, 'body_kind': 'full', 'body': 'https://loopnet.com/Listing/123-Main https://crexi.com/properties/1'}
+        self.assertEqual(self.run_intake([full]).state, 'succeeded')
+        notes = [a for _, a in self.fake.writes('log-activity') if a['summary'] == 'Links from matched email']
+        self.assertEqual(len(notes), 1)
+        self.assertIn('123-Main', notes[0]['detail'])
+        self.assertIn('crexi.com', notes[0]['detail'])
+
+    def test_link_key_is_shared_across_intake_owners(self):
+        self.fake.email_queue = [{'activity_id': 'email-shared', 'deal': 'confirmed-deal',
+                                 'body': 'https://loopnet.com/Listing/123', 'occurred_at': NOW.isoformat()}]
+        self.assertEqual(self.run_intake().state, 'succeeded')
+        first = self.fake.writes('log-activity')[-1][1]['idempotency_key']
+        shutil.rmtree(self.out())
+        write_settings(self.home, self.repo, owner='dell')
+        self.assertEqual(self.run_intake().state, 'succeeded')
+        second = self.fake.writes('log-activity')[-1][1]['idempotency_key']
+        self.assertEqual(first, second)
+
     def test_hydrated_links_follow_original_confirmed_email(self):
         preview = mail('pat@example.test', -timedelta(hours=1), body='Still loading the full message',
                        kind='preview', copy_key='hydration-fixture')

@@ -28,6 +28,12 @@ class LinksTest(unittest.TestCase):
             wrap('https://user:pass@loopnet.com/a'), wrap('https://loopnet.com/%0aattack')])),
             [('listing', listing)])
 
+    def test_rejects_ambiguous_authorities(self):
+        bad = [r'https://evil.example\.loopnet.com/listing',
+               'https://evil.example%2f.loopnet.com/listing',
+               r'https://evil.example\.dropbox.com/folders/x', r'https://loopnet.com/path\bad']
+        self.assertEqual(extract_links(' '.join(bad + [wrap(url) for url in bad])), [])
+
     def test_links_are_bounded(self):
         body = ' '.join(f'https://loopnet.com/Listing/{i}' for i in range(30))
         self.assertEqual(len(extract_links(body)), 20)

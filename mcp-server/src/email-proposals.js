@@ -430,7 +430,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             where a.kind in ('email_in','email_out') and a.deal_id is not null
               and a.occurred_at<=now() and ($1::uuid is null or a.id>$1::uuid)
               and (a.email_source is null or a.email_source->>'mailbox_owner'=$3)
-            order by a.id limit $2`, [args.after ?? null, limit + 1, partnerAuthoritySlugForActor(_actor)]);
+              and (a.kind <> 'email_out' or a.actor_id=$4::uuid)
+            order by a.id limit $2`, [args.after ?? null, limit + 1, partnerAuthoritySlugForActor(_actor), _actor.id]);
           const emails = rows.slice(0, limit);
           const more = rows.length > limit;
           return { schema_version: 'email-link-sources.v1', emails, more,

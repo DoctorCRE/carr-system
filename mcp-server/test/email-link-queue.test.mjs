@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { emailProposalTools } from '../src/email-proposals.js';
 
 const queue = emailProposalTools({})['email-router-queue'];
-const actor = { human: true, slug: 'joe' };
+const actor = { human: true, slug: 'joe', id: '30000000-0000-0000-0000-000000000001' };
 
 test('filed link sources retain exact deals and page without an age window', async () => {
   const rows = [
@@ -18,7 +18,7 @@ test('filed link sources retain exact deals and page without an age window', asy
   assert.equal(first.more, true);
   assert.equal(first.next_cursor, rows[0].activity_id);
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].args, [null, 2, 'joe']);
+  assert.deepEqual(calls[0].args, [null, 2, 'joe', actor.id]);
   assert.match(calls[0].sql, /a\.deal_id is not null/);
   assert.match(calls[0].sql, /a\.kind in \('email_in','email_out'\)/);
   assert.doesNotMatch(calls[0].sql, /make_interval/);
@@ -34,7 +34,7 @@ test('hydrated text can only come from the same source actor and record', async 
   const result = await queue.handler(db, actor, { purpose: 'links', after });
   assert.deepEqual(result.emails, []);
   assert.equal(result.next_cursor, null);
-  assert.deepEqual(parameters, [after, 26, 'joe']);
+  assert.deepEqual(parameters, [after, 26, 'joe', actor.id]);
   assert.match(query, /h\.email_context->>'source_activity_id'=a\.id::text/);
   assert.match(query, /h\.actor_id=a\.actor_id/);
   for (const field of ['client_id', 'vendor_id', 'lead_id', 'deal_id']) {

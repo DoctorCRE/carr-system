@@ -768,14 +768,16 @@ class Run:
             'purpose': 'links', 'limit': 200,
             **({'after': self.state['links_cursor']} if self.state.get('links_cursor') else {})})
         self.counts['links_filed'] = 0
+        pending_sources = {self.state.get('requests', {}).get(self.activity_key(ref, ident), {}).get('activity_id')
+                           for ident, pending in self.state.get('pending_full', {}).items()
+                           for ref in pending['refs']}
         for mail in queue.get('emails', []):
-            if not mail.get('deal'):
+            if not mail.get('deal') or mail['activity_id'] in pending_sources:
                 continue
             links = sorted(email_links.extract_links(mail.get('body') or ''))
             if not links:
                 continue
-            digest = _hash(json.dumps(links))
-            request_key = self.activity_key(mail['deal'], f"links|{mail['activity_id']}|{digest}")
+            request_key = key('log-activity', 'email-links', mail['activity_id'])
             acknowledged = self.state.get('requests', {}).get(request_key, {}).get('acknowledged')
             if self.write('log-activity', {
                 'idempotency_key': request_key,
