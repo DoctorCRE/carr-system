@@ -403,7 +403,7 @@ out: { attach_id,
            propose_with: "write-doctrine-section document=team-memory section_key=conventions/proposed/<slug>" },
          { name: "team-memory", access: "read_write" | "read_only",
            document: "team-memory", generation,
-           index: [ { section_key, title, version, content_hash,
+           index: [ { section_id, section_key, title, version, content_hash,
                       review_after, last_writer_surface } ],
            instructions: "Check the index before starting. Read with doctrine-sections.
              Write lessons as you learn them with write-doctrine-section

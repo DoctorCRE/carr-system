@@ -1603,7 +1603,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         const doc = await resolveDoc(c, TEAM_MEMORY);
         const generation = Number((await c.query(`select generation from doctrine_meta where id=1`)).rows[0].generation);
         const index = (await c.query(
-          `select s.section_key, s.title, s.current_version as version, s.body_hash as content_hash,
+          `select s.id as section_id, s.section_key, s.title, s.current_version as version, s.body_hash as content_hash,
                   s.review_after, m.surface as last_writer_surface
              from doctrine_section s
              left join doctrine_revision r on r.id = s.current_revision_id
