@@ -16,6 +16,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const SRC = fileURLToPath(new URL("../src/", import.meta.url));
 const FILE = "tools.js";
@@ -95,7 +96,7 @@ class Fake {
 }
 
 function args(overrides = {}) {
-  return { idempotency_key: `k-${Math.random()}`, loop_id: CLOSED.id, base_version: 2,
+  return { idempotency_key: derivedIdempotencyKey("test", `k-${Math.random()}`), loop_id: CLOSED.id, base_version: 2,
     outcome: GOOD_OUTCOME, reason: GOOD_REASON, ...overrides };
 }
 

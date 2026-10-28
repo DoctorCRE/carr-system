@@ -1,5 +1,6 @@
 // Tests uptime probes, outage alerts, recovery, and worker behavior.
 import { test } from "node:test";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 import assert from "node:assert/strict";
 import {
   inQuietWindow, probeProduction, QUIET_END_HOUR, QUIET_START_HOUR, QUIET_TIME_ZONE, ROUND_TRIP_VERB,
@@ -273,7 +274,8 @@ test("all probes must pass for recovery; a later outage gets a separate incident
   const keys = h.calls.filter((call) => call.url.endsWith("/mcp"))
     .map((call) => JSON.parse(call.body).params).filter((call) => call.name === "add-loop")
     .map((call) => call.arguments.idempotency_key);
-  assert.deepEqual(keys, ["uptime:production-29853782:open", "uptime:production-29853787:open"]);
+  assert.deepEqual(keys, ["production-29853782", "production-29853787"].map((id) => derivedIdempotencyKey("uptime-open", id)));
+  for (const key of keys) assert.match(key, /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/);
 });
 
 test("Cron entrypoint serializes overlapping delivery and only exposes read-only health", async () => {

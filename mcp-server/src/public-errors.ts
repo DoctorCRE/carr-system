@@ -93,7 +93,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["newer_change_exists", "The record changed after this proposal. Review its current state before deciding."],
   ["invalid_work_queue_fields", "Use only the documented queue fields and positive 32-bit slice, job, and position numbers."],
   ["invalid_work_request", "Supply a numeric Work Request reference such as WR-000014."],
-  ["invalid_idempotency_key", "Supply a UUID idempotency key and reuse it only for the same action."],
+  ["invalid_idempotency_key", "Supply a UUID as idempotency_key and reuse it only for the same action."],
   ["invalid_slice_plan", "Supply one through one hundred non-empty slice titles, each at most 200 characters."],
   ["slice_plan_conflict", "Use the existing ordered slices; replacing their identities is refused."],
   ["slice_not_found", "Choose a slice from the recorded plan."],
@@ -212,7 +212,7 @@ export function publicError(error: unknown, { env, inputSchema, fallback = "unha
       .filter(id => typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(id)))].slice(0, 50);
   if (code === "version_conflict" && Number.isSafeInteger(payload?.current_version) && (payload!.current_version as number) >= 0)
     result.current_version = payload!.current_version as number;
-  if (["invalid_report_problem", "invalid_report_problem_fields", "invalid_acceptance_criteria", "current_situation_source_not_found", "invalid_field_value", "validation_error", "value_not_in_declared_vocabulary", "unregistered_operation_fields", "missing_required", "invalid_boolean", "invalid_number", "tool_call_markup_in_value"].includes(code)) {
+  if (["invalid_idempotency_key", "invalid_report_problem", "invalid_report_problem_fields", "invalid_acceptance_criteria", "current_situation_source_not_found", "invalid_field_value", "validation_error", "value_not_in_declared_vocabulary", "unregistered_operation_fields", "missing_required", "invalid_boolean", "invalid_number", "tool_call_markup_in_value"].includes(code)) {
     const allowed = inputFields(inputSchema);
     const candidates = [payload?.field, payload?.column,
       ...(Array.isArray(payload?.fields) ? payload.fields : []),

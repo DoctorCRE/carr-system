@@ -26,7 +26,7 @@ class PoolFake {
 test("promote-pool refuses a pool row without sourced contact research before party creation", async () => {
   const db = new PoolFake();
   await assert.rejects(() => TOOLS["promote-pool"].handler(db, joe, {
-    idempotency_key: "promote-pool-no-research", pool_id: "pool-id", base_version: 1, stage: "new",
+    idempotency_key: "00000571-0000-4000-8000-000000000217", pool_id: "pool-id", base_version: 1, stage: "new",
   }), e => e instanceof ToolError && e.payload.error === "research_evidence_required" && e.payload.gate === "promote-pool");
   assert.equal(db.partyInserts, 0);
 });

@@ -1,4 +1,5 @@
 // Check service health and track uptime incidents.
+import { derivedIdempotencyKey } from "./derived-key.ts";
 export const API_ORIGIN = "https://api.doctorcre.com";
 export const APP_ORIGIN = "https://app.doctorcre.com";
 export const STATE_KEY = "uptime.v1";
@@ -163,7 +164,7 @@ async function deliverRecord(storage, state, env, fetcher) {
     try {
       if (!incident.loop_id) {
         const value = await callRecord(env, fetcher, "add-loop", {
-          idempotency_key: `uptime:${incident.id}:open`, kind: "open_loop", domain: "system",
+          idempotency_key: derivedIdempotencyKey("uptime-open", incident.id), kind: "open_loop", domain: "system",
           owner: "claude", marker: "none", body: incident.open_body,
           source_note: "carr-uptime Cron monitor; orchestrator owns remediation; immutable incident timings are retained in the monitor ledger",
           blocker: "other_lane", blocker_detail: "The orchestrator production-recovery lane must restore the failed DoctorCRE route or contract; this observer has no deployment authority",
@@ -178,7 +179,7 @@ async function deliverRecord(storage, state, env, fetcher) {
         if (loop.status === "open") {
           const seconds = (Date.parse(incident.recovered_at) - Date.parse(incident.first_failure_at)) / 1000;
           const value = await callRecord(env, fetcher, "close-loop", {
-            idempotency_key: `uptime:${incident.id}:close`, loop_id: incident.loop_id, base_version: loop.version,
+            idempotency_key: derivedIdempotencyKey("uptime-close", incident.id), loop_id: incident.loop_id, base_version: loop.version,
             resolution: "done", outcome: `${incidentText(incident)} Observed outage ${seconds} seconds; all three production JSON probes passed on recovery.`,
           });
           if (value.ok !== true) throw new Error("close_shape");
