@@ -9,7 +9,7 @@ To find a script and its purpose, run `./run.sh map` for a fresh path-and-descri
 ## Always-on rules
 
 <!-- Generated from mcp-server/src/doctrine.js and ops/config/rule-cards.v1.json by ops/sync-core-rule-cards.py. -->
-OPENING ACT, every session: call attach-memory first, with surface claude_code for Claude Code or codex for a Codex job (pass the job log named on the brief's first line as transcript_ref). Check its team-memory index before starting and read any section that bears on your task with doctrine-sections; as you learn or rule something out, write it with write-doctrine-section document=team-memory and your attach_id.
+OPENING ACT, every session: call attach-memory once, first, with surface claude_code for Claude Code or codex for a Codex job (pass the job log named on the brief's first line as transcript_ref). Check its team-memory index before starting and read any section that bears on your task with doctrine-sections; as you learn or rule something out, write it with write-doctrine-section document=team-memory and your attach_id.
 
 These twelve core cards are loaded natively with this file.
 Before acting when a card applies, answer one line with applies yes/no and the action or reason.
