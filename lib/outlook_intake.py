@@ -19,7 +19,9 @@ through the named record-layer verbs:
 
 A run outside 07:00-19:30 local does nothing. Matching requires one record with
 that exact address; every address written in a record's email field counts, and
-names alone never establish identity. Unmatched participants in mail and calendar
+names alone never establish identity. Records are clients, leads and vendors, plus
+open deals for the participants with no such role that v_email_deal_contact lists
+(a partner-confirmed email sender, for one): their mail logs on the deal itself. Unmatched participants in mail and calendar
 stay unresolved and are retried when mappings change, even outside the rolling
 lookback. Records are never created, merged or renamed.
 
@@ -104,6 +106,8 @@ WRITE_VERBS = frozenset({'log-activity', 'set-next-action', 'publish-board-snaps
                          'record-deal-item', 'complete-deal-item', 'drop-action'})
 FLAG_ITEM_TITLE = 'Follow up flagged email'
 RECORD_REF = re.compile(r'^[CLV]-')
+DEAL_REF = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+DEAL_CONTACTS = 'v_email_deal_contact'
 EXIT = {'succeeded': 0, 'skipped': 78, 'failed': 1}
 
 BACKFILL = timedelta(hours=48)
@@ -547,7 +551,7 @@ class Matcher:
             if '@' in c.email and not _internal(c.email, domain):
                 if not c.exact:
                     self.shared.add(c.email.lower())
-                elif RECORD_REF.match(c.ref):
+                elif RECORD_REF.match(c.ref) or DEAL_REF.match(c.ref):
                     self.by_email.setdefault(c.email.lower(), set()).add(c.ref)
                 else:
                     self.unsupported.add(c.email.lower())
@@ -1742,6 +1746,10 @@ def _contacts(repo: Path) -> Callable[[], list]:
                     if not r.get('_out_of_market'):
                         rows += record_contacts(email, str(r.get(id_col) or '').strip(),
                                                 str(r.get(name_col) or r.get(org_col) or '').strip())
+            _, found = matcher.read_view(DEAL_CONTACTS, credential_file=load_settings().database_credentials)
+            for r in found:
+                rows += record_contacts(str(r.get('Email') or '').strip().lower(), str(r.get('Deal ID') or '').strip(),
+                                        str(r.get('Name') or '').strip())
         except (Exception, SystemExit):
             raise CarrError(code='contacts_read_failed') from None
         if not rows:

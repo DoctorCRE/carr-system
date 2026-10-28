@@ -1132,6 +1132,29 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(args['idempotency_key'],
                          str(uuid.uuid5(uuid.NAMESPACE_URL, f'log-activity|C-901|joe|{ident(m)}')))
 
+    def test_a_confirmed_deal_contact_logs_on_the_deal_and_is_never_offered_as_a_record(self):
+        deal = '0b6c8a52-7d1e-4c55-9f0a-2e3d4c5b6a71'
+        self.fake.contacts_rows.append(intake.Contact('rep@landlord.test', deal, 'Bayside suite'))
+        result = self.run_intake([mail('rep@landlord.test', -timedelta(hours=1), name='Rep Example')])
+        self.assertEqual(result.state, 'succeeded')
+        [(_, args)] = self.fake.writes('log-activity')
+        self.assertEqual(args['ref'], deal)
+        self.assertEqual(self.fake.writes('propose-email-lead'), [])
+        matcher = intake.Matcher([intake.Contact('rep@landlord.test', deal, 'Bayside suite'), CLIENT], 'carr.us')
+        self.assertEqual([ref for _, ref, _ in matcher.people], ['C-901'])
+
+    def test_contacts_include_the_deal_contact_view(self):
+        from types import SimpleNamespace
+        deal = '0b6c8a52-7d1e-4c55-9f0a-2e3d4c5b6a71'
+        views = {'fake': [{'id': 'C-901', 'name': 'Pat Example', 'Email': 'pat@example.test'}],
+                 intake.DEAL_CONTACTS: [{'Deal ID': deal, 'Name': 'Bayside suite', 'Email': 'Rep@Landlord.test'}]}
+        exporter = SimpleNamespace(RECORD_VIEWS=[('fake', 'id', 'name', 'org')],
+                                   read_view=lambda view, **kwargs: ([], views[view]))
+        with patch('lib.loadpy.load_module_from_path', return_value=exporter), \
+                patch.object(intake, 'load_settings', lambda home=None: load_settings(self.home)):
+            contacts = intake._contacts(self.repo)()
+        self.assertEqual([(c.email, c.ref) for c in contacts], [('pat@example.test', 'C-901'), ('rep@landlord.test', deal)])
+
     def test_shared_inbound_message_has_a_separate_activity_key_for_each_mailbox(self):
         m = mail('pat@example.test', -timedelta(hours=1))
         captured = []

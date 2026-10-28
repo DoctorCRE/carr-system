@@ -10588,7 +10588,9 @@ registerTools(emailNextStepTools({ withEnvelope, writeEvent, lockDealField, reso
   setNextAction: (c, actor, args) => TOOLS["set-next-action"].handler(c, actor, args) }), "email-next-step");
 registerTools(emailProposalTools({ ToolError, withEnvelope, writeEvent,
   preview: (c, actor, verb, args) => TOOLS[verb].handler(c, actor, args) }), "email-proposals");
-registerTools(emailLeadProposalTools({ withEnvelope, writeEvent }), "email-lead-proposal");
+registerTools(emailLeadProposalTools({ withEnvelope, writeEvent,
+  updatePartyContact: (c, actor, args) => TOOLS["update-party-contact"].handler(c, actor, args),
+  newLead: (c, actor, args) => TOOLS["new-lead"].handler(c, actor, args) }), "email-lead-proposal");
 const invoices=invoiceAutomation({withEnvelope,writeEvent,ToolError,lockDealField,
   updateDeal:(c,actor,args)=>TOOLS["update-deal"].handler(c,actor,args),
   invoicingMailbox:process.env.CARR_INVOICING_MAILBOX});

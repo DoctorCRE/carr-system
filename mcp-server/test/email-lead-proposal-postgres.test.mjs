@@ -263,3 +263,128 @@ test('migration preserves proven mailbox proposals and final declines while hidi
     message_ref: randomUUID(), applies_to: 'new_matter', confidence: 0.8 }, 'carr_writer');
   assert.deepEqual([again.pool_id, again.status, again.proposed], [declined, 'declined', false]);
 });
+
+// confirm-email-lead: a partner's confirmation teaches the record layer who the sender is.
+const joeHome = () => ({ ...actor, slug: 'joe', human: true });
+const dellHome = () => ({ ...actor, slug: 'dell', human: true });
+async function queued(identity, address, extra = {}) {
+  const proposal = await leadCommand(identity, 'propose-email-lead', { idempotency_key: randomUUID(), address,
+    display_name: 'Synthetic Confirm Sender', summary: 'Asks about a clinic suite.', first_seen_at: '2026-10-20T15:00:00Z',
+    message_ref: randomUUID(), evidence_quote: 'We need about 3,000 square feet', confidence: 0.8, ...extra }, 'carr_writer');
+  assert.equal(proposal.proposed, true);
+  return proposal.pool_id;
+}
+const confirm = (identity, args) => leadCommand(identity, 'confirm-email-lead', { idempotency_key: randomUUID(), ...args }, 'carr_writer');
+const pool = async id => (await c.query('select status, version, promoted_lead_id from candidate_pool where id=$1', [id])).rows[0];
+const pending = async identity => (await leadCommand(identity, 'list-email-proposals', { mode: 'lead_proposals' })).proposals.map(p => p.pool_id);
+const confirmEvent = async id => (await c.query("select new_value from event where verb='confirm-email-lead' and subject_id=$1", [id])).rows[0].new_value;
+
+test('confirming a known contact at a new address adds the address to that party, so intake matches it', async () => {
+  await fixtures();
+  const id = await queued(joeHome(), 'client.home@confirm.test', { applies_to: 'existing_party', party: 'C-999451' });
+  const person = (await c.query("select p.id from client cl join party p on p.id=cl.party_id where cl.roster_ref='C-999451'")).rows[0].id;
+  await c.query("update party set email='client.office@confirm.test' where id=$1", [person]);
+  const before = await counts();
+  const result = await confirm(joeHome(), { pool_id: id, base_version: 1 });
+  assert.deepEqual([result.status, result.applies_to, result.party_id], ['confirmed', 'existing_party', person]);
+  assert.equal((await c.query('select email from party where id=$1', [person])).rows[0].email,
+    'client.office@confirm.test; client.home@confirm.test');
+  assert.deepEqual(await counts(), before, 'no party, lead or pool row is minted');
+  assert.equal((await pool(id)).status, 'confirmed');
+  assert.ok(!(await pending(joeHome())).includes(id), 'the confirmed row leaves Home');
+  const again = await leadCommand(joeHome(), 'propose-email-lead', { idempotency_key: randomUUID(), address: 'client.home@confirm.test',
+    summary: 'Follow-up.', first_seen_at: '2026-10-21T15:00:00Z', message_ref: randomUUID() }, 'carr_writer');
+  assert.equal(again.reason, 'known_party');
+  const event = await confirmEvent(id);
+  assert.deepEqual([event.evidence_quote, event.evidence_quote_untrusted, event.proposed_applies_to, event.overridden],
+    ['We need about 3,000 square feet', true, 'existing_party', false]);
+});
+
+test('confirming an open deal attaches a minimal sender party to it, which the intake deal contacts carry', async () => {
+  const { open } = await fixtures();
+  const id = await queued(joeHome(), 'landlord.rep@confirm.test', { applies_to: 'existing_deal', deal: open });
+  const result = await confirm(joeHome(), { pool_id: id, base_version: 1 });
+  assert.deepEqual([result.status, result.applies_to, result.deal_id], ['confirmed', 'existing_deal', open]);
+  const party = (await c.query("select id, name from party where email='landlord.rep@confirm.test'")).rows;
+  assert.deepEqual(party.map(p => [p.name, p.id]), [['Synthetic Confirm Sender', result.party_id]]);
+  assert.equal((await c.query("select count(*)::int as n from record_flag where subject_id=$1 and kind='verified'", [result.party_id])).rows[0].n, 0,
+    'an email-confirmed party never claims research');
+  assert.deepEqual((await c.query('select role from deal_participant where deal_id=$1 and party_id=$2 and to_at is null',
+    [open, result.party_id])).rows, [{ role: 'email_contact' }]);
+  assert.deepEqual((await c.query('select "Deal ID" as deal, "Name" as name from v_email_deal_contact where "Email"=$1',
+    ['landlord.rep@confirm.test'])).rows, [{ deal: open, name: 'Synthetic bayside suite' }]);
+  assert.equal((await pool(id)).status, 'confirmed');
+});
+
+test('confirming a new matter creates an email-sourced lead, never a research promotion', async () => {
+  await fixtures();
+  const id = await queued(dellHome(), 'new.clinic@confirm.test', { applies_to: 'new_matter' });
+  const result = await confirm(dellHome(), { pool_id: id, base_version: 1 });
+  assert.equal(result.status, 'promoted');
+  const lead = (await c.query(`select l.stage, l.source_type, l.source_detail, a.slug as owner, p.email
+    from lead l join party p on p.id=l.party_id join actor a on a.id=l.owner_id where l.id=$1`, [result.lead_id])).rows[0];
+  assert.deepEqual([lead.stage, lead.source_type, lead.owner, lead.email], ['new', 'email', 'dell', 'new.clinic@confirm.test']);
+  assert.match(lead.source_detail, /untrusted email text: "We need about 3,000 square feet"/);
+  assert.deepEqual(await pool(id), { status: 'promoted', version: 2, promoted_lead_id: result.lead_id });
+  assert.equal((await c.query("select count(*)::int as n from record_flag where subject_id=$1 and kind='verified'", [result.party_id])).rows[0].n, 0);
+  assert.equal((await c.query("select count(*)::int as n from event where verb='promote-pool' and subject_id=$1", [id])).rows[0].n, 0);
+});
+
+test('the partner may override the reading: another deal, or another outcome', async () => {
+  const { open, closed } = await fixtures();
+  const client = (await c.query("select id from client where roster_ref='C-999451'")).rows[0].id;
+  const other = (await c.query(`insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by)
+    values('Synthetic harbor suite',$1,'purchase','site_selection','joe',$2,$2) returning id`, [client, actor.id])).rows[0].id;
+  const toDeal = await queued(joeHome(), 'override.deal@confirm.test', { applies_to: 'existing_deal', deal: open });
+  const moved = await confirm(joeHome(), { pool_id: toDeal, base_version: 1, deal: other });
+  assert.equal(moved.deal_id, other);
+  assert.equal((await c.query('select count(*)::int as n from deal_participant where deal_id=$1 and party_id=$2', [open, moved.party_id])).rows[0].n, 0);
+  assert.equal((await confirmEvent(toDeal)).overridden, true);
+  const toParty = await queued(joeHome(), 'override.party@confirm.test', { applies_to: 'new_matter' });
+  const known = await confirm(joeHome(), { pool_id: toParty, base_version: 1, applies_to: 'existing_party', party: 'C-999451' });
+  assert.equal(known.applies_to, 'existing_party');
+  assert.match((await c.query('select email from party where id=$1', [known.party_id])).rows[0].email, /override\.party@confirm\.test$/);
+  const event = await confirmEvent(toParty);
+  assert.deepEqual([event.applies_to, event.proposed_applies_to, event.overridden], ['existing_party', 'new_matter', true]);
+  const shape = await queued(joeHome(), 'override.shape@confirm.test', { applies_to: 'new_matter' });
+  for (const extra of [{ applies_to: 'existing_deal' }, { applies_to: 'existing_party' }, { deal: open },
+    { applies_to: 'new_matter', party: 'C-999451' }, { applies_to: 'existing_deal', deal: open, stage: 'new' }])
+    await assert.rejects(confirm(joeHome(), { pool_id: shape, base_version: 1, ...extra }),
+      error => error.payload?.error === 'email_lead_input_invalid', JSON.stringify(extra));
+  await assert.rejects(confirm(joeHome(), { pool_id: shape, base_version: 1, applies_to: 'existing_deal', deal: closed }),
+    error => error.payload?.error === 'email_lead_deal_invalid');
+  await assert.rejects(confirm(joeHome(), { pool_id: shape, base_version: 1, applies_to: 'existing_party', party: 'C-000000' }),
+    error => error.payload?.error === 'email_lead_party_invalid');
+  assert.equal((await pool(shape)).status, 'pool');
+});
+
+test('decline-candidate resolves an email lead off Home; a declined row cannot then be confirmed', async () => {
+  const id = await queued(joeHome(), 'decline.me@confirm.test', { applies_to: 'new_matter' });
+  await leadCommand(joeHome(), 'decline-candidate', { idempotency_key: randomUUID(), pool_id: id, base_version: 1,
+    reason: 'Synthetic vendor pitch' }, 'carr_writer');
+  assert.equal((await pool(id)).status, 'declined');
+  assert.ok(!(await pending(joeHome())).includes(id));
+  await assert.rejects(confirm(joeHome(), { pool_id: id, base_version: 2 }), error => error.payload?.error === 'email_lead_not_pending');
+});
+
+test('a replayed confirmation returns the stored answer; a stale version or second key changes nothing', async () => {
+  const id = await queued(joeHome(), 'replay.confirm@confirm.test', { applies_to: 'new_matter' });
+  await assert.rejects(confirm(joeHome(), { pool_id: id, base_version: 7 }), error => error.payload?.error === 'version_conflict');
+  const args = { idempotency_key: randomUUID(), pool_id: id, base_version: 1 };
+  const first = await leadCommand(joeHome(), 'confirm-email-lead', args, 'carr_writer');
+  const before = await counts();
+  const second = await leadCommand(joeHome(), 'confirm-email-lead', args, 'carr_writer');
+  assert.equal(second.replayed, true);
+  assert.equal(second.lead_id, first.lead_id);
+  assert.deepEqual(await counts(), before);
+  await assert.rejects(confirm(joeHome(), { pool_id: id, base_version: 2 }), error => error.payload?.error === 'email_lead_not_pending');
+});
+
+test('only the mailbox owner confirms: the other partner and machine callers are refused', async () => {
+  const id = await queued(joeHome(), 'owner.only@confirm.test', { applies_to: 'new_matter' });
+  await assert.rejects(confirm(dellHome(), { pool_id: id, base_version: 1 }), error => error.payload?.error === 'email_lead_not_found');
+  await assert.rejects(confirm(actor, { pool_id: id, base_version: 1 }), error => error.payload?.error === 'email_sender_identity_required');
+  const local = { ...actor, slug: 'dell-local', native_agent_verified: true, sponsoring_human_slug: 'dell' };
+  await assert.rejects(confirm(local, { pool_id: id, base_version: 1 }), error => error.payload?.error === 'email_lead_not_found');
+  assert.deepEqual(await pool(id), { status: 'pool', version: 1, promoted_lead_id: null });
+});

@@ -698,6 +698,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "confirm-email-lead": {
+    "ingress_key": "mcp-tool:confirm-email-lead",
+    "source_locator": "mcp-server/src/email-lead-proposal.ts",
+    "schema_digest": "35118ab0f70731f846bbc5c49e38dbbf072ee81f264c5e0c554183b036dd78d8",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "confirm-email-next-step": {
     "ingress_key": "mcp-tool:confirm-email-next-step",
     "source_locator": "mcp-server/src/email-next-step.ts",
