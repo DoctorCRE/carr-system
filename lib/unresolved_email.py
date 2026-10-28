@@ -19,9 +19,8 @@ short local keys (D1, P1) so the model cannot name one that was not listed.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 import re
-import subprocess
 
 from lib import model_call
 from lib.email_router import fenced
@@ -29,6 +28,8 @@ from lib.email_router import fenced
 OUTCOMES = ('existing_deal', 'existing_party', 'new_matter', 'not_business')
 MAX_READS = 10        # model calls per intake run; a backlog drains over runs
 MAX_ATTEMPTS = 3      # failed reads of one email before it is left unread
+RETRY_AFTER = timedelta(hours=6)  # spacing between attempts: an outage costs an email one attempt
+MAX_FAILURES_IN_A_ROW = 2  # then the run stops reading; the spacing makes those attempts harmless
 MAX_DEALS = 200
 MAX_PARTIES = 20
 MIN_QUOTE, MAX_QUOTE = 10, 500
@@ -60,11 +61,6 @@ SYSTEM_PROMPT = (
     'one short summary sentence of the need without names, addresses or phone numbers, and an evidence_quote '
     'copied exactly, character for character, from the email. confidence is your probability that the '
     'answer is right.')
-
-
-class InvalidRead(ValueError):
-    """The model answered, but not with a usable read of this email. Only this spends an attempt;
-    a failed call (signed out, usage limit, timeout) says nothing about the email."""
 
 
 def open_deals(rows: list[dict]) -> list[dict]:
@@ -108,12 +104,12 @@ def prompt(mail: dict, today: date, deals: list[dict], parties: list[dict]) -> s
 
 
 def parse(reply: dict, mail: dict, deals: list[dict], parties: list[dict]) -> dict:
-    """The read, checked against what was offered; InvalidRead when it cannot stand."""
+    """The read, checked against what was offered; ValueError when it cannot stand."""
     applies, confidence = reply.get('applies_to'), reply.get('confidence')
     if applies not in OUTCOMES:
-        raise InvalidRead('unknown outcome')
+        raise ValueError('unknown outcome')
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
-        raise InvalidRead('invalid confidence')
+        raise ValueError('invalid confidence')
     read = {'applies_to': applies, 'deal': None, 'party': None, 'summary': None, 'evidence_quote': None,
             'confidence': float(confidence)}
     if applies == 'not_business':
@@ -122,7 +118,7 @@ def parse(reply: dict, mail: dict, deals: list[dict], parties: list[dict]) -> di
     def pick(value, prefix: str, offered: list[dict]):
         index = int(value[1:]) if isinstance(value, str) and re.fullmatch(prefix + r'\d+', value) else 0
         if not 1 <= index <= len(offered):
-            raise InvalidRead('the read named something that was not offered')
+            raise ValueError('the read named something that was not offered')
         return offered[index - 1]
     if applies == 'existing_deal':
         read['deal'] = pick(reply.get('deal'), 'D', deals)['id']
@@ -130,7 +126,7 @@ def parse(reply: dict, mail: dict, deals: list[dict], parties: list[dict]) -> di
         read['party'] = pick(reply.get('party'), 'P', parties)['ref']
     summary = ' '.join(str(reply.get('summary') or '').split())[:300]
     if not summary:
-        raise InvalidRead('a business read needs a summary')
+        raise ValueError('a business read needs a summary')
     read['summary'] = summary
     quote = reply.get('evidence_quote')
     if (isinstance(quote, str) and MIN_QUOTE <= len(quote.strip()) and len(quote) <= MAX_QUOTE
@@ -139,17 +135,7 @@ def parse(reply: dict, mail: dict, deals: list[dict], parties: list[dict]) -> di
     return read
 
 
-def outage(error: Exception) -> bool:
-    """A failed call that says nothing about the email: the CLI exited non-zero (signed out, usage
-    limit, auth, transport), timed out, or could not start. lib/model_call raises exactly these
-    for a call that did not complete; everything else is about the email and spends an attempt."""
-    return isinstance(error, (RuntimeError, subprocess.TimeoutExpired, OSError))
-
-
 def ask(mail: dict, today: date, deals: list[dict], parties: list[dict], model: str) -> dict:
-    try:
-        reply = model_call.ask(prompt(mail, today, deals, parties), model=model, schema=SCHEMA,
-                               system_prompt=SYSTEM_PROMPT)
-    except ValueError as error:  # the call completed, but this email's reply carries no result
-        raise InvalidRead('the reply carries no read') from error
+    reply = model_call.ask(prompt(mail, today, deals, parties), model=model, schema=SCHEMA,
+                           system_prompt=SYSTEM_PROMPT)
     return parse(reply, mail, deals, parties)

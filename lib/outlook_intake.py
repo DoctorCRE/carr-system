@@ -1053,17 +1053,16 @@ class Run:
         """Read each unresolved email from an unknown sender once; queue business for a partner's review.
 
         At most unresolved_email.MAX_READS model reads per run, oldest email first; the rest wait
-        and reads_due keeps the next run decoding an unchanged store. A call that fails (signed
-        out, usage limit, timeout: unresolved_email.outage) stops reading for this run and spends
-        no attempt; any other failure is about that email and is retried on later runs, the email
-        left unread after MAX_ATTEMPTS, so one poison email never blocks the rest.
-        Once a sender is on the queue, that address's later email is not read again: the queue
-        holds one row per address. A refused proposal does not count as queued."""
+        and reads_due keeps the next run decoding an unchanged store. Any failed read spends one of
+        the email's MAX_ATTEMPTS and is not retried before RETRY_AFTER, so an outage costs each
+        email at most one attempt; the run moves past it and stops reading after
+        MAX_FAILURES_IN_A_ROW. Once a sender is on the queue, that address's later email is not read
+        again: the queue holds one row per address. A refused proposal does not count as queued."""
         self.state['reads_due'] = False
         if self.ports.read_unresolved is None:
             return
         queued = {p['sender'] for p in self.state.get('mail_unresolved', {}).values() if p.get('sender')}
-        deals = None
+        deals, failures = None, 0
         for m, progress in self.lead_candidates:
             if 'read' in progress:
                 continue
@@ -1073,6 +1072,9 @@ class Run:
             if _hash(address) in queued:
                 progress['read'] = 'sender_queued'
                 self.counts['lead_already_queued'] += 1
+                continue
+            if progress.get('read_failed_at', 0) > self.now.timestamp() - unresolved_email.RETRY_AFTER.total_seconds():
+                self.state['reads_due'] = True
                 continue
             if self.counts['reads'] >= unresolved_email.MAX_READS:
                 self.counts['reads_deferred'] += 1
@@ -1090,19 +1092,22 @@ class Run:
             self.counts['reads'] += 1
             try:
                 read = self.ports.read_unresolved(m, self.today, deals, parties)
-            except Exception as error:
-                if unresolved_email.outage(error):
-                    self.counts['model_failed'] += 1
-                    return
+            except Exception:
+                failures += 1
                 progress['read_attempts'] = progress.get('read_attempts', 0) + 1
+                progress['read_failed_at'] = int(self.now.timestamp())
                 if progress['read_attempts'] >= unresolved_email.MAX_ATTEMPTS:
                     progress['read'] = 'abandoned'
                     self.counts['reads_abandoned'] += 1
                 else:
                     self.counts['model_failed'] += 1
+                    self.state['reads_due'] = True
                 _save(self.out, self.state)
+                if failures >= unresolved_email.MAX_FAILURES_IN_A_ROW:
+                    return
                 continue
-            for stale in ('intent', 'summary', 'read_attempts'):
+            failures = 0
+            for stale in ('intent', 'summary', 'read_attempts', 'read_failed_at'):
                 progress.pop(stale, None)
             progress['read'] = read['applies_to']
             self.counts['lead_' + read['applies_to']] += 1

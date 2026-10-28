@@ -2263,48 +2263,48 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(result.counts['unresolved_read'], unresolved_email.MAX_READS + 2)
         self.assertEqual(self.run_intake(mails, touch=False).reason, 'store_unchanged')
 
-    def test_an_invalid_answer_about_one_email_is_retried_then_left_unread(self):
-        self.fake.intent_reply = unresolved_email.InvalidRead('named a deal that was not offered')
-        m = mail('new@example.test', -timedelta(hours=1))
-        for _ in range(unresolved_email.MAX_ATTEMPTS - 1):
-            self.assertEqual(self.run_intake([m]).reason, 'model_failed')
-        result = self.run_intake([m])
-        self.assertEqual(result.state, 'succeeded')
+    def test_a_poison_email_is_abandoned_after_three_attempts_spread_over_twelve_hours(self):
+        self.fake.intent_reply = RuntimeError('model exit 1')
+        m = mail('poison@practice.test', -timedelta(hours=1))
+        start = self.fake.now
+        for hours in (0, 3, 6, 9, 24):  # 3 and 9 fall inside the six-hour spacing; 9 is still in the run window
+            self.fake.now = start + timedelta(hours=hours)
+            result = self.run_intake([m])
+        calls = len(self.fake.intent_calls)
+        self.assertEqual(calls, unresolved_email.MAX_ATTEMPTS, 'one attempt per six hours')
         self.assertEqual(result.counts['reads_abandoned'], 1)
+        self.assertEqual(result.state, 'succeeded')
         self.assertEqual((result.counts['unresolved_read'], result.counts['unresolved_read_abandoned']), (0, 1),
                          'an abandoned email is not counted as read')
+        self.fake.now = start + timedelta(hours=48)
         self.run_intake([m])
-        self.assertEqual(len(self.fake.intent_calls), unresolved_email.MAX_ATTEMPTS)
+        self.assertEqual(len(self.fake.intent_calls), calls)
         self.assertEqual(self.fake.writes(), [])
 
-    def test_a_model_outage_spends_no_attempts_and_the_backlog_is_read_afterwards(self):
-        self.fake.intent_reply = RuntimeError('model exit 1')
-        mails = [mail('first@practice.test', -timedelta(hours=2), subject='One'),
-                 mail('second@clinic.test', -timedelta(hours=1), subject='Two')]
-        for _ in range(unresolved_email.MAX_ATTEMPTS + 2):
-            result = self.run_intake(mails)
-            self.assertEqual(result.reason, 'model_failed')
-            self.assertEqual((result.counts['reads'], result.counts['reads_abandoned']), (1, 0),
-                             'an outage stops this run after one call')
-        state = json.loads((self.out() / intake.STATE).read_text())
-        self.assertFalse(any('read_attempts' in p or 'read' in p for p in state['mail_unresolved'].values()))
-        self.fake.intent_reply = read('new_matter', 'Needs space.')
-        result = self.run_intake(mails)
-        self.assertEqual(result.state, 'succeeded')
-        self.assertEqual(len(self.fake.writes('propose-email-lead')), 2)
-
-    def test_a_poison_email_ahead_of_good_ones_never_blocks_them_and_is_abandoned(self):
+    def test_a_poison_email_ahead_of_good_ones_never_blocks_them(self):
         poison = mail('poison@practice.test', -timedelta(hours=3), subject='Poison')
         good = [mail(f'good{i}@clinic{i}.test', -timedelta(hours=2, minutes=-i), subject=f'Good {i}') for i in range(2)]
-        self.fake.intent_reply = lambda m, deals, parties: (ValueError('model reply carries no result')
+        self.fake.intent_reply = lambda m, deals, parties: (RuntimeError('model exit 1')
                                                             if m['sender'] == poison['sender'] else read('new_matter', 'Needs space.'))
         result = self.run_intake([poison, *good])
         self.assertEqual(len(self.fake.writes('propose-email-lead')), 2, 'the good emails are read in the same run')
-        for _ in range(unresolved_email.MAX_ATTEMPTS - 1):
-            result = self.run_intake([poison, *good])
-        self.assertEqual(result.counts['reads_abandoned'], 1)
-        self.assertEqual(result.state, 'succeeded')
-        self.assertEqual(sum(m['sender'] == poison['sender'] for m, _, _ in self.fake.intent_calls), unresolved_email.MAX_ATTEMPTS)
+        self.assertEqual(result.reason, 'model_failed')
+
+    def test_a_ninety_minute_outage_spends_at_most_one_attempt_per_email(self):
+        self.fake.intent_reply = RuntimeError('model exit 1')
+        mails = [mail(f'sender{i}@practice{i}.test', -timedelta(hours=2, minutes=i), subject=f'Space {i}') for i in range(4)]
+        start = self.fake.now
+        for minutes in (0, 30, 60):
+            self.fake.now = start + timedelta(minutes=minutes)
+            result = self.run_intake(mails)
+            self.assertLessEqual(result.counts['reads'], 2, 'two failures in a row stop the run')
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertTrue(all(p.get('read_attempts', 0) <= 1 for p in state['mail_unresolved'].values()))
+        self.assertEqual(result.counts['unresolved_read_abandoned'], 0)
+        self.fake.intent_reply = read('new_matter', 'Needs space.')
+        self.fake.now = start + timedelta(hours=6, minutes=30)
+        self.assertEqual(self.run_intake(mails, touch=False).state, 'succeeded', 'a retry backlog decodes an unchanged store')
+        self.assertEqual(len(self.fake.writes('propose-email-lead')), 4)
 
     def test_a_refused_proposal_does_not_stop_the_senders_later_email(self):
         self.fake.intent_reply = lambda m, deals, parties: read('new_matter', 'Needs space.')
@@ -2369,6 +2369,7 @@ class IntakeTest(unittest.TestCase):
         m = mail('new@example.test', -timedelta(hours=1))
         self.assertEqual(self.run_intake([m]).reason, 'model_failed')
         self.fake.intent_reply = read('new_matter', 'Needs space.')
+        self.fake.now += unresolved_email.RETRY_AFTER
         self.assertEqual(self.run_intake([m], touch=False).state, 'succeeded')
         self.assertEqual(len(self.fake.writes('propose-email-lead')), 1)
 
@@ -3111,16 +3112,6 @@ class UnresolvedReadTest(unittest.TestCase):
         self.assertEqual(read['deal'], 'deal-1')
         self.assertEqual(ask.call_args.kwargs['model'], 'haiku')
         self.assertIs(ask.call_args.kwargs['schema'], unresolved_email.SCHEMA)
-
-    def test_a_reply_without_a_result_is_about_the_email_and_a_failed_call_is_an_outage(self):
-        for error in (ValueError('model reply carries no result'), json.JSONDecodeError('x', '', 0)):
-            with patch.object(unresolved_email.model_call, 'ask', side_effect=error), \
-                    self.assertRaises(unresolved_email.InvalidRead):
-                unresolved_email.ask(self.MAIL, NOW.date(), self.DEALS, self.PARTIES, 'haiku')
-        for error in (RuntimeError('model exit 1'), subprocess.TimeoutExpired('claude', 180), FileNotFoundError('claude')):
-            self.assertTrue(unresolved_email.outage(error), error)
-        for error in (ValueError('x'), KeyError('x'), unresolved_email.InvalidRead('x')):
-            self.assertFalse(unresolved_email.outage(error), error)
 
 
 class StoreResolverTest(unittest.TestCase):
