@@ -1,7 +1,7 @@
--- rollback: forward-only — reaped run rows and board-publish events are gone; drop function ops.reap_expired_runs(uuid, text, text, integer) and index ops.run_expires_at_idx to undo the shape
--- expand-contract: contract — bounded batched deletes of expired ops.run rows and week-old publish-board-snapshot events; their readers were checked first (WR573.S3.J3)
+-- rollback: forward-only — reaped run rows are gone; drop function ops.reap_expired_runs(uuid, text, text, integer) and index ops.run_expires_at_idx to undo the shape
+-- expand-contract: contract — bounded batched deletes of expired ops.run rows; preserve every event and reader-visible run (WR573.S3.J3)
 -- lock-review: ops.run is ~140k rows / 61 MB; the runner permits only transactional DDL, so this index uses its write-blocking lock, and the deletes run in 1,000-row batches
--- 1047_reap_expired_runs.sql
+-- 1048_reap_expired_runs.sql
 --
 -- ops.run is appended to by tools/ops-record.py on every job and check step and
 -- nothing ever removed a row. ops.reap_expired_runs is the one retention rule,
@@ -21,9 +21,8 @@
 --   * cited by an incident link, an incident's recovery evidence, a Work Request
 --     or defect receipt, or a release receipt's recovery run (ON DELETE RESTRICT).
 --
--- The board publish event is no longer written (board-answers.js): the board
--- version number records each publication. No dedicated consumer filters on
--- that verb; the generic Doc Activity feed loses these publication entries.
+-- Publication events remain durable history for Doc Activity. Reap only run
+-- observations outside the retention windows and protected reader selections.
 -- The runner requires one transaction, so CREATE INDEX CONCURRENTLY is not
 -- supported here. Its lock and timeout are enforced by the migration runner.
 
@@ -73,6 +72,29 @@ comment on function ops.reap_expired_runs(uuid, text, text, integer) is
 revoke all on function ops.reap_expired_runs(uuid, text, text, integer) from public;
 grant execute on function ops.reap_expired_runs(uuid, text, text, integer) to carr_jobs;
 
+do $contract$
+declare
+  contract jsonb := ops.scac_current_grant_contract();
+  capability jsonb := jsonb_build_object(
+    'config', jsonb_build_array('search_path=pg_catalog, pg_temp'),
+    'grantee', 'carr_jobs', 'parallel', 'u', 'grantable', false,
+    'privilege', 'execute', 'volatility', 'v', 'function_kind', 'f',
+    'security_definer', true, 'ingress_kind', 'db_function_acl',
+    'signature', 'ops.reap_expired_runs(p_service_id uuid, p_environment text, p_run_key text, p_limit integer)',
+    'ingress_key', 'db-function-acl:ops.reap_expired_runs(p_service_id uuid, p_environment text, p_run_key text, p_limit integer):carr_jobs:execute');
+begin
+  if not (contract->'secdef_execute') @> jsonb_build_array(capability) then
+    contract := jsonb_set(contract, '{secdef_execute}',
+      (contract->'secdef_execute') || jsonb_build_array(capability));
+    execute format(
+      'CREATE OR REPLACE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb LANGUAGE sql IMMUTABLE SET search_path=pg_catalog AS %L',
+      'SELECT ' || quote_literal(contract::text) || '::jsonb');
+  end if;
+  if ops.scac_mutation_catalog_v118_current() is not true then
+    raise exception '1048 FAILED: reaper grant differs from the exact grant contract';
+  end if;
+end $contract$;
+
 do $$
 declare
   v_key record;
@@ -86,15 +108,5 @@ begin
     end loop;
   end loop;
 
-  loop
-    delete from public.event e
-     where e.id in (select x.id from public.event x
-                     where x.verb = 'publish-board-snapshot'
-                       and x.subject_type = 'board_snapshot'
-                       and x.occurred_at < now() - interval '7 days'
-                     limit 1000);
-    get diagnostics v_deleted = row_count;
-    exit when v_deleted = 0;
-  end loop;
 end
 $$;

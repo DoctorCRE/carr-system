@@ -29,6 +29,7 @@ for coverage.
 Needs a disposable loopback cluster; ops/local-pg-ci.py supplies one and runs
 this in its acceptance chain. Exits 78 when there is no such cluster to use.
 """
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -208,23 +209,67 @@ def retention(owner, dsn):
             check(cur.fetchone()[0] == 4, "a failed reaper savepoint must preserve the committed run")
         finally:
             cur.execute("grant execute on function ops.reap_expired_runs(uuid,text,text,integer) to carr_jobs")
-        with conn.transaction():
-            event_ids = []
-            for verb, subject, days in (("publish-board-snapshot", "board_snapshot", 8),
-                                        ("publish-board-snapshot", "board_snapshot", 6),
-                                        ("other-verb", "board_snapshot", 8),
-                                        ("publish-board-snapshot", "deal", 8)):
-                cur.execute("""insert into public.event
-                    (occurred_at, actor_id, verb, subject_type, subject_id, cause)
-                    values (now() - make_interval(days => %s),
-                            (select id from public.actor where slug='system'), %s, %s, %s, 'system')
-                    returning id""", (days, verb, subject, uuid.uuid4()))
-                event_ids.append(cur.fetchone()[0])
+        event_ids = []
+        for verb, subject, days in (("publish-board-snapshot", "board_snapshot", 8),
+                                    ("publish-board-snapshot", "board_snapshot", 6),
+                                    ("other-verb", "board_snapshot", 8),
+                                    ("publish-board-snapshot", "deal", 8)):
+            cur.execute("""insert into public.event
+                (occurred_at, recorded_at, actor_id, verb, subject_type, subject_id, cause, organization_tenant_id, personal_scope)
+                values (now() - make_interval(days => %s), now() - make_interval(days => %s),
+                        (select id from public.actor where slug='system'), %s, %s, %s, 'system', 'carr-internal', 'none')
+                returning id""", (days, days, verb, subject, uuid.uuid4()))
+            event_ids.append(cur.fetchone()[0])
+        try:
             migration = next(Path(REPO, "migrations").glob("*_reap_expired_runs.sql"))
-            cur.execute(migration.read_text())
-            cur.execute("select id from public.event where id = any(%s::uuid[])", (event_ids,))
-            check({r[0] for r in cur.fetchall()} == set(event_ids[1:]),
-                  "migration must delete only old board-publish events")
+            script = """
+                import assert from 'node:assert/strict';
+                import pg from 'pg';
+                import { readFileSync } from 'node:fs';
+                import { docActivityTools } from './src/doc-activity.js';
+                const c = new pg.Client({ connectionString: process.env.CARR_LOCAL_PG_DSN });
+                await c.connect();
+                try {
+                    await c.query('begin');
+                    const tool = docActivityTools({ ToolError: Error })['read-doc-activity'];
+                    const read = () => tool.handler(c, { slug: 'joe', human: true }, { limit: 100 });
+                    const key = JSON.parse(process.env.RETENTION_RUN_KEY);
+                    const seed = () => c.query(`insert into ops.run
+                        (kind,service_id,environment,run_key,state,started_at,ended_at,
+                         source_kind,source_ref,observed_at,expires_at)
+                        select 'job',$1,$2,$3,'succeeded',now()-interval '40 days',
+                            now()-interval '40 days','wrapper','activity acceptance',
+                            now()-interval '40 days',now()-interval '39 days'
+                        from generate_series(1,5)`, key);
+                    await seed();
+                    const before = await read();
+                    const ids = JSON.parse(process.env.RETENTION_EVENT_IDS);
+                    assert.ok(ids.every(id => before.entries.some(entry => entry.id === id)),
+                        'real Doc Activity must expose every seeded event before reap');
+                    await c.query(readFileSync(process.env.RETENTION_MIGRATION, 'utf8'));
+                    assert.deepEqual(await read(), before,
+                        'real read-doc-activity output must be unchanged across migration reap');
+                    const remaining = await c.query('select count(*)::int as n from ops.run where service_id=$1 and environment=$2 and run_key=$3', key);
+                    assert.equal(remaining.rows[0].n, 3, 'migration must actually reap superseded runs');
+                    await seed();
+                    const reaped = await c.query('select ops.reap_expired_runs($1,$2,$3,1000) as n', key);
+                    assert.equal(reaped.rows[0].n, 5, 'writer reap must actually delete eligible runs');
+                    assert.deepEqual(await read(), before,
+                        'real read-doc-activity output must be unchanged across writer reap');
+                } finally {
+                    await c.query('rollback');
+                    await c.end();
+                }
+            """
+            result = subprocess.run(['node', '--input-type=module'], input=script,
+                capture_output=True, text=True, timeout=60, cwd=Path(REPO, 'mcp-server'),
+                env={**os.environ, 'CARR_LOCAL_PG_DSN': owner,
+                     'RETENTION_EVENT_IDS': json.dumps([str(x) for x in event_ids]),
+                     'RETENTION_MIGRATION': str(migration),
+                     'RETENTION_RUN_KEY': json.dumps([str(sid), ENVIRONMENT, key + '.activity'])})
+            check(result.returncode == 0,
+                  'real Doc Activity history must survive both reaps: ' + result.stderr[-2000:])
+        finally:
             cur.execute("delete from public.event where id = any(%s::uuid[])", (event_ids,))
         cur.execute("delete from ops.incident where id = %s", (incident,))
     if len(FAILURES) == before:

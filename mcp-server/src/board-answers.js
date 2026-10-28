@@ -135,8 +135,10 @@ export function boardAnswerTools({ withEnvelope: envelope, writeEvent }) {
                returning id,organization_tenant_id,sponsoring_human_slug,board_id,version,updated_at`,
               [snapshotJson, actor.id, tenant, principal, board, args.base_version]);
           if (!rows.rows.length) throw new ToolError({ error: "board_version_conflict" });
-          // No event row: the board's version number is its own audit trail.
-          return { ok: true, snapshot: rows.rows[0] };
+          const snapshot = rows.rows[0];
+          await writeEvent(c, actor, "publish-board-snapshot", "board_snapshot", snapshot.id,
+            { new: { board_id: board, version: snapshot.version }, idempotency_key: args.idempotency_key });
+          return { ok: true, snapshot };
         });
         return { ...result, snapshot: { ...result.snapshot, snapshot_json: JSON.parse(snapshotJson) } };
       },

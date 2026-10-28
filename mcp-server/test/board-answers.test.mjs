@@ -110,9 +110,13 @@ test("board publication bounds database payload work and replays the complete sn
     const result = await TOOLS["publish-board-snapshot"].handler(fake, sponsoredRobot, args);
     const [sql, params] = fake.calls.find(([sql]) => /insert into board_snapshot|update board_snapshot/.test(sql));
     assert.doesNotMatch(sql.split(/returning/i)[1], /snapshot_json/, "RETURNING must have size independent of the board");
-    assert.equal(fake.calls.length, 4, "one lock, replay read, snapshot write and receipt");
-    assert.ok(!fake.calls.some(([sql]) => /insert into event/.test(sql)),
-      "the board version is the audit trail; publication writes no event row");
+    assert.equal(fake.calls.length, 5, "one lock, replay read, snapshot write, event and receipt");
+    const publication = fake.calls.filter(([sql]) => /insert into event/.test(sql));
+    assert.equal(publication.length, 1, "each new publication records one history entry");
+    const event = publication[0][1];
+    assert.equal(event[1], sponsoredRobot.id);
+    assert.deepEqual(event.slice(2, 5), ["publish-board-snapshot", "board_snapshot", metadata.id]);
+    assert.deepEqual(JSON.parse(event[7]), { board_id: "project", version: metadata.version });
     assert.deepEqual(JSON.parse(params[base_version ? 0 : 3]), snapshot);
     assert.deepEqual(result.snapshot, { ...metadata, version: base_version + 1, snapshot_json: snapshot });
     const receipt = fake.calls.find(([sql]) => sql.includes("insert into tool_call"));
