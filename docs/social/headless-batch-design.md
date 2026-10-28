@@ -54,7 +54,7 @@ Repeated waste in both transcripts:
 - Each run grepped the previous run's transcript to rediscover how to upload media and
   schedule posts.
 - Each run rewrote its card generator from scratch.
-- `claude-tree/skills/social-media-manager/scripts/blotato.sh` was not used, because it has no list call, no windowed read and no
+- `blotato.sh` was not used, because it has no list call, no windowed read and no
   presigned upload. The runs called Blotato with raw curl instead.
 - Both batch records flag the same drift. The task prompt still names a Chrome Grok
   pass and a vault batch file. The store retired both: the Grok pass on 08-07
@@ -121,12 +121,12 @@ old task may change the queue in that time.
 threads through `additionalPosts`. Add it to `submit`; do not hand the model the key.
 
 **D3. Language and Blotato client: one Python module, `tools/social_batch.py`, with stdlib HTTP.**
-`claude-tree/skills/social-media-manager/scripts/blotato.sh` stays unchanged for the social-media-manager skill. The module reads the key
+`blotato.sh` stays unchanged for the social-media-manager skill. The module reads the key
 the same way the credential inventory's probe does: it sources `~/.zprofile` in a child
 shell and passes the key as a header on stdin. It never puts the key in argv and never
 logs it.
 
-*Reopen if* a second Python caller needs Blotato. Then extract the proposed `lib/blotato.py`.
+*Reopen if* a second Python caller needs Blotato. Then extract `lib/blotato.py`.
 
 **D4. Cadence numbers live in a small pinned config, checked against the store at every run.**
 `ops/social/cadence.v1.json` holds the numbers below. It also holds the `section_id` and
@@ -276,7 +276,7 @@ vision check becomes a required `check` input.
   - `Bash(./run.sh social-batch *)` and `Bash(./run.sh call read-doctrine *)`.
 
   The deny list covers `tools/`, `lib/`, `ops/`, `bin/`, `run.sh`, the batch ledger and
-  `out/social-batch/<week>/batch.json`, the Blotato hosts, `~/.zprofile`, curl and wget. `submit` calls the store
+  `batch.json`, the Blotato hosts, `~/.zprofile`, curl and wget. `submit` calls the store
   write verbs from its own subprocess, so the model needs no write verb.
 - Headless Chrome runs only through `./run.sh social-batch render`. Both the card HTML and
   the PNG must sit in that work folder. Render serves the folder from a throwaway
@@ -303,10 +303,10 @@ vision check becomes a required `check` input.
 The prompt file lives at `~/.claude/scheduled-tasks/social-batch-headless/SKILL.md`, with
 a tracked copy at `ops/scheduled-tasks/social-batch-headless.SKILL.md` so config-as-code
 reconciles it. The prompt is one JSON object in a ```json fence, because
-the `contract` function in `lib/acceptance_checks.py` reads the acceptance
-contract only from a whole-JSON prompt. A markdown prompt yields no criteria, so its run can never be accepted. Model,
+`lib/acceptance_checks.contract` reads the acceptance contract only from a whole-JSON
+prompt. A markdown prompt yields no criteria, so its run can never be accepted. Model,
 allowed tools and the deny list (Blotato hosts, `~/.zprofile`, curl, wget) live in the
-task's `ops/headless-tasks/tasks.json` entry. A SKILL.md alone does not register a Desktop task:
+task's `tasks.json` entry. A SKILL.md alone does not register a Desktop task:
 `deal-history-research-weekly` has one there and is absent from the scheduler list. No
 sidebar session is created.
 
@@ -407,7 +407,7 @@ At most about 40 lines, holding no rules the script enforces:
 3. Read the store by slug: `x-posting-spec`, `social-media-workflow`,
    `content-inspiration-bank` (§2 and the newest §4 sections), `x-strategy-2026`,
    `brand-voice`, and the voice and style documents the spec names. Read Drive only for
-   files that have no store copy (today: `{{VAULT}}/Marketing/Social Media/content-fuel-inbox.md`), and name each one.
+   files that have no store copy (today: `content-fuel-inbox.md`), and name each one.
 4. Research and Grok per D9 and D10. Verify every figure at its primary source.
 5. Draft to fill the open slots from `plan`, never past them. Render cards and look at
    each PNG.
@@ -425,7 +425,7 @@ Adds:
 - `ops/social/cadence.v1.json`;
 - a test file with recorded Blotato fixtures;
 - the tracked prompt;
-- `ops/headless-tasks/com.carr.headless.social-batch-headless.plist` and its `ops/headless-tasks/tasks.json` entry.
+- `ops/headless-tasks/com.carr.headless.social-batch-headless.plist` and its `tasks.json` entry.
 
 Acceptance:
 
@@ -460,6 +460,6 @@ Acceptance:
 ## 8. Out of scope, noted
 
 - Dell's batch (`ops/scheduled-tasks/dell/dell-social-batch-weekly.SKILL.md`) could later
-  reuse `tools/social_batch.py` by taking an account set. Not in this WR.
-- `ops/config/credential-inventory.v1.json` names the old script `lib/system_sender.py` as a Blotato
+  reuse `social_batch.py` by taking an account set. Not in this WR.
+- `ops/config/credential-inventory.v1.json` names `lib/system_sender.py` as a Blotato
   user, but that file does not exist. This is a stale pointer, unrelated to this design.

@@ -11,7 +11,7 @@
     "   - status queue_unreadable, spec_changed, spec_unreadable or error: stop, say which and its detail, and write no receipt.",
     "   - Name every warning in your final report.",
     "2. Read the store by slug with `./run.sh call read-doctrine '{\"document\":\"<slug>\"}'`: x-posting-spec, social-media-workflow, content-inspiration-bank (section 2 and the newest section 4 entries), x-strategy-2026, brand-voice, and every voice or style document those name. The store wins over any file.",
-    "3. Read the one fuel file with no store copy, the vault file at `{{VAULT}}/Marketing/Social Media/content-fuel-inbox.md` (external source). Joe's own lines go first. Say if it was unreadable.",
+    "3. Read the one fuel file with no store copy: {{VAULT}}/Marketing/Social Media/content-fuel-inbox.md. Joe's own lines go first. Say if it was unreadable.",
     "4. Grok pass: not run here until WR561.S3 binds the grok CLI to read-only tools. Record grok.status skipped, reason 'grok not yet bound for headless runs', and find trends with WebSearch and the banks.",
     "5. Verify every figure at its primary source with WebFetch. If a source cannot be read, drop the figure or the post. A thin week Joe tops up beats a wrong batch.",
     "6. Draft into the open slots from plan, never past them. Follow the specs for voice, cadence, format rotation and the quality bar. Pick Central wall-clock times; the script converts them to UTC.",

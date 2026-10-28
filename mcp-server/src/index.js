@@ -87,6 +87,7 @@ import { neon, Pool } from "@neondatabase/serverless";
 import { mcpApiHandler, dispatch } from "./mcp.js";
 import { handleAuthorize, handleCallback, handleConsent } from "./google-oidc.js";
 export { OAuthConsentState } from "./oauth-consent-state.js";
+export { VerbRequestBudget } from "./verb-request-budget.js";
 export { AiNeuronBudget } from "./ai-budget.js";
 import { sharedOAuthFetch, mcpOriginRefusal, isSharedOAuthPath } from "./oauth-policy.ts";
 import { agentActorForToken, authenticatedIdentity, continuityActorForTokenMaps,
@@ -620,7 +621,7 @@ const program6RoutineController = createProgram6RoutineController({ authorizeAct
 const tourInternalHandler = createTourInternalWebHandler(createTourRuntimeAdapters());
 const reportsHandler = createReportsWebHandler(createReportsRuntimeAdapters());
 const dealroomHandler = createDealroomHandler({
-  mcpHandler: (request, env, ctx, actor) => dispatch(request, env, ctx, actor),
+  mcpHandler: (request, env, ctx, actor, sessionKey) => dispatch(request, env, ctx, actor, sessionKey),
   pipelineHandler: (request, env, _ctx, actor) => pipelineApi(request, env, actor),
   program6Handler: (request, env, ctx, actor, session) =>
     program6RoutineController.fetch(request, env, ctx, actor, session),

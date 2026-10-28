@@ -11,6 +11,7 @@
 //
 // NO SEND CAPABILITY EXISTS OR WILL EXIST IN THIS WORKER.
 
+import { verbRequestBudgetRefusal } from "./verb-request-budget.js";
 import { neon, Pool } from "@neondatabase/serverless";
 import { budgetedAi } from "./ai-budget.js";
 import { publicError } from "./public-errors.ts";
@@ -916,7 +917,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
   }
 }
 
-export async function dispatch(request, env, ctx, actor) {
+export async function dispatch(request, env, ctx, actor, sessionKey) {
   const originRefused = mcpOriginRefusal(request, env);
   if (originRefused) return originRefused;
   // PROBE LOCK (loop #192, 2026-08-06): a probe-authenticated actor's profile
@@ -1017,6 +1018,8 @@ export async function dispatch(request, env, ctx, actor) {
       case "tools/list":
         return reply({ tools: toolList(profile) });
       case "tools/call": {
+        const budgetRefused = await verbRequestBudgetRefusal(env, actor, sessionKey);
+        if (budgetRefused) return budgetRefused;
         env.ctx = ctx;
         try {
           const result = await callTool(env, scopedActor, rpc.params?.name, rpc.params?.arguments, profile);

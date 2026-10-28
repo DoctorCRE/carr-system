@@ -1,7 +1,7 @@
 // Tests public error projection and internal diagnostic handling.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dispatch } from "../src/mcp.js";
+import { dispatch } from "./helpers/budgeted-dispatch.mjs";
 import { ToolError, coerceArgsToSchema, pgConstraintError, TOOLS } from "../src/tools.js";
 import { Pool } from "@neondatabase/serverless";
 
