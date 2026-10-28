@@ -1053,20 +1053,23 @@ class Run:
         """Read each unresolved email from an unknown sender once; queue business for a partner's review.
 
         At most unresolved_email.MAX_READS model reads per run, oldest email first; the rest wait
-        and reads_due keeps the next run decoding an unchanged store. A failed read is retried on
-        later runs and left unread after MAX_ATTEMPTS. Once a read has queued a sender, that
-        address's later email is not read again: the queue holds one row per address."""
+        and reads_due keeps the next run decoding an unchanged store. A call that fails (signed
+        out, usage limit, timeout) stops reading for this run and spends no attempt; an answer
+        that cannot stand is retried on later runs and the email left unread after MAX_ATTEMPTS.
+        Once a sender is on the queue, that address's later email is not read again: the queue
+        holds one row per address. A refused proposal does not count as queued."""
         self.state['reads_due'] = False
         if self.ports.read_unresolved is None:
             return
+        queued = {p['sender'] for p in self.state.get('mail_unresolved', {}).values() if p.get('sender')}
         deals = None
         for m, progress in self.lead_candidates:
             if 'read' in progress:
                 continue
             address = m['sender'].lower()
             name = _clean_name(m['sender_name'], m['subject'])
-            request_key = key('propose-email-lead', _hash(address), 'read')
-            if self.state.get('requests', {}).get(request_key, {}).get('acknowledged'):
+            request_key = key('propose-email-lead', _hash(address), f'read|{m["ident"]}')
+            if _hash(address) in queued:
                 progress['read'] = 'sender_queued'
                 self.counts['lead_already_queued'] += 1
                 continue
@@ -1086,7 +1089,7 @@ class Run:
             self.counts['reads'] += 1
             try:
                 read = self.ports.read_unresolved(m, self.today, deals, parties)
-            except Exception:
+            except unresolved_email.InvalidRead:
                 progress['read_attempts'] = progress.get('read_attempts', 0) + 1
                 if progress['read_attempts'] >= unresolved_email.MAX_ATTEMPTS:
                     progress['read'] = 'abandoned'
@@ -1095,6 +1098,9 @@ class Run:
                     self.counts['model_failed'] += 1
                 _save(self.out, self.state)
                 continue
+            except Exception:
+                self.counts['model_failed'] += 1
+                return
             for stale in ('intent', 'summary', 'read_attempts'):
                 progress.pop(stale, None)
             progress['read'] = read['applies_to']
@@ -1111,6 +1117,9 @@ class Run:
                 outcome = self.state['requests'][request_key].get('outcome')
                 self.counts[{'proposed': 'lead_proposed', 'known_party': 'lead_known_party',
                              'refused': 'lead_refused'}.get(outcome, 'lead_already_queued')] += 1
+                if outcome != 'refused':
+                    progress['sender'] = _hash(address)
+                    queued.add(progress['sender'])
 
     def next_steps(self, mails: list[dict]) -> None:
         """Ask for each pending email's next step and set its ball; a step stays pending until both succeed."""
@@ -1284,7 +1293,8 @@ def mapping_counts(state: dict) -> dict:
     return {'hydration_pending': len(state.get('pending_full', {})),
             'hydration_expired': sum(bool(p.get('expired')) for p in state.get('pending_full', {}).values()),
             'unresolved_messages': len(mail) - machine_only, 'skipped_automated': machine_only,
-            'unresolved_read': sum('read' in item for item in mail.values()),
+            'unresolved_read': sum(item.get('read', 'abandoned') != 'abandoned' for item in mail.values()),
+            'unresolved_read_abandoned': sum(item.get('read') == 'abandoned' for item in mail.values()),
             'unresolved_expired': state.get('unresolved_expired', 0),
             'calendar_unresolved_expired': state.get('calendar_unresolved_expired', 0),
             'unresolved_calendar': len(calendar), 'unresolved_addresses': len(participants),

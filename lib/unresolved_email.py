@@ -61,6 +61,11 @@ SYSTEM_PROMPT = (
     'answer is right.')
 
 
+class InvalidRead(ValueError):
+    """The model answered, but not with a usable read of this email. Only this spends an attempt;
+    a failed call (signed out, usage limit, timeout) says nothing about the email."""
+
+
 def open_deals(rows: list[dict]) -> list[dict]:
     """The open deals a read may name, from read-deal-reconciliation all:true."""
     deals = [{'id': r['id'], 'name': r.get('name') or '', 'client': r.get('client_name') or '',
@@ -102,12 +107,12 @@ def prompt(mail: dict, today: date, deals: list[dict], parties: list[dict]) -> s
 
 
 def parse(reply: dict, mail: dict, deals: list[dict], parties: list[dict]) -> dict:
-    """The read, checked against what was offered; ValueError when it cannot stand."""
+    """The read, checked against what was offered; InvalidRead when it cannot stand."""
     applies, confidence = reply.get('applies_to'), reply.get('confidence')
     if applies not in OUTCOMES:
-        raise ValueError('unknown outcome')
+        raise InvalidRead('unknown outcome')
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
-        raise ValueError('invalid confidence')
+        raise InvalidRead('invalid confidence')
     read = {'applies_to': applies, 'deal': None, 'party': None, 'summary': None, 'evidence_quote': None,
             'confidence': float(confidence)}
     if applies == 'not_business':
@@ -116,7 +121,7 @@ def parse(reply: dict, mail: dict, deals: list[dict], parties: list[dict]) -> di
     def pick(value, prefix: str, offered: list[dict]):
         index = int(value[1:]) if isinstance(value, str) and re.fullmatch(prefix + r'\d+', value) else 0
         if not 1 <= index <= len(offered):
-            raise ValueError('the read named something that was not offered')
+            raise InvalidRead('the read named something that was not offered')
         return offered[index - 1]
     if applies == 'existing_deal':
         read['deal'] = pick(reply.get('deal'), 'D', deals)['id']
@@ -124,7 +129,7 @@ def parse(reply: dict, mail: dict, deals: list[dict], parties: list[dict]) -> di
         read['party'] = pick(reply.get('party'), 'P', parties)['ref']
     summary = ' '.join(str(reply.get('summary') or '').split())[:300]
     if not summary:
-        raise ValueError('a business read needs a summary')
+        raise InvalidRead('a business read needs a summary')
     read['summary'] = summary
     quote = reply.get('evidence_quote')
     if (isinstance(quote, str) and MIN_QUOTE <= len(quote.strip()) and len(quote) <= MAX_QUOTE

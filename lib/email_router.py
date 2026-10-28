@@ -97,8 +97,11 @@ class WriteFailed(Exception):
 
 
 def fenced(email: dict) -> str:
-    body = re.sub(r'(?i)</\s*email\s*>', '</ email>', email['body'][:MODEL_BODY_CHARS])
-    return f'<email>\nSubject: {email["summary"]}\n\n{body}\n</email>'
+    """The email inside one <email> fence: a closing tag in any field is escaped, the subject is one line."""
+    def escape(text: str) -> str:
+        return re.sub(r'(?i)</\s*email\s*>', '</ email>', text)
+    subject = ' '.join(escape(email['summary'] or '').split())
+    return f'<email>\nSubject: {subject}\n\n{escape(email["body"][:MODEL_BODY_CHARS])}\n</email>'
 
 
 def ask_model(email: dict, today: date, model: str) -> dict:
