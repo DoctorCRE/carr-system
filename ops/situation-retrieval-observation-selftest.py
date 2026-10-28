@@ -19,10 +19,11 @@ collector = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(collector)
 
 
-def check(label: str, condition: bool) -> None:
-    print(f"  {'ok' if condition else 'FAIL'}  {label}")
-    if not condition:
-        raise AssertionError(label)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(ok="  ok  {label}", detail=None, raises="{label}")
 
 
 class FakeCursor:

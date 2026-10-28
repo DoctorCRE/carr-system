@@ -23,10 +23,15 @@ from lib.record_call import FAILED, OK, REFUSED, TRANSIENT, call_verb  # noqa: E
 FAILS: list[str] = []
 
 
-def check(name: str, cond: bool, got: object = None) -> None:
-    print(("ok    " if cond else "FAIL  ") + name + ("" if cond else f"  (got {got!r})"))
-    if not cond:
-        FAILS.append(name)
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(
+    ok="ok    {label}",
+    fail="FAIL  {label}  (got {detail!r})",
+    detail=None,
+    default_detail=None,
+    failures=FAILS,
+)
 
 
 class Runner:

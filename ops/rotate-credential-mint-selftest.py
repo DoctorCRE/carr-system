@@ -33,10 +33,11 @@ OWNER = "postgresql://owner:ownerpw@ep-x-123.us-east-2.aws.neon.tech/neondb?sslm
 PEER = "postgresql://carr_jobs:oldpw@ep-x-123.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"  # ci-secret-scan: allow — hermetic fixture
 
 
-def check(label: str, ok: bool) -> None:
-    print(("  ok   " if ok else "  FAIL ") + label)
-    if not ok:
-        FAILURES.append(label)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(ok="  ok   {label}", fail="  FAIL {label}", detail=None, failures=FAILURES)
 
 
 def refused(call) -> str:

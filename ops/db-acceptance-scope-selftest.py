@@ -22,10 +22,11 @@ spec.loader.exec_module(scope)
 failures: list[str] = []
 
 
-def check(name, ok):
-    print(('  ok   ' if ok else '  FAIL ') + name)
-    if not ok:
-        failures.append(name)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(ok="  ok   {label}", fail="  FAIL {label}", detail=None, failures=failures)
 
 
 check('transitive continuity manifest runs database proof',

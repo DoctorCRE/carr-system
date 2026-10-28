@@ -22,8 +22,8 @@
       "sha256": "af4abd79a95f36a325e0d12e9994df80add60851e9c54bc88cd7a4c6e1c9b6d8"
     },
     "vendor/hxprobe/src/calendar.rs": {
-      "revision": "b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d",
-      "sha256": "28f9a5f9fb11701369e8c4a161195ad4a709f181975e07f6c092ce085bb1362f"
+      "revision": "55e33ca4807d082e6bb3f8a3124d8e6aedf58c2d",
+      "sha256": "d2f3c52c428ff2e8bd471b848c15f26af1725d620392048078d1b81b3f781c3c"
     },
     "vendor/hxprobe/src/record.rs": {
       "revision": "b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d",
@@ -1473,6 +1473,26 @@
       "notes": "Accepted only after the 51-byte immutable-ID tail framing check."
     },
     {
+      "id": "object.class.006b.offset.2",
+      "parent": "object.class.006b",
+      "identifier": {
+        "kind": "byte_offset",
+        "value": 2
+      },
+      "name": "Calendar occurrence start",
+      "wire_type": "u64le-dotnet-ticks",
+      "decoder": "calendar::parse",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/calendar.rs",
+          "symbol": "OCCURRENCE"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "Equals the start at +574 on recurring occurrences (whose Global Object ID carries an instance date) and is zero otherwise; exported as events.recurrence."
+    },
+    {
       "id": "object.class.006b.offset.574",
       "parent": "object.class.006b",
       "identifier": {
@@ -1644,6 +1664,46 @@
         }
       ],
       "first_seen_version": null
+    },
+    {
+      "id": "calendar.attendee_status",
+      "parent": "calendar.attendees",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "12 status bytes after each attendee address"
+      },
+      "name": "Attendee kind and response",
+      "wire_type": "u32le[3]",
+      "decoder": "calendar::Attendee::kind",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/calendar.rs",
+          "symbol": "Attendee"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "Word 0 is the attendee kind (0 required, 1 optional) and word 1 the response (4 no response yet), pinned by one TEST-account invitation on 2026-10-28. Response codes 0, 1 and 2 have no ground truth and are exported raw without a label."
+    },
+    {
+      "id": "calendar.canceled",
+      "parent": "calendar.subject",
+      "identifier": {
+        "kind": "string_run_selector",
+        "value": "first subject copy prefixed Canceled: or Cancelled:"
+      },
+      "name": "Canceled subject",
+      "wire_type": "utf16le-nul-terminated",
+      "decoder": "calendar::parse",
+      "confidence": "inferred",
+      "evidence": [
+        {
+          "source": "vendor/hxprobe/src/calendar.rs",
+          "symbol": "CANCELED"
+        }
+      ],
+      "first_seen_version": null,
+      "notes": "Outlook stores the cancellation prefix on the first subject copy while the repeated copy keeps the plain subject. Exported as lifecycle_status canceled; no binary cancellation flag is established."
     },
     {
       "id": "mail",

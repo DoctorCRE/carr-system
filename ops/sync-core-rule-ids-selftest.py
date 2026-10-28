@@ -37,12 +37,11 @@ sync_core_rule_ids = _load_module(
 FAILURES: list[str] = []
 
 
-def check(name, condition):
-    if condition:
-        print(f"  ok  {name}")
-    else:
-        print(f"  FAIL  {name}")
-        FAILURES.append(name)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(ok="  ok  {label}", detail=None, failures=FAILURES)
 
 
 SYNTHETIC_TRIAGE = {

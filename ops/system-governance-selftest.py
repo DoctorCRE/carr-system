@@ -11,10 +11,11 @@ REPO = Path(__file__).resolve().parents[1]
 FAILED: list[str] = []
 
 
-def check(label: str, condition: bool) -> None:
-    print(("  ok    " if condition else "  FAIL  ") + label)
-    if not condition:
-        FAILED.append(label)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(detail=None, failures=FAILED)
 
 
 def read(path: str) -> dict[str, Any]:
