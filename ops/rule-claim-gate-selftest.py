@@ -297,6 +297,8 @@ class RuleClaimGateTest(unittest.TestCase):
             'I added a route rule so I always run the tests before merging.',
             'I added a rule in the ruleset of standing instructions: always ask first.',
             'I added a guidance and firewall rule.',
+            'I saved a DNS rule: always check Cloudflare first.',
+            'I saved a DNS rule in `MEMORY.md`.',
             'I added a firewall rule and a durable rule.',
             'I added a WAF rule and saved a lesson.',
             'I created a DNS rule and added a taught rule.',

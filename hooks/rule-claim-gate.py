@@ -26,10 +26,10 @@ CONFIG_RULE_PREFIX = re.compile(
     r"(?:\s+(?:mail|e-?mail|inbox|forwarding))*[\s-]+$", re.I)
 
 CONFIG_RULE_SUFFIX = re.compile(
-    r"\s+(?:to|in|on|for)\s+(?:the\s+)?(?:Cloudflare\s+)?"
+    r"\s+(?:to|in)\s+the\s+(?:Cloudflare\s+)?"
     r"(?:firewall|waf|rate[ -]limit(?:ing)?|ruleset|route|dns)\b", re.I)
 GUIDANCE_CONTEXT = re.compile(
-    r"\b(?:CLAUDE\.md|AGENTS\.md|guidance|behaviou?ral|skills?|doctrine|taught)\b", re.I)
+    r"\b(?:CLAUDE\.md|AGENTS\.md|guidance|behaviou?ral|skills?|doctrine|taught|memory|standing instructions?|policy)\b", re.I)
 CLAUSE_BREAK = re.compile(r"\b(?:and|but|or)\b|[,;]", re.I)
 
 
@@ -74,7 +74,7 @@ def prose(text):
         lines.append(line)
     text = '\n'.join(lines)
     text = re.sub(r'(`+)(.*?)\1', lambda match: match[2] if re.fullmatch(
-        r'(?:[\w./-]+/)?(?:CLAUDE|AGENTS|SKILL)\.md', match[2], re.I) else '',
+        r'(?:[\w./-]+/)?(?:CLAUDE|AGENTS|SKILL|MEMORY)\.md', match[2], re.I) else '',
         text, flags=re.S)
     text = re.sub(r'"[^"]*"|“[^”]*”|‘(?:[^’]|(?<=\w)’(?=\w))*’', '', text)
     text = re.sub(r"(?<!\w)'(?:[^']|(?<=\w)'(?=\w))*'(?!\w)", '', text)
@@ -94,7 +94,10 @@ def asserted_claim(sentence):
             if match.group('subject').lower() == 'rule':
                 local_prefix = CLAUSE_BREAK.split(prefix)[-1]
                 local_suffix = CLAUSE_BREAK.split(sentence[end:])[0]
-                if not GUIDANCE_CONTEXT.search(local_prefix + ' ' + local_suffix) and (
+                if not GUIDANCE_CONTEXT.search(sentence) and not re.search(
+                    r'(?:\bso\s+I\s+(?:always|never|will)\b|:\s*(?:always|never|I\s+will)\b)',
+                    local_suffix, re.I
+                ) and (
                     CONFIG_RULE_PREFIX.search(local_prefix)
                     or CONFIG_RULE_SUFFIX.match(local_suffix)
                 ):
