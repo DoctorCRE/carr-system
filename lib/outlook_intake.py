@@ -84,7 +84,7 @@ import tempfile
 from typing import Callable
 import uuid
 
-from lib import model_call
+from lib import email_links, model_call
 from lib.outlook_settings import load_settings, OutlookSettings
 OUT = Path('out/outlook-intake')
 REFRESH_LIST = 'needs-refresh.json'
@@ -636,6 +636,8 @@ class Run:
                 request['next_action_id'] = reply.get('next_action_id')
             if verb == 'propose-email-lead':
                 request['outcome'] = 'proposed' if reply.get('proposed') is True else str(reply.get('reason'))
+            if verb == 'log-activity':
+                request['activity_id'] = reply.get('activity_id')
             request.update(acknowledged=True, disposition='acknowledged', retry_at=None, error_code=None)
             _save(self.out, self.state)
         self.written.append((who, args.get('ref', 'claim card'), verb, note))
@@ -759,6 +761,32 @@ class Run:
                 done.setdefault(m['ck'], []).append(m['sent_unix'])
             if not m['full']:
                 self.counts['preview_only'] += 1
+
+    def file_links(self) -> bool:
+        """Use server-confirmed filing, including matches made after local intake finished."""
+        queue = self.ports.carr('email-router-queue', {
+            'purpose': 'links', 'limit': 200,
+            **({'after': self.state['links_cursor']} if self.state.get('links_cursor') else {})})
+        self.counts['links_filed'] = 0
+        for mail in queue.get('emails', []):
+            if not mail.get('deal'):
+                continue
+            links = sorted(email_links.extract_links(mail.get('body') or ''))
+            if not links:
+                continue
+            digest = _hash(json.dumps(links))
+            request_key = self.activity_key(mail['deal'], f"links|{mail['activity_id']}|{digest}")
+            acknowledged = self.state.get('requests', {}).get(request_key, {}).get('acknowledged')
+            if self.write('log-activity', {
+                'idempotency_key': request_key,
+                'ref': mail['deal'], 'kind': 'note', 'summary': 'Links from matched email',
+                'detail': '\n'.join(f'{kind}: {url}' for kind, url in links),
+                'occurred_at': mail['occurred_at']}, 'matched email', 'email links') and not acknowledged:
+                self.counts['links_filed'] += 1
+        if any(self.counts[k] for k in ('writes_failed', 'writes_deferred', 'requests_blocked')):
+            return False
+        self.state['links_cursor'] = queue.get('next_cursor')
+        return True
 
     def prepare_attachments(self, mails: list[dict], matcher: Matcher, db: Path, files: Path) -> list[tuple[str, dict, dict, bytes]]:
         from lib import outlook_attachments as att
@@ -954,6 +982,10 @@ class Run:
             ok = all([self.write('log-activity', {
                 'idempotency_key': self.activity_key(ref, f'fullbody|{ident}'), 'ref': ref, 'kind': 'note',
                 'summary': f'Full text of email: {m["subject"] or "(no subject)"}', 'detail': m['text'],
+                **({'email_context': {**email_context(m, self.settings.internal_domain),
+                                      'source_activity_id': source}}
+                   if (source := self.state.get('requests', {}).get(self.activity_key(ref, ident), {}).get('activity_id'))
+                   else {}),
                 'occurred_at': _iso(p['sent'])}, p['sender_email'], 'full text follow-up') for ref in p['refs']])
             if ok:
                 self.counts['full_text_notes'] += 1
@@ -1253,7 +1285,26 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
         try:
             for stale in out.glob(WORK_PREFIX + '*'):
                 _remove(stale)
-            return _run(out, home, ports)
+            outcome = _run(out, home, ports)
+            if outcome.state != 'succeeded':
+                return outcome
+            state = json.loads((out / STATE).read_text())
+            work = Run(ports, state, ports.now(), out, settings)
+            try:
+                linked = work.file_links()
+            except CarrError:
+                return Outcome('failed', 'email_links_read_failed', outcome.counts)
+            for name, count in work.counts.items():
+                outcome.counts[name] = outcome.counts.get(name, 0) + count
+            for code in ERROR_CODES:
+                outcome.counts['error_' + code] = sum(
+                    not r['acknowledged'] and r.get('error_code') == code for r in state.get('requests', {}).values())
+            _save(out, state)
+            if not linked:
+                return Outcome('failed', 'email_links_pending', outcome.counts)
+            if work.counts['links_filed']:
+                outcome.reason = 'processed'
+            return outcome
         except CleanupError:
             return Outcome('failed', 'cleanup_failed')
     finally:
