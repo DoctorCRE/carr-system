@@ -25,7 +25,7 @@ class HostedVerdict(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             summary = pathlib.Path(directory) / 'summary'
             needs = {'scope': {'result': 'success', 'outputs': {'full': 'true'}},
-                     'fallow': {'result': 'success'}, 'classes': {'result': 'success'},
+                     'classes': {'result': 'success'},
                      'migration-fixtures': {'result': 'success'}}
             with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
                             GITHUB_REPOSITORY='DoctorCRE/carr-system',
@@ -47,7 +47,7 @@ class HostedVerdict(unittest.TestCase):
     def test_failed_scope_cannot_authorize_skipping_fixtures(self):
         with tempfile.TemporaryDirectory() as directory:
             needs = {'scope': {'result': 'failure', 'outputs': {'full': 'false'}},
-                     'fallow': {'result': 'success'}, 'classes': {'result': 'success'}, 'migration-fixtures': {'result': 'skipped'}}
+                     'classes': {'result': 'success'}, 'migration-fixtures': {'result': 'skipped'}}
             with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
                             GITHUB_STEP_SUMMARY=str(pathlib.Path(directory) / 'summary')):
                 self.assertEqual(evidence.hosted_verdict(), 1)
@@ -68,7 +68,7 @@ class HostedVerdict(unittest.TestCase):
             for full, classes, fixtures, draft, expected in cases:
                 with self.subTest(full=full, classes=classes, fixtures=fixtures, draft=draft):
                     needs = {'scope': {'result': 'success', 'outputs': {'full': full}},
-                             'fallow': {'result': 'success'}, 'classes': {'result': classes}, 'migration-fixtures': {'result': fixtures}}
+                             'classes': {'result': classes}, 'migration-fixtures': {'result': fixtures}}
                     result = subprocess.run([sys.executable, str(ROOT / 'ops/ci-evidence.py'), 'verdict'],
                         env={**os.environ, 'CI_NEEDS': json.dumps(needs), 'CI_DRAFT': str(draft).lower(),
                              'GITHUB_STEP_SUMMARY': str(pathlib.Path(directory) / 'summary')},
