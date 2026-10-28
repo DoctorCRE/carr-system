@@ -7,6 +7,7 @@ from pathlib import Path
 
 repo = Path(__file__).resolve().parents[3]
 spec = importlib.util.spec_from_file_location('dream', repo / 'ops/dream.py')
+assert spec and spec.loader
 dream = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(dream)
 
