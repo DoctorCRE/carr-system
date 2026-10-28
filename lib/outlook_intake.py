@@ -456,13 +456,8 @@ def health_counts(health: dict | None) -> dict:
             for name, rate in ((health or {}).get('rates') or {}).items() if rate is not None}
 
 
-def _tool_detail(tool: str, code: int | None, stderr: bytes | str | None) -> str:
-    text = stderr.decode('utf-8', errors='replace') if isinstance(stderr, bytes) else (stderr or '')
-    lines = text.splitlines()
-    last = lines[-1] if lines else ''
-    last = re.sub(r"(?:[A-Za-z]:[\\/]|~?/|\.\.?/)[^\s\"'<>]*", '[path]', last)
-    last = ''.join(c if c.isprintable() else ' ' for c in last)
-    return f'{tool} exit={code} stderr={last}'[:200]
+def _tool_detail(tool: str, code: int | None, failure: str) -> str:
+    return f'{tool} exit={code} code={failure}'
 
 
 def _snapshot(home: Path, work: Path) -> None:
@@ -473,18 +468,18 @@ def _snapshot(home: Path, work: Path) -> None:
         done = subprocess.run([str(helper)], cwd=work, capture_output=True, timeout=900)
         if done.returncode in (errno.EPERM, errno.EACCES):
             raise FullDiskAccessRequired(f'grant Full Disk Access to {helper}',
-                                         _tool_detail('outlook-intake-copy', done.returncode, done.stderr))
+                                         _tool_detail('outlook-intake-copy', done.returncode, 'exit_nonzero'))
         if done.returncode:
-            raise DecodeError(_tool_detail('outlook-intake-copy', done.returncode, done.stderr))
-    except PermissionError as error:
+            raise DecodeError(_tool_detail('outlook-intake-copy', done.returncode, 'exit_nonzero'))
+    except PermissionError:
         raise FullDiskAccessRequired(f'grant Full Disk Access to {helper}',
                                      _tool_detail('outlook-intake-copy', None,
-                                                  f'PermissionError errno={error.errno}')) from None
-    except subprocess.TimeoutExpired as error:
-        raise DecodeError(_tool_detail('outlook-intake-copy', None, error.stderr or 'TimeoutExpired')) from None
-    except OSError as error:
+                                                  'permission_denied')) from None
+    except subprocess.TimeoutExpired:
+        raise DecodeError(_tool_detail('outlook-intake-copy', None, 'timeout')) from None
+    except OSError:
         raise DecodeError(_tool_detail('outlook-intake-copy', None,
-                                      f'{type(error).__name__} errno={error.errno}')) from None
+                                      'launch_failed')) from None
 
 
 def _remove(work: Path) -> None:
@@ -1765,13 +1760,13 @@ def _decoder(home: Path) -> Callable[[Path, Path, Path], None]:
         try:
             done = subprocess.run([str(load_settings(home).decoder), 'db', str(copy), str(db), str(files)],
                                   capture_output=True, timeout=900)
-        except subprocess.TimeoutExpired as error:
-            raise DecodeError(_tool_detail('hxprobe', None, error.stderr or 'TimeoutExpired')) from None
-        except OSError as error:
+        except subprocess.TimeoutExpired:
+            raise DecodeError(_tool_detail('hxprobe', None, 'timeout')) from None
+        except OSError:
             raise DecodeError(_tool_detail('hxprobe', None,
-                                          f'{type(error).__name__} errno={error.errno}')) from None
+                                          'launch_failed')) from None
         if done.returncode:
-            raise DecodeError(_tool_detail('hxprobe', done.returncode, done.stderr))
+            raise DecodeError(_tool_detail('hxprobe', done.returncode, 'exit_nonzero'))
     return decode
 
 

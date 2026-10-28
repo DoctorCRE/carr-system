@@ -2016,18 +2016,16 @@ class IntakeTest(unittest.TestCase):
                     if command[-1] == '--scope' or (tool == 'hxprobe' and len(command) == 1):
                         return original(command, **kwargs)
                     return subprocess.CompletedProcess(command, 42, stdout=b'private stdout',
-                        stderr=b'ignored first line\nfailed /private/elsewhere/file: corrupt ' + b'x' * 300)
+                        stderr=b'ignored first line\nlee@example.test Subject: Lease offer /Users/x/Deals/Acme Medical/LOI.docx')
 
                 with patch('subprocess.run', side_effect=run):
                     result = intake.run(self.repo, self.home, ports)
                 receipt = json.loads(intake.receipt_line(result).split(' ', 1)[1])
                 self.assertEqual((receipt['state'], receipt['reason']), ('failed', 'decode_failed'))
-                self.assertIn(tool, receipt['detail'])
-                self.assertIn('exit=42', receipt['detail'])
-                self.assertIn('corrupt', receipt['detail'])
-                self.assertLessEqual(len(receipt['detail']), 200)
-                for private in ('/private/elsewhere', 'private stdout', 'ignored first line'):
-                    self.assertNotIn(private, receipt['detail'])
+                for private in ('lee@example.test', 'Lease offer', 'Acme', 'Medical',
+                                '/Users/x', 'private stdout', 'ignored first line'):
+                    self.assertNotIn(private, json.dumps(receipt))
+                self.assertEqual(receipt['detail'], f'{tool} exit=42 code=exit_nonzero')
                 self.assertEqual([p for p in self.out().iterdir() if p.is_dir()], [])
 
     def test_decode_os_and_sqlite_errors_report_type_without_private_message(self):
@@ -2055,7 +2053,7 @@ class IntakeTest(unittest.TestCase):
             result = self.run_intake()
         self.assertEqual(result.state, 'failed')
         receipt = json.loads(intake.receipt_line(result).split(' ', 1)[1])
-        self.assertEqual(receipt['detail'], 'outlook-intake-copy exit=None stderr=PermissionError errno=1')
+        self.assertEqual(receipt['detail'], 'outlook-intake-copy exit=None code=permission_denied')
         self.assertIn(f'grant Full Disk Access to {self.home}/carr-local/bin/outlook-intake-copy',
                       intake.status_line(result))
         self.assertEqual(self.fake.calls, [])

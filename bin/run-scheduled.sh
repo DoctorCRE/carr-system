@@ -101,7 +101,9 @@ if (isinstance(receipt, dict) and isinstance(receipt.get("counts"), dict)
         and all(count_key.fullmatch(k) and type(v) is int and 0 <= v <= 1_000_000_000
                 for k, v in receipt["counts"].items())):
     safe = {k: receipt[k] for k in ("state", "reason", "counts")}
-    if isinstance(receipt.get("detail"), str) and len(receipt["detail"]) <= 200:
+    if (isinstance(receipt.get("detail"), str) and re.fullmatch(
+            r"(?:outlook-intake-copy|hxprobe) exit=(?:None|-?[0-9]{1,10}) "
+            r"code=(?:exit_nonzero|permission_denied|timeout|launch_failed)", receipt["detail"])):
         safe["detail"] = receipt["detail"]
     print(json.dumps(safe, sort_keys=True))
     print(receipt["reason"])

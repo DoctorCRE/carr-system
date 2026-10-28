@@ -80,7 +80,7 @@ class ScheduledRunTests(unittest.TestCase):
 
     def test_intake_tool_detail_and_router_exception_types_survive_wrapper(self):
         receipt = {'state': 'failed', 'reason': 'decode_failed', 'counts': {},
-                   'detail': 'hxprobe exit=42 stderr=corrupt [path]'}
+                   'detail': 'hxprobe exit=42 code=exit_nonzero'}
         router = {'state': 'failed', 'counts': {'model_failed': 2},
                   'model_failed_types': {'ModuleNotFoundError': 2}}
         result = self.invoke_intake(receipt, router_lines=['email-router-receipt ' + json.dumps(router)])
@@ -107,6 +107,19 @@ class ScheduledRunTests(unittest.TestCase):
         self.assertEqual(second.returncode, 0)
         self.assertEqual(len(self.rows()), 1)
         self.assertIn('"state": "degraded"', second.stdout)
+
+    def test_intake_detail_rejects_private_text_and_unknown_codes(self):
+        for detail in ('lee@example.test Subject: Lease offer /Users/x/Deals/Acme Medical/LOI.docx',
+                       'hxprobe exit=42 code=unknown',
+                       'hxprobe exit=42 code=exit_nonzero\nlee@example.test',
+                       'other exit=42 code=exit_nonzero'):
+            with self.subTest(detail=detail):
+                receipt = {'state': 'failed', 'reason': 'decode_failed', 'counts': {}, 'detail': detail}
+                result = self.invoke_intake(receipt)
+                args = json.loads(self.rows()[-1][3])
+                expected = {k: v for k, v in receipt.items() if k != 'detail'}
+                self.assertEqual(json.loads(args[args.index('--detail') + 1]), expected)
+                self.assertNotIn(detail, result.stdout)
 
     def test_decoder_deferred_and_health_error_receipts_are_preserved(self):
         deferred = {'state': 'degraded', 'reason': 'writes_deferred',
