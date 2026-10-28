@@ -46,10 +46,15 @@ def run(repo: Path, now: datetime, waits: Waits = Waits(),
         found = usable_window(pid) if pid else None
         if not found or pid is None:
             return Outcome('failed', 'no_usable_main_window')
+        window = Window(pid, found['window_id'], waits)
         expected_account = settings.account
         if not found.get('title', '').endswith(f' • {expected_account}'):
-            return Outcome('failed', 'wrong_account')
-        window = Window(pid, found['window_id'], waits)
+            if not window.select_all_accounts():
+                return Outcome('failed', 'wrong_account')
+            found = usable_window(pid)
+            if not found or not found.get('title', '').endswith(f' • {expected_account}'):
+                return Outcome('failed', 'wrong_account')
+            window = Window(pid, found['window_id'], waits)
         deadline = now_fn() + timedelta(minutes=10)
         closed = lambda: now_fn() >= deadline or not intake.in_window(now_fn())
         report = triage.Report()
