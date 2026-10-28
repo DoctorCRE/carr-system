@@ -11,6 +11,7 @@ WINDOW = 40
 BEFORE = 10
 CAP = 200
 REVIEW_GATE = {'evaluate', 'review-gate'}
+UNFINISHED = {'failure', 'cancelled', 'timed_out'}
 ANSI = re.compile(r'\x1b\[[0-9;?]*[A-Za-z]')
 STAMP = re.compile(r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z ?')
 MARKER = re.compile(r'##\[error\]|\bFAIL(?:ED)?\b|Error:|Traceback|AssertionError|exit (?:code|status) [1-9]')
@@ -43,12 +44,12 @@ def error_window(lines):
 
 def failed_jobs(repo, run_id):
     jobs = json.loads(gh('run', 'view', str(run_id), '--repo', repo, '--json', 'jobs'))['jobs']
-    return [job for job in jobs if job.get('conclusion') == 'failure']
+    return [job for job in jobs if job.get('conclusion') in UNFINISHED]
 
 
 def explain_job(repo, job):
-    steps = [s['name'] for s in job.get('steps', []) if s.get('conclusion') == 'failure']
-    out = [f'== {job["name"]} (job {job["databaseId"]})', f'failed step: {", ".join(steps) or "unknown"}']
+    steps = [s['name'] for s in job.get('steps', []) if s.get('conclusion') in UNFINISHED]
+    out = [f'== {job["name"]} (job {job["databaseId"]}, {job["conclusion"]})', f'failed step: {", ".join(steps) or "unknown"}']
     log = gh('api', '--allow-escape-sequences', f'repos/{repo}/actions/jobs/{job["databaseId"]}/logs')
     return out + error_window(clean(log)) + ['']
 

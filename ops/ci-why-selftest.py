@@ -85,7 +85,7 @@ class CiWhyTests(unittest.TestCase):
                     {'5': [job(51, 'unit', 'Run tests'), job(53, 'other', 'x')]}, {'51': PYTEST_LOG})
         text = run(fake, 12)
         self.assertIn('review gate (evaluate) is waiting for an approval on this head; not a code failure.', text)
-        self.assertIn('== unit (job 51)\nfailed step: Run tests', text)
+        self.assertIn('== unit (job 51, failure)\nfailed step: Run tests', text)
         self.assertIn('FAILED tests/test_widget.py::test_sum - AssertionError', text)
         self.assertIn('##[error]Process completed with exit code 1.', text)
         for absent in ('\x1b', '2026-01-01T', 'harmless', 'cleanup noise', 'collected item 19', '== other'):
@@ -119,9 +119,18 @@ class CiWhyTests(unittest.TestCase):
     def test_run_mode_explains_every_failed_job(self):
         fake = Fake([], {'77': [job(1, 'unit', 'Run tests'), job(2, 'ok', 'Run', 'success')]}, {'1': PYTEST_LOG})
         text = run(fake, '--run', 77)
-        self.assertIn('== unit (job 1)', text)
+        self.assertIn('== unit (job 1, failure)', text)
         self.assertNotIn('== ok', text)
 
+
+    def test_cancelled_and_timed_out_jobs_are_explained_with_their_conclusion(self):
+        jobs = [job(31, 'app e2e', 'Run tests', 'timed_out'), job(32, 'lint', 'Run lint', 'cancelled')]
+        fake = Fake([check('app e2e', 'fail', 3, 31), check('lint', 'cancel', 3, 32)], {'3': jobs},
+                    {'31': LONG_LOG, '32': PYTEST_LOG})
+        for argv in ((12,), ('--run', 3)):
+            text = run(fake, *argv)
+            self.assertIn('== app e2e (job 31, timed_out)\nfailed step: Run tests', text)
+            self.assertIn('== lint (job 32, cancelled)\nfailed step: Run lint', text)
 
 if __name__ == '__main__':
     unittest.main()
