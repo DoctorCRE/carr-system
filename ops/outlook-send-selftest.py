@@ -95,7 +95,7 @@ class FakeOutlook:
             return [{'element_index': 0, 'role': 'AXWindow', 'label': MAIN['title'], 'depth': 0},
                     {'element_index': 1, 'role': 'AXButton', 'label': 'New Mail', 'depth': 1,
                      'element_token': '1:1'},
-                    {'element_index': 2, 'role': 'AXTable', 'label': 'Message List', 'depth': 4}]
+                    {'role': 'AXTable', 'label': 'Message List', 'depth': 4}]
         form = self.forms[wid]
         out: list[dict] = []
 

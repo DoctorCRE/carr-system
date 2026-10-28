@@ -64,6 +64,10 @@ class CuaError(Exception):
     pass
 
 
+class ComposeWindowOpen(Exception):
+    pass
+
+
 class UiError(Exception):
     """The window did not show the expected shape; labeled details must be non-secret codes."""
 
@@ -210,9 +214,9 @@ def _compose_window_open(pid: int, windows: list[dict]) -> bool:
     return False
 
 
-def _quit(pid: int, windows: list[dict], waits: Waits) -> Outcome | None:
+def _quit(pid: int, windows: list[dict], waits: Waits) -> bool:
     if _compose_window_open(pid, windows):
-        return Outcome('skipped', 'compose_window_open')
+        raise ComposeWindowOpen
     window = next((w for w in windows if is_ordinary_main_window(w)), None)
     fallback_at = time.monotonic()
     if window is not None:
@@ -226,22 +230,22 @@ def _quit(pid: int, windows: list[dict], waits: Waits) -> Outcome | None:
     while outlook_pid() is not None:
         now = time.monotonic()
         if now >= deadline:
-            return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
+            return False
         if now >= fallback_at:
             if _compose_window_open(pid, _windows(pid)):
-                return Outcome('skipped', 'compose_window_open')
+                raise ComposeWindowOpen
             now = time.monotonic()
             if now >= deadline:
-                return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
+                return False
             try:
                 subprocess.run(['osascript', '-e', f'tell application "{APP}" to quit'],
                                capture_output=True, timeout=min(30, deadline - now))
             except subprocess.TimeoutExpired:
-                return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
+                return False
             fallback_at = float('inf')
             continue
         time.sleep(min(waits.poll_seconds, deadline - now, fallback_at - now))
-    return None
+    return True
 
 
 def _quit_window_detail(pid: int) -> str:
@@ -278,9 +282,10 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
         pid = outlook_pid()
         if pid is not None:
             windows = _windows(pid)
-            blocked = _quit(pid, windows, waits)
-            if blocked:
-                return blocked
+            if any(is_compose_window(w) for w in windows):
+                return Outcome('skipped', 'compose_window_open')
+            if not _quit(pid, windows, waits):
+                return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
         launched = subprocess.run(['open', '-g', '-a', APP, '--args',
                                    '-ApplePersistenceIgnoreState', 'YES'],
                                   capture_output=True, timeout=60)
@@ -301,6 +306,8 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
                 pass
             time.sleep(waits.new_window_seconds)
         return None if usable_window(pid) else Outcome('failed', 'no_usable_main_window')
+    except ComposeWindowOpen:
+        return Outcome('skipped', 'compose_window_open')
     except CuaError:
         return Outcome('failed', 'cua_driver_unavailable')
     except subprocess.TimeoutExpired:

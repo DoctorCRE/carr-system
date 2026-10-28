@@ -402,41 +402,6 @@ class PreflightQuitTest(FakeOutlookCase):
         with patch.dict(os.environ, self.env, clear=True):
             return prepare_outlook(waits)
 
-    def test_titled_and_untitled_drafts_beside_mailbox_prevent_restart(self):
-        for title in (f'Re: subject-000 • {ACCOUNT}', ''):
-            with self.subTest(title=title):
-                self.given(windows=[ORDINARY, COMPOSE | {'title': title}], draft_window_ids=[14])
-                outcome = self.prepare()
-                self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
-                self.assert_no_restart()
-
-    def test_small_titled_and_untitled_drafts_prevent_restart_on_any_space(self):
-        for title in ('subject-000', f'subject-000 • {ACCOUNT}', ''):
-            for on_screen in (True, False):
-                with self.subTest(title=title, on_screen=on_screen):
-                    self.calls.unlink(missing_ok=True)
-                    draft = window(14, title, 399, 399, on_screen)
-                    self.given(windows=[ORDINARY, draft], draft_window_ids=[14])
-                    outcome = self.prepare()
-                    self.assertIsNotNone(outcome)
-                    self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
-                    self.assert_no_restart()
-
-    def test_unresolved_mailbox_candidate_prevents_restart(self):
-        self.given(windows=[ORDINARY], unresolved_window_ids=[13])
-        outcome = self.prepare()
-        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
-        self.assert_no_restart()
-
-    def test_draft_opened_after_menu_quit_prevents_fallback_and_relaunch(self):
-        self.given(windows=[ORDINARY], menu_quit_ignored=True,
-                   after_menu_quit=[ORDINARY, COMPOSE | {'title': f'subject-000 • {ACCOUNT}'}],
-                   draft_window_ids=[14])
-        outcome = self.prepare()
-        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
-        self.assertEqual(self.called('osascript') + self.called('open'), [])
-        self.assertTrue(json.loads(self.state.read_text())['running'])
-
     def test_quit_uses_mailbox_when_unassigned_window_is_first(self):
         self.given(windows=[UNTITLED_OFFSCREEN, ORDINARY], quit_window_id=13)
         self.assertIsNone(self.prepare())
@@ -562,6 +527,42 @@ class PreflightQuitTest(FakeOutlookCase):
         self.assertEqual(self.called('osascript') + self.called('open'), [])
         self.assertFalse(any(call[1] == 'invoke_menu' for call in self.called('cua-driver')))
         self.assertTrue(json.loads(self.state.read_text())['running'])
+
+    def test_titled_and_untitled_drafts_beside_mailbox_prevent_restart(self):
+        for title in (f'Re: subject-000 • {ACCOUNT}', ''):
+            with self.subTest(title=title):
+                self.given(windows=[ORDINARY, COMPOSE | {'title': title}], draft_window_ids=[14])
+                outcome = self.prepare()
+                self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+                self.assert_no_restart()
+
+    def test_small_titled_and_untitled_drafts_prevent_restart_on_any_space(self):
+        for title in ('subject-000', f'subject-000 • {ACCOUNT}', ''):
+            for on_screen in (True, False):
+                with self.subTest(title=title, on_screen=on_screen):
+                    self.calls.unlink(missing_ok=True)
+                    draft = window(14, title, 399, 399, on_screen)
+                    self.given(windows=[ORDINARY, draft], draft_window_ids=[14])
+                    outcome = self.prepare()
+                    self.assertIsNotNone(outcome)
+                    self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+                    self.assert_no_restart()
+
+    def test_unresolved_mailbox_candidate_prevents_restart(self):
+        self.given(windows=[ORDINARY], unresolved_window_ids=[13])
+        outcome = self.prepare()
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+        self.assert_no_restart()
+
+    def test_draft_opened_after_menu_quit_prevents_fallback_and_relaunch(self):
+        self.given(windows=[ORDINARY], menu_quit_ignored=True,
+                   after_menu_quit=[ORDINARY, COMPOSE | {'title': f'subject-000 • {ACCOUNT}'}],
+                   draft_window_ids=[14])
+        outcome = self.prepare()
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+        self.assertEqual(self.called('osascript') + self.called('open'), [])
+        self.assertTrue(json.loads(self.state.read_text())['running'])
+
 
 
 class ComposeWindowTest(unittest.TestCase):
