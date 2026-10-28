@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """Deliver current store-scoped rules for prompt, tool, and response events."""
 from __future__ import annotations
+import fcntl
+import hashlib
 import json
+import os
 import re
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
-from lib.rule_scope_lookup import lookup
+from lib.rule_scope_lookup import fetch_catalog, select_rules
 from lib.rule_delivery_preuse import (LOOKUP_RECEIPT_SCHEMA, LOOKUP_INSTRUCTION, LOOKUP_COMPLETE_INSTRUCTION,
     canonical, digest, receipt_id, source_sha256, valid_local_identity, _claude_user_text)
 from lib import rule_cards, rule_routes
@@ -19,6 +23,17 @@ CARD_TOOL = 'rule-cards'
 GAP_LOG = REPO / 'out/rule-lookup/selection-gaps.jsonl'
 
 FAILURE = "RULE LOOKUP INCOMPLETE. Rules were not fully delivered. Ordinary actions must wait. Recover through standing-context or the read-only rule verbs; report unusable scope as a data defect."
+# The scope catalog is read from the store once per user prompt and reused by that
+# prompt's tool calls for at most CATALOG_MAX_SECONDS (WR573.S1.J2): the hook fires
+# on every tool call, the corpus changes only when a rule does. A rule changed
+# elsewhere reaches a session at its next prompt or within the window, whichever
+# comes first, so prompt-less jobs still get stop rules; this session's own rule
+# writes clear the cache at once.
+RULE_WRITING_VERBS = frozenset({'adopt-rule', 'approve-rule', 'retire-rule', 'bind-rule-context-contract'})
+CATALOG_MAX_SECONDS = 600    # a cached catalog older than this is read again
+CATALOG_LOCK_SECONDS = 2.0   # bounded wait; past it, read the store directly
+CATALOG_MAX_AGE = 86400      # catalog files older than a day are removed on write
+
 UNAVAILABLE = "RULE LOOKUP UNAVAILABLE. The rule store could not be reached for this action; it was not blocked. Recover rules through standing-context if the work depends on them."
 
 
@@ -73,6 +88,88 @@ def task_text(payload):
                 raise ValueError('task_too_large')
             return text
     raise ValueError('task_context_unavailable')
+
+
+def _catalog_root():
+    return Path(os.environ.get('CARR_RULE_SCOPE_CACHE_DIR',
+                               Path.home() / '.config/carr/claude-rule-delivery/scope-catalog'))
+
+
+def _catalog_path(session_id):
+    return _catalog_root() / (hashlib.sha256(session_id.encode('utf-8')).hexdigest() + '.json')
+
+
+def _writes_rules(payload):
+    """Whether this tool call runs a verb that changes the rule corpus."""
+    from lib.rule_boot_gate import _carr_verb
+    tool_input = payload.get('tool_input') if isinstance(payload.get('tool_input'), dict) else {}
+    verb = _carr_verb(payload.get('tool_name') or '')
+    if verb == 'call-verb':
+        verb = tool_input.get('verb')
+    if verb in RULE_WRITING_VERBS:
+        return True
+    command = tool_input.get('command') or tool_input.get('cmd') or ''
+    return isinstance(command, str) and any(
+        re.search(r'run\.sh\s+call\s+' + re.escape(v) + r'\b', command) for v in RULE_WRITING_VERBS)
+
+
+def _validated(catalog):
+    select_rules(catalog, {'tool_name': ''})  # raises on any catalog it would refuse
+    return catalog
+
+
+def _write_catalog(path, catalog):
+    temp = path.with_suffix('.tmp')
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+        json.dump(catalog, handle)
+    os.replace(temp, path)
+    cutoff = time.time() - CATALOG_MAX_AGE
+    for old in path.parent.iterdir():
+        try:
+            if old != path and old.stat().st_mtime < cutoff:
+                old.unlink()
+        except OSError:
+            pass
+
+
+def session_catalog(payload, runner):
+    """This session's scope catalog: a copy of the sponsor's rule corpus, rule text
+    included, kept at 0600 under ~/.config/carr (directory 0700).
+
+    UserPromptSubmit always reads the store; tool calls and Stop reuse what the
+    prompt read until it is CATALOG_MAX_SECONDS old. A catalog is written only after it passes select_rules'
+    validation, so a refused or failed read is never served. When another hook
+    in the session holds the lock past CATALOG_LOCK_SECONDS this call reads the
+    store directly instead of queueing behind it.
+    """
+    path = _catalog_path(payload['session_id'])
+    if payload['hook_event_name'] == 'PreToolUse' and _writes_rules(payload):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        return _validated(fetch_catalog(runner))
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with open(path.with_suffix('.lock'), 'a', encoding='utf-8') as lock:
+        deadline = time.monotonic() + CATALOG_LOCK_SECONDS
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    return _validated(fetch_catalog(runner))
+                time.sleep(0.05)
+        if payload['hook_event_name'] != 'UserPromptSubmit':
+            try:
+                if 0 <= time.time() - path.stat().st_mtime < CATALOG_MAX_SECONDS:
+                    return json.loads(path.read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                pass
+        catalog = _validated(fetch_catalog(runner))
+        _write_catalog(path, catalog)
+        return catalog
 
 
 def context(text, event):
@@ -202,7 +299,7 @@ def delivery_receipt(payload, selection, task, *, dedupe=True):
     return context(text, event)
 
 
-def process(payload, *, runner=subprocess.run, dedupe=True):
+def process(payload, *, runner=subprocess.run, dedupe=True, cache=True):
     event = payload.get('hook_event_name')
     if event not in {'PreToolUse', 'UserPromptSubmit', 'Stop'}:
         return None
@@ -222,7 +319,8 @@ def process(payload, *, runner=subprocess.run, dedupe=True):
                    'tool_name': payload.get('tool_name', ''), 'tool_input': payload.get('tool_input', {})}
         if payload.get('last_assistant_message'):
             current['response'] = payload['last_assistant_message']
-        selection = lookup(current, runner=runner)
+        catalog = session_catalog(payload, runner) if cache else fetch_catalog(runner)
+        selection = select_rules(catalog, current)
         if not valid_local_identity(selection['identity']):
             return refused(event)
         return delivery_receipt(payload, selection, task, dedupe=dedupe)

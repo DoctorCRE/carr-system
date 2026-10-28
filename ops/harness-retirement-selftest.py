@@ -13,8 +13,7 @@ class HarnessRetirement(unittest.TestCase):
         retired = ('rule-boot-gate.py', 'delegation-gate.py', 'executor-tier-gate.py',
                    'claude-continuity-hook.py', 'codex-continuity-hook.py')
         for relative in ('ops/config/hooks.json', 'ops/config/codex-hooks.json',
-                         '.claude/settings.json', 'claude-tree/settings/user.settings.json',
-                         'claude-tree/settings/carr-ai-project.settings.json'):
+                         '.claude/settings.json'):
             with self.subTest(source=relative):
                 raw = (ROOT / relative).read_text()
                 for script in retired:

@@ -78,7 +78,7 @@ _START_INTERVAL = re.compile(
     r"(?P<indent>[ \t]*)<key>StartInterval</key>\s*<integer>\s*(?P<n>\d+)\s*</integer>[ \t]*\n?")
 _MARKER_RE = re.compile(re.escape(MARKER) + r":\s*(\d+)")
 
-TEMPLATE_DIRS = ("ops/launchd", "tools/dictation-rig/launchd")
+TEMPLATE_DIR = "ops/launchd"
 
 
 def hourly_minute(label: str) -> int:
@@ -240,14 +240,8 @@ def audit_template(text: str) -> list[str]:
 
 
 def carr_templates(repo) -> list[Path]:
-    """Every tracked-location CARR LaunchAgent template under the repo."""
-    root = Path(repo)
-    found = []
-    for rel in TEMPLATE_DIRS:
-        folder = root / rel
-        if folder.is_dir():
-            found.extend(sorted(p for p in folder.glob("com.carr.*.plist") if p.is_file()))
-    return found
+    """Every tracked CARR LaunchAgent template under the repo."""
+    return sorted(p for p in (Path(repo) / TEMPLATE_DIR).glob("com.carr.*.plist") if p.is_file())
 
 
 def _main(argv: list[str]) -> int:
