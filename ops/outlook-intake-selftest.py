@@ -1163,6 +1163,7 @@ class IntakeTest(unittest.TestCase):
         payload = json.loads(request['payload'])
         payload['idempotency_key'] = old
         request.pop('key_owner', None)
+        request.pop('source_kind', None)
         request.update(payload=json.dumps(payload), disposition='blocked', error_code='key_reuse', retry_at=None)
         state['requests'][old] = request
         path.write_text(json.dumps(state))
@@ -1262,6 +1263,27 @@ class IntakeTest(unittest.TestCase):
             sources.append(args['source_ref'])
         self.assertNotEqual(*keys)
         self.assertNotEqual(*sources)
+
+    def test_legacy_pending_flag_replays_its_frozen_payload(self):
+        m = self.flagged(flag='flagged', due=self.OCT29)
+        self.filed_deal(m)
+        self.fake.fail_verbs.add('record-deal-item')
+        self.assertEqual(self.run_intake([m]).state, 'failed')
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        [scoped] = [k for k, r in state['requests'].items() if r['verb'] == 'record-deal-item']
+        request = state['requests'].pop(scoped)
+        legacy = intake.key('record-deal-item', 'deal-1', f'{ident(m)}|flagged')
+        args = json.loads(request['payload'])
+        args.update(idempotency_key=legacy, source_ref=f'outlook-flag:{ident(m)}')
+        request['payload'] = json.dumps(args)
+        state['requests'][legacy] = request
+        path.write_text(json.dumps(state))
+        self.fake.calls.clear()
+        self.fake.fail_verbs.clear()
+        self.fake.now += timedelta(minutes=2)
+        self.assertEqual(self.run_intake([m], touch=False).state, 'succeeded')
+        self.assertEqual(self.fake.writes('record-deal-item'), [('record-deal-item', args)])
 
     def test_lead_proposals_from_different_mailboxes_have_distinct_keys(self):
         keys = []

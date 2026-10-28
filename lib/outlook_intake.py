@@ -1463,7 +1463,8 @@ def _retry_owner_key_collisions(state: dict, owner: str) -> None:
                 or request.get('key_owner') == owner):
             continue
         args = json.loads(request['payload'])
-        if args.get('owner') != owner or 'expected_action' not in args or request.get('source_kind') != 'mail':
+        if (args.get('owner') != owner or 'expected_action' not in args
+                or not (request.get('source_kind') == 'mail' or legacy in sources)):
             continue
         source = sources.get(legacy, f'legacy|{legacy}')
         scoped = key('set-next-action', args['ref'], f'{owner}|{source}')
