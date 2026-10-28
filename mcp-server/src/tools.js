@@ -316,12 +316,20 @@ export function auditIdentity(actor) {
 }
 
 const UUID_KEY = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+// Two RW02 keys carry meaning the database reads back: ops.rw02_record_run finds a
+// run's page stops by the `rw02-read:<run_ref>:` key prefix, and ops.rw02_loop_episodes
+// finds a finding's loop episodes by the exact base/`:eN` shape. Only those exact
+// shapes, on those verbs, are accepted until a migration gives them a UUID form.
+const DB_READ_KEY_SHAPES = {
+  "record-salesforce-page-stop": /^rw02-read:[0-9a-f]{24}:page-stop:[0-9]{1,6}$/,
+  "add-loop": /^rw02-(?:missing-joe|unknown-to-carr):[0-9a-f]{32}(?::e(?:[2-9]|[1-9][0-9]{1,5}))?$/,
+};
 
 async function withEnvelope(client, actor, verb, args, fn) {
   const key = args.idempotency_key;
   if (!key) throw new ToolError({ error: "missing_idempotency_key",
     hint: "generate a UUID per intended action; retries reuse the SAME key" });
-  if (typeof key !== "string" || !UUID_KEY.test(key))
+  if (typeof key !== "string" || !(UUID_KEY.test(key) || DB_READ_KEY_SHAPES[verb]?.test(key)))
     throw new ToolError({ error: "invalid_idempotency_key", field: "idempotency_key" });
   const identity = auditIdentity(actor);
   // SIEP-11: replay authority is the exact operation manifest, never the bare

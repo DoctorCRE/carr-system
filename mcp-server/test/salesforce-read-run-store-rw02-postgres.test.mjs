@@ -141,7 +141,7 @@ test("V5-RW02 run ledger, consent record, loop episodes and invoiced scope on re
 
     await t.test("a run that recorded a page stop cannot be recorded clean", async () => {
       const run_ref = hex24();
-      await verb(pg, copy, "record-salesforce-page-stop", { idempotency_key: derivedIdempotencyKey("test", `rw02-read:${run_ref}:page-stop:0`),
+      await verb(pg, copy, "record-salesforce-page-stop", { idempotency_key: `rw02-read:${run_ref}:page-stop:0`,
         page: { execution_mode: "attended",
           binding: { expected_origin: "https://synthetic-org.invalid", expected_org_id: "00Dsynthetic0001",
             expected_account_ref: "seat", expected_ui_contract_digest: `sha256:${"1".repeat(64)}` },

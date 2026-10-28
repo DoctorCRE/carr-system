@@ -946,7 +946,7 @@ export async function runSalesforceBrowserReadReconciliation(options = {}) {
       const verdict = evaluatePageObservation(kernel);
       if (verdict.decision === "stop") {
         await recorder.record("record-salesforce-page-stop",
-          { idempotency_key: derivedIdempotencyKey("rw02-page-stop", `${run_ref}:${index}`), page: kernel });
+          { idempotency_key: `rw02-read:${run_ref}:page-stop:${index}`, page: kernel });
         page_stop = { page_index: index, kernel_reason_id: verdict.reason_id,
           challenge: kernel.observation.challenge };
       }
@@ -1121,7 +1121,7 @@ export async function runSalesforceBrowserReadReconciliation(options = {}) {
       // in `kind` and `source`, both of which the row keeps. Keyed per deal and
       // reason: a repeat run replays the first row instead of adding one.
       plan.push({ finding: "absent", verb: "record-finding", args: {
-        idempotency_key: key("absent", f.deal_id, f.reason_id), subject: f.deal_id,
+        idempotency_key: derivedIdempotencyKey("rw02-absent", key("absent", f.deal_id, f.reason_id)), subject: f.deal_id,
         kind: `salesforce_presence:${f.reason_id}`, found: false, internal: true, epistemic_status: "observed",
         source: `${source_note}; reason ${f.reason_id}` } });
     }

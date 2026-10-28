@@ -40,3 +40,16 @@ test("write envelope still runs with a UUID idempotency_key", async () => {
     (e) => !/idempotency/.test(String(e.error)));
   assert.ok(db.calls.some((s) => s.startsWith("select request_hash, response")));
 });
+
+// The database reads these two RW02 key shapes back, so exactly them stay accepted.
+test("the RW02 shapes the database reads back are accepted on their own verbs only", async () => {
+  const pageStop = `rw02-read:${"a".repeat(24)}:page-stop:0`;
+  const episode = `rw02-missing-joe:${"b".repeat(32)}:e2`;
+  const refused = (verb, key) => TOOLS[verb].handler(store(), actor, { idempotency_key: key })
+    .then(() => null, (e) => e.payload?.error);
+  assert.notEqual(await refused("record-salesforce-page-stop", pageStop), "invalid_idempotency_key");
+  assert.notEqual(await refused("add-loop", episode), "invalid_idempotency_key");
+  assert.equal(await refused("record-finding", pageStop), "invalid_idempotency_key");
+  assert.equal(await refused("record-salesforce-page-stop", `rw02-read:${"a".repeat(24)}:other`), "invalid_idempotency_key");
+  assert.equal(await refused("add-loop", `rw02-missing-joe:${"b".repeat(32)}:e1`), "invalid_idempotency_key");
+});
