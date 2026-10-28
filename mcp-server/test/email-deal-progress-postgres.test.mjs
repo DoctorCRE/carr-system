@@ -1566,17 +1566,36 @@ test('failed delivery requires a reason and is recorded once without an automati
 
 test('the owner can resubmit a reply aborted before dispatch', async () => {
   await c.query('delete from email_proposal');
-  await c.query("insert into actor(slug,kind,display_name,email) values('dell','human','Synthetic partner','partner@example.com') on conflict(slug) do update set email=excluded.email,active=true");
+  await c.query("insert into actor(slug,kind,display_name,email) values('dell','human','Synthetic partner','dell@example.test') on conflict(slug) do update set email=excluded.email,active=true");
   const proposal = await draftFor();
-  const first = await submitDraft(proposal, { cc: ['partner@example.com'] });
+  const first = await submitDraft(proposal, { cc: ['dell@example.test'] });
   await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
     base_version: first.version, status: 'failed', sha256: first.sha256, reason: 'aborted_before_dispatch' }, machineFor('joe'), 'carr_writer');
-  const again = await submitDraft(proposal, { base_version: 3, cc: ['partner@example.com'] });
+  const dell = { ...(await c.query("select id,slug from actor where slug='dell'")).rows[0], human: true };
+  await refuses(submitDraft(proposal, { base_version: 3 }, dell), 'email_draft_not_owner');
+  const key = randomUUID();
+  const args = { base_version: 3, cc: ['dell@example.test'], idempotency_key: key };
+  const again = await submitDraft(proposal, args);
+  assert.equal((await submitDraft(proposal, args)).replayed, true);
+  await refuses(submitDraft(proposal, { ...args, idempotency_key: randomUUID() }), 'email_draft_already_submitted');
   assert.equal(again.version, 4);
   assert.equal(again.sha256, first.sha256);
   const outbox = await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader');
   assert.equal(outbox.drafts[0].version, 4);
   assert.equal(outbox.drafts[0].sha256, first.sha256);
+});
+
+test('unknown and dynamic failure reasons remain final', async () => {
+  for (const reason of ['unknown_reason', 'failed:compose_field_not_found:to', 'aborted_before_dispatch:details']) {
+    await c.query('delete from email_proposal');
+    const proposal = await draftFor();
+    const first = await submitDraft(proposal, { cc: ['dell@example.test'] });
+    await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+      base_version: first.version, status: 'failed', sha256: first.sha256, reason }, machineFor('joe'), 'carr_writer');
+    await assert.rejects(submitDraft(proposal, { base_version: 3, cc: ['dell@example.test'] }),
+      error => error.payload?.error === 'email_draft_failure_not_resubmittable' && error.payload.reason === reason);
+    assert.deepEqual((await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader')).drafts, []);
+  }
 });
 
 test('reply draft provenance cannot be forged or inferred from legacy display names', async () => {

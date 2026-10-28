@@ -2,6 +2,9 @@
 import { sha256 } from './sha256.ts';
 import { partnerAuthoritySlugForActor } from './partner-authority.js';
 const LIMIT = 200;
+const RESUBMITTABLE_FAILURES = new Set([
+  'aborted_before_dispatch', // The sender recorded that dispatch was aborted before pressing Send.
+]);
 const MATCHING = new Set(['file_to_deal', 'possible_new_deal']);
 const ROLES = ['client', 'landlord_side', 'lender', 'attorney', 'other_vendor'];
 const KINDS = {
@@ -207,7 +210,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
         return withEnvelope(c, actor, 'submit-email-draft', args, async () => {
           const row = await draftRow(c, args.proposal_id, actor.slug);
-          if (row.status !== 'pending') fail('email_draft_already_submitted');
+          if (row.status === 'failed' && !RESUBMITTABLE_FAILURES.has(row.send_result?.reason))
+            fail('email_draft_failure_not_resubmittable', { reason: row.send_result?.reason ?? null });
+          if (row.status !== 'pending' && row.status !== 'failed') fail('email_draft_already_submitted');
           checkVersion(row, args.base_version);
           if (!args.body.trim()) fail('email_draft_empty_body');
           if (!args.subject.trim() || /[\r\n]/.test(args.subject)) fail('email_draft_subject_invalid');
@@ -217,7 +222,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           const submitted = { subject: args.subject, body: args.body,
             sha256: sha256(JSON.stringify({ subject: args.subject, body: args.body })), ...recipients };
           await c.query(`update email_proposal set status='approved_to_send',version=version+1,
-            submitted_email=$2::jsonb,submitted_at=now(),resolved_by=$3,resolved_at=now() where id=$1`,
+            submitted_email=$2::jsonb,submitted_at=now(),resolved_by=$3,resolved_at=now(),
+            send_result=null,result_recorded_at=null where id=$1`,
           [row.id, JSON.stringify(submitted), actor.id]);
           await writeEvent(c, actor, 'submit-email-draft', 'deal', row.deal_id, {
             new: { proposal_id: row.id, sha256: submitted.sha256, to: submitted.to, cc: submitted.cc },
