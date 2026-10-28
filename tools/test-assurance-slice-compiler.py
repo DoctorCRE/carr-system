@@ -515,5 +515,27 @@ def test_module_has_no_provider_network_git_database_model_or_write_imports():
     assert compiler.compile_ownership_contract_digest(preimage) == valid_input()["assurance_slice"]["ownership_contract_digest"]
 
 
+def test_schema_compiler_enforces_keyed_uniqueness_beyond_unique_items():
+    source = """
+import {compileSchema} from "./workspace/contracts/schema-validator.mjs";
+import assert from "node:assert/strict";
+const item = props => ({type: "object", properties: props});
+const validate = compileSchema({type: "array", uniqueItems: true, "x-carr-unique-by": "check_ref", items: item({check_ref: {type: "string"}, failure_condition: {type: "string"}})});
+assert.equal(validate([{check_ref: "check:a", failure_condition: "one"}, {check_ref: "check:a", failure_condition: "different"}]).valid, false);
+assert.equal(validate([{check_ref: "check:a"}, {check_ref: "check:b"}]).valid, true);
+assert.throws(() => compileSchema({type: "array", "x-carr-unique-by": ""}), /x-carr-unique-by/);
+assert.throws(() => compileSchema({type: "array", "x-carr-unique-by": "   ", items: item({check_ref: {type: "string"}})}), /x-carr-unique-by/);
+assert.throws(() => compileSchema({type: "array", "x-carr-unique-by": "check_ref", items: item({other: {type: "string"}})}), /declares/);
+const scalar = compileSchema({type: "array", "x-carr-unique-by": "check_ref", items: item({check_ref: {type: ["string", "number", "boolean"]}})});
+assert.equal(scalar([{check_ref: "check:a"}, {check_ref: "check:b"}]).valid, true);
+assert.equal(scalar([{other: "check:a"}]).valid, false);
+assert.equal(scalar([{check_ref: {nested: true}}, {check_ref: {nested: true}}]).valid, false);
+assert.equal(scalar([{check_ref: ["a"]}]).valid, false);
+assert.equal(scalar([{check_ref: null}]).valid, false);
+assert.equal(scalar([{check_ref: {b: 1, a: 2}}, {check_ref: {a: 2, b: 1}}]).valid, false);
+"""
+    subprocess.run(["node", "--input-type=module", "-e", source], cwd=ROOT, text=True, capture_output=True, check=True)
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main(["-q", __file__]))
