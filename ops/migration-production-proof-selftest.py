@@ -118,18 +118,16 @@ class ProofTests(unittest.TestCase):
         self.assertTrue(result['ok'])
         self.assertEqual(result['pending'], ['0003_c.sql'])
 
-    def test_ledger_rejects_missing_changed_and_backfilled_files(self):
+    def test_ledger_rejects_missing_and_changed_files(self):
         for repository, applied in [
             ({'0001_a.sql': 'a'}, {'0001_a.sql': 'a', '0004_unknown.sql': 'd'}),
             ({'0001_a.sql': 'wrong'}, {'0001_a.sql': 'a'}),
-            ({'0001_a.sql': 'a', '0002_backfill.sql': 'b', '0003_c.sql': 'c'},
-             {'0001_a.sql': 'a', '0003_c.sql': 'c'}),
         ]:
             with self.subTest(applied=applied):
                 self.assertFalse(proof.ledger_proof(repository, applied)['ok'])
 
-    def test_same_number_earlier_hole_refuses(self):
-        self.assertFalse(proof.ledger_proof(
+    def test_lower_unapplied_filename_is_pending(self):
+        self.assertTrue(proof.ledger_proof(
             {'0001_a.sql': 'a', '0001_b.sql': 'b'}, {'0001_b.sql': 'b'})['ok'])
 
     def test_partial_strict_atomic_group_refuses(self):

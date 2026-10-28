@@ -16,13 +16,13 @@ from migration_source import migration_names
 
 
 def findings(main: set[str], pending: set[str], peer: Claims) -> list[str]:
-    ceiling = max((int(m[1]) for n in main if (m := SLOT_RE.fullmatch(n))), default=0)
-    bad = {name for name in pending if int(name[:4]) <= ceiling or int(name[:4]) in peer.earlier}
+    occupied = {int(match[1]) for name in main if (match := SLOT_RE.fullmatch(name))}
+    bad = {name for name in pending if int(name[:4]) in occupied | peer.earlier}
     if not bad:
         return []
     targets = allocate_integration_successors(main, pending, occupied_slots=peer.occupied)
     return [f'{name}: slot {name[:4]} belongs to '
-            + (f'PR #{peer.owners[int(name[:4])]}' if int(name[:4]) > ceiling else 'main')
+            + ('main' if int(name[:4]) in occupied else f'PR #{peer.owners[int(name[:4])]}')
             + f'; rename to {targets[name]} and update its references' for name in sorted(bad)]
 
 

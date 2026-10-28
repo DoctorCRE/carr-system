@@ -92,7 +92,7 @@ class BaselineTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'cannot read'):
                 MigrationBaseline.load(Path(directory))
 
-    def test_committed_snapshot_is_a_checksummed_source_prefix(self):
+    def test_committed_snapshot_is_a_checksummed_applied_set(self):
         root = Path(__file__).resolve().parents[1]
         baseline = MigrationBaseline.load(root)
         ledger = repository_ledger(root, baseline)

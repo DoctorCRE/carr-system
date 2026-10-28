@@ -4,7 +4,7 @@
 Added migrations require rollback notes. Destructive DDL requires an
 expand-contract phase; long locks require lock-review. The lexical check reads
 DO and function bodies but ignores comments and quoted strings.
-The snapshot ledger must be a nonempty, checksummed prefix of source migrations.
+The snapshot ledger must be a nonempty, checksummed subset of source migrations.
 The immutable baseline binds removed historical SQL to its source snapshot.
 Pending migrations and changed snapshot content are proved by migration-shadow.
 
@@ -29,6 +29,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 from migration_baseline import MANIFEST, MigrationBaseline  # noqa: E402
 from migration_source import migration_names, read_migration  # noqa: E402
+from migrate import validate_ledger_identities  # noqa: E402
 
 MIGRATIONS_DIR = "migrations"
 SNAPSHOT = "db/schema.sql"
@@ -279,8 +280,12 @@ def ledger_problems(files: Mapping[str, str], snapshot: str,
         return [f"{SNAPSHOT} has no nonempty schema_migrations ledger section"]
     identities = (baseline.repository_ledger(files) if baseline else
                   {name: runner_sha256(text) for name, text in files.items()})
-    if rows != dict(sorted(identities.items())[:len(rows)]):
-        return [f"{SNAPSHOT} ledger filenames or checksums differ from the source migration prefix"]
+    try:
+        if baseline is not None:
+            baseline.validate_coverage(rows)
+        validate_ledger_identities(identities, rows)
+    except ValueError as exc:
+        return [f"{SNAPSHOT} ledger filenames or checksums differ from source migrations: {exc}"]
     return []
 
 
@@ -402,7 +407,7 @@ def main(argv: list[str] | None = None) -> int:
     if failed:
         return 1
     print(f"migration-safety-gate: OK — {len(added)} added migration(s) declare their risk; "
-          f"{SNAPSHOT} ledger is a valid applied prefix")
+          f"{SNAPSHOT} ledger is a valid applied set")
     return 0
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply pending migrations over the base snapshot on disposable PostgreSQL 18.
+"""Rehearse base-first and filename-order upgrades on disposable PostgreSQL 18.
 
 Restore the candidate, compare reviewed seeds, and prove business-data isolation.
 An unchanged base snapshot passes. A changed snapshot must match the candidate.
@@ -201,6 +201,9 @@ def find_pg18(explicit: str | None) -> pathlib.Path | None:
 
 
 def default_base() -> str:
+    if os.environ.get("GITHUB_EVENT_NAME") == "merge_group":
+        event = json.loads(pathlib.Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+        return str(event["merge_group"]["base_sha"])
     ref = (os.environ.get("GITHUB_BASE_REF") or "").strip()
     target = f"origin/{ref}" if ref else "origin/main"
     parents = ["HEAD"]
@@ -231,6 +234,23 @@ def run(cmd: list, env: dict[str, str], label: str, log: pathlib.Path) -> str:
     return result.stdout
 
 
+def materialize_base(base: str, destination: pathlib.Path) -> pathlib.Path:
+    """Pair the base revision's migration files with the current runner policy."""
+    paths = [path for path in gate.git(REPO, "ls-tree", "-r", "--name-only", base,
+                                      "--", "migrations/", "db/migration-baseline.json").splitlines()
+             if path == "db/migration-baseline.json"
+             or (path.startswith("migrations/") and path.count("/") == 1 and path.endswith(".sql"))]
+    (destination / "migrations").mkdir(parents=True)
+    for path, text in gate.read_blobs(REPO, base, paths).items():
+        target = destination / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(text.encode())
+    (destination / "tools").mkdir()
+    for name in ("migrate.py", "migration_baseline.py", "migration_number_contract.py"):
+        shutil.copyfile(REPO / "tools" / name, destination / "tools" / name)
+    return destination / "tools/migrate.py"
+
+
 def shadow(base: str, bindir: pathlib.Path, work: pathlib.Path) -> tuple[str, str, list[str]]:
     """Return (base snapshot, candidate snapshot, migrations applied)."""
     log = work / "shadow.log"
@@ -240,6 +260,7 @@ def shadow(base: str, bindir: pathlib.Path, work: pathlib.Path) -> tuple[str, st
     base_snapshot = subprocess.run(["git", "show", f"{base}:{SNAPSHOT}"], cwd=REPO,
                                    capture_output=True, check=True).stdout.decode("utf-8")
     write_snapshot(work / "base.sql", base_snapshot)
+    base_runner = materialize_base(base, work / "base-source")
     fixture = local_pg.DisposablePostgres("carr-migration-shadow.", bindir / "pg_ctl", env)
     data, port = fixture.root / "data", free_port()
     dsn = f"postgres://carr_ci@127.0.0.1:{port}/carr_ci"
@@ -258,11 +279,30 @@ def shadow(base: str, bindir: pathlib.Path, work: pathlib.Path) -> tuple[str, st
             env, "create neondb_owner", log)
         run([bindir / "psql", dsn, "-v", "ON_ERROR_STOP=1", "-q", "-f", work / "base.sql"],
             {**env, "PGOPTIONS": "--client-min-messages=warning"}, f"load {base[:12]}:{SNAPSHOT}", log)
+        run([python, base_runner, "--apply", "--yes"], {**env, "DATABASE_URL": dsn},
+            "base migrations before HEAD", log)
         run([python, REPO / "tools/migrate.py", "--apply", "--yes"], {**env, "DATABASE_URL": dsn},
             "tools/migrate.py --apply", log)
         candidate = work / "candidate.sql"
         run([REPO / "bin/schema-snapshot.sh", "--from-disposable-local", dsn,
              "--output-candidate", candidate], env, "bin/schema-snapshot.sh", log)
+        canonical_dsn = dsn
+        run([bindir / "psql", dsn.rsplit("/", 1)[0] + "/postgres", "-X", "-v", "ON_ERROR_STOP=1",
+             "-qc", "alter database carr_ci rename to base_first"], env, "retain base-first database", log)
+        dsn = dsn.rsplit("/", 1)[0] + "/base_first"
+        run([bindir / "createdb", "-h", "127.0.0.1", "-p", str(port), "-U", "carr_ci", "carr_ci"],
+            env, "createdb canonical migration order", log)
+        run([bindir / "psql", canonical_dsn, "-X", "-v", "ON_ERROR_STOP=1", "-q", "-f", work / "base.sql"],
+            {**env, "PGOPTIONS": "--client-min-messages=warning"}, "load canonical base snapshot", log)
+        run([python, REPO / "tools/migrate.py", "--apply", "--yes"], {**env, "DATABASE_URL": canonical_dsn},
+            "canonical tools/migrate.py --apply", log)
+        canonical = work / "canonical.sql"
+        run([REPO / "bin/schema-snapshot.sh", "--from-disposable-local", canonical_dsn,
+             "--output-candidate", canonical], env, "export canonical snapshot", log)
+        order_diffs = differences(read_snapshot(canonical), read_snapshot(candidate))
+        if order_diffs:
+            raise StepFailed("base-first migration order differs from canonical rebuild:\n"
+                             + "\n".join(order_diffs))
         run([bindir / "createdb", "-h", "127.0.0.1", "-p", str(port), "-U", "carr_ci", "rebuilt"],
             env, "createdb snapshot rebuild", log)
         rebuilt = dsn.rsplit("/", 1)[0] + "/rebuilt"
@@ -301,8 +341,9 @@ def main(argv: list[str] | None = None) -> int:
         return 3
     try:
         base = args.base or default_base()
-    except subprocess.CalledProcessError as exc:
-        print(f"migration-shadow: cannot resolve the base: {exc.stderr.strip()}", file=sys.stderr)
+    except (OSError, KeyError, TypeError, ValueError, subprocess.CalledProcessError) as exc:
+        detail = getattr(exc, "stderr", None) or str(exc)
+        print(f"migration-shadow: cannot resolve the base: {detail.strip()}", file=sys.stderr)
         return 2
 
     artifacts = local_pg.DisposablePostgres("carr-migration-shadow.", bindir / "pg_ctl")
