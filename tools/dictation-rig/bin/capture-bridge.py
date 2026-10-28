@@ -410,9 +410,12 @@ def post_batch(
     token = capture_token(session_dir)
     if token is None:
         return False
-    canonical = json.dumps(items, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    content: dict[str, Any] = {"items": items}
+    if route == "/capture/candidates":
+        content["evidence_sources"] = post_call.automatic_evidence(session_dir)
+    canonical = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     key = f"post-call:{session_dir.name}:{lane}:{uuid.uuid5(uuid.NAMESPACE_URL, canonical)}"
-    body = {"session_token": token, "idempotency_key": key, "items": items}
+    body = {"session_token": token, "idempotency_key": key, **content}
     try:
         status, response = http_request("POST", f"{cfg['base_url']}{route}", body, None)
     except BridgeNetworkError as exc:

@@ -9855,7 +9855,7 @@ registerTools({
           !["next_step", "phase_move"].includes(candidate.kind)))
         throw new ToolError({ error: "automatic_apply_not_allowed", kind: candidate.kind,
           hint: "only a partner's own Call Mode may apply a post-call next step or phase automatically" });
-      const hold = automatic ? automaticApplyHold(candidate) : null;
+      const hold = automatic ? await automaticApplyHold(candidate) : null;
       if (hold) throw new ToolError({ error: "below_confidence_bar", kind: candidate.kind, reason: hold,
         hint: "leave it as a card for Joe or Dell; nothing was changed" });
 
@@ -9870,6 +9870,7 @@ registerTools({
       if (!verb) throw new ToolError({ error: "unknown_candidate_kind", kind: candidate.kind });
       const innerArgs = { ...candidate.payload, idempotency_key: captureKey(candidate.id) };
       delete innerArgs.plan_base;
+      delete innerArgs.evidence_source;
       if (candidate.kind === "meeting_record") innerArgs.kind = "meeting";
       if (candidate.kind === "phase_move") {
         // The partners' own words on the call are the evidence for the move,

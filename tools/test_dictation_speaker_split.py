@@ -304,6 +304,9 @@ class ProcessSessionWiringTest(unittest.TestCase):
             "system one": "Other participant 1", "system two": "Other participant 2",
         })
         self.assertIn("system: " + speaker_split.METHOD_NOTE, t["speaker_method"])
+        # Post-call trusts a system label only when one voice was heard there.
+        self.assertEqual(t["speaker_tracks"], {"mic": {"diarized": True, "speakers": 1},
+                                               "system": {"diarized": True, "speakers": 2}})
         # The shared clock still applies after relabeling.
         self.assertEqual([s["start_ms"] for s in t["segments"] if s["text"] == "system one"], [500])
 
@@ -312,6 +315,14 @@ class ProcessSessionWiringTest(unittest.TestCase):
         t = self.transcript()
         self.assertEqual({seg["speaker"] for seg in t["segments"]}, {"Me", "Other participant"})
         self.assertEqual(t["speaker_method"], "separate audio channels; no third-party voiceprint")
+        self.assertEqual(t["speaker_tracks"], {"mic": {"diarized": False, "speakers": 0},
+                                               "system": {"diarized": False, "speakers": 0}})
+
+    def test_missing_track_has_no_diarizer_record(self) -> None:
+        self.stub(speaker_split, "run_diarizer", lambda *_a: [turn("S1", 0, 2)])
+        (self.session / "system.caf").unlink()
+        t = self.transcript()
+        self.assertEqual(t["speaker_tracks"], {"mic": {"diarized": True, "speakers": 1}})
 
 
 if __name__ == "__main__":

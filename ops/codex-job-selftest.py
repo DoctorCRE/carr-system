@@ -33,7 +33,7 @@ class CodexJobTests(unittest.TestCase):
 
         def spawn(argv, **kwargs):
             code = execute(argv, **kwargs).returncode
-            return types.SimpleNamespace(pid=12345, wait=lambda: code)
+            return types.SimpleNamespace(pid=12345, wait=lambda **options: code)
 
         args = ["codex-job", repo, "test-job", "original brief"]
         for config in configs:

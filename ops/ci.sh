@@ -163,6 +163,10 @@ check_hxprobe() {
 }
 
 check_unit() {
+  if [ "$STRICT" != 1 ] && [ "${GITHUB_ACTIONS:-}" != true ] && [ -z "${CARR_CI_DATABASE_URL:-}" ]; then
+    skip unit "SKIP-for-local: CARR_CI_DATABASE_URL is unset; unit runs in hosted CI"
+    return
+  fi
   if run_quiet "$LOGDIR/unit.log" "$PY" ops/ci-unit.py; then
     cat "$LOGDIR/unit.log"
     ok unit "required Node package checks executed"
