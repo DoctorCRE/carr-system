@@ -318,7 +318,7 @@ RUN_REAP_BATCH = 1000
 
 
 def _reap_expired_runs(conn, cur, service_id, environment, run_key) -> None:
-    """Keep ops.run bounded from the one path that grows it (migration 1048).
+    """Keep ops.run bounded from the one path that grows it (migration 1049).
 
     A savepoint, so a reaper failure never costs the run row just written."""
     try:

@@ -1,7 +1,7 @@
 -- rollback: forward-only — reaped run rows are gone; drop function ops.reap_expired_runs(uuid, text, text, integer) and index ops.run_expires_at_idx to undo the shape
 -- expand-contract: contract — bounded batched deletes of expired ops.run rows; preserve every event and reader-visible run (WR573.S3.J3)
 -- lock-review: ops.run is ~140k rows / 61 MB; the runner permits only transactional DDL, so this index uses its write-blocking lock, and the deletes run in 1,000-row batches
--- 1048_reap_expired_runs.sql
+-- 1049_reap_expired_runs.sql
 --
 -- ops.run is appended to by tools/ops-record.py on every job and check step and
 -- nothing ever removed a row. ops.reap_expired_runs is the one retention rule,
@@ -91,7 +91,7 @@ begin
       'SELECT ' || quote_literal(contract::text) || '::jsonb');
   end if;
   if ops.scac_mutation_catalog_v118_current() is not true then
-    raise exception '1048 FAILED: reaper grant differs from the exact grant contract';
+    raise exception '1049 FAILED: reaper grant differs from the exact grant contract';
   end if;
 end $contract$;
 
