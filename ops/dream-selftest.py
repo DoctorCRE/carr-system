@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Exercise dream cloning, verification, application, and recovery."""
 import copy
 import importlib.util
 import os
@@ -8,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('dream', Path(__file__).with_name('dream.py'))
+assert spec and spec.loader
 dream = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(dream)
 
@@ -43,45 +45,6 @@ class DreamTest(unittest.TestCase):
             if moved: store.sections['duplicate/1']['version'] = 2
             report = dream.apply(store, clone, notes, ['a','b','c'], 'dream-attach', 'fixture')
             return store, report
-    def test_full_dream_from_five_attaches_and_three_transcripts(self):
-        store = Store()
-        attach_ids = [f'synthetic-attach-{i}' for i in range(5)]
-        for i, attach_id in enumerate(attach_ids):
-            store.sections[f'duplicate/{i}']['body']['text'] = f'The same lesson from {attach_id}.'
-        original = copy.deepcopy(store.sections)
-        class Agent:
-            def propose(self, session_id, transcript, memories):
-                self_case.assertEqual(store.sections, original)
-                self_case.assertEqual(store.applies, [])
-                self_case.assertIn('synthetic transcript', transcript)
-                if session_id == attach_ids[0]:
-                    return [{'note': 'Merge duplicate lessons.', 'changes': [
-                        {'section_key': 'duplicate/1', 'op': 'retire'},
-                        {'section_key': 'duplicate/2', 'op': 'retire'}]}]
-                if session_id == attach_ids[1]:
-                    return [{'note': 'Merge remaining duplicate lessons.', 'changes': [
-                        {'section_key': 'duplicate/3', 'op': 'retire'},
-                        {'section_key': 'duplicate/4', 'op': 'retire'}]}]
-                return [{'note': 'The old script is gone.', 'changes': [
-                            {'section_key': 'stale', 'op': 'retire'}]},
-                        {'note': 'Confirmed the lesson.', 'changes': [
-                            {'section_key': 'confirmed', 'op': 'write', 'title': 'confirmed',
-                             'body_text': 'confirmed lesson\nVerified 2026-01-01 from session synthetic-attach-2'}]}]
-        self_case = self
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = []
-            for i in range(3):
-                path = Path(tmp) / f'session-{i}.jsonl'
-                path.write_text('{"message":{"role":"user","content":"synthetic transcript ' + str(i) + '"}}\n')
-                paths.append(path)
-            result = dream.run(store, Path(tmp) / 'mem', list(zip(attach_ids[:3], paths)), Agent(), 'synthetic-dream-attach', 'synthetic-dream')
-            self.assertEqual(len(store.applies), 1)
-            self.assertEqual([k for k in store.sections if k.startswith('duplicate/')], ['duplicate/0'])
-            self.assertNotIn('stale', store.sections)
-            self.assertIn('Verified 2026-01-01 from session synthetic-attach-2', store.sections['confirmed']['body']['text'])
-            self.assertEqual(result['changed'], 6)
-            self.assertEqual(len(store.logs), 1)
-
     def test_fixture_applies_one_change_set(self):
         store, report = self.run_fixture()
         self.assertEqual(len(store.applies), 1)
@@ -94,21 +57,6 @@ class DreamTest(unittest.TestCase):
         self.assertNotIn('duplicate/2', store.sections)
         self.assertEqual(report['dropped'], [{'sections': ['duplicate/1'], 'sessions': ['a'], 'note': 'duplicate'}])
         self.assertEqual(store.logs[0]['dropped'], report['dropped'])
-    def test_missing_retire_drops_only_its_unit_and_logs_it(self):
-        class Agent:
-            def propose(self, session_id, transcript, memories):
-                return [{'note': 'bad retirement', 'changes': [{'section_key': 'missing', 'op': 'retire'}, {'section_key': 'stale', 'op': 'retire'}]},
-                        {'note': 'valid retirement', 'changes': [{'section_key': 'duplicate/1', 'op': 'retire'}]}]
-        with tempfile.TemporaryDirectory() as tmp:
-            store = Store()
-            transcript = Path(tmp) / 'session.jsonl'
-            transcript.write_text('{"message":{"role":"user","content":"synthetic"}}\n')
-            result = dream.run(store, Path(tmp) / 'mem', [('a', transcript)], Agent(), 'attach', 'fixture')
-            self.assertIn('stale', store.sections)
-            self.assertNotIn('duplicate/1', store.sections)
-            self.assertEqual(result['dropped'], [{'note': 'bad retirement', 'sections': ['missing', 'stale'], 'sessions': ['a'], 'reason': 'missing_retire_section'}])
-            self.assertEqual(store.logs[0], result)
-
     def test_case_colliding_keys_are_refused_and_logged(self):
         store = Store()
         section = copy.deepcopy(store.sections['stale'])
@@ -116,8 +64,30 @@ class DreamTest(unittest.TestCase):
         store.sections['Stale'] = section
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaisesRegex(ValueError, 'case_colliding_section_keys'):
-                dream.run(store, Path(tmp) / 'mem', [], None, 'attach', 'fixture')
+                dream.clone(store, Path(tmp) / 'mem', 'fixture')
             self.assertEqual(store.logs[0]['error'], 'case_colliding_section_keys')
+            self.assertEqual(store.applies, [])
+
+    def test_error_and_success_logs_use_distinct_idempotency_keys(self):
+        calls = []
+        class Response:
+            returncode = 0
+            stdout = '{"ok": true}'
+        def call(verb, args):
+            calls.append(args)
+            return Response()
+        store = dream.VerbStore(call)
+        store.log({'error': 'case_colliding_section_keys'}, 'night')
+        store.log({'changed': 1}, 'night')
+        self.assertNotEqual(calls[0]['idempotency_key'], calls[1]['idempotency_key'])
+        self.assertNotEqual(calls[0]['section_key'], calls[1]['section_key'])
+
+    def test_malformed_notes_refused_before_apply(self):
+        store = Store()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = dream.clone(store, Path(tmp) / 'mem')
+            with self.assertRaisesRegex(ValueError, 'invalid change unit'):
+                dream.apply(store, root, [{}], ['a'], 'attach', 'fixture')
             self.assertEqual(store.applies, [])
 
     def test_repeat_apply_is_a_no_op(self):
@@ -148,59 +118,6 @@ class DreamTest(unittest.TestCase):
             self.assertEqual(store.logs[0], result)
             self.assertIn('duplicate/2', store.sections)
             self.assertNotIn('stale', store.sections)
-
-    def test_proposals_use_condensed_transcripts_and_clone(self):
-        store = Store()
-        class Agent:
-            def propose(self, session_id, transcript, memories):
-                self.transcript = transcript
-                return [{'note': 'confirmed', 'changes': [{'section_key': 'confirmed', 'op': 'write',
-                         'title': memories['confirmed']['title'], 'body_text': 'Confirmed from session a.'}]}]
-        with tempfile.TemporaryDirectory() as tmp:
-            root = dream.clone(store, Path(tmp) / 'mem')
-            transcript = Path(tmp) / 'transcript.jsonl'
-            transcript.write_text('{"message":{"role":"user","content":"synthetic confirmation"}}\n')
-            agent = Agent()
-            notes = dream.propose(root, [('a', transcript)], agent)
-            self.assertIn('synthetic confirmation', agent.transcript)
-            self.assertEqual(store.sections['confirmed']['body']['text'], 'confirmed lesson')
-            dream.apply(store, root, notes, ['a'], 'dream-attach', 'fixture')
-            self.assertEqual(store.sections['confirmed']['body']['text'], 'Confirmed from session a.')
-
-    def test_overlapping_proposals_consolidate_provenance(self):
-        class Agent:
-            def propose(self, session_id, transcript, memories):
-                return [{'note': transcript, 'changes': [{'section_key': 'confirmed', 'op': 'write',
-                         'title': memories['confirmed']['title'], 'body_text': memories['confirmed']['body_text'] + transcript}]}]
-        with tempfile.TemporaryDirectory() as tmp:
-            store = Store()
-            root = dream.clone(store, Path(tmp) / 'mem')
-            paths = [Path(tmp) / f'{i}.jsonl' for i in range(2)]
-            for i, path in enumerate(paths):
-                path.write_text('{"message":{"role":"user","content":"synthetic ' + str(i) + '"}}\n')
-            notes = dream.propose(root, [('a', paths[0]), ('b', paths[1])], Agent())
-            self.assertEqual(len(notes), 1)
-            self.assertEqual(notes[0]['sessions'], ['a', 'b'])
-            dream.apply(store, root, None, ['a', 'b'], 'attach', 'fixture')
-            self.assertIn('synthetic 0', store.sections['confirmed']['body']['text'])
-            self.assertIn('synthetic 1', store.sections['confirmed']['body']['text'])
-
-    def test_reverted_proposal_leaves_no_change(self):
-        class Agent:
-            def __init__(self): self.calls = 0
-            def propose(self, session_id, transcript, memories):
-                self.calls += 1
-                return [{'note': 'reconsidered', 'changes': [{'section_key': 'confirmed', 'op': 'write',
-                    'title': memories['confirmed']['title'], 'body_text': 'temporary' if self.calls == 1 else 'confirmed lesson'}]}]
-        with tempfile.TemporaryDirectory() as tmp:
-            store = Store()
-            root = dream.clone(store, Path(tmp) / 'mem')
-            path = Path(tmp) / 'session.jsonl'
-            path.write_text('{"message":{"role":"user","content":"synthetic"}}\n')
-            dream.propose(root, [('a', path), ('b', path)], Agent())
-            self.assertEqual(dream.apply(store, root, None, ['a', 'b'], 'attach', 'fixture')['changed'], 0)
-            self.assertEqual(store.applies, [])
-
 
     def test_resume_after_log_failure_uses_the_same_change_set(self):
         class RetryStore(Store):
@@ -318,6 +235,16 @@ class DreamTest(unittest.TestCase):
             path.write_text(path.read_text().replace('"version": 1', '"version": 2'))
             with self.assertRaises(ValueError): dream.apply(store, root, [], ['a'], 'attach', 'fixture')
             self.assertEqual(store.applies, [])
+
+    def test_existing_secret_does_not_block_unrelated_change(self):
+        store = Store()
+        store.sections['confirmed']['body']['text'] = 'AKIA' + 'X' * 16
+        with tempfile.TemporaryDirectory() as tmp:
+            root = dream.clone(store, Path(tmp) / 'mem')
+            (root / 'stale.md').unlink()
+            report = dream.apply(store, root, [{'sections': ['stale'], 'sessions': ['a'], 'note': 'obsolete'}], ['a'], 'attach', 'fixture')
+            self.assertEqual(report['changed'], 1)
+            self.assertNotIn('stale', store.sections)
 
     def test_secret_and_missing_provenance_refuse_everything(self):
         for case in ('secret', 'missing_note'):

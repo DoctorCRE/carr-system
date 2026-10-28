@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Clone, verify and apply a dream through the doctrine verbs.
 
-The caller supplies selected sessions and proposals. Scheduling and selection belong
+The caller supplies selected sessions and edits. Scheduling and selection belong
 in the nightly orchestrator. Each note maps a change unit to its input sessions.
 """
 import hashlib
@@ -19,6 +19,7 @@ from lib.transcript_read import load_transcript
 from ops.git_env import fixture_env
 
 spec = importlib.util.spec_from_file_location('secret_scan', ROOT / 'ops/ci-secret-scan.py')
+assert spec and spec.loader
 secret_scan = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(secret_scan)
 class VersionConflict(Exception):
@@ -70,7 +71,7 @@ def _git(root, *args):
     return subprocess.run(['git', '-C', str(root), *args], check=True, capture_output=True, text=True, env=fixture_env()).stdout
 
 
-def clone(store, root):
+def clone(store, root, key=None):
     root = Path(root)
     state = root.parent / ('.' + root.name + '-dream-state')
     state.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -79,6 +80,8 @@ def clone(store, root):
     paths = []
     folded = [section['section_key'].casefold() for section in snapshot['sections']]
     if len(folded) != len(set(folded)):
+        if key is not None:
+            store.log({'error': 'case_colliding_section_keys', 'notes': [], 'dropped': [], 'changed': 0}, key)
         raise ValueError('case_colliding_section_keys')
     for section in snapshot['sections']:
         path = _path(root, section['section_key'])
@@ -147,6 +150,8 @@ def apply(store, root, notes, input_sessions, attach, key, *, _attempt=0, _confl
         output[section_key] = (meta, body)
     current = {s['section_key']: s for s in store.read()['sections']}
     changed_keys = {k for k in set(originals) | set(output) if originals.get(k) != output.get(k)}
+    if not isinstance(notes, list) or any(not isinstance(unit, dict) or not isinstance(unit.get('sections'), list) or not unit.get('note') or not unit.get('sessions') for unit in notes):
+        raise ValueError('invalid change unit')
     notes = [{**unit, 'sections': [key for key in unit['sections'] if key in changed_keys]} for unit in notes]
     notes = [unit for unit in notes if unit['sections']]
     units = {}
@@ -188,15 +193,12 @@ def apply(store, root, notes, input_sessions, attach, key, *, _attempt=0, _confl
     if len(current) + sum(1 if i['section_key'] not in current else -1 if i['op'] == 'retire' else 0 for i in changes) > 300:
         raise ValueError('memory exceeds 300 sections')
     # Apply the scanner patterns directly: untrusted dream output cannot grant itself an exemption.
-    for text in [json.dumps(notes)] + [p.read_text(encoding='utf-8') for p in files]:
+    for text in [str(value) for unit in notes for value in (unit['note'], *unit['sections'], *unit['sessions'])] + [item['body_text'] for item in changes if item['op'] == 'write']:
         if any(rx.search(text) for _, rx, _, _ in secret_scan.PATTERNS):
             raise ValueError('secret scan failed')
     for item in changes:
         if not store.gate(item, attach):
             raise ValueError('doctrine gate failed')
-    rejected_path = root / '_dream' / 'rejected.json'
-    if rejected_path.exists():
-        dropped.extend(json.loads(rejected_path.read_text(encoding='utf-8')))
     report = {'notes': applied, 'dropped': dropped, 'changed': len(changes)}
     receipt.parent.mkdir(parents=True, exist_ok=True)
     _write_state(journal, {'key': key, 'attach': attach, 'changes': changes, 'report': report})
@@ -262,73 +264,6 @@ class VerbStore:
     def apply(self, items, attach, key):
         self.call('change-doctrine-sections', {'document': 'team-memory', 'attach_id': attach, 'idempotency_key': key, 'commit_message': 'Dream memory consolidation', 'items': items})
     def log(self, report, key):
-        section_key = 'dreams/' + hashlib.sha256(key.encode()).hexdigest()
-        self.call('write-doctrine-section', {'document': 'dreams-log', 'section_key': section_key, 'title': 'Dream report', 'body_text': json.dumps(report, sort_keys=True), 'base_version': 0, 'idempotency_key': key + '-log'})
-
-
-def propose(root, sessions, agent):
-    """Apply per-transcript proposals to the clone and return change-unit notes."""
-    root = Path(root)
-    notes = []
-    rejected = []
-    for session_id, transcript_path in sessions:
-        memories = {}
-        for path in root.rglob('*.md'):
-            if '.git' in path.relative_to(root).parts or '_dream' in path.relative_to(root).parts:
-                continue
-            meta, body = _parse(path.read_text(encoding='utf-8'))
-            memories[meta['section_key']] = {'title': meta['title'], 'body_text': body}
-        units = agent.propose(session_id, condense(transcript_path), memories)
-        if not isinstance(units, list):
-            raise ValueError('invalid proposer output')
-        for unit in units:
-            changes = unit['changes']
-            keys = [change['section_key'] for change in changes]
-            if not keys or len(set(keys)) != len(keys):
-                raise ValueError('invalid change unit')
-            if any(change['op'] == 'retire' and not _path(root, change['section_key']).is_file() for change in changes):
-                rejected.append({'note': unit['note'], 'sections': keys, 'sessions': [session_id], 'reason': 'missing_retire_section'})
-                continue
-            for change in changes:
-                key = change['section_key']
-                if key.startswith('conventions/proposed/'):
-                    raise ValueError('dream cannot change convention proposals')
-                path = _path(root, key)
-                if change['op'] == 'retire':
-                    path.unlink()
-                elif change['op'] == 'write':
-                    if path.exists():
-                        meta, _ = _parse(path.read_text(encoding='utf-8'))
-                        if change['title'] != meta['title']:
-                            raise ValueError('existing title cannot change')
-                    else:
-                        meta = {'section_id': None, 'section_key': key, 'title': change['title'], 'version': 0, 'content_hash': None}
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text('---\n' + json.dumps(meta, sort_keys=True) + '\n---\n' + change['body_text'], encoding='utf-8')
-                else:
-                    raise ValueError('invalid proposal operation')
-            merged = {'note': unit['note'], 'sections': keys, 'sessions': [session_id]}
-            overlap = [old for old in notes if set(old['sections']).intersection(keys)]
-            for old in overlap:
-                notes.remove(old)
-                merged['sections'] = sorted(set(merged['sections']) | set(old['sections']))
-                merged['sessions'] = sorted(set(merged['sessions']) | set(old['sessions']))
-                merged['note'] += '\n' + old['note']
-            notes.append(merged)
-    notes_path = root / '_dream' / 'notes.md'
-    notes_path.parent.mkdir(parents=True, exist_ok=True)
-    notes_path.write_text(json.dumps(notes, indent=2), encoding='utf-8')
-    (notes_path.parent / 'rejected.json').write_text(json.dumps(rejected), encoding='utf-8')
-    return notes
-
-
-def run(store, root, sessions, agent, attach, key):
-    """Execute a dream for already-selected sessions."""
-    try:
-        clone(store, root)
-    except ValueError as error:
-        if str(error) == 'case_colliding_section_keys':
-            store.log({'error': str(error), 'notes': [], 'dropped': [], 'changed': 0}, key)
-        raise
-    propose(root, sessions, agent)
-    return apply(store, root, None, [session_id for session_id, _ in sessions], attach, key)
+        kind = 'error' if 'error' in report else 'success'
+        section_key = 'dreams/' + hashlib.sha256((key + '-' + kind).encode()).hexdigest()
+        self.call('write-doctrine-section', {'document': 'dreams-log', 'section_key': section_key, 'title': 'Dream report', 'body_text': json.dumps(report, sort_keys=True), 'base_version': 0, 'idempotency_key': key + '-' + kind + '-log'})
