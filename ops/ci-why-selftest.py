@@ -12,6 +12,8 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 loader = importlib.machinery.SourceFileLoader('ci_why', str(ROOT / 'bin' / 'ci-why'))
 spec = importlib.util.spec_from_loader('ci_why', loader)
+if spec is None or spec.loader is None:
+    raise RuntimeError('ci-why could not be loaded')
 ci_why = importlib.util.module_from_spec(spec)
 loader.exec_module(ci_why)
 
