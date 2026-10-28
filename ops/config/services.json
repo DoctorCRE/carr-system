@@ -186,11 +186,11 @@
     {
       "key": "checkout-pull",
       "name": "Canonical checkout fast-forward",
-      "purpose": "Every five minutes and at load, fast-forwards this Mac's canonical checkout, reports tracked dirty files, and retries transient ref locks.",
+      "purpose": "Every five minutes and at load, fast-forwards this Mac's canonical checkout with Git.",
       "family": "Local Mac edge",
       "criticality": "high",
       "owner_actor": "joe",
-      "repo_path": "ops/checkout-pull.py",
+      "repo_path": "ops/launchd/com.carr.checkout-pull.plist",
       "runtime": "launchd",
       "environments": [
         {

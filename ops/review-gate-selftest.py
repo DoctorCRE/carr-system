@@ -91,7 +91,7 @@ class ReviewGate(unittest.TestCase):
             for approved in (False, True):
                 comments = [{"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok"}] if approved else []
                 with patch.object(gate, "api", side_effect=[pr, {}, [{"filename": "safe"}], comments, [], pr, {}]) as api:
-                    gate.run(event, "owner/repo")
+                    self.assertEqual(gate.run(event, "owner/repo"), 0 if approved else 1)
                     self.assertEqual(api.call_args.args[1]["state"], "success" if approved else "failure")
         pr["additions"] = 0
         for comments, expected in [([], "failure"), ([{"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok"}], "success")]:
@@ -152,10 +152,10 @@ class ReviewGate(unittest.TestCase):
         pr = {"base": {"ref": "main"}, "head": {"sha": "abc"}, "changed_files": 1,
               "additions": 1, "deletions": 0, "body": "", "user": {"type": "User"}}
         with patch.object(gate, "api", side_effect=[pr, {}, [{"filename": "app.py"}], [], [], pr, {}]) as api:
-            gate.run({"number": 4}, "owner/repo")
+            self.assertEqual(gate.run({"number": 4}, "owner/repo"), 1)
             status = api.call_args.args[1]
             self.assertEqual(status["state"], "failure")
-            self.assertIn("Card: WR557.S3.J1", status["description"])
+            self.assertEqual(status["description"], "Missing PR body line: Card: WR<number>.S<number>.J<number>")
 
     def test_paginated_api(self):
         from types import SimpleNamespace

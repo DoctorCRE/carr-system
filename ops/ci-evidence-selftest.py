@@ -35,17 +35,14 @@ class HostedVerdict(unittest.TestCase):
                 self.assertEqual(evidence.hosted_verdict(), 0)
             self.assertIn('classes: PASSED', summary.read_text())
 
-    def test_fallow_failure_cannot_pass_the_required_aggregate(self):
+    def test_path_skipped_fixtures_require_successful_scope_and_explicit_output(self):
         with tempfile.TemporaryDirectory() as directory:
-            for result in ('failure', 'cancelled', 'skipped', 'success'):
-                with self.subTest(result=result):
-                    needs = {'scope': {'result': 'success', 'outputs': {'full': 'false'}},
-                             'classes': {'result': 'success'},
-                             'migration-fixtures': {'result': 'skipped'},
-                             'fallow': {'result': result}}
-                    with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
-                                    GITHUB_STEP_SUMMARY=str(pathlib.Path(directory) / 'summary')):
-                        self.assertEqual(evidence.hosted_verdict(), 0 if result == 'success' else 1)
+            for fixtures, expected in (('false', 0), ('true', 1), ('', 1)):
+                needs = {'scope': {'result': 'success', 'outputs': {'full': 'true', 'fixtures': fixtures}},
+                         'classes': {'result': 'success'}, 'migration-fixtures': {'result': 'skipped'}}
+                with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
+                                GITHUB_STEP_SUMMARY=str(pathlib.Path(directory) / 'summary')):
+                    self.assertEqual(evidence.hosted_verdict(), expected)
 
     def test_failed_scope_cannot_authorize_skipping_fixtures(self):
         with tempfile.TemporaryDirectory() as directory:

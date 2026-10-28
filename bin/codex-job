@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import signal
+import runpy
 import stat
 import shutil
 import subprocess
@@ -39,7 +40,11 @@ def main():
     parser.add_argument('branch', help='new branch name')
     parser.add_argument('brief')
     parser.add_argument('-c', '--config', action='append', default=[], metavar='key=value')
+    parser.add_argument("--timeout-seconds", type=int, default=10800, help="wall-clock cap (default: 3 hours)")
     args = parser.parse_args()
+    if args.timeout_seconds <= 0:
+        parser.error("--timeout-seconds must be positive")
+    timeout = runpy.run_path(str(Path(__file__).with_name("with-timeout.py")))
     repo = args.repo
     if not Path(repo).exists() and re.fullmatch(r'[\w.-]+/[\w.-]+', repo):
         repo = f'https://github.com/{repo}.git'
@@ -99,7 +104,11 @@ def main():
                                  stdout=sys.stderr, start_new_session=True)
         pgid = child.pid
         try:
-            code = child.wait()
+            try:
+                code = child.wait(timeout=args.timeout_seconds)
+            except subprocess.TimeoutExpired:
+                timeout["_terminate_group"](child)
+                code = 124
         finally:
             try:
                 os.killpg(pgid, signal.SIGTERM)

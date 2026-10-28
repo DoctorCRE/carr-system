@@ -14,7 +14,7 @@ chain wedged inside `exports (6 targets -> OneDrive)`. The direct child was
 socket was its python grandchild. Killing the direct child would have left the
 grandchild holding the socket, so the child is put in a NEW SESSION and the
 whole group is signalled at once. The watchdog can therefore stop the entire
-owned command. Codex jobs do not use this timeout wrapper.
+owned command. Codex jobs reuse the same process-tree termination.
 
 WHY A NEW SESSION IS THE SAFE CHOICE RATHER THAN THE RISKY ONE. Signalling a
 group is the sharp edge of this file: aim at the caller's group and the watchdog

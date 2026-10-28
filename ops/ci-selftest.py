@@ -348,6 +348,11 @@ def test_database_scope_receipts():
                  "ops/new-db-gate.py", ".github/workflows/ci.yml"):
         check(f"database scope runs {path}", scope.needs_full([path]))
     check("database scope skips app-only change", not scope.needs_full(["web/app.js"]))
+    for path, expected in (("migrations/9999.sql", True), ("db/schema.sql", True),
+                           ("tools/migrate.py", True), ("ops/ci-migration-selftest.py", True),
+                           ("ops/ci-unit.py", False), ("tools/outlook.py", False)):
+        check(f"migration fixtures path {path}", scope.needs_fixtures([path]) == expected)
+
     with tempfile.TemporaryDirectory() as directory:
         event = pathlib.Path(directory) / "event.json"
         event.write_text('{}')
@@ -1101,7 +1106,7 @@ def test_hosted_draft_lifecycle():
             ["node", "-e", script, json.dumps([expression, context])], text=True))
 
     for filename, lanes, verdict_name, command in (
-            ("ci.yml", ("scope", "classes", "migration-fixtures", "fallow"),
+            ("ci.yml", ("scope", "classes", "migration-fixtures"),
              "checks", "verdict"),
             ("doc-drift.yml", ("check",), "verdict", "drift-verdict")):
         wf = _hosted_workflow(filename)
@@ -1112,6 +1117,17 @@ def test_hosted_draft_lifecycle():
         check(f"{filename}: all non-PR full-suite triggers survive",
               {"merge_group", "schedule", "workflow_dispatch"} <= set(events))
         jobs = wf["jobs"]
+        if filename == "doc-drift.yml":
+            baseline = next(st for st in jobs['check']['steps'] if st.get('name', '').startswith('Summarize drift'))
+            for event in ('pull_request', 'merge_group', 'schedule', 'workflow_dispatch'):
+                check(f"drift baseline event {event}", bool(evaluate(baseline['if'],
+                    {'github': {'event_name': event}})) == (event in ('schedule', 'workflow_dispatch')))
+        else:
+            weekly = _hosted_workflow('fallow.yml')
+            check("Fallow runs weekly outside the PR aggregate",
+                  set(weekly['on']) == {'schedule', 'workflow_dispatch'}
+                  and weekly['on']['schedule'] == [{'cron': '20 6 * * 1'}]
+                  and 'fallow' not in jobs)
         verdict = jobs.get(verdict_name, {})
         check(f"{filename}: verdict always evaluates and waits for every lane",
               verdict.get("if") == "${{ always() }}" and set(verdict.get("needs", [])) == set(lanes))

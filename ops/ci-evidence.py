@@ -52,7 +52,7 @@ def hosted_verdict(*, drift=False):
             summary.write(message + '\n')
         return 1
     needs = json.loads(os.environ['CI_NEEDS'])
-    lanes = ('check',) if drift else ('scope', 'classes', 'migration-fixtures', 'fallow')
+    lanes = ('check',) if drift else ('scope', 'classes', 'migration-fixtures')
     results = {name: needs[name]['result'] for name in lanes}
     allowed = {name: {'success'} for name in lanes}
     if not drift:
@@ -61,7 +61,7 @@ def hosted_verdict(*, drift=False):
         if full not in ('true', 'false'):
             print('CI verdict: scope receipt unavailable; refusing success')
             return 1
-        if full == 'false':
+        if full == 'false' or scope.get('outputs', {}).get('fixtures') == 'false':
             allowed['migration-fixtures'].add('skipped')
     lines = [f"{name}: {'PASSED' if result == 'success' else str(result).upper()}"
              for name, result in results.items()]
