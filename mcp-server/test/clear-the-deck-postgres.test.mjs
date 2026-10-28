@@ -66,7 +66,7 @@ before(async () => {
   pre.queueLoopJoeEdited = await loop({ by: 'joe-local', owner: 'claude' });
   await c.query('update loop_item set updated_by=$2 where id=$1', [pre.queueLoopJoeEdited, ids.joe]);
   pre.callModeAction = await action({ by: 'joe-local', owner: 'joe', ageDays: 400 });
-  await c.query(readFileSync(new URL('../../migrations/1030_clear_the_deck.sql', import.meta.url), 'utf8'));
+  await c.query(readFileSync(new URL('../../migrations/1042_clear_the_deck.sql', import.meta.url), 'utf8'));
 });
 after(async () => {
   try { await c?.end(); }
