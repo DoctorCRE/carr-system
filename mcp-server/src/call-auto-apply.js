@@ -11,6 +11,10 @@ export async function automaticApplyHold(candidate) {
     if (!payload.next_date) return "The call did not state a date for the next step.";
     if (words(payload.text) < 2) return "The next step is too short to apply without a person reading it.";
   }
+  // A recorder attestation, not server verification: the recorder (device
+  // token) read its private transcript and named the partner who said this
+  // quote. The server never sees the transcript; the quote hash only stops the
+  // quote being swapped after the recorder attested it.
   const source = payload.evidence_source;
   if (!["joe", "dell"].includes(source?.speaker))
     return "The quoted evidence does not resolve to a partner in the stored call.";

@@ -940,36 +940,67 @@ def _supports(evidence: str, field: str, value: dict[str, Any], deal_name: str) 
     return None
 
 
-def _partner_evidence(quote: str, segments: list[Any], context: dict[str, Any]) -> str | None:
-    if not quote:
+PARTNERS = ("Joe", "Dell")
+
+
+def _one_system_voice(transcript: dict[str, Any]) -> bool:
+    """transcribe_session.py ran the diarizer on system audio and heard exactly one voice."""
+    tracks = transcript.get("speaker_tracks")
+    system = tracks.get("system") if isinstance(tracks, dict) else None
+    return (isinstance(system, dict) and system.get("diarized") is True
+            and type(system.get("speakers")) is int and system["speakers"] == 1)
+
+
+def _speaker_partner(speaker: str, labels: dict[str, Any], local_partner: Any, one_system_voice: bool) -> str | None:
+    if speaker == labels.get("system"):
+        # The weekly-call system label assumes the other partner. It names Dell
+        # (or Joe) only when the diarizer heard that one voice and nobody else.
+        remote = local_partner in PARTNERS and speaker in PARTNERS and speaker != local_partner
+        return speaker.lower() if remote and one_system_voice else None
+    if speaker in PARTNERS:
+        return speaker.lower()
+    if speaker == "Me" and labels.get("mic", "Me") == "Me" and local_partner in PARTNERS:
+        return str(local_partner).lower()
+    if speaker == "mic" and labels.get("mic") in PARTNERS:
+        return str(labels["mic"]).lower()
+    return None
+
+
+def _partner_evidence(quote: str, transcript: Any, context: dict[str, Any]) -> str | None:
+    """The partner whose own consecutive words contain the quote, or None.
+
+    Whisper splits one sentence across segments, so a speaker's consecutive
+    segments are read as one run; the quote must sit inside one run on word
+    boundaries, ignoring case and punctuation.
+    """
+    wanted = _words(quote)
+    if not wanted or not isinstance(transcript, dict) or not isinstance(transcript.get("segments"), list):
         return None
-    partners = ("Joe", "Dell")
     labels = context.get("speaker_labels")
     if not isinstance(labels, dict):
         labels = {}
-    local_partner = context.get("local_partner")
-    for segment in segments:
+    one_system_voice = _one_system_voice(transcript)
+    runs: list[tuple[str, list[str]]] = []
+    for segment in transcript["segments"]:
         if not isinstance(segment, dict) or not isinstance(segment.get("text"), str):
-            continue
-        if quote not in segment["text"]:
             continue
         speaker = segment.get("speaker")
         if not isinstance(speaker, str):
-            continue
-        # Weekly-call system labels assume the other partner without identifying the remote voice.
-        if local_partner in partners and speaker == labels.get("system") and speaker != local_partner:
-            continue
-        if speaker in partners:
-            return speaker.lower()
-        if speaker == "Me" and labels.get("mic", "Me") == "Me" and local_partner in partners:
-            return local_partner.lower()
-        if speaker == "mic" and labels.get(speaker) in partners:
-            return labels[speaker].lower()
+            runs.append(("", []))
+        elif runs and runs[-1][0] == speaker:
+            runs[-1][1].append(segment["text"])
+        else:
+            runs.append((speaker, [segment["text"]]))
+    for speaker, texts in runs:
+        if speaker and f" {wanted} " in f" {_words(' '.join(texts))} ":
+            partner = _speaker_partner(speaker, labels, context.get("local_partner"), one_system_voice)
+            if partner:
+                return partner
     return None
 
 
 def _automatic_hold(update: dict[str, Any], field: str, report: dict[str, Any],
-                    deal_name: str, segments: list[Any], context: dict[str, Any]) -> str | None:
+                    deal_name: str, transcript: Any, context: dict[str, Any]) -> str | None:
     """Why one stated change must stay a card for Joe or Dell, or None to apply it.
 
     Joe's 2026-10-26 ruling: confident changes apply themselves; anything the
@@ -985,7 +1016,7 @@ def _automatic_hold(update: dict[str, Any], field: str, report: dict[str, Any],
     if field == "next_step" and not value.get("next_date"):
         return "No date was stated for this next step."
     evidence = _words(update.get("evidence"))
-    if not _partner_evidence(str(update.get("evidence") or ""), segments, context):
+    if not _partner_evidence(str(update.get("evidence") or ""), transcript, context):
         return "The quoted change was not stated by an identified partner."
     unsupported = _supports(evidence, field, value, deal_name)
     if unsupported:
@@ -1008,14 +1039,13 @@ def _automatic_hold(update: dict[str, Any], field: str, report: dict[str, Any],
 
 def mark_automatic(result: dict[str, Any], transcript: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """Label each stated next step and phase move automatic or for review."""
-    segments = transcript.get("segments") if isinstance(transcript, dict) else None
     names = {deal.get("id"): str(deal.get("name") or "") for deal in context.get("deals", []) if isinstance(deal, dict)}
     for update in result.get("deal_updates", []):
         for field in AUTOMATIC_FIELDS:
             value = update.get(field)
             if isinstance(value, dict):
                 hold = _automatic_hold(update, field, result, names.get(update.get("deal_id"), ""),
-                                       segments or [], context)
+                                       transcript, context)
                 value["apply"] = "review" if hold else "automatic"
                 value["review_reason"] = hold
     return result
@@ -1029,16 +1059,13 @@ def automatic_evidence(session_dir: Path) -> list[dict[str, str] | None]:
         transcript = json.loads(raw)
     except (OSError, UnicodeError, json.JSONDecodeError):
         return [None] * len(items)
-    segments = transcript.get("segments") if isinstance(transcript, dict) else None
-    if not isinstance(segments, list):
-        return [None] * len(items)
     stored = read_json(session_dir / CONTEXT_FILE) or {}
     context = {"speaker_labels": stored.get("speaker_labels"), "local_partner": stored.get("recorder")}
     source_sha256 = hashlib.sha256(raw).hexdigest()
     sources = []
     for item in items:
         quote = str(item.get("evidence_quote") or "")
-        speaker = _partner_evidence(quote, segments, context) if quote else None
+        speaker = _partner_evidence(quote, transcript, context)
         sources.append({"speaker": speaker, "quote_sha256": hashlib.sha256(quote.encode("utf-8")).hexdigest(),
                         "source_sha256": source_sha256} if speaker else None)
     return sources

@@ -189,7 +189,7 @@ async function companionCall(port, route, body) {
   return payload;
 }
 
-test('a recorded weekly call applies identified partner changes and holds assumed remote speakers for review', { timeout: SONNET ? 900_000 : 180_000 }, async () => {
+test('a recorded weekly call updates every confidently discussed card and leaves the rest as cards', { timeout: SONNET ? 900_000 : 180_000 }, async () => {
   root = mkdtempSync(path.join(tmpdir(), 'carr-call-rehearsal-'));
   const recordings = path.join(root, 'Recordings');
   session = path.join(recordings, '2026.10.26-0900');
@@ -238,7 +238,10 @@ test('a recorded weekly call applies identified partner changes and holds assume
     }
     await run(PYTHON, [path.join(BIN, 'transcribe_session.py'), session], { env, timeout: 600_000 });
   } else {
-    write('transcript.json', { segments: CALL.map(([speaker, text], i) => ({ start_ms: i * 5000, end_ms: i * 5000 + 4000, speaker, text })) });
+    // As transcribe_session.py records it: the diarizer ran on each track and
+    // heard one voice, so the system label identifies Dell.
+    write('transcript.json', { speaker_tracks: { mic: { diarized: true, speakers: 1 }, system: { diarized: true, speakers: 1 } },
+      segments: CALL.map(([speaker, text], i) => ({ start_ms: i * 5000, end_ms: i * 5000 + 4000, speaker, text })) });
     await companionCall(port, '/api/call-context', context);
   }
   let review;
@@ -262,22 +265,12 @@ test('a recorded weekly call applies identified partner changes and holds assume
   const outcome = calls[0];
   assert.equal(outcome.call_date, '2026-10-27');
   const applied = (dealId, kind) => outcome.applied.find(a => a.deal_id === dealId && a.kind === kind);
-  for (const [target, kind] of [[bayside, 'phase_move'], [bayside, 'next_step'], [magnolia, 'next_step']]) {
+  // The deterministic stand-in states all three plainly. Live Sonnet makes its
+  // own call: whatever it did not apply must be waiting as an approval card.
+  for (const [target, kind] of [[bayside, 'phase_move'], [bayside, 'next_step'], [harbor, 'next_step'], [gulf, 'next_step'], [magnolia, 'next_step']]) {
     if (applied(target.id, kind)) continue;
     assert.ok(SONNET, `${kind} on ${target.id} should have applied: ${JSON.stringify(outcome)}`);
     assert.ok(outcome.open_cards.some(card => card.deal_id === target.id && card.kind === kind), JSON.stringify(outcome.open_cards));
-  }
-  if (!SONNET) {
-    assert.equal(outcome.applied.length, 3);
-    for (const target of [harbor, gulf]) {
-      assert.equal(applied(target.id, 'next_step'), undefined);
-      assert.ok(outcome.open_cards.some(card => card.deal_id === target.id && card.kind === 'next_step'),
-        JSON.stringify(outcome.open_cards));
-    }
-    assert.equal(gulf.next_step, 'Old Gulf step');
-    assert.equal(gulf.next_date, '2026-10-01');
-    assert.equal(harbor.next_step, 'Old Harbor step');
-    assert.equal(harbor.next_date, '2026-10-30');
   }
   assert.ok(outcome.applied.length >= 1, 'the call applied nothing');
   for (const change of outcome.applied) {
@@ -312,6 +305,23 @@ test('a recorded weekly call applies identified partner changes and holds assume
 
   // 6. Undo reverts through the record layer, guarded by the deal's version,
   //    and never overwrites work done on the card after the call.
+  const items = async candidateId => (await c.query(
+    "select id, status from next_action where source_ref=$1 and item_title is not null order by created_at, id",
+    [`capture_candidate:${candidateId}`])).rows;
+  const gulfStep = applied(gulf.id, 'next_step');
+  if (gulfStep) {
+    // The call's step superseded Joe's overdue Gulf step; undo puts that ball back.
+    const undo = { candidate_id: gulfStep.candidate_id, base_version: (await deal('Synthetic Gulf Imaging Center')).version };
+    const result = await verb(joe, 'undo-call-change', undo);
+    const restored = await deal('Synthetic Gulf Imaging Center');
+    assert.equal(restored.next_step, 'Old Gulf step');
+    assert.equal(restored.next_date, '2026-10-01');
+    assert.ok(result.reverted.reopened_action_ids.length >= 1, JSON.stringify(result));
+    assert.ok((await items(gulfStep.candidate_id)).every(i => i.status === 'dropped'));
+    // A second undo of the same change is a no-op, not a second write.
+    assert.equal((await verb(joe, 'undo-call-change', { ...undo, base_version: restored.version })).already, 'undone');
+    assert.equal((await deal('Synthetic Gulf Imaging Center')).version, restored.version);
+  }
   const baysideStep = applied(bayside.id, 'next_step');
   if (baysideStep && applied(bayside.id, 'phase_move')) {
     // The call's phase move cleared Joe's overdue Bayside step before the new
@@ -339,6 +349,17 @@ test('a recorded weekly call applies identified partner changes and holds assume
     assert.equal((await deal('Synthetic Bayside Dental Relocation')).phase, 'research');
     const afterUndo = (await verb(joe, 'read-call-outcomes')).calls[0];
     assert.ok(afterUndo.applied.find(a => a.candidate_id === phase.candidate_id).undone_at);
+  }
+  const harborStep = applied(harbor.id, 'next_step');
+  if (harborStep) {
+    // Joe ticked off a checklist item after the call: undo refuses, the tick stays.
+    const [item] = await items(harborStep.candidate_id);
+    assert.ok(item, 'the applied step carries its checklist items');
+    await verb(joe, 'complete-deal-item', { deal: harbor.id, item_id: item.id });
+    await assert.rejects(verb(joe, 'undo-call-change', { candidate_id: harborStep.candidate_id,
+      base_version: (await deal('Synthetic Harbor Clinic Expansion')).version }), error => error.payload?.error === 'newer_change_exists');
+    assert.equal((await items(harborStep.candidate_id)).find(i => i.id === item.id).status, 'done');
+    assert.match((await deal('Synthetic Harbor Clinic Expansion')).next_step, /second walkthrough/i);
   }
 
   // 7. Once a partner has looked it over, the outcome leaves Home.
