@@ -58,6 +58,20 @@ select (created_at at time zone 'UTC')::date, verb, sponsoring_human_slug, via, 
 grant select, insert, update on public.tool_read_count to carr_writer;
 grant select on public.tool_read_count to carr_reader, carr_exporter;
 
+-- Record the two new carr_writer DML grants in the grant contract, as 1017 did.
+do $count_grants$
+declare contract jsonb := ops.scac_current_grant_contract(); privilege_name text;
+begin
+  foreach privilege_name in array array['insert', 'update'] loop
+    contract := jsonb_set(contract, '{relation_dml}', contract->'relation_dml' || jsonb_build_array(jsonb_build_object(
+      'ingress_key', 'db-relation-acl:public.tool_read_count:carr_writer:'||privilege_name,
+      'ingress_kind', 'db_relation_acl', 'relation', 'public.tool_read_count', 'relation_kind', 'r',
+      'grantee', 'carr_writer', 'privilege', privilege_name, 'grantable', false)));
+  end loop;
+  execute format('create or replace function ops.scac_current_grant_contract() returns jsonb '
+    'language sql immutable set search_path=pg_catalog as %L', 'select '||quote_literal(contract::text)||'::jsonb');
+end $count_grants$;
+
 create or replace view public.v_integrity_digest as
   select 'row_counts'::text as line,
     jsonb_build_object(

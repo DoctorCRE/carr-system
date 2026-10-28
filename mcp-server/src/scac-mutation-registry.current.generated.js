@@ -3612,6 +3612,24 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "grantee": "carr_writer",
       "privilege": "update",
       "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:public.tool_read_count:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "public.tool_read_count",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:public.tool_read_count:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation": "public.tool_read_count",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "update",
+      "grantable": false
     }
   ],
   "secdef_execute": [
