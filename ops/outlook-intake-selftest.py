@@ -1425,7 +1425,7 @@ class IntakeTest(unittest.TestCase):
         self.run_intake([keyed, reply])
         self.assertEqual(len(self.fake.writes('log-activity')), 2)
 
-    def test_missing_original_does_not_give_its_ambiguous_receipt_to_a_reply(self):
+    def test_missing_original_suppresses_reply_under_legacy_merged_receipt(self):
         original = mail('pat@example.test', -timedelta(hours=2), subject='Suite review',
                         copy_key='normalized-suite-review')
         self.run_intake([original])
