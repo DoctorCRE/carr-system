@@ -16,7 +16,7 @@ assert spec is not None and spec.loader is not None
 stage = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(stage)
 
-# The grammar ops.adopt_rule (migration 1026) and org-conventions.js parse.
+# The grammar ops.adopt_rule (migration 1027) and org-conventions.js parse.
 CONVENTION = re.compile(r'^Convention: ([^\n]+)')
 CARD = re.compile(r'\nCard: (\{[^\n]*\})[ \t]*(?:\n|$)')
 

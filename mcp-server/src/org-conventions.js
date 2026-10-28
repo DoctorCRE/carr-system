@@ -4,7 +4,7 @@
 // Agents propose a convention as a team-memory section under
 // conventions/proposed/<slug>. governance-queue lists those sections, and a
 // partner's in-person approval calls adopt-rule, which hands the section to
-// ops.adopt_rule (migration 1026): one transaction makes it a proposed rule,
+// ops.adopt_rule (migration 1027): one transaction makes it a proposed rule,
 // activates it through the existing Joe-authority approval chain and retires
 // the proposal. rule-cards reads the adopted cards back for
 // ops/sync-core-rule-cards.py --from-store.
@@ -28,7 +28,7 @@ export function parseProposal(text) {
 }
 
 // governance-queue's pending_convention_proposals lane, read by
-// ops.read_governance_queue() (migration 1026), with each proposal's
+// ops.read_governance_queue() (migration 1027), with each proposal's
 // adoptability and the adopt-rule call that approves it.
 export function conventionProposals(rows = []) {
   return rows.map(({ body_text, ...row }) => {
