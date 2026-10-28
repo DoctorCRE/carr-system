@@ -195,6 +195,12 @@ class Outcome:
     counts: dict = field(default_factory=dict)
 
 
+def receipt_line(outcome: Outcome) -> str:
+    """The machine receipt bin/run-scheduled.sh validates and records."""
+    reason = 'full_disk_access_required' if outcome.reason.startswith('grant Full Disk Access') else outcome.reason
+    return 'outlook-intake-receipt ' + json.dumps({'state': outcome.state, 'reason': reason, 'counts': outcome.counts})
+
+
 def status_line(outcome: Outcome) -> str:
     counts = ' '.join(f'{k}={v}' for k, v in sorted(outcome.counts.items()))
     return f'outlook-intake {outcome.state} {outcome.reason} {counts}'.rstrip()
@@ -1464,8 +1470,7 @@ def main() -> int:
                   lead_intent=lambda mail, today: ask_lead_intent(mail, today, settings.model))
     outcome = run(repo, home, ports)
     print(status_line(outcome))
-    reason = 'full_disk_access_required' if outcome.reason.startswith('grant Full Disk Access') else outcome.reason
-    print('outlook-intake-receipt ' + json.dumps({'state': outcome.state, 'reason': reason, 'counts': outcome.counts}))
+    print(receipt_line(outcome))
     if outcome.reason not in ('outside_window', 'previous_run_active'):
         try:
             from lib import email_router

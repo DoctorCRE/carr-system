@@ -17,6 +17,7 @@ import tempfile
 import unittest
 import uuid
 from unittest.mock import patch
+from contextlib import closing
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -27,6 +28,7 @@ from lib.outlook_settings import load_settings
 from outlook_test_support import write_settings
 
 NOW = datetime(2026, 10, 20, 15, 0, tzinfo=timezone.utc)
+REAL_RUN = subprocess.run  # IntakeTest patches subprocess.run for the store copy
 SCHEMA = """
 CREATE TABLE messages (id INTEGER PRIMARY KEY, block INTEGER, sender TEXT, sender_name TEXT,
   recipients TEXT, subject TEXT, message_id TEXT, body TEXT, html TEXT, body_words INTEGER,
@@ -504,6 +506,47 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(result.counts['mail_other_accounts'], 1)
         [(_, activity)] = self.fake.writes('log-activity')
         self.assertEqual(activity['summary'], 'Email from lee@example.test: Configured mailbox')
+
+    def scheduled(self, outcome):
+        """Feed the intake's own receipt line through bin/run-scheduled.sh and return the spool row."""
+        root = self.tmp / f'scheduler-{outcome.state}'
+        for name in ('bin/run-scheduled.sh', 'tools/ops-spool.py'):
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / name, root / name)
+        (root / '.venv/bin').mkdir(parents=True)
+        (root / '.venv/bin/python').symlink_to(sys.executable)
+        child = root / 'child.py'
+        child.write_text(f'import sys\nprint({intake.receipt_line(outcome)!r})\nsys.exit({intake.EXIT[outcome.state]})\n')
+        spool = root / 'out/run-spool.sqlite3'
+        done = REAL_RUN(['/bin/zsh', str(root / 'bin/run-scheduled.sh'), 'outlook-intake', 'outlook.intake',
+                         sys.executable, str(child)], cwd=root, text=True, capture_output=True, timeout=15,
+                        env={'HOME': str(root), 'PATH': os.environ['PATH'], 'CARR_RUN_SPOOL_DB': str(spool)})
+        self.assertEqual(done.returncode, intake.EXIT[outcome.state])
+        with closing(sqlite3.connect(spool)) as connection:
+            [(state, argv)] = connection.execute('select state, argv from spool').fetchall()
+        args = json.loads(argv)
+        return state, args[args.index('--detail') + 1], args
+
+    def test_scheduler_accepts_receipts_built_by_the_real_intake(self):
+        mails = [mail('pat@example.test', -timedelta(hours=1)),
+                 mail('stranger@example.test', -timedelta(minutes=50), subject='New inquiry'),
+                 mail('noreply@example.test', -timedelta(minutes=40), subject='Automated notice'),
+                 mail('lee@example.test', -timedelta(minutes=30), subject='Foreign', recipients='personal@example.test')]
+        succeeded = self.run_intake(mails)
+        self.fake.fail_verbs.add('log-activity')
+        self.fake.now += timedelta(minutes=30)
+        failed = self.run_intake([*mails, mail('pat@example.test', -timedelta(minutes=5), subject='Follow-up')])
+        self.assertEqual((succeeded.state, failed.state), ('succeeded', 'failed'))
+        for outcome in (succeeded, failed):
+            with self.subTest(state=outcome.state):
+                for key in ('skipped_automated', 'mail_other_accounts', 'lead_proposed', 'lead_refused'):
+                    self.assertIn(key, outcome.counts)
+                state, detail, args = self.scheduled(outcome)
+                self.assertEqual(state, outcome.state)
+                self.assertNotRegex(detail, r'^outlook\.intake exited', 'the scheduler rejected a real receipt')
+                self.assertEqual(json.loads(detail), json.loads(intake.receipt_line(outcome).split(' ', 1)[1]))
+                if outcome.state == 'failed':
+                    self.assertEqual(args[args.index('--failure-class') + 1], outcome.reason)
 
     def test_receipt_counts_header_exclusions_without_claiming_mail_was_processed(self):
         excluded = [mail('lee@example.test', -timedelta(hours=1),
