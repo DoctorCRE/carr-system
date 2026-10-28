@@ -158,7 +158,7 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
     clock = clock or (lambda: now + timedelta(seconds=time.monotonic() - started))
     counts = {k: 0 for k in ('emails', 'routed', 'model_failed', 'abandoned', 'recorded', 'refused',
                              'dropped', 'write_failed', 'queue_failed', 'more', 'out_of_time', 'inherited', 'contact_only')}
-    counts['refusal_codes'] = {}
+    codes: dict[str, int] = {}
     routed, attempts = state.setdefault('routed', {}), state.setdefault('attempts', {})
     cutoff = (now - timedelta(days=WINDOW_DAYS + 1)).timestamp()
     for activity, at in list(routed.items()):
@@ -175,7 +175,7 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
         queue = call('email-router-queue', {'days': WINDOW_DAYS, 'limit': MAX_EMAILS, 'exclude': sorted(routed)})
     except Exception:
         counts['queue_failed'] = 1
-        return counts
+        return {**counts, 'refusal_codes': codes}
     counts['more'] = int(bool(queue.get('more')))
     for email in queue.get('emails', [])[:MAX_EMAILS]:
         if clock() >= now + BUDGET:
@@ -241,7 +241,7 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
                     if code is None:
                         raise WriteFailed() from error
                     counts['refused'] += 1
-                    counts['refusal_codes'][code] = counts['refusal_codes'].get(code, 0) + 1
+                    codes[code] = codes.get(code, 0) + 1
         except WriteFailed:
             counts['write_failed'] += 1
             failed(activity)
@@ -249,7 +249,7 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
         attempts.pop(activity, None)
         routed[activity] = now.timestamp()
         counts['routed'] += 1
-    return counts
+    return {**counts, 'refusal_codes': codes}
 
 
 def _state(out: Path) -> dict:
