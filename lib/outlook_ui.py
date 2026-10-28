@@ -161,8 +161,10 @@ def _windows(pid: int) -> list[dict]:
 
 def _readable(pid: int, window: dict) -> bool:
     state = cua('get_window_state', {'pid': pid, 'window_id': window['window_id'],
-                                     'include_screenshot': False, 'max_elements': 20})
-    return not str(state.get('degraded_reason') or '').startswith('ax_window_unresolved')
+                                     'include_screenshot': False, 'max_elements': 20, 'max_depth': 1})
+    return not state.get('degraded_reason') and any(
+        e.get('role') == 'AXButton' and e.get('label') == 'New Mail' and e.get('depth') == 1
+        for e in state.get('elements') or [])
 
 
 def usable_window(pid: int) -> dict | None:
@@ -205,9 +207,10 @@ def _quit_window_detail(pid: int, windows: list[dict] | None = None) -> str:
                       'New Mail', 'Cancel', 'Close', 'Discard'}
         for window in windows:
             bounds = window.get('bounds') or {}
-            entry = {key: bounds.get(key) if type(bounds.get(key)) in (int, float) else None
+            controls: list[dict[str, object]] = []
+            entry: dict[str, object] = {key: bounds.get(key) if type(bounds.get(key)) in (int, float) else None
                      for key in ('width', 'height')}
-            entry.update(has_title=bool(window.get('title')), account_suffix=is_account_window(window), controls=[])
+            entry.update(has_title=bool(window.get('title')), account_suffix=is_account_window(window), controls=controls)
             if not entry['account_suffix']:
                 try:
                     state = cua('get_window_state', {'pid': pid, 'window_id': window['window_id'],
@@ -216,7 +219,7 @@ def _quit_window_detail(pid: int, windows: list[dict] | None = None) -> str:
                         role = element.get('role')
                         if isinstance(role, str) and re.fullmatch(r'AX[A-Za-z]+', role):
                             name = element.get('label')
-                            entry['controls'].append({'role': role, 'name': name if name in safe_names else None})
+                            controls.append({'role': role, 'name': name if name in safe_names else None})
                 except (CuaError, KeyError, TypeError, AttributeError):
                     pass
             snapshot.append(entry)
@@ -231,7 +234,8 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
         pid = outlook_pid()
         if pid is not None:
             windows = _windows(pid)
-            if len(windows) != 1 or not is_ordinary_main_window(windows[0]):
+            if (len(windows) != 1 or not is_ordinary_main_window(windows[0])
+                    or not _readable(pid, windows[0])):
                 return Outcome('skipped', 'compose_window_open', _quit_window_detail(pid, windows))
             if not _quit(pid, windows, waits):
                 return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
@@ -245,7 +249,8 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
         if pid is None:
             return Outcome('failed', 'outlook_not_running_after_launch')
         windows = _windows(pid)
-        if len(windows) != 1 or not is_ordinary_main_window(windows[0]):
+        if (len(windows) != 1 or not is_ordinary_main_window(windows[0])
+                or not _readable(pid, windows[0])):
             return Outcome('skipped', 'compose_window_open', _quit_window_detail(pid, windows))
         return None if usable_window(pid) else Outcome('failed', 'no_usable_main_window')
     except CuaError:
