@@ -150,12 +150,14 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'list-email-thread-filings': {
       write: false,
-      description: 'List automatic email thread filings for the authenticated partner.',
+      description: 'List the authenticated partner’s automatic email thread filings with source subject, sender name, email time, event ID and recorded activity version (null for legacy events). Undo uses event_id and an idempotency key.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       handler: async (c, actor) => {
         if (actor.human !== true || !['joe','dell'].includes(actor.slug)) fail('partner_confirmation_required');
         const { rows } = await c.query(`select e.id as event_id,e.subject_id as deal,
-          e.new_value->>'activity_id' as activity_id,e.recorded_at,a.summary
+          e.new_value->>'activity_id' as activity_id,e.recorded_at,a.summary,
+          a.email_context->>'subject' as subject,a.email_context->'sender'->>'name' as sender_name,
+          a.occurred_at,(e.new_value->>'activity_version')::integer as activity_version
           from v_email_thread_filing_event e join activity a on a.id::text=e.new_value->>'activity_id'
           where e.verb='inherit-email-thread' and (a.email_source->>'mailbox_owner'=$1 or
             (a.email_source->>'mailbox_owner' is null and exists

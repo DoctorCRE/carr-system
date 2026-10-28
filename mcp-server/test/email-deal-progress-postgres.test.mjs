@@ -1701,12 +1701,12 @@ test('each partner router queues only its captured mailbox provenance', async ()
 
 async function automaticThreadFiling() {
   const context = { subject: 'Synthetic thread', conversation_id: randomUUID(),
-    sender: { email: 'sender@example.test', internal: false }, recipients: [] };
+    sender: { email: 'sender@example.test', name: 'Synthetic Sender', internal: false }, recipients: [] };
   const prior = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
     summary: 'Synthetic thread', detail: quote, occurred_at: new Date(NOW - 60000).toISOString(), email_context: context });
   await c.query('update activity set deal_id=$2 where id=$1', [prior.activity_id, deal]);
   const reply = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
-    summary: 'Synthetic reply', detail: quote, email_context: context });
+    summary: 'Synthetic reply', detail: quote, occurred_at: new Date(NOW).toISOString(), email_context: context });
   await command('inherit-email-thread', { idempotency_key: randomUUID(), activity_id: reply.activity_id,
     thread_activity_id: prior.activity_id }, router(), 'carr_writer');
   const filings = await command('list-email-thread-filings', {}, actor, 'carr_reader');
@@ -1714,6 +1714,26 @@ async function automaticThreadFiling() {
   assert.ok(filing);
   return { prior, reply, filing };
 }
+test('filing list provides source email and recorded version for undo', async () => {
+  const { reply, filing } = await automaticThreadFiling();
+  assert.equal(filing.subject, 'Synthetic thread');
+  assert.equal(filing.sender_name, 'Synthetic Sender');
+  assert.equal(new Date(filing.occurred_at).toISOString(), new Date(NOW).toISOString());
+  assert.equal(filing.activity_version, 2);
+  assert.equal(filing.activity_id, reply.activity_id);
+  assert.equal(filing.deal, deal);
+  assert.match(filing.event_id, /^[0-9a-f-]{36}$/);
+});
+test('filing list preserves ownership and reports legacy version as null', async () => {
+  const { filing } = await automaticThreadFiling();
+  const dell = { ...(await c.query("select id,slug from actor where slug='dell'")).rows[0], human: true };
+  assert.equal((await command('list-email-thread-filings', {}, dell, 'carr_reader')).filings.some(row => row.event_id === filing.event_id), false);
+  await assert.rejects(command('list-email-thread-filings', {}, router(), 'carr_reader'),
+    e => e.payload?.error === 'partner_confirmation_required');
+  await c.query("update event set new_value=new_value-'activity_version' where id=$1", [filing.event_id]);
+  const legacy = (await command('list-email-thread-filings', {}, actor, 'carr_reader')).filings.find(row => row.event_id === filing.event_id);
+  assert.equal(legacy.activity_version, null);
+});
 test('a partner can undo an automatic thread filing and the router cannot refile it', async () => {
   const { prior, reply, filing } = await automaticThreadFiling();
   await command('undo-email-thread-filing', { idempotency_key: randomUUID(), event_id: filing.event_id }, actor, 'carr_writer');
