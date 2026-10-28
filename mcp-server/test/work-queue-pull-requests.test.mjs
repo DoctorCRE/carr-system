@@ -136,6 +136,26 @@ test('a truncated window suppresses stale on a long-idle draft too', () => {
   assert.deepEqual(view.jobs.map(job => [job.stage, job.stale]), [['build', false]]);
 });
 
+for (const incomplete of [
+  { state: 'unavailable', reason: 'github_http_403', prs: [] },
+  { state: 'ok', truncated: true, prs: Array.from({ length: 100 }, (_, i) => livePr(1000 + i, [])) },
+]) {
+  test(`incomplete ${incomplete.state === 'unavailable' ? 'unavailable' : 'truncated'} repository does not save a paired job finish`, () => {
+    const merged = livePr(21, ['WR557.S1.J1'], { state: 'merged' });
+    const carr = { repo: 'DoctorCRE/carr-system', state: 'ok', prs: [merged] };
+    const app = { repo: 'jbookout/doctorcre-app', ...incomplete };
+    const partial = queueView([jobRow(1)], [carr, app], at);
+    assert.deepEqual(partial.finishes, []);
+
+    const draft = livePr(22, ['WR557.S1.J1'], { repo: app.repo, draft: true });
+    const full = queueView([jobRow(1)], [carr, { repo: app.repo, state: 'ok', prs: [draft] }], at);
+    assert.deepEqual(full.jobs.map(job => [job.stage, job.stale]), [['build', true]]);
+    assert.deepEqual(full.finishes, []);
+    const done = queueView([jobRow(1)], [carr, { repo: app.repo, state: 'ok', prs: [{ ...draft, draft: false, state: 'merged' }] }], at);
+    assert.deepEqual(done.finishes.map(({ finished }) => [finished.stage, finished.prs.length]), [['merged', 2]]);
+  });
+}
+
 test('a job whose saved finish has left the search window keeps its merged stage and PR links', () => {
   const saved = { stage: 'merged', prs: [{ repo: 'DoctorCRE/carr-system', number: 9, state: 'merged', card_id: 'WR557.S1.J1.carr#9' }] };
   const view = queueView([jobRow(1, { finished: saved })], [{ repo: 'DoctorCRE/carr-system', state: 'ok', truncated: true, prs: [] }], at);
