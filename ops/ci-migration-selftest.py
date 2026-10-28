@@ -118,6 +118,13 @@ class MigrationTests(unittest.TestCase):
                 self.assertEqual(digest, expected, json.dumps(trace))
                 self.assertIn("CI passed — every class green", result.stdout)
 
+    def test_core_and_fixtures_run_all_exactly_once(self):
+        # The main canary runs these two halves in parallel in place of all.
+        runs = {part: self.run_ci(part) for part in ("core", "fixtures", "all")}
+        for part, (result, _) in runs.items():
+            self.assertEqual(result.returncode, 0, part + result.stdout + result.stderr)
+        self.assertEqual(runs["core"][1] + runs["fixtures"][1], runs["all"][1])
+
     def test_host_shadow_artifact_directory_does_not_change_fixture_commands(self):
         with patch.dict(os.environ, CARR_SHADOW_ARTIFACT_DIR=str(self.root / "host-artifacts")):
             fixture = MigrationTests()
