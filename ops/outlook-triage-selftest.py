@@ -402,6 +402,17 @@ class PreflightQuitTest(FakeOutlookCase):
         self.assertEqual(self.called('osascript'), [])
 
 
+    def test_lone_draft_blocks_restart_without_quitting(self):
+        for draft in (COMPOSE, COMPOSE | {'kind': 'event', 'title': f'New Event • {ACCOUNT}'}):
+            with self.subTest(kind=draft['kind']):
+                self.given(windows=[draft])
+                outcome = self.prepare()
+                self.assertIsNotNone(outcome)
+                self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+                self.assertEqual(self.called('osascript') + self.called('open'), [])
+                self.assertFalse(any(call[1] == 'invoke_menu' for call in self.called('cua-driver')))
+                self.assertTrue(json.loads(self.state.read_text())['running'])
+
     def test_secondary_display_main_window_uses_menu_quit(self):
         for x, width, height in ((-1329, 1329, 1002), (-1024, 1024, 700)):
             with self.subTest(x=x, width=width, height=height):
