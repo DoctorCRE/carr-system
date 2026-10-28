@@ -360,3 +360,34 @@ test("rule ID refusals expose fixed hints without internal details", async t => 
       { env: { CORRELATION_ID: correlationId } }), { error: code, correlation_id: correlationId, hint });
   }
 });
+
+for (const [name, args] of [
+  ["report-problem", { idempotency_key: "d170d000-0000-4000-8000-000000000034", situation: "Synthetic fixture",
+    title: "Synthetic", desired_outcome: "Synthetic", acceptance_criteria: [{ id: "A", text: "Synthetic" }] }],
+  ["write-doctrine-section", { idempotency_key: "d170d000-0000-4000-8000-000000000035", document: "synthetic",
+    section_key: "synthetic", body_text: "Synthetic fixture", base_version: 0 }],
+]) test(`MCP ${name} names the unknown top-level field it refused`, async t => {
+  t.mock.method(console, "error", () => {});
+  const request = new Request("https://synthetic.example/mcp", { method: "POST",
+    body: JSON.stringify({ jsonrpc: "2.0", id: 33, method: "tools/call", params: {
+      name, arguments: { ...args, unexpected_field: "synthetic-private-value", "private input": "x" } } }),
+  });
+  const body = await (await dispatch(request, { CORRELATION_ID: correlationId }, {}, { slug: "joe", human: true })).json();
+  const payload = JSON.parse(body.result.content[0].text);
+  assert.ok(["unregistered_operation_fields", "invalid_report_problem_fields"].includes(payload.error), payload.error);
+  assert.deepEqual(payload.fields, ["unexpected_field"]);
+  assert.doesNotMatch(JSON.stringify(body), /synthetic-private-value|private input/);
+});
+
+test("MCP names the caller authority field it refused", async t => {
+  t.mock.method(console, "error", () => {});
+  const request = new Request("https://synthetic.example/mcp", { method: "POST",
+    body: JSON.stringify({ jsonrpc: "2.0", id: 34, method: "tools/call", params: {
+      name: "find", arguments: { query: "Synthetic", actor: "synthetic-private-value" } } }),
+  });
+  const body = await (await dispatch(request, { CORRELATION_ID: correlationId }, {}, { slug: "joe", human: true })).json();
+  const payload = JSON.parse(body.result.content[0].text);
+  assert.equal(payload.error, "caller_authority_field_forbidden");
+  assert.deepEqual(payload.fields, ["actor"]);
+  assert.doesNotMatch(JSON.stringify(body), /synthetic-private-value/);
+});
