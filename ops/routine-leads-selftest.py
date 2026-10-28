@@ -91,7 +91,7 @@ class LeadTests(unittest.TestCase):
                 self.assertEqual(runtime.run_module(ctx, leads), 0)
                 self.assertEqual([args["query"] for verb, args in calls if verb == "find"], ["Example Dental", "Example Principal", "Example Optometry", "Example Principal"])
                 self.assertEqual([verb for verb, _ in calls if verb != "find"], ["add-loop", "add-loop", "add-loop"])
-                self.assertEqual([json.loads(args["body"])["npi"] for verb, args in calls if verb == "add-loop" and args["title"].startswith("NPPES proposal:")], ["1000000001", "1000000009"])
+                self.assertEqual([json.loads(args["body"])["data"]["npi"] for verb, args in calls if verb == "add-loop" and args["title"].startswith("NPPES proposal:")], ["1000000001", "1000000009"])
                 receipt = json.loads(output.getvalue())
                 self.assertEqual(receipt["candidate_count"], 2)
                 self.assertEqual(receipt["status"], "prepared")
@@ -228,7 +228,7 @@ class LeadTests(unittest.TestCase):
         ctx = context(dict(FIXTURE), dry_run=False)
         handoff = leads.execute(ctx, dict(leads.prepare(ctx), skipped_weekly_files=plan["skipped_weekly_files"]))
         self.assertEqual(handoff["skipped_weekly_files"], plan["skipped_weekly_files"])
-        self.assertEqual(json.loads(ctx.calls[-1][1]["body"])["skipped_weekly_files"], plan["skipped_weekly_files"])
+        self.assertEqual(json.loads(ctx.calls[-1][1]["body"])["data"]["skipped_weekly_files"], plan["skipped_weekly_files"])
 
     def test_newest_weekly_file_and_other_errors_fail_naming_url_and_status(self):
         # WR-000512 AC-NEWEST-REQUIRED, and a non-404 on an older file is still a real failure.
@@ -419,7 +419,7 @@ class LeadTests(unittest.TestCase):
         self.assertEqual(result["ranked"], [])
         self.assertEqual(result["ranking_status"], "PENDING npi-sweep-weekly research and radar rubric")
         self.assertEqual([r["score"] for r in result["proposed"]], [4, 1])
-        summary = json.loads(ctx.calls[-1][1]["body"])
+        summary = json.loads(ctx.calls[-1][1]["body"])["data"]
         self.assertEqual(summary["proposed"], result["proposed"])
         self.assertEqual(summary["status"], "prepared")
 

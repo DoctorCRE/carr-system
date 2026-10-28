@@ -2346,6 +2346,19 @@ function assertSingleOwner(owner) {
   return raw.toLowerCase();
 }
 
+// Audit 3 F7: owner=claude is the autonomous drain queue, so only a full
+// (partner-attended) profile may fill it. No profile on the actor means a local
+// or break-glass door, which is already full authority.
+function assertClaudeOwnerAllowed(actor, owner) {
+  const profile = actor?.operational_profile;
+  if (profile && profile !== "full" && String(owner ?? "").trim().toLowerCase() === "claude")
+    throw new ToolError({ error: "claude_owner_requires_full_profile", profile,
+      hint: "owner=claude is the autonomous drain queue; a narrow profile files the loop for a partner (owner joe or dell) instead" });
+}
+// The surface that wrote a loop, shown on read-loop and loop-board so a reader
+// can weigh the text. Rows filed before this field existed read "unrecorded".
+const WRITER_SURFACE_SQL = "coalesce(extra_cells->>'writer_surface','unrecorded')";
+
 // ---------- Deal Room helpers (field-base concurrency, not record version) ----------
 
 
@@ -4103,6 +4116,7 @@ export const TOOLS = {
     } },
     handler: async (c, _a, args) => {
       const cols = `id as loop_id, kind, number, domain, blocker_class, blocker_detail, status,
+                    ${WRITER_SURFACE_SQL} as writer_surface,
                     title, body, owner, marker, since_text, unblocks, source_note, tier, personal_to,
                     to_jsonb(due_on)#>>'{}' as due_on, close_outcome,
                     to_jsonb(closed_at)#>>'{}' as closed_at, version,
@@ -4171,7 +4185,7 @@ export const TOOLS = {
         // it blocked on, who owns it — from the SAME filtered query, so both
         // modes always agree on which rows exist.
         const s = await c.query(
-          `select number, kind, status, owner,
+          `select number, kind, status, owner, ${WRITER_SURFACE_SQL} as writer_surface,
                   -- LABEL: title or first 80 chars of body's first line, bold
                   -- markers stripped — the same fallback the full row uses.
                   left(coalesce(
@@ -4202,7 +4216,7 @@ export const TOOLS = {
         };
       }
       const r = await c.query(
-        `select number, kind, domain, status, owner, marker, title,
+        `select number, kind, domain, status, owner, ${WRITER_SURFACE_SQL} as writer_surface, marker, title,
                 -- LABEL, not title. Almost every loop predates the title column
                 -- and keeps its text in body, so a board keyed on title alone
                 -- returns a column of nulls and cannot identify anything. Fall
@@ -7409,6 +7423,7 @@ export const TOOLS = {
       // above for why: joint ownership is what stops the system ever draining
       // the backlog on its own initiative.
       args.owner = assertSingleOwner(args.owner);
+      assertClaudeOwnerAllowed(actor, args.owner);
 
       // THE CREATION-SIDE MIRROR of update-loop's due_date_needs_dated_marker.
       // Omitting the marker and passing a date INFERS 'dated', which is the
@@ -7474,7 +7489,7 @@ export const TOOLS = {
          args.drift_critical === true, tier, personal, actor.id, args.domain || null,
          blockerGated ? args.blocker : null,
          blockerGated ? args.blocker_detail.trim() : null,
-         JSON.stringify(residue ? { blocker_residue: residue } : {})]);
+         JSON.stringify({ writer_surface: actor.operational_profile || "local", ...(residue ? { blocker_residue: residue } : {}) })]);
 
       // The blocker goes on the EVENT as well as the row: an open_loop that was
       // filed under a blocker which later turns out to be false is a thing Joe
@@ -7525,6 +7540,7 @@ export const TOOLS = {
       section: { type: "string", enum: ["hot", "backlog", "open"], description: "move the row to this section of its file" } },
       required: ["idempotency_key"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "update-loop", args, async () => {
+      if (args.owner !== undefined) assertClaudeOwnerAllowed(actor, args.owner);
       const cur = await resolveLoop(c, args, { actor });
       await versionGuard(c, "loop_item", cur.id, args.base_version);
       if (cur.status !== "open")
