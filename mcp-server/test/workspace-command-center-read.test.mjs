@@ -32,7 +32,8 @@ test("Command Center returns the contract-shaped team and mine aggregate read wi
   assert.equal(result.source.freshness, "fresh");
   assert.match(result.source.safe_explanation, /no-store request-time canonical/i);
   assert.equal(result.source.correlation_id, "corr-joe");
-  assert.equal(result.source.valid_until, "2026-08-24T15:01:00.000Z");
+  assert.ok(Date.parse(result.source.valid_until) > Date.parse("2026-08-24T15:01:00Z"));
+  assert.equal(result.source.valid_until, "2026-08-24T15:02:00.000Z");
   assert.equal(queries.length, 2);
   assert.equal(queries[0].params[0], "joe");
   assert.equal((queries[0].sql.match(/count\(\*\) filter/g) || []).length, 4);
