@@ -95,25 +95,7 @@ impl ParseError {
     }
 }
 
-/// A block whose header and payload checksums agree, not yet inflated.
-pub struct Verified {
-    pub kind: u32,
-    payload: std::ops::Range<usize>,
-    inflated_len: usize,
-}
-
 pub fn parse_checked(mm: &[u8], off: usize) -> Result<Block, ParseError> {
-    inflate(mm, &verify(mm, off)?)
-}
-
-/// Decompress a verified block to exactly its declared length.
-pub fn inflate(mm: &[u8], v: &Verified) -> Result<Block, ParseError> {
-    let data = lz::decode_exact(&mm[v.payload.clone()], v.inflated_len).ok_or(ParseError::InvalidLz4)?;
-    Ok(Block { kind: v.kind, data })
-}
-
-/// Check both checksums and the declared lengths without decompressing.
-pub fn verify(mm: &[u8], off: usize) -> Result<Verified, ParseError> {
     let h = read_header(mm, off).ok_or(ParseError::TruncatedHeader)?;
 
     // Guard against absurd lengths before allocating anything.
@@ -132,7 +114,9 @@ pub fn verify(mm: &[u8], off: usize) -> Result<Verified, ParseError> {
         return Err(ParseError::PayloadCrcMismatch);
     }
 
-    Ok(Verified { kind: h.kind, payload: off + PAYLOAD..end, inflated_len: h.inflated_len })
+    let data =
+        lz::decode_exact(&mm[off + PAYLOAD..end], h.inflated_len).ok_or(ParseError::InvalidLz4)?;
+    Ok(Block { kind: h.kind, data })
 }
 
 /// Offsets of every block header in the file.
@@ -149,7 +133,7 @@ pub fn find_all(mm: &[u8]) -> Vec<usize> {
 }
 
 /// CRC-32 (IEEE, as used by zlib), which is what HxCore calls.
-pub fn crc32(data: &[u8]) -> u32 {
+fn crc32(data: &[u8]) -> u32 {
     static TABLE: std::sync::OnceLock<[u32; 256]> = std::sync::OnceLock::new();
     let table = TABLE.get_or_init(|| {
         let mut t = [0u32; 256];

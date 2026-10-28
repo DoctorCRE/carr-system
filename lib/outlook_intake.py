@@ -1599,12 +1599,10 @@ def _contacts(repo: Path) -> Callable[[], list]:
     return read
 
 
-def _decoder(home: Path, cache: Path) -> Callable[[Path, Path, Path], None]:
-    """hxprobe decodes again only the blocks that changed since the cached run."""
+def _decoder(home: Path) -> Callable[[Path, Path, Path], None]:
     def decode(copy: Path, files: Path, db: Path) -> None:
         try:
-            done = subprocess.run([str(load_settings(home).decoder), 'db', str(copy), str(db), str(files),
-                                   '--cache', str(cache)],
+            done = subprocess.run([str(load_settings(home).decoder), 'db', str(copy), str(db), str(files)],
                                   capture_output=True, timeout=900)
         except (OSError, subprocess.TimeoutExpired):
             raise DecodeError('hxprobe did not run') from None
@@ -1621,7 +1619,7 @@ def main() -> int:
     settings.require_service('intake')
     ports = Ports(carr=_carr(repo), contacts=_contacts(repo),
                   next_step=lambda mail, today: ask_model(mail, today, settings.model),
-                  decode=_decoder(home, repo / OUT / 'decoder.cache'), now=lambda: datetime.now(timezone.utc),
+                  decode=_decoder(home), now=lambda: datetime.now(timezone.utc),
                   lead_intent=lambda mail, today: ask_lead_intent(mail, today, settings.model))
     outcome = run(repo, home, ports)
     print(status_line(outcome))

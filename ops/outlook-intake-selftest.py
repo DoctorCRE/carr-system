@@ -1923,13 +1923,6 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual((deferred.reason, deferred.counts['decoder_block_verification_bp']),
                          ('writes_deferred', 9000))
 
-    def test_production_decoder_reuses_a_private_cache_beside_intake_state(self):
-        cache = self.out() / 'decoder.cache'
-        with patch.object(intake.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as run:
-            intake._decoder(self.home, cache)(Path('copy.hxd'), Path('Files'), Path('store.db'))
-        self.assertEqual(run.call_args.args[0][1:], ['db', 'copy.hxd', 'store.db', 'Files', '--cache', str(cache)])
-        self.assertFalse(cache.name.startswith(intake.WORK_PREFIX), 'stale-work cleanup must not remove it')
-
     def test_failed_degraded_run_does_not_consume_alarm(self):
         healthy = [mail(OWNER, -timedelta(hours=1), recipients='pat@example.test') for _ in range(20)]
         self.run_intake(healthy)

@@ -101,8 +101,7 @@ pub fn sidecar_names(span: &[u8]) -> Vec<String> {
 #[derive(Default)]
 pub struct Sidecars {
     files: HashMap<String, PathBuf>,
-    /// Each sidecar's HTML and the fingerprint of its text, read once.
-    cache: HashMap<String, Option<(String, String)>>,
+    cache: HashMap<String, Option<String>>,
     pub linked: usize,
     pub rejected: usize,
 }
@@ -129,7 +128,7 @@ impl Sidecars {
         self.files.len()
     }
 
-    fn html(&mut self, name: &str) -> Option<(String, String)> {
+    fn html(&mut self, name: &str) -> Option<String> {
         if let Some(hit) = self.cache.get(name) {
             return hit.clone();
         }
@@ -137,21 +136,18 @@ impl Sidecars {
             let file = fs::File::open(path).ok()?;
             let mut out = Vec::new();
             flate2::read::GzDecoder::new(file).take(MAX_SIDECAR).read_to_end(&mut out).ok()?;
-            let html = String::from_utf8_lossy(&out).into_owned();
-            let text = fingerprint(&html_to_text(&html));
-            Some((html, text))
+            Some(String::from_utf8_lossy(&out).into_owned())
         });
         self.cache.insert(name.to_string(), html.clone());
         html
     }
 
-    /// The first sidecar named in a record's span whose text contains the
-    /// record's own opening.
-    pub fn body_from(&mut self, names: &[String], r: &Record) -> Option<String> {
+    /// The sidecar HTML for this record, if one in its span matches it.
+    pub fn body_for(&mut self, span: &[u8], r: &Record) -> Option<String> {
         let expect = opening(r.preview.as_deref().unwrap_or(&r.body))?;
-        for name in names {
-            let Some((html, text)) = self.html(name) else { continue };
-            if text.contains(&expect) {
+        for name in sidecar_names(span) {
+            let Some(html) = self.html(&name) else { continue };
+            if fingerprint(&html_to_text(&html)).contains(&expect) {
                 self.linked += 1;
                 return Some(html);
             }
@@ -213,9 +209,9 @@ mod tests {
         assert_eq!(sidecars.len(), 2, "the S0 number is not hard-coded");
         let r = rec("pat@example.test", "Suite", "Thanks, Thursday at ten works for the tour.");
         let wrong = u16le("EFMData/2222.dat");
-        assert_eq!(sidecars.body_from(&sidecar_names(&wrong), &r), None, "a neighbour's sidecar is rejected");
+        assert_eq!(sidecars.body_for(&wrong, &r), None, "a neighbour's sidecar is rejected");
         let right = [u16le("EFMData/2222.dat"), vec![0, 0], u16le("EFMData/1111.dat")].concat();
-        assert!(sidecars.body_from(&sidecar_names(&right), &r).unwrap().contains("More text"), "the matching sidecar wins");
+        assert!(sidecars.body_for(&right, &r).unwrap().contains("More text"), "the matching sidecar wins");
         assert_eq!((sidecars.linked, sidecars.rejected), (1, 2));
         fs::remove_dir_all(&dir).unwrap();
     }

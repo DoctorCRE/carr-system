@@ -71,43 +71,19 @@ pub struct Index {
     pub objects: usize,
 }
 
-/// One dated calendar object; `event` holds its bytes and decode when it parses.
-#[derive(Debug)]
-pub struct Observation {
-    pub goid: String,
-    pub start: i64,
-    pub event: Option<(Vec<u8>, Event)>,
-}
-
-pub fn observations(data: &[u8]) -> Vec<Observation> {
-    objects(data)
-        .into_iter()
-        .filter_map(|obj| {
-            let (Some(goid), Some(start), Some(end)) = (goid(obj), tick(obj, START), tick(obj, END)) else {
-                return None;
-            };
-            let event = (end >= start)
-                .then(|| parse(obj, goid.clone(), start, end))
-                .flatten()
-                .map(|ev| (obj.to_vec(), ev));
-            Some(Observation { goid, start, event })
-        })
-        .collect()
-}
-
 impl Index {
-    #[cfg(test)]
     pub fn observe(&mut self, data: &[u8]) {
-        for observation in observations(data) {
-            self.apply(observation);
-        }
-    }
-
-    pub fn apply(&mut self, Observation { goid, start, event }: Observation) {
-        self.objects += 1;
-        self.identities.insert((goid, start));
-        if let Some((bytes, ev)) = event {
-            self.events.entry(bytes).or_insert(ev);
+        for obj in objects(data) {
+            let (Some(goid), Some(start), Some(end)) = (goid(obj), tick(obj, START), tick(obj, END)) else {
+                continue;
+            };
+            self.objects += 1;
+            self.identities.insert((goid.clone(), start));
+            if end < start {
+                continue;
+            }
+            let Some(ev) = parse(obj, goid, start, end) else { continue };
+            self.events.entry(obj.to_vec()).or_insert(ev);
         }
     }
 }
