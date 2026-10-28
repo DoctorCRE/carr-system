@@ -95,8 +95,8 @@ def asserted_claim(sentence):
                 local_prefix = CLAUSE_BREAK.split(prefix)[-1]
                 local_suffix = CLAUSE_BREAK.split(sentence[end:])[0]
                 if not GUIDANCE_CONTEXT.search(sentence) and not re.search(
-                    r'(?:\bso\s+I\s+(?:always|never|will)\b|:\s*(?:always|never|I\s+will)\b)',
-                    local_suffix, re.I
+                    r':|\b(?:I|we|always|never|ask|check|run|remember|ensure|must|should)\b',
+                    sentence[end:], re.I
                 ) and (
                     CONFIG_RULE_PREFIX.search(local_prefix)
                     or CONFIG_RULE_SUFFIX.match(local_suffix)

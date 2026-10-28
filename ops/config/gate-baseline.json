@@ -13,7 +13,7 @@
     "md_manifest.py": "de4ec1a2c97730d9211889a6bada81d65fd0a59f39da3498885aa2c3a96bfc61",
     "record-home-gate.py": "a982dab7bd869ec98340eef4e55e51441e6d9558b3474f56aec353320ab5fe07",
     "refused_content.py": "d3283e0efe48c63561c84cfa72b5cf363f5d53414c7e803584c569d4b26f1f4c",
-    "rule-claim-gate.py": "0c7fe6f57eb705d170dc1b1de13271441b3a2582fc017a4e2cba7e019fe564fb",
+    "rule-claim-gate.py": "d54a47d783e0379fb2c4de38dbc2654ad4b73c6486928b918b8e55d64b1d41ba",
     "rule-pack-preuse-reselection.py": "72be2b9b54178ae007e9b3b48614fd4e0e24102159500aa572a59220399a59bf",
     "scheduled-run-record.py": "34d230bf7dc9ad92fd30de7b21ce6263624fb3d1dfdf56a72ba121f613e31c80",
     "session-brief.py": "63e6a6fd56ab9fe65cf612fe17ebe0813ae5f724cdf6008ca759976ce9c4f1d1",
