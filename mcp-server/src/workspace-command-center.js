@@ -11,6 +11,8 @@ export const TEAM_FLAGGED_DESTINATION = "/deals?workspace=team&filter=flagged";
 export const MY_FLAGGED_DESTINATION = "/deals?workspace=team&filter=flagged&owner=me";
 export const NEEDS_JOE_DESTINATION = "/system-work.html";
 export const HOME_SCOPES = ["team", "mine"];
+// Two refresh periods cover the app's 60-second polling floor.
+const SNAPSHOT_VALIDITY_MS = 120_000;
 const VALID_ACTORS = new Set(["joe", "dell"]);
 const DEPENDENCY_CODES = new Set(["DEPENDENCY_UNAVAILABLE", "ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "ENOTFOUND", "08000", "57P01"]);
 
@@ -33,7 +35,7 @@ function source({ source, sourceRef, observedAt, validUntil, correlationId, fres
     source, source_ref: sourceRef, observed_at: observedAt, valid_until: validUntil,
     freshness, correlation_id: correlationId,
     safe_explanation: freshness === "fresh"
-      ? "Fresh because this is a no-store request-time canonical database aggregate; valid for 60 seconds."
+      ? "Fresh because this is a no-store request-time canonical database aggregate; valid for 120 seconds."
       : "This source is unavailable because legacy unscoped rows prevent a safe tenant-bound aggregate.",
   };
 }
@@ -53,7 +55,7 @@ export async function readCommandCenterSummary({ client, actor, tenant = organiz
   if (!actor?.slug || !VALID_ACTORS.has(actor.slug)) throw typedError("AUTHORIZATION_REFUSED");
   const observedAtDate = now();
   const observedAt = observedAtDate.toISOString();
-  const validUntil = new Date(observedAtDate.valueOf() + 60_000).toISOString();
+  const validUntil = new Date(observedAtDate.valueOf() + SNAPSHOT_VALIDITY_MS).toISOString();
   let dealResult;
   let workResult;
   try {
