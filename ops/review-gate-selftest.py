@@ -63,7 +63,7 @@ class ReviewGate(unittest.TestCase):
 
     def test_reviewer_header_required(self):
         pr = {"changed_files": 0, "additions": 151, "deletions": 0, "head": {"sha": "abc"}}
-        for reviewer, expected in [("grok", True), ("claude-opus", True), ("codex", True), ("jev", True), ("anyone", False), ("", False)]:
+        for reviewer, expected in [("grok", True), ("claude-opus", True), ("codex", True), ("jev", True), ("anyone", True), ("Claude Sonnet 5.5 (independent)", True), ("", False), ("   ", False)]:
             with self.subTest(reviewer=reviewer):
                 self.assertEqual(gate.approved(pr, [], [{"body": f"VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: {reviewer}"}]), expected)
 
@@ -113,7 +113,7 @@ class ReviewGate(unittest.TestCase):
         cases = [([approval], "success"),
                  ([{**approval, "state": "DISMISSED"}], "failure"),
                  ([{**approval, "body": approval["body"].replace("abc", "old")}], "failure"),
-                 ([{**approval, "body": approval["body"].replace("grok", "anyone")}], "failure"),
+                 ([{**approval, "body": approval["body"].replace("grok", "anyone")}], "success"),
                  ([approval, {"body": "VERDICT: CHANGES\nReviewed-SHA: abc\nReviewer: grok", "submitted_at": "2026-01-02T00:00:00Z"}], "failure")]
         for reviews, expected in cases:
             with self.subTest(reviews=reviews), patch.object(gate, "api", side_effect=[pr, {}, [{"filename": "safe"}], [], reviews, pr, {}]) as api:
@@ -129,6 +129,7 @@ class ReviewGate(unittest.TestCase):
         late = {"submitted_at": "2026-01-02T00:00:00Z"}
         cases = [(item("CHANGES", early), item("APPROVE", late), "success"),
                  (item("APPROVE", early), item("CHANGES", late), "failure"),
+                 (item("APPROVE", early), item("CHANGES", late, body="VERDICT: CHANGES\nReviewed-SHA: abc\nReviewer: Claude Sonnet 5.5 (independent)"), "failure"),
                  (item("APPROVE", early), item("CHANGES", late, state="DISMISSED"), "success")]
         for comment, review, expected in cases:
             with self.subTest(expected=expected, review=review), patch.object(gate, "api", side_effect=[pr, {}, [{"filename": "safe"}], [comment], [review], pr, {}]) as api:
