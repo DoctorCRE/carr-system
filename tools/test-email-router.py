@@ -149,6 +149,8 @@ class RouterTests(unittest.TestCase):
         counts = route(server, lambda e, d: {'proposals': [BOTH['proposals'][0]]}, state)
         self.assertEqual((counts['refused'], counts['routed'], counts['write_failed']), (1, 1, 0))
         self.assertIn('a3', state['routed'])
+        receipt = json.loads(email_router.receipt('succeeded', counts).split(' ', 1)[1])
+        self.assertEqual(receipt['refusal_codes'], {INVALID: 1})
 
     def test_invented_quotes_and_low_confidence_never_leave_the_router(self):
         server = Server([email('a4', FIXTURE['attacks'][0])])

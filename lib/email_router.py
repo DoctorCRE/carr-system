@@ -158,6 +158,7 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
     clock = clock or (lambda: now + timedelta(seconds=time.monotonic() - started))
     counts = {k: 0 for k in ('emails', 'routed', 'model_failed', 'abandoned', 'recorded', 'refused',
                              'dropped', 'write_failed', 'queue_failed', 'more', 'out_of_time', 'inherited', 'contact_only')}
+    counts['refusal_codes'] = {}
     routed, attempts = state.setdefault('routed', {}), state.setdefault('attempts', {})
     cutoff = (now - timedelta(days=WINDOW_DAYS + 1)).timestamp()
     for activity, at in list(routed.items()):
@@ -234,9 +235,11 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
                     call('record-email-proposal', {'idempotency_key': key, **args})
                     counts['recorded'] += 1
                 except Exception as error:
-                    if refusal_code(error) is None:
+                    code = refusal_code(error)
+                    if code is None:
                         raise WriteFailed() from error
                     counts['refused'] += 1
+                    counts['refusal_codes'][code] = counts['refusal_codes'].get(code, 0) + 1
         except WriteFailed:
             counts['write_failed'] += 1
             failed(activity)
@@ -282,7 +285,12 @@ def run(out: Path, carr: Callable[[str, dict], dict], classify: Callable[[dict, 
 
 
 def receipt(outcome: str, counts: dict) -> str:
-    return 'email-router-receipt ' + json.dumps({'state': outcome, 'counts': counts})
+    counts = counts.copy()
+    codes = counts.pop('refusal_codes', {})
+    result = {'state': outcome, 'counts': counts}
+    if codes:
+        result['refusal_codes'] = codes
+    return 'email-router-receipt ' + json.dumps(result)
 
 
 def step(repo: Path, settings) -> int:
