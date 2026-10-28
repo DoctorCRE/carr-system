@@ -314,11 +314,11 @@ def cmd_sync_registry(args) -> int:
 
 
 # ── run ──────────────────────────────────────────────────────────────────────
-RUN_REAP_BATCH = 500
+RUN_REAP_BATCH = 1000
 
 
 def _reap_expired_runs(conn, cur, service_id, environment, run_key) -> None:
-    """Keep ops.run bounded from the one path that grows it (migration 1038).
+    """Keep ops.run bounded from the one path that grows it (migration 1047).
 
     A savepoint, so a reaper failure never costs the run row just written."""
     try:
@@ -326,7 +326,7 @@ def _reap_expired_runs(conn, cur, service_id, environment, run_key) -> None:
             cur.execute("select ops.reap_expired_runs(%s, %s, %s, %s)",
                         (service_id, environment, run_key, RUN_REAP_BATCH))
     except Exception as e:                                   # noqa: BLE001
-        print(f"ops-record: run retention skipped: {str(e).splitlines()[0][:200]}",
+        print(f"ops-record: run retention skipped: {type(e).__name__}",
               file=sys.stderr)
 
 
