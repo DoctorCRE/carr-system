@@ -178,6 +178,10 @@ class DecodeError(RuntimeError):
 class FullDiskAccessRequired(RuntimeError):
     """macOS denied the dedicated snapshot helper access to Outlook."""
 
+    def __init__(self, message: str, detail: str = ''):
+        super().__init__(message)
+        self.detail = detail
+
 
 class CleanupError(RuntimeError):
     """A private work folder could not be deleted."""
@@ -208,12 +212,16 @@ class Outcome:
     state: str
     reason: str
     counts: dict = field(default_factory=dict)
+    detail: str = ''
 
 
 def receipt_line(outcome: Outcome) -> str:
     """The machine receipt bin/run-scheduled.sh validates and records."""
     reason = 'full_disk_access_required' if outcome.reason.startswith('grant Full Disk Access') else outcome.reason
-    return 'outlook-intake-receipt ' + json.dumps({'state': outcome.state, 'reason': reason, 'counts': outcome.counts})
+    receipt = {'state': outcome.state, 'reason': reason, 'counts': outcome.counts}
+    if outcome.detail:
+        receipt['detail'] = outcome.detail
+    return 'outlook-intake-receipt ' + json.dumps(receipt)
 
 
 def status_line(outcome: Outcome) -> str:
@@ -448,6 +456,15 @@ def health_counts(health: dict | None) -> dict:
             for name, rate in ((health or {}).get('rates') or {}).items() if rate is not None}
 
 
+def _tool_detail(tool: str, code: int | None, stderr: bytes | str | None) -> str:
+    text = stderr.decode('utf-8', errors='replace') if isinstance(stderr, bytes) else (stderr or '')
+    lines = text.splitlines()
+    last = lines[-1] if lines else ''
+    last = re.sub(r"(?:[A-Za-z]:[\\/]|~?/|\.\.?/)[^\s\"'<>]*", '[path]', last)
+    last = ''.join(c if c.isprintable() else ' ' for c in last)
+    return f'{tool} exit={code} stderr={last}'[:200]
+
+
 def _snapshot(home: Path, work: Path) -> None:
     settings = load_settings(home)
     settings.verify_helper()
@@ -455,13 +472,19 @@ def _snapshot(home: Path, work: Path) -> None:
     try:
         done = subprocess.run([str(helper)], cwd=work, capture_output=True, timeout=900)
         if done.returncode in (errno.EPERM, errno.EACCES):
-            raise PermissionError(done.returncode, 'Outlook copy denied')
+            raise FullDiskAccessRequired(f'grant Full Disk Access to {helper}',
+                                         _tool_detail('outlook-intake-copy', done.returncode, done.stderr))
         if done.returncode:
-            raise DecodeError(f'Outlook copy helper exit {done.returncode}')
-    except PermissionError:
-        raise FullDiskAccessRequired(f'grant Full Disk Access to {helper}') from None
-    except subprocess.TimeoutExpired:
-        raise DecodeError('Outlook copy helper timed out') from None
+            raise DecodeError(_tool_detail('outlook-intake-copy', done.returncode, done.stderr))
+    except PermissionError as error:
+        raise FullDiskAccessRequired(f'grant Full Disk Access to {helper}',
+                                     _tool_detail('outlook-intake-copy', None,
+                                                  f'PermissionError errno={error.errno}')) from None
+    except subprocess.TimeoutExpired as error:
+        raise DecodeError(_tool_detail('outlook-intake-copy', None, error.stderr or 'TimeoutExpired')) from None
+    except OSError as error:
+        raise DecodeError(_tool_detail('outlook-intake-copy', None,
+                                      f'{type(error).__name__} errno={error.errno}')) from None
 
 
 def _remove(work: Path) -> None:
@@ -1554,9 +1577,14 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         with _decode(home, out, ports.decode) as (meta, mails, events, db, files):
             return _process(out, ports, settings, state, signature, now, matcher, meta, mails, events, db, files)
     except FullDiskAccessRequired as error:
-        return Outcome('failed', str(error))
-    except (DecodeError, sqlite3.Error, OSError):
-        return Outcome('failed', 'decode_failed')
+        return Outcome('failed', str(error), detail=error.detail)
+    except DecodeError as error:
+        return Outcome('failed', 'decode_failed', detail=str(error))
+    except (sqlite3.Error, OSError) as error:
+        detail = type(error).__name__
+        if isinstance(error, OSError):
+            detail += f' errno={error.errno}'
+        return Outcome('failed', 'decode_failed', detail=detail)
 
 
 def _process(out, ports, settings, state, signature, now, matcher, meta, mails, events, db, files):
@@ -1737,10 +1765,13 @@ def _decoder(home: Path) -> Callable[[Path, Path, Path], None]:
         try:
             done = subprocess.run([str(load_settings(home).decoder), 'db', str(copy), str(db), str(files)],
                                   capture_output=True, timeout=900)
-        except (OSError, subprocess.TimeoutExpired):
-            raise DecodeError('hxprobe did not run') from None
+        except subprocess.TimeoutExpired as error:
+            raise DecodeError(_tool_detail('hxprobe', None, error.stderr or 'TimeoutExpired')) from None
+        except OSError as error:
+            raise DecodeError(_tool_detail('hxprobe', None,
+                                          f'{type(error).__name__} errno={error.errno}')) from None
         if done.returncode:
-            raise DecodeError(f'hxprobe exit {done.returncode}')
+            raise DecodeError(_tool_detail('hxprobe', done.returncode, done.stderr))
     return decode
 
 

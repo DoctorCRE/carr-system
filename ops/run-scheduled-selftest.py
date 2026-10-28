@@ -78,6 +78,16 @@ class ScheduledRunTests(unittest.TestCase):
         args = json.loads(self.rows()[-1][3])
         self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
 
+    def test_intake_tool_detail_and_router_exception_types_survive_wrapper(self):
+        receipt = {'state': 'failed', 'reason': 'decode_failed', 'counts': {},
+                   'detail': 'hxprobe exit=42 stderr=corrupt [path]'}
+        router = {'state': 'failed', 'counts': {'model_failed': 2},
+                  'model_failed_types': {'ModuleNotFoundError': 2}}
+        result = self.invoke_intake(receipt, router_lines=['email-router-receipt ' + json.dumps(router)])
+        args = json.loads(self.rows()[0][3])
+        self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
+        self.assertEqual(json.loads(result.stdout.split('email-router-receipt ', 1)[1]), router)
+
     def test_router_counts_and_refusal_codes_reach_output(self):
         intake = {"state": "succeeded", "reason": "processed", "counts": {}}
         router = {"state": "succeeded", "counts": {"inherited": 2, "contact_only": 1, "refused": 2},
