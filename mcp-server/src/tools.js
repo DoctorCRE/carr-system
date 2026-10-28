@@ -8823,9 +8823,9 @@ const RESERVED_AUTHORITY_ARGUMENT_FIELDS = new Set([
 // the two server-bound local partner doors, but reviewers, probes, Hermes, Grok,
 // and unsponsored runtimes remain outside partner authority.
 export function assertNoCallerAuthorityFields(args) {
-  if (args && typeof args === "object" && !Array.isArray(args) &&
-      Object.keys(args).some((key) => RESERVED_AUTHORITY_ARGUMENT_FIELDS.has(key)))
-    throw new ToolError({ error: "caller_authority_field_forbidden" });
+  const fields = args && typeof args === "object" && !Array.isArray(args)
+    ? Object.keys(args).filter((key) => RESERVED_AUTHORITY_ARGUMENT_FIELDS.has(key)).sort() : [];
+  if (fields.length) throw new ToolError({ error: "caller_authority_field_forbidden", fields });
   return args;
 }
 
