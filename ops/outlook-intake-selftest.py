@@ -1957,9 +1957,15 @@ class IntakeTest(unittest.TestCase):
                     'decoder_folder_bp': 0}
         processed = self.run_intake(sample)
         self.assertEqual({k: v for k, v in processed.counts.items() if k.endswith('_bp')}, expected)
+        expected_samples = {'decoder_block_verification_sample': 1000, 'decoder_sender_sample': 20,
+                            'decoder_subject_sample': 20, 'decoder_recipients_sample': 20,
+                            'decoder_sent_time_sample': 20, 'decoder_folder_sample': 20,
+                            'decoder_attachment_metadata_sample': 0}
+        self.assertEqual({k: v for k, v in processed.counts.items() if k.endswith('_sample')}, expected_samples)
         unchanged = self.run_intake(sample, touch=False)
         self.assertEqual(unchanged.reason, 'store_unchanged')
         self.assertEqual({k: v for k, v in unchanged.counts.items() if k.endswith('_bp')}, expected)
+        self.assertEqual({k: v for k, v in unchanged.counts.items() if k.endswith('_sample')}, expected_samples)
         deferred = self.run_intake(sample, found=1000, verified=900)
         self.assertEqual((deferred.reason, deferred.counts['decoder_block_verification_bp']),
                          ('writes_deferred', 9000))
@@ -3337,6 +3343,16 @@ class LoadObjectFieldsTest(unittest.TestCase):
         self.assertEqual(intake.health_counts(health)['decoder_recipients_bp'], 10000)
         self.assertEqual(intake.health_counts(health)['decoder_subject_sample'], 1)
         self.assertEqual(health['eligible'].get('subject'), None)
+
+    def test_cc_only_message_counts_as_having_recipients(self):
+        with sqlite3.connect(self.db) as con:
+            con.execute("DELETE FROM recipients WHERE kind='to'")
+        meta, mails, _ = self.load(OWNER)
+        self.assertEqual(len(mails), 1)
+        self.assertIsNone(mails[0]['recipients'])
+        self.assertEqual(mails[0]['cc'], OWNER)
+        health = intake._decoder_health(meta, ts(-timedelta(hours=2)), NOW, {})
+        self.assertEqual(intake.health_counts(health)['decoder_recipients_bp'], 10000)
 
     def test_object_subject_replaces_inherited_or_wrong_heuristic(self):
         self.assertEqual(self.load()[1][0]['subject'], 'Re: Café 🏢')
