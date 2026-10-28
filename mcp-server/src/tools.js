@@ -3967,7 +3967,7 @@ export const TOOLS = {
 
   "email-match-contacts": {
     write: false,
-    description: "The Outlook intake's contact list: every address written in a live party's email field, in any market, as {address, ref, name, exact}. ref is the party's client, lead or vendor ref, one row per live role, or its P- ref when it holds none. Merged-away and deleted parties never appear. exact=false marks a role address (info, front desk, office...) sharing its field with other addresses: it may serve many people.",
+    description: "The Outlook intake's contact list: every address written in a live party's email field, in any market, as {address, ref, name, exact}. ref is the party's client, lead or vendor ref, one row per live role, or its P- ref when it holds none. A participant of an open deal holding no client, lead or vendor role also comes back with the deal's id as ref and the deal's name (v_email_deal_contact), so its mail logs on that deal. Merged-away and deleted parties never appear. exact=false marks a role address (info, front desk, office...) sharing its field with other addresses: it may serve many people.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c) => {
       const ROLE = /^(?:front-?desk|info|office|admin|contact|reception|billing|hello|team|support|scheduling|appointments?|sales|inquiries|enquiries|referrals?|records|staff|help|general)(?:[-.+].*)?$/u;
@@ -3981,6 +3981,8 @@ export const TOOLS = {
             union all select vendor_ref from vendor where party_id = p.id and merged_into is null) r on true
          where p.merged_into is null and p.deleted_at is null and p.email like '%@%'
            and coalesce(r.ref, p.ref) is not null
+        union all
+        select "Deal ID"::text, coalesce("Name", ''), "Email" from v_email_deal_contact where "Email" like '%@%'
          order by 1`)).rows;
       const contacts = rows.flatMap(({ ref, name, email }) => {
         const found = [...new Set((email.match(/[\p{L}\p{M}\p{N}_.+'-]+@[\p{L}\p{M}\p{N}_-]+(?:\.[\p{L}\p{M}\p{N}_-]+)+/gu) ?? [])
@@ -10665,7 +10667,9 @@ registerTools(emailNextStepTools({ withEnvelope, writeEvent, lockDealField, reso
   setNextAction: (c, actor, args) => TOOLS["set-next-action"].handler(c, actor, args) }), "email-next-step");
 registerTools(emailProposalTools({ ToolError, withEnvelope, writeEvent,
   preview: (c, actor, verb, args) => TOOLS[verb].handler(c, actor, args) }), "email-proposals");
-registerTools(emailLeadProposalTools({ withEnvelope, writeEvent }), "email-lead-proposal");
+registerTools(emailLeadProposalTools({ withEnvelope, writeEvent,
+  updatePartyContact: (c, actor, args) => TOOLS["update-party-contact"].handler(c, actor, args),
+  newLead: (c, actor, args) => TOOLS["new-lead"].handler(c, actor, args) }), "email-lead-proposal");
 registerTools(clearTheDeckTools({ ToolError, withEnvelope, writeEvent }), "clear-the-deck");
 const invoices=invoiceAutomation({withEnvelope,writeEvent,ToolError,lockDealField,
   updateDeal:(c,actor,args)=>TOOLS["update-deal"].handler(c,actor,args),
