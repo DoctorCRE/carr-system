@@ -288,6 +288,22 @@ class RuleClaimGateTest(unittest.TestCase):
                 self.assertNotEqual(self.run_hook(self.turn(assistant(text)))
                                     .get('decision'), 'block')
 
+    def test_reworded_infrastructure_guidance_claims_block(self):
+        for text in [
+            'I added a DNS rule: check Cloudflare first before asking Joe.',
+            'I added a route rule: ask Joe before merging anything.',
+            'I added a DNS rule so that I always check Cloudflare first.',
+            'I saved a rate limit rule: from now on I check the quota before running jobs.',
+            'I added a route rule so that we check screenshots.',
+            'I added a route rule and we ask Joe before merging.',
+            'I added a route rule, ask Joe before merging.',
+            'I added a DNS rule check Cloudflare first.',
+            'I added a route rule that I follow before merging.',
+        ]:
+            with self.subTest(text=text):
+                self.assertEqual(self.run_hook(self.turn(assistant(text)))
+                                 .get('decision'), 'block')
+
     def test_infrastructure_rules_do_not_exempt_guidance_claims(self):
         for text in [
             'I saved a rule on DNS questions: always check Cloudflare before asking Joe.',
