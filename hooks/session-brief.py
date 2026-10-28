@@ -26,6 +26,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.credential_file import read_env_file
 from lib.hook_runtime import decision, run, Event
 
 PACK_DELIVERY_RAIL = (
@@ -59,11 +60,7 @@ STATIC_RAIL = (
 
 def dynamic_counts():
     env = os.path.expanduser("~/.config/carr/db.env")
-    url = None
-    with open(env) as fh:
-        for line in fh:
-            if line.startswith("CARR_DB_EXPORTER_URL="):
-                url = line.split("=", 1)[1].strip().strip("\"'")
+    url = read_env_file(env, syntax="prefix").get("CARR_DB_EXPORTER_URL")
     if not url:
         raise RuntimeError("no exporter url")
     import psycopg

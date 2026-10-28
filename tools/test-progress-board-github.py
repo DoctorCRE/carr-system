@@ -331,7 +331,7 @@ class Publication(unittest.TestCase):
                 return {"ok": True, "snapshot": {**stored, "snapshot_json": snapshot}, "questions": []}
             raise AssertionError(name)
 
-        with patch.object(B, "call_verb", side_effect=verb):
+        with patch.object(B, "board_reply", side_effect=verb):
             self.assertEqual(B.publish_board("demo", costs={})["snapshot_version"], 1)
             self.assertEqual(B.publish_board("demo", costs={})["snapshot_version"], 1, "an unchanged board is not republished")
         self.assertEqual(len(writes), 1)
@@ -344,7 +344,7 @@ class Publication(unittest.TestCase):
                 stored.update(version=1, snapshot_json=copy.deepcopy(args['snapshot']))
                 stored['snapshot_json']['tasks']['a'].update(status='failed', linkage={'references': []})
             return {'ok': True, 'snapshot': stored or None, 'questions': []}
-        with patch.object(B, 'call_verb', side_effect=verb):
+        with patch.object(B, 'board_reply', side_effect=verb):
             with self.assertRaisesRegex(RuntimeError, 'did not read back'):
                 B.publish_board('demo', costs={})
 

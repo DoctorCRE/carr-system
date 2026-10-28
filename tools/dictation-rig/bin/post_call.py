@@ -30,6 +30,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from lib.fence import DATA_SENTENCE  # noqa: E402
+from lib.record_call import call_command  # noqa: E402
 
 SCHEMA_VERSION = 1
 CONTEXT_FILE = "call-context.json"
@@ -684,29 +685,15 @@ def default_distiller(request: dict[str, Any]) -> dict[str, Any]:
     return reply["structured_output"]
 
 
-def call_verb(verb: str, args: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+def call_record_command(verb: str, args: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
     """Use the partner's existing local identity; rehearsals inject an offline route."""
     command = os.environ.get("CARR_POST_CALL_VERB_COMMAND")
     argv = shlex.split(command) if command else [sys.executable, str(Path(__file__).resolve().parents[3] / "tools" / "call-verb.py")]
-    try:
-        done = subprocess.run(argv + [verb, json.dumps(args)], capture_output=True, text=True,
-                              timeout=60, check=False)
-    except (OSError, subprocess.SubprocessError) as exc:
-        return False, {"error": type(exc).__name__}
-    reply: dict[str, Any] = {}
-    for line in reversed(done.stdout.strip().splitlines()):
-        try:
-            parsed = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            reply = parsed
-            break
-    return done.returncode == 0 and reply.get("ok") is True, reply
+    return call_command(argv, verb, args, timeout=60)
 
 
 def fetch_context(session_dir: Path) -> dict[str, Any]:
-    ok, board = call_verb("deal-room-board", {"workspace": "all"})
+    ok, board = call_record_command("deal-room-board", {"workspace": "all"})
     if not ok or not isinstance(board.get("deals"), list):
         raise ContractError("deal-room-board unavailable while fetching call context")
     if any(not isinstance(deal, dict) or not isinstance(deal.get("id"), str) or not deal["id"]
@@ -718,7 +705,7 @@ def fetch_context(session_dir: Path) -> dict[str, Any]:
            and deal.get("phase") not in {"closed", "invoiced"}]
     deals: list[dict[str, Any]] = []
     for start in range(0, len(ids), 50):
-        ok, reply = call_verb("get-call-context", {"deal_ids": ids[start:start + 50]})
+        ok, reply = call_record_command("get-call-context", {"deal_ids": ids[start:start + 50]})
         if not ok or not isinstance(reply.get("deals"), list):
             raise ContractError("get-call-context unavailable while fetching call context")
         deals.extend(reply["deals"])

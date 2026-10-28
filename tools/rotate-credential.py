@@ -81,6 +81,9 @@ import urllib.request
 from typing import Callable, NoReturn
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.credential_file import read_env_file  # noqa: E402
+
 ENV_PATH = os.path.expanduser("~/.config/carr/db.env")
 NEON_API = "https://console.neon.tech/api/v2"
 # The same organization tools/db-tap.py pins, for the same reason: a lookup that
@@ -369,17 +372,10 @@ def _backup_mutation_unavailable() -> NoReturn:
 
 def read_env() -> dict[str, str]:
     """Values from db.env. Never logged, never returned to a caller that prints."""
-    out: dict[str, str] = {}
     try:
-        for line in open(ENV_PATH, encoding="utf-8").read().splitlines():
-            s = line.strip()
-            if not s or s.startswith("#") or "=" not in s:
-                continue
-            k, v = s.split("=", 1)
-            out[k.strip()] = v.strip().strip("\"'")
+        return read_env_file(ENV_PATH, syntax="trimmed")
     except OSError as e:
         sys.exit(f"rotate-credential: cannot read {ENV_PATH}: {e}")
-    return out
 
 
 def shell_quote(value: str) -> str:

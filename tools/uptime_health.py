@@ -13,7 +13,7 @@ from urllib.request import urlopen
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib import record_call
 
-def call_verb(name, payload):
+def loop_reply(name, payload):
     """A loop verb's reply, or {"ok": False} for anything but an ok outcome;
     `refused` marks a definite no from the record layer (nothing written)."""
     result = record_call.call_verb(name, payload, timeout=35)
@@ -37,7 +37,7 @@ def reconcile_monitor(fault, healthy, state_path=None, verb=None):
     """Keep monitor failure separate from the Worker's one loop per production incident."""
     repo = Path(__file__).resolve().parents[1]
     path = Path(state_path or os.environ.get("CARR_UPTIME_RESPONSE_STATE", repo / "out/uptime-monitor-response.json"))
-    verb = verb or call_verb
+    verb = verb or loop_reply
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.with_suffix(".lock").open("a") as lock:

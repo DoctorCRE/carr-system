@@ -28,6 +28,7 @@ import pathlib as _PATHLIB
 # reads as BLOCKED); an acknowledged recovery exercise passes
 # --recovery --reason WHY [--vault PATH].
 sys.path.insert(0, str(_PATHLIB.Path(__file__).resolve().parents[1]))
+from lib.credential_file import read_env_file  # noqa: E402
 from lib.drive_recovery import require_legacy_vault  # noqa: E402
 
 _RECOVERY = require_legacy_vault('record-native render verification (this compares vault renders against the record)')
@@ -45,11 +46,9 @@ def main() -> int:
     # — the jobs role produced a false "0073 not applied" SKIP on first live
     # run, the same role-visibility class as the vendor_category grant bug.
     url = None
-    for key in ("CARR_DB_EXPORTER_URL=", "CARR_DB_JOBS_URL="):
-        for line in open(ENV):
-            if line.startswith(key):
-                url = line.split("=", 1)[1].strip().strip('"').strip("'")
-                break
+    for key in ("CARR_DB_EXPORTER_URL", "CARR_DB_JOBS_URL"):
+        url = read_env_file(ENV, syntax="prefix-double-single",
+                            duplicates="first", names=(key,)).get(key)
         if url:
             break
     if not url:
