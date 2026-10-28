@@ -407,13 +407,36 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'email-router-queue': {
       write: false,
-      description: 'Router input for WR-000441: captured inbound emails from the last 1-7 days (default 3), oldest first, including unfiled mail, with resolved participants, filed history and all open deals, and not in exclude (the activity ids the router already handled). An email with some proposals stored stays queued until the router excludes it, so a partly written email is retried; record-email-proposal upserts per kind, deal and email. Returns at most limit emails (1-200, default 25) and more=true when others wait, so a long queue drains over runs. Returns the email body as untrusted data for classification into record-email-proposal.',
+      description: 'Router input for WR-000441: captured inbound emails from the last 1-7 days (default 3), oldest first, including unfiled mail, with resolved participants, filed history and all open deals, and not in exclude (the activity ids the router already handled). An email with some proposals stored stays queued until the router excludes it, so a partly written email is retried; record-email-proposal upserts per kind, deal and email. Returns at most limit emails (1-200, default 25) and more=true when others wait, so a long queue drains over runs. Returns the email body as untrusted data for classification into record-email-proposal. purpose=links instead pages already-filed inbound and outbound email by activity UUID without an age window, returning its latest associated hydrated text and confirmed deal. Pass next_cursor as after until more=false.',
       inputSchema: { type: 'object', additionalProperties: false,
         properties: { days: { type: 'integer', minimum: 1, maximum: 7 },
+          purpose: { enum: ['links'] }, after: { type: 'string', format: 'uuid' },
           limit: { type: 'integer', minimum: 1, maximum: LIMIT },
           exclude: { type: 'array', maxItems: 5000, items: { type: 'string', format: 'uuid' } } } },
       handler: async (c, _actor, args) => {
         const limit = args.limit ?? 25;
+        if (args.purpose === 'links') {
+          const { rows } = await c.query(`select a.id as activity_id,a.deal_id as deal,
+              coalesce(hydrated.detail,a.detail) as body,a.occurred_at
+            from activity a left join lateral (
+              select h.detail from activity h where h.kind='note' and h.detail is not null
+                and h.email_context->>'source_activity_id'=a.id::text and h.actor_id=a.actor_id
+                and ((h.client_id is not null and h.client_id=a.client_id)
+                  or (h.vendor_id is not null and h.vendor_id=a.vendor_id)
+                  or (h.lead_id is not null and h.lead_id=a.lead_id)
+                  or (h.deal_id is not null and h.deal_id=a.deal_id))
+              order by h.recorded_at desc,h.id desc limit 1
+            ) hydrated on true
+            where a.kind in ('email_in','email_out') and a.deal_id is not null
+              and a.occurred_at<=now() and ($1::uuid is null or a.id>$1::uuid)
+              and (a.email_source is null or a.email_source->>'mailbox_owner'=$3)
+              and (a.kind <> 'email_out' or a.actor_id=$4::uuid)
+            order by a.id limit $2`, [args.after ?? null, limit + 1, partnerAuthoritySlugForActor(_actor), _actor.id]);
+          const emails = rows.slice(0, limit);
+          const more = rows.length > limit;
+          return { schema_version: 'email-link-sources.v1', emails, more,
+            next_cursor: more ? emails.at(-1).activity_id : null };
+        }
         const { rows } = await c.query(`select a.id as activity_id,a.summary,a.detail as body,a.occurred_at,
             a.email_context,a.email_source->>'mailbox_owner' as mailbox_owner,(select jsonb_build_object('party_id',p.id,'name',p.name,'email',null,
               'address_unavailable',true,'unknown',false,'internal',false) from party p where p.id=coalesce(
