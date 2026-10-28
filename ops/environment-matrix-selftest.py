@@ -139,7 +139,8 @@ def main() -> int:
           and "_project_id_by_name" in db_tap_src)
 
     # ── 4 ────────────────────────────────────────────────────────────────────
-    declared_prod = set(envs["production"]["domains"])
+    declared_prod = (set(envs["production"]["domains"])
+                     | set(envs["production"].get("retiring_domains", [])))
     served_prod = {r["pattern"] for r in wrangler.get("routes", [])
                    if isinstance(r, dict) and r.get("pattern")}
     check("4a. every domain the matrix claims for production is served by the Worker",
