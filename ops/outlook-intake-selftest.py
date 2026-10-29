@@ -3696,7 +3696,8 @@ class LoadObjectFieldsTest(unittest.TestCase):
 
     def test_draft_without_object_subject_keeps_text_match(self):
         with sqlite3.connect(self.db) as con:
-            con.execute("UPDATE message_objects SET subject=''")
+            con.execute("UPDATE folders SET name='Drafts' WHERE id=7")
+            con.execute("UPDATE message_objects SET subject='' WHERE local_key=71")
         self.assertEqual(self.load()[1][0]['subject'], 'Legacy topic')
 
     def test_null_subject_and_recipient_conflict_keep_legacy_fields(self):
