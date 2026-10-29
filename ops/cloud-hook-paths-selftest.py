@@ -18,7 +18,8 @@ THE CONTRACT, per layout:
       worktree-self-plumb.py and machine-converge.py do nothing: both act on
       machine state (worktree symlinks, the orphan reaper, a fast-forward of
       the canonical checkout, config-as-code install) that a container lacks.
-      A missing script or an unset $CLAUDE_PROJECT_DIR allows the call.
+      The launch Card gate runs from $CLAUDE_PROJECT_DIR. A missing Card gate
+      denies the call. Missing machine hooks remain optional.
 
 Each command is run exactly as written in the tracked settings file, under
 every POSIX shell present, against throwaway HOME and project directories.
@@ -38,7 +39,7 @@ REPO = Path(__file__).resolve().parent.parent
 SETTINGS = REPO / ".claude" / "settings.json"
 SHELLS = [s for s in ("/bin/sh", "/bin/bash", "/bin/zsh") if os.access(s, os.X_OK)]
 MACHINE_HOOKS = ("worktree-self-plumb.py", "machine-converge.py")
-KNOWN_HOOKS = MACHINE_HOOKS
+KNOWN_HOOKS = MACHINE_HOOKS + ("agent-card-gate.py",)
 
 FAILURES: list[str] = []
 
@@ -101,6 +102,8 @@ def cloud_project(tmp: Path) -> Path:
     project = tmp / "repo"
     shutil.copytree(REPO / "hooks", project / "hooks",
                     ignore=shutil.ignore_patterns("__pycache__"))
+    (project / 'lib').mkdir()
+    shutil.copy2(REPO / 'lib/hook_runtime.py', project / 'lib/hook_runtime.py')
     (project / ".claude").mkdir()
     shutil.copy2(SETTINGS, project / ".claude" / "settings.json")
     shutil.copy2(REPO / "AGENTS.md", project / "AGENTS.md")
@@ -148,8 +151,9 @@ def cloud_cases() -> None:
                 for event, script, command in wired_commands():
                     payload = cases[event][0]
                     r = run(shell, command, env2, payload, bare)
-                    check(f"cloud/{os.path.basename(shell)} project dir {label}: {event} {script} allows",
-                          r.returncode == 0 and not blocked(r),
+                    expected_block = script == 'agent-card-gate.py'
+                    check(f"cloud/{os.path.basename(shell)} project dir {label}: {event} {script} missing policy",
+                          r.returncode == 0 and blocked(r) == expected_block,
                           f"rc={r.returncode} stderr={r.stderr.strip()[-200:]!r}")
 
 

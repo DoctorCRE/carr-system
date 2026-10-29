@@ -2,7 +2,19 @@
   "autoCompactEnabled": true,
   "autoCompactWindow": 500000,
   "hooks": {
-    "PreToolUse": [],
+    "PreToolUse": [
+      {
+        "matcher": "Agent|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "r=\"${HOME}/carr-system\"; if [ ! -d \"$r/hooks\" ]; then r=${CLAUDE_PROJECT_DIR:-}; fi; if [ ! -f \"$r/hooks/agent-card-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script $r/hooks/agent-card-gate.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: agent-card-gate.py\"}}'; exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/agent-card-gate.py\"",
+            "timeout": 10,
+            "onFailure": "block"
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [
