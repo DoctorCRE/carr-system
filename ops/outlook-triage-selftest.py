@@ -22,9 +22,9 @@ import plistlib
 import re
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
-import time
 import unittest
 from unittest.mock import patch
 
@@ -113,15 +113,30 @@ FIND = {
 }
 
 FAKE = r'''#!{python}
-import json, os, sys
+import json, os, stat, sys, tempfile
 state_path = os.environ['FAKE_STATE']
-state = json.load(open(state_path))
+with open(state_path) as source:
+    state = json.load(source)
 name = os.path.basename(sys.argv[0])
 args = sys.argv[1:]
 with open(os.environ['FAKE_CALLS'], 'a') as calls:
     calls.write(json.dumps([name] + args) + '\n')
 def save():
-    json.dump(state, open(state_path, 'w'))
+    fd, temporary = tempfile.mkstemp(dir=os.path.dirname(state_path))
+    try:
+        with os.fdopen(fd, 'w') as output:
+            try:
+                mode = stat.S_IMODE(os.stat(state_path).st_mode)
+            except FileNotFoundError:
+                mask = os.umask(0)
+                os.umask(mask)
+                mode = 0o666 & ~mask
+            os.fchmod(output.fileno(), mode)
+            json.dump(state, output)
+        os.replace(temporary, state_path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 def lists():
     return state['lists']
 def current():
@@ -429,10 +444,44 @@ class FakeOutlookCase(unittest.TestCase):
         return {r['label'] for rows in state['lists'].values() for r in rows if r['unread']}
 
 
+class PreflightClock:
+    def __init__(self):
+        self.now = 0.0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
 class PreflightQuitTest(FakeOutlookCase):
-    def prepare(self, waits=Waits(2, 0, 0, 0.01, 0, 0, 0)):
+    def setUp(self):
+        super().setUp()
+        self.clock = PreflightClock()
+        self.quit_timeouts = []
+
+    def prepare(self, waits=Waits(2, 0, 0, 10, 0, 0, 0)):
         from lib.outlook_ui import prepare_outlook
-        with patch.dict(os.environ, self.env, clear=True):
+        real_run = subprocess.run
+
+        def run(args, **kwargs):
+            if args[0] == 'osascript':
+                timeout = kwargs.get('timeout')
+                self.quit_timeouts.append(timeout)
+                delay = json.loads(self.state.read_text()).get('osascript_quit_delay', 0)
+                if timeout is not None and delay > timeout:
+                    self.clock.sleep(timeout)
+                    raise subprocess.TimeoutExpired(args, timeout)
+                kwargs['timeout'] = 120
+                result = real_run(args, **kwargs)
+                self.clock.sleep(delay)
+                return result
+            return real_run(args, **kwargs)
+
+        with patch.dict(os.environ, self.env, clear=True), \
+                patch('lib.outlook_ui.time', self.clock), \
+                patch('lib.outlook_ui.subprocess.run', side_effect=run):
             return prepare_outlook(waits)
 
     def test_mailbox_with_twelve_toolbar_strips_allows_restart(self):
@@ -468,7 +517,7 @@ class PreflightQuitTest(FakeOutlookCase):
                 secondary['bounds']['x'] = x
                 self.given(windows=[TOOLBAR, secondary], osascript_quit_ignored=True,
                            after_launch=[secondary])
-                self.assertIsNone(self.prepare(Waits(0.4, 0, 0, 0.01, 0, 0, 0)))
+                self.assertIsNone(self.prepare(Waits(0.4, 0, 0, 10, 0, 0, 0)))
                 self.assertEqual(self.called('osascript'), [])
 
     def test_successful_menu_that_leaves_outlook_running_falls_back(self):
@@ -494,30 +543,44 @@ class PreflightQuitTest(FakeOutlookCase):
             self.assertIsNone(self.prepare())
         self.assertEqual(len(self.called('osascript')), 1)
 
+    def test_state_publish_preserves_existing_permissions(self):
+        self.given()
+        self.state.chmod(0o640)
+        subprocess.run([str(self.tmp / 'bin/osascript')], env=self.env, check=True)
+        self.assertFalse(json.loads(self.state.read_text())['running'])
+        self.assertEqual(stat.S_IMODE(self.state.stat().st_mode), 0o640)
+
+    def test_interrupted_state_publish_keeps_previous_snapshot_readable(self):
+        self.given(windows=[ORDINARY])
+        previous = json.loads(self.state.read_text())
+
+        def interrupted_dump(value, output):
+            output.write('{"running":')
+            output.flush()
+            self.assertEqual(json.loads(self.state.read_text()), previous)
+            raise InterruptedError('writer interrupted before publication')
+
+        with patch.dict(os.environ, self.env, clear=True), \
+                patch.object(sys, 'argv', ['osascript']), \
+                patch('json.dump', side_effect=interrupted_dump), \
+                self.assertRaises(InterruptedError):
+            exec(compile(FAKE.replace('{python}', sys.executable), '<fake-outlook>', 'exec'), {})
+        self.assertEqual(json.loads(self.state.read_text()), previous)
+
     def test_refused_quit_times_out_without_relaunch(self):
         self.given(windows=[ORDINARY], menu_quit_ignored=True, osascript_quit_ignored=True)
-        outcome = self.prepare(Waits(1, 0, 0, 0.01, 0, 0, 0))
+        outcome = self.prepare(Waits(1, 0, 0, 10, 0, 0, 0))
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'outlook_quit_timeout'))
         self.assertEqual(len(self.called('osascript')), 1)
         self.assertEqual(self.called('open'), [])
         self.assertTrue(json.loads(self.state.read_text())['running'])
 
     def test_quit_timeout_reports_fresh_sanitized_windows(self):
-        class Clock:
-            now = 0.0
-
-            def monotonic(self):
-                return self.now
-
-            def sleep(self, seconds):
-                self.now += seconds
-
         sheet = window(16, 'private subject and address@example.test', 700, 240) | {'role': 'AXSheet'}
         dialog = window(17, 'private confirmation', 600, 300) | {'subrole': 'AXDialog'}
         self.given(windows=[ORDINARY], after_quit=[ORDINARY, COMPOSE, sheet, dialog, TOOLBAR],
                    menu_quit_ignored=True, osascript_quit_ignored=True)
-        with patch('lib.outlook_ui.time', Clock()):
-            outcome = self.prepare(Waits(poll_seconds=10))
+        outcome = self.prepare(Waits(poll_seconds=10))
         self.assertEqual(outcome.reason, 'outlook_quit_timeout')
         self.assertEqual(json.loads(outcome.detail), {'windows': [
             {'kind': 'main', 'width': 1230, 'height': 768, 'is_on_screen': True},
@@ -541,7 +604,7 @@ class PreflightQuitTest(FakeOutlookCase):
                     raise CuaError('private window title')
             return cua(tool, arguments)
         with patch('lib.outlook_ui.cua', side_effect=fail_diagnostic_snapshot):
-            outcome = self.prepare(Waits(0.4, 0, 0, 0.01, 0, 0, 0))
+            outcome = self.prepare(Waits(0.4, 0, 0, 10, 0, 0, 0))
         self.assertEqual((outcome.reason, outcome.detail),
                          ('outlook_quit_timeout', 'windows_unavailable'))
 
@@ -557,7 +620,7 @@ class PreflightQuitTest(FakeOutlookCase):
                     raise CuaError('windows unavailable')
             return cua(tool, arguments)
         with patch('lib.outlook_ui.cua', side_effect=fail_fallback_snapshot):
-            outcome = self.prepare(Waits(0.4, 0, 0, 0.01, 0, 0, 0))
+            outcome = self.prepare(Waits(0.4, 0, 0, 10, 0, 0, 0))
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'cua_driver_unavailable'))
         self.assertEqual(self.called('osascript') + self.called('open'), [])
         self.assertTrue(json.loads(self.state.read_text())['running'])
@@ -574,9 +637,9 @@ class PreflightQuitTest(FakeOutlookCase):
 
     def test_hanging_graceful_quit_cannot_extend_quit_deadline(self):
         self.given(windows=[ORDINARY], menu_quit_ignored=True, osascript_quit_delay=5)
-        started = time.monotonic()
-        outcome = self.prepare(Waits(0.4, 0, 0, 0.01, 0, 0, 0))
-        self.assertLess(time.monotonic() - started, 2)
+        outcome = self.prepare(Waits(0.4, 0, 0, 10, 0, 0, 0))
+        self.assertEqual(self.quit_timeouts, [0.2])
+        self.assertEqual(self.clock.monotonic(), 0.4)
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'outlook_quit_timeout'))
         self.assertEqual(self.called('open'), [])
 
