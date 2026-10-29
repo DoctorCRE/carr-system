@@ -120,6 +120,11 @@ def main():
     args = parser.parse_args()
     if args.timeout_seconds <= 0:
         parser.error("--timeout-seconds must be positive")
+    try:
+        brief, _ = prepare(args.brief, Path(__file__).resolve().parents[1])
+    except (OSError, ValueError) as error:
+        print(f'codex-job: {error}', file=sys.stderr)
+        return 1
     if not register_job(args):
         return 1
     timeout = runpy.run_path(str(Path(__file__).with_name("with-timeout.py")))
@@ -171,7 +176,6 @@ def main():
                                capture_output=True, text=True).stdout.strip()
         subprocess.run(['git', '-C', str(clone), 'config', 'user.email',
                         'jbookout@users.noreply.github.com'], check=True)
-        brief, _ = prepare(args.brief, clone)
         log = job_log()
         brief = (f'Job log: {log} (pass it to attach-memory as transcript_ref).' if log
                  else 'Job log: none (stderr is not a file).') + '\n\n' + brief

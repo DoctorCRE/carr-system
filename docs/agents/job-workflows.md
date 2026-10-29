@@ -1,1 +1,1 @@
-Job types, stages, required skills, and acceptance evidence are defined in [ops/config/job-workflows.v1.yaml](../../ops/config/job-workflows.v1.yaml).
+Job briefs declare `Type: <job type>` on its own line. The launcher validates the type and stamps every stage requirement and skill instruction from [ops/config/job-workflows.v1.yaml](../../ops/config/job-workflows.v1.yaml). Conditional skills are bundled with their conditions preserved. Missing types, unknown types, and unavailable skills refuse the launch. A brief's `Skills:` line does not select skills.

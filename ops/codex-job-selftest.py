@@ -22,9 +22,9 @@ DELIVERED = ("Delivery: ok missing=none branch=test-job start=start head=pushed 
 class CodexJobTests(unittest.TestCase):
     def launch(self, *, status=0, repo="DoctorCRE/carr-system", configs=(), result=True,
                brief="Card: WR557.S2.J2\noriginal brief",
-               dispatch_ok=True, settings=""):
+               dispatch_ok=True, settings="", prepare_error=None):
         picker = types.ModuleType("skill_picker")
-        picker.prepare = Mock(return_value=("prepared brief", []))
+        picker.prepare = Mock(return_value=("prepared brief", []), side_effect=prepare_error)
         output, errors = io.StringIO(), io.StringIO()
         self.calls = calls = []
         heads = iter(["start\n", "pushed\n"])  # the start point, then the delivered HEAD
@@ -75,6 +75,16 @@ class CodexJobTests(unittest.TestCase):
         codex = next(call for call in calls if call[0][:2] == ["codex", "exec"])
         return code, output.getvalue(), [*calls[:2], codex], picker.prepare
 
+    def test_preparation_failure_never_registers_clones_or_starts_codex(self):
+        for error in (ValueError('invalid Type: review'), ValueError('required skill unavailable'),
+                      OSError('unreadable skill')):
+            with self.subTest(error=error):
+                code, errors, calls, _ = self.launch(prepare_error=error)
+                self.assertEqual(code, 1)
+                self.assertEqual(calls, [])
+                self.assertEqual(self.calls, [])
+                self.assertEqual(errors, f'codex-job: {error}\n')
+
     def test_final_codex_argv_uses_hook_trust_and_prepared_brief(self):
         code, output, calls, prepare = self.launch(configs=("model_reasoning_effort=high", "model=test"))
         clone = calls[0][0][-1]
@@ -88,7 +98,7 @@ class CodexJobTests(unittest.TestCase):
                                       calls[-1][0][-1]])
         self.assertTrue(calls[-1][0][-1].endswith("\n\nprepared brief"))
         self.assertEqual(calls[-1][1]["stdin"], subprocess.DEVNULL)
-        prepare.assert_called_once_with("Card: WR557.S2.J2\noriginal brief", Path(clone))
+        prepare.assert_called_once_with("Card: WR557.S2.J2\noriginal brief", ROOT)
         self.assertEqual((code, output), (0, "job result\n" + DELIVERED))
         self.assertFalse(Path(clone).parent.exists(), "temporary clone must be cleaned up")
 
