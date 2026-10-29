@@ -159,12 +159,12 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
             where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`, [wr.id, args.slice || 1, args.job])).rows[0];
           if (!row && jobFacts.some(key => args[key] == null)) refuse('job_not_found');
           if (row) {
-            if (row.repository !== args.repository) refuse('job_repository_mismatch');
+            if (row.repository != null && row.repository !== args.repository) refuse('job_repository_mismatch');
             if (row.runner_job_id != null) refuse('job_already_started');
             await c.query(`update ops.work_request_job set runner_job_id=$4,started_at=now(),
-              executor=coalesce($5,executor),model=coalesce($6,model),effort=coalesce($7,effort)
+              executor=coalesce($5,executor),model=coalesce($6,model),effort=coalesce($7,effort),repository=coalesce(repository,$8)
               where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`, [wr.id, args.slice || 1, args.job, args.runner_job_id,
-              args.executor ?? null, args.model ?? null, args.effort ?? null]);
+              args.executor ?? null, args.model ?? null, args.effort ?? null, args.repository]);
             return { card_id: queueCardId(wr.ref, args.slice || 1, args.job), runner_job_id: args.runner_job_id };
           }
         }
