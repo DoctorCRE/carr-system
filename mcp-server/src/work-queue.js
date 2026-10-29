@@ -135,14 +135,16 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
       } };
   };
   return {
-    'plan-work-request-slices': command('plan-work-request-slices', 'Record ordered slice titles once. Omit slices for implicit S1. Repeating the same plan preserves identities.',
+    'plan-work-request-slices': command('plan-work-request-slices', 'Record or append ordered slice titles. Existing titles must remain an exact prefix. Omit slices for implicit S1. Repeating the same plan preserves identities.',
       { slices: { type: 'array', minItems: 1, maxItems: 100, items: text(200) } }, [], async (c, actor, args, wr) => {
         const titles = Object.hasOwn(args, 'slices') ? args.slices : [wr.title];
-        if (!Array.isArray(titles) || !titles.length || titles.length > 100 || titles.some(title => typeof title !== 'string' || !title.trim() || title.length > 200)) refuse('invalid_slice_plan');
+        if (!Array.isArray(titles) || titles.length > 100 || titles.some(title => typeof title !== 'string' || !title.trim() || title.length > 200)) refuse('invalid_slice_plan');
         const prior = (await c.query('select title from ops.work_request_slice where work_request_id=$1 order by ordinal', [wr.id])).rows;
-        if (prior.length && JSON.stringify(prior.map(row => row.title)) !== JSON.stringify(titles)) refuse('slice_plan_conflict');
-        if (!prior.length) await c.query(`insert into ops.work_request_slice
-          select $1,ordinality,title from unnest($2::text[]) with ordinality as s(title,ordinality)`, [wr.id, titles]);
+        if (prior.some((row, index) => row.title !== titles[index]))
+          throw new ToolError({ error: 'slice_plan_conflict', recorded_titles: prior.map(row => row.title) });
+        if (!titles.length) refuse('invalid_slice_plan');
+        if (titles.length > prior.length) await c.query(`insert into ops.work_request_slice
+          select $1,$3::integer+ordinality,title from unnest($2::text[]) with ordinality as s(title,ordinality)`, [wr.id, titles.slice(prior.length), prior.length]);
         return { slices: titles.map((title, index) => ({ slice_id: queueCardId(wr.ref, index + 1), title })) };
       }),
     'dispatch-job': command('dispatch-job', 'Mint a queued job from facts, or record a runner start for an existing job exactly once.',

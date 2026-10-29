@@ -212,6 +212,7 @@ test('a listed in_progress Work Request opens through work-request-card', async 
  client.query=async(sql,params)=>{
   if(sql.includes('work-request-intake:card')) return {rows:[]};
   if(sql.includes('work-request-intake:readable-card')) return {rows:[request]};
+  if(sql.includes('work-request-intake:slices')) return {rows:[]};
   if(sql.includes('work-request-intake:acting-identity')) return {rows:[]};
   const result=await query(sql,params);
   if(sql.includes('ops.work_request w')&&!sql.includes('count(*) as count'))
