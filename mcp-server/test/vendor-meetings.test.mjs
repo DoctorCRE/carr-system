@@ -143,7 +143,7 @@ test('holds and vendor or lead restrictions stay out of Suggested',async()=>{
 });
 
 test('both partners traverse exact contacts and scoped Unicode searches without duplicated pages',async(t)=>{
- t.mock.timers.enable({apis:['Date'],now:Date.now()});
+ t.mock.timers.enable({apis:['Date'],now:Date.parse('2026-01-01T00:00:00Z')});
  const query='界'.repeat(80);
  const f=await candidate({name:query});
  const second=(await c.query("insert into party(kind,name,org_id,created_by,updated_by) values('person',$1,$2,$3,$3) returning id",[query+' second',f.company,actor.id])).rows[0].id;

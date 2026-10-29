@@ -1,3 +1,4 @@
+// Project vendor people with sourced offices and research status.
 export const vendorPeopleJoin = `left join lateral (
   select p.id as contact_id,p.name,p.email,p.phone,p.cell,p.city,p.state,
     f.flag_id,f.value,f.source,f.observed_at,f.expires_on,
