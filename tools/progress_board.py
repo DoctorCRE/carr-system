@@ -2490,7 +2490,7 @@ def publish_external_inventory(cache: dict[str, Any]) -> dict[str, Any]:
     encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
     digest = hashlib.sha256(encoded.encode()).hexdigest()
     key = stable_key('publish-census-inventory', {'digest': digest, 'day': now_utc().date().isoformat()})
-    call_verb('publish-census-inventory', {'payload': payload, 'idempotency_key': key})
+    board_reply('publish-census-inventory', {'payload': payload, 'idempotency_key': key})
     return {**{key: value for key, value in cache.items() if key not in ('items', 'pr_heads')},
             'schema': 'system-work-external.v3', 'digest': digest, 'item_count': len(cache['items'])}
 
