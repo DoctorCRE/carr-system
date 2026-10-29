@@ -124,7 +124,7 @@ class CostPublication(unittest.TestCase):
             config.write_text('{}')
             with patch.object(costs, 'ROOT', root), patch.object(costs, 'collect', return_value=report), patch.object(costs, 'read_tokens', return_value={}), \
                  patch.object(board, 'REPO_ROOT', root), patch.dict(os.environ, {'PROGRESS_BOARD_ROOT': str(root / 'out')}), \
-                 patch.object(board, 'call_verb', side_effect=verb), \
+                 patch.object(board, 'board_reply', side_effect=verb), \
                  redirect_stdout(io.StringIO()):
                 result = costs.main(['--config', str(config), '--output', str(root / 'custom/costs.json'), '--publish'])
             self.assertEqual(result, 0)

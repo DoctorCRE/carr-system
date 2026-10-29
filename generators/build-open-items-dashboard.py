@@ -13,9 +13,8 @@ Usage:
 
 Credential:
   ~/.config/carr/db.env carries CARR_DB_EXPORTER_URL. This script parses that
-  file BY HAND (KEY="VALUE" lines, values may be single- or double-quoted) —
-  it does not shell out to `. db.env` and does not import the repo's exporter
-  machinery, by design (this is a self-contained, standalone build script).
+  file through lib.credential_file using the dashboard's literal quote rules.
+  It does not shell out or import exporter machinery.
 
 Recovery-only write:
   /Users/booko/My Drive/CARR AI/00_Context/open-items.html
@@ -31,6 +30,9 @@ from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.credential_file import read_env_file  # noqa: E402
 
 ENV_FILE = Path.home() / ".config" / "carr" / "db.env"
 RECOVERY_DEFAULT_VAULT = Path("/Users/booko/Library/CloudStorage/GoogleDrive-joe.bookout.carr.us@gmail.com/My Drive/CARR AI")
@@ -87,21 +89,8 @@ _MARKER_DATE_RE = re.compile(r"^\U0001F5D3(\d{4}-\d{2}-\d{2})$")
 # ── credential ────────────────────────────────────────────────────────────
 
 def parse_env_file(path: Path) -> dict[str, str]:
-    """Hand-parse KEY="VALUE" lines (values may be single- or double-quoted)."""
-    out: dict[str, str] = {}
-    if not path.exists():
-        return out
-    for raw_line in path.read_text().splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
-            value = value[1:-1]
-        out[key] = value
-    return out
+    """Read the dashboard's literal KEY=value assignment format."""
+    return read_env_file(path, syntax="paired") if path.exists() else {}
 
 
 def get_dsn() -> str:
