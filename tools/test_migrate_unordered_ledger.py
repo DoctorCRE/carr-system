@@ -95,6 +95,43 @@ class UnorderedLedgerTests(unittest.TestCase):
             with self.psycopg.connect(dsn) as conn:
                 self.assertEqual(conn.execute('select filename,sha256,applied_at from schema_migrations order by filename').fetchall(), completed)
 
+    def test_runner_rolls_back_a_missing_dependency_then_applies_a_before_b(self):
+        root = Path(__file__).resolve().parents[1]
+        with self.psycopg.connect(self.dsn, autocommit=True) as conn:
+            conn.execute('create database wr578_dependency template wr578_ledger_template')
+        dsn = self.dsn.rsplit('/', 1)[0] + '/wr578_dependency'
+        with tempfile.TemporaryDirectory(prefix='wr578-dependency-') as directory:
+            repo = Path(directory)
+            (repo / 'tools').mkdir()
+            (repo / 'db').mkdir()
+            for name in ('migrate.py', 'migration_baseline.py', 'migration_number_contract.py'):
+                shutil.copyfile(root / 'tools' / name, repo / 'tools' / name)
+            shutil.copyfile(root / 'db/migration-baseline.json', repo / 'db/migration-baseline.json')
+            shutil.copytree(root / 'migrations', repo / 'migrations')
+            a = '9998_wr578_dependency_a.sql'
+            b = '9999_wr578_dependency_b.sql'
+            (repo / 'migrations' / b).write_text(
+                'create table public.wr578_rollback_probe(id integer);'
+                'alter table public.wr578_dependency add column changed integer;')
+            command = [sys.executable, str(repo / 'tools/migrate.py'), '--apply', '--yes']
+            with self.psycopg.connect(dsn) as conn:
+                before = conn.execute('select filename,sha256,applied_at from schema_migrations order by filename').fetchall()
+            failed = subprocess.run(command, env={**self.child, 'DATABASE_URL': dsn},
+                capture_output=True, text=True, timeout=60)
+            self.assertNotEqual(failed.returncode, 0, failed.stdout + failed.stderr)
+            self.assertIn('UndefinedTable', failed.stderr)
+            with self.psycopg.connect(dsn) as conn:
+                self.assertEqual(conn.execute('select filename,sha256,applied_at from schema_migrations order by filename').fetchall(), before)
+                self.assertIsNone(conn.execute("select to_regclass('public.wr578_rollback_probe')").fetchone()[0])
+            (repo / 'migrations' / a).write_text('create table public.wr578_dependency(id integer);')
+            passed = subprocess.run(command, env={**self.child, 'DATABASE_URL': dsn},
+                capture_output=True, text=True, timeout=60)
+            self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
+            self.assertLess(passed.stdout.index(f'applying {a}'), passed.stdout.index(f'applying {b}'))
+            with self.psycopg.connect(dsn) as conn:
+                self.assertEqual(conn.execute("select filename from schema_migrations where filename in (%s,%s) order by filename", (a,b)).fetchall(), [(a,), (b,)])
+                self.assertEqual(conn.execute('select changed from public.wr578_dependency').fetchall(), [])
+
 
 if __name__ == '__main__':
     unittest.main()

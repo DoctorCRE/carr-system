@@ -161,8 +161,6 @@ def main() -> int:
     ))
 
     loaded = migration_runner.load_migrations()
-    # A merge can add an earlier migration after a branch exported its snapshot.
-    # The real rebuild must see an immutable prefix, not a hole below its tip.
     snapshot = (REPO / "db/schema.sql").read_text(encoding="utf-8")
     marker = "COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;"
     rows = snapshot.split(marker, 1)[1].split("\n\\.\n", 1)[0].strip().splitlines()

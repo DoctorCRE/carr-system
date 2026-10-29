@@ -18,11 +18,12 @@ class IntegrationSuccessors(unittest.TestCase):
         self.assertEqual(contract.allocate_integration_successors(['0532_room_dispatch_spine_scac_successor.sql'], ['0533_b.sql', '0533_a.sql']),
                          {'0533_a.sql': '0537_a.sql', '0533_b.sql': '0538_b.sql'})
 
-    def test_main_union_requires_exact_bytes_and_forward_order(self):
+    def test_main_union_requires_exact_bytes_and_unique_slots(self):
         main={'0748_base.sql': 'base', '0749_first.sql': 'first'}
         contract.validate_integration_union(main, {**main, '0750_second.sql': 'second'})
+        contract.validate_integration_union(main, {**main, '0747_late.sql': 'late'})
         for bad in [{**main, '0749_first.sql': 'edited'}, {'0748_base.sql': 'base'},
-                    {**main, '0749_second.sql': 'second'}, {**main, '0747_late.sql': 'late'}]:
+                    {**main, '0749_second.sql': 'second'}, {**main, 'not.sql': 'bad'}]:
             with self.assertRaises(contract.MigrationNumberError):
                 contract.validate_integration_union(main, bad)
 
