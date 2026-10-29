@@ -91,7 +91,6 @@ class ParityTest(unittest.TestCase):
         actions = [args for verb, args in calls if verb == 'set-next-action']
         self.assertEqual(actions, [])
         self.assertTrue(any(name.startswith('report-') for name in artifacts))
-        self.assertIn('needs-refresh.json', artifacts)
         state = json.loads(artifacts['state.json'])
         self.assertEqual(len(state['calendar_evidence']), 2)
         self.assertTrue(all(row['status'] == 'unsupported' for row in state['calendar_evidence'].values()))

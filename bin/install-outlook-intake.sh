@@ -51,7 +51,18 @@ if [ "$REPO" != "$RUNTIME" ]; then
   exec /bin/zsh "$RUNTIME/bin/install-outlook-intake.sh" "$@"
 fi
 "$PY" -m lib.outlook_settings service intake
-"$PY" -m lib.outlook_settings service refresh
+"$PY" - "$REPO" <<'PYCODE'
+import importlib.util
+from pathlib import Path
+import sys
+
+repo = Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location('config_as_code', repo / 'ops/config-as-code.py')
+config = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(config)
+if config.reconcile_retired_launchd(True, ['com.carr.outlook-refresh.plist']):
+    raise SystemExit('install-outlook-intake: could not retire Outlook refresh LaunchAgent')
+PYCODE
 LABEL="com.carr.outlook-intake"
 SOURCE="$REPO/ops/launchd/$LABEL.plist"
 DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -101,6 +112,7 @@ from lib.outlook_settings import load_settings
 settings = load_settings(home)
 settings.require_repo(repo)
 
+
 from lib.outlook_helper import install_helper
 
 install_helper(settings, rebuild_helper=args.rebuild_helper)
@@ -134,18 +146,3 @@ print -- "install-outlook-intake: it is NOT loaded. To load it, run:"
 print -- "  install -m 644 '$RENDERED' '$DEST'"
 print -- "  launchctl bootstrap gui/$(id -u) '$DEST'"
 print -- "install-outlook-intake: private reports: $REPO/out/outlook-intake/"
-
-LABEL="com.carr.outlook-refresh"
-SOURCE="$REPO/ops/launchd/$LABEL.plist"
-DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
-RENDERED="$REPO/out/$LABEL.plist"
-LOG="$REPO/out/outlook-refresh-launchd.log"
-"$PY" -m lib.outlook_settings render "$SOURCE" > "$TMP"
-/usr/bin/plutil -lint "$TMP" >/dev/null
-cp "$TMP" "$RENDERED"
-chmod 644 "$RENDERED"
-touch "$LOG"
-chmod 600 "$LOG"
-print -- "install-outlook-intake: refresh worker rendered for the same host and user; it is NOT loaded."
-print -- "  install -m 644 '$RENDERED' '$DEST'"
-print -- "  launchctl bootstrap gui/$(id -u) '$DEST'"

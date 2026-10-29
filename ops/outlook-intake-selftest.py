@@ -1788,19 +1788,14 @@ class IntakeTest(unittest.TestCase):
         [(_, args)] = self.fake.writes('log-activity')
         self.assertEqual(args['detail'], body)
 
-    def test_a_preview_only_email_logs_the_preview_and_is_listed_for_refresh(self):
+    def test_a_preview_only_email_logs_without_a_refresh_queue(self):
         m = mail('pat@example.test', -timedelta(hours=1), body='Can we meet Thursday at ten', kind='preview')
         result = self.run_intake([m])
         [(_, args)] = self.fake.writes('log-activity')
         self.assertEqual(args['detail'], 'Can we meet Thursday at ten')
         self.assertEqual(result.counts['preview_only'], 1)
         self.assertIn('preview_only', self.report_text())
-        path = self.out() / intake.REFRESH_LIST
-        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
-        [entry] = json.loads(path.read_text())
-        self.assertEqual(entry, {'message_id': ident(m), 'sent_utc': (NOW - timedelta(hours=1)).isoformat(),
-                                 'subject_hash': hashlib.sha256(b'Suite question').hexdigest(),
-                                 'sender_email': 'pat@example.test'})
+        self.assertFalse((self.out() / 'needs-refresh.json').exists())
 
     def test_hydration_rechecks_sidecars_despite_unsupported_calendar(self):
         preview = mail('pat@example.test', -timedelta(hours=1), body='Hello', kind='preview', copy_key='hydrate')
@@ -1810,7 +1805,6 @@ class IntakeTest(unittest.TestCase):
         full = {**preview, 'body': 'Hello. Send the floor plan by Thursday.', 'body_kind': 'full'}
         self.assertEqual(self.run_intake([full], events, touch=False).state, 'succeeded')
         self.assertEqual(self.fake.writes('set-next-action'), [])
-        self.assertEqual(json.loads((self.out() / intake.REFRESH_LIST).read_text()), [])
         self.run_intake([full], events, touch=False)
         self.assertEqual([a['kind'] for _, a in self.fake.writes('log-activity')], ['email_in', 'note'])
 
@@ -1820,8 +1814,6 @@ class IntakeTest(unittest.TestCase):
         self.fake.now += timedelta(days=12)
         result = self.run_intake([preview], touch=False)
         self.assertEqual(result.counts['hydration_expired'], 1)
-        [entry] = json.loads((self.out() / intake.REFRESH_LIST).read_text())
-        self.assertTrue(entry['expired'])
         state = json.loads((self.out() / intake.STATE).read_text())
         self.assertNotIn(intake.key('log-activity', CLIENT.ref, ident(preview)), state['requests'])
         self.fake.now += timedelta(minutes=30)
@@ -1830,7 +1822,6 @@ class IntakeTest(unittest.TestCase):
         full = {**preview, 'body': 'Hello. Send the floor plan.', 'body_kind': 'full'}
         self.run_intake([full], touch=False)
         self.assertEqual(self.fake.writes('set-next-action'), [], 'keep the intervening human action')
-        self.assertEqual(json.loads((self.out() / intake.REFRESH_LIST).read_text()), [])
 
     def test_legacy_preview_hydration_retries_until_full_body_note_ack(self):
         preview = mail('pat@example.test', -timedelta(hours=1), body='Hello', kind='preview', copy_key='legacy')
@@ -1850,13 +1841,8 @@ class IntakeTest(unittest.TestCase):
     def test_once_the_full_body_decodes_it_is_logged_as_a_note_and_leaves_the_list(self):
         preview = mail('pat@example.test', -timedelta(hours=1), body='Can we meet', kind='preview', copy_key='k2')
         self.run_intake([preview])
-        path = self.out() / intake.REFRESH_LIST
-        entries = json.loads(path.read_text())
-        entries[0]['opened_at'] = NOW.isoformat()
-        path.write_text(json.dumps(entries))
         self.run_intake([preview, mail('pat@example.test', -timedelta(hours=1) + timedelta(seconds=5),
                                        body='Can we meet Thursday? Full text.', copy_key='k2')])
-        self.assertEqual(json.loads(path.read_text()), [], 'refreshed email leaves the list')
         notes = [a for _, a in self.fake.writes('log-activity') if a['kind'] == 'note']
         self.assertEqual([n['detail'] for n in notes], ['Can we meet Thursday? Full text.'])
         self.assertEqual(notes[0]['idempotency_key'],
@@ -1892,20 +1878,6 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual([(a['kind'], a['detail']) for a in activities],
                          [('email_in', 'Preview'), ('email_in', 'Preview'), ('note', 'Full body after download')])
         self.assertNotEqual(activities[0]['idempotency_key'], activities[2]['idempotency_key'])
-        self.assertEqual(json.loads((self.out() / intake.REFRESH_LIST).read_text()), [])
-
-    def test_triage_opened_at_survives_a_rewrite(self):
-        first = mail('pat@example.test', -timedelta(hours=2), body='Can we meet', kind='preview', copy_key='k3')
-        self.run_intake([first])
-        path = self.out() / intake.REFRESH_LIST
-        entries = json.loads(path.read_text())
-        entries[0]['opened_at'] = NOW.isoformat()
-        path.write_text(json.dumps(entries))
-        self.run_intake([first, mail('lee@example.test', -timedelta(hours=1), body='Hello there', kind='preview',
-                                     subject='Other')])
-        opened = {e['message_id']: e.get('opened_at') for e in json.loads(path.read_text())}
-        self.assertEqual(opened[ident(first)], NOW.isoformat())
-        self.assertEqual(len(opened), 2)
 
     def test_meeting_keeps_open_action_hidden_by_thirty_newer_timeline_rows(self):
         self.fake.timeline['C-901'] = [
@@ -1964,9 +1936,9 @@ class IntakeTest(unittest.TestCase):
 
     def test_private_files_are_narrowed_to_0600_even_when_they_already_existed(self):
         self.out().mkdir(parents=True)
-        for name in ('lock', intake.STATE, intake.REFRESH_LIST):
+        for name in ('lock', intake.STATE):
             path = self.out() / name
-            path.write_text('[]' if name == intake.REFRESH_LIST else '{}')
+            path.write_text('{}')
             os.chmod(path, 0o644)
         self.run_intake([mail('pat@example.test', -timedelta(hours=1), kind='preview', body='Can we meet')])
         for path in self.out().iterdir():

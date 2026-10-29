@@ -53,7 +53,6 @@ client contents into this runbook or a PR.
 | State or capability | Recovery requirement |
 |---|---|
 | `out/outlook-intake/state.json` | Pending actions, unresolved mail, and intake checkpoints need an independent copy. Missing state falls back to 48 hours. |
-| `out/outlook-intake/needs-refresh.json` | Recover the preview-body refresh queue with intake state. |
 | `out/outlook-send/ledger.jsonl` and `~/.local/state/carr/outlook-send/ledger.jsonl` | Recover the ledger for the configured caller. Reconcile outbound history before sending again. |
 | `out/calendar-archive/` | Recover historical snapshots separately from the current calendar feed. |
 | `out/boards/` | Recover local notes and questions. |

@@ -26,7 +26,7 @@ class InventoryTests(unittest.TestCase):
             (root / 'ops/config').mkdir(parents=True)
             shutil.copyfile(ROOT / 'ops/config/studio-failover.v1.json', root / 'ops/config/studio-failover.v1.json')
             labels = ['com.carr.nightly-record-layer', 'com.carr.outlook-intake',
-                      'com.carr.outlook-refresh', 'com.carr.outlook-triage']
+                      'com.carr.outlook-triage']
             (root / 'ops/launchd').mkdir()
             for label in labels:
                 shutil.copyfile(ROOT / ('ops/launchd/' + label + '.plist'), root / ('ops/launchd/' + label + '.plist'))
@@ -42,10 +42,9 @@ class InventoryTests(unittest.TestCase):
                 self.assertEqual(jobs['com.carr.nightly-record-layer']['state'], ['~/carr-system/backups'])
                 for label in labels:
                     self.assertFalse(jobs[label]['enabled'])
-                for label in labels[1:3]:
-                    self.assertEqual(jobs[label]['state'], ['~/carr-system/out/outlook-intake/state.json',
-                                                         '~/carr-system/out/outlook-intake/needs-refresh.json'])
-                self.assertEqual(jobs[labels[3]]['state'], ['~/.config/carr/outlook-nightly-sweep.folders.md'])
+                for label in labels[1:2]:
+                    self.assertEqual(jobs[label]['state'], ['~/carr-system/out/outlook-intake/state.json'])
+                self.assertEqual(jobs[labels[2]]['state'], ['~/.config/carr/outlook-nightly-sweep.folders.md'])
                 self.assertIn('Outlook permission and outbound reconciliation',
                               {r['name'] for r in config['manual_roles']})
 
@@ -83,7 +82,7 @@ class FailoverTests(unittest.TestCase):
         module = self.host_module()
         config = json.loads((ROOT / 'ops/config/studio-failover.v1.json').read_text())
         config['jobs'] = [j for j in config['jobs'] if j['label'].startswith('com.carr.outlook-')]
-        self.assertEqual(len(config['jobs']), 3)
+        self.assertEqual(len(config['jobs']), 2)
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()
             write_settings(root, ROOT, services=['intake'])
@@ -112,11 +111,11 @@ class FailoverTests(unittest.TestCase):
         config = json.loads((ROOT / 'ops/config/studio-failover.v1.json').read_text())
         result = plan(config, {}, 'macbook')
         installed = {step.get('label') for step in result['steps'] if step['action'] == 'install'}
-        self.assertTrue({'com.carr.outlook-intake', 'com.carr.outlook-refresh', 'com.carr.outlook-triage'} <= installed)
+        self.assertTrue({'com.carr.outlook-intake', 'com.carr.outlook-triage'} <= installed)
         missing = '\n'.join(result['missing'])
         self.assertIn('~/carr-system/backups', missing)
         self.assertNotIn('~/carr-system/out/backups', missing)
-        for state in ('state.json', 'needs-refresh.json'):
+        for state in ('state.json',):
             self.assertIn('~/carr-system/out/outlook-intake/' + state, missing)
         self.assertIn('Outlook permission and outbound reconciliation', missing)
         self.assertFalse(result['ready'])

@@ -737,7 +737,7 @@ def outlook_render_cases() -> list[bool]:
         with patch.object(mod, "HOME", str(home)), patch.object(mod, "REPO", str(repo)), \
                 patch.object(mod, "TOKENS", [("{{REPO}}", str(repo)), ("{{HOME}}", str(home))]), \
                 patch("pathlib.Path.home", return_value=home):
-            for name in ("intake", "refresh", "triage"):
+            for name in ("intake", "triage"):
                 template = (REPO / f"ops/launchd/com.carr.outlook-{name}.plist").read_text()
                 rendered = mod.concrete(template)
                 definition = plistlib.loads(rendered.encode())
@@ -775,7 +775,7 @@ def outlook_render_cases() -> list[bool]:
         with patch.object(mod, "HOME", str(home)), patch.object(mod, "REPO", str(canonical)), \
                 patch.object(mod, "TOKENS", [("{{REPO}}", str(canonical)), ("{{HOME}}", str(home))]), \
                 patch("pathlib.Path.home", return_value=home):
-            for name in ("intake", "refresh", "triage"):
+            for name in ("intake", "triage"):
                 template = (REPO / f"ops/launchd/com.carr.outlook-{name}.plist").read_text()
                 installed = settings.render_plist(template.encode()).decode()
                 try:
