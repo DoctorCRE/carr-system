@@ -113,7 +113,7 @@ FIND = {
 }
 
 FAKE = r'''#!{python}
-import json, os, sys, tempfile
+import json, os, stat, sys, tempfile
 state_path = os.environ['FAKE_STATE']
 with open(state_path) as source:
     state = json.load(source)
@@ -125,6 +125,13 @@ def save():
     fd, temporary = tempfile.mkstemp(dir=os.path.dirname(state_path))
     try:
         with os.fdopen(fd, 'w') as output:
+            try:
+                mode = stat.S_IMODE(os.stat(state_path).st_mode)
+            except FileNotFoundError:
+                mask = os.umask(0)
+                os.umask(mask)
+                mode = 0o666 & ~mask
+            os.fchmod(output.fileno(), mode)
             json.dump(state, output)
         os.replace(temporary, state_path)
     finally:
@@ -535,6 +542,13 @@ class PreflightQuitTest(FakeOutlookCase):
         with patch('lib.outlook_ui.cua', side_effect=unavailable_menu):
             self.assertIsNone(self.prepare())
         self.assertEqual(len(self.called('osascript')), 1)
+
+    def test_state_publish_preserves_existing_permissions(self):
+        self.given()
+        self.state.chmod(0o640)
+        subprocess.run([str(self.tmp / 'bin/osascript')], env=self.env, check=True)
+        self.assertFalse(json.loads(self.state.read_text())['running'])
+        self.assertEqual(stat.S_IMODE(self.state.stat().st_mode), 0o640)
 
     def test_interrupted_state_publish_keeps_previous_snapshot_readable(self):
         self.given(windows=[ORDINARY])
