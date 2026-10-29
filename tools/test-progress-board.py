@@ -10,6 +10,7 @@ import copy
 import functools
 import itertools
 import io
+import hashlib
 import json
 import importlib.util
 import os
@@ -238,6 +239,8 @@ class ProgressBoardCLI(BoardCase):
         refreshed = {**stale, 'observed_at': iso()}
         remote = {}
         def call(verb, args):
+            if verb == 'publish-census-inventory':
+                return {'ok': True}
             name = args['board_id']
             if verb == 'publish-board-snapshot':
                 remote[name] = {'version': 1, 'snapshot_json': copy.deepcopy(args['snapshot'])}
@@ -261,6 +264,8 @@ class ProgressBoardCLI(BoardCase):
         (self.root / 'boards/system-work-github-cache.json').write_text(json.dumps(external))
         remote = {}
         def call(verb, args):
+            if verb == 'publish-census-inventory':
+                return {'ok': True}
             board = args['board_id']
             if verb == 'publish-board-snapshot':
                 remote[board] = {'version': 1, 'snapshot_json': args['snapshot']}
@@ -275,7 +280,7 @@ class ProgressBoardCLI(BoardCase):
         self.update_legacy_task('demo','repair','--title','Synthetic repair','--status','running','--executor','codex')
         self.assertEqual(self.read_state('demo')['tasks']['repair'].get('domain'),'system')
 
-    def test_large_history_publishes_bounded_pages_without_losing_rows(self):
+    def test_large_history_is_stored_whole_and_named_by_digest(self):
         self.run_board('init', 'carr-v5', '--title', 'Synthetic board')
         items=[{'id':f'repo:pr:{i}', 'kind':'pull_request', 'title':'Synthetic title '*12,
                 'completed':True,'opened_at':'2026-09-01T00:00:00Z',
@@ -283,7 +288,12 @@ class ProgressBoardCLI(BoardCase):
         external={'schema':'system-work-external.v1','items':items,'complete':True,
                   'observed_at':iso(),'coverage':[],'completed_pr_history':True,'pr_work_refs':[]}
         remote={}
+        stored=[]
         def call(verb,args):
+            if verb=='publish-census-inventory':
+                self.assertEqual(set(args['payload']),{'items'})
+                stored.append(args['payload'])
+                return {'ok':True}
             board=args['board_id']
             if verb=='publish-board-snapshot':
                 self.assertLessEqual(len(json.dumps(args['snapshot'],separators=(',',':'),ensure_ascii=False)),262144)
@@ -293,9 +303,12 @@ class ProgressBoardCLI(BoardCase):
         with patch.dict(os.environ,self.env), patch.object(BOARD,'board_reply',call):
             BOARD.publish_board('carr-v5')
         manifest=remote['carr-v5']['snapshot_json']['external_inventory']
-        restored=[row for page in manifest['pages'] for row in remote[page['board_id']]['snapshot_json']['items']]
-        self.assertEqual(restored,items)
+        self.assertEqual(stored[-1]['items'],items)
+        self.assertEqual((manifest['schema'],manifest['item_count']),('system-work-external.v3',len(items)))
+        self.assertEqual(manifest['digest'],hashlib.sha256(json.dumps(stored[-1],sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest())
         self.assertNotIn('items',manifest)
+        self.assertNotIn('pages',manifest)
+        self.assertFalse([name for name in remote if name.startswith('carr-v5-external-')])
 
 
 

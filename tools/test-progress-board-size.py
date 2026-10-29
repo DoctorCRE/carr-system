@@ -271,6 +271,8 @@ class PagedPublicationTests(unittest.TestCase):
         self.enterContext(patch('system_work_cache.cached_github', return_value=self.inventory))
 
     def call(self, verb, args):
+        if verb == "publish-census-inventory":
+            return {"ok": True}
         key = args["board_id"]
         if verb == "read-progress-board":
             return {"ok": True, "snapshot": copy.deepcopy(self.store.get(key)), "questions": []}

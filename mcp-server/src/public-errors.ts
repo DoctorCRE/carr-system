@@ -103,6 +103,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["job_repository_mismatch", "Start this job in its recorded repository."],
   ["job_not_found", "Choose an existing job under this Work Request and slice."],
   ["priority_out_of_range", "Choose a position within the visible queue."],
+  ["census_inventory_invalid", "Send a JSON object with an items array under 8 MB."],
   ["key_reuse", "Use a fresh idempotency_key for changed arguments."],
   ["unknown_tool", "Discover the tool with list-verbs."],
   ["not_in_profile", "This operation is unavailable in the current profile."],

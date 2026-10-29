@@ -2481,28 +2481,18 @@ def publish_immutable_page(board_id: str, payload: dict[str, Any]) -> int:
 
 
 def publish_external_inventory(cache: dict[str, Any]) -> dict[str, Any]:
-    """Publish immutable bounded pages before switching the manifest pointer."""
-    pages: list[dict[str, Any]] = []
-    batch: list[dict[str, Any]] = []
-    def emit(rows):
-        payload = {'items': rows}
-        encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
-        digest = hashlib.sha256(encoded.encode()).hexdigest()
-        board_id = 'carr-v5-external-' + digest
-        version = publish_immutable_page(board_id, payload)
-        pages.append({'board_id': board_id, 'version': version, 'count': len(rows), 'digest': digest})
-    for row in cache['items']:
-        candidate = [*batch, row]
-        if len(json.dumps({'items': candidate}, ensure_ascii=False)) > 120000:
-            if not batch: raise RuntimeError('external inventory row exceeds page contract')
-            emit(batch)
-            batch = [row]
-            if len(json.dumps({'items': batch}, ensure_ascii=False)) > 120000:
-                raise RuntimeError('external inventory row exceeds page contract')
-        else: batch = candidate
-    if batch: emit(batch)
+    """Replace the one stored inventory, then return the manifest that names its digest.
+
+    The row is replaced whole, so a reader sees the previous inventory or this one.
+    The key carries the UTC day: an unchanged inventory is written at most daily,
+    and a lost row is restored within a day."""
+    payload = {'items': cache['items']}
+    encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+    digest = hashlib.sha256(encoded.encode()).hexdigest()
+    key = stable_key('publish-census-inventory', {'digest': digest, 'day': now_utc().date().isoformat()})
+    call_verb('publish-census-inventory', {'payload': payload, 'idempotency_key': key})
     return {**{key: value for key, value in cache.items() if key not in ('items', 'pr_heads')},
-            'schema': 'system-work-external.v2', 'pages': pages, 'item_count': len(cache['items'])}
+            'schema': 'system-work-external.v3', 'digest': digest, 'item_count': len(cache['items'])}
 
 
 def publish_paged_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
