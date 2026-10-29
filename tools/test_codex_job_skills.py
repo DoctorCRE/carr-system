@@ -50,6 +50,55 @@ class CatalogTests(unittest.TestCase):
             self.assertEqual([s.name for s in skill_picker.catalog(repo, home=home)],
                              ['file-pr', 'modernize'])
 
+    def test_catalog_prefers_agents_copy_over_claude_and_codex(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, repo = Path(tmp) / 'home', Path(tmp) / 'repo'
+            for root in ('.agents/skills', '.claude/skills', '.codex/skills'):
+                path = home / root / 'file-pr/SKILL.md'
+                path.parent.mkdir(parents=True)
+                path.write_text('---\nname: file-pr\ndescription: Open a PR\n---\n')
+            skills = skill_picker.catalog(repo, home=home)
+            self.assertEqual([(s.name, s.path) for s in skills], [
+                ('file-pr', (home / '.agents/skills/file-pr/SKILL.md').resolve())])
+            for removed, expected in (('.agents/skills', '.claude/skills'),
+                                      ('.claude/skills', '.codex/skills')):
+                (home / removed / 'file-pr/SKILL.md').unlink()
+                with self.subTest(expected_root=expected):
+                    self.assertEqual([(s.name, s.path) for s in skill_picker.catalog(repo, home=home)], [
+                        ('file-pr', (home / expected / 'file-pr/SKILL.md').resolve())])
+
+    def test_catalog_skips_synced_subfolders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, repo = Path(tmp) / 'home', Path(tmp) / 'repo'
+            for root in (home / '.agents/skills', home / '.claude/skills',
+                         home / '.codex/skills', repo / '.claude/skills'):
+                for relative in ('synced/handoff', 'nested/synced/handoff'):
+                    path = root / relative / 'SKILL.md'
+                    path.parent.mkdir(parents=True)
+                    path.write_text('---\nname: handoff\ndescription: Synced copy\n---\n')
+            self.assertEqual(skill_picker.catalog(repo, home=home), [])
+
+    def test_workflow_validation_rejects_unknown_skill(self):
+        table = yaml.safe_load((Path(__file__).resolve().parents[1] /
+                                'ops/config/job-workflows.v1.yaml').read_text())
+        table['job_types']['feature-backend']['stages']['build']['skills'].append('unknown-skill')
+        with self.assertRaisesRegex(AssertionError, 'unknown-skill'):
+            self.assert_workflow_skills_resolve(table, {
+                'pstack:poteto-mode', 'pstack:principle-prove-it-works',
+                'mattpocock-skills:grill-with-docs', 'mattpocock-skills:tdd',
+                'mattpocock-skills:pr', 'mattpocock-skills:code-review',
+                'mattpocock-skills:codebase-design', 'mattpocock-skills:diagnosing-bugs',
+                'mattpocock-skills:domain-modeling', 'file-pr', 'babysit-pr',
+                'modernize', 'zero-tech-debt'})
+
+    def assert_workflow_skills_resolve(self, table, available):
+        for job_type, job in table['job_types'].items():
+            for stage in job['stages'].values():
+                names = stage['skills'] + [item['skill'] for item in
+                                           stage.get('conditional_skills', [])]
+                self.assertFalse(set(names) - available,
+                                 f'{job_type}: unknown skills {set(names) - available}')
+
     def test_workflow_skills_resolve_in_fixture_home(self):
         table = yaml.safe_load((Path(__file__).resolve().parents[1] /
                                 'ops/config/job-workflows.v1.yaml').read_text())
@@ -70,17 +119,13 @@ class CatalogTests(unittest.TestCase):
                     path.parent.mkdir(parents=True)
                     path.write_text(f'---\nname: {name}\ndescription: Procedure {name}\n---\n')
             available = {skill.name for skill in skill_picker.catalog(repo, home=home)}
+            self.assert_workflow_skills_resolve(table, available)
             jobs = table['job_types']
             self.assertEqual(set(jobs), {'feature-ui', 'feature-backend', 'bug-fix',
                                         'removal-refactor', 'data-migration', 'review', 'research-audit'})
             for job_type, job in jobs.items():
                 with self.subTest(job_type=job_type):
                     self.assertTrue(job['stages'])
-                    for stage in job['stages'].values():
-                        names = stage['skills'] + [item['skill'] for item in
-                                                   stage.get('conditional_skills', [])]
-                        self.assertFalse(set(names) - available,
-                                         f'{job_type}: unknown skills {set(names) - available}')
                     if job['read_only']:
                         self.assertTrue({'pr', 'fix-rounds', 'ship'}.isdisjoint(job['stages']))
                         self.assertNotIn('mattpocock-skills:tdd', job['stages']['build']['skills'])

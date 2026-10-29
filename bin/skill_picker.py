@@ -32,8 +32,11 @@ def catalog(repo: Path, *, home: Path | None = None) -> list[Skill]:
                  for p in sorted(root.glob('*')) if p.is_dir())
     roots.append(('', repo / '.claude/skills'))
     skills: dict[Path, Skill] = {}
+    unprefixed_names: set[str] = set()
     for prefix, root in roots:
         for path in sorted(root.rglob('SKILL.md')):
+            if not prefix and (root.name == 'synced' or 'synced' in path.relative_to(root).parts):
+                continue
             path = path.resolve()
             if path in skills:
                 continue
@@ -47,7 +50,12 @@ def catalog(repo: Path, *, home: Path | None = None) -> list[Skill]:
                     continue
                 name, description = fields.get('name'), fields.get('description')
                 if isinstance(name, str) and name.strip() and isinstance(description, str) and description.strip():
-                    skills[path] = Skill(prefix + name.strip(), description.strip(), path)
+                    name = name.strip()
+                    if not prefix:
+                        if name in unprefixed_names:
+                            continue
+                        unprefixed_names.add(name)
+                    skills[path] = Skill(prefix + name, description.strip(), path)
             except (OSError, ValueError, yaml.YAMLError):
                 continue
     return sorted(skills.values(), key=lambda s: (s.name, str(s.path)))
