@@ -38,6 +38,28 @@ class CatalogTests(unittest.TestCase):
             local.write_text('---\nname: local\ndescription: Updated immediately\n---\n')
             self.assertIn('Updated immediately', [s.description for s in skill_picker.catalog(repo, home=home)])
 
+    def test_catalog_without_new_roots_matches_main(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, repo = Path(tmp) / 'home', Path(tmp) / 'repo'
+            entries = [
+                (home / '.agents/skills/synced/docs', 'docs'),
+                (home / '.agents/skills/first', 'shared'),
+                (home / '.agents/skills/second', 'shared'),
+                (repo / '.claude/skills/shared', 'shared'),
+                (repo / '.claude/skills/synced/pdf', 'pdf'),
+                (home / '.agents/skills/.hidden/agent', 'hidden-agent'),
+                (repo / '.claude/skills/.hidden/local', 'hidden-local'),
+            ]
+            for directory, name in entries:
+                directory.mkdir(parents=True)
+                (directory / 'SKILL.md').write_text(
+                    f'---\nname: {name}\ndescription: Procedure {name}\n---\n')
+            expected = sorted([
+                skill_picker.Skill(name, f'Procedure {name}', (directory / 'SKILL.md').resolve())
+                for directory, name in entries
+            ], key=lambda skill: (skill.name, str(skill.path)))
+            self.assertEqual(skill_picker.catalog(repo, home=home), expected)
+
     def test_catalog_reads_tstack_roots_and_deduplicates_symlinks(self):
         with tempfile.TemporaryDirectory() as tmp:
             home, repo = Path(tmp) / 'home', Path(tmp) / 'repo'
@@ -67,11 +89,36 @@ class CatalogTests(unittest.TestCase):
                     self.assertEqual([(s.name, s.path) for s in skill_picker.catalog(repo, home=home)], [
                         ('file-pr', (home / expected / 'file-pr/SKILL.md').resolve())])
 
+    def test_catalog_prefers_repo_copy_over_new_roots(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, repo = Path(tmp) / 'home', Path(tmp) / 'repo'
+            local = repo / '.claude/skills/file-pr/SKILL.md'
+            for root in (local.parent, home / '.claude/skills/file-pr',
+                         home / '.codex/skills/file-pr'):
+                root.mkdir(parents=True)
+                (root / 'SKILL.md').write_text('---\nname: file-pr\ndescription: Open a PR\n---\n')
+            self.assertEqual(skill_picker.catalog(repo, home=home), [
+                skill_picker.Skill('file-pr', 'Open a PR', local.resolve())])
+
+    def test_catalog_skips_dot_directories_in_new_roots(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, repo = Path(tmp) / 'home', Path(tmp) / 'repo'
+            for root in (home / '.claude/skills', home / '.codex/skills'):
+                for relative in ('.system/hidden', 'nested/.hidden'):
+                    path = root / relative / 'SKILL.md'
+                    path.parent.mkdir(parents=True)
+                    path.write_text('---\nname: hidden\ndescription: Hidden skill\n---\n')
+                visible = root / 'visible/SKILL.md'
+                visible.parent.mkdir(parents=True)
+                visible.write_text('---\nname: visible\ndescription: Visible skill\n---\n')
+            self.assertEqual(skill_picker.catalog(repo, home=home), [
+                skill_picker.Skill('visible', 'Visible skill',
+                                  (home / '.claude/skills/visible/SKILL.md').resolve())])
+
     def test_catalog_skips_synced_subfolders(self):
         with tempfile.TemporaryDirectory() as tmp:
             home, repo = Path(tmp) / 'home', Path(tmp) / 'repo'
-            for root in (home / '.agents/skills', home / '.claude/skills',
-                         home / '.codex/skills', repo / '.claude/skills'):
+            for root in (home / '.claude/skills', home / '.codex/skills'):
                 for relative in ('synced/handoff', 'nested/synced/handoff'):
                     path = root / relative / 'SKILL.md'
                     path.parent.mkdir(parents=True)

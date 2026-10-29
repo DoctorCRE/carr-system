@@ -28,14 +28,18 @@ def catalog(repo: Path, *, home: Path | None = None) -> list[Skill]:
             latest = max(versions, key=lambda p: tuple(int(n) for n in re.findall(r'\d+', p.parent.name)))
             roots.append((plugin + ':', latest))
     roots.extend(('', p) for p in sorted((home / '.agents/skills').glob('*')) if p.is_dir())
-    roots.extend(('', p) for root in (home / '.claude/skills', home / '.codex/skills')
-                 for p in sorted(root.glob('*')) if p.is_dir())
     roots.append(('', repo / '.claude/skills'))
+    fallback_roots = [p for root in (home / '.claude/skills', home / '.codex/skills')
+                      for p in sorted(root.glob('*')) if p.is_dir() and not p.name.startswith('.')]
+    existing_root_count = len(roots)
+    roots.extend(('', p) for p in fallback_roots)
     skills: dict[Path, Skill] = {}
     unprefixed_names: set[str] = set()
-    for prefix, root in roots:
+    for index, (prefix, root) in enumerate(roots):
+        fallback = index >= existing_root_count
         for path in sorted(root.rglob('SKILL.md')):
-            if not prefix and (root.name == 'synced' or 'synced' in path.relative_to(root).parts):
+            if fallback and any(part == 'synced' or part.startswith('.')
+                                for part in (root.name, *path.relative_to(root).parts[:-1])):
                 continue
             path = path.resolve()
             if path in skills:
@@ -52,7 +56,7 @@ def catalog(repo: Path, *, home: Path | None = None) -> list[Skill]:
                 if isinstance(name, str) and name.strip() and isinstance(description, str) and description.strip():
                     name = name.strip()
                     if not prefix:
-                        if name in unprefixed_names:
+                        if fallback and name in unprefixed_names:
                             continue
                         unprefixed_names.add(name)
                     skills[path] = Skill(prefix + name, description.strip(), path)
