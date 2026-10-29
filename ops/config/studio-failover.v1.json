@@ -102,18 +102,7 @@
       "source": "ops/launchd/com.carr.outlook-intake.plist",
       "credentials": [],
       "state": [
-        "~/carr-system/out/outlook-intake/state.json",
-        "~/carr-system/out/outlook-intake/needs-refresh.json"
-      ],
-      "enabled": false
-    },
-    {
-      "label": "com.carr.outlook-refresh",
-      "source": "ops/launchd/com.carr.outlook-refresh.plist",
-      "credentials": [],
-      "state": [
-        "~/carr-system/out/outlook-intake/state.json",
-        "~/carr-system/out/outlook-intake/needs-refresh.json"
+        "~/carr-system/out/outlook-intake/state.json"
       ],
       "enabled": false
     },

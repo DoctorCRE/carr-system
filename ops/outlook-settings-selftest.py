@@ -57,12 +57,12 @@ class SettingsTest(unittest.TestCase):
     def test_dell_shaped_settings_render_jobs_without_studio_paths(self):
         profile = self.home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Profile'
         write_settings(self.home, self.repo, owner='dell', account='second.partner@example.test',
-                       profile=str(profile), services=['intake', 'refresh'], full_screen_height=956,
+                       profile=str(profile), services=['intake'], full_screen_height=956,
                        executable_path=f'{self.home}/.cargo/bin:{self.home}/.local/bin:/usr/bin:/bin')
         settings = load_settings(self.home)
         self.assertEqual((settings.owner, settings.account, settings.profile, settings.full_screen_height),
                          ('dell', 'second.partner@example.test', profile, 956))
-        for service in ('intake', 'refresh'):
+        for service in ('intake',):
             settings.require_service(service)
             rendered = plistlib.loads(settings.render_plist(ROOT / f'ops/launchd/com.carr.outlook-{service}.plist'))
             self.assertEqual(rendered['WorkingDirectory'], str(self.repo))
@@ -193,7 +193,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(values[5], 'joe')
         owners = [call.args[1][5] for call in cursor.execute.call_args_list
                   if 'insert into ops.service\n' in call.args[0]]
-        self.assertEqual(owners, ['joe', 'joe', 'joe', 'joe'])
+        self.assertEqual(owners, ['joe', 'joe', 'joe'])
 
     def test_configured_exporter_file_wins_over_an_unrelated_shell_export(self):
         from exporters import common

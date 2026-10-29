@@ -56,19 +56,8 @@ nullable content_id. Cache paths and bytes stay in the private decoder output.
 Only mail naming the configured account as sender or recipient enters intake;
 BCC-only mail without that evidence is omitted.
 
-An email whose body is still only Outlook's preview is logged with the preview,
-flagged preview_only, and listed in out/outlook-intake/needs-refresh.json for the
-same-host refresh worker to open. The file is a JSON array, mode 0600, one object per
-email:
-
-    {"message_id": "<opaque intake id>", "subject_hash": "<sha256 hex of the subject>",
-     "sent_utc": "<ISO 8601>", "sender_email": "<address>", "opened_at": "<ISO 8601, refresh worker adds it>"}
-
-The refresh worker finds the email by sender_email and subject_hash and adds opened_at; this
-intake job owns every other field and keeps opened_at when it rewrites the file. Once a
-listed email decodes with its full body, the next run logs that text as a
-log-activity note (activities cannot be updated in place: the verb refuses a
-reused key with new arguments) and drops the entry.
+An email whose body is still only Outlook's preview is logged with the preview
+and flagged preview_only. A later full body is logged as a note.
 
 The private copy and decoded database live in a 0700 work folder under
 out/outlook-intake/ and are deleted before the run ends; a folder that cannot be
@@ -98,7 +87,6 @@ import uuid
 from lib import email_links, unresolved_email
 from lib.outlook_settings import load_settings, OutlookSettings
 OUT = Path('out/outlook-intake')
-REFRESH_LIST = 'needs-refresh.json'
 STATE = 'state.json'
 WORK_PREFIX = 'work-'
 WINDOW = (time(7, 0), time(19, 30))
@@ -222,7 +210,7 @@ class Outcome:
 BACKLOG_COUNTS = frozenset((
     'hydration_pending', 'hydration_expired', 'unresolved_messages', 'skipped_automated', 'unresolved_read',
     'unresolved_read_abandoned', 'unresolved_expired', 'unresolved_calendar', 'unresolved_addresses', 'unmatched',
-    'requests_blocked', 'needs_refresh_listed', 'calendar_lifecycle_unsupported',
+    'requests_blocked', 'calendar_lifecycle_unsupported',
     'calendar_lifecycle_canceled', 'calendar_requests_quarantined', 'calendar_unresolved_expired',
     'calendar_follow_up_reviews', 'calendar_follow_up_trimmed', 'calendar_agenda_items'))
 BACKLOG_PREFIXES = ('mapping_', 'error_')
@@ -1198,7 +1186,7 @@ class Run:
         self.state.pop('upcoming', None)
         self.counts.update(calendar_counts(self.state))
 
-    def report(self, out: Path, refresh_count: int, news: bool = False) -> None:
+    def report(self, out: Path, news: bool = False) -> None:
         """Write a report when the run has news, health changed, or the decoder is degraded."""
         health = self.state.get('decoder_health')
         status = (health.get('status', 'degraded' if health['failing'] else 'healthy')
@@ -1220,7 +1208,7 @@ class Run:
                       '- conversation_id: available for rows linked to one decoded message object', '']
         lines += ['## Counts', '']
         lines += [f'- {k}: {v}' for k, v in sorted(self.counts.items())]
-        lines += [f'- needs_refresh_listed: {refresh_count}', '', '## Writes', '']
+        lines += ['', '## Writes', '']
         lines += [f'- {who} | {ref} | {verb}' + (f' | {note}' if note else '') for who, ref, verb, note in self.written]
         lines += ['', '## Failed requests', '']
         for ident, request in self.state.get('requests', {}).items():
@@ -1231,26 +1219,6 @@ class Run:
         lines += ['', '## Unmatched', '']
         lines += [f'- {name} | {domain} | {reason}' for name, domain, reason in sorted(self.unmatched)]
         _private_write(out / f'report-{self.now.astimezone(self.settings.timezone):%Y%m%d-%H%M%S}.md', '\n'.join(lines) + '\n')
-
-
-def _refresh_list(out: Path, pending: dict) -> int:
-    path = out / REFRESH_LIST
-    try:
-        opened = {e['message_id']: e['opened_at'] for e in json.loads(path.read_text())
-                  if isinstance(e, dict) and e.get('opened_at')}
-    except (OSError, ValueError, TypeError, KeyError):
-        opened = {}
-    entries = []
-    for ident, p in sorted(pending.items(), key=lambda kv: kv[1]['sent']):
-        entry = {'message_id': ident, 'subject_hash': p['subject_hash'], 'sent_utc': _iso(p['sent']),
-                 'sender_email': p['sender_email']}
-        if p.get('expired'):
-            entry['expired'] = True
-        if ident in opened:
-            entry['opened_at'] = opened[ident]
-        entries.append(entry)
-    _private_write(path, json.dumps(entries, indent=2) + '\n')
-    return len(entries)
 
 
 def mapping_counts(state: dict) -> dict:
@@ -1543,7 +1511,6 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     if not state.get('decoder_degraded') and 'mail_other_accounts' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('attachment_policy') == 1 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due'):
         if state.get('pending_full'):
             Run(ports, state, now, out, settings).full_text([])
-            _refresh_list(out, state['pending_full'])
             _save(out, state)
         counts = {**mapping_counts(state), **calendar_counts(state),
                   'mail_other_accounts': state['mail_other_accounts'], **health_counts(state.get('decoder_health'))}
@@ -1584,7 +1551,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     if 'block_verification' in health['failing'] and 'block_verification' in health['eligible']:
         work = Run(ports, state, now, out, settings)
         work.counts.update(decoder_alarm=alarm, writes_deferred=1, **health_counts(health))
-        work.report(out, 0)
+        work.report(out)
         state['decoder_alarm_delivered'] = True
         _save(out, state)
         return Outcome('degraded', 'writes_deferred', work.counts)
@@ -1593,7 +1560,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         work.counts.update(health_counts(health))
         if health.get('error_class'):
             work.counts['decoder_health_error_' + health['error_class']] = 1
-        work.report(out, 0)
+        work.report(out)
         _save(out, state)
         return Outcome('failed', 'calendar_decode_empty', work.counts)
 
@@ -1640,17 +1607,16 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
             state.pop('calendar_review_at', None)
             work.counts.update(calendar_agenda_published=0, calendar_agenda_failed=1)
     except CarrError as error:
-        work.report(out, 0)
+        work.report(out)
         _save(out, state)
         return Outcome('failed', 'carr_unreachable' if error.code == 'transport_error' else error.code, work.counts)
     work.counts.update(mapping_counts(state))
     for code in ERROR_CODES:
         work.counts['error_' + code] = sum(not r['acknowledged'] and r.get('error_code') == code
                                           for r in state.get('requests', {}).values())
-    refresh = _refresh_list(out, state.get('pending_full', {}))
-    work.report(out, refresh, news=bool(mail_processed or work.unmatched or refresh
+    work.report(out, news=bool(mail_processed or work.unmatched or state.get('pending_full')
                                         or work.counts['calendar_requests_quarantined']))
-    counts = {**work.counts, 'needs_refresh_listed': refresh}
+    counts = dict(work.counts)
     failed = next((reason for count, reason in (('writes_failed', 'writes_failed'),
                                                ('requests_blocked', 'request_blocked'),
                                                ('writes_deferred', 'writes_deferred'),

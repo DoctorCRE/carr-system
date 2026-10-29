@@ -51,7 +51,6 @@ if [ "$REPO" != "$RUNTIME" ]; then
   exec /bin/zsh "$RUNTIME/bin/install-outlook-intake.sh" "$@"
 fi
 "$PY" -m lib.outlook_settings service intake
-"$PY" -m lib.outlook_settings service refresh
 LABEL="com.carr.outlook-intake"
 SOURCE="$REPO/ops/launchd/$LABEL.plist"
 DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -135,17 +134,6 @@ print -- "  install -m 644 '$RENDERED' '$DEST'"
 print -- "  launchctl bootstrap gui/$(id -u) '$DEST'"
 print -- "install-outlook-intake: private reports: $REPO/out/outlook-intake/"
 
-LABEL="com.carr.outlook-refresh"
-SOURCE="$REPO/ops/launchd/$LABEL.plist"
-DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
-RENDERED="$REPO/out/$LABEL.plist"
-LOG="$REPO/out/outlook-refresh-launchd.log"
-"$PY" -m lib.outlook_settings render "$SOURCE" > "$TMP"
-/usr/bin/plutil -lint "$TMP" >/dev/null
-cp "$TMP" "$RENDERED"
-chmod 644 "$RENDERED"
-touch "$LOG"
-chmod 600 "$LOG"
-print -- "install-outlook-intake: refresh worker rendered for the same host and user; it is NOT loaded."
-print -- "  install -m 644 '$RENDERED' '$DEST'"
-print -- "  launchctl bootstrap gui/$(id -u) '$DEST'"
+# Retire a previously installed refresh job.
+launchctl bootout "gui/$(id -u)/com.carr.outlook-refresh" 2>/dev/null || true
+rm -f "$HOME/Library/LaunchAgents/com.carr.outlook-refresh.plist"

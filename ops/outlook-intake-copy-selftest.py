@@ -377,7 +377,6 @@ class InstallerTest(unittest.TestCase):
         for relative in ('ops/hxprobe-source-digest.py', 'bin/install-outlook-intake.sh', 'bin/install-outlook-triage.sh',
                          'tools/outlook-intake-copy.c', 'lib/outlook_settings.py', 'lib/outlook_helper.py',
                          'ops/launchd/com.carr.outlook-intake.plist',
-                         'ops/launchd/com.carr.outlook-refresh.plist',
                          'ops/launchd/com.carr.outlook-outbox.plist',
                          'ops/launchd/com.carr.outlook-triage.plist'):
             shutil.copyfile(ROOT / relative, self.repo / relative)
@@ -403,6 +402,9 @@ class InstallerTest(unittest.TestCase):
 
         self.sign_tools = self.root / 'signing tools'
         self.sign_tools.mkdir()
+        launchctl = self.sign_tools / 'launchctl'
+        launchctl.write_text('#!/bin/sh\nexit 0\n')
+        launchctl.chmod(0o700)
         self.sign_log = self.root / 'signing-calls'
         codesign = self.sign_tools / 'codesign'
         codesign.write_text('''#!/usr/bin/python3
@@ -440,11 +442,12 @@ else:
         self.assertEqual(stat.S_IMODE(self.helper.stat().st_mode), 0o700)
         self.assertIn(f'ad-hoc helper rebuilds need a Full Disk Access re-grant for {self.helper}', result.stdout)
         self.assertFalse((self.home / 'Library/LaunchAgents').exists())
-        for service in ('intake', 'refresh'):
+        for service in ('intake',):
             rendered = plistlib.loads((self.repo / f'out/com.carr.outlook-{service}.plist').read_bytes())
             self.assertEqual(rendered['WorkingDirectory'], str(self.repo))
             self.assertEqual(rendered['EnvironmentVariables']['PATH'], load_settings(self.home).executable_path)
             self.assertEqual(stat.S_IMODE((self.repo / f'out/outlook-{service}-launchd.log').stat().st_mode), 0o600)
+        self.assertFalse((self.repo / 'out/com.carr.outlook-refresh.plist').exists())
         intake = plistlib.loads((self.repo / 'out/com.carr.outlook-intake.plist').read_bytes())
         self.assertEqual(intake['ProgramArguments'][0], str(self.helper))
         self.profile.mkdir(parents=True)
@@ -667,6 +670,7 @@ elif args[0] == 'build':
         self.assertEqual(self.git(runtime, 'status', '--porcelain', '--untracked-files=no'), '')
         self.assertEqual((runtime / 'out').resolve(), self.repo / 'out')
         self.assertEqual((runtime / '.venv').resolve(), self.repo / '.venv')
+        self.assertFalse((self.repo / 'out/com.carr.outlook-refresh.plist').exists())
         intake = plistlib.loads((self.repo / 'out/com.carr.outlook-intake.plist').read_bytes())
         self.assertEqual(intake['WorkingDirectory'], str(runtime))
         scope = subprocess.run([str(self.helper), '--scope'], capture_output=True, text=True, check=True)

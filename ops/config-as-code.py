@@ -163,7 +163,6 @@ LAUNCHD_ALT_REPO = {
 OUTLOOK_INSTALLERS = {
     "com.carr.outlook-intake.plist": "bin/install-outlook-intake.sh",
     "com.carr.outlook-outbox.plist": "bin/install-outlook-intake.sh",
-    "com.carr.outlook-refresh.plist": "bin/install-outlook-intake.sh",
     "com.carr.outlook-triage.plist": "bin/install-outlook-triage.sh",
     "com.carr.outlook-research-copy.plist": "bin/install-outlook-research-copy.sh",
 }

@@ -425,11 +425,6 @@ class FakeOutlookCase(unittest.TestCase):
                              ['Outlook', 'Quit Outlook'] for call in self.called('cua-driver')))
         self.assertTrue(json.loads(self.state.read_text())['running'])
 
-    def refresh_list(self, entries):
-        path = self.repo / triage.REFRESH_LIST
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(entries))
-        return path
 
     def report_path(self):
         return self.repo / triage.OUT / '2026-10-20.report.md'
@@ -625,15 +620,6 @@ class PreflightQuitTest(FakeOutlookCase):
         self.assertEqual(self.called('osascript') + self.called('open'), [])
         self.assertTrue(json.loads(self.state.read_text())['running'])
 
-    def test_refresh_cli_logs_timeout_detail(self):
-        from lib import outlook_refresh
-        from lib.outlook_ui import Outcome
-        detail = '{"windows":[{"kind":"sheet","width":700,"height":240,"is_on_screen":true}]}'
-        output = io.StringIO()
-        with patch('lib.outlook_refresh.run', return_value=Outcome('failed', 'outlook_quit_timeout', detail)), \
-                redirect_stdout(output):
-            self.assertEqual(outlook_refresh.main(), 1)
-        self.assertEqual(output.getvalue(), f'outlook-refresh failed outlook_quit_timeout {detail}\n')
 
     def test_hanging_graceful_quit_cannot_extend_quit_deadline(self):
         self.given(windows=[ORDINARY], menu_quit_ignored=True, osascript_quit_delay=5)
@@ -1073,26 +1059,6 @@ class RefreshTest(FakeOutlookCase):
         self.assertEqual((result.state, result.reason), ('skipped', 'unread_set_unverified'))
         self.assertIn('coverage=coverage_identity_ambiguous', result.detail)
 
-    def test_busy_inbox_refreshes_with_hidden_unread_mail_kept_unread(self):
-        from lib import outlook_refresh
-        hidden = msg('sender-hidden', 'subject-hidden', unread=True)
-        self.given(tabs={'focused': [self.READ_BODY, self.UNREAD_BODY, hidden],
-                         'other': [UNREAD]}, visible_limit=2)
-        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
-        before_unread = self.unread_labels(json.loads(self.state.read_text()))
-        with patch.dict(os.environ, self.env, clear=True):
-            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
-                                        now_fn=lambda: EVENING.replace(hour=10))
-        self.assertEqual((result.state, result.reason), ('succeeded', 'refreshed'))
-        state = json.loads(self.state.read_text())
-        self.assertEqual(self.unread_labels(state), before_unread)
-        self.assertEqual(state['selections'], [self.READ_BODY['label']])
-        self.assertEqual(state['moved'], [])
-        self.assertNotIn('Mark Unread', state['presses'])
-        self.assertIn('opened_at', json.loads(path.read_text())[0])
-        self.assertGreater(state['scrolls'], 0)
-        self.assertEqual(state['offsets'], {'focused': 0, 'other': 0})
 
     def test_list_scrolling_preserves_selection_and_every_read_flag(self):
         from lib.outlook_ui import Window
@@ -1109,67 +1075,8 @@ class RefreshTest(FakeOutlookCase):
         self.assertEqual(state['offsets'], {'only': 0})
         self.assertGreater(state['scrolls'], 0)
 
-    def test_busy_inbox_deduplicates_overlapping_pages_and_both_tabs(self):
-        from lib import outlook_refresh
-        hidden = msg('sender-hidden', 'subject-hidden', unread=True)
-        self.given(tabs={'focused': [self.READ_BODY, self.UNREAD_BODY, hidden],
-                         'other': [self.UNREAD_BODY, UNREAD]}, visible_limit=2, badge=3)
-        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
-        before = self.unread_labels(json.loads(self.state.read_text()))
-        with patch.dict(os.environ, self.env, clear=True):
-            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
-                                        now_fn=lambda: EVENING.replace(hour=10))
-        self.assertEqual((result.state, result.reason), ('succeeded', 'refreshed'))
-        state = json.loads(self.state.read_text())
-        self.assertEqual(self.unread_labels(state), before)
-        self.assertEqual(state['selections'], [self.READ_BODY['label']])
-        self.assertIn('opened_at', json.loads(path.read_text())[0])
-        self.assertEqual(state['offsets'], {'focused': 0, 'other': 0})
 
-    def test_incomplete_ambiguous_and_changing_scans_skip_without_opening_mail(self):
-        from lib import outlook_refresh
-        hidden = msg('sender-hidden', 'subject-hidden', unread=True)
-        cases = [
-            ({'scroll_stuck': True}, 'coverage_incomplete'),
-            ({'read_on_scroll': [hidden['label']]}, 'coverage_changed'),
-            ({'replace_on_restore': ARRIVAL}, 'coverage_changed'),
-            ({'replace_on_first_scroll': ARRIVAL}, 'coverage_changed'),
-        ]
-        for options, reason in cases:
-            with self.subTest(reason=reason, options=options):
-                self.given([self.READ_BODY, self.UNREAD_BODY, hidden], visible_limit=2, **options)
-                path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
-                queue = path.read_bytes()
-                with patch.dict(os.environ, self.env, clear=True):
-                    result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                                waits=Waits(2, 0, 0, 0, 0, 0, 0),
-                                                now_fn=lambda: EVENING.replace(hour=10))
-                self.assertEqual((result.state, result.reason), ('skipped', 'unread_set_unverified'))
-                self.assertIn('coverage=' + reason, result.detail)
-                state = json.loads(self.state.read_text())
-                self.assertEqual(state['selections'], [])
-                self.assertEqual(state['moved'], [])
-                self.assertEqual(path.read_bytes(), queue)
-                self.assertEqual(state['offsets'].get('only', 0), 0)
-                self.assertNotIn('sender-', result.detail)
-                self.assertNotIn('subject-', result.detail)
 
-    def test_ambiguous_identity_below_first_page_skips_and_restores_top(self):
-        from lib import outlook_refresh
-        self.given([self.READ_BODY, self.UNREAD_BODY, UNREAD, UNREAD], visible_limit=2)
-        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
-        before = path.read_bytes()
-        with patch.dict(os.environ, self.env, clear=True):
-            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
-                                        now_fn=lambda: EVENING.replace(hour=10))
-        self.assertEqual((result.state, result.reason), ('skipped', 'unread_set_unverified'))
-        self.assertIn('coverage=coverage_identity_ambiguous', result.detail)
-        state = json.loads(self.state.read_text())
-        self.assertEqual(state['selections'], [])
-        self.assertEqual(state['offsets'], {'only': 0})
-        self.assertEqual(path.read_bytes(), before)
 
     def test_coverage_deadline_skips_and_restores_top_before_any_action(self):
         from lib.outlook_ui import Window
@@ -1202,247 +1109,21 @@ class RefreshTest(FakeOutlookCase):
         self.assertEqual(state['selections'], [])
         self.assertEqual(state['offsets'], {'only': 0})
 
-    def test_failed_tab_switch_reports_requested_and_observed_tabs(self):
-        from lib import outlook_refresh
-        self.given(tabs={'focused': [self.READ_BODY], 'other': [UNREAD]},
-                   tab_switch_ignored=True)
-        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
-        before = path.read_bytes()
-        with patch.dict(os.environ, self.env, clear=True), redirect_stderr(io.StringIO()):
-            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
-                                        now_fn=lambda: EVENING.replace(hour=10))
-        self.assertEqual((result.state, result.reason), ('failed', 'ui_error'))
-        self.assertEqual(result.detail, 'at switch_tab: tab_switch_failed requested=other '
-                         'before=focused observed=focused')
-        self.assertEqual(path.read_bytes(), before)
-        state = json.loads(self.state.read_text())
-        self.assertEqual(state['selections'], [])
-        self.assertEqual(self.unread_labels(state), {UNREAD['label']})
 
-    def test_titled_and_untitled_drafts_skip_refresh_without_restart(self):
-        from lib import outlook_refresh
-        for title in (f'Re: subject-000 • {ACCOUNT}', ''):
-            with self.subTest(title=title):
-                self.given([self.READ_BODY], windows=[ORDINARY, COMPOSE | {'title': title}],
-                           draft_window_ids=[14])
-                path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
-                with patch.dict(os.environ, self.env, clear=True):
-                    outcome = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                                  waits=Waits(2, 0, 0, 0, 0, 0, 0),
-                                                  now_fn=lambda: EVENING.replace(hour=10))
-                self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
-                self.assertNotIn('opened_at', json.loads(path.read_text())[0])
-                self.assert_no_restart()
 
-    def test_unreadable_untitled_offscreen_window_allows_refresh(self):
-        from lib import outlook_refresh
-        self.given([self.READ_BODY], windows=[TOOLBAR, ORDINARY, UNTITLED_OFFSCREEN],
-                   unresolved_window_ids=[15], after_launch=[TOOLBAR, ORDINARY, UNTITLED_OFFSCREEN])
-        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
-        with patch.dict(os.environ, self.env, clear=True):
-            outcome = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                          waits=Waits(2, 0, 0, 0, 0, 0, 0),
-                                          now_fn=lambda: EVENING.replace(hour=10))
-        self.assertEqual((outcome.state, outcome.reason), ('succeeded', 'refreshed'))
-        state = json.loads(self.state.read_text())
-        self.assertEqual(state['selections'], [self.READ_BODY['label']])
-        self.assertEqual(state['moved'], [])
-        self.assertIn('opened_at', json.loads(path.read_text())[0])
 
-    def test_refresh_worker_placement_and_entry_share_intake_host(self):
-        catalog = json.loads((ROOT / 'ops/config/services.json').read_text())['services']
-        services = {s['key']: s for s in catalog}
-        intake_env = services['outlook-intake']['environments'][0]
-        refresh_env = services['outlook-refresh']['environments'][0]
-        self.assertEqual(refresh_env['runs_on'], intake_env['runs_on'])
-        plist = plistlib.loads((ROOT / refresh_env['deploy_mechanism']).read_bytes())
-        self.assertEqual(plist['WorkingDirectory'], '{{REPO}}')
-        self.assertEqual(plist['Umask'], 0o077)
-        self.assertNotIn('RunAtLoad', plist)
-        self.assertIn('from lib.outlook_refresh import main; raise SystemExit(main())', plist['ProgramArguments'])
-        self.assertEqual(plist['StartCalendarInterval'], calendar_for_window((7, 15), (19, 15), 30))
-        installer = (ROOT / 'bin/install-outlook-intake.sh').read_text()
-        self.assertIn('LABEL="com.carr.outlook-refresh"', installer)
-        self.assertNotIn('launchctl bootstrap', '\n'.join(line for line in installer.splitlines()
-                                                         if not line.lstrip().startswith(('print(', 'print '))))
 
-    def test_same_host_refresh_worker_opens_only_read_mail_without_filing(self):
-        from lib import outlook_refresh
-        self.given([FILE_A, self.READ_BODY, self.UNREAD_BODY])
-        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test'),
-                                  listed('m2', self.UNREAD_BODY, 'c1@client.test')])
-        self.guide.write_text('')
-        write_settings(self.home, self.repo, account=ACCOUNT, driver=str(self.tmp / 'bin/cua-driver'))
-        with patch.dict(os.environ, self.env, clear=True):
-            outcome = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                          waits=Waits(2, 0, 0, 0, 0, 0, 0),
-                                          now_fn=lambda: EVENING.replace(hour=10))
-        self.assertEqual(outcome.state, 'succeeded')
-        state = json.loads(self.state.read_text())
-        self.assertEqual(state['selections'], [self.READ_BODY['label']])
-        self.assertEqual(state['moved'], [])
-        entries = json.loads(path.read_text())
-        self.assertIn('opened_at', entries[0])
-        self.assertNotIn('opened_at', entries[1])
-        self.assertEqual(len(entries), 2, 'opening is not a body-decoded acknowledgement')
 
-    def test_refresh_ui_error_names_failed_step(self):
-        from lib import outlook_refresh
-        from lib.outlook_ui import UiError
-        self.given([self.READ_BODY])
-        self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
-        output = io.StringIO()
-        with patch.dict(os.environ, self.env, clear=True), \
-                patch('lib.outlook_refresh.Window._inbox_rows',
-                      side_effect=UiError('inbox_row_not_found', step='_inbox_rows')), \
-                redirect_stderr(output):
-            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
-                                        now_fn=lambda: EVENING.replace(hour=10))
-        self.assertEqual((result.state, result.reason), ('failed', 'ui_error'))
-        self.assertIn('outlook-refresh UiError at _inbox_rows: inbox_row_not_found',
-                      output.getvalue())
-        self.assertEqual(result.detail, 'at _inbox_rows: inbox_row_not_found')
 
-    def test_refresh_search_error_detail_reaches_cli(self):
-        from lib import outlook_refresh
-        from lib.outlook_ui import UiError
-        self.given([self.READ_BODY])
-        self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
-        with patch.dict(os.environ, self.env, clear=True), \
-                patch('lib.outlook_refresh.Window.search',
-                      side_effect=UiError('search_field_not_found', step='search')):
-            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
-                                        now_fn=lambda: EVENING.replace(hour=10))
-        self.assertEqual((result.state, result.reason), ('failed', 'search_field_not_found'))
-        self.assertEqual(result.detail, 'at search: search_field_not_found')
-        output = io.StringIO()
-        with patch('lib.outlook_refresh.run', return_value=result), redirect_stdout(output):
-            self.assertEqual(outlook_refresh.main(), 1)
-        self.assertIn('at search: search_field_not_found', output.getvalue())
 
-    def test_refresh_failure_logs_category_without_exception_content(self):
-        from lib import outlook_refresh
-        from lib.outlook_ui import CuaError, UiError
-        self.given([self.READ_BODY])
-        self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
-        for error, reason, message in (
-                (UiError, 'ui_error', 'Outlook UI interaction failed'),
-                (OSError, 'os_error', 'Operating system operation failed'),
-                (CuaError, 'cua_error', 'Computer automation call failed')):
-            with self.subTest(error=error.__name__):
-                output = io.StringIO()
-                with patch.dict(os.environ, self.env, clear=True), \
-                        patch('lib.outlook_refresh.Window.front',
-                              side_effect=error('private subject sender body\nsecret')), \
-                        redirect_stderr(output), redirect_stdout(output):
-                    result = outlook_refresh.run(
-                        self.repo, EVENING.replace(hour=10),
-                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
-                        now_fn=lambda: EVENING.replace(hour=10))
-                self.assertEqual((result.state, result.reason), ('failed', reason))
-                self.assertEqual(output.getvalue(),
-                                 f'outlook-refresh {error.__name__}: {message}\n')
 
-    def test_refresh_worker_refuses_wrong_account_and_active_user(self):
-        from lib import outlook_refresh
-        wrong = window(13, 'Inbox • other@example.test', 1230, 768)
-        for ignored, missing, idle, reason, presses in (
-                (False, False, 3600, 'refreshed', ['All Accounts']),
-                (True, False, 3600, 'wrong_account', ['All Accounts']),
-                (False, True, 3600, 'wrong_account', []),
-                (False, False, 1, 'user_active', [])):
-            with self.subTest(ignored=ignored, missing=missing, idle=idle):
-                self.given([self.READ_BODY], after_launch=[wrong], idle_seconds=idle,
-                           account_press_ignored=ignored, account_button_missing=missing)
-                path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
-                with patch.dict(os.environ, self.env, clear=True):
-                    result = outlook_refresh.run(
-                        self.repo, EVENING.replace(hour=10),
-                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
-                        now_fn=lambda: EVENING.replace(hour=10))
-                self.assertEqual(result.reason, reason)
-                state = json.loads(self.state.read_text())
-                self.assertEqual(state['presses'], presses)
-                self.assertEqual(state['moved'], [])
-                self.assertEqual(state['selections'],
-                                 [self.READ_BODY['label']] if reason == 'refreshed' else [])
-                self.assertEqual('opened_at' in json.loads(path.read_text())[0],
-                                 reason == 'refreshed')
 
-    def test_read_email_is_opened_unchanged_and_stamped(self):
-        self.given([FILE_A, self.READ_BODY, NEWS])
-        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
-        outcome, state = self.run_triage()
-        self.assertEqual(outcome.state, 'succeeded')
-        self.assertIn(self.READ_BODY['label'], state['selections'])
-        self.assertNotIn('Mark Unread', state['presses'])
-        entry = json.loads(path.read_text())[0]
-        self.assertEqual(entry['intake_note'], 'kept')
-        self.assertRegex(entry['opened_at'], r'^2\d{3}-')
-        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
-        self.assertIn('opened: 1', self.report())
 
-    def test_unread_email_is_never_selected_and_waits_until_joe_reads_it(self):
-        self.given([FILE_A, NEWS, self.UNREAD_BODY])
-        path = self.refresh_list([listed('m2', self.UNREAD_BODY, 'c1@client.test')])
-        outcome, state = self.run_triage()
-        self.assertEqual((outcome.state, outcome.reason), ('succeeded', 'filed'))
-        self.assertNotIn(self.UNREAD_BODY['label'], state['selections'])
-        self.assertNotIn('Mark Unread', state['presses'])
-        self.assertEqual(self.unread_labels(state), {self.UNREAD_BODY['label']})
-        self.assertIn('unread_skipped: 1', self.report())
-        self.assertNotIn('opened_at', json.loads(path.read_text())[0])
-        self.assertEqual([m[0] for m in state['moved']], [FILE_A['label']])
 
-    def test_a_search_that_crosses_the_close_opens_nothing(self):
-        self.given([FILE_A, self.READ_BODY])
-        path = self.refresh_list([listed('m5', self.READ_BODY, 'news@news.test')])
-        closed = EVENING.replace(hour=21, minute=16)
-        outcome, state = self.run_triage(
-            clock=lambda: closed if json.loads(self.state.read_text()).get('search_typed') else EVENING)
-        self.assertEqual((outcome.state, outcome.reason), ('timed_out', 'window_closed'))
-        self.assertEqual(state['selections'], [])
-        self.assertEqual(state['moved'], [])
-        self.assertNotIn('opened_at', json.loads(path.read_text())[0])
 
-    def test_an_ignored_click_is_not_counted_as_opened(self):
-        self.given([FILE_A, self.READ_BODY], search_click_ignored=True)
-        path = self.refresh_list([listed('m6', self.READ_BODY, 'news@news.test')])
-        outcome, state = self.run_triage()
-        self.assertEqual(outcome.state, 'succeeded')
-        self.assertNotIn(self.READ_BODY['label'], state['selections'])
-        self.assertIn('  not_opened: 1', self.report())
-        self.assertNotRegex(self.report(), r'(?m)^  opened: ')
-        self.assertNotIn('opened_at', json.loads(path.read_text())[0])
 
-    def test_unmatched_entries_are_counted_and_left_alone(self):
-        self.given([FILE_A, self.READ_BODY])
-        path = self.refresh_list([listed('m3', self.READ_BODY, 'nobody@example.com')])
-        outcome, state = self.run_triage()
-        self.assertEqual(outcome.state, 'succeeded')
-        self.assertIn('not_found: 1', self.report())
-        self.assertNotIn('opened_at', json.loads(path.read_text())[0])
 
-    def test_capped_per_night_never_opened_first_then_least_recently_opened(self):
-        self.assertEqual(triage.Limits().max_refreshes, 50)
-        self.given([self.READ_BODY])
-        self.refresh_list([listed('a', self.READ_BODY, 'a@example.com', opened_at='2026-10-19T01:00:00Z'),
-                           listed('b', self.READ_BODY, 'b@example.com'),
-                           listed('c', self.READ_BODY, 'c@example.com', opened_at='2026-10-10T01:00:00Z'),
-                           listed('d', self.READ_BODY, 'd@example.com')])
-        self.run_triage(limits=triage.Limits(max_refreshes=3))
-        searched = [json.loads(c[2])['text'] for c in self.called('cua-driver') if c[1] == 'type_text']
-        self.assertEqual(searched, ['b@example.com', 'd@example.com', 'c@example.com'])
 
-    def test_malformed_list_fails_loudly(self):
-        self.given([FILE_A])
-        self.refresh_list([{'message_id': 'm4'}])
-        outcome, state = self.run_triage()
-        self.assertEqual((outcome.state, outcome.reason), ('failed', 'refresh_list_invalid'))
-        self.assertEqual(state['moved'], [])
 
 
 class UnreadAgreementTest(unittest.TestCase):
