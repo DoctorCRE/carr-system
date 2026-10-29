@@ -11,10 +11,12 @@ import signal
 import time
 from unittest.mock import patch
 import unittest
+import uuid
 from datetime import datetime, timedelta, timezone
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
+from lib.fence import DATA_SENTENCE  # noqa: E402
 
 
 class HeadlessTests(unittest.TestCase):
@@ -192,6 +194,7 @@ print(sys.argv[sys.argv.index('--correlation')+1]+' aa000000-0000-4000-8000-0000
         self.assertEqual(args['argv'][args['argv'].index('--permission-prompts')+1], 'none')
         self.assertIn('--allowedTools', args['argv'])
         self.assertIn('<scheduled-task name="test-task">', args['prompt'])
+        self.assertIn(DATA_SENTENCE, args['prompt'])
         self.assertIn('acceptance_contract', args['prompt'])
         self.assertIn('carr-headless-completion/v1', args['prompt'])
         self.assertEqual(Path(args['cwd']), self.repo.resolve())
@@ -245,7 +248,7 @@ print(sys.argv[sys.argv.index('--correlation')+1]+' aa000000-0000-4000-8000-0000
         calls = [json.loads(s) for s in (self.home / 'records.jsonl').read_text().splitlines()]
         self.assertEqual(len(calls), 1, 'delivered episodes are not sent again')
         a = json.loads(calls[0][-1])
-        self.assertIn('test-task', a['idempotency_key'])
+        self.assertEqual(uuid.UUID(a['idempotency_key']).version, 5)
         self.assertEqual(calls[0][:2], ['call', 'add-loop'])
 
     def test_double_fire_skips_but_failure_can_retry(self):

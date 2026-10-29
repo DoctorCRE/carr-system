@@ -25,6 +25,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError } from "../src/tools.js";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const joe = { id: "10000000-0000-0000-0000-000000000002", slug: "joe",
   display: "Joe", human: true, via: "mcp", client_id: "claude" };
@@ -74,7 +75,7 @@ class Fake {
 }
 
 async function amend(decision_id, fake = new Fake()) {
-  const args = { idempotency_key: `k-${decision_id}`, decision_id,
+  const args = { idempotency_key: derivedIdempotencyKey("test", `k-${decision_id}`), decision_id,
                  title: "a corrected title", reason: "the title was wrong" };
   try { return { fake, result: await TOOLS["update-decision"].handler(fake, joe, args), error: null }; }
   catch (e) { return { fake, result: null, error: e instanceof ToolError ? (e.payload ?? e.detail ?? e) : e }; }
@@ -157,7 +158,7 @@ test("detach-decision resolves the short form too, instead of reporting not_atta
   let error = null;
   try {
     await TOOLS["detach-decision"].handler(fake, joe, {
-      idempotency_key: "k-detach", decision_id: SHORT, from: "C-127",
+      idempotency_key: "00000571-0000-4000-8000-000000000118", decision_id: SHORT, from: "C-127",
       reason: "this ruling is not about that client" });
   } catch (e) { error = e instanceof ToolError ? (e.payload ?? e.detail ?? e) : e; }
 

@@ -51,6 +51,8 @@ import os
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO)
+from lib.credential_file import read_env_file  # noqa: E402
 
 LEVEL_NAME = {0: "Prospective", 1: "Building", 2: "Established", 3: "Core", None: "unrecorded"}
 
@@ -62,9 +64,7 @@ def db_url() -> str | None:
         return url
     env = os.path.expanduser("~/.config/carr/db.env")
     if os.path.exists(env):
-        for line in open(env, encoding="utf-8"):
-            if line.startswith("CARR_DB_EXPORTER_URL="):
-                return line.split("=", 1)[1].strip().strip("\"'")
+        return read_env_file(env, syntax="prefix", duplicates="first", names=("CARR_DB_EXPORTER_URL",)).get("CARR_DB_EXPORTER_URL")
     return None
 
 

@@ -1,6 +1,7 @@
 """Synthetic capture outages must remain visible without releasing recordings."""
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import subprocess
@@ -33,6 +34,33 @@ class CaptureOutcomesTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.log.stop()
         self.tmp.cleanup()
+
+    def test_publish_binds_partner_evidence_receipt_and_retry_key_to_stored_source(self) -> None:
+        quote = "Move Synthetic Dental into legal"
+        report = {"deal_updates": [{"deal_id": "synthetic-deal", "candidate_id": "activity-existing",
+                  "summary": "Phase proposal", "evidence": quote,
+                  "phase_move": {"value": "legal", "started_on": None}}]}
+        requests = []
+
+        def request(_method, _url, body, _headers):
+            requests.append(body)
+            return 200, {"candidate_ids": ["phase-receipt"]}
+
+        for extra in ("", " Another sentence."):
+            bridge.post_call.write_private(self.session / bridge.post_call.REPORT_FILE, report)
+            bridge.post_call.write_private(self.session / "transcript.json",
+                                           {"segments": [{"speaker": "Joe", "text": quote + extra}]})
+            shaped = bridge.post_call.sanitized_candidates(self.session)
+            with patch.object(bridge, "http_request", side_effect=request):
+                self.assertTrue(bridge.post_batch(self.cfg, self.session, "/capture/candidates",
+                                                shaped["legacy_items"], shaped["bindings"], "legacy"))
+        first, second = requests
+        source = first["evidence_sources"][0]
+        self.assertEqual(source["speaker"], "joe")
+        self.assertEqual(source["quote_sha256"], hashlib.sha256(quote.encode()).hexdigest())
+        self.assertNotEqual(source["source_sha256"], second["evidence_sources"][0]["source_sha256"])
+        self.assertNotEqual(first["idempotency_key"], second["idempotency_key"])
+        self.assertNotIn("segments", json.dumps(first))
 
     def test_poll_distinguishes_verified_pending_from_unavailable(self) -> None:
         with patch.object(bridge, "http_request", return_value=(200, {"state": "recording", "meeting_record": None})):
@@ -68,6 +96,38 @@ class CaptureOutcomesTests(unittest.TestCase):
             self.assertEqual(bridge.poll_cmd(self.cfg, self.session), 0)
         request.assert_called_once()
         self.assertTrue((self.session / "mic.caf").exists())
+
+    def test_claim_refusal_logs_public_error_code(self) -> None:
+        (self.session / ".capture.json").unlink()
+        (self.session / "announcement.json").write_text('{"announcement_fired_at":"2026-01-05T12:00:00Z"}')
+        (self.session / "meta.json").write_text('{"started":"2026-01-05T12:00:00Z"}')
+        (self.session / "call-context.json").write_text('{"mode":"other_call"}')
+        with patch.object(bridge, "http_request", return_value=(503, {"error": "device_actor_not_provisioned"})):
+            self.assertNotEqual(bridge.claim_cmd(self.cfg, self.session), 0)
+        self.assertIn("error=device_actor_not_provisioned", bridge.LOG_PATH.read_text())
+
+    def test_rejections_log_only_valid_public_codes(self) -> None:
+        calls = (
+            lambda: bridge.status_cmd(self.cfg, self.session, "recording", None),
+            lambda: bridge.post_batch(self.cfg, self.session, "/capture/items", [{}], [], "fixture"),
+            lambda: bridge.file_post_call_report(self.cfg, self.session, "fixture", 0),
+        )
+        with patch.object(bridge.post_call, "report_sha256", return_value="fixture"):
+            for call in calls:
+                for status, response, expected in (
+                    (503, {"error": "database_unavailable", "hint": "private-hint"}, "database_unavailable"),
+                    (409, {"error": "bad code", "hint": "private-hint"}, "unparsed"),
+                    (503, {"error": "a" * 65}, "unparsed"),
+                    (503, {"error": 123}, "unparsed"),
+                    (503, {}, "unparsed"),
+                ):
+                    with self.subTest(status=status, response=response), patch.object(bridge, "http_request", return_value=(status, response)):
+                        bridge.LOG_PATH.unlink(missing_ok=True)
+                        call()
+                        log = bridge.LOG_PATH.read_text()
+                        self.assertIn(f"error={expected}", log)
+                        self.assertNotIn("private-hint", log)
+                        self.assertNotIn("bad code", log)
 
     def test_claim_outage_remains_retryable_with_same_nonce(self) -> None:
         (self.session / ".capture.json").unlink()

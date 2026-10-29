@@ -265,12 +265,16 @@ class PagedPublicationTests(unittest.TestCase):
         self.path = root / "boards/carr-v5.json"
         self.store = {}
         self.writes = []
-        self.enterContext(patch.object(board, "call_verb", side_effect=self.call))
+        self.census_writes = []
+        self.enterContext(patch.object(board, "board_reply", side_effect=self.call))
         self.inventory = {'schema': 'system-work-external.v1', 'items': [], 'complete': True,
                           'observed_at': '2026-10-21T12:00:00Z', 'coverage': [], 'completed_pr_history': True}
         self.enterContext(patch('system_work_cache.cached_github', return_value=self.inventory))
 
     def call(self, verb, args):
+        if verb == "publish-census-inventory":
+            self.census_writes.append(copy.deepcopy(args))
+            return {"ok": True}
         key = args["board_id"]
         if verb == "read-progress-board":
             return {"ok": True, "snapshot": copy.deepcopy(self.store.get(key)), "questions": []}
@@ -294,11 +298,14 @@ class PagedPublicationTests(unittest.TestCase):
         self.assertEqual(published["history"], {})
         self.assertEqual(published["costs"], {"state": "partial"})
         self.assertIn("external_inventory", published)
+        self.assertEqual(len(self.census_writes), 1)
+        self.assertEqual(self.census_writes[0]["payload"], {"items": self.inventory["items"]})
         for retired in ("notes", "deliverables", "decisions", "ledger", "task_counts", "milestones", "github_sync", "pagination"):
             self.assertNotIn(retired, published)
         writes = len(self.writes)
         board.publish_board("carr-v5", costs={"state": "partial"})
         self.assertNotIn("carr-v5", self.writes[writes:], "an unchanged system board is not republished")
+
 
 
 if __name__ == "__main__":

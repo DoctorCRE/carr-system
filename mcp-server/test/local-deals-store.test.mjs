@@ -80,6 +80,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       if (name === "party") await c.query("alter table party drop column if exists vendor_assignment_version");
     }
     await c.query('alter table activity add column if not exists email_source jsonb');
+    await c.query('alter table activity add column if not exists email_context jsonb');
     for (const table of ['actor','party','deal']) await c.query(`alter table ${table} add primary key(id)`);
     await c.query(readMigration('0951_deal_vendor_assignments.sql').split('-- Current catalog reseal')[0]);
     const touch = schema.match(/CREATE FUNCTION public\.trg_touch_row\(\) RETURNS trigger[\s\S]*?end \$\$;/)?.[0];
@@ -622,7 +623,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       });
       await executeRegisteredTool(c, actor, 'set-prospect-engagement-status', {
         client_id: id(3), status: 'inactive', base_version: 2,
-        reason: 'Synthetic deferral', idempotency_key: 'synthetic-overdue-inactive',
+        reason: 'Synthetic deferral', idempotency_key: '00000571-0000-4000-8000-000000000152',
       });
       await c.query(readFileSync(path.join(root, 'migrations/0923_deal_status_next_step.sql'), 'utf8'));
       await c.query('set local role carr_reader');
@@ -911,7 +912,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       const forward = readFileSync(path.join(root,'migrations/0920_prospect_engagement_status.sql'),'utf8');
       await c.query(forward);
       await executeRegisteredTool(c,actor,'set-prospect-engagement-status',{
-        client_id:id(3),status:'inactive',base_version:2,reason:'Synthetic deferral',idempotency_key:'synthetic-roundtrip'});
+        client_id:id(3),status:'inactive',base_version:2,reason:'Synthetic deferral',idempotency_key:'00000571-0000-4000-8000-000000000153'});
       const records = async () => Object.fromEntries(await Promise.all(
         ['party','client','deal','deal_note','lead','event','tool_call'].map(async table =>
           [table,(await c.query(`select * from ${table} order by 1`)).rows])));
@@ -948,9 +949,9 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await t.test('a new prospect created over a lead starts active and appears on the board', async () => transaction(async () => {
       await c.query("insert into party(id,kind,name,created_by,updated_by) values($1,'org','Synthetic Intake',$2,$2)",[id(2),actor.id]);
       const lead = await executeRegisteredTool(c,actor,'new-lead',{
-        party_id:id(2),stage:'opportunity',idempotency_key:'synthetic-intake-lead'});
+        party_id:id(2),stage:'opportunity',idempotency_key:'00000571-0000-4000-8000-000000000154'});
       const client = await executeRegisteredTool(c,actor,'new-client',{
-        party_id:id(2),status:'prospect',acquisition_source:'other',idempotency_key:'synthetic-intake-client',
+        party_id:id(2),status:'prospect',acquisition_source:'other',idempotency_key:'00000571-0000-4000-8000-000000000155',
         research_evidence:{sources:[{url:'https://example.com/synthetic',observed_at:'2026-01-01T00:00:00Z'}],
           field_evidence:{practice_name:[0],address:[0],phone:[0],specialty:[0],practitioners:[0],hours:[0]},discrepancies:[]}});
       await c.query("insert into deal(id,client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,$2,'Synthetic Intake Assignment','renewal','research','joe',$3,$3)",[id(4),client.client_id,actor.id]);
@@ -963,7 +964,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await fixture(false);
       await c.query("update client set status='prospect' where id=$1",[id(3)]);
       await assert.rejects(TOOLS['set-prospect-engagement-status'].handler(c,{...actor,human:false,slug:'automation'}, {
-        client_id:id(3),status:'inactive',base_version:2,reason:'Synthetic automated inference',idempotency_key:'synthetic-automation'
+        client_id:id(3),status:'inactive',base_version:2,reason:'Synthetic automated inference',idempotency_key:'00000571-0000-4000-8000-000000000156'
       }),e=>e.payload?.error==='human_confirmation_required');
       assert.equal((await TOOLS['deal-room-board'].handler(c,actor,{})).deals.length,1);
       assert.deepEqual((await c.query('select * from lead')).rows,[]);
@@ -975,7 +976,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query("update client set status='prospect',prospect_engagement_status='active' where id=$1", [id(3)]);
       const before = (await TOOLS['deal-room-board'].handler(c,actor,{})).deals[0];
       const args = {client_id:id(3),status:'inactive',base_version:before.client_version,
-        reason:'Synthetic pipeline review',idempotency_key:'synthetic-inactive'};
+        reason:'Synthetic pipeline review',idempotency_key:'00000571-0000-4000-8000-000000000157'};
       const inactive = await executeRegisteredTool(c,actor,'set-prospect-engagement-status',args);
       assert.deepEqual((await TOOLS['deal-room-board'].handler(c,actor,{})).deals,[]);
       const leads = (await TOOLS['lead-board'].handler(c,actor,{workspace:'leads'})).leads;
@@ -986,7 +987,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal(leads[0].prospect_client_version,inactive.client_version);
       assert.deepEqual(await executeRegisteredTool(c,actor,'set-prospect-engagement-status',args),{replayed:true,...inactive});
       const active = await executeRegisteredTool(c,actor,'set-prospect-engagement-status',{
-        ...args,status:'active',base_version:inactive.client_version,idempotency_key:'synthetic-active'});
+        ...args,status:'active',base_version:inactive.client_version,idempotency_key:'00000571-0000-4000-8000-000000000158'});
       assert.deepEqual((await TOOLS['deal-room-board'].handler(c,actor,{})).deals.map(d=>d.id),[id(4)]);
       const after = (await TOOLS['lead-board'].handler(c,actor,{workspace:'leads'})).leads;
       assert.equal(after.length,1);
@@ -1003,7 +1004,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await fixture(false);
       await c.query("update client set status='prospect' where id=$1",[id(3)]);
       const result = await executeRegisteredTool(c,actor,'set-prospect-engagement-status',{
-        client_id:id(3),status:'inactive',base_version:2,reason:'Synthetic lost confirmation',idempotency_key:'synthetic-readback'});
+        client_id:id(3),status:'inactive',base_version:2,reason:'Synthetic lost confirmation',idempotency_key:'00000571-0000-4000-8000-000000000159'});
       await c.query('set local role carr_reader');
       const detail = await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)});
       assert.equal(detail.client_id,id(3));
@@ -1024,7 +1025,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query("insert into lead(id,registry_ref,party_id,client_id,stage,notes,score,created_by,updated_by) values($1,'L-900001',$2,$3,'opportunity','Synthetic retained history',72,$4,$4)",[id(30),id(2),id(3),actor.id]);
       await c.query("insert into deal(id,client_id,name,deal_type,phase,operating_state,parking_reason,parking_note,parked_at,parked_by,created_by,updated_by) values($1,$2,'Synthetic Parked Assignment','renewal','research','parked','other','Synthetic hold',now(),$3,$3,$3)",[id(31),id(3),actor.id]);
       const inactive = await executeRegisteredTool(c,actor,'set-prospect-engagement-status',{
-        client_id:id(3),status:'inactive',base_version:2,reason:'Synthetic deferral',idempotency_key:'synthetic-linked-inactive'});
+        client_id:id(3),status:'inactive',base_version:2,reason:'Synthetic deferral',idempotency_key:'00000571-0000-4000-8000-000000000160'});
       await c.query('set local role carr_reader');
       assert.deepEqual((await TOOLS['deal-board'].handler(c)).deals,[]);
       const leads = (await TOOLS['lead-board'].handler(c,actor,{workspace:'leads',lead_id:id(30)}));
@@ -1033,7 +1034,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal(leads.leads.length,1);
       await c.query('reset role');
       await executeRegisteredTool(c,actor,'set-prospect-engagement-status',{
-        client_id:id(3),status:'active',base_version:inactive.client_version,reason:'Synthetic renewed interest',idempotency_key:'synthetic-linked-active'});
+        client_id:id(3),status:'active',base_version:inactive.client_version,reason:'Synthetic renewed interest',idempotency_key:'00000571-0000-4000-8000-000000000161'});
       const board = (await TOOLS['deal-room-board'].handler(c,actor,{})).deals;
       assert.equal(board.length,2);
       assert.equal(board.find(d=>d.id===id(31)).operating_state,'parked');
@@ -1045,7 +1046,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await fixture(false);
       await c.query("update client set status='prospect' where id=$1",[id(3)]);
       await assert.rejects(executeRegisteredTool(c,actor,'set-prospect-engagement-status',{
-        client_id:id(3),status:'inactive',base_version:2,expected_actor:'dell',reason:'Synthetic review',idempotency_key:'synthetic-actor-switch'
+        client_id:id(3),status:'inactive',base_version:2,expected_actor:'dell',reason:'Synthetic review',idempotency_key:'00000571-0000-4000-8000-000000000162'
       }),e=>e.payload?.error==='account_changed');
       assert.equal((await TOOLS['deal-room-board'].handler(c,actor,{})).deals.length,1);
     }));
@@ -1055,7 +1056,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query("update client set status='prospect',prospect_engagement_status='inactive' where id=$1",[id(3)]);
       await c.query("update party set contact_state='do_not_contact' where id=$1",[id(2)]);
       await assert.rejects(executeRegisteredTool(c,actor,'set-prospect-engagement-status',{
-        client_id:id(3),status:'active',base_version:2,reason:'Synthetic review',idempotency_key:'synthetic-protected-party'
+        client_id:id(3),status:'active',base_version:2,reason:'Synthetic review',idempotency_key:'00000571-0000-4000-8000-000000000163'
       }),e=>e.payload?.error==='prospect_party_protected');
       assert.equal((await c.query('select count(*)::int n from lead')).rows[0].n,0);
       assert.equal((await c.query('select count(*)::int n from event')).rows[0].n,0);
@@ -1063,7 +1064,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
 
     await t.test('engagement updates reject stale versions, invalid status, empty reasons and merged clients', async () => transaction(async () => {
       await fixture(true);
-      const args = {client_id:id(3),status:'active',base_version:1,reason:'Synthetic review',idempotency_key:'synthetic-invalid'};
+      const args = {client_id:id(3),status:'active',base_version:1,reason:'Synthetic review',idempotency_key:'00000571-0000-4000-8000-000000000164'};
       await assert.rejects(executeRegisteredTool(c,actor,'set-prospect-engagement-status',{...args,status:'parked'}), error=>error.payload?.error==='value_not_in_declared_vocabulary');
       await assert.rejects(executeRegisteredTool(c,actor,'set-prospect-engagement-status',{...args,reason:' '}), error=>error.payload?.error==='engagement_reason_required');
       await c.query('update client set merged_into=$2 where id=$1',[id(3),id(6)]);

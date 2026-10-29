@@ -16,18 +16,30 @@ RISKY = ("*launchagents*", "*.plist", "install-*.sh", "*/install-*.sh",
 SKIP_CI = re.compile(r"\[(skip ci|ci skip|no ci|skip actions|actions skip)\]", re.I)
 
 
+def docs_only(pr, files):
+    return bool(files) and len(files) == pr["changed_files"] and all(
+        f.get(key, "x.md").lower().endswith(".md") for f in files for key in ("filename", "previous_filename"))
+
+
+def card_allowed(pr, files):
+    return (pr.get("user", {}).get("type") == "Bot" or docs_only(pr, files) or
+            any(re.fullmatch(r"Card: WR[0-9]+\.S[0-9]+\.J[0-9]+", line)
+                for line in (pr.get("body") or "").splitlines()))
+
+
 def approved(pr, files, comments):
     if SKIP_CI.search(pr.get("title") or ""):
         return False
     sha_line = f'Reviewed-SHA: {pr["head"]["sha"]}'
-    # GitHub lists comments oldest first; the newest VERDICT naming the current head wins.
-    verdicts = [lines[0] for lines in (c["body"].splitlines() for c in comments)
-                if lines[:1] in (["VERDICT: APPROVE"], ["VERDICT: CHANGES"]) and sha_line in lines]
+    # The newest verdict naming the current head wins across both sources.
+    verdicts = [lines[0] for lines in ((c.get("body") or "").splitlines() for c in comments)
+                if len(lines) >= 3 and lines[0] in ("VERDICT: APPROVE", "VERDICT: CHANGES")
+                and lines[1] == sha_line and lines[2].startswith("Reviewer: ")
+                and lines[2][10:].strip()]
     if verdicts[-1:] == ["VERDICT: CHANGES"]:
         return False
     # Markdown-only PRs carry no runtime behaviour, so they merge on green CI at any size (Joe 2026-10-27).
-    if files and len(files) == pr["changed_files"] and all(
-            f.get(key, "x.md").lower().endswith(".md") for f in files for key in ("filename", "previous_filename")):
+    if docs_only(pr, files):
         return True
     risky = any(f.get("status") == "added" and f.get("filename", "").startswith(("bin/", "hooks/", "ops/", ".github/workflows/")) for f in files) or any(fnmatch.fnmatchcase(f.get(key, "").lower(), pattern)
                 for f in files for key in ("filename", "previous_filename") for pattern in RISKY)
@@ -51,13 +63,13 @@ def api(path, payload=None):
 
 def run(event, repo):
     root = f"repos/{repo}"
-    def status(sha, state):
+    def status(sha, state, description="No skip-CI title; small safe diff or current-head approval required"):
         api(f"{root}/statuses/{sha}", {"context": "review-gate", "state": state,
-            "description": "No [skip ci] title; small safe diff or current-head approval required"})
+            "description": description})
     if "merge_group" in event:
         status(event["merge_group"]["head_sha"], "success")
         return
-    number = event.get("number") or event["issue"]["number"]
+    number = event.get("number") or (event.get("pull_request") or event["issue"])["number"]
     pr = api(f"{root}/pulls/{number}")
     if pr["base"]["ref"] != "main":
         return
@@ -65,10 +77,18 @@ def run(event, repo):
     status(sha, "pending")
     files = api(f"{root}/pulls/{number}/files?per_page=100")
     comments = api(f"{root}/issues/{number}/comments?per_page=100")
-    passed = approved(pr, files, comments)
-    if api(f"{root}/pulls/{number}")["head"]["sha"] == sha:
-        status(sha, "success" if passed else "failure")
+    reviews = api(f"{root}/pulls/{number}/reviews?per_page=100")
+    comments = sorted(comments + [r for r in reviews if r.get("state") not in ("DISMISSED", "PENDING")], key=lambda item: item.get("submitted_at") or item.get("created_at") or "")
+    card_ok = card_allowed(pr, files)
+    passed = card_ok and approved(pr, files, comments)
+    latest = api(f"{root}/pulls/{number}")
+    if latest["head"]["sha"] == sha and latest.get("body") == pr.get("body"):
+        description = ("No skip-CI title; small safe diff or current-head approval required" if card_ok else
+                       "Missing PR body line: Card: WR<number>.S<number>.J<number>")
+        status(sha, "success" if passed else "failure", description)
+        print(description)
+        return int(not passed)
 
 
 if __name__ == "__main__":
-    run(json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text()), os.environ["GITHUB_REPOSITORY"])
+    raise SystemExit(run(json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text()), os.environ["GITHUB_REPOSITORY"]))

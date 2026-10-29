@@ -222,8 +222,11 @@ class Ledger:
     def contains_item(self, print_: str, since: float) -> bool:
         if not self.path.exists():
             return False
+        latest = {}
+        for row in map(json.loads, self.path.read_text().splitlines()):
+            latest[row['key']] = row
         return any(row.get('fingerprint') == print_ and row['at'] >= since
-                   for row in map(json.loads, self.path.read_text().splitlines()))
+                   and row['state'] != 'aborted_before_dispatch' for row in latest.values())
 
     def append(self, key: str, kind: str, state: str, print_: str, at: float,
                sent_item_id: str | None = None) -> None:
@@ -794,9 +797,7 @@ def open_form(item: Mail | Event, waits: ui.Waits = ui.Waits()) -> ComposeWindow
     try:
         pid, main = _main_window(waits)
         windows = _cua('list_windows', {'pid': pid}).get('windows') or []
-        if any(w['window_id'] != main['window_id']
-               and min((w.get('bounds') or {}).get(k, 0) for k in ('width', 'height')) >= 400
-               for w in windows):
+        if ui.compose_window_open(pid, [w for w in windows if w['window_id'] != main['window_id']]):
             raise UiFailure('compose_window_open')
         before = {w['window_id'] for w in windows}
         window: ComposeWindow | EventWindow

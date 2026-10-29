@@ -97,13 +97,9 @@ ROUTINE_ENV_FILE.chmod(0o600)
 FAILED: list[str] = []
 
 
-def check(label: str, cond: bool, detail: str = "") -> bool:
-    if cond:
-        print(f"  ok    {label}")
-    else:
-        print(f"  FAIL  {label}" + (f"\n        {detail}" if detail else ""))
-        FAILED.append(label)
-    return bool(cond)
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(detail="\n        {detail}", failures=FAILED)
 
 
 def unreachable_env(extra: Optional[dict] = None) -> dict:
@@ -329,16 +325,31 @@ def postgres_parity():
     bins = postgres_bin_dir()
     schema = """-- CARR GRANTS (bin/schema-snapshot.sh) — not produced by pg_dump.
 revoke all on function public.private_action() from public;
+revoke all on function public.restore_parity_identity_longer_than_a_name(timestamp with time zone, uuid) from public;
+revoke all on function public.vector_out(public.vector) from public;
 grant usage on schema public to carr_writer;
 grant usage on schema public to carr_reader;
 grant select, insert, update on table public.fixture to carr_writer;
 grant select on table public.fixture to carr_reader;
 grant execute on function public.private_action() to carr_writer;
+grant execute on function public.restore_parity_identity_longer_than_a_name(timestamp with time zone, uuid) to carr_writer;
+grant select on table public.paren_columns to carr_reader;
 -- PostgreSQL database dump
 """
     raw = schema.encode()
     blob = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
     declared = declaration(schema, 'a' * 40, blob)
+
+    def create_objects(conn, extension=True):
+        conn.execute('create table public.fixture(id integer generated always as identity, derived integer generated always as (1) stored, value integer); create table public.denied(id integer generated always as identity, derived integer generated always as (1) stored, value integer)')
+        conn.execute("create function public.private_action() returns integer language sql as 'select 1'")
+        # An identity past 63 bytes: the catalog read once came back as `name`
+        # and truncated it, so a declared revoke matched nothing (WR-000560).
+        conn.execute("create function public.restore_parity_identity_longer_than_a_name(timestamp with time zone, uuid) returns integer language sql as 'select 1'")
+        # A column whose own name holds parentheses (production's v_export_leads).
+        conn.execute('create table public.paren_columns("Source Detail (V-ID / event / referrer)" text)')
+        if extension:
+            conn.execute('create extension vector with schema public')
     with postgres_fixture_group(), DisposablePostgres('carr-security-', bins / 'pg_ctl') as fixture:
         with socket.socket() as listener:
             listener.bind(('127.0.0.1', 0))
@@ -350,8 +361,7 @@ grant execute on function public.private_action() to carr_writer;
             fixture.run(command, check=True, capture_output=True, timeout=60)
         with psycopg.connect(f'host=127.0.0.1 port={port} user=fixture_owner dbname=postgres', autocommit=True) as conn:
             conn.execute('create role app_writer; create role app_reader; create role carr_writer; create role carr_reader')
-            conn.execute('create table public.fixture(id integer generated always as identity, derived integer generated always as (1) stored, value integer); create table public.denied(id integer generated always as identity, derived integer generated always as (1) stored, value integer)')
-            conn.execute("create function public.private_action() returns integer language sql as 'select 1'")
+            create_objects(conn)
             apply_grants(conn, declared)
             result = check_parity(conn, declared)
             check('local PG generated columns before writable columns preserve positive and negative role probes', result['verdict'] == 'PASS', str(result))
@@ -378,6 +388,16 @@ grant execute on function public.private_action() to carr_writer;
             conn.execute('grant execute on function public.private_action() to public')
             result = check_parity(conn, declared)
             check('local PG PUBLIC execute leak fails parity', result['verdict'] == 'FAIL', str(result))
+            conn.execute('revoke execute on function public.private_action() from public')
+            conn.execute('grant execute on function public.restore_parity_identity_longer_than_a_name(timestamp with time zone, uuid) to public')
+            result = check_parity(conn, declared)
+            check('local PG PUBLIC execute leak on a function identity past 63 bytes fails parity',
+                  result['verdict'] == 'FAIL' and any('restore_parity_identity_longer_than_a_name(timestamp with time zone, uuid):execute' in m
+                                                       for m in result['mismatches']), str(result))
+            conn.execute('revoke execute on function public.restore_parity_identity_longer_than_a_name(timestamp with time zone, uuid) from public')
+            result = check_parity(conn, declared)
+            check('local PG extension functions the admin owns keep their declared revoke (none uncarried)',
+                  result['verdict'] == 'PASS' and result['uncarried_extension_revokes'] == 0, str(result))
 
             # The hosted restore admin is NOT a superuser. Neon's neondb_owner holds
             # the app roles through the provider's CREATEROLE grant, which on
@@ -390,15 +410,22 @@ grant execute on function public.private_action() to carr_writer;
                 conn.execute(f'grant {role} to restore_admin with admin true, inherit false, set false')
             conn.execute('create database restored owner restore_admin')
         target = f'host=127.0.0.1 port={port} user=restore_admin dbname=restored'
+        # Neon creates extension objects as its own superuser (cloud_admin), so the
+        # restore admin does not own them, exactly as in production (read
+        # 2026-10-27: every pgvector function owner=cloud_admin, PUBLIC execute).
+        with psycopg.connect(f'host=127.0.0.1 port={port} user=fixture_owner dbname=restored', autocommit=True) as conn:
+            conn.execute('create extension vector with schema public')
         with psycopg.connect(target, autocommit=True) as conn:
-            conn.execute('create table public.fixture(id integer generated always as identity, derived integer generated always as (1) stored, value integer); create table public.denied(id integer generated always as identity, derived integer generated always as (1) stored, value integer)')
-            conn.execute("create function public.private_action() returns integer language sql as 'select 1'")
+            create_objects(conn, extension=False)
         try:
             result = rebuild_security(target, declared)
         except Exception as exc:  # the refusal is the failure under test
             result = {'verdict': f'{type(exc).__name__}: {exc}'}
         check('a non-superuser restore admin holding the app roles with ADMIN but no SET '
               'rebuilds and passes security parity', result['verdict'] == 'PASS', str(result))
+        check('an extension function the restore admin cannot own keeps PUBLIC execute, as in '
+              'production, and is reported as one uncarried declared revoke',
+              result.get('uncarried_extension_revokes') == 1, str(result))
 
 
 def main() -> int:

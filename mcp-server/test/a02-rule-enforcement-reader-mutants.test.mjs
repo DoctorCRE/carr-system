@@ -16,6 +16,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const SRC = fileURLToPath(new URL("../src/", import.meta.url));
 const WORK = mkdtempSync(join(tmpdir(), "a02-rule-enforcement-mutants-"));
@@ -161,7 +162,7 @@ const receipt = () => ({ schema_version: "rule-enforcement-fallback-receipt.v1",
   receipt_id: "f0000000-0000-4000-8000-000000000001", rule_id: FULL_ID, rule_version: 1,
   fallback_kind: "refuse_closed", procedure_ref: "p", recorded_by: "joe",
   created_at: "2026-09-26T00:00:00Z" });
-const args = () => ({ idempotency_key: `k-${Math.random()}`, rule_id: FULL_ID.slice(0, 8),
+const args = () => ({ idempotency_key: derivedIdempotencyKey("test", `k-${Math.random()}`), rule_id: FULL_ID.slice(0, 8),
   fallback_kind: "refuse_closed", procedure_ref: "p", reason: "r" });
 
 /** T2: a short id reaches SQL only after resolveRuleId turned it into the full uuid. */

@@ -37,7 +37,7 @@ import {
   withFailureRecording,
   wrapNeonRows,
 } from "../src/trace.js";
-import { dispatch } from "../src/mcp.js";
+import { dispatch } from "./helpers/budgeted-dispatch.mjs";
 import { auditIdentity } from "../src/tools.js";
 
 const A_CORR = "9f3b2c1a-4d5e-4f60-8a1b-0123456789ab";
@@ -305,7 +305,7 @@ test("recordWorkerFailure: a new recurrence invalidates monitoring evidence but 
 // ────────────────────────────────────────────────────────────────────────
 // INCIDENT NUMBERING — the day prefix and the sequence must come from ONE
 // clock. This writer used to count against to_char(now(), ...) (the SERVER's
-// timezone) and then stamp the ref from `new Date()` (the CLIENT's). The two
+// timezone) and then stamp the ref from the client's clock. The two
 // agree only on a UTC server, and a Worker talking to Neon is UTC on both
 // ends, so nothing here could ever have caught the split — which is precisely
 // why these fakes now hand back a server day that is NOT today's.

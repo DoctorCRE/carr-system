@@ -87,6 +87,40 @@ class WatchdogTests(unittest.TestCase):
         rows = watchdog.read_latest(self.root / self.config["paths"]["findings"])
         self.assertEqual({f["kind"] for f in rows.values()}, {"job_failed"})
 
+    def test_a_degraded_receipt_stays_open_until_a_healthy_run(self):
+        def receipt(state, **counts):
+            return "outlook-intake-receipt " + json.dumps(
+                {"counts": counts, "reason": "decoder_degraded" if state == "degraded" else "processed",
+                 "state": state}, sort_keys=True)
+        router = 'email-router-receipt {"counts": {}, "state": "succeeded"}'
+        reply = subprocess.CompletedProcess([], 0, "PID\tStatus\tLabel\n-\t0\tcom.carr.fixture\n", "")
+        logs = ["\n".join((receipt("degraded", decoder_alarm=1, decoder_block_verification_bp=9879,
+                                    decoder_sender_bp=4000, emails=3), router, "")),
+                "\n".join((receipt("degraded", decoder_alarm=0, decoder_sender_bp=3900), router, "")),
+                "\n".join((receipt("succeeded", decoder_sender_bp=9100), router, ""))]
+        with patch.object(watchdog, "SOURCE", self.source), \
+             patch.object(watchdog.subprocess, "run", return_value=reply), \
+             patch.object(watchdog.shutil, "disk_usage", return_value=(100, 50, 50)):
+            self.log.write_text(logs[0])
+            self.assertEqual(watchdog.scan(self.root, self.config), 0)
+            context = watchdog.digest(self.root, self.config)
+            self.assertIn("com.carr.fixture degraded (decoder_degraded)", context)
+            self.assertIn("block_verification 98.8%, sender 40.0%", context)
+            self.assertNotIn("emails", context)
+            self.log.write_text(logs[1])
+            watchdog.scan(self.root, self.config)
+            self.assertIn("sender 39.0%", watchdog.digest(self.root, self.config))
+            self.log.write_text(logs[2])
+            watchdog.scan(self.root, self.config)
+        self.assertEqual(watchdog.digest(self.root, self.config), "")
+
+    def test_a_split_receipt_reports_rates_from_the_run_counts(self):
+        line = "outlook-intake-receipt " + json.dumps(
+            {"counts": {"run": {"decoder_alarm": 1, "decoder_sender_bp": 4000, "emails": 3},
+                        "backlog": {"unmatched": 2}},
+             "reason": "decoder_degraded", "state": "degraded"}, sort_keys=True)
+        self.assertEqual(watchdog.degraded_receipt([line]), "(decoder_degraded): sender 40.0%")
+
     def test_disk_clears_at_ten_percent(self):
         for free, count in ((9.99, 1), (10, 0), (50, 0)):
             with self.subTest(free=free):

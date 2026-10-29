@@ -269,6 +269,78 @@ class RuleClaimGateTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.run_hook(self.turn(assistant(text))).get('decision'), 'block')
 
+    def test_infrastructure_rules_do_not_require_guidance_enforcement(self):
+        for text in [
+            'I added a Cloudflare firewall rule that blocks the control room…',
+            'I added a firewall rule.',
+            'The WAF rule is now in place.',
+            'I created a rate-limit rule.',
+            'I saved a rate limit rule.',
+            'I added a ruleset rule.',
+            'I created a route rule.',
+            'The DNS rule has been created.',
+            'I added a Cloudflare ruleset.',
+            'I added a rule to the Cloudflare firewall.',
+            'I created a rule in the WAF.',
+            'I added a rule to the Cloudflare firewall and a DNS rule.',
+        ]:
+            with self.subTest(text=text):
+                self.assertNotEqual(self.run_hook(self.turn(assistant(text)))
+                                    .get('decision'), 'block')
+
+    def test_reworded_infrastructure_guidance_claims_block(self):
+        for text in [
+            'I added a DNS rule: check Cloudflare first before asking Joe.',
+            'I added a route rule: ask Joe before merging anything.',
+            'I added a DNS rule so that I always check Cloudflare first.',
+            'I saved a rate limit rule: from now on I check the quota before running jobs.',
+            'I added a route rule so that we check screenshots.',
+            'I added a route rule and we ask Joe before merging.',
+            'I added a route rule, ask Joe before merging.',
+            'I added a DNS rule check Cloudflare first.',
+            'I added a route rule that I follow before merging.',
+        ]:
+            with self.subTest(text=text):
+                self.assertEqual(self.run_hook(self.turn(assistant(text)))
+                                 .get('decision'), 'block')
+
+    def test_infrastructure_rules_do_not_exempt_guidance_claims(self):
+        for text in [
+            'I saved a rule on DNS questions: always check Cloudflare before asking Joe.',
+            'I added a rule for route reviews: never merge without a screenshot.',
+            'I created a rule for rate limit incidents: always page Joe first.',
+            'I saved a DNS rule in memory: always check Cloudflare before asking Joe.',
+            'I added a route rule so I always run the tests before merging.',
+            'I added a rule in the ruleset of standing instructions: always ask first.',
+            'I added a guidance and firewall rule.',
+            'I saved a DNS rule: always check Cloudflare first.',
+            'I saved a DNS rule in `MEMORY.md`.',
+            'I added a firewall rule and a durable rule.',
+            'I added a WAF rule and saved a lesson.',
+            'I created a DNS rule and added a taught rule.',
+            "The rate-limit rule is now in place and I'll remember this.",
+            'I added a route rule. The rule is saved.',
+            'I saved a lesson after creating the firewall rule.',
+            'I added a guidance rule about firewall configuration.',
+            'I added a rule to CLAUDE.md about WAF configuration.',
+            'I added a rule to AGENTS.md about DNS configuration.',
+            'I added a skill rule about rate-limit configuration.',
+            'I created a doctrine rule about route configuration.',
+            'I added a firewall rule to AGENTS.md.',
+            'I added a firewall rule to `AGENTS.md`.',
+            'I added a WAF rule to `docs/CLAUDE.md`.',
+            'I added a DNS rule to `.agents/skills/check/SKILL.md`.',
+            'I added a WAF rule to CLAUDE.md.',
+            'I added a doctrine firewall rule.',
+            'I added a behavioural DNS rule.',
+            'I added a taught WAF rule.',
+            'I added a skill firewall rule.',
+            'I added a rule to the Cloudflare firewall and a durable rule.',
+        ]:
+            with self.subTest(text=text):
+                self.assertEqual(self.run_hook(self.turn(assistant(text)))
+                                 .get('decision'), 'block')
+
     def test_email_rule_reports_do_not_require_local_enforcement_code(self):
         for text in [
             'I created an Outlook mail rule. I checked Gmail delivery.',
@@ -336,13 +408,12 @@ class RuleClaimGateTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn('parse_error', result.stderr)
 
-    def test_registered_in_project_and_managed_stop_hooks(self):
-        for path in ['.claude/settings.json', 'ops/config/hooks.json']:
-            with self.subTest(path=path):
-                document = json.loads((REPO / path).read_text())
-                groups = document.get('hooks', document)['Stop']
-                commands = [hook['command'] for group in groups for hook in group['hooks']]
-                self.assertEqual(sum('rule-claim-gate.py' in c for c in commands), 1)
+    def test_fires_once_per_stop_from_the_managed_hooks(self):
+        managed = json.loads((REPO / 'ops/config/hooks.json').read_text())['Stop']
+        self.assertEqual(sum('rule-claim-gate.py' in hook['command']
+                             for group in managed for hook in group['hooks']), 1)
+        # A second project-level entry made every Mac Stop run the gate twice.
+        self.assertNotIn('rule-claim-gate.py', (REPO / '.claude/settings.json').read_text())
 
     def test_string_assistant_content_still_blocks(self):
         self.assertEqual(self.run_hook(self.turn(message('assistant', "I'll remember.")))

@@ -11,7 +11,7 @@ test('financial lifecycle callers share one strict calendar-date rule', async ()
     '2025-02-29', '2026-13-01', '2026-00-01', '2026-09-00', '2026-09-31',
     '2026-09-01T00:00:00Z', ' 2026-09-01', '2026-09-01\n'])
     assert.equal(isCalendarDate(date), false, String(date));
-  for (const file of ['tools.js', 'invoice-tracker.js']) {
+  for (const file of ['tools.js', 'invoice-tracker.ts']) {
     const source = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8');
     assert.match(source, /import \{ isCalendarDate \} from ["']\.\/calendar-date\.ts["']/);
     const caller = file === 'tools.js' ? source.slice(source.indexOf('"update-deal": {'), source.indexOf('"reassign-deal": {')) : source;

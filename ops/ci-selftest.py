@@ -28,9 +28,15 @@ SEED_DSN = "DATABASE_URL=" + "postgres://prod:" + "hunter2hunter2" + "@ep-x.neon
 
 RESULTS: list[tuple] = []
 
-def check(label, ok, detail=""):
-    RESULTS.append((label, bool(ok), detail))
-    print(f"  {'PASS' if ok else 'FAIL'}  {label}" + (f"  ({detail})" if detail and not ok else ""))
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(
+    ok="  PASS  {label}",
+    detail="  ({detail})",
+    record=lambda label, ok, detail: RESULTS.append((label, bool(ok), detail)),
+)
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -106,47 +112,11 @@ def run(args, env=None, shell_cmd=None, timeout=60, root=None):
         p = subprocess.run(cmd, capture_output=True, text=True, cwd=root, env=e, timeout=timeout)
     return p.returncode, ANSI.sub("", (p.stdout or "") + (p.stderr or ""))
 
-def test_freshness_checks_the_tree_without_requiring_main_ancestry():
-    with tempfile.TemporaryDirectory() as directory:
-        root = pathlib.Path(directory)
-        (root / "ops/config").mkdir(parents=True)
-        (root / "ops/ci.sh").write_bytes(CI.read_bytes())
-        shutil.copy2(REPO / "ops/node_test_summary.py", root / "ops/node_test_summary.py")
-        (root / "ops/config/ci-check-scope.json").write_text('{}')
-        env = fixture_env()
-        def git(*args):
-            return subprocess.run(["git", *args], cwd=root, env=env, check=True,
-                                  capture_output=True, text=True).stdout.strip()
-        git("init", "-q")
-        git("config", "user.email", "fixture@example.invalid")
-        git("config", "user.name", "Fixture")
-        (root / "source.txt").write_text("first\n")
-        git("add", "source.txt")
-        git("commit", "-qm", "first")
-        first = git("rev-parse", "HEAD")
-        git("update-ref", "refs/remotes/origin/main", first)
-        def freshness():
-            return subprocess.run(["/bin/bash", str(root / "ops/ci.sh"), "--strict", "--only", "freshness"],
-                                  cwd=root, env=env, capture_output=True, text=True, timeout=15)
-        result = freshness()
-        check("freshness runs without a duplicate config checker", result.returncode == 0, result.stdout + result.stderr)
-        (root / "source.txt").write_text("second\n")
-        git("commit", "-qam", "second")
-        git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"))
-        git("checkout", "-q", "--detach", first)
-        result = freshness()
-        check("a valid tree passes without containing the latest main", result.returncode == 0,
-              result.stdout + result.stderr)
-        blob = git("rev-parse", "HEAD:source.txt")
-        subprocess.run(["git", "update-index", "--index-info"], cwd=root, env=env,
-                       input=f"0 {'0' * 40}\tsource.txt\n"
-                             f"100644 {blob} 1\tsource.txt\n"
-                             f"100644 {blob} 2\tsource.txt\n"
-                             f"100644 {blob} 3\tsource.txt\n",
-                       text=True, check=True, capture_output=True)
-        result = freshness()
-        check("an unresolved integration tree fails", result.returncode == 1
-              and "unresolved" in result.stdout, result.stdout + result.stderr)
+def test_retired_freshness_class_is_not_available():
+    rc, out = run(["--list"])
+    check("freshness is absent from the class inventory", rc == 0 and "freshness" not in out, out)
+    rc, out = run(["--strict", "--only", "freshness"])
+    check("retired freshness class refuses instead of silently passing", rc == 64 and "no such class" in out, out)
 
 
 def test_no_green_without_running():
@@ -154,9 +124,9 @@ def test_no_green_without_running():
         exe = shutil.which(sh)
         if not exe:
             continue
-        rc, out = run(["--strict", "--only", "freshness"], shell_cmd=[exe])
+        rc, out = run(["--strict", "--only", "dependency"], shell_cmd=[exe])
         claims_green = "CI passed" in out
-        actually_ran = re.search(r"(OK|FAIL|SKIP)\s+freshness", out) is not None
+        actually_ran = re.search(r"(OK|FAIL|SKIP)\s+dependency", out) is not None
         check(f"{sh}: never reports green without running a class",
               rc == 0 and claims_green and actually_ran,
               f"claimed green={claims_green} ran={actually_ran}")
@@ -339,9 +309,13 @@ def test_database_scope_receipts():
     scope = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(scope)
     for path in ("migrations/9999_probe.sql", "mcp-server/test/new-proof.sql",
-                 "ops/new-db-gate.py", ".github/workflows/ci.yml"):
+                 "ops/new-db-gate.py", ".github/workflows/ci.yml",
+                 "mcp-server/src/proof.js", "lib/proof.py",
+                 "ops/db_acceptance_programs.py", "requirements.lock"):
         check(f"database scope runs {path}", scope.needs_full([path]))
     check("database scope skips app-only change", not scope.needs_full(["web/app.js"]))
+    check("database scope skips docs-only changes", not scope.needs_full(["README.md", "docs/guide.md"]))
+
     with tempfile.TemporaryDirectory() as directory:
         event = pathlib.Path(directory) / "event.json"
         event.write_text('{}')
@@ -381,7 +355,6 @@ def test_hosted_migration_ownership():
                                          "CI_DRAFT": draft, "GITHUB_STEP_SUMMARY": str(pathlib.Path(directory) / "summary"),
                                          "CI_NEEDS": json.dumps({"scope": {"result": "success", "outputs": {"full": full}},
                                                                  "classes": {"result": classes},
-                                                                 "fallow": {"result": "success"},
                                                                  "migration-fixtures": {"result": fixtures}})})
             check(f"aggregate scope={full!r} fixtures={fixtures} classes={classes}", result.returncode == expected)
     record = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Record the tested tree and class contract")
@@ -880,7 +853,7 @@ def test_failed_gate_logs_survive_exit():
                   and FIXTURE_TOKEN not in redacted.read_text()
                   and "<redacted:github-token:40 chars>" in redacted.read_text())
         retained += list(timeout_dirs)
-        result = subprocess.run(["bash", str(root / "ops/ci.sh"), "--strict", "--only", "freshness"],
+        result = subprocess.run(["bash", str(root / "ops/ci.sh"), "--strict", "--only", "dependency"],
                                 cwd=root, env={**fixture_env(), "RUNNER_TEMP": logs},
                                 capture_output=True, text=True, timeout=15)
         check("passing runs remove their log directory", result.returncode == 0
@@ -1095,7 +1068,7 @@ def test_hosted_draft_lifecycle():
             ["node", "-e", script, json.dumps([expression, context])], text=True))
 
     for filename, lanes, verdict_name, command in (
-            ("ci.yml", ("scope", "classes", "migration-fixtures", "fallow"),
+            ("ci.yml", ("scope", "classes", "migration-fixtures"),
              "checks", "verdict"),
             ("doc-drift.yml", ("check",), "verdict", "drift-verdict")):
         wf = _hosted_workflow(filename)
@@ -1106,6 +1079,17 @@ def test_hosted_draft_lifecycle():
         check(f"{filename}: all non-PR full-suite triggers survive",
               {"merge_group", "schedule", "workflow_dispatch"} <= set(events))
         jobs = wf["jobs"]
+        if filename == "doc-drift.yml":
+            baseline = next(st for st in jobs['check']['steps'] if st.get('name', '').startswith('Summarize drift'))
+            for event in ('pull_request', 'merge_group', 'schedule', 'workflow_dispatch'):
+                check(f"drift baseline event {event}", bool(evaluate(baseline['if'],
+                    {'github': {'event_name': event}})) == (event in ('schedule', 'workflow_dispatch')))
+        else:
+            weekly = _hosted_workflow('fallow.yml')
+            check("Fallow runs weekly outside the PR aggregate",
+                  set(weekly['on']) == {'schedule', 'workflow_dispatch'}
+                  and weekly['on']['schedule'] == [{'cron': '20 6 * * 1'}]
+                  and 'fallow' not in jobs)
         verdict = jobs.get(verdict_name, {})
         check(f"{filename}: verdict always evaluates and waits for every lane",
               verdict.get("if") == "${{ always() }}" and set(verdict.get("needs", [])) == set(lanes))
@@ -1510,7 +1494,7 @@ def main(argv=None):
         test_each_class_runs_in_exactly_one_hosted_group()
         return 1 if any(not ok for _, ok, _ in RESULTS) else 0
     for fn in (test_failed_gate_logs_survive_exit, test_worktree_python_selection,
-               test_freshness_checks_the_tree_without_requiring_main_ancestry,
+               test_retired_freshness_class_is_not_available,
                test_no_green_without_running,
                test_strict_turns_skip_into_failure,
                test_binding_reports_missing_wrangler_as_skipped,

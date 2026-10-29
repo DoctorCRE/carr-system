@@ -41,10 +41,11 @@ FAKE_ROUTE.chmod(0o700)
 os.environ["TAILSCALE_ROUTE_BIN"] = str(FAKE_ROUTE)
 
 
-def check(label: str, cond: bool, detail: object = "") -> None:
-    print(f"{'PASS' if cond else 'FAIL'}  {label}" + ("" if cond or not detail else f": {detail}"))
-    if not cond:
-        FAILS.append(label)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(ok="PASS  {label}", fail="FAIL  {label}", detail=": {detail}", failures=FAILS)
 
 
 def stub(root: Path, status_out: str, status_rc: int) -> tuple[Path, Path]:

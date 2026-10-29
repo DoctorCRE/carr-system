@@ -50,14 +50,15 @@ PASS = 0
 FAIL: list[str] = []
 
 
-def check(label: str, condition: bool, detail: str = "") -> None:
-    global PASS
-    if condition:
-        PASS += 1
-        print(f"  ok    {label}")
-    else:
-        FAIL.append(label)
-        print(f"  FAIL  {label}  {detail}")
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(
+    fail="  FAIL  {label}  {detail}",
+    detail=None,
+    failures=FAIL,
+    counters={"PASS": "pass"},
+    ns=globals(),
+)
 
 
 def digest(path: Path) -> str:

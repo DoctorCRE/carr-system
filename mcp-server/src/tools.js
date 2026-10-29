@@ -3,7 +3,7 @@ import { vendorMeetingTools } from "./vendor-meetings.js";
 import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.ts";
 import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.ts";
-import { invoiceTrackerTools } from "./invoice-tracker.js";
+import { invoiceTrackerTools } from "./invoice-tracker.ts";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.ts";
@@ -23,17 +23,19 @@ import { readLeadWorkspace, LEAD_WORKSPACE_SCHEMA, validateStageReview, lockLead
 // The doctrine store's verbs (P2, decision 82a2fb62) live in doctrine.js as a
 // factory over this file's envelope machinery, merged at the bottom.
 import { doctrineTools } from "./doctrine.js";
+import { orgConventionTools, conventionProposals } from "./org-conventions.js";
 import { situationRetrievalTools } from "./situation-retrieval.js";
 import { investigationTools } from "./investigation.js";
 import { docConversationTools } from "./doc-conversation.js";
-import { docSuggestionTools } from "./doc-suggestions.js";
+import { docSuggestionTools } from "./doc-suggestions.ts";
 import { docActivityTools } from "./doc-activity.js";
 import { whatsNewTools } from "./whats-new.js";
 import { MEETING_MODE_WRITE_VERBS, meetingModeTools } from "./meeting-mode.js";
-import { notificationTools } from "./notifications.js";
-import { sessionIdentityTools } from "./session-identity.js";
-import { dispatchSpineTools } from "./dispatch-spine.js";
+import { notificationTools } from "./notifications.ts";
+import { sessionIdentityTools } from "./session-identity.ts";
+import { dispatchSpineTools } from "./dispatch-spine.ts";
 import { workShapeTools } from "./work-shape.ts";
+import { workQueueTools } from "./work-queue.js";
 import { workRequestIntakeTools } from "./work-request-intake.js";
 import { workPortfolioTools } from "./work-portfolio.js";
 import { leaseTermComparisonTools } from "./lease-term-comparison.js";
@@ -43,11 +45,14 @@ import { clientPortalTools } from "./client-portal.ts";
 import { memoryTools } from "./memory.js";
 import { codexContinuityTools } from "./codex-continuity.js";
 import { incidentTools } from "./incident.js";
-import { resourceObservationTools } from "./resource-observation.v5.js";
+import { resourceObservationTools } from "./resource-observation.v5.ts";
 import { invoiceAutomation } from "./invoice-automation.js";
 import { emailDealProgressTools } from "./email-deal-progress.ts";
+import { derivedIdempotencyKey } from "./derived-key.ts";
+import { DURABLE_KEY_SHAPES, REPLAY_WINDOW, durableReceipt, replayReceipt } from "./replay-receipt.ts";
 import { emailNextStepTools } from "./email-next-step.ts";
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
+import { clearTheDeckTools } from "./clear-the-deck.js";
 import { addCalendarMeetingPrep } from "./calendar-meeting-prep.js";
 import { CALENDAR_AGENDA_BOARD, calendarSection, addCalendarContacts, addCalendarDealSuggestions } from "./brief-calendar.js";
 import { emailLeadProposalTools } from "./email-lead-proposal.ts";
@@ -84,11 +89,12 @@ import { salesforceReadRunStoreTools } from "./salesforce-read-run-store-rw02.v5
 import { V5BoundaryDoorRefusal, globalBoundariesDoorTools, passBoundaryDoor } from
   "./global-boundaries-door.v5.js";
 import { governedCorrespondenceStoreTools } from "./governed-correspondence-store.v5.js";
-import { assuranceHealthStoreTools } from "./assurance-health-store.v5.js";
+import { assuranceHealthStoreTools } from "./assurance-health-store.v5.ts";
 import { ruleContextRuntimeTools } from "./rule-context-runtime.v5.js";
 import { systemWorkTools } from "./system-work-census.v5.js";
 import { BOARD_ANSWER_WRITE_VERBS, boardAnswerTools } from "./board-answers.js";
-import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.js";
+import { censusInventoryTools } from "./census-inventory.js";
+import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.ts";
 import { partyIdentityTools } from "./party-identity.js";
 import { partyDuplicateCandidateTools } from "./party-duplicate-candidates.js";
 import { briefQueuePage, readBriefLoops, briefLoopKey, briefNeedsJoeKey, briefAssuranceKey } from "./brief-queues.ts";
@@ -313,10 +319,14 @@ export function auditIdentity(actor) {
   };
 }
 
+const UUID_KEY = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+
 async function withEnvelope(client, actor, verb, args, fn) {
   const key = args.idempotency_key;
   if (!key) throw new ToolError({ error: "missing_idempotency_key",
     hint: "generate a UUID per intended action; retries reuse the SAME key" });
+  if (typeof key !== "string" || !(UUID_KEY.test(key) || DURABLE_KEY_SHAPES[verb]?.test(key)))
+    throw new ToolError({ error: "invalid_idempotency_key", field: "idempotency_key" });
   const identity = auditIdentity(actor);
   // SIEP-11: replay authority is the exact operation manifest, never the bare
   // caller key. Binding the canonical operation and server-derived principal
@@ -345,11 +355,15 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || verb === "dismiss-email-proposal" || verb === "undo-call" || ["set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing", "clear-the-deck-apply"].includes(verb) || verb === "undo-call" || ["set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
-  const prior = await client.query("select request_hash, response from tool_call where idempotency_key=$1", [key]);
+  // A receipt older than REPLAY_WINDOW is not a replay: the key is unknown and the
+  // write runs as new (tool_call_expire frees the key on insert). A durable
+  // receipt is read back by key elsewhere and keeps replaying.
+  const prior = await client.query(`select request_hash, response from tool_call where idempotency_key=$1
+    and ($2 or created_at > now() - interval '${REPLAY_WINDOW}')`, [key, durableReceipt(verb, key)]);
   if (prior.rows.length) {
     if (prior.rows[0].request_hash !== hash) throw new ToolError({ error: "key_reuse" });
     const response = prior.rows[0].response;
@@ -362,7 +376,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
     `insert into tool_call (idempotency_key, verb, actor_id, request_hash, response, via, client_id,
        organization_tenant_id, sponsoring_human_slug, personal_scope, authorization_class, correlation_id)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-    [key, verb, actor.id, hash, JSON.stringify(result), actor.via || null, actor.client_id || null,
+    [key, verb, actor.id, hash, replayReceipt(result), actor.via || null, actor.client_id || null,
      identity.organization_tenant_id, identity.sponsoring_human_slug, identity.personal_scope,
      identity.authorization_class, identity.correlation_id]);
   return result;
@@ -664,6 +678,21 @@ function preferredMergeSurvivor(rows) {
     if (as[i] !== bs[i]) return as[i] > bs[i] ? a : b;
   }
   return new Date(a.created_at).getTime() <= new Date(b.created_at).getTime() ? a : b;
+}
+
+async function resolveDecisionAbout(client, actor, about) {
+  const refs = (Array.isArray(about) ? about : [about])
+    .map(r => String(r || "").trim()).filter(Boolean);
+  for (const ref of refs) {
+    if (/^WR-/i.test(ref)) {
+      const found = await client.query(
+        "select 1 from ops.work_request where ref = $1 and organization_tenant_id = $2", [ref.toUpperCase(), organizationTenantForActor(actor)]);
+      if (!found.rows.length) throw new ToolError({ error: "decision_about_work_request_not_found", field: "about", ref });
+      throw new ToolError({ error: "unsupported_decision_about", field: "about", ref });
+    }
+    await resolveSubject(client, ref);
+  }
+  return refs;
 }
 
 // [loop #278] The ONE place a decision gets mirrored onto the record it governs.
@@ -2316,6 +2345,19 @@ function assertSingleOwner(owner) {
   return raw.toLowerCase();
 }
 
+// Audit 3 F7: owner=claude is the autonomous drain queue, so only a full
+// (partner-attended) profile may fill it. No profile on the actor means a local
+// or break-glass door, which is already full authority.
+function assertClaudeOwnerAllowed(actor, owner) {
+  const profile = actor?.operational_profile;
+  if (profile && profile !== "full" && String(owner ?? "").trim().toLowerCase() === "claude")
+    throw new ToolError({ error: "claude_owner_requires_full_profile", profile,
+      hint: "owner=claude is the autonomous drain queue; a narrow profile files the loop for a partner (owner joe or dell) instead" });
+}
+// The surface that wrote a loop, shown on read-loop and loop-board so a reader
+// can weigh the text. Rows filed before this field existed read "unrecorded".
+const WRITER_SURFACE_SQL = "coalesce(extra_cells->>'writer_surface','unrecorded')";
+
 // ---------- Deal Room helpers (field-base concurrency, not record version) ----------
 
 
@@ -2460,7 +2502,12 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
 // they closed and which ball they opened, so the card goes back exactly. Any
 // later edit to the step, its date or one of its checklist items is newer work
 // and refuses the undo instead of being overwritten.
-async function undoAppliedNextStep(c, actor, dealId, candidate, key, args) {
+// A call proposal's write is filed under one derived UUID. Calls applied before
+// the envelope took only UUIDs were filed under `capture:<id>`; undo still reads those.
+const captureKey = id => derivedIdempotencyKey("capture-candidate", id);
+const captureKeys = id => [`capture:${id}`, captureKey(id)];
+
+async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args) {
   // Same lock order as resolve-candidate's apply: the checklist first, so a
   // partner completing one of the call's items waits for (or beats) the undo.
   await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0)) /* call-outcome:undo-items-lock */", [dealId]);
@@ -2469,15 +2516,15 @@ async function undoAppliedNextStep(c, actor, dealId, candidate, key, args) {
   await versionGuard(c, "deal", dealId, args.base_version);
   const events = (await c.query(
     `select field, old_value, new_value, recorded_at from event
-      where subject_type='deal' and subject_id=$1 and idempotency_key=$2 and field in ('next_step','next_date','next_action')
-      order by recorded_at, id /* call-outcome:undo-step-events */`, [dealId, key])).rows;
+      where subject_type='deal' and subject_id=$1 and idempotency_key=any($2::text[]) and field in ('next_step','next_date','next_action')
+      order by recorded_at, id /* call-outcome:undo-step-events */`, [dealId, keys])).rows;
   const first = field => events.find(row => row.field === field);
   const applied = events.filter(row => row.field === "next_step" && row.new_value?.next_action_id).at(-1);
   if (!first("next_step") || !first("next_date") || !applied) throw new ToolError({ error: "applied_change_not_found" });
   const newer = (await c.query(
     `select 1 from event where subject_type='deal' and subject_id=$1 and field in ('next_step','next_date')
-        and recorded_at > (select max(recorded_at) from event where subject_type='deal' and subject_id=$1 and idempotency_key=$2)
-      limit 1 /* call-outcome:undo-step-newer */`, [dealId, key])).rows;
+        and recorded_at > (select max(recorded_at) from event where subject_type='deal' and subject_id=$1 and idempotency_key=any($2::text[]))
+      limit 1 /* call-outcome:undo-step-newer */`, [dealId, keys])).rows;
   const items = (await c.query(
     `select n.id, n.status, (select count(*) from event e where e.subject_type='deal' and e.subject_id=$1
         and e.field in ('deal_item','deal_item_instruction') and e.new_value->>'item_id' = n.id::text) as events
@@ -3452,7 +3499,7 @@ export const TOOLS = {
 
   "today-triage": {
     write: false,
-    description: "What needs attention now: due actions, critical dates inside 14 days, and untriaged ingest. Due and overdue actions lead, then critical dates due today through 14 days, then remaining rows. Each group sorts oldest-first, with kind and id breaking ties. Optional owners='partners' selects both partners, machine seats, and unowned rows before limiting; default 'all' preserves shared triage. Optional limit is 1..50 (default 50). Pass next_cursor as cursor with the same owners filter to continue. Returns items, total for the filtered queue, has_more, and next_cursor. Continuation uses live rows and pins ordering to the first page's business date; it is not a snapshot.",
+    description: "What needs attention now: due actions, critical dates inside 14 days, and untriaged ingest. Due and overdue actions lead, then critical dates due today through 14 days, then remaining rows. Due actions and remaining rows sort most recent first, critical dates soonest first, with kind and id breaking ties. Optional owners='partners' selects both partners, machine seats, and unowned rows before limiting; default 'all' preserves shared triage. Optional limit is 1..50 (default 50). Pass next_cursor as cursor with the same owners filter to continue. Returns items, total for the filtered queue, has_more, and next_cursor. Continuation uses live rows and pins ordering to the first page's business date; it is not a snapshot.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       owners: { type: "string", enum: ["all", "partners"] },
       limit: { type: "integer", minimum: 1, maximum: 50 },
@@ -3468,14 +3515,14 @@ export const TOOLS = {
         try {
           if (typeof args.cursor !== "string" || !args.cursor.length || args.cursor.length > 1000) throw Error();
           after = JSON.parse(atob(args.cursor));
-          if (!after || after.v !== 1 || after.owners !== owners || !isCalendarDate(after.on) || after.on < "0001-01-01"
+          if (!after || after.v !== 2 || after.owners !== owners || !isCalendarDate(after.on) || after.on < "0001-01-01"
               || ![0, 1, 2].includes(after.rank)
               || !(after.due_on === null || (isCalendarDate(after.due_on) && after.due_on >= "0001-01-01"))
               || !["next_action", "post_call_action", "critical_date", "ingest"].includes(after.item_kind)
               || typeof after.id !== "string" || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(after.id)) throw Error();
         } catch { throw new ToolError({ error: "triage_cursor_invalid" }); }
       }
-      const rows = (await c.query(`with scoped as (
+      const rows = (await c.query(`with ranked as (
         select *, due_on::text as triage_due_on, coalesce($4::date, current_date)::text as triage_on,
           case when item_kind in ('next_action', 'post_call_action')
             and due_on <= coalesce($4::date, current_date) then 0
@@ -3483,13 +3530,20 @@ export const TOOLS = {
             and due_on between coalesce($4::date, current_date) and coalesce($4::date, current_date) + 14
             then 1 else 2 end as triage_rank
         from v_today_triage
+      ), keyed as (
+        select *, coalesce(case when triage_rank = 1 then 1 else -1 end * to_char(due_on, 'J')::integer, 9999999)
+          as triage_key
+        from ranked
+      ), scoped as (
+        select * from keyed
         where ($1::text = 'all' or owner is null or lower(owner) = any($2::text[]))
       ), totals as (select count(*) as triage_total from scoped)
       select page.*, totals.triage_total from totals left join lateral (
         select * from scoped
-        where $5::integer is null or (triage_rank, coalesce(due_on, 'infinity'::date), item_kind, id)
-          > ($5::integer, coalesce($6::date, 'infinity'::date), $7::text, $8::uuid)
-        order by triage_rank, due_on nulls last, item_kind, id
+        where $5::integer is null or (triage_rank, triage_key, item_kind, id)
+          > ($5::integer, coalesce(case when $5::integer = 1 then 1 else -1 end * to_char($6::date, 'J')::integer, 9999999),
+               $7::text, $8::uuid)
+        order by triage_rank, triage_key, item_kind, id
         limit $3
       ) page on true`, [owners, [...TODO_OWNER_PARTNER.keys()], limit + 1,
         after?.on ?? null, after?.rank ?? null, after?.due_on ?? null, after?.item_kind ?? null, after?.id ?? null])).rows;
@@ -3497,10 +3551,10 @@ export const TOOLS = {
       const page = rows.filter(row => !(row.id === null && row.item_kind === null));
       const has_more = page.length > limit;
       const last = page[Math.min(page.length, limit) - 1];
-      const next_cursor = has_more ? btoa(JSON.stringify({ v: 1, owners, on: last.triage_on,
+      const next_cursor = has_more ? btoa(JSON.stringify({ v: 2, owners, on: last.triage_on,
         rank: last.triage_rank, due_on: last.triage_due_on,
         item_kind: last.item_kind, id: last.id })) : null;
-      const items = page.slice(0, limit).map(({ triage_total, triage_rank, triage_on, triage_due_on, ...row }) => row);
+      const items = page.slice(0, limit).map(({ triage_total, triage_rank, triage_on, triage_due_on, triage_key, ...row }) => row);
       return { items, total, has_more, next_cursor };
     },
   },
@@ -3798,7 +3852,7 @@ export const TOOLS = {
                 coalesce((select jsonb_agg(jsonb_build_object('id',i.id,'title',i.item_title,
                   'due_on',to_jsonb(i.due_on)#>>'{}','status',i.status,'bullets',i.item_bullets,'source_ref',i.source_ref)
                   order by i.created_order,i.id) from v_deal_room_action i where i.deal_id=b.id
-                  and i.item_title is not null and i.status <> 'dropped'),'[]'::jsonb) as items,
+                  and i.item_title is not null and i.status not in ('dropped', 'expired')),'[]'::jsonb) as items,
                 (b.next_step is null or b.next_date is null) as next_step_required, b.market, b.segment,
                 b.client_id, b.client_ref, b.client_name, ce.client_status, ce.client_version,
                 ce.prospect_engagement_status, b.account_client_id, b.account_client_ref,
@@ -3905,6 +3959,35 @@ export const TOOLS = {
       if (rows.length > 1000)
         throw new ToolError({ error: "post_call_followups_limit_exceeded", limit: 1000 });
       return { schema_version: "post-call-followups.v1", candidates: rows, send: false };
+    },
+  },
+
+  "email-match-contacts": {
+    write: false,
+    description: "The Outlook intake's contact list: every address written in a live party's email field, in any market, as {address, ref, name, exact}. ref is the party's client, lead or vendor ref, one row per live role, or its P- ref when it holds none. A participant of an open deal holding no client, lead or vendor role also comes back with the deal's id as ref and the deal's name (v_email_deal_contact), so its mail logs on that deal. Merged-away and deleted parties never appear. exact=false marks a role address (info, front desk, office...) sharing its field with other addresses: it may serve many people.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+    handler: async (c) => {
+      const ROLE = /^(?:front-?desk|info|office|admin|contact|reception|billing|hello|team|support|scheduling|appointments?|sales|inquiries|enquiries|referrals?|records|staff|help|general)(?:[-.+].*)?$/u;
+      const rows = (await c.query(`
+        select coalesce(r.ref, p.ref) as ref, coalesce(nullif(btrim(p.name), ''), org.name, '') as name, p.email
+          from party p
+          left join party org on org.id = p.org_id
+          left join lateral (
+            select roster_ref as ref from client where party_id = p.id and merged_into is null
+            union all select registry_ref from lead where party_id = p.id
+            union all select vendor_ref from vendor where party_id = p.id and merged_into is null) r on true
+         where p.merged_into is null and p.deleted_at is null and p.email like '%@%'
+           and coalesce(r.ref, p.ref) is not null
+        union all
+        select "Deal ID"::text, coalesce("Name", ''), "Email" from v_email_deal_contact where "Email" like '%@%'
+         order by 1`)).rows;
+      const contacts = rows.flatMap(({ ref, name, email }) => {
+        const found = [...new Set((email.match(/[\p{L}\p{M}\p{N}_.+'-]+@[\p{L}\p{M}\p{N}_-]+(?:\.[\p{L}\p{M}\p{N}_-]+)+/gu) ?? [])
+          .map(address => address.toLowerCase()))];
+        return found.map(address => ({ address, ref, name,
+          exact: found.length === 1 || !ROLE.test(address.split('@')[0].replaceAll('_', '-')) }));
+      });
+      return { schema_version: "email-match-contacts.v1", contacts };
     },
   },
 
@@ -4068,6 +4151,7 @@ export const TOOLS = {
     } },
     handler: async (c, _a, args) => {
       const cols = `id as loop_id, kind, number, domain, blocker_class, blocker_detail, status,
+                    ${WRITER_SURFACE_SQL} as writer_surface,
                     title, body, owner, marker, since_text, unblocks, source_note, tier, personal_to,
                     to_jsonb(due_on)#>>'{}' as due_on, close_outcome,
                     to_jsonb(closed_at)#>>'{}' as closed_at, version,
@@ -4136,7 +4220,7 @@ export const TOOLS = {
         // it blocked on, who owns it — from the SAME filtered query, so both
         // modes always agree on which rows exist.
         const s = await c.query(
-          `select number, kind, status, owner,
+          `select number, kind, status, owner, ${WRITER_SURFACE_SQL} as writer_surface,
                   -- LABEL: title or first 80 chars of body's first line, bold
                   -- markers stripped — the same fallback the full row uses.
                   left(coalesce(
@@ -4167,7 +4251,7 @@ export const TOOLS = {
         };
       }
       const r = await c.query(
-        `select number, kind, domain, status, owner, marker, title,
+        `select number, kind, domain, status, owner, ${WRITER_SURFACE_SQL} as writer_surface, marker, title,
                 -- LABEL, not title. Almost every loop predates the title column
                 -- and keeps its text in body, so a board keyed on title alone
                 -- returns a column of nulls and cannot identify anything. Fall
@@ -4253,6 +4337,16 @@ export const TOOLS = {
       // migration 0028; without it the FK to activity_kind rejects the row.
       kind: { type: "string", enum: ["call","email_out","email_in","meeting","tour","text","note","counter_sent","counter_received","loi","lease_signed","task","analysis"] },
       summary: { type: "string" }, detail: { type: "string" },
+      email_context: { type: 'object', additionalProperties: false,
+        required: ['subject', 'conversation_id', 'sender', 'recipients'], properties: {
+          source_activity_id: { type: 'string', format: 'uuid' },
+          subject: { type: 'string' }, conversation_id: { type: ['string', 'null'] },
+          sender: { type: 'object', additionalProperties: false, required: ['email', 'internal'],
+            properties: { email: { type: 'string' }, name: { type: ['string', 'null'] }, internal: { type: 'boolean' } } },
+          recipients: { type: 'array', items: { type: 'object', additionalProperties: false,
+            required: ['email', 'kind', 'internal'], properties: { email: { type: 'string' },
+              name: { type: ['string', 'null'] }, kind: { enum: ['to', 'cc'] }, internal: { type: 'boolean' } } } },
+        } },
       email_source: { type: "object", additionalProperties: false, required: ["sender_email", "mailbox_owner"],
         properties: { sender_email: { type: "string", format: "email", maxLength: 254 },
           mailbox_owner: { type: "string", enum: ["joe", "dell"] } } },
@@ -4332,10 +4426,14 @@ export const TOOLS = {
         for (const vendorId of versions.keys())
           await c.query('update vendor set updated_by=$1 where id=$2',[actor.id,vendorId]);
       }
+      if (args.email_source !== undefined && (args.kind !== 'email_in' ||
+          args.email_source.mailbox_owner !== partnerAuthoritySlugForActor(actor)))
+        throw new ToolError({ error: 'email_source_owner_mismatch' });
       const r = await c.query(
-        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_source)
-         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb) returning id, occurred_at`,
+        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_context, email_source)
+         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb, $9::jsonb) returning id, occurred_at`,
         [args.occurred_at || null, actor.id, args.kind, args.summary, args.detail || null, args.owed || null, s.id,
+          args.email_context ? JSON.stringify(args.email_context) : null,
           args.email_source ? JSON.stringify(args.email_source) : null]);
       await writeEvent(c, actor, "log-activity", s.type, s.id,
         { new: { activity: r.rows[0].id, kind: args.kind }, human_quote: args.human_quote, idempotency_key: args.idempotency_key });
@@ -5464,7 +5562,7 @@ export const TOOLS = {
       const stage = args.status === "inactive" ? "nurture_drip" : "opportunity";
       if (!leads.length) {
         const created = await TOOLS["new-lead"].handler(c,actor,{
-          idempotency_key: `${args.idempotency_key}:lead`,party_id:current.party_id,stage });
+          idempotency_key: derivedIdempotencyKey("prospect-lead", args.idempotency_key),party_id:current.party_id,stage });
         leads = [{id:created.lead_id,client_id:null,stage,suppressed:false,version:1}];
       }
       for (const lead of leads) {
@@ -5477,7 +5575,7 @@ export const TOOLS = {
         if (!protectedLead(lead) && lead.stage !== stage) {
           const version = (await c.query("select version from lead where id=$1",[lead.id])).rows[0].version;
           await TOOLS["update-lead"].handler(c,actor,{
-            idempotency_key:`${args.idempotency_key}:stage:${lead.id}`,lead:lead.id,base_version:version,
+            idempotency_key:derivedIdempotencyKey("prospect-lead-stage",`${args.idempotency_key}:${lead.id}`),lead:lead.id,base_version:version,
             fields:{stage},stage_review:{reason:args.reason.trim(),evidence_ids:[],human_quote:args.human_quote} });
         }
       }
@@ -6847,8 +6945,9 @@ export const TOOLS = {
 
   // BATCH REVIEW QUEUE (WR-000019 slice S6). Every pending governance decision
   // in one payload, so Joe reviews on his own schedule rather than one verb at
-  // a time: legacy rules and guidance imports for guidance-file PR review, retrieval
-  // proposals waiting on approve-retrieval-proposals. Read-only projection —
+  // a time: team-memory convention proposals waiting on adopt-rule (WR-000562
+  // S4), legacy rules and guidance imports, retrieval proposals waiting on
+  // approve-retrieval-proposals. Read-only projection —
   // it opens no new write path and changes nothing. carr_reader (the read-verb
   // credential) has no grant on `rule` or `retrieval_proposal`, so this reads
   // through a SECURITY DEFINER function (migration 0345), the same reason
@@ -6856,7 +6955,7 @@ export const TOOLS = {
   // multi-table read.
   "governance-queue": {
     write: false,
-    description: "Read every pending decision in one payload: legacy rule proposals and staged guidance imports for review through CLAUDE.md, AGENTS.md or skill PRs (proposals bind nobody until merged), retrieval proposals awaiting approve-retrieval-proposals, and needs_joe — the ONE list of every open item waiting on Joe (action-required and Joe-owned loops, Work Requests in needs_joe, unanswered board questions, rule approvals, and the locally published PR and tabled items), each with a plain title, why only Joe can do it, the one action, link, age and what it blocks, ordered by what it blocks. Items the system can decide itself are excluded and counted by reason. Read-only; grants no authority and performs no decision itself.",
+    description: "Read every pending decision in one payload: team-memory convention proposals (conventions/proposed/<slug>) a partner adopts in person with adopt-rule (they bind nobody until adopted), legacy rule proposals and staged guidance imports (read-only), retrieval proposals awaiting approve-retrieval-proposals, and needs_joe — the ONE list of every open item waiting on Joe (action-required and Joe-owned loops, Work Requests in needs_joe, unanswered board questions, rule approvals, and the locally published PR and tabled items), each with a plain title, why only Joe can do it, the one action, link, age and what it blocks, ordered by what it blocks. Items the system can decide itself are excluded and counted by reason. Read-only; grants no authority and performs no decision itself.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c, actor, _args, { now } = {}) => {
       const row = (await c.query("select ops.read_governance_queue() as queue /* governance-queue */")).rows[0];
@@ -6864,16 +6963,19 @@ export const TOOLS = {
       const rules = queue.pending_rule_approvals || [];
       const batches = queue.pending_guidance_import_batches || [];
       const proposals = queue.pending_retrieval_proposals || [];
+      const conventions = conventionProposals(queue.pending_convention_proposals);
       return {
         ok: true,
+        pending_convention_proposals: conventions,
         pending_rule_approvals: rules,
         pending_guidance_import_batches: batches,
         pending_retrieval_proposals: proposals,
         counts: {
+          pending_convention_proposals: conventions.length,
           pending_rule_approvals: rules.length,
           pending_guidance_import_batches: batches.length,
           pending_retrieval_proposals: proposals.length,
-          total: rules.length + batches.length + proposals.length,
+          total: conventions.length + rules.length + batches.length + proposals.length,
         },
         needs_joe: await readNeedsJoe(c, actor, queue, { now }),
       };
@@ -6969,15 +7071,7 @@ export const TOOLS = {
       // record this loop exists to stop creating. Resolution happens twice on the happy
       // path (here to validate, again inside mirrorDecision to write); that is a couple
       // of indexed reads against correctness, which is not a trade worth making.
-      const aboutRefs = args.about
-        ? (Array.isArray(args.about) ? args.about : [args.about]).map(r => String(r || "").trim()).filter(Boolean)
-        : [];
-      for (const ref of aboutRefs) {
-        if (/^WR-/i.test(ref))
-          throw new ToolError({ error: "unsupported_decision_about", field: "about", ref,
-            hint: "Work Request refs are not supported in about. Use a lead, client, vendor, party or deal ref. For a system-wide ruling, omit about and name the Work Request in the rationale." });
-        await resolveSubject(c, ref);
-      }
+      const aboutRefs = await resolveDecisionAbout(c, actor, args.about);
 
       // [idea 68, 0085] BOTH HALVES OF A PRICE OR NEITHER. A cost with no
       // quality number is a complaint and a quality number with no cost is a
@@ -7095,6 +7189,8 @@ export const TOOLS = {
           where subject_id = $1 and verb = 'log-decision' limit 1`, [decisionId])).rows[0];
       if (!cur) throw new ToolError({ error: "decision_not_found", decision_id: args.decision_id,
         hint: "pass the decision_id log-decision returned, not the event_id" });
+
+      await resolveDecisionAbout(c, actor, args.about);
 
       const nv = cur.new_value || {};
       const quote = args.human_quote !== undefined ? args.human_quote : cur.human_quote;
@@ -7362,6 +7458,7 @@ export const TOOLS = {
       // above for why: joint ownership is what stops the system ever draining
       // the backlog on its own initiative.
       args.owner = assertSingleOwner(args.owner);
+      assertClaudeOwnerAllowed(actor, args.owner);
 
       // THE CREATION-SIDE MIRROR of update-loop's due_date_needs_dated_marker.
       // Omitting the marker and passing a date INFERS 'dated', which is the
@@ -7427,7 +7524,7 @@ export const TOOLS = {
          args.drift_critical === true, tier, personal, actor.id, args.domain || null,
          blockerGated ? args.blocker : null,
          blockerGated ? args.blocker_detail.trim() : null,
-         JSON.stringify(residue ? { blocker_residue: residue } : {})]);
+         JSON.stringify({ writer_surface: actor.operational_profile || "local", ...(residue ? { blocker_residue: residue } : {}) })]);
 
       // The blocker goes on the EVENT as well as the row: an open_loop that was
       // filed under a blocker which later turns out to be false is a thing Joe
@@ -7478,6 +7575,7 @@ export const TOOLS = {
       section: { type: "string", enum: ["hot", "backlog", "open"], description: "move the row to this section of its file" } },
       required: ["idempotency_key"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "update-loop", args, async () => {
+      if (args.owner !== undefined) assertClaudeOwnerAllowed(actor, args.owner);
       const cur = await resolveLoop(c, args, { actor });
       await versionGuard(c, "loop_item", cur.id, args.base_version);
       if (cur.status !== "open")
@@ -8725,9 +8823,9 @@ const RESERVED_AUTHORITY_ARGUMENT_FIELDS = new Set([
 // the two server-bound local partner doors, but reviewers, probes, Hermes, Grok,
 // and unsponsored runtimes remain outside partner authority.
 export function assertNoCallerAuthorityFields(args) {
-  if (args && typeof args === "object" && !Array.isArray(args) &&
-      Object.keys(args).some((key) => RESERVED_AUTHORITY_ARGUMENT_FIELDS.has(key)))
-    throw new ToolError({ error: "caller_authority_field_forbidden" });
+  const fields = args && typeof args === "object" && !Array.isArray(args)
+    ? Object.keys(args).filter((key) => RESERVED_AUTHORITY_ARGUMENT_FIELDS.has(key)).sort() : [];
+  if (fields.length) throw new ToolError({ error: "caller_authority_field_forbidden", fields });
   return args;
 }
 
@@ -8953,24 +9051,26 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "doc-conversation": "mcp-server/src/doc-conversation.js",
   "doc-activity": "mcp-server/src/doc-activity.js",
   "meeting-mode": "mcp-server/src/meeting-mode.js",
-  "notifications": "mcp-server/src/notifications.js",
-  "session-identity": "mcp-server/src/session-identity.js",
-  "dispatch-spine": "mcp-server/src/dispatch-spine.js",
+  "notifications": "mcp-server/src/notifications.ts",
+  "session-identity": "mcp-server/src/session-identity.ts",
+  "dispatch-spine": "mcp-server/src/dispatch-spine.ts",
   "doc-outcome-cards": "mcp-server/src/tools.js",
   "work-shape": "mcp-server/src/work-shape.ts",
+  "work-queue": "mcp-server/src/work-queue.js",
   "work-request-intake": "mcp-server/src/work-request-intake.js",
   "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
   "fact-observations": "mcp-server/src/fact-observations.ts",
   "partner-room": "mcp-server/src/partner-room.js",
   "agent-profile": "mcp-server/src/agent-profiles.js",
   "client-portal": "mcp-server/src/client-portal.ts",
-  "resource-observation": "mcp-server/src/resource-observation.v5.js",
+  "resource-observation": "mcp-server/src/resource-observation.v5.ts",
   "lead-automation": "mcp-server/src/lead-automation.js",
   "invoice-automation": "mcp-server/src/invoice-automation.js",
   "email-deal-progress": "mcp-server/src/email-deal-progress.ts",
   "email-next-step": "mcp-server/src/email-next-step.ts",
   "email-proposals": "mcp-server/src/email-proposals.js",
   "email-lead-proposal": "mcp-server/src/email-lead-proposal.ts",
+  "clear-the-deck": "mcp-server/src/clear-the-deck.js",
   "workflow-cutover": "mcp-server/src/workflow-cutover.v5.ts",
   "memory": "mcp-server/src/memory.js",
   "codex-continuity": "mcp-server/src/codex-continuity.js",
@@ -8990,17 +9090,19 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "salesforce-read-run-rw02": "mcp-server/src/salesforce-read-run-store-rw02.v5.js",
   "global-boundaries-door": "mcp-server/src/global-boundaries-door.v5.js",
   "governed-correspondence-store": "mcp-server/src/governed-correspondence-store.v5.js",
-  "assurance-health-store": "mcp-server/src/assurance-health-store.v5.js",
+  "assurance-health-store": "mcp-server/src/assurance-health-store.v5.ts",
   "rule-context-runtime": "mcp-server/src/rule-context-runtime.v5.js",
   "system-work-census": "mcp-server/src/system-work-census.v5.js",
   "board-answers": "mcp-server/src/board-answers.js",
-  "research-sites": "mcp-server/src/research-sites.js",
+  "census-inventory": "mcp-server/src/census-inventory.js",
+  "org-conventions": "mcp-server/src/org-conventions.js",
+  "research-sites": "mcp-server/src/research-sites.ts",
   "party-identity": "mcp-server/src/party-identity.js",
   "party-duplicate-candidates": "mcp-server/src/party-duplicate-candidates.js",
   "schedule-board": "mcp-server/src/schedule-board.js",
-  "doc-suggestions": "mcp-server/src/doc-suggestions.js",
+  "doc-suggestions": "mcp-server/src/doc-suggestions.ts",
   "whats-new": "mcp-server/src/whats-new.js",
-  "invoice-tracker": "mcp-server/src/invoice-tracker.js",
+  "invoice-tracker": "mcp-server/src/invoice-tracker.ts",
   "vendor-meetings": "mcp-server/src/vendor-meetings.js",
 });
 
@@ -9138,7 +9240,7 @@ registerTools({
       return stripDealPlaceholders({ schema_version: "deal-timeline.v1", checklist, lease: lease.rows[0] || null,
         deal_id: s.id, ...deal.rows[0], short_name: shortDealHeading(deal.rows[0]), thread: thread.rows,
         critical_dates: criticalDates.rows, next_actions: actions.rows,
-        item_schema_version: DEAL_ITEMS_SCHEMA, items: actions.rows.filter(i => i.title && i.status !== 'dropped')
+        item_schema_version: DEAL_ITEMS_SCHEMA, items: actions.rows.filter(i => i.title && !['dropped', 'expired'].includes(i.status))
           .map(({ id,title,due_on,status,bullets,source_ref }) => ({ id,title,due_on,status,bullets,source_ref })),
         activities: activities.rows, participants: participants.rows,
         premises: premises.rows, negotiation_rounds: negotiation.rows,
@@ -9236,7 +9338,7 @@ registerTools({
           select a.deal_id, a.id, a.item_title as title, to_jsonb(a.due_on)#>>'{}' as due_on,
                  a.status, a.item_bullets as bullets, a.source_ref, a.created_order
             from v_deal_room_action a join scoped s on s.id = a.deal_id
-           where a.item_title is not null and a.status <> 'dropped'
+           where a.item_title is not null and a.status not in ('dropped', 'expired')
            order by a.deal_id, a.created_order, a.id limit 10001
         ), bounds as (
           select (select count(*) from scoped) > 1000
@@ -9761,7 +9863,7 @@ registerTools({
           !["next_step", "phase_move"].includes(candidate.kind)))
         throw new ToolError({ error: "automatic_apply_not_allowed", kind: candidate.kind,
           hint: "only a partner's own Call Mode may apply a post-call next step or phase automatically" });
-      const hold = automatic ? automaticApplyHold(candidate) : null;
+      const hold = automatic ? await automaticApplyHold(candidate) : null;
       if (hold) throw new ToolError({ error: "below_confidence_bar", kind: candidate.kind, reason: hold,
         hint: "leave it as a card for Joe or Dell; nothing was changed" });
 
@@ -9774,8 +9876,9 @@ registerTools({
       };
       const verb = verbByKind[candidate.kind];
       if (!verb) throw new ToolError({ error: "unknown_candidate_kind", kind: candidate.kind });
-      const innerArgs = { ...candidate.payload, idempotency_key: `capture:${candidate.id}` };
+      const innerArgs = { ...candidate.payload, idempotency_key: captureKey(candidate.id) };
       delete innerArgs.plan_base;
+      delete innerArgs.evidence_source;
       if (candidate.kind === "meeting_record") innerArgs.kind = "meeting";
       if (candidate.kind === "phase_move") {
         // The partners' own words on the call are the evidence for the move,
@@ -9793,6 +9896,9 @@ registerTools({
         await lockDealField(c, subject.id, "next_step");
         if (automatic) {
           const base = candidate.payload.plan_base;
+          const siblingKeys = (await c.query(`select id from capture_candidate
+            where session_id=$1 and status='confirmed' and applied_automatically /* capture:automatic-plan-siblings */`,
+            [candidate.session_id])).rows.flatMap(row => captureKeys(row.id));
           if (!base || !Object.hasOwn(base, "next_step") || !Object.hasOwn(base, "next_date"))
             throw new ToolError({ error: "missing_plan_base", hint: "Review this older call proposal before applying it." });
           const changed = await c.query(
@@ -9800,10 +9906,8 @@ registerTools({
               join event e on e.subject_type='deal' and e.subject_id=$1 and e.field=b.key
               where (b.value is null or (e.recorded_at,e.id) >
                 (select recorded_at,id from event where id=b.value::uuid))
-                and not exists(select 1 from capture_candidate sibling
-                  where sibling.session_id=$3 and sibling.status='confirmed' and sibling.applied_automatically
-                    and e.idempotency_key='capture:' || sibling.id::text)
-              limit 1 /* capture:automatic-plan-conflict */`, [subject.id, JSON.stringify(base), candidate.session_id]);
+                and not (e.idempotency_key = any($3::text[]))
+              limit 1 /* capture:automatic-plan-conflict */`, [subject.id, JSON.stringify(base), siblingKeys]);
           if (changed.rows.length) throw new ToolError({ error: "newer_change_exists", field: changed.rows[0].field,
             hint: "The plan changed after this call proposal was filed. Review it before applying." });
         }
@@ -9819,7 +9923,7 @@ registerTools({
           const { status, ...facts } = item;
           const stored = await executeRegisteredTool(c, actor, 'record-deal-item', {
             ...facts, deal: result.deal_id,
-            idempotency_key: `capture:${candidate.id}:item:${index}`,
+            idempotency_key: derivedIdempotencyKey("capture-candidate-item", `${candidate.id}:${index}`),
           });
           result.items.push(stored.item);
         }
@@ -10003,13 +10107,15 @@ registerTools({
       const prior = (await c.query(`select new_value from event where verb='undo-call' and field='call_undo'
         and new_value->>'session_id'=$1 order by recorded_at desc,id desc limit 1`, [session.id])).rows[0];
       if (prior) return { ok: true, session_id: session.id, already: "undone", ...prior.new_value };
-      const candidates = (await c.query(`select p.id,p.kind,p.evidence_quote,p.undone_at,e.subject_id as deal_id
-        from capture_candidate p left join lateral (
-          select subject_id from event where subject_type='deal' and idempotency_key='capture:' || p.id::text
-            and field=case when p.kind='phase_move' then 'phase' else 'next_step' end
-          order by recorded_at,id limit 1
-        ) e on true where p.session_id=$1 and p.applied_automatically order by p.id for update of p`,
-        [session.id])).rows.filter(row => !row.undone_at);
+      const applied = (await c.query(`select p.id,p.kind,p.evidence_quote,p.undone_at from capture_candidate p
+        where p.session_id=$1 and p.applied_automatically order by p.id for update of p`, [session.id])).rows;
+      const candidates = [];
+      for (const row of applied.filter(row => !row.undone_at)) {
+        const written = (await c.query(`select subject_id from event where subject_type='deal' and idempotency_key=any($1::text[])
+          and field=$2 order by recorded_at,id limit 1 /* call-outcome:undo-call-deal */`,
+          [captureKeys(row.id), row.kind === 'phase_move' ? 'phase' : 'next_step'])).rows[0];
+        candidates.push({ ...row, deal_id: written?.subject_id });
+      }
       if (candidates.some(row => !row.deal_id)) throw new ToolError({ error: "applied_change_not_found" });
       const changes = [];
       const deals = [...new Set(candidates.map(row => row.deal_id))].sort();
@@ -10027,11 +10133,11 @@ registerTools({
         await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0))", [dealId]);
         for (const field of ["phase", "next_date", "next_step"]) await lockDealField(c, dealId, field);
         await c.query("select id from deal where id=$1 for update", [dealId]);
-        const keys = own.map(row => `capture:${row.id}`);
+        const keys = own.flatMap(row => captureKeys(row.id));
         const journal = (await c.query(`select id,field,old_value,new_value,idempotency_key from event
           where subject_type='deal' and subject_id=$1 and idempotency_key=any($2::text[])
           and field in ('phase','next_date','next_step','next_action') order by recorded_at,id`, [dealId,keys])).rows;
-        if (own.some(row => !journal.some(event => event.idempotency_key === `capture:${row.id}`
+        if (own.some(row => !journal.some(event => captureKeys(row.id).includes(event.idempotency_key)
           && event.field === (row.kind === 'phase_move' ? 'phase' : 'next_step'))))
           throw new ToolError({ error: "applied_change_not_found", deal_id: dealId });
         const fields = [...new Set(journal.map(row => row.field))];
@@ -10088,7 +10194,7 @@ registerTools({
         }
         for (const candidate of own) {
           const evidence = { candidate_id:candidate.id,kind:candidate.kind,deal_id:dealId,
-            evidence_quote:candidate.evidence_quote,event_ids:journal.filter(row=>row.idempotency_key===`capture:${candidate.id}`).map(row=>row.id),
+            evidence_quote:candidate.evidence_quote,event_ids:journal.filter(row=>captureKeys(candidate.id).includes(row.idempotency_key)).map(row=>row.id),
             restored,reopened_action_ids:reopenIds,dropped_item_ids:items.map(item=>item.id) };
           await c.query('update capture_candidate set undone_at=clock_timestamp(),undone_by=$2 where id=$1',[candidate.id,actor.id]);
           await writeEvent(c,actor,'undo-call','deal',dealId,{field:'call_change_undo',
@@ -10118,19 +10224,19 @@ registerTools({
       if (!candidate.applied_automatically) throw new ToolError({ error: "not_applied_automatically" });
       if (candidate.undone_at) return { ok: true, candidate_id: candidate.id, already: "undone" };
       const dealId = candidate.payload.deal;
-      const key = `capture:${candidate.id}`;
+      const keys = captureKeys(candidate.id);
       let reverted;
       if (candidate.kind === "phase_move") {
         await lockDealField(c, dealId, "phase");
         await versionGuard(c, "deal", dealId, args.base_version);
         const applied = (await c.query(
-          `select id from event where subject_type='deal' and subject_id=$1 and field='phase' and idempotency_key=$2
-            order by recorded_at desc, id desc limit 1 /* call-outcome:undo-phase */`, [dealId, key])).rows[0];
+          `select id from event where subject_type='deal' and subject_id=$1 and field='phase' and idempotency_key=any($2::text[])
+            order by recorded_at desc, id desc limit 1 /* call-outcome:undo-phase */`, [dealId, keys])).rows[0];
         if (!applied) throw new ToolError({ error: "applied_change_not_found" });
         reverted = await executeRegisteredTool(c, actor, "revert-deal-field",
-          { event_id: applied.id, idempotency_key: `${args.idempotency_key}:phase` });
+          { event_id: applied.id, idempotency_key: derivedIdempotencyKey("call-undo-phase", args.idempotency_key) });
       } else if (candidate.kind === "next_step") {
-        reverted = await undoAppliedNextStep(c, actor, dealId, candidate, key, args);
+        reverted = await undoAppliedNextStep(c, actor, dealId, candidate, keys, args);
       } else throw new ToolError({ error: "not_applied_automatically" });
       await c.query("update capture_candidate set undone_at=now(), undone_by=$2 where id=$1 /* call-outcome:undo */",
         [candidate.id, actor.id]);
@@ -10454,8 +10560,10 @@ registerTools({
 // Doctrine store verbs (P2, decision 82a2fb62) — same envelope, same contracts.
 registerTools(featureSwitchTools({ withEnvelope, executeRegisteredTool }), 'feature-switches');
 registerTools(doctrineTools({ withEnvelope, writeEvent, ToolError }), "doctrine");
+registerTools(orgConventionTools({ withEnvelope, writeEvent }), "org-conventions");
 registerTools(systemWorkTools(), "system-work-census");
 registerTools(boardAnswerTools({ withEnvelope, writeEvent }), "board-answers");
+registerTools(censusInventoryTools({ withEnvelope }), "census-inventory");
 registerTools(researchSiteTools({ withEnvelope, writeEvent }), "research-sites");
 registerTools(partyIdentityTools({ withEnvelope, writeEvent, versionGuard, resolvePartyForWrite }), "party-identity");
 registerTools(partyDuplicateCandidateTools(), "party-duplicate-candidates");
@@ -10532,6 +10640,7 @@ registerTools({
 registerTools(workShapeTools({ withEnvelope, writeEvent, ToolError }), "work-shape");
 
 // Program 6: sourced additive capture and a safe card only. No lifecycle verbs.
+registerTools(workQueueTools({ withEnvelope, writeEvent, ToolError }), "work-queue");
 registerTools(workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }), "work-request-intake");
 registerTools(workPortfolioTools({ ToolError }), "work-portfolio");
 
@@ -10546,7 +10655,7 @@ registerTools(agentProfileTools(), "agent-profile");
 registerTools(clientPortalTools({ withEnvelope, writeEvent, resolveSubject }), "client-portal");
 // DoctorCRE v5 V5-UX-C02/C06: the resource-metering read contract and the
 // one write door the local, credential-less collector uses. See
-// src/resource-observation.v5.js.
+// src/resource-observation.v5.ts.
 registerTools(resourceObservationTools({ withEnvelope, ToolError }), "resource-observation");
 registerTools(emailDealProgressTools({ withEnvelope, writeEvent, lockDealField, resolveEmailProposal,
   updateDeal: (c, actor, args) => TOOLS["update-deal"].handler(c, actor, args) }), "email-deal-progress");
@@ -10555,7 +10664,10 @@ registerTools(emailNextStepTools({ withEnvelope, writeEvent, lockDealField, reso
   setNextAction: (c, actor, args) => TOOLS["set-next-action"].handler(c, actor, args) }), "email-next-step");
 registerTools(emailProposalTools({ ToolError, withEnvelope, writeEvent,
   preview: (c, actor, verb, args) => TOOLS[verb].handler(c, actor, args) }), "email-proposals");
-registerTools(emailLeadProposalTools({ withEnvelope, writeEvent }), "email-lead-proposal");
+registerTools(emailLeadProposalTools({ withEnvelope, writeEvent,
+  updatePartyContact: (c, actor, args) => TOOLS["update-party-contact"].handler(c, actor, args),
+  newLead: (c, actor, args) => TOOLS["new-lead"].handler(c, actor, args) }), "email-lead-proposal");
+registerTools(clearTheDeckTools({ ToolError, withEnvelope, writeEvent }), "clear-the-deck");
 const invoices=invoiceAutomation({withEnvelope,writeEvent,ToolError,lockDealField,
   updateDeal:(c,actor,args)=>TOOLS["update-deal"].handler(c,actor,args),
   invoicingMailbox:process.env.CARR_INVOICING_MAILBOX});

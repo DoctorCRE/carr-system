@@ -8,8 +8,10 @@ To find a script and its purpose, run `./run.sh map` for a fresh path-and-descri
 
 ## Always-on rules
 
-<!-- Generated from ops/config/rule-cards.v1.json by ops/sync-core-rule-cards.py. -->
-These twelve core cards are loaded natively with this file. No boot fetch is required.
+<!-- Generated from mcp-server/src/doctrine.js and ops/config/rule-cards.v1.json by ops/sync-core-rule-cards.py. -->
+OPENING ACT, every session: call attach-memory once, first, with surface claude_code for a Claude Code session (terminal or Desktop) or codex for a Codex job (pass the job log named on the brief's first line as transcript_ref); a claude.ai or other chat app does not attach and calls standing-context instead. Check its team-memory index before starting, read any section that bears on your task with doctrine-sections, and skip work a current section records as done or ruled out, citing it; as you learn or rule something out, write it with write-doctrine-section document=team-memory and your attach_id.
+
+These twelve core cards are loaded natively with this file.
 Before acting when a card applies, answer one line with applies yes/no and the action or reason.
 
 [K01] Assess when asked; finish when authorized: When Joe asks what you think, assess and stop. Once work is authorized, finish it and its necessary follow-ups without re-asking; backlog out-of-scope work with the product task it blocks.
@@ -24,7 +26,7 @@ Before acting when a card applies, answer one line with applies yes/no and the a
 
 [K06] Resolve source conflicts openly: When sources disagree, follow Joe's live direction, then the current store record, then the newer dated ruling, and say there was a conflict. Archives and backups are evidence, not authority.
 
-[K12] Capture durable corrections now: When a partner corrects or overrules you, or states a preference that would recur, propose an edit to the relevant guidance file (CLAUDE.md, AGENTS.md or a skill) in a PR this turn with the trade-off; proposals bind nobody until merged. A how-to the same partner explains twice: quote both, offer a skill.
+[K12] Capture durable corrections now: When a partner corrects or overrules you, or states a preference that would recur, propose it this turn as a team-memory convention with the trade-off; it binds nobody until Joe or Dell adopts it in the app. A how-to the same partner explains twice: quote both, offer a skill.
 
 [K08] End with one action or one decision: When ending a reply, do the doable steps yourself and leave at most one human action or decision, asked directly (approve or decline) in the question box. No closing menus or scripted replies.
 
@@ -187,6 +189,8 @@ To catch up with main, merge origin/main into the branch. This overrides the
 rebase and force-push steps in the tstack skills (`modernize`, `full-send`,
 `full-stop`); Joe 2026-10-26: "Keep never-rebase/never-force-push."
 
+Never poll GitHub: no loops, watch or sleep around gh pr checks, gh run or gh api. Push, run gh pr merge --auto once, report, stop. CI results reach the orchestrator as app events.
+
 **And do not COMMIT on main either.** `ops/githooks/pre-commit` refuses it. The
 push half was always blocked; the commit half was not, so a commit made on main
 in `~/carr-system` simply stranded there — that checkout reached NINE unpushed
@@ -271,11 +275,13 @@ Several sessions run against this one checkout at the same time.
 
 ## Guidance changes
 
-Capture durable corrections as proposed edits to the relevant CLAUDE.md,
-AGENTS.md or skill in a pull request, with the trade-off. Proposals bind nobody
-until merged. Edit generated guidance at its source and regenerate it:
+Capture durable corrections as team-memory convention proposals, with the
+trade-off; they bind nobody until Joe or Dell adopts them in the app
+(docs/memory/team-memory-design.md). Changes to the files themselves go through
+a pull request. Edit generated guidance at its source and regenerate it:
 `python3 ops/sync-core-rule-cards.py` renders the core cards from
-`ops/config/rule-cards.v1.json`. Keep attribution and review in Git history.
+`ops/config/rule-cards.v1.json`, and `--from-store` first rewrites that file
+from the rule cards adopted in the store. Keep attribution and review in Git history.
 
 ## Writing
 

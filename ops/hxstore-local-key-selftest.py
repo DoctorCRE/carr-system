@@ -7,10 +7,14 @@ from pathlib import Path
 import sqlite3
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from lib import outlook_intake as intake
+
 CRATE = ROOT / 'vendor/hxprobe'
 STORE = runpy.run_path(str(ROOT / 'ops/hxstore-observe-selftest.py'))['store']
 EPOCH_TICKS = 621_355_968_000_000_000
@@ -58,6 +62,23 @@ class LocalKeyExportTests(unittest.TestCase):
                 rows = db.execute(f'SELECT {columns} FROM messages ORDER BY sent_unix').fetchall()
                 meta = dict(db.execute('SELECT key, value FROM meta'))
             return rows, meta
+
+    def test_intake_preserves_subjects_of_distinct_decoder_items(self):
+        subjects = [prefix + f'Synthetic suite review {group}' for group in range(125)
+                    for prefix in ('', 'Re: ', 'Fw: ', 'Fwd: ')]
+        with tempfile.TemporaryDirectory() as tmp:
+            source, target = Path(tmp) / 'synthetic.hxd', Path(tmp) / 'synthetic.db'
+            source.write_bytes(STORE(b''.join(
+                message(0x2000 + i, sender='owner@example.test', sent=1_793_000_000 - i * 30,
+                        subject=subject) for i, subject in enumerate(subjects))))
+            result = subprocess.run([str(CRATE / 'target/debug/hxprobe'), 'db', str(source), str(target)],
+                                    capture_output=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            _, mails, _ = intake._load(target, account='owner@example.test')
+            self.assertCountEqual([m['subject'] for m in mails], subjects)
+            prepared = intake._best_copies(mails)
+            self.assertCountEqual([intake.email_context(m, 'example.test')['subject']
+                                   for m in prepared], subjects)
 
     def test_revisions_of_one_message_export_its_key(self):
         rows, meta = self.export(message(0x1001), message(0x1001))

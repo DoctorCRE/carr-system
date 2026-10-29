@@ -37,7 +37,7 @@ const DAY = 86_400_000;
 
 const logIt = (fake, occurred_at, kind = "call") =>
   TOOLS["log-activity"].handler(fake, joe, {
-    idempotency_key: "k-" + Math.random().toString(36).slice(2),
+    idempotency_key: crypto.randomUUID(),
     ref: "V-SUP-007", kind, summary: "spoke with them", occurred_at,
   });
 
@@ -84,7 +84,7 @@ test("a touch dated in the past is fine — backfilling is normal work", async (
 test("omitting the date entirely is fine — it defaults to now", async () => {
   const fake = new Fake();
   const out = await TOOLS["log-activity"].handler(fake, joe, {
-    idempotency_key: "k-none", ref: "V-SUP-007", kind: "call", summary: "called them",
+    idempotency_key: "00000571-0000-4000-8000-000000000021", ref: "V-SUP-007", kind: "call", summary: "called them",
   });
   assert.equal(out.ok, true);
 });
@@ -106,7 +106,7 @@ test("the tolerance is minutes, not hours — it cannot be used to schedule", as
 test("stamp-touch is covered too, since it routes through the same handler", async () => {
   const fake = new Fake();
   await assert.rejects(() => TOOLS["stamp-touch"].handler(fake, joe, {
-    idempotency_key: "k-stamp", ref: "V-SUP-007", summary: "called",
+    idempotency_key: "00000571-0000-4000-8000-000000000022", ref: "V-SUP-007", summary: "called",
     occurred_at: iso(5 * DAY),
   }), /occurred_at_in_future/,
     "the truck-shorthand verb must not be the way around the guard");
@@ -152,4 +152,16 @@ test("timeline compositions retain the authenticated read-only calendar-history 
     assert.equal(connectionRouteForTool(TOOLS[name]), "writer_read_only", name);
     assert.equal(TOOLS[name].write, false);
   }
+});
+
+test('captured email context reaches the activity record', async () => {
+  const fake = new Fake();
+  const context = { subject: 'Synthetic new practice', conversation_id: 'test-thread',
+    sender: { email: 'vendor@example.test', name: 'Vendor', internal: false },
+    recipients: [{ email: 'doctor@example.test', name: null, kind: 'cc', internal: false }] };
+  await TOOLS['log-activity'].handler(fake, joe, {
+    idempotency_key: '00000571-0000-4000-8000-000000000023', ref: 'V-SUP-007', kind: 'email_in',
+    summary: 'Email from Vendor: Synthetic new practice', email_context: context,
+  });
+  assert.deepEqual(JSON.parse(fake.inserts[0][7]), context);
 });

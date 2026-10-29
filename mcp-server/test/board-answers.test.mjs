@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
 import { BOARD_ANSWER_WRITE_VERBS } from "../src/board-answers.js";
 import { mcpInventory } from "../../ops/scac-mutation-inventory.mjs";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const joe = {
   id: "10000000-0000-0000-0000-000000000002", slug: "joe", display: "Joe",
@@ -49,7 +50,7 @@ test("board snapshot publication is tenant scoped and refuses stale versions", a
   await assert.rejects(
     () => TOOLS["publish-board-snapshot"].handler(fake, sponsoredRobot, {
       board_id: "project", base_version: 1, snapshot: { title: "Project", tasks: {} },
-      idempotency_key: "publish-1",
+      idempotency_key: "00000571-0000-4000-8000-000000000027",
     }),
     error => error instanceof ToolError && error.payload.error === "board_version_conflict",
   );
@@ -96,7 +97,7 @@ test("board reads overlap independent queries and batch links at every board siz
   }
 });
 
-test("board publication bounds database payload work and replays the complete snapshot", async () => {
+test("board publication bounds database payload work and replies with only the board version", async () => {
   for (const base_version of [0, 7]) {
     const snapshot = { schema: "carr-progress-board.v4", tasks: Object.fromEntries(
       Array.from({ length: 1000 }, (_, i) => [`task-${i}`, { title: `Task ${i}` }])) };
@@ -105,13 +106,14 @@ test("board publication bounds database payload work and replays the complete sn
     const fake = new Fake({
       [base_version ? "update board_snapshot" : "insert into board_snapshot"]: [metadata],
     });
-    const args = { board_id: "project", base_version, snapshot, idempotency_key: `publish-${base_version}` };
+    const args = { board_id: "project", base_version, snapshot, idempotency_key: derivedIdempotencyKey("test", `publish-${base_version}`) };
     const result = await TOOLS["publish-board-snapshot"].handler(fake, sponsoredRobot, args);
     const [sql, params] = fake.calls.find(([sql]) => /insert into board_snapshot|update board_snapshot/.test(sql));
     assert.doesNotMatch(sql.split(/returning/i)[1], /snapshot_json/, "RETURNING must have size independent of the board");
     assert.equal(fake.calls.length, 5, "one lock, replay read, snapshot write, event and receipt");
     assert.deepEqual(JSON.parse(params[base_version ? 0 : 3]), snapshot);
-    assert.deepEqual(result.snapshot, { ...metadata, version: base_version + 1, snapshot_json: snapshot });
+    assert.deepEqual(result, { ok: true, board_id: "project", version: base_version + 1 },
+      "the reply names the board and its new version, never the snapshot");
     const receipt = fake.calls.find(([sql]) => sql.includes("insert into tool_call"));
     assert.deepEqual(JSON.parse(receipt[1][4]), { ok: true, snapshot: { ...metadata, version: base_version + 1 } });
     assert.ok(receipt[1][4].length < 512, "receipt storage must stay bounded as the board grows");
@@ -122,10 +124,10 @@ test("board publication bounds database payload work and replays the complete sn
     assert.deepEqual(retried, { replayed: true, ...result });
     assert.equal(replay.calls.length, 2, "replay only locks and reads the bounded receipt");
     const legacyReplay = new Fake({ "select request_hash, response": [{
-      request_hash: receipt[1][3], response: result,
+      request_hash: receipt[1][3], response: { ok: true, snapshot: { ...metadata, snapshot_json: snapshot } },
     }] });
     assert.deepEqual(await TOOLS["publish-board-snapshot"].handler(legacyReplay, sponsoredRobot, args),
-      { replayed: true, ...result }, "existing full receipts remain readable");
+      { replayed: true, ...result }, "a full receipt from before the bounded reply replays the same reply");
     await assert.rejects(() => TOOLS["publish-board-snapshot"].handler(replay, sponsoredRobot,
       { ...args, snapshot: { ...snapshot, title: "Different publication" } }),
     error => error.payload?.error === "key_reuse");
@@ -165,7 +167,7 @@ test("concurrent same-key board writes replay the first result", async () => {
       },
     };
   }
-  const args = { idempotency_key: "same-board-key", board_id: "project",
+  const args = { idempotency_key: "00000571-0000-4000-8000-000000000028", board_id: "project",
     base_version: 0, snapshot: { title: "Project" } };
   async function run(c) {
     try { return await TOOLS["publish-board-snapshot"].handler(c, joe, args); }
@@ -175,9 +177,8 @@ test("concurrent same-key board writes replay the first result", async () => {
   await readStarted;
   const second = run(client());
   const [a, b] = await Promise.all([first, second]);
-  assert.equal(a.snapshot.id, "board-1");
-  assert.equal(b.replayed, true);
-  assert.deepEqual(b.snapshot, a.snapshot);
+  assert.deepEqual(a, { ok: true, board_id: "project", version: 1 });
+  assert.deepEqual(b, { replayed: true, ...a });
 });
 
 test("board answers and acknowledgments refuse a different sponsor within the same tenant", async () => {
@@ -196,7 +197,7 @@ test("board answers and acknowledgments refuse a different sponsor within the sa
   assert.match(read[0], /sponsoring_human_slug/);
   assert.deepEqual(read[1].slice(0, 3), ["carr-internal", "joe", "orchestrator:project"]);
   await assert.rejects(() => TOOLS["acknowledge-board-answer"].handler(fake, dell,
-    { idempotency_key: "ack-cross-sponsor", answer_id: answerId,
+    { idempotency_key: "00000571-0000-4000-8000-000000000029", answer_id: answerId,
       asker_ref: "orchestrator:project", base_version: 1 }),
   error => error instanceof ToolError && error.payload.error === "board_version_conflict");
   const [sql, params] = fake.calls.find(([query]) => query.includes("update board_answer a set received_at"));
@@ -212,7 +213,7 @@ test("acknowledgments require an exact version and record the actor", async () =
     "update board_answer a set received_at": [received],
   });
   const ack = await TOOLS["acknowledge-board-answer"].handler(fake, sponsoredRobot, {
-    idempotency_key: "ack-1", answer_id: answerId,
+    idempotency_key: "00000571-0000-4000-8000-000000000030", answer_id: answerId,
     asker_ref: "orchestrator:project", base_version: 1,
   });
   assert.equal(ack.answer.status, "Received");
@@ -233,7 +234,7 @@ test("answer uses the authenticated partner, never a caller supplied answered_by
     "insert into event": [{ id: "event-1" }],
   });
   const result = await TOOLS["answer-board-question"].handler(fake, joe, {
-    idempotency_key: "answer-1", board_id: "project", question_id: "q1",
+    idempotency_key: "00000571-0000-4000-8000-000000000031", board_id: "project", question_id: "q1",
     base_version: 1, answer_text: "Proceed",
   });
   assert.equal(result.answer.answered_by, "joe");
@@ -248,7 +249,7 @@ test("a machine cannot answer even when it has a verified sponsor", async () => 
   await assert.rejects(
     () => TOOLS["answer-board-question"].handler(fake,
       { ...robot, native_agent_verified: true, sponsoring_human_slug: "joe" }, {
-        idempotency_key: "answer-machine", board_id: "project", question_id: "q1",
+        idempotency_key: "00000571-0000-4000-8000-000000000032", board_id: "project", question_id: "q1",
         base_version: 1, answer_text: "Proceed",
       }),
     error => error instanceof ToolError && error.payload.error === "board_answer_requires_human_partner",
@@ -257,7 +258,7 @@ test("a machine cannot answer even when it has a verified sponsor", async () => 
 });
 
 const answerArgs = {
-  idempotency_key: "synthetic-human-answer", board_id: "project", question_id: "q1",
+  idempotency_key: "00000571-0000-4000-8000-000000000033", board_id: "project", question_id: "q1",
   base_version: 1, answer_text: "Proceed",
 };
 
@@ -356,7 +357,7 @@ test("typed board records install reference monitors and question uniqueness", (
 
 test('hierarchy snapshots preserve evidence beyond the old display budget with a bounded v4 limit', async () => {
   const run = snapshot => TOOLS['publish-board-snapshot'].handler(new Fake(), sponsoredRobot, {
-    board_id: 'hierarchy', base_version: 1, idempotency_key: 'hierarchy-size', snapshot,
+    board_id: 'hierarchy', base_version: 1, idempotency_key: '00000571-0000-4000-8000-000000000034', snapshot,
   });
   await assert.rejects(() => run({ schema: 'carr-progress-board.v4', evidence: 'x'.repeat(300000) }),
     error => error.payload?.error === 'board_version_conflict');
@@ -364,4 +365,19 @@ test('hierarchy snapshots preserve evidence beyond the old display budget with a
     error => error.payload?.error === 'board_snapshot_invalid');
   await assert.rejects(() => run({ schema: 'carr-progress-board.v3', evidence: 'x'.repeat(300000) }),
     error => error.payload?.error === 'board_snapshot_invalid');
+});
+
+test("board publication replies with a safe numeric version and refuses an unsafe one before its receipt", async () => {
+  const publish = (version) => {
+    const fake = new Fake({ "update board_snapshot": [{ id: "9007199254740993", board_id: "project", version }] });
+    return [fake, TOOLS["publish-board-snapshot"].handler(fake, joe, { board_id: "project", base_version: 2,
+      snapshot: { version: "display-version" }, idempotency_key: derivedIdempotencyKey("test", `safe-${version}`) })];
+  };
+  for (const version of ["3", "9007199254740991"])
+    assert.deepEqual(await publish(version)[1], { ok: true, board_id: "project", version: Number(version) });
+  for (const version of ["9007199254740992", "0", "1.5", null]) {
+    const [fake, run] = publish(version);
+    await assert.rejects(run, error => error instanceof ToolError && error.payload.error === "board_version_invalid");
+    assert.ok(!fake.calls.some(([sql]) => sql.includes("insert into tool_call")), "no receipt for a refused reply");
+  }
 });

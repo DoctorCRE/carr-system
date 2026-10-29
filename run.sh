@@ -12,6 +12,7 @@
 #   ./run.sh key-recovery-test — prove the OFFLINE PAPER key copy alone can recover a backup
 #   ./run.sh call-mode     — inspect or operate the local Quill Call Mode bridge
 #   ./run.sh local-db-ci   — run migration or strict CI on disposable local PG
+#   ./run.sh portal-parity — compare a client-portal candidate with a reference site, row by row
 # Drive-backed legacy inputs are recovery-only. Scoped commands parse their own
 # explicit --recovery --reason WHY [--vault PATH] boundary and erase ambient
 # CARR_VAULT in normal mode.
@@ -98,6 +99,7 @@ case "${1:-}" in
   brief-pack)   brief_pack "$@" ;;
   restore-rehearse) restore_rehearse "$@" ;;
   key-recovery-test) shift; key_recovery_test "$@" ;;
+  portal-parity) shift; node "$REPO/mcp-server/portal-parity/cli.mjs" "$@" ;;
   call)         call_verb "$@" ;;
   call-mode)    shift; python3 "$REPO/tools/dictation-rig/bin/call-mode.py" "$@" ;;
   # Normal retrieval is canonical-store only and fail-closed. The reader itself
@@ -127,6 +129,7 @@ case "${1:-}" in
   # three, two of which (the .venv and out/ symlinks) are invisible until
   # something breaks on a path that is simply not there.
   worktree)     shift; "$REPO/bin/worktree.sh" "$@" ;;
+  pre-pr)       shift; "$PY" "$REPO/ops/ci-pushfloor.py" --pre-pr "$@" ;;
   local-db-ci)  shift; "$PY" "$REPO/ops/local-pg-ci.py" "$@" ;;
   outlook-send) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import outlook_send as o; sys.exit(o.main(["send", *sys.argv[1:]]))' "$@" ;;
   outlook-event) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import outlook_send as o; sys.exit(o.main(["event", *sys.argv[1:]]))' "$@" ;;
@@ -160,7 +163,9 @@ case "${1:-}" in
       "export [--only <target>] [--bootstrap]|" \
       "call [--branch <name>] <verb> '<json args>'|" \
       "call-mode [serve|state|start|stop]|" \
+      "pre-pr [--body <file>]|" \
       "local-db-ci [--class migration|strict] [--port N]|" \
+      "portal-parity --stage N [--rows <ids>] (see --help)|" \
       "worktree <name> [--from B]|--list|--remove <name|path>"
     printf '\n'
     exit 2 ;;

@@ -37,10 +37,11 @@ SCRIPT = os.path.join(REPO, "bin", "sync-skills.sh")
 failures: list[str] = []
 
 
-def check(name: str, ok: bool, detail: str = "") -> None:
-    print(f"  {'ok  ' if ok else 'FAIL'}  {name}" + (f"   {detail}" if detail and not ok else ""))
-    if not ok:
-        failures.append(name)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(detail="   {detail}", failures=failures)
 
 
 def build(tmp: str) -> tuple[str, str]:

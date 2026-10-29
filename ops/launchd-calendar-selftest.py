@@ -185,9 +185,9 @@ check("two interval markers in one template are refused",
 # 3. The real tree.
 # --------------------------------------------------------------------------
 templates = lc.carr_templates(REPO)
-check("the template roster covers ops/launchd and the Call Mode override",
-      any(p.parent.name == "launchd" and p.parent.parent.name == "ops" for p in templates)
-      and any("dictation-rig" in str(p) for p in templates), len(templates))
+check("the template roster is ops/launchd, Call Mode included",
+      all(p.parent.name == "launchd" and p.parent.parent.name == "ops" for p in templates)
+      and any(p.name == "com.carr.call-mode.plist" for p in templates), len(templates))
 for path in templates:
     rel = path.relative_to(REPO)
     found = lc.audit_template(path.read_text(encoding="utf-8"))
@@ -197,8 +197,8 @@ pull = plistlib.loads((REPO / "ops/launchd/com.carr.checkout-pull.plist").read_b
 check("checkout-pull fast-forwards every five minutes and at load",
       pull["StartCalendarInterval"] == [{"Minute": m} for m in range(0, 60, 5)]
       and pull.get("RunAtLoad") is True, pull)
-check("checkout-pull runs the retrying pull script",
-      pull["ProgramArguments"] == ["/usr/bin/python3", "{{REPO}}/ops/checkout-pull.py", "{{REPO}}"],
+check("checkout-pull uses the installed plain Git command",
+      pull["ProgramArguments"] == ["/usr/bin/git", "-C", "{{REPO}}", "pull", "--ff-only", "--quiet"],
       pull["ProgramArguments"])
 
 by_name: dict[str, list[Path]] = {}

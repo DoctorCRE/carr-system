@@ -7,6 +7,8 @@ autonomous design decisions, source study, and remaining acceptance criteria.
 
 The research atlas generator is retired. Saved inventories and findings remain below.
 
+See [the per-Mac settings and helper signing steps](studio-settings-migration.md) for intake installation.
+
 ## Data contract
 
 `outlook-surface-atlas/v1` contains these fields.

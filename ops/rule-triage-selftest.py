@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """rule-triage-selftest.py — acceptance test for WR-000019 slice S7's triage
-artifact, ops/config/rule-triage.v1.json, plus a smoke test of the two tools
-that reads it (rule-triage-report.py).
+artifact, ops/config/rule-triage.v1.json.
 
 WHAT THIS PINS, per the slice's own definition of done:
   1. Complete coverage — every id in ops/config/rule-enforcement-map.json's
@@ -17,7 +16,6 @@ WHAT THIS PINS, per the slice's own definition of done:
      and (b) is not itself GONE — a merge chain into a retired rule would be
      a dangling reference the moment Joe's batch actually retires anything.
   6. Every JIT rule carries a jit_trigger_hint (non-empty).
-  7. rule-triage-report.py runs clean on the real artifact (smoke test).
 
 
 RUNNING IT. No database, no network:
@@ -25,14 +23,12 @@ RUNNING IT. No database, no network:
     python3 ops/rule-triage-selftest.py
 """
 import json
-import subprocess
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 TRIAGE_PATH = REPO / "ops" / "config" / "rule-triage.v1.json"
 ENFORCEMENT_MAP_PATH = REPO / "ops" / "config" / "rule-enforcement-map.json"
-REPORT_SCRIPT = REPO / "ops" / "rule-triage-report.py"
 
 CORE_CAP = 35
 CORE_TARGET_LOW, CORE_TARGET_HIGH = 15, 20
@@ -41,14 +37,11 @@ passed = 0
 failures: list[str] = []
 
 
-def check(name, cond, detail=""):
-    global passed
-    if cond:
-        passed += 1
-        print(f"  ok    {name}")
-    else:
-        failures.append(name)
-        print(f"  FAIL  {name}" + (f" — {detail}" if detail else ""))
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(failures=failures, counters={"passed": "pass"}, ns=globals())
 
 
 def warn(name, cond, detail=""):
@@ -151,18 +144,6 @@ def main() -> int:
     check("declared counts object matches the actual row counts",
           all(counts.get(h, 0) == actual_counts[h] for h in valid_homes),
           f"declared={counts} actual={actual_counts}")
-
-    # 7. report script smoke test
-    if REPORT_SCRIPT.exists():
-        p = subprocess.run([sys.executable, str(REPORT_SCRIPT)],
-                            capture_output=True, text=True, cwd=str(REPO))
-        check("rule-triage-report.py exits 0 on the real artifact",
-              p.returncode == 0, f"rc={p.returncode} stderr={p.stderr[:200]}")
-        check("rule-triage-report.py output mentions every home section",
-              all(h.upper() in p.stdout for h in ["core", "gate", "jit", "gone"]),
-              "one or more HOME headers missing from output")
-    else:
-        check("rule-triage-report.py exists", False, str(REPORT_SCRIPT))
 
     print(f"\n{passed} checks passed, {len(failures)} failed")
     if failures:

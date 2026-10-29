@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Build and run the dedicated copier against synthetic files only."""
+import hashlib
 import json
 import importlib.util
 import os
@@ -7,6 +8,7 @@ import plistlib
 from pathlib import Path
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -17,6 +19,39 @@ sys.path.insert(0, str(ROOT))
 from git_env import fixture_env
 from outlook_test_support import write_settings
 from lib.outlook_settings import load_settings, SettingsError
+
+
+# Rewrites every page of the file in order, forever: generation, page, then a
+# filler that repeats the generation so a torn page is visible too.
+WRITER = """
+import os, struct, sys
+fd = os.open(sys.argv[1], os.O_WRONLY)
+pages = int(sys.argv[2])
+generation = 0
+while True:
+    generation += 1
+    page = struct.pack('<QQ', generation, 0) + struct.pack('<Q', generation) * 510
+    for index in range(pages):
+        os.pwrite(fd, page[:8] + struct.pack('<Q', index) + page[16:], index * 4096)
+"""
+
+
+def page_stamps(data, pages):
+    stamps = []
+    for index in range(pages):
+        page = data[index * 4096:(index + 1) * 4096]
+        generation, = struct.unpack_from('<Q', page)
+        whole = page[16:] == struct.pack('<Q', generation) * 510
+        stamps.append(generation if whole and struct.unpack_from('<Q', page, 8)[0] in (0, index) else -1)
+    return stamps
+
+
+def one_instant(stamps):
+    """Pages read g..g then g-1..g-1 (one boundary), with no torn page."""
+    if -1 in stamps:
+        return False
+    drops = [(a, b) for a, b in zip(stamps, stamps[1:]) if a != b]
+    return len(drops) <= 1 and all(a == b + 1 for a, b in drops)
 
 
 class CopyTest(unittest.TestCase):
@@ -48,6 +83,51 @@ class CopyTest(unittest.TestCase):
     def copy(self, *args, cwd=None, env=None, input=None):
         return subprocess.run([str(self.helper), *args], cwd=cwd or self.work,
                               env=env, input=input, capture_output=True)
+
+    def sidecar_open_fault(self, action):
+        race = self.root / 'remove-sidecar.c'
+        race.write_text("""
+#define _DARWIN_C_SOURCE
+#define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#include <dlfcn.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stdarg.h>
+#include <string.h>
+#include <unistd.h>
+int openat(int fd, const char *name, int flags, ...) {
+    int mode = 0;
+    if (flags & O_CREAT) {
+        va_list args;
+        va_start(args, flags);
+        mode = va_arg(args, int);
+        va_end(args);
+    }
+    if (!(flags & O_CREAT) && strcmp(name, "7.dat") == 0) { SIDECAR_FAULT; }
+    int (*real_openat)(int, const char *, int, ...) = dlsym(RTLD_NEXT, "openat");
+    return real_openat(fd, name, flags, mode);
+}
+""".replace('SIDECAR_FAULT', action))
+        self.build(str(race))
+
+    def test_sidecar_disappearing_at_open_does_not_fail_snapshot(self):
+        self.sidecar_open_fault('unlinkat(fd, name, 0)')
+        result = self.copy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.sidecars / '7.dat').exists(), 'the race deleted the source after listing')
+        self.assertFalse((self.work / 'Files/S0/845/EFMData/7.dat').exists())
+        self.assertEqual((self.work / 'store.hxd').read_bytes(), b'synthetic-store')
+
+    def test_sidecar_open_errors_other_than_enoent_still_fail(self):
+        self.sidecar_open_fault('errno = EACCES; return -1')
+        result = self.copy()
+        self.assertEqual(result.returncode, 13)
+        self.assertIn(b'errno 13', result.stderr)
+
+    def test_missing_required_store_still_fails(self):
+        (self.profile / 'HxStore.hxd').unlink()
+        self.assertEqual(self.copy().returncode, 2)
 
     def test_selected_attachments_are_copied_privately_without_refreshing_snapshot(self):
         selected = self.profile / 'Files/S0/845/Attachments/9'
@@ -146,14 +226,57 @@ class CopyTest(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == 'darwin', 'APFS cloning is macOS only')
     def test_attachment_copy_falls_back_when_cloning_is_unsupported(self):
+        self.build(str(self.unsupported_clone()))
+        self.test_selected_attachments_are_copied_privately_without_refreshing_snapshot()
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'APFS cloning is macOS only')
+    def test_store_and_sidecars_are_cloned_when_the_volume_supports_it(self):
+        log = self.root / 'clones.log'
+        recording = self.root / 'recording-clone.c'
+        recording.write_text('\n'.join((
+            '#include <dlfcn.h>', '#include <stdio.h>', '#include <sys/clonefile.h>',
+            'int fclonefileat(int source, int target, const char *name, uint32_t flags) {',
+            f'    FILE *log = fopen({json.dumps(str(log))}, "a");',
+            '    if (log) { fprintf(log, "%s\\n", name); fclose(log); }',
+            '    int (*real)(int, int, const char *, uint32_t) =',
+            '        (int (*)(int, int, const char *, uint32_t))dlsym(RTLD_NEXT, "fclonefileat");',
+            '    return real(source, target, name, flags);', '}', '')))
+        self.build(str(recording))
+        self.test_copies_only_the_fixed_store_and_body_sidecars_privately()
+        self.assertEqual(log.read_text().splitlines(), ['store.hxd', '7.dat'])
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'APFS cloning is macOS only')
+    def test_store_copy_falls_back_to_a_full_copy_when_cloning_is_unsupported(self):
+        self.build(str(self.unsupported_clone()))
+        self.test_copies_only_the_fixed_store_and_body_sidecars_privately()
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'APFS cloning is macOS only')
+    def test_store_clone_is_one_instant_while_the_store_is_being_written(self):
+        # A writer stamps every 4 KiB page with a generation number, sweeping
+        # the file front to back again and again, one pwrite per page. A copy
+        # taken at one instant shows at most one boundary, between generation
+        # g and g - 1; a copy assembled over time can show more.
+        pages = 4096
+        store = self.profile / 'HxStore.hxd'
+        store.write_bytes(bytes(4096 * pages))
+        writer = subprocess.Popen([sys.executable, '-c', WRITER, str(store), str(pages)])
+        self.addCleanup(writer.kill)
+        for attempt in range(20):
+            work = Path(tempfile.mkdtemp(prefix='work-', dir=self.out))
+            self.assertEqual(self.copy(cwd=work).returncode, 0)
+            stamps = page_stamps((work / 'store.hxd').read_bytes(), pages)
+            self.assertTrue(one_instant(stamps), f'copy {attempt} mixes moments: {sorted(set(stamps))}')
+            shutil.rmtree(work)
+        self.assertIsNone(writer.poll(), 'the writer kept writing throughout')
+
+    def unsupported_clone(self):
         unsupported = self.root / 'unsupported-clone.c'
         unsupported.write_text('\n'.join((
             '#include <errno.h>', '#include <sys/clonefile.h>',
             'int fclonefileat(int source, int target, const char *name, uint32_t flags) {',
             '    (void)source; (void)target; (void)name; (void)flags;',
             '    errno = ENOTSUP; return -1;', '}', '')))
-        self.build(str(unsupported))
-        self.test_selected_attachments_are_copied_privately_without_refreshing_snapshot()
+        return unsupported
 
     def test_scope_readback_names_only_the_compiled_paths_without_copying(self):
         result = self.copy('--scope', cwd=self.root)
@@ -235,6 +358,13 @@ class CopyTest(unittest.TestCase):
         self.assertTrue((self.work / 'Files').is_dir())
 
 
+def digest_gate():
+    spec = importlib.util.spec_from_file_location('fixture_digest', ROOT / 'ops/hxprobe-source-digest.py')
+    gate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gate)
+    return gate
+
+
 @unittest.skipUnless(sys.platform == 'darwin', 'the installer requires macOS zsh and plutil')
 class InstallerTest(unittest.TestCase):
     def setUp(self):
@@ -245,7 +375,7 @@ class InstallerTest(unittest.TestCase):
         for relative in ('bin', 'tools', 'ops/launchd', 'lib', '.venv/bin', 'vendor/hxprobe', 'spec/outlook'):
             (self.repo / relative).mkdir(parents=True)
         for relative in ('ops/hxprobe-source-digest.py', 'bin/install-outlook-intake.sh', 'bin/install-outlook-triage.sh',
-                         'tools/outlook-intake-copy.c', 'lib/outlook_settings.py',
+                         'tools/outlook-intake-copy.c', 'lib/outlook_settings.py', 'lib/outlook_helper.py',
                          'ops/launchd/com.carr.outlook-intake.plist',
                          'ops/launchd/com.carr.outlook-refresh.plist',
                          'ops/launchd/com.carr.outlook-outbox.plist',
@@ -267,20 +397,48 @@ class InstallerTest(unittest.TestCase):
         decoder = self.vendor / 'hxprobe/target/release/hxprobe'
         decoder.write_text('#!/bin/sh\nexit 99\n')
         decoder.chmod(0o700)
-        sources = self.git(self.repo, 'rev-parse', 'HEAD:vendor/hxprobe', 'HEAD:spec/outlook/hxstore-atlas.json',
-                           'HEAD:ops/hxstore-atlas.py').split()
-        (self.vendor / '.carr-pin').write_text('source ' + ' '.join(sources) + '\n')
+        receipt = {'source_digest': digest_gate().digest(self.repo / 'vendor/hxprobe'),
+                   'binary_sha256': hashlib.sha256(decoder.read_bytes()).hexdigest()}
+        (self.vendor / '.carr-build.json').write_text(json.dumps(receipt))
 
-    def install(self, name='intake', check=True):
+        self.sign_tools = self.root / 'signing tools'
+        self.sign_tools.mkdir()
+        self.sign_log = self.root / 'signing-calls'
+        codesign = self.sign_tools / 'codesign'
+        codesign.write_text('''#!/usr/bin/python3
+import json
+import os
+from pathlib import Path
+import sys
+with open(os.environ['SIGN_LOG'], 'a') as log:
+    log.write(json.dumps(sys.argv[1:]) + '\\n')
+if '-s' in sys.argv:
+    if '--force' not in sys.argv:
+        sys.exit('already signed; replacement requires --force')
+    if os.environ.get('SIGN_FAIL'):
+        sys.stderr.write('specified item could not be found in the keychain')
+        sys.exit(1)
+else:
+    print(os.environ.get('REQUIREMENT', 'designated => identifier "outlook-intake-copy" and certificate leaf = H"012345"'), file=sys.stderr)
+''')
+        codesign.chmod(0o700)
+
+    def install(self, name='intake', check=True, signing_env=None):
+        if name == 'intake' and self.config.exists():
+            values = json.loads(self.config.read_text())
+            if str(self.sign_tools) not in values['executable_path'].split(':'):
+                values['executable_path'] = f"{self.sign_tools}:{values['executable_path']}"
+                self.config.write_text(json.dumps(values))
         command = ['/bin/zsh', '-f', '-c', 'export HOME="$1"; exec /bin/zsh -f "$2"',
                    'installer-test', str(self.home), str(self.repo / f'bin/install-outlook-{name}.sh')]
-        return subprocess.run(command, capture_output=True, text=True, check=check, env=fixture_env())
+        return subprocess.run(command, capture_output=True, text=True, check=check,
+                              env={**fixture_env(), 'SIGN_LOG': str(self.sign_log), **(signing_env or {})})
 
     def test_installer_uses_settings_without_a_machine_role_and_preserves_the_granted_binary(self):
         result = self.install()
         self.assertTrue(self.helper.is_file())
         self.assertEqual(stat.S_IMODE(self.helper.stat().st_mode), 0o700)
-        self.assertIn(f'grant Full Disk Access to {self.helper}', result.stdout)
+        self.assertIn(f'ad-hoc helper rebuilds need a Full Disk Access re-grant for {self.helper}', result.stdout)
         self.assertFalse((self.home / 'Library/LaunchAgents').exists())
         for service in ('intake', 'refresh'):
             rendered = plistlib.loads((self.repo / f'out/com.carr.outlook-{service}.plist').read_bytes())
@@ -300,6 +458,86 @@ class InstallerTest(unittest.TestCase):
         before = self.helper.stat().st_mtime_ns
         self.install()
         self.assertEqual(self.helper.stat().st_mtime_ns, before, 'an unchanged helper retains its privacy identity')
+
+    def test_unchanged_install_keeps_binary_bytes_and_mtime_without_an_access_warning(self):
+        self.install()
+        before_bytes = self.helper.read_bytes()
+        before_mtime = self.helper.stat().st_mtime_ns
+        result = self.install()
+        self.assertEqual(self.helper.read_bytes(), before_bytes)
+        self.assertEqual(self.helper.stat().st_mtime_ns, before_mtime)
+        self.assertNotIn('Full Disk Access', result.stdout)
+
+    def test_source_change_rebuilds_once_and_names_the_binary_needing_access(self):
+        self.install()
+        before = self.helper.read_bytes()
+        source = self.repo / 'tools/outlook-intake-copy.c'
+        source.write_text(source.read_text().replace('snapshot failed', 'fixture snapshot failed'))
+        result = self.install()
+        self.assertNotEqual(self.helper.read_bytes(), before)
+        warning = f'ad-hoc helper rebuilds need a Full Disk Access re-grant for {self.helper}'
+        self.assertEqual(sum(warning in line for line in result.stdout.splitlines()), 1)
+        before_bytes = self.helper.read_bytes()
+        before_mtime = self.helper.stat().st_mtime_ns
+        result = self.install()
+        self.assertEqual(self.helper.read_bytes(), before_bytes)
+        self.assertEqual(self.helper.stat().st_mtime_ns, before_mtime)
+        self.assertNotIn('Full Disk Access', result.stdout)
+
+    def test_compiled_settings_change_rebuilds_and_warns_for_the_configured_binary(self):
+        self.install()
+        values = json.loads(self.config.read_text())
+        values['profile'] = str(self.home / 'Changed Profile')
+        self.config.write_text(json.dumps(values))
+        result = self.install()
+        scope = subprocess.run([str(self.helper), '--scope'], capture_output=True, text=True, check=True)
+        self.assertEqual(scope.stdout.splitlines()[0], values['profile'])
+        self.assertIn(f'ad-hoc helper rebuilds need a Full Disk Access re-grant for {self.helper}', result.stdout)
+
+    def test_certificate_identity_rebuilds_without_an_access_warning(self):
+        self.install()
+        values = json.loads(self.config.read_text())
+        values['signing_identity'] = 'Fixture Signing Identity'
+        self.config.write_text(json.dumps(values))
+        result = self.install()
+        self.assertNotIn('re-grant', result.stdout)
+        calls = [json.loads(line) for line in self.sign_log.read_text().splitlines()]
+        self.assertEqual(calls[0][:-1], ['--force', '-s', '-', '--identifier', 'outlook-intake-copy'])
+        self.assertEqual(calls[1][:-1], ['--force', '-s', 'Fixture Signing Identity',
+                                       '--identifier', 'outlook-intake-copy'])
+        self.helper.with_suffix('.pin').unlink()
+        result = self.install()
+        self.assertNotIn('re-grant', result.stdout)
+        self.assertEqual(self.sign_log.read_text().count('"-d", "-r-"'), 2)
+        load_settings(self.home).verify_helper()
+
+    def test_self_signed_certificate_anchor_requirement_is_accepted(self):
+        values = json.loads(self.config.read_text())
+        values['signing_identity'] = 'Fixture Signing Identity'
+        self.config.write_text(json.dumps(values))
+        requirement = 'designated => identifier "outlook-intake-copy" and anchor H"0123456789abcdef0123456789abcdef01234567"'
+        result = self.install(check=False, signing_env={'REQUIREMENT': requirement})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('re-grant', result.stdout)
+        load_settings(self.home).verify_helper()
+
+    def test_signing_failure_preserves_existing_helper_and_pin(self):
+        self.install()
+        before = self.helper.read_bytes(), self.helper.with_suffix('.pin').read_text()
+        values = json.loads(self.config.read_text())
+        values['signing_identity'] = 'Fixture Signing Identity'
+        self.config.write_text(json.dumps(values))
+        for env, message in (({'SIGN_FAIL': '1'}, 'keychain'),
+                             ({'REQUIREMENT': 'designated => cdhash H"123"'}, 'certificate designated requirement'),
+                             ({'REQUIREMENT': ''}, 'certificate designated requirement'),
+                             ({'REQUIREMENT': 'designated => certificate leaf = H"123" or cdhash H"123"'},
+                              'certificate designated requirement')):
+            with self.subTest(env=env):
+                result = self.install(check=False, signing_env=env)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
+                self.assertNotIn('re-grant', result.stdout)
+                self.assertEqual((self.helper.read_bytes(), self.helper.with_suffix('.pin').read_text()), before)
 
     def test_outbox_is_rendered_only_when_enabled_and_never_loaded(self):
         self.install()
@@ -326,7 +564,7 @@ class InstallerTest(unittest.TestCase):
     def test_first_build_uses_configured_tools_for_another_owner(self):
         decoder = self.vendor / 'hxprobe/target/release/hxprobe'
         decoder.unlink()
-        (self.vendor / '.carr-pin').unlink()
+        (self.vendor / '.carr-build.json').unlink()
         tools = self.home / 'configured tools'
         tools.mkdir(parents=True)
         cargo = tools / 'cargo'
@@ -345,13 +583,7 @@ elif args[0] == 'build':
         rustc = tools / 'rustc'
         rustc.write_text(f'#!{sys.executable}\nprint("rustc synthetic-other-host")\n')
         rustc.chmod(0o700)
-        spec = importlib.util.spec_from_file_location('fixture_digest', ROOT / 'ops/hxprobe-source-digest.py')
-        gate = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(gate)
-        (self.repo / 'vendor/hxprobe/BUILD-SHA256').write_text('00' * 32 + '\n')
-        gate.write(self.repo / 'vendor/hxprobe')
-        self.git(self.repo, 'add', 'vendor/hxprobe/BUILD-SHA256')
-        self.git(self.repo, 'commit', '--quiet', '-m', 'synthetic source receipt')
+        gate = digest_gate()
         write_settings(self.home, self.repo, owner='dell', account='partner@example.test',
                        profile=str(self.home / 'Main Profile'), vendor=str(self.vendor),
                        copy_helper=str(self.helper), executable_path=f'{tools}:/usr/bin:/bin:/usr/sbin:/sbin')

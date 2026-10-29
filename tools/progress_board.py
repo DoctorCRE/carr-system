@@ -26,6 +26,7 @@ import subprocess
 import time
 import sys
 import tempfile
+import uuid
 import urllib.request
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -2096,7 +2097,7 @@ def run_publication_stage(project: str, phase: str, action: Callable[[], Any]) -
     return error
 
 
-def call_verb(verb: str, args: dict[str, Any]) -> dict[str, Any]:
+def board_reply(verb: str, args: dict[str, Any]) -> dict[str, Any]:
     """Use the existing noninteractive local-token route; no model is involved.
     Anything short of an explicit ok:true reply raises."""
     record_call = repo_lib("record_call")
@@ -2128,7 +2129,7 @@ def call_verb(verb: str, args: dict[str, Any]) -> dict[str, Any]:
 
 def reconcile_board_write(verb: str, args: dict[str, Any]) -> str:
     """An unreadable or changed version never authorizes another write."""
-    observed = call_verb("read-progress-board", {"board_id": args["board_id"]})
+    observed = board_reply("read-progress-board", {"board_id": args["board_id"]})
     base = int(args["base_version"])
     if verb == "publish-board-snapshot":
         remote = observed.get("snapshot")
@@ -2146,7 +2147,7 @@ def reconcile_board_write(verb: str, args: dict[str, Any]) -> str:
 
 def stable_key(verb: str, args: dict[str, Any]) -> str:
     body = json.dumps([verb, args], sort_keys=True, separators=(",", ":"))
-    return "board-" + hashlib.sha256(body.encode()).hexdigest()
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, "carr-progress-board:" + body))
 
 
 
@@ -2389,7 +2390,7 @@ def publish_orchestrator(state: dict[str, Any]) -> int:
 
 
 def _publish_orchestrator(state: dict[str, Any]) -> int:
-    before = call_verb('read-progress-board', {'board_id': 'orchestrator'}).get('snapshot')
+    before = board_reply('read-progress-board', {'board_id': 'orchestrator'}).get('snapshot')
     snapshot = orchestrator_snapshot(state)
     view = snapshot['orchestrator']
     bank = 1 - (before or {}).get('snapshot_json', {}).get('orchestrator', {}).get('bank', 1)
@@ -2403,11 +2404,11 @@ def _publish_orchestrator(state: dict[str, Any]) -> int:
         if snapshot_size(payload) > SNAPSHOT_BUDGET:
             raise SnapshotTooLarge('orchestrator page exceeds publication budget; no work dropped')
         board_id = f'orchestrator-page-{bank}-{offset // 100}'
-        saved = call_verb('read-progress-board', {'board_id': board_id}).get('snapshot')
+        saved = board_reply('read-progress-board', {'board_id': board_id}).get('snapshot')
         if not saved or saved.get('snapshot_json') != payload:
             args = {'board_id': board_id, 'base_version': int(saved['version']) if saved else 0, 'snapshot': payload}
-            call_verb('publish-board-snapshot', {**args, 'idempotency_key': stable_key('publish-board-snapshot', args)})
-            saved = call_verb('read-progress-board', {'board_id': board_id}).get('snapshot')
+            board_reply('publish-board-snapshot', {**args, 'idempotency_key': stable_key('publish-board-snapshot', args)})
+            saved = board_reply('read-progress-board', {'board_id': board_id}).get('snapshot')
         if not saved or saved.get('snapshot_json') != payload:
             raise RuntimeError('orchestrator page did not read back')
         view['pages'].append({'board_id': board_id, 'version': int(saved['version']), 'count': len(payload['cards'])})
@@ -2415,8 +2416,8 @@ def _publish_orchestrator(state: dict[str, Any]) -> int:
         raise SnapshotTooLarge('orchestrator manifest exceeds publication budget; previous observation retained')
     args = {'board_id': 'orchestrator', 'base_version': int(before['version']) if before else 0,
             'snapshot': snapshot}
-    call_verb('publish-board-snapshot', {**args, 'idempotency_key': stable_key('publish-board-snapshot', args)})
-    after = call_verb('read-progress-board', {'board_id': 'orchestrator'}).get('snapshot') or {}
+    board_reply('publish-board-snapshot', {**args, 'idempotency_key': stable_key('publish-board-snapshot', args)})
+    after = board_reply('read-progress-board', {'board_id': 'orchestrator'}).get('snapshot') or {}
     if after.get('snapshot_json') != snapshot:
         raise RuntimeError('published orchestrator observation did not read back')
     return int(after['version'])
@@ -2469,39 +2470,29 @@ def question_revision(question: dict[str, Any], project: str) -> dict[str, Any]:
 def publish_immutable_page(board_id: str, payload: dict[str, Any]) -> int:
     if snapshot_size(payload) > SNAPSHOT_BUDGET:
         raise SnapshotTooLarge("snapshot page exceeds publication budget; previous observation retained")
-    before = call_verb("read-progress-board", {"board_id": board_id}).get("snapshot")
+    before = board_reply("read-progress-board", {"board_id": board_id}).get("snapshot")
     if before is None:
         args = {"board_id": board_id, "base_version": 0, "snapshot": payload}
-        call_verb("publish-board-snapshot", {**args, "idempotency_key": stable_key("publish-board-snapshot", args)})
-    after = call_verb("read-progress-board", {"board_id": board_id}).get("snapshot")
+        board_reply("publish-board-snapshot", {**args, "idempotency_key": stable_key("publish-board-snapshot", args)})
+    after = board_reply("read-progress-board", {"board_id": board_id}).get("snapshot")
     if not after or after.get("snapshot_json") != payload:
         raise RuntimeError("snapshot page did not read back; previous observation retained")
     return int(after["version"])
 
 
 def publish_external_inventory(cache: dict[str, Any]) -> dict[str, Any]:
-    """Publish immutable bounded pages before switching the manifest pointer."""
-    pages: list[dict[str, Any]] = []
-    batch: list[dict[str, Any]] = []
-    def emit(rows):
-        payload = {'items': rows}
-        encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
-        digest = hashlib.sha256(encoded.encode()).hexdigest()
-        board_id = 'carr-v5-external-' + digest
-        version = publish_immutable_page(board_id, payload)
-        pages.append({'board_id': board_id, 'version': version, 'count': len(rows), 'digest': digest})
-    for row in cache['items']:
-        candidate = [*batch, row]
-        if len(json.dumps({'items': candidate}, ensure_ascii=False)) > 120000:
-            if not batch: raise RuntimeError('external inventory row exceeds page contract')
-            emit(batch)
-            batch = [row]
-            if len(json.dumps({'items': batch}, ensure_ascii=False)) > 120000:
-                raise RuntimeError('external inventory row exceeds page contract')
-        else: batch = candidate
-    if batch: emit(batch)
+    """Replace the one stored inventory, then return the manifest that names its digest.
+
+    The row is replaced whole, so a reader sees the previous inventory or this one.
+    The key carries the UTC day: an unchanged inventory is written at most daily,
+    and a lost row is restored within a day."""
+    payload = {'items': cache['items']}
+    encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+    digest = hashlib.sha256(encoded.encode()).hexdigest()
+    key = stable_key('publish-census-inventory', {'digest': digest, 'day': now_utc().date().isoformat()})
+    board_reply('publish-census-inventory', {'payload': payload, 'idempotency_key': key})
     return {**{key: value for key, value in cache.items() if key not in ('items', 'pr_heads')},
-            'schema': 'system-work-external.v2', 'pages': pages, 'item_count': len(cache['items'])}
+            'schema': 'system-work-external.v3', 'digest': digest, 'item_count': len(cache['items'])}
 
 
 def as_published(record: dict[str, Any]) -> Any:
@@ -2523,7 +2514,7 @@ def publish_board(project: str, *, costs=None) -> dict[str, int]:
     board = safe_project(project)
     if board == LAUNCHD_BOARD:
         publish_orchestrator(state)
-    before = call_verb("read-progress-board", {"board_id": board})
+    before = board_reply("read-progress-board", {"board_id": board})
     remote_snapshot = before.get("snapshot")
     snapshot = project_board_snapshot(state, costs=costs)
     if board == LAUNCHD_BOARD:
@@ -2540,7 +2531,7 @@ def publish_board(project: str, *, costs=None) -> dict[str, int]:
     if remote_snapshot is None or as_published(remote_snapshot) != snapshot:
         args = {"board_id": board, "base_version": int(remote_snapshot["version"]) if remote_snapshot else 0,
                 "snapshot": snapshot}
-        call_verb("publish-board-snapshot", {**args, "idempotency_key": stable_key("publish-board-snapshot", args)})
+        board_reply("publish-board-snapshot", {**args, "idempotency_key": stable_key("publish-board-snapshot", args)})
 
     remote_questions = {q["question_id"]: q for q in before.get("questions", [])}
     changed = 0
@@ -2557,14 +2548,14 @@ def publish_board(project: str, *, costs=None) -> dict[str, int]:
             fields = question_revision(revision, board)
             verb = "ask-board-question" if number == 1 else "revise-board-question"
             args = {"board_id": board, "question_id": qid, "base_version": number - 1, **fields}
-            call_verb(verb, {**args, "idempotency_key": stable_key(verb, args)})
+            board_reply(verb, {**args, "idempotency_key": stable_key(verb, args)})
             changed += 1
         if remote_revision == expected_revision and remote:
             fields = question_revision(current, board)
             if any(remote.get(key) != value for key, value in fields.items()):
                 raise RuntimeError(f"board question {qid} differs on the server; revise it through ask")
 
-    after = call_verb("read-progress-board", {"board_id": board})
+    after = board_reply("read-progress-board", {"board_id": board})
     sealed = after.get("snapshot") or {}
     if as_published(sealed) != snapshot:
         raise RuntimeError("published board snapshot did not read back")
@@ -2629,7 +2620,7 @@ def poll_board_answers(project: str) -> dict[str, int]:
     for asker in sorted(refs):
         cursor = max((int(answer["cursor"]) for answer in seen.values() if answer["asker_ref"] == asker), default=0)
         while True:
-            page = call_verb("read-board-answers", {"after_cursor": cursor, "asker_ref": asker, "limit": 500})
+            page = board_reply("read-board-answers", {"after_cursor": cursor, "asker_ref": asker, "limit": 500})
             rows = page.get("answers", [])
             for answer in rows:
                 require_own_answer(answer, asker)
@@ -2655,14 +2646,14 @@ def poll_board_answers(project: str) -> dict[str, int]:
         if answer.get("status") not in {"Received", "Applied"}:
             args = {"answer_id": answer["id"], "asker_ref": asker, "base_version": int(answer["version"])}
             try:
-                receipt = call_verb("acknowledge-board-answer",
+                receipt = board_reply("acknowledge-board-answer",
                                     {**args, "idempotency_key": stable_key("acknowledge-board-answer", args)})
                 if receipt.get("answer", {}).get("status") != "Received":
                     raise RuntimeError("board answer Received did not read back from the write")
             except RuntimeError:
                 # The server may have committed Received before the local ack
                 # event was fsynced. Re-read that exact cursor before retrying.
-                reread = call_verb("read-board-answers", {
+                reread = board_reply("read-board-answers", {
                     "after_cursor": int(answer["cursor"]) - 1, "asker_ref": asker, "limit": 1,
                 }).get("answers", [])
                 if reread:
@@ -2760,7 +2751,7 @@ def command_reconcile(args: argparse.Namespace) -> None:
     if args.live and args.apply:
         raise SystemExit("--live is read-only; apply to the canonical local board after reviewing its dry-run")
     if args.live:
-        remote = call_verb("read-progress-board", {"board_id": safe_project(args.project)})
+        remote = board_reply("read-progress-board", {"board_id": safe_project(args.project)})
         snapshot = remote.get("snapshot")
         if not snapshot:
             raise SystemExit("No published board snapshot")
@@ -2849,7 +2840,7 @@ def publish_needs_joe_local() -> None:
         return info
     import needs_joe_local
 
-    count = needs_joe_local.publish(call_verb, stable_key, pr_state,
+    count = needs_joe_local.publish(board_reply, stable_key, pr_state,
                                     needs_joe_local.read_source(), stamp())
     log(f"needs-joe local page published with {count} item(s)")
 
@@ -2881,7 +2872,7 @@ def command_init(args: argparse.Namespace) -> None:
 def command_task(args: argparse.Namespace) -> None:
     binding = None
     if getattr(args, "work_request", None):
-        binding = repo_lib("progress_hierarchy").load_request(args.work_request, call_verb)
+        binding = repo_lib("progress_hierarchy").load_request(args.work_request, board_reply)
     expected = json.loads(args.expected_task) if args.expected_task is not None else None
     if args.expected_task is not None and not isinstance(expected, dict):
         raise SystemExit("--expected-task must be a task object")

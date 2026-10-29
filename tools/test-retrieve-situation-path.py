@@ -8,11 +8,11 @@ source = Path(__file__).with_name("retrieve.py").read_text()
 failures = 0
 
 
-def check(name, condition):
-    global failures
-    print(("  ok    " if condition else "  FAIL  ") + name)
-    if not condition:
-        failures += 1
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(detail=None, counters={"failures": "fail"}, ns=globals())
 
 
 check("store pass calls the authenticated shared situation-retrieval verb",

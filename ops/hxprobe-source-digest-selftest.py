@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A stale hxprobe BUILD-SHA256 is red; a refreshed one is green (WR-000515)."""
+"""The installed hxprobe stays bound to its source without an in-tree pin (WR-000515, WR-000440)."""
 import contextlib
 import importlib.util
 import io
@@ -18,8 +18,6 @@ assert spec is not None and spec.loader is not None
 gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
-BINARY_LINE = f'{"ab" * 32}  target/release/hxprobe'
-
 
 class ReceiptTests(unittest.TestCase):
     def setUp(self):
@@ -35,12 +33,12 @@ class ReceiptTests(unittest.TestCase):
         (self.crate / 'src').mkdir()
         (self.crate / 'src/main.rs').write_text('fn main() {}\n')
         (self.crate / 'Cargo.toml').write_text('[package]\nname = "hxprobe"\n')
-        (self.crate / 'BUILD-SHA256').write_text(f'{BINARY_LINE}\n\nCommand: cargo build --release --locked\n')
-        gate.write(self.crate)
+        self.vendor = self.root / 'installed'
+        self.decoder = self.vendor / 'hxprobe/target/release/hxprobe'
 
-    def check(self) -> int:
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            return gate.main(['--crate', str(self.crate)])
+    def cargo_calls(self) -> list[str]:
+        log = self.root / 'tools/calls.jsonl'
+        return [json.loads(line)[0] for line in log.read_text().splitlines()] if log.exists() else []
 
     def build(self, failure=''):
         tools = self.root / 'tools'
@@ -69,14 +67,12 @@ if args[0] == 'build':
         rustc.chmod(0o700)
         with patch.dict(os.environ, {'PATH': str(tools)}), contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()):
-            return gate.main(['--crate', str(self.crate), '--build-into', str(self.root / 'installed')])
+            return gate.main(['--crate', str(self.crate), '--build-into', str(self.vendor)])
 
-    def test_other_machine_build_uses_verified_source_and_records_local_artifact(self):
+    def test_other_machine_build_records_the_local_artifact_and_source(self):
         self.assertEqual(self.build(), 0)
-        vendor = self.root / 'installed'
-        binary = vendor / 'hxprobe/target/release/hxprobe'
-        self.assertEqual(binary.read_bytes(), b'synthetic other-machine binary')
-        receipt = json.loads((vendor / '.carr-build.json').read_text())
+        self.assertEqual(self.decoder.read_bytes(), b'synthetic other-machine binary')
+        receipt = json.loads((self.vendor / '.carr-build.json').read_text())
         self.assertEqual(receipt['source_digest'], gate.digest(self.crate))
         self.assertEqual(receipt['binary_sha256'], hashlib.sha256(b'synthetic other-machine binary').hexdigest())
         self.assertIn('aarch64-apple-darwin', receipt['rustc'])
@@ -85,73 +81,63 @@ if args[0] == 'build':
         self.assertEqual([row[0] for row in calls], ['test', 'build'])
         self.assertTrue(all('--locked' in row and '--release' in row for row in calls))
 
-    def test_stale_source_refuses_before_running_cargo_or_creating_output(self):
-        (self.crate / 'src/main.rs').write_text('fn main() { panic!("changed"); }\n')
-        self.assertEqual(self.build(), 1)
-        self.assertFalse((self.root / 'tools/calls.jsonl').exists())
-        self.assertFalse((self.root / 'installed').exists())
-
-    def test_failed_tests_or_build_keep_the_previous_decoder_and_receipt(self):
+    def test_receipted_decoder_for_this_source_is_kept_without_cargo(self):
         self.assertEqual(self.build(), 0)
-        vendor = self.root / 'installed'
-        decoder = vendor / 'hxprobe/target/release/hxprobe'
-        receipt = vendor / '.carr-build.json'
-        decoder.write_bytes(b'previous decoder')
-        old_receipt = receipt.read_bytes()
+        (self.root / 'tools/calls.jsonl').unlink()
+        self.assertEqual(self.build(), 0)
+        self.assertEqual(self.cargo_calls(), [])
+
+    def test_source_change_rebuilds(self):
+        self.assertEqual(self.build(), 0)
+        (self.crate / 'src/main.rs').write_text('fn main() { println!("new"); }\n')
+        self.assertEqual(self.build(), 0)
+        self.assertEqual(self.cargo_calls(), ['test', 'build', 'test', 'build'])
+        receipt = json.loads((self.vendor / '.carr-build.json').read_text())
+        self.assertEqual(receipt['source_digest'], gate.digest(self.crate))
+
+    def test_a_decoder_that_does_not_match_its_receipt_is_removed_and_rebuilt(self):
+        self.assertEqual(self.build(), 0)
+        self.decoder.write_bytes(b'altered decoder')
+        self.assertEqual(self.build(), 0)
+        self.assertEqual(self.decoder.read_bytes(), b'synthetic other-machine binary')
+        self.decoder.write_bytes(b'altered decoder')
+        self.assertEqual(self.build('build'), 1)
+        self.assertFalse(self.decoder.exists(), 'a failed rebuild never leaves the altered decoder in place')
+
+    def test_failed_tests_or_build_keep_the_previous_receipted_decoder(self):
+        self.assertEqual(self.build(), 0)
+        old_receipt = (self.vendor / '.carr-build.json').read_bytes()
+        (self.crate / 'src/main.rs').write_text('fn main() { panic!("changed"); }\n')
         for failure in ('test', 'build'):
             with self.subTest(failure=failure):
                 self.assertEqual(self.build(failure), 1)
-                self.assertEqual(decoder.read_bytes(), b'previous decoder')
-                self.assertEqual(receipt.read_bytes(), old_receipt)
+                self.assertEqual(self.decoder.read_bytes(), b'synthetic other-machine binary')
+                self.assertEqual((self.vendor / '.carr-build.json').read_bytes(), old_receipt)
 
-    def test_refreshed_receipt_is_green(self):
-        self.assertEqual(self.check(), 0)
-
-    def test_source_change_with_previous_receipt_is_red_until_refreshed(self):
-        (self.crate / 'src/main.rs').write_text('fn main() { println!("new"); }\n')
-        self.assertEqual(self.check(), 1)
-        gate.write(self.crate)
-        self.assertEqual(self.check(), 0)
-
-    def test_new_build_input_is_covered_without_a_list_edit(self):
-        (self.crate / 'build.rs').write_text('fn main() {}\n')
-        self.assertEqual(self.check(), 1)
-
-    def test_external_build_inputs_stale_the_receipt(self):
-        for path in ('spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py'):
+    def test_every_build_input_changes_the_digest(self):
+        for path in ('vendor/hxprobe/build.rs', 'spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py'):
             with self.subTest(path=path):
+                before = gate.digest(self.crate)
                 source = self.root / path
-                source.write_text(source.read_text() + 'changed\n')
-                self.assertEqual(self.check(), 1)
-                gate.write(self.crate)
-                self.assertEqual(self.check(), 0)
+                source.write_text((source.read_text() if source.exists() else '') + '// changed\n')
+                self.assertNotEqual(gate.digest(self.crate), before)
 
-    def test_receipt_without_a_digest_is_red(self):
-        (self.crate / 'BUILD-SHA256').write_text(f'{BINARY_LINE}\n')
-        self.assertEqual(self.check(), 1)
-
-    def test_docs_and_build_output_do_not_stale_the_receipt(self):
+    def test_docs_and_build_output_do_not_change_the_digest(self):
+        before = gate.digest(self.crate)
         (self.crate / 'UPSTREAM.md').write_text('notes\n')
         (self.crate / 'target/release').mkdir(parents=True)
         (self.crate / 'target/release/hxprobe').write_bytes(b'\0binary')
-        self.assertEqual(self.check(), 0)
-
-    def test_refresh_keeps_the_reference_hash_on_line_one_and_one_digest_line(self):
-        (self.crate / 'src/main.rs').write_text('fn main() { println!("again"); }\n')
-        gate.write(self.crate)
-        text = (self.crate / 'BUILD-SHA256').read_text()
-        self.assertEqual(text.splitlines()[0], BINARY_LINE)
-        self.assertEqual(text.count('Source digest: '), 1)
-        self.assertIn('Command: cargo build --release --locked', text)
+        self.assertEqual(gate.digest(self.crate), before)
 
 
-class CommittedReceiptTest(unittest.TestCase):
-    def test_committed_receipt_describes_the_committed_source(self):
-        # The gate itself: the gates class runs every ops/*-selftest.py on Linux.
-        self.assertEqual(gate.recorded(gate.CRATE), gate.digest(gate.CRATE),
-                         'vendor/hxprobe changed without a refreshed BUILD-SHA256; rebuild the reference artifact, '
-                         'update line 1, then run python3 ops/hxprobe-source-digest.py --write')
-
+class NoTrackedPinTest(unittest.TestCase):
+    def test_no_tracked_file_records_the_source_digest(self):
+        # Two decoder PRs conflict on any committed file derived from the source (WR-000440).
+        want = gate.digest(gate.CRATE)
+        holders = [str(path) for folder in (gate.CRATE, ROOT / 'spec/outlook') for path in folder.rglob('*')
+                   if path.is_file() and 'target' not in path.relative_to(folder).parts
+                   and want.encode() in path.read_bytes()]
+        self.assertEqual(holders, [])
 
 if __name__ == '__main__':
     unittest.main()

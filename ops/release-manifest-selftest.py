@@ -22,12 +22,11 @@ _spec.loader.exec_module(RELEASE_MANIFEST)
 FAILURES: list[str] = []
 
 
-def check(name: str, condition: bool, detail: str = "") -> None:
-    if condition:
-        print(f"  ok    {name}")
-    else:
-        FAILURES.append(name)
-        print(f"  FAIL  {name}" + (f" — {detail}" if detail else ""))
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(failures=FAILURES)
 
 
 def run(*args: str) -> subprocess.CompletedProcess:

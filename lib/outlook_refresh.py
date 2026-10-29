@@ -13,7 +13,7 @@ from lib import outlook_intake as intake
 from lib import outlook_triage as triage
 from lib.outlook_settings import load_settings
 from lib.outlook_ui import (CuaError, Outcome, UiError, Waits, Window,
-                            outlook_pid, prepare_outlook, usable_window)
+                            outlook_pid, prepare_outlook, usable_window, window_detail)
 
 
 def run(repo: Path, now: datetime, waits: Waits = Waits(),
@@ -45,11 +45,17 @@ def run(repo: Path, now: datetime, waits: Waits = Waits(),
         pid = outlook_pid()
         found = usable_window(pid) if pid else None
         if not found or pid is None:
-            return Outcome('failed', 'no_usable_main_window')
+            return Outcome('failed', 'no_usable_main_window',
+                           'phase=refresh_window_lookup ' + window_detail(pid))
+        window = Window(pid, found['window_id'], waits)
         expected_account = settings.account
         if not found.get('title', '').endswith(f' • {expected_account}'):
-            return Outcome('failed', 'wrong_account')
-        window = Window(pid, found['window_id'], waits)
+            if not window.select_all_accounts():
+                return Outcome('failed', 'wrong_account')
+            found = usable_window(pid)
+            if not found or not found.get('title', '').endswith(f' • {expected_account}'):
+                return Outcome('failed', 'wrong_account')
+            window = Window(pid, found['window_id'], waits)
         deadline = now_fn() + timedelta(minutes=10)
         closed = lambda: now_fn() >= deadline or not intake.in_window(now_fn())
         report = triage.Report()
@@ -57,12 +63,16 @@ def run(repo: Path, now: datetime, waits: Waits = Waits(),
             window.front()
             return triage.preserve_unread(window, report, lambda tabs: (
                 triage.refresh_all(window, path, triage.Limits(), report, closed)
-                or Outcome('succeeded', 'refreshed')))
+                or Outcome('succeeded', 'refreshed')), closed)
         finally:
             window.show_folder_pane(True)
     except ValueError:
         return Outcome('failed', 'refresh_list_invalid')
     except (OSError, UiError, CuaError) as exc:
+        if isinstance(exc, UiError) and exc.step:
+            detail = f'at {exc.step}: {exc}'
+            print(f'outlook-refresh UiError {detail}', file=sys.stderr)
+            return Outcome('failed', 'ui_error', detail)
         if isinstance(exc, UiError):
             reason, message = 'ui_error', 'Outlook UI interaction failed'
         elif isinstance(exc, CuaError):

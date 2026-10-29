@@ -20,7 +20,7 @@ class PublicationBoundaryTests(unittest.TestCase):
                 with self.subTest(marker=marker, door=door), \
                      patch.object(board.repo_lib('machine_role'), 'read_marker', return_value=marker), \
                      patch.object(board, 'read_state', return_value={'project': 'carr-v5', 'tasks': {}}), \
-                     patch.object(board, 'call_verb', side_effect=RuntimeError('remote reached')) as remote, \
+                     patch.object(board, 'board_reply', side_effect=RuntimeError('remote reached')) as remote, \
                      patch.object(board, 'render') as render, patch.object(board, 'build_all_repos'):
                     with self.assertRaisesRegex(RuntimeError, 'primary'):
                         if door == 'publisher':
@@ -43,7 +43,7 @@ class PublicationBoundaryTests(unittest.TestCase):
             self.assertEqual(args['base_version'], store.get(key, {}).get('version', 0))
             store[key] = {'version': args['base_version'] + 1, 'snapshot_json': copy.deepcopy(args['snapshot'])}
             return {'ok': True}
-        with patch.object(board, 'call_verb', side_effect=call), patch.object(board, 'read_json_file', return_value={}):
+        with patch.object(board, 'board_reply', side_effect=call), patch.object(board, 'read_json_file', return_value={}):
             for i in range(11):
                 state['tasks'][str(i)]['updated_at'] = f'2026-10-21T19:00:{i:02d}Z'
                 board.publish_orchestrator(state)
@@ -66,7 +66,7 @@ class PublicationBoundaryTests(unittest.TestCase):
             self.assertEqual(args['base_version'], store.get(key, {}).get('version', 0))
             store[key] = {'version': args['base_version'] + 1, 'snapshot_json': copy.deepcopy(args['snapshot'])}
             return {'ok': True}
-        with patch.object(board, 'call_verb', side_effect=call), patch.object(board, 'read_json_file', return_value={}):
+        with patch.object(board, 'board_reply', side_effect=call), patch.object(board, 'read_json_file', return_value={}):
             board.publish_orchestrator(state)
             before = copy.deepcopy(store['orchestrator'])
             fail = True
@@ -99,7 +99,7 @@ class PublicationBoundaryTests(unittest.TestCase):
             self.assertLessEqual(board.snapshot_size(args['snapshot']), board.SNAPSHOT_BUDGET)
             store[key] = {'version': args['base_version'] + 1, 'snapshot_json': copy.deepcopy(args['snapshot'])}
             return {'ok': True}
-        with patch.object(board, 'call_verb', side_effect=call), \
+        with patch.object(board, 'board_reply', side_effect=call), \
              patch.object(board, 'read_json_file', return_value={}):
             board.publish_orchestrator(state)
             view = store['orchestrator']['snapshot_json']['orchestrator']
@@ -112,7 +112,7 @@ class PublicationBoundaryTests(unittest.TestCase):
             self.assertEqual(sum(card['state'] == 'merged' for card in cards), 600)
             self.assertFalse(any(card['state'] == 'live' for card in cards))
             previous = copy.deepcopy(store['orchestrator'])
-            with patch.object(board, 'call_verb', side_effect=RuntimeError('offline')):
+            with patch.object(board, 'board_reply', side_effect=RuntimeError('offline')):
                 with self.assertRaises(RuntimeError):
                     board.publish_orchestrator(state)
             self.assertEqual(store['orchestrator'], previous)

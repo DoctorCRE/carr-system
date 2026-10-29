@@ -26,10 +26,11 @@ import exporters.common as common  # noqa: E402
 fails: list[str] = []
 
 
-def check(label, ok, detail=""):
-    print(f"  {'PASS' if ok else 'FAIL'}  {label}" + (f"  — {detail}" if detail else ""))
-    if not ok:
-        fails.append(label)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(ok="  PASS  {label}", detail="  — {detail}", detail_on_ok=True, failures=fails)
 
 
 def deadlock(*_args, **_kwargs):

@@ -194,7 +194,12 @@ elif tool == 'get_window_state':
         elements.append(element)
         tokens[str(index)] = kind
         return index
+    if payload['window_id'] == 14:
+        print(json.dumps({'elements': [{'role': 'AXButton', 'label': 'Send'}]}))
+        sys.exit(0)
     top = add('AXWindow', state['folder'] + ' • ' + ACCOUNT, 0)
+    if not state.get('account_button_missing'):
+        add('AXButton', 'All Accounts', 1, top, ['account'])
     for label in ('New Mail', 'Delete', 'Archive', 'Move', 'Flag', 'Mark Unread'):
         add('AXButton', label, 1, top, ['button', label])
     for depth in (1, 2, 3):
@@ -211,12 +216,14 @@ elif tool == 'get_window_state':
                 if unread:
                     add('AXStaticText', str(unread), 6, row, value=str(unread))
     if state['tab'] and state['folder'] == 'Inbox':
-        focused = 'Selected' if state['tab'] == 'focused' else 'Unselected'
-        other = 'Unselected' if state['tab'] == 'focused' else 'Selected'
-        add('AXCheckBox', f'Focused Inbox {focused};  Other Inbox {other}', 4, top, value='0')
-    table = add('AXTable', 'Message List', 4, top)
+        # Live Outlook names the selected tab first (read 2026-10-28).
+        label = ('Focused Inbox Selected;  Other Inbox Unselected' if state['tab'] == 'focused'
+                 else 'Other Inbox Selected;  Focused Inbox Unselected')
+        add('AXCheckBox', label, 4, top, value='0')
+    table = add('AXTable', 'Message List', 4, top, ['message_list'])
     add('AXCell', 'Today, Expanded', 6, table)
-    for r in current():
+    offset = 0 if state.get('search') else state.get('offsets', {}).get(state['tab'] or 'only', 0)
+    for r in current()[offset:offset + state.get("visible_limit", len(current()))]:
         row = add('AXRow', '', 5, table, selected=r['label'] == state.get('selected'))
         shown = ('Unread, ' if r['unread'] else '') + r['label']
         add('AXCell', shown, 6, row, ['row', r['label']], selected=r['label'] == state.get('selected'))
@@ -229,21 +236,54 @@ elif tool == 'get_window_state':
                     add('AXRow', folder, 3, top, ['folder', folder])
     state['tokens'] = {'snap': snap, 'map': tokens}
     save()
-    print(json.dumps({'snapshot_id': snap, 'elements': elements, 'degraded_reason': None}))
+    if payload['window_id'] in state.get('draft_window_ids', []):
+        elements = [{'role': 'AXTextField', 'label': 'Subject'}]
+    degraded = 'ax_window_unresolved' if payload['window_id'] in state.get('unresolved_window_ids', []) else None
+    print(json.dumps({'snapshot_id': snap, 'elements': elements, 'degraded_reason': degraded}))
 elif tool == 'invoke_menu':
     path = payload['path']
     if path == ['Outlook', 'Quit Outlook']:
         state['running'] = (state.get('menu_quit_ignored', False) or
                             payload['window_id'] != state.get('quit_window_id', payload['window_id']))
+        if 'after_menu_quit' in state:
+            state['windows'] = state['after_menu_quit']
     elif path == ['View', 'Sidebar']:
         if not state.get('sidebar_stuck'):
             state['sidebar'] = not state['sidebar']
-    elif path == ['View', 'Switch to Other'] and state['tab']:
+    elif path == ['View', 'Switch to Other'] and state['tab'] and not state.get('tab_switch_ignored'):
         state['tab'] = 'other'
-    elif path == ['View', 'Switch to Focused'] and state['tab']:
+    elif path == ['View', 'Switch to Focused'] and state['tab'] and not state.get('tab_switch_ignored'):
         state['tab'] = 'focused'
     elif path == ['File', 'New', 'Main Window'] and 'after_new_window' in state:
         state['windows'] = state['after_new_window']
+    save()
+    print(json.dumps({'effect': 'unverifiable'}))
+elif tool == 'scroll':
+    snap, _, index = payload.get('element_token', '').partition(':')
+    if snap != state['tokens']['snap'] or state['tokens']['map'].get(index) != ['message_list']:
+        fail('scroll must target the fresh Message List token')
+    amount = 50 if payload['direction'] == 'up' else 1
+    if payload.get('by') != 'line' or payload.get('amount') != amount:
+        fail('unexpected scroll granularity')
+    tab = state['tab'] or 'only'
+    offsets = state.setdefault('offsets', {})
+    limit = state.get('visible_limit', len(current()))
+    step = max(1, limit - 1)
+    offset = offsets.get(tab, 0) + (step if payload['direction'] == 'down' else -step * amount)
+    if not state.get('scroll_stuck'):
+        offsets[tab] = max(0, min(max(0, len(current()) - limit), offset))
+    replacement = state.pop('replace_on_first_scroll', None)
+    if replacement:
+        lists()[tab][1] = replacement
+    if payload['direction'] == 'down':
+        state['scanned_down'] = True
+        for label in state.pop('read_on_scroll', []):
+            mark_read(label)
+    elif state.get('scanned_down') and offsets.get(tab, 0) == 0:
+        replacement = state.pop('replace_on_restore', None)
+        if replacement:
+            lists()[tab][-1] = replacement
+    state['scrolls'] = state.get('scrolls', 0) + 1
     save()
     print(json.dumps({'effect': 'unverifiable'}))
 elif tool in ('click', 'type_text'):
@@ -258,6 +298,13 @@ elif tool in ('click', 'type_text'):
             state['picker'] = payload['text']
         else:
             fail('not a text field')
+    elif kind == ['account']:
+        if payload.get('action', 'press') != 'press':
+            fail('account selection requires AXPress')
+        state['presses'].append('All Accounts')
+        if not state.get('account_press_ignored'):
+            for w in state['windows']:
+                w['title'] = state['folder'] + ' • ' + ACCOUNT
     elif kind and kind[0] == 'row':
         if not (state.get('search') and state.get('search_click_ignored')):
             select(kind[1])
@@ -357,6 +404,12 @@ class FakeOutlookCase(unittest.TestCase):
         rows = [json.loads(line) for line in self.calls.read_text().splitlines()]
         return [row[1:] for row in rows if row[0] == name]
 
+    def assert_no_restart(self):
+        self.assertEqual(self.called('osascript') + self.called('open'), [])
+        self.assertFalse(any(call[1] == 'invoke_menu' and json.loads(call[2])['path'] ==
+                             ['Outlook', 'Quit Outlook'] for call in self.called('cua-driver')))
+        self.assertTrue(json.loads(self.state.read_text())['running'])
+
     def refresh_list(self, entries):
         path = self.repo / triage.REFRESH_LIST
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -381,6 +434,23 @@ class PreflightQuitTest(FakeOutlookCase):
         from lib.outlook_ui import prepare_outlook
         with patch.dict(os.environ, self.env, clear=True):
             return prepare_outlook(waits)
+
+    def test_mailbox_with_twelve_toolbar_strips_allows_restart(self):
+        strips = [window(wid, '', 1920, 30, False) for wid in range(20, 32)]
+        self.given(windows=strips + [ORDINARY], after_launch=strips + [ORDINARY])
+        self.assertIsNone(self.prepare())
+
+    def test_mailbox_with_suffixed_compose_prevents_restart(self):
+        self.given(windows=[ORDINARY, COMPOSE | {'title': f'Draft • {ACCOUNT}'}])
+        outcome = self.prepare()
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+        self.assert_no_restart()
+
+    def test_lone_draft_is_refused_without_quitting(self):
+        self.given(windows=[COMPOSE | {'title': f'Draft • {ACCOUNT}'}])
+        self.assertIsNotNone(self.prepare())
+        self.assertEqual(self.called('osascript') + self.called('open'), [])
+        self.assertFalse(any(call[1] == 'invoke_menu' for call in self.called('cua-driver')))
 
     def test_quit_uses_mailbox_when_unassigned_window_is_first(self):
         self.given(windows=[UNTITLED_OFFSCREEN, ORDINARY], quit_window_id=13)
@@ -426,18 +496,28 @@ class PreflightQuitTest(FakeOutlookCase):
 
     def test_refused_quit_times_out_without_relaunch(self):
         self.given(windows=[ORDINARY], menu_quit_ignored=True, osascript_quit_ignored=True)
-        outcome = self.prepare(Waits(0.4, 0, 0, 0.01, 0, 0, 0))
+        outcome = self.prepare(Waits(1, 0, 0, 0.01, 0, 0, 0))
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'outlook_quit_timeout'))
         self.assertEqual(len(self.called('osascript')), 1)
         self.assertEqual(self.called('open'), [])
         self.assertTrue(json.loads(self.state.read_text())['running'])
 
     def test_quit_timeout_reports_fresh_sanitized_windows(self):
+        class Clock:
+            now = 0.0
+
+            def monotonic(self):
+                return self.now
+
+            def sleep(self, seconds):
+                self.now += seconds
+
         sheet = window(16, 'private subject and address@example.test', 700, 240) | {'role': 'AXSheet'}
         dialog = window(17, 'private confirmation', 600, 300) | {'subrole': 'AXDialog'}
         self.given(windows=[ORDINARY], after_quit=[ORDINARY, COMPOSE, sheet, dialog, TOOLBAR],
                    menu_quit_ignored=True, osascript_quit_ignored=True)
-        outcome = self.prepare(Waits(0.4, 0, 0, 0.01, 0, 0, 0))
+        with patch('lib.outlook_ui.time', Clock()):
+            outcome = self.prepare(Waits(poll_seconds=10))
         self.assertEqual(outcome.reason, 'outlook_quit_timeout')
         self.assertEqual(json.loads(outcome.detail), {'windows': [
             {'kind': 'main', 'width': 1230, 'height': 768, 'is_on_screen': True},
@@ -453,17 +533,34 @@ class PreflightQuitTest(FakeOutlookCase):
         from lib.outlook_ui import CuaError, cua
         self.given(windows=[ORDINARY], menu_quit_ignored=True, osascript_quit_ignored=True)
         snapshots = 0
-        def fail_second_snapshot(tool, arguments):
+        def fail_diagnostic_snapshot(tool, arguments):
+            nonlocal snapshots
+            if tool == 'list_windows':
+                snapshots += 1
+                if snapshots > 2:
+                    raise CuaError('private window title')
+            return cua(tool, arguments)
+        with patch('lib.outlook_ui.cua', side_effect=fail_diagnostic_snapshot):
+            outcome = self.prepare(Waits(0.4, 0, 0, 0.01, 0, 0, 0))
+        self.assertEqual((outcome.reason, outcome.detail),
+                         ('outlook_quit_timeout', 'windows_unavailable'))
+
+    def test_unavailable_fallback_snapshot_prevents_quit_and_relaunch(self):
+        from lib.outlook_ui import CuaError, cua
+        self.given(windows=[ORDINARY], menu_quit_ignored=True)
+        snapshots = 0
+        def fail_fallback_snapshot(tool, arguments):
             nonlocal snapshots
             if tool == 'list_windows':
                 snapshots += 1
                 if snapshots > 1:
-                    raise CuaError('private window title')
+                    raise CuaError('windows unavailable')
             return cua(tool, arguments)
-        with patch('lib.outlook_ui.cua', side_effect=fail_second_snapshot):
+        with patch('lib.outlook_ui.cua', side_effect=fail_fallback_snapshot):
             outcome = self.prepare(Waits(0.4, 0, 0, 0.01, 0, 0, 0))
-        self.assertEqual((outcome.reason, outcome.detail),
-                         ('outlook_quit_timeout', 'windows_unavailable'))
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'cua_driver_unavailable'))
+        self.assertEqual(self.called('osascript') + self.called('open'), [])
+        self.assertTrue(json.loads(self.state.read_text())['running'])
 
     def test_refresh_cli_logs_timeout_detail(self):
         from lib import outlook_refresh
@@ -491,30 +588,114 @@ class PreflightQuitTest(FakeOutlookCase):
         self.assertFalse(any(call[1] == 'invoke_menu' for call in self.called('cua-driver')))
         self.assertTrue(json.loads(self.state.read_text())['running'])
 
+    def test_titled_and_untitled_drafts_beside_mailbox_prevent_restart(self):
+        for title in (f'Re: subject-000 • {ACCOUNT}', ''):
+            with self.subTest(title=title):
+                self.given(windows=[ORDINARY, COMPOSE | {'title': title}], draft_window_ids=[14])
+                outcome = self.prepare()
+                self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+                self.assert_no_restart()
+
+    def test_unreadable_untitled_size_does_not_identify_a_draft(self):
+        unknown = window(15, '', 501, 500, False)
+        self.given(windows=[ORDINARY, unknown], unresolved_window_ids=[15])
+        self.assertIsNone(self.prepare())
+        self.assertEqual(len(self.called('open')), 1)
+
+    def test_unreadable_titled_draft_prevents_restart(self):
+        from lib.outlook_ui import cua
+        self.given(windows=[ORDINARY, COMPOSE | {'title': f'Draft • {ACCOUNT}'}])
+        def unreadable_draft(tool, arguments):
+            if tool == 'get_window_state' and arguments['window_id'] == 14:
+                return {'elements': [], 'degraded_reason': 'ax_window_unresolved'}
+            return cua(tool, arguments)
+        with patch('lib.outlook_ui.cua', side_effect=unreadable_draft):
+            outcome = self.prepare()
+        self.assertIsNotNone(outcome)
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+        self.assert_no_restart()
+
+    def test_unknown_controls_do_not_identify_a_draft(self):
+        from lib.outlook_ui import cua
+        self.given(windows=[ORDINARY, UNTITLED_OFFSCREEN])
+        def unknown_window(tool, arguments):
+            if tool == 'get_window_state' and arguments['window_id'] == 15:
+                return {'elements': [{'role': 'AXButton', 'label': 'Help'}]}
+            return cua(tool, arguments)
+        with patch('lib.outlook_ui.cua', side_effect=unknown_window):
+            self.assertIsNone(self.prepare())
+        self.assertEqual(len(self.called('open')), 1)
+
+    def test_offscreen_unassigned_shape_with_draft_controls_prevents_restart(self):
+        self.given(windows=[ORDINARY, UNTITLED_OFFSCREEN], draft_window_ids=[15])
+        outcome = self.prepare()
+        self.assertIsNotNone(outcome)
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+        self.assert_no_restart()
+
+    def test_small_titled_and_untitled_drafts_prevent_restart_on_any_space(self):
+        for title in ('subject-000', f'subject-000 • {ACCOUNT}', ''):
+            for on_screen in (True, False):
+                with self.subTest(title=title, on_screen=on_screen):
+                    self.calls.unlink(missing_ok=True)
+                    draft = window(14, title, 399, 399, on_screen)
+                    self.given(windows=[ORDINARY, draft], draft_window_ids=[14])
+                    outcome = self.prepare()
+                    self.assertIsNotNone(outcome)
+                    self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+                    self.assert_no_restart()
+
+    def test_unresolved_mailbox_candidate_prevents_restart(self):
+        self.given(windows=[ORDINARY], unresolved_window_ids=[13])
+        outcome = self.prepare()
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'no_usable_main_window'))
+        self.assertIn('phase=before_quit ordinary_candidates_unreadable', outcome.detail)
+        self.assertIn('"width":1230', outcome.detail)
+        self.assertNotIn(ACCOUNT, outcome.detail)
+        self.assert_no_restart()
+
+    def test_unresolved_window_after_launch_reports_phase_and_shape(self):
+        self.given(windows=[], after_launch=[ORDINARY], unresolved_window_ids=[13])
+        outcome = self.prepare()
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'no_usable_main_window'))
+        self.assertIn('phase=after_launch_and_new_window', outcome.detail)
+        self.assertIn('"kind":"main"', outcome.detail)
+        self.assertNotIn(ACCOUNT, outcome.detail)
+
+    def test_draft_opened_after_menu_quit_prevents_fallback_and_relaunch(self):
+        self.given(windows=[ORDINARY], menu_quit_ignored=True,
+                   after_menu_quit=[ORDINARY, COMPOSE | {'title': f'subject-000 • {ACCOUNT}'}],
+                   draft_window_ids=[14])
+        outcome = self.prepare()
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+        self.assertEqual(self.called('osascript') + self.called('open'), [])
+        self.assertTrue(json.loads(self.state.read_text())['running'])
+
+
 
 class ComposeWindowTest(unittest.TestCase):
     def test_observed_untitled_offscreen_window_does_not_block_preflight(self):
         self.assertFalse(is_compose_window(UNTITLED_OFFSCREEN))
 
-    def test_subjectless_and_resized_drafts_still_block_preflight(self):
-        for title in ('', None, 'UNTITLED', 'subject-000'):
+    def test_titled_drafts_are_identified_without_size_only_inference(self):
+        for title in ('', None, 'UNTITLED', 'subject-000', f'Draft • {ACCOUNT}'):
             for width, height in ((917, 911), (500, 501), (501, 500)):
                 with self.subTest(title=title, width=width, height=height):
                     draft = window(16, title, width, height, None) | {'is_on_screen': False}
-                    self.assertTrue(is_compose_window(draft))
-        for draft in (UNTITLED_OFFSCREEN | {'is_on_screen': True},
-                      UNTITLED_OFFSCREEN | {'on_current_space': False},
-                      UNTITLED_OFFSCREEN | {'on_current_space': True},
-                      UNTITLED_OFFSCREEN | {'title': 'subject-000'},
-                      UNTITLED_OFFSCREEN | {'title': 'UNTITLED'}, UNTITLED_OFFSCREEN | {'title': None},
-                      {k: v for k, v in UNTITLED_OFFSCREEN.items() if k != 'is_on_screen'},
-                      {k: v for k, v in UNTITLED_OFFSCREEN.items() if k != 'on_current_space'},
-                      window(16, '', 500, 500)):
-            with self.subTest(draft=draft):
-                self.assertTrue(is_compose_window(draft))
+                    self.assertEqual(is_compose_window(draft), bool(title))
 
 
 class OutlookTriageTest(FakeOutlookCase):
+    def test_titled_and_untitled_drafts_skip_triage_without_restart(self):
+        for title in (f'Re: subject-000 • {ACCOUNT}', ''):
+            with self.subTest(title=title):
+                self.given([FILE_A], windows=[ORDINARY, COMPOSE | {'title': title}],
+                           draft_window_ids=[14])
+                outcome, state = self.run_triage()
+                self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+                self.assertEqual(state['moved'], [])
+                self.assert_no_restart()
+
     def test_configured_driver_outside_shell_path_works(self):
         self.given([FILE_A, NEWS, UNREAD])
         local_driver = self.home / '.local/bin/cua-driver'
@@ -534,7 +715,7 @@ class OutlookTriageTest(FakeOutlookCase):
         self.assertEqual((state['moved'], state['selections']), ([], []))
 
     def test_files_read_email_by_each_rule_and_never_selects_unread(self):
-        self.given([FILE_A, VENDOR, FIRM, NEWS, UNCERTAIN, UNREAD])
+        self.given([FILE_A, VENDOR, FIRM, NEWS, UNREAD])
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('succeeded', 'filed'))
         self.assertEqual(state['moved'], [[FILE_A['label'], 'folder-A'],
@@ -548,7 +729,6 @@ class OutlookTriageTest(FakeOutlookCase):
         for row, rule in ((FILE_A, 'deal'), (VENDOR, 'vendor'), (FIRM, 'map')):
             self.assertIn(f'  {short(row["label"])} {rule}', report)
         self.assertIn('no_rule_matched: 1', report)
-        self.assertIn('uncertain: 1', report)
         self.assertIn('unread: 1', report)
         self.assertEqual(stat.S_IMODE(self.report_path().stat().st_mode), 0o600)
         self.assertEqual(self.settled().read_text(), 'succeeded filed\n')
@@ -576,6 +756,12 @@ class OutlookTriageTest(FakeOutlookCase):
         self.assertEqual(outcome.state, 'succeeded')
         self.assertEqual([m[1] for m in state['moved']], ['folder-A', 'folder-C'])
         self.assertEqual(self.unread_labels(state), {UNREAD['label']})
+
+    def test_reads_both_tabs_when_outlook_opens_on_other(self):
+        self.given(tabs={'focused': [NEWS, FILE_A], 'other': [FIRM, NEWS, UNREAD]}, tab='other')
+        outcome, state = self.run_triage()
+        self.assertEqual(outcome.state, 'succeeded')
+        self.assertEqual(sorted(m[1] for m in state['moved']), ['folder-A', 'folder-C'])
 
     def test_selects_the_inbox_before_reading_and_never_files_another_folder(self):
         self.given([FILE_A, NEWS], folder='Sent Items', elsewhere=[ELSEWHERE, VENDOR])
@@ -652,7 +838,7 @@ class OutlookTriageTest(FakeOutlookCase):
     def test_unread_rows_that_do_not_add_up_to_the_badge_block_every_move(self):
         self.given([FILE_A, VENDOR, UNREAD], badge=2)
         outcome, state = self.run_triage()
-        self.assertEqual((outcome.state, outcome.reason), ('failed', 'unread_set_unverified'))
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'unread_set_unverified'))
         self.assertEqual(state['selections'], [])
         self.assertNotIn('Move', state['presses'])
 
@@ -673,7 +859,8 @@ class OutlookTriageTest(FakeOutlookCase):
         self.assertEqual(self.settled().read_text(), 'skipped user_active\n')
 
     def test_observed_untitled_offscreen_window_allows_triage(self):
-        self.given([FILE_A], windows=[TOOLBAR, ORDINARY, UNTITLED_OFFSCREEN])
+        self.given([FILE_A], windows=[TOOLBAR, ORDINARY, UNTITLED_OFFSCREEN],
+                   unresolved_window_ids=[15], after_launch=[TOOLBAR, ORDINARY, UNTITLED_OFFSCREEN])
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('succeeded', 'filed'))
         self.assertEqual(state['moved'], [[FILE_A['label'], 'folder-A']])
@@ -807,6 +994,199 @@ class RefreshTest(FakeOutlookCase):
     READ_BODY = msg('sender-news', 'subject-010', email='news@news.test')
     UNREAD_BODY = msg('folder-A, client-001', 'subject-011', '8:15 AM', unread=True, email='c1@client.test')
 
+    def test_conflicting_row_states_block_callback_even_when_badge_matches(self):
+        from lib.outlook_ui import Window
+        x = msg('sender-x', 'subject-x', unread=True)
+        y = msg('sender-y', 'subject-y', unread=True)
+        self.given(tabs={'focused': [x, y], 'other': [dict(x, unread=False)]}, badge=1)
+        calls = []
+        def action(tabs):
+            calls.append(tabs)
+            return triage.Outcome('succeeded', 'refreshed')
+        with patch.dict(os.environ, self.env, clear=True):
+            result = triage.preserve_unread(Window(4242, 13, Waits(2, 0, 0, 0, 0, 0, 0)),
+                                           triage.Report(), action, lambda: False)
+        self.assertEqual(calls, [])
+        self.assertEqual((result.state, result.reason), ('skipped', 'unread_set_unverified'))
+        self.assertIn('coverage=coverage_identity_ambiguous', result.detail)
+
+    def test_busy_inbox_refreshes_with_hidden_unread_mail_kept_unread(self):
+        from lib import outlook_refresh
+        hidden = msg('sender-hidden', 'subject-hidden', unread=True)
+        self.given(tabs={'focused': [self.READ_BODY, self.UNREAD_BODY, hidden],
+                         'other': [UNREAD]}, visible_limit=2)
+        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+        before_unread = self.unread_labels(json.loads(self.state.read_text()))
+        with patch.dict(os.environ, self.env, clear=True):
+            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                                        now_fn=lambda: EVENING.replace(hour=10))
+        self.assertEqual((result.state, result.reason), ('succeeded', 'refreshed'))
+        state = json.loads(self.state.read_text())
+        self.assertEqual(self.unread_labels(state), before_unread)
+        self.assertEqual(state['selections'], [self.READ_BODY['label']])
+        self.assertEqual(state['moved'], [])
+        self.assertNotIn('Mark Unread', state['presses'])
+        self.assertIn('opened_at', json.loads(path.read_text())[0])
+        self.assertGreater(state['scrolls'], 0)
+        self.assertEqual(state['offsets'], {'focused': 0, 'other': 0})
+
+    def test_list_scrolling_preserves_selection_and_every_read_flag(self):
+        from lib.outlook_ui import Window
+        hidden = msg('sender-hidden', 'subject-hidden', unread=True)
+        self.given([self.READ_BODY, self.UNREAD_BODY, hidden, UNREAD],
+                   selected=self.READ_BODY['label'], visible_limit=2)
+        before = json.loads(self.state.read_text())
+        with patch.dict(os.environ, self.env, clear=True):
+            rows = Window(4242, 13, Waits(2, 0, 0, 0, 0, 0, 0)).scan_rows(lambda: True)
+        state = json.loads(self.state.read_text())
+        self.assertEqual(len(rows), 4)
+        for key in ('lists', 'selected', 'selections', 'moved', 'presses'):
+            self.assertEqual(state.get(key), before.get(key), key)
+        self.assertEqual(state['offsets'], {'only': 0})
+        self.assertGreater(state['scrolls'], 0)
+
+    def test_busy_inbox_deduplicates_overlapping_pages_and_both_tabs(self):
+        from lib import outlook_refresh
+        hidden = msg('sender-hidden', 'subject-hidden', unread=True)
+        self.given(tabs={'focused': [self.READ_BODY, self.UNREAD_BODY, hidden],
+                         'other': [self.UNREAD_BODY, UNREAD]}, visible_limit=2, badge=3)
+        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+        before = self.unread_labels(json.loads(self.state.read_text()))
+        with patch.dict(os.environ, self.env, clear=True):
+            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                                        now_fn=lambda: EVENING.replace(hour=10))
+        self.assertEqual((result.state, result.reason), ('succeeded', 'refreshed'))
+        state = json.loads(self.state.read_text())
+        self.assertEqual(self.unread_labels(state), before)
+        self.assertEqual(state['selections'], [self.READ_BODY['label']])
+        self.assertIn('opened_at', json.loads(path.read_text())[0])
+        self.assertEqual(state['offsets'], {'focused': 0, 'other': 0})
+
+    def test_incomplete_ambiguous_and_changing_scans_skip_without_opening_mail(self):
+        from lib import outlook_refresh
+        hidden = msg('sender-hidden', 'subject-hidden', unread=True)
+        cases = [
+            ({'scroll_stuck': True}, 'coverage_incomplete'),
+            ({'read_on_scroll': [hidden['label']]}, 'coverage_changed'),
+            ({'replace_on_restore': ARRIVAL}, 'coverage_changed'),
+            ({'replace_on_first_scroll': ARRIVAL}, 'coverage_changed'),
+        ]
+        for options, reason in cases:
+            with self.subTest(reason=reason, options=options):
+                self.given([self.READ_BODY, self.UNREAD_BODY, hidden], visible_limit=2, **options)
+                path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+                queue = path.read_bytes()
+                with patch.dict(os.environ, self.env, clear=True):
+                    result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                                waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                                                now_fn=lambda: EVENING.replace(hour=10))
+                self.assertEqual((result.state, result.reason), ('skipped', 'unread_set_unverified'))
+                self.assertIn('coverage=' + reason, result.detail)
+                state = json.loads(self.state.read_text())
+                self.assertEqual(state['selections'], [])
+                self.assertEqual(state['moved'], [])
+                self.assertEqual(path.read_bytes(), queue)
+                self.assertEqual(state['offsets'].get('only', 0), 0)
+                self.assertNotIn('sender-', result.detail)
+                self.assertNotIn('subject-', result.detail)
+
+    def test_ambiguous_identity_below_first_page_skips_and_restores_top(self):
+        from lib import outlook_refresh
+        self.given([self.READ_BODY, self.UNREAD_BODY, UNREAD, UNREAD], visible_limit=2)
+        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+        before = path.read_bytes()
+        with patch.dict(os.environ, self.env, clear=True):
+            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                                        now_fn=lambda: EVENING.replace(hour=10))
+        self.assertEqual((result.state, result.reason), ('skipped', 'unread_set_unverified'))
+        self.assertIn('coverage=coverage_identity_ambiguous', result.detail)
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state['selections'], [])
+        self.assertEqual(state['offsets'], {'only': 0})
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_coverage_deadline_skips_and_restores_top_before_any_action(self):
+        from lib.outlook_ui import Window
+        hidden = msg('sender-hidden', 'subject-hidden', unread=True)
+        self.given([self.READ_BODY, self.UNREAD_BODY, hidden, UNREAD], visible_limit=2)
+        before = json.loads(self.state.read_text())
+        closed = lambda: json.loads(self.state.read_text()).get('scrolls', 0) >= 2
+        with patch.dict(os.environ, self.env, clear=True):
+            result = triage.preserve_unread(Window(4242, 13, Waits(2, 0, 0, 0, 0, 0, 0)),
+                                           triage.Report(), lambda tabs: self.fail('action ran'), closed)
+        self.assertEqual((result.state, result.reason), ('skipped', 'unread_set_unverified'))
+        self.assertIn('coverage=coverage_deadline', result.detail)
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state['lists'], before['lists'])
+        self.assertEqual(state['selections'], [])
+        self.assertEqual(state['offsets'], {'only': 0})
+
+    def test_coverage_page_limit_skips_and_restores_a_long_list(self):
+        from lib.outlook_ui import Window
+        self.given([self.READ_BODY] + [msg('sender-news', f'subject-{n}', unread=True)
+                                     for n in range(60)], visible_limit=2)
+        before = json.loads(self.state.read_text())
+        with patch.dict(os.environ, self.env, clear=True):
+            result = triage.preserve_unread(Window(4242, 13, Waits(2, 0, 0, 0, 0, 0, 0)),
+                                           triage.Report(), lambda tabs: self.fail('action ran'), lambda: False)
+        self.assertEqual((result.state, result.reason), ('skipped', 'unread_set_unverified'))
+        self.assertIn('coverage=coverage_page_limit', result.detail)
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state['lists'], before['lists'])
+        self.assertEqual(state['selections'], [])
+        self.assertEqual(state['offsets'], {'only': 0})
+
+    def test_failed_tab_switch_reports_requested_and_observed_tabs(self):
+        from lib import outlook_refresh
+        self.given(tabs={'focused': [self.READ_BODY], 'other': [UNREAD]},
+                   tab_switch_ignored=True)
+        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+        before = path.read_bytes()
+        with patch.dict(os.environ, self.env, clear=True), redirect_stderr(io.StringIO()):
+            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                                        now_fn=lambda: EVENING.replace(hour=10))
+        self.assertEqual((result.state, result.reason), ('failed', 'ui_error'))
+        self.assertEqual(result.detail, 'at switch_tab: tab_switch_failed requested=other '
+                         'before=focused observed=focused')
+        self.assertEqual(path.read_bytes(), before)
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state['selections'], [])
+        self.assertEqual(self.unread_labels(state), {UNREAD['label']})
+
+    def test_titled_and_untitled_drafts_skip_refresh_without_restart(self):
+        from lib import outlook_refresh
+        for title in (f'Re: subject-000 • {ACCOUNT}', ''):
+            with self.subTest(title=title):
+                self.given([self.READ_BODY], windows=[ORDINARY, COMPOSE | {'title': title}],
+                           draft_window_ids=[14])
+                path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+                with patch.dict(os.environ, self.env, clear=True):
+                    outcome = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                                  waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                                                  now_fn=lambda: EVENING.replace(hour=10))
+                self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
+                self.assertNotIn('opened_at', json.loads(path.read_text())[0])
+                self.assert_no_restart()
+
+    def test_unreadable_untitled_offscreen_window_allows_refresh(self):
+        from lib import outlook_refresh
+        self.given([self.READ_BODY], windows=[TOOLBAR, ORDINARY, UNTITLED_OFFSCREEN],
+                   unresolved_window_ids=[15], after_launch=[TOOLBAR, ORDINARY, UNTITLED_OFFSCREEN])
+        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+        with patch.dict(os.environ, self.env, clear=True):
+            outcome = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                          waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                                          now_fn=lambda: EVENING.replace(hour=10))
+        self.assertEqual((outcome.state, outcome.reason), ('succeeded', 'refreshed'))
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state['selections'], [self.READ_BODY['label']])
+        self.assertEqual(state['moved'], [])
+        self.assertIn('opened_at', json.loads(path.read_text())[0])
+
     def test_refresh_worker_placement_and_entry_share_intake_host(self):
         catalog = json.loads((ROOT / 'ops/config/services.json').read_text())['services']
         services = {s['key']: s for s in catalog}
@@ -844,6 +1224,42 @@ class RefreshTest(FakeOutlookCase):
         self.assertNotIn('opened_at', entries[1])
         self.assertEqual(len(entries), 2, 'opening is not a body-decoded acknowledgement')
 
+    def test_refresh_ui_error_names_failed_step(self):
+        from lib import outlook_refresh
+        from lib.outlook_ui import UiError
+        self.given([self.READ_BODY])
+        self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+        output = io.StringIO()
+        with patch.dict(os.environ, self.env, clear=True), \
+                patch('lib.outlook_refresh.Window._inbox_rows',
+                      side_effect=UiError('inbox_row_not_found', step='_inbox_rows')), \
+                redirect_stderr(output):
+            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                                        now_fn=lambda: EVENING.replace(hour=10))
+        self.assertEqual((result.state, result.reason), ('failed', 'ui_error'))
+        self.assertIn('outlook-refresh UiError at _inbox_rows: inbox_row_not_found',
+                      output.getvalue())
+        self.assertEqual(result.detail, 'at _inbox_rows: inbox_row_not_found')
+
+    def test_refresh_search_error_detail_reaches_cli(self):
+        from lib import outlook_refresh
+        from lib.outlook_ui import UiError
+        self.given([self.READ_BODY])
+        self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+        with patch.dict(os.environ, self.env, clear=True), \
+                patch('lib.outlook_refresh.Window.search',
+                      side_effect=UiError('search_field_not_found', step='search')):
+            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                                        now_fn=lambda: EVENING.replace(hour=10))
+        self.assertEqual((result.state, result.reason), ('failed', 'search_field_not_found'))
+        self.assertEqual(result.detail, 'at search: search_field_not_found')
+        output = io.StringIO()
+        with patch('lib.outlook_refresh.run', return_value=result), redirect_stdout(output):
+            self.assertEqual(outlook_refresh.main(), 1)
+        self.assertIn('at search: search_field_not_found', output.getvalue())
+
     def test_refresh_failure_logs_category_without_exception_content(self):
         from lib import outlook_refresh
         from lib.outlook_ui import CuaError, UiError
@@ -861,26 +1277,37 @@ class RefreshTest(FakeOutlookCase):
                         redirect_stderr(output), redirect_stdout(output):
                     result = outlook_refresh.run(
                         self.repo, EVENING.replace(hour=10),
-                        waits=Waits(2, 0, 0, 0, 0, 0, 0))
+                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                        now_fn=lambda: EVENING.replace(hour=10))
                 self.assertEqual((result.state, result.reason), ('failed', reason))
                 self.assertEqual(output.getvalue(),
                                  f'outlook-refresh {error.__name__}: {message}\n')
 
     def test_refresh_worker_refuses_wrong_account_and_active_user(self):
         from lib import outlook_refresh
-        self.given([self.READ_BODY])
-        self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
-        write_settings(self.home, self.repo, account='wrong@example.test', driver=str(self.tmp / 'bin/cua-driver'))
-        with patch.dict(os.environ, self.env, clear=True):
-            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                         waits=Waits(2, 0, 0, 0, 0, 0, 0))
-        self.assertEqual(result.reason, 'wrong_account')
-        self.assertEqual(json.loads(self.state.read_text())['selections'], [])
-        self.given([self.READ_BODY], idle_seconds=1)
-        with patch.dict(os.environ, self.env, clear=True):
-            result = outlook_refresh.run(self.repo, EVENING.replace(hour=10))
-        self.assertEqual(result.reason, 'user_active')
-        self.assertEqual(json.loads(self.state.read_text())['selections'], [])
+        wrong = window(13, 'Inbox • other@example.test', 1230, 768)
+        for ignored, missing, idle, reason, presses in (
+                (False, False, 3600, 'refreshed', ['All Accounts']),
+                (True, False, 3600, 'wrong_account', ['All Accounts']),
+                (False, True, 3600, 'wrong_account', []),
+                (False, False, 1, 'user_active', [])):
+            with self.subTest(ignored=ignored, missing=missing, idle=idle):
+                self.given([self.READ_BODY], after_launch=[wrong], idle_seconds=idle,
+                           account_press_ignored=ignored, account_button_missing=missing)
+                path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
+                with patch.dict(os.environ, self.env, clear=True):
+                    result = outlook_refresh.run(
+                        self.repo, EVENING.replace(hour=10),
+                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                        now_fn=lambda: EVENING.replace(hour=10))
+                self.assertEqual(result.reason, reason)
+                state = json.loads(self.state.read_text())
+                self.assertEqual(state['presses'], presses)
+                self.assertEqual(state['moved'], [])
+                self.assertEqual(state['selections'],
+                                 [self.READ_BODY['label']] if reason == 'refreshed' else [])
+                self.assertEqual('opened_at' in json.loads(path.read_text())[0],
+                                 reason == 'refreshed')
 
     def test_read_email_is_opened_unchanged_and_stamped(self):
         self.given([FILE_A, self.READ_BODY, NEWS])
@@ -953,6 +1380,103 @@ class RefreshTest(FakeOutlookCase):
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'refresh_list_invalid'))
         self.assertEqual(state['moved'], [])
+
+
+class UnreadAgreementTest(unittest.TestCase):
+    class Window:
+        def __init__(self, tabs, badge, scans=None):
+            self.tabs, self.badge, self.scans = tabs, badge, scans
+            self.tab = next(iter(tabs))
+
+        def select_inbox(self):
+            self.tab = next(iter(self.tabs))
+
+        def inbox_badge(self):
+            return self.badge
+
+        def show_folder_pane(self, visible):
+            pass
+
+        def rows(self):
+            return self.tab, self.tabs[self.tab]
+
+        def switch_tab(self, tab):
+            self.tab = tab
+
+        def scan_rows(self, allowed):
+            return self.scans[self.tab]
+
+    def row(self, subject, unread=False, selected=False):
+        label = msg('sender-test', subject)['label']
+        return Row(('Unread, ' if unread else '') + label, 'token', selected)
+
+    def test_every_initial_observation_must_agree_before_callback(self):
+        x, read_x, y = self.row('x', True), self.row('x'), self.row('y', True)
+        cases = [
+            ({'focused': [x, y], 'other': [read_x]}, 1),
+            ({'focused': [read_x, y], 'other': [x]}, 2),
+            ({'focused': [x, y], 'other': [read_x]}, 3),
+            ({None: [x, y, read_x]}, 1),
+            ({None: [x, x]}, 1),
+            ({None: [Row('unknown', 'token', False)]}, 0),
+            ({'focused': [read_x], 'other': [self.row('x', selected=True)]}, 0),
+        ]
+        for tabs, badge in cases:
+            with self.subTest(tabs=tabs, badge=badge):
+                calls = []
+                outcome = triage.preserve_unread(self.Window(tabs, badge), triage.Report(),
+                                                 lambda rows: calls.append(rows), lambda: False)
+                self.assertEqual(calls, [])
+                self.assertEqual((outcome.state, outcome.reason), ('skipped', 'unread_set_unverified'))
+
+    def test_agreed_cross_tab_observations_allow_callback_once(self):
+        x = self.row('x', True)
+        calls = []
+        outcome = triage.preserve_unread(
+            self.Window({'focused': [x], 'other': [x]}, 1), triage.Report(),
+            lambda rows: calls.append(rows) or triage.Outcome('succeeded', 'refreshed'), lambda: False)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(outcome.state, 'succeeded')
+
+    def test_conflicting_scan_observations_block_callback(self):
+        x, y = self.row('x', True), self.row('y', True)
+        for scans in ({'focused': [x, y], 'other': [self.row('x')]},
+                      {'focused': [x, y], 'other': [self.row('y', True, selected=True)]}):
+            with self.subTest(scans=scans):
+                calls = []
+                outcome = triage.preserve_unread(
+                    self.Window({'focused': [x], 'other': []}, 2, scans), triage.Report(),
+                    lambda rows: calls.append(rows), lambda: False)
+                self.assertEqual(calls, [])
+                self.assertNotEqual(outcome.state, 'succeeded')
+
+    def test_top_normalization_cannot_discard_a_transient_state_conflict(self):
+        from lib.outlook_ui import Window
+        read_x, unread_x = self.row('x'), self.row('x', True)
+        class ChangingWindow(Window):
+            def __init__(self):
+                self.observations = iter([[read_x], [unread_x]])
+
+            def rows(self):
+                return None, next(self.observations, [read_x])
+
+            def _scroll_list(self, direction):
+                pass
+
+        with self.assertRaisesRegex(triage.UiError, 'coverage_changed'):
+            ChangingWindow().scan_rows(lambda: True)
+
+    def test_conflicting_post_action_observations_fail_the_run(self):
+        y = self.row('y', True)
+        window = self.Window({'focused': [y], 'other': []}, 1)
+        calls = []
+        def action(rows):
+            calls.append(rows)
+            window.tabs = {'focused': [self.row('x', True), y], 'other': [self.row('x')]}
+            return triage.Outcome('succeeded', 'refreshed')
+        outcome = triage.preserve_unread(window, triage.Report(), action, lambda: False)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'unread_set_changed'))
 
 
 class DecideTest(unittest.TestCase):

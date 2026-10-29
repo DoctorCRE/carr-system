@@ -39,7 +39,8 @@ async function database() {
       create table actor(id uuid primary key, slug text);
       insert into actor values ('${ACTOR}', 'joe');
       create table tool_call(idempotency_key text primary key, verb text, actor_id uuid, request_hash text,
-        response jsonb, via text, client_id text, organization_tenant_id text, sponsoring_human_slug text,
+        response jsonb, created_at timestamptz not null default now(),
+        via text, client_id text, organization_tenant_id text, sponsoring_human_slug text,
         personal_scope text, authorization_class text, correlation_id uuid);
       create table event(occurred_at timestamptz, recorded_at timestamptz, actor_id uuid,
         verb text, subject_type text, subject_id uuid, field text, old_value jsonb, new_value jsonb,
@@ -216,7 +217,7 @@ test('the rejection response waits for the audit writer to finish', async () => 
     let settled = false;
     const response = rejection(call()).then(payload => { settled = true; return payload; });
     try {
-      await started;
+      await Promise.race([started, response]);
       await new Promise(resolve => setImmediate(resolve));
       assert.equal(settled, false);
     } finally { release(); }

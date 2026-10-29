@@ -280,7 +280,7 @@ if [ ! -f "$ENVFILE" ]; then
   exit 78
 fi
 set -a; . "$ENVFILE"; set +a
-URL="${CARR_INGEST_URL:-https://api.practicecre.com/ingest}"
+URL="${CARR_INGEST_URL:-https://api.doctorcre.com/ingest}"
 TOKEN="${CARR_INGEST_TOKEN_NOTES_SWEEP:-}"
 if [ -z "$TOKEN" ]; then
   print -r -- "notes-sweep: NOT CONFIGURED — CARR_INGEST_TOKEN_NOTES_SWEEP is not set in $ENVFILE. Payloads stay queued."

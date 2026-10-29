@@ -21,7 +21,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from lib import email_router  # noqa: E402
+from lib import email_router, email_matching  # noqa: E402
 from lib import outlook_intake  # noqa: E402
 
 NOW = datetime(2026, 10, 26, 15, 0, tzinfo=timezone.utc)
@@ -78,6 +78,77 @@ def route(server, classify, state=None, clock=None):
 
 
 class RouterTests(unittest.TestCase):
+    def test_outbound_next_step_requires_the_sending_account(self):
+        source = dict(email('sent', ASK), kind='email_out', sender={'email': 'sender@example.test'}, mailbox_owner='dell')
+        for account, expected in [('sender@example.test', 1), ('copy@example.test', 0)]:
+            with self.subTest(account=account):
+                server = Server([source])
+                counts = email_router.route(server, lambda e, d: BOTH, refusal_code, {}, NOW,
+                                            account=account)
+                self.assertEqual(counts['recorded'], expected)
+                self.assertEqual([p['kind'] for p in server.recorded()], ['next_step'] if expected else [])
+                if expected:
+                    self.assertEqual(server.recorded()[0]['owner'], 'dell')
+                self.assertEqual({verb for verb, _ in server.calls} - {'email-router-queue'},
+                                 {'record-email-proposal'} if expected else set())
+
+    def test_model_failure_never_blocks_thread_filing(self):
+        source = dict(email('inherit', ASK), deal=None)
+        calls = []
+        def carr(verb, args):
+            calls.append((verb, args))
+            if verb == 'email-router-queue':
+                return {'emails': [source], 'open_deals': [{'id': DEAL, 'name': 'Synthetic purchase',
+                        'phase': 'site_selection', 'deal_type': 'purchase'}]}
+            return {'ok': True}
+        def broken(email, today):
+            raise RuntimeError('model unavailable')
+        state = {}
+        inherit = lambda *args: email_matching.MatchDecision('inherit_thread', DEAL, thread_activity_id='prior')
+        for _ in range(email_router.MAX_ATTEMPTS):
+            counts = email_router.route(carr, broken, refusal_code, state, NOW, matching=inherit)
+            self.assertEqual(counts['model_failed'], 1)
+        filed = [args for verb, args in calls if verb == 'inherit-email-thread']
+        self.assertEqual(len(filed), email_router.MAX_ATTEMPTS)
+        self.assertEqual(filed[0], {'idempotency_key': filed[0]['idempotency_key'], 'activity_id': 'inherit',
+                                    'thread_activity_id': 'prior'})
+        self.assertEqual(len({args['idempotency_key'] for args in filed}), 1)
+        self.assertEqual(counts['abandoned'], 1)
+
+    def test_unfiled_intake_email_proposes_next_step_for_the_selected_deal(self):
+        source = dict(email('unfiled', ASK), deal=None, kind='email_out',
+                      sender={'email': 'sender@example.test'}, mailbox_owner='dell')
+        calls = []
+        def carr(verb, args):
+            calls.append((verb, args))
+            if verb == 'email-router-queue':
+                return {'emails': [source], 'open_deals': [{'id': DEAL, 'name': 'Synthetic purchase',
+                        'phase': 'site_selection', 'deal_type': 'purchase'}]}
+            return {'ok': True}
+        counts = email_router.route(carr, lambda e, d: BOTH, refusal_code, {}, NOW,
+                    matching=lambda *args: email_matching.MatchDecision('file_to_deal', DEAL,
+                        sender_role='client', confidence=0.95), account='sender@example.test')
+        written = [args for verb, args in calls if verb == 'record-email-proposal']
+        self.assertEqual([args['kind'] for args in written], ['file_to_deal', 'next_step'])
+        self.assertEqual(counts['recorded'], 2)
+        self.assertEqual(written[1]['deal'], DEAL)
+        self.assertEqual(written[1]['owner'], 'dell')
+
+    def test_receipt_counts_model_exception_types_without_messages(self):
+        server = Server([email('type1', LOI), email('type2', LOI), email('type3', LOI)])
+        errors = iter([ModuleNotFoundError('private mail text'),
+                       ModuleNotFoundError('other private text'), ValueError('private value')])
+
+        def broken(email, today):
+            raise next(errors)
+
+        counts = route(server, broken)
+        receipt = json.loads(email_router.receipt('failed', counts).split(' ', 1)[1])
+        self.assertEqual(receipt['counts']['model_failed'], 3)
+        self.assertEqual(receipt['model_failed_types'], {'ModuleNotFoundError': 2, 'ValueError': 1})
+        self.assertNotIn('private', json.dumps(receipt))
+        self.assertEqual(server.recorded(), [])
+
     def test_one_model_answer_records_reply_draft_with_other_proposals(self):
         source = email('reply1', f'{LOI} {ASK}')
         source['mailbox_owner'] = 'dell'
@@ -149,6 +220,8 @@ class RouterTests(unittest.TestCase):
         counts = route(server, lambda e, d: {'proposals': [BOTH['proposals'][0]]}, state)
         self.assertEqual((counts['refused'], counts['routed'], counts['write_failed']), (1, 1, 0))
         self.assertIn('a3', state['routed'])
+        receipt = json.loads(email_router.receipt('succeeded', counts).split(' ', 1)[1])
+        self.assertEqual(receipt['refusal_codes'], {INVALID: 1})
 
     def test_invented_quotes_and_low_confidence_never_leave_the_router(self):
         server = Server([email('a4', FIXTURE['attacks'][0])])
@@ -174,7 +247,7 @@ class RouterTests(unittest.TestCase):
         self.assertTrue(prompt.endswith('</email>'))
 
     def test_the_router_can_reach_only_the_queue_and_the_proposal_writer(self):
-        self.assertEqual(email_router.VERBS, {'email-router-queue', 'record-email-proposal'})
+        self.assertEqual(email_router.VERBS, {'email-router-queue', 'record-email-proposal', 'inherit-email-thread'})
 
     def test_a_partly_written_email_retries_and_stores_the_missing_proposal(self):
         failures = ['transport_error']
@@ -256,7 +329,7 @@ class RouterTests(unittest.TestCase):
                 raise outlook_intake.CarrError(code='timeout')
             outcome, counts = email_router.run(Path(folder), down, lambda e, d: {}, refusal_code, NOW)
             self.assertEqual((outcome, counts['queue_failed']), ('failed', 1))
-            settings = SimpleNamespace(model='sonnet')
+            settings = SimpleNamespace(model='sonnet', account='broker@example.test')
             with patch.object(outlook_intake, '_carr', return_value=down), \
                     patch.object(email_router, 'OUT', Path(folder) / 'router'), \
                     patch('sys.stdout', new_callable=StringIO) as stdout:
@@ -271,7 +344,7 @@ class RouterTests(unittest.TestCase):
     def test_step_classifies_with_the_configured_model(self):
         seen = {}
 
-        def fake_run(out, carr, classify, refusal, now, clock=None):
+        def fake_run(out, carr, classify, refusal, now, clock=None, account=None):
             classify(email('e1', LOI), NOW.date())
             return 'succeeded', {}
 
@@ -281,7 +354,7 @@ class RouterTests(unittest.TestCase):
         with patch.object(email_router, 'run', side_effect=fake_run), \
                 patch.object(email_router.model_call, 'ask', side_effect=fake_ask), \
                 patch.object(outlook_intake, '_carr'), patch('sys.stdout'):
-            self.assertEqual(email_router.step(ROOT, SimpleNamespace(model='sonnet')), 0)
+            self.assertEqual(email_router.step(ROOT, SimpleNamespace(model='sonnet', account='broker@example.test')), 0)
         self.assertEqual(seen['model'], 'sonnet')
 
     def test_the_production_transport_names_only_tool_refusals(self):
@@ -297,6 +370,280 @@ class RouterTests(unittest.TestCase):
         self.assertTrue(email_router.REFUSAL.fullmatch(INVALID))
         for stderr in (f'RPC ERROR {{"error":"{INVALID}"}}', 'RPC ERROR "unauthorized"', 'connection reset'):
             self.assertIsNone(raised(stderr), stderr)
+
+
+class MatchingTests(unittest.TestCase):
+    def test_vendor_new_doctor_stays_unfiled_even_with_thread_and_prior_deal(self):
+        original = {'activity_id': 'prior', 'deal': DEAL, 'subject': 'Practice space',
+                    'conversation_id': 'conversation', 'occurred_at': '2026-10-25T14:00:00Z',
+                    'sender': {'email': 'vendor@example.test', 'role': 'lender'},
+                    'recipients': [{'email': 'broker@example.test', 'internal': True}]}
+        current = dict(original, activity_id='current', deal=None, occurred_at='2026-10-26T14:00:00Z',
+                       body='A new practice for Dr Synthetic, copied here.',
+                       recipients=original['recipients'] + [{'email': 'doctor@example.test', 'unknown': True}])
+        fake = FakeJev(existing=0.1, different=0.95)
+        decision = email_matching.match(current, [{'id': DEAL, 'name': 'Deal A'}], [original], client=fake)
+        self.assertEqual((decision.kind, decision.deal), ('possible_new_deal', None))
+        self.assertEqual(len(fake.calls), 1)
+
+    def mail(self, **changes):
+        return dict({'activity_id': 'current', 'deal': None, 'subject': 'Re: Practice space',
+                     'conversation_id': 'conversation', 'occurred_at': '2026-10-26T14:00:00Z',
+                     'sender': {'email': 'vendor@example.test', 'party_id': 'vendor', 'role': 'lender'},
+                     'recipients': [{'email': 'broker@example.test', 'internal': True}],
+                     'body': 'The property is available for your practice.'}, **changes)
+
+    def prior(self, **changes):
+        return self.mail(**dict({'activity_id': 'prior', 'deal': DEAL,
+                                 'occurred_at': '2026-10-25T14:00:00Z'}, **changes))
+
+    def test_conversation_inherits_without_calling_jev(self):
+        fake = FakeJev()
+        decision = email_matching.match(self.mail(), [{'id': DEAL}], [self.prior()], client=fake)
+        self.assertEqual((decision.kind, decision.deal, decision.thread_activity_id), ('inherit_thread', DEAL, 'prior'))
+        self.assertEqual(fake.calls, [])
+
+    def test_new_known_vendor_or_sender_breaks_continuity(self):
+        vendor = {'email': 'new@example.test', 'party_id': 'new', 'role': 'lender'}
+        for mail in (self.mail(recipients=self.mail()['recipients'] + [vendor]), self.mail(sender=vendor)):
+            with self.subTest(mail=mail):
+                self.assertIsNone(email_matching.thread_match(mail, [{'id': DEAL}], [self.prior()]))
+
+    def test_subject_fallback_requires_overlap_and_thirty_days(self):
+        for history, expected in [([self.prior(conversation_id=None)], 'inherit_thread'),
+                                  ([self.prior(conversation_id=None, occurred_at='2026-09-01T14:00:00Z')], 'file_to_deal'),
+                                  ([self.prior(conversation_id=None, sender={'email': 'someone@example.test'})], 'file_to_deal')]:
+            fake = FakeJev()
+            decision = email_matching.match(self.mail(conversation_id=None), [{'id': DEAL}], history, client=fake)
+            self.assertEqual(decision.kind, expected)
+
+    def test_different_conversation_ids_never_fall_back_to_subject(self):
+        fake = FakeJev(existing=0.1, different=0.95)
+        decision = email_matching.match(self.mail(conversation_id='new'), [{'id': DEAL}], [self.prior()], client=fake)
+        self.assertEqual(decision.kind, 'possible_new_deal')
+        self.assertEqual(len(fake.calls), 1)
+
+    def test_new_known_client_recipient_blocks_inheritance(self):
+        recipients = self.mail()['recipients'] + [{'email': 'doctor@example.test', 'party_id': 'doctor',
+                                                  'client_id': 'different-client', 'role': 'client'}]
+        fake = FakeJev(existing=0.1, different=0.95)
+        decision = email_matching.match(self.mail(recipients=recipients), [{'id': DEAL, 'client_id': 'client-a'}],
+                                        [self.prior()], client=fake)
+        self.assertEqual(decision.kind, 'possible_new_deal')
+
+    def test_conflicting_filed_deals_do_not_inherit(self):
+        fake = FakeJev(existing=0.5, different=0.5)
+        decision = email_matching.match(self.mail(), [{'id': DEAL}, {'id': 'other'}],
+                                        [self.prior(), self.prior(activity_id='other-prior', deal='other')], client=fake)
+        self.assertEqual(decision.kind, 'contact_only')
+        self.assertEqual(len(fake.calls), 1)
+
+    def test_confidence_gates_choices_without_a_none_option(self):
+        for existing, different, confidence, expected in [
+                (0.9, 0.1, 0.8, 'file_to_deal'), (0.9, 0.1, 0.5, 'contact_only'),
+                (0.5, 0.1, 0.9, 'contact_only'), (0.9, 0.5, 0.9, 'contact_only'),
+                (0.2, 0.1, 0.9, 'possible_new_deal'), (0.9, 0.9, 0.99, 'possible_new_deal')]:
+            with self.subTest(existing=existing, different=different, confidence=confidence):
+                result = email_matching.match(self.mail(), [{'id': DEAL}], [],
+                                               client=FakeJev(existing, different, confidence))
+                self.assertEqual(result.kind, expected)
+
+    def test_all_deals_every_recipient_and_evidence_reach_one_jev_call(self):
+        deals = [{'id': str(i), 'name': f'Deal {i}', 'property': f'{i} Synthetic Road', 'city': 'Test City',
+                  'client': f'Practice {i}', 'phase': 'site_selection',
+                  'participants': [{'name': 'Synthetic Vendor', 'role': 'lender'}]} for i in range(81)]
+        fake = FakeJev(choice='80')
+        mail = self.mail(recipients=[{'email': 'known@example.test', 'client_id': 'c', 'name': 'Known Doctor', 'role': 'client'},
+                                    {'email': 'new@example.test', 'unknown': True, 'kind': 'cc'}])
+        result = email_matching.match(mail, deals, [], client=fake, shuffle=lambda rows: rows.reverse())
+        self.assertEqual((result.kind, result.deal), ('file_to_deal', '80'))
+        self.assertEqual(len(fake.calls), 1)
+        request = fake.calls[0]
+        self.assertEqual(request['model'], 'jev-1.13.0')
+        self.assertEqual(request['state']['email']['recipients'], mail['recipients'])
+        self.assertEqual(request['state']['body_excerpt'], mail['body'])
+        self.assertEqual(list(request['questions']['deal'].criteria), [str(i) for i in reversed(range(81))])
+        self.assertIn('Synthetic Vendor', request['questions']['deal'].criteria['80'])
+        self.assertEqual(set(request['questions']), {'deal', 'existing', 'different', 'role'})
+
+    def test_router_records_new_matter_and_never_runs_phase_classifier(self):
+        calls = []
+        def carr(verb, args):
+            calls.append((verb, args))
+            if verb == 'email-router-queue':
+                return {'open_deals': [{'id': DEAL}], 'emails': [self.mail()]}
+            return {'ok': True}
+        def forbidden(*args):
+            raise AssertionError('an unfiled email must not run phase classification')
+        counts = email_router.route(carr, forbidden, refusal_code, {}, NOW,
+                                    matching=lambda e, ds, hs: email_matching.match(e, ds, hs, client=FakeJev(0.1, 0.9)))
+        self.assertEqual((counts['routed'], counts['recorded']), (1, 1))
+        written = calls[1][1]
+        self.assertEqual(written['kind'], 'possible_new_deal')
+        self.assertNotIn('deal', written)
+        self.assertIn('vendor@example.test', written['text'])
+
+    def test_router_persists_thread_inheritance_and_retries_failed_writes(self):
+        writes = []
+        state = {}
+        broken = [True]
+        mail = self.mail(thread_history=[self.prior()])
+        def carr(verb, args):
+            if verb == 'email-router-queue':
+                return {'open_deals': [{'id': DEAL}], 'emails': [mail]}
+            writes.append((verb, args))
+            if broken:
+                broken.pop()
+                raise RuntimeError('transport unavailable')
+            return {'ok': True}
+        first = email_router.route(carr, lambda e, d: {'proposals': []}, refusal_code, state, NOW)
+        self.assertEqual((first['routed'], first['write_failed']), (0, 1))
+        second = email_router.route(carr, lambda e, d: {'proposals': []}, refusal_code, state, NOW)
+        self.assertEqual((second['routed'], second['inherited']), (1, 1))
+        self.assertEqual(writes[0], writes[1])
+        self.assertEqual(writes[1][0], 'inherit-email-thread')
+        self.assertEqual(writes[1][1]['thread_activity_id'], 'prior')
+
+    def test_undone_filing_is_not_proposed_again_to_the_same_deal(self):
+        pending = []
+        def carr(verb, args):
+            if verb == 'email-router-queue':
+                return {'open_deals': [{'id': DEAL}], 'emails': [self.mail(thread_history=[self.prior()], suppressed_deals=[DEAL])]}
+            if verb == 'inherit-email-thread':
+                raise Refused('email_thread_filing_suppressed')
+            pending.append(args)
+            return {'ok': True}
+        def matching(mail, deals, history):
+            if history:
+                return email_matching.MatchDecision('inherit_thread', DEAL, thread_activity_id='prior')
+            return email_matching.MatchDecision('file_to_deal', DEAL, sender_role='client', confidence=0.9)
+        email_router.route(carr, lambda e, d: {'proposals': []}, refusal_code, {}, NOW, matching=matching)
+        self.assertFalse(any(p.get('deal') == DEAL for p in pending))
+
+    def test_router_matches_after_thread_refusal(self):
+        self.assertIsNotNone(email_router.REFUSAL.fullmatch('email_thread_ambiguous'))
+        calls = []
+        projected = json.loads(subprocess.check_output([
+            'node', '--experimental-strip-types', '--input-type=module', '-e',
+            "import {publicError} from './mcp-server/src/public-errors.ts'; import {ToolError} from './mcp-server/src/tool-error.ts'; console.log(JSON.stringify(publicError(new ToolError({error:'email_thread_ambiguous'}), '00000000-0000-4000-8000-000000000001')));",
+        ], cwd=Path(__file__).resolve().parents[1], text=True))
+        def carr(verb, args):
+            calls.append((verb, args))
+            if verb == 'email-router-queue':
+                return {'open_deals': [{'id': DEAL}], 'emails': [self.mail(thread_history=[self.prior()])]}
+            if verb == 'inherit-email-thread':
+                raise Refused(projected['error'])
+            return {'ok': True}
+        def matching(mail, deals, history):
+            if history:
+                return email_matching.MatchDecision('inherit_thread', DEAL, thread_activity_id='prior')
+            return email_matching.MatchDecision('possible_new_deal', sender_role='lender', confidence=0.9, text='New matter')
+        counts = email_router.route(carr, lambda e, d: {'proposals': []}, refusal_code, {}, NOW, matching=matching)
+        self.assertEqual((counts['routed'], counts['recorded'], counts['write_failed']), (1, 1, 0))
+        self.assertEqual(calls[-1][1]['kind'], 'possible_new_deal')
+
+
+    def test_missing_current_conversation_never_joins_prior_known_conversation(self):
+        fake = FakeJev(existing=0.1, different=0.95)
+        decision = email_matching.match(self.mail(conversation_id=None), [{'id': DEAL}], [self.prior()], client=fake)
+        self.assertEqual(decision.kind, 'possible_new_deal')
+
+    def test_future_or_same_time_history_cannot_inherit(self):
+        for moment in ('2026-10-26T14:00:00Z', '2026-10-27T14:00:00Z'):
+            decision = email_matching.match(self.mail(), [{'id': DEAL}], [self.prior(occurred_at=moment)],
+                                            client=FakeJev(existing=0.5, different=0.5))
+            self.assertEqual(decision.kind, 'contact_only')
+
+    def test_invalid_model_probabilities_fail_for_retry(self):
+        for value in (float('nan'), float('inf'), -0.1, 1.1, True):
+            with self.assertRaises(ValueError):
+                email_matching.match(self.mail(), [{'id': DEAL}], [], client=FakeJev(existing=value))
+
+    def test_unattended_matching_loads_jev_key_without_changing_environment(self):
+        fake = FakeJev()
+        constructor_calls = []
+        def construct(**kwargs):
+            constructor_calls.append(kwargs)
+            return __import__('contextlib').nullcontext(fake)
+        with patch.dict('os.environ', {}, clear=True), \
+                patch.object(email_matching, 'load_carr_tokens', create=True,
+                             return_value={'TYPESAFE_API_KEY': 'synthetic-key'}) as load, \
+                patch('typesafe_sdk.TypeSafeClient', side_effect=construct):
+            decision = email_matching.match(self.mail(), [{'id': DEAL}], [])
+        self.assertEqual(decision.kind, 'file_to_deal')
+        self.assertEqual(constructor_calls, [{'api_key': 'synthetic-key', 'model': 'jev-1.13.0'}])
+        load.assert_called_once_with(['TYPESAFE_API_KEY'], path=Path.home() / '.config/carr/typesafe.env')
+
+    def test_supplied_jev_environment_key_needs_no_credential_file(self):
+        fake = FakeJev()
+        constructor_calls = []
+        def construct(**kwargs):
+            constructor_calls.append(kwargs)
+            return __import__('contextlib').nullcontext(fake)
+        with patch.dict('os.environ', {'TYPESAFE_API_KEY': 'synthetic-env-key'}, clear=True), \
+                patch.object(email_matching, 'load_carr_tokens', side_effect=AssertionError('must not read a file')), \
+                patch('typesafe_sdk.TypeSafeClient', side_effect=construct):
+            email_matching.match(self.mail(), [{'id': DEAL}], [])
+        self.assertEqual(constructor_calls, [{'api_key': 'synthetic-env-key', 'model': 'jev-1.13.0'}])
+
+    def test_unconfigured_jev_does_not_attempt_a_model_request(self):
+        with patch.dict('os.environ', {}, clear=True), \
+                patch.object(email_matching, 'load_carr_tokens', create=True, return_value={}), \
+                patch('typesafe_sdk.TypeSafeClient', side_effect=lambda **kwargs:
+                    self.fail('missing credentials must fail before client creation')):
+            with self.assertRaisesRegex(ValueError, 'email matching Jev authentication is not configured'):
+                email_matching.match(self.mail(), [{'id': DEAL}], [])
+
+    def test_sdk_serializes_all_questions_and_decodes_answers_without_network(self):
+        try:
+            import httpx2
+            from typesafe_sdk import TypeSafeClient
+        except ImportError:
+            self.skipTest('typesafe-sdk dependency unavailable in this interpreter')
+        requests = []
+        def respond(request):
+            requests.append(json.loads(request.content))
+            return httpx2.Response(200, json={
+                'model': 'jev-1.13.0', 'usage': {'input_tokens': 100, 'output_tokens': 20},
+                'answers': {'deal': {'type': 'choice', 'choice': DEAL, 'confidence': 0.95, 'probabilities': {DEAL: 1.0}},
+                            'existing': {'type': 'noul', 'noul': 0.95}, 'different': {'type': 'noul', 'noul': 0.05},
+                            'role': {'type': 'choice', 'choice': 'lender', 'confidence': 0.95,
+                                     'probabilities': {'lender': 1.0}}}})
+        with TypeSafeClient(api_key='synthetic-test-key', model='jev-1.13.0', compression=False,
+                            transport=httpx2.MockTransport(respond)) as client:
+            decision = email_matching.match(self.mail(), [{'id': DEAL, 'name': 'Synthetic practice'}], [], client=client)
+        self.assertEqual((decision.kind, decision.deal), ('file_to_deal', DEAL))
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(set(requests[0]['questions']), {'deal', 'existing', 'different', 'role'})
+
+
+    def test_short_or_empty_body_matching_keeps_literal_available_evidence(self):
+        for body, evidence in [('OK', 'OK'), ('', 'Re: Practice space')]:
+            calls = []
+            def carr(verb, args):
+                calls.append((verb, args))
+                if verb == 'email-router-queue':
+                    return {'open_deals': [{'id': DEAL}], 'emails': [self.mail(body=body)]}
+                return {'ok': True}
+            counts = email_router.route(carr, lambda e, d: {'proposals': []}, refusal_code, {}, NOW,
+                                        matching=lambda e, ds, hs: email_matching.match(e, ds, hs, client=FakeJev()))
+            self.assertEqual((counts['routed'], counts['recorded']), (1, 1))
+            self.assertEqual(calls[1][1]['evidence_quote'], evidence)
+
+
+
+class FakeJev:
+    def __init__(self, existing=0.95, different=0.05, confidence=0.9, choice=DEAL):
+        self.existing, self.different, self.confidence, self.choice = existing, different, confidence, choice
+        self.calls = []
+
+    def system_one(self, **kwargs):
+        self.calls.append(kwargs)
+        from typesafe_sdk import ChoiceAnswer, NoulAnswer
+        return SimpleNamespace(
+            nouls={'existing': NoulAnswer(noul=self.existing), 'different': NoulAnswer(noul=self.different)},
+            choices={'deal': ChoiceAnswer(choice=self.choice, confidence=self.confidence, probabilities={self.choice: 1.0}),
+                     'role': ChoiceAnswer(choice='lender', confidence=0.9, probabilities={'lender': 1.0})})
 
 
 if __name__ == '__main__':

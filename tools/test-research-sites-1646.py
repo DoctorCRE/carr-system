@@ -25,7 +25,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 GUARD = ROOT / "hooks" / "guard-unattended.py"
-SITES = ROOT / "mcp-server" / "src" / "research-sites.js"
+SITES = ROOT / "mcp-server" / "src" / "research-sites.ts"
 R = "https://research.example.org"
 ALLOW, DENY = 0, 2
 

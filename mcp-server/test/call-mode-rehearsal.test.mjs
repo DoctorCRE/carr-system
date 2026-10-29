@@ -12,6 +12,7 @@
 // CARR_REHEARSAL_AUDIO=1 (macOS with whisper-cli) speaks the call with `say -o`
 // into the two Quill tracks and transcribes them with transcribe_session.py.
 import test, { before, after } from 'node:test';
+import { NOW } from './helpers/fixed-clock.mjs';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -193,7 +194,7 @@ test('a recorded weekly call updates every confidently discussed card and leaves
   const recordings = path.join(root, 'Recordings');
   session = path.join(recordings, '2026.10.26-0900');
   mkdirSync(session, { recursive: true });
-  const started = new Date().toISOString().replace(/\.\d+Z$/u, 'Z');
+  const started = new Date(NOW).toISOString().replace(/\.\d+Z$/u, 'Z');
   const write = (file, value) => writeFileSync(path.join(session, file), `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   write('announcement.json', { announcement_fired_at: started });
   write('meta.json', { started, files: { mic: 'mic.caf', system: 'system.caf' }, start_offset_ms: { mic: 0, system: 0 } });
@@ -237,7 +238,10 @@ test('a recorded weekly call updates every confidently discussed card and leaves
     }
     await run(PYTHON, [path.join(BIN, 'transcribe_session.py'), session], { env, timeout: 600_000 });
   } else {
-    write('transcript.json', { segments: CALL.map(([speaker, text], i) => ({ start_ms: i * 5000, end_ms: i * 5000 + 4000, speaker, text })) });
+    // As transcribe_session.py records it: the diarizer ran on each track and
+    // heard one voice, so the system label identifies Dell.
+    write('transcript.json', { speaker_tracks: { mic: { diarized: true, speakers: 1 }, system: { diarized: true, speakers: 1 } },
+      segments: CALL.map(([speaker, text], i) => ({ start_ms: i * 5000, end_ms: i * 5000 + 4000, speaker, text })) });
     await companionCall(port, '/api/call-context', context);
   }
   let review;
@@ -259,6 +263,7 @@ test('a recorded weekly call updates every confidently discussed card and leaves
   const { calls } = await verb(joe, 'read-call-outcomes');
   assert.equal(calls.length, 1);
   const outcome = calls[0];
+  assert.equal(outcome.call_date, '2026-10-27');
   const applied = (dealId, kind) => outcome.applied.find(a => a.deal_id === dealId && a.kind === kind);
   // The deterministic stand-in states all three plainly. Live Sonnet makes its
   // own call: whatever it did not apply must be waiting as an approval card.

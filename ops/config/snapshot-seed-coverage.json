@@ -33,11 +33,12 @@
     "a new seeded column cannot silently disappear from rebuild verification."
   ],
   "carried_after_apply": {
+    "doctrine_document": "CARRIED IN PART after 1015 applies: only the two WR-000562 store documents, team-memory and dreams-log, restored by the scoped render below. Each row is a slug, a title, content_class distillation, visibility shared, a null owner and creator, and team-memory's review policy id; no section body, client, party, deal or event. attach-memory and the memory_attach_required gate need team-memory to exist on a rebuilt database. Every other doctrine document is business doctrine and never enters the snapshot.",
     "ops.canonical_ownership_issuer_generation": "0532a's exact two-principal issuer selector: repository-owned g1 is active and g2 is draining. These are bounded control configuration and the foreign-key target for canonical ownership runtime sessions, not session records or credentials. Once the migration enters the snapshot ledger, bin/schema-snapshot.sh verifies and carries only these two rows.",
     "ops.completion_policy": "the single versioned completion-default policy seeded by migration 0431; it contains only tenant metadata, the closed required-dimension list, freshness, precedence, effective time, and its digest. Without it the completion projection has no policy and emits no subjects. Carried by an exact source-verified block in bin/schema-snapshot.sh; no subjects, observations, relations, dispositions, or receipts are carried",
     "ops.engineering_stale_contract_fence": "0532a's exact two-row, append-only stale-contract deny-list. It contains only burned work-request/plan identifiers, hashes, migration filenames, successor flags and reasons; no client, runtime session, credential, or execution record. Once its migration enters the snapshot ledger, bin/schema-snapshot.sh verifies and carries the two reviewed fence rows so old contracts stay refused after rebuild.",
-    "ops.scac_mutation_registry_entry": "the immutable v1-v9 SCAC mutation inventory entries seeded by migrations 0454 through 0468. They are bounded internal security configuration, contain source contracts and catalog ACL projections rather than business or runtime data, and are required for every exact registry lookup. Carried with their sealed version headers by a source-verified block in bin/schema-snapshot.sh once 0468 enters the snapshot ledger",
-    "ops.scac_mutation_registry_version": "the nine immutable v1-v9 SCAC registry seal headers seeded by migrations 0454 through 0468. They are bounded internal security configuration and the foreign-key parents and cryptographic seals for ops.scac_mutation_registry_entry. Carried with the exact entry rows by a source-verified block in bin/schema-snapshot.sh once 0468 enters the snapshot ledger",
+    "ops.scac_mutation_registry_entry": "the immutable SCAC mutation inventory entries of the one current registry version (v118; migration 1033 removed the historical v1-v117 copies). They are bounded internal security configuration, contain source contracts and catalog ACL projections rather than business or runtime data, and are required for every exact registry lookup. Carried with their sealed version headers by a source-verified block in bin/schema-snapshot.sh once 0468 enters the snapshot ledger",
+    "ops.scac_mutation_registry_version": "the one immutable current SCAC registry seal header (v118; migration 1033 removed the historical v1-v117 headers). It is bounded internal security configuration and the foreign-key parent and cryptographic seal for ops.scac_mutation_registry_entry. Carried with the exact entry rows by a source-verified block in bin/schema-snapshot.sh once 0468 enters the snapshot ledger",
     "ops.slice_marker_seat": "0626's two automated slice-marker seat rows (joe-local, dell-local): internal machine-actor slugs and a one-line note each; no client, party, deal, event or credential. The seat doors refuse every actor not in it, so a rebuild without these rows would silently stop the slice done-record from ever firing. Pending until 0626 enters the snapshot ledger; bin/schema-snapshot.sh carries it with the reference vocabulary dump"
   },
   "carried": {
@@ -142,6 +143,8 @@
     "research_site": "the research-site index: useful sources tagged by topic, added and removed at runtime by any caller through add-research-site and remove-research-site, with per-row history. 0849 seeds a starting set of public source hosts; a rebuild without them loses only suggestions (no access depends on this table), so it is runtime data, not configuration",
     "system_config": "operational settings, not vocabulary, and the kind of table where a value that should never be committed can appear; staging sets its own",
     "tool_call": "the verb call ledger — runtime history",
+    "tool_read_count": "daily read-verb call counters backfilled from tool_read_call — usage data",
+    "tool_read_count_backfill": "tool_read_call grouped at 1041 for the contract top-up — usage data",
     "ops.studio_leader": "Current host ownership, epoch, fence evidence and change time are runtime failover authority, not reference configuration. A schema-only rebuild deliberately has no owner and guarded jobs and transfers refuse until the runtime row is restored from a verified backup; never seed Studio ownership from a stale snapshot while MacBook may be active."
   },
   "carried_subset_must_not_contain": {
@@ -228,6 +231,28 @@
         "config",
         "enabled",
         "created_at"
+      ]
+    },
+    {
+      "table": "public.doctrine_document",
+      "migration": "1015_team_memory_store.sql",
+      "where": "slug in ('team-memory','dreams-log')",
+      "order_by": "slug",
+      "exact_rows": 2,
+      "columns": [
+        "id",
+        "slug",
+        "title",
+        "content_class",
+        "visibility",
+        "owner_actor_id",
+        "review_policy_id",
+        "created_by"
+      ],
+      "omit_columns": [
+        "created_at",
+        "updated_at",
+        "title_search_vector"
       ]
     },
     {

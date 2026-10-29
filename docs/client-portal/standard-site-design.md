@@ -118,13 +118,15 @@ a third party. Rejected: keeping Sites and calling the CARR API from it (two
 hosts, a stored credential, two deploy paths). Joe 2026-10-27: "all sites should
 host on my site". That direction is about the address, and this keeps every
 client on `share.doctorcre.com`. It does change the platform behind the address:
-today the domain is a CNAME to OpenAI Sites, and only Codex can publish there.
+since 2026-10-27 the domain is served by the partners' own `carr-share` Worker
+(before that it was a CNAME to OpenAI Sites, where only Codex could publish).
 After cutover, publishing is a record-layer verb, and Codex has no part in it.
-Reopen if Joe wants Codex Sites to stay the host, or if the Worker cannot take
-the custom domain.
+D6 still holds against `carr-share`: it is a second Worker and deploy path with
+no access to the record layer. Reopen if Joe wants `carr-share` to stay the
+host, or if the Worker cannot take the custom domain.
 
-**D7. The portal adapter copies the `reports-web.js` shape.** One host adapter
-module (`portal-web.js`) with injected record-layer seams, an opaque session
+**D7. The portal adapter copies the `mcp-server/src/reports-web.js` shape.** One host adapter
+planned module (`mcp-server/src/portal-web.js`) with injected record-layer seams, an opaque session
 cookie whose digest is stored server-side, same-origin writes with CSRF, strict
 CSP and self-hosted MapLibre. Front-end files ship in the pinned doctorcre-app
 artifact under `/portal/`, as `/reports/` and `/tours/` do today.
@@ -194,15 +196,30 @@ packed by a script that AES-GCM-encrypts each file and writes a route manifest.
 A Worker releases a file only after a password form sets a signed
 `__Host-` session cookie (7 days). Each site has a D1 table for its Tour List.
 
-- **REF-V** is served directly by the share.doctorcre.com Worker (an OpenAI
-  Sites project) at `/<slug-v>/`. Code `VS` in the tables.
-- **REF-A** is a second OpenAI Sites project. The share.doctorcre.com Worker
-  proxies `/<slug-a>/` to it with a service token. Code `AS` in the tables.
-- The content keys and passwords are Sites secrets that cannot be read back, so
-  the deployed ciphertext cannot be decrypted locally. The read-only source
-  copies are the reference; acceptance stage 0 proves they match what is live.
+- **Hosting since 2026-10-27.** share.doctorcre.com is served by one Cloudflare
+  Worker, `carr-share`, in the partners' own Cloudflare account; it replaced the
+  two OpenAI Sites projects described when this inventory was taken. Its source
+  folder on the Studio (outside this repo, read-only for this work) holds each
+  site's files and the Worker modules. Each site's pack writes a route manifest
+  module mapping every served path (including the directory route that releases
+  `index.html`) to its encrypted blob; the router releases a file only for a
+  path in that manifest.
+- **REF-V** is the Worker's REF-V module at `/<slug-v>/`. Code `VS` in the tables.
+- **REF-A** is the Worker's REF-A portal module at `/<slug-a>/`, served directly:
+  the edge proxy and its rows (A-G01, A-G35 to A-G39) no longer exist live and
+  are retired under AD8. Code `AS` in the tables.
+- The content keys and passwords are Worker secrets that are never read for
+  this work, so the deployed ciphertext is not decrypted locally. The read-only
+  source copies are the reference; acceptance stage 0 proves they match what is
+  live.
+- Non-GET requests (sign-ins, saves and every probe that posts) count against a
+  per-visitor write limit per site, about 20 a minute; past it the Worker answers
+  429. A zone rule also answers 429 to a burst of requests for ten seconds.
 - The share Worker's router sends every path that is not REF-A, REF-V or LEG-1
   to the LEG-2 handler, which also serves the bare-domain landing page.
+
+`<REF-A-source>` and `<REF-V-source>` mean the external reference-site source
+folders reviewed for this inventory. They are not paths in this repository.
 
 ### Counting rules
 
@@ -233,8 +250,8 @@ Findings the inventory surfaced:
 - REF-V serves five files nothing references (four retired listing photos and
   one GeoJSON), and its deploy carries two ciphertexts the manifest no longer
   maps. The template does not carry them (allowed difference AD4).
-- REF-A serves its build input `properties.json`, which duplicates the
-  properties in `data.js`. The template does not serve it (AD4).
+- REF-A serves its build input `<REF-A-source>/properties.json`, which duplicates the
+  properties in `<REF-A-source>/data.js`. The template does not serve it (AD4).
 - REF-A's location-illustration fallback references a second file that does not
   exist; no current property triggers it.
 - REF-A's competitor filter offers a market with no offices. Parity keeps it
@@ -245,17 +262,17 @@ Findings the inventory surfaced:
 | ID | Item | T/D | Built today | Served and gated today |
 |---|---|---|---|---|
 | A-G01 | Edge proxy on share.doctorcre.com: `/<slug-a>` and `/<slug-a>/*` forwarded to the origin site with a service token; strips auth headers; forwards only the portal cookie; rewrites redirects; 15 s timeout; Origin check on POST/PUT | T+D | share Worker proxy module for REF-A; origin host and token name per site | edge |
-| A-G02 | Origin: `/` and `/<slug-a>` redirect 301 to `/<slug-a>/` | T | origin Worker code (`portal.js`) | AS, open |
+| A-G02 | Origin: `/` and `/<slug-a>` redirect 301 to `/<slug-a>/` | T | origin Worker code (`<REF-A-source>/portal.js`) | AS, open |
 | A-G03 | Password page: client name line, dark card, password form | T+D | HTML string in origin Worker code; client name hard-coded | AS, open |
 | A-G04 | Password check: HMAC compare; success sets `__Host-` cookie (expiry, nonce, HMAC; 7 days) and 303 | T | origin Worker code; password is a Sites secret | AS, open |
 | A-G05 | Wrong password: 401 with error line | T | origin Worker code | AS, open |
-| A-G06 | Asset release: manifest lookup, AES-GCM decrypt, private headers, `frame-ancestors none` CSP | T | `assets.js` manifest generated by `tools/package.mjs` | AS, gated |
+| A-G06 | Asset release: manifest lookup, AES-GCM decrypt, private headers, `frame-ancestors none` CSP | T | `<REF-A-source>/assets.js` manifest generated by `<REF-A-source>/tools/package.mjs` | AS, gated |
 | A-G07 | Session status: `GET /<slug-a>/auth/status` returns authenticated flag and CSRF token | T | origin Worker code | AS |
 | A-G08 | Sign out: `POST /<slug-a>/auth/logout` with Origin and CSRF, clears the cookie | T | origin Worker code | AS, gated + CSRF |
-| A-G09 | Tour List read: `GET /<slug-a>/api/selection` | T | origin Worker code (`selection.js`) | AS, gated |
+| A-G09 | Tour List read: `GET /<slug-a>/api/selection` | T | origin Worker code (`<REF-A-source>/selection.js`) | AS, gated |
 | A-G10 | Tour List write: `PUT` compare-and-swap with Origin and CSRF, 409 on conflict | T | origin Worker code | AS, gated + CSRF |
 | A-G11 | Tour List storage: one D1 row per site (sorted selections, notes by property, version) | T+D | origin D1 table `selection_state` | AS, D1 |
-| A-G12 | Property-ID allowlist for the Tour List generated from `properties.json` at build | T+D | `property-ids.js` generated by `tools/package.mjs` | AS |
+| A-G12 | Property-ID allowlist for the Tour List generated from `<REF-A-source>/properties.json` at build | T+D | `<REF-A-source>/property-ids.js` generated by `<REF-A-source>/tools/package.mjs` | AS |
 | A-G13 | Path safety and private headers (same rules as REF-V) | T | origin Worker code | AS |
 | A-G14 | Error path: 404 for an unknown or unsafe path, returned before the gate | T | origin Worker code | AS |
 | A-G15 | Error path: 503 "temporarily unavailable" when the site secrets are not configured | T | origin Worker code | AS |
@@ -317,13 +334,13 @@ Findings the inventory surfaced:
 | A-S27 | Demographics view | T | index.html | AS, gated |
 | A-S28 | Regional growth: four stat tiles, reach paragraph | D | index.html | AS, gated |
 | A-S29 | Local Age and Household Context heading | T | index.html | AS, gated |
-| A-S30 | Household Context: median income for every geography | T+D | index.html + app.js from `data.js` | AS, gated |
+| A-S30 | Household Context: median income for every geography | T+D | index.html + app.js from `<REF-A-source>/data.js` | AS, gated |
 | A-S31 | Higher-Income Households: radius-report and municipal cards, notes disclosure | T+D | index.html + app.js | AS, gated |
 | A-S32 | Micro-zone Study Areas: zone switch, map, summary card, topic switch, profile, note, study PDF links | T+D | index.html + app.js from `microzones` | AS, gated |
 | A-S33 | Competitor Map: counts, market filter, map, status line, office cards, scope disclosure | T+D | index.html + app.js from `competition` | AS, gated |
 | A-S34 | "Sources and methodology" disclosure | D | index.html | AS, gated |
 | A-S35 | Sources view: Search Criteria (client, criteria, website) | D | index.html | AS, gated |
-| A-S36 | Sources view: Listing Sources (rendered list) | T+D | app.js from `data.js` | AS, gated |
+| A-S36 | Sources view: Listing Sources (rendered list) | T+D | app.js from `<REF-A-source>/data.js` | AS, gated |
 | A-S37 | Sources view: Market Sources (three items) | D | index.html | AS, gated |
 | A-S38 | Sources view: regional master-plan sources section | D | index.html | AS, gated |
 | A-S39 | Sources view: Demographic Sources (rendered list and period note) | T+D | index.html + app.js | AS, gated |
@@ -332,7 +349,7 @@ Findings the inventory surfaced:
 | A-S42 | Sources view: Locator Sources paragraph | D | index.html | AS, gated |
 | A-S43 | Sources view: Ownership Illustration paragraph | D | index.html | AS, gated |
 | A-S44 | Property dialog: logos, photo, option number, facts table hiding "not verified" values, highlights, add-to-list toggle | T+D | app.js | AS, gated |
-| A-S45 | Project dialog: overlay note, figure, status and metric, copy, relevance, precision, source and "View primary source" | T+D | app.js from the developments list in `data.js` | AS, gated |
+| A-S45 | Project dialog: overlay note, figure, status and metric, copy, relevance, precision, source and "View primary source" | T+D | app.js from the developments list in `<REF-A-source>/data.js` | AS, gated |
 | A-S46 | Practice profile dialog: name, category, logo, address, services, website, verification note | T+D | app.js from `competition.offices` | AS, gated |
 | A-S47 | Current-practice context dialog | D | app.js; address hard-coded | AS, gated |
 
@@ -347,7 +364,7 @@ Findings the inventory surfaced:
 | A-T05 | MapLibre ES-module import with "map unavailable" fallback | T | app.js | AS, gated (runs in the browser) |
 | A-T06 | Vector basemap style with CARR palette recolour on load | T | app.js; style URL hard-coded | AS, gated (runs in the browser) |
 | A-T07 | Home development map: project pins with preview and dialog | T+D | app.js; fit bounds include hard-coded points | AS, gated (runs in the browser) |
-| A-T08 | Home master-plan overlay: fill, road-context lines, dashed closure, click and floating label open its project | T+D | app.js; geometry in the developments list in `data.js` | AS, gated (runs in the browser) |
+| A-T08 | Home master-plan overlay: fill, road-context lines, dashed closure, click and floating label open its project | T+D | app.js; geometry in the developments list in `<REF-A-source>/data.js` | AS, gated (runs in the browser) |
 | A-T09 | Purchase map: numbered pins, preview, open property | T+D | app.js; preferred offsets hard-coded per property | AS, gated (runs in the browser) |
 | A-T10 | Current-practice marker on home and purchase maps with context dialog | D | app.js; coordinates and address hard-coded | AS, gated (runs in the browser) |
 | A-T11 | Pin spacing with stems (attribution-aware on the competition map) | T | app.js | AS, gated (runs in the browser) |
@@ -431,16 +448,16 @@ Findings the inventory surfaced:
 | A-L28 | Footer Sources link | T | index.html or app.js | in page |
 | A-L29 | Property dialog CARR logo to the CARR website | T | index.html or app.js | external, new tab |
 | A-L30 | Current-practice dialog "View sources" | T | index.html or app.js | in page |
-| A-L31 | Listing Sources: property 1, source 1 | D | app.js from `data.js` | external, new tab |
-| A-L32 | Listing Sources: property 1, source 2 | D | app.js from `data.js` | external, new tab |
-| A-L33 | Listing Sources: property 2, source 1 | D | app.js from `data.js` | external, new tab |
-| A-L34 | Listing Sources: property 3, source 1 | D | app.js from `data.js` | external, new tab |
-| A-L35 | Listing Sources: property 3, source 2 | D | app.js from `data.js` | external, new tab |
-| A-L36 | Listing Sources: property 4, source 1 | D | app.js from `data.js` | external, new tab |
-| A-L37 | Listing Sources: property 5, source 1 | D | app.js from `data.js` | external, new tab |
-| A-L38 | Listing Sources: property 6, source 1 | D | app.js from `data.js` | external, new tab |
-| A-L39 | Listing Sources: property 7, source 1 | D | app.js from `data.js` | external, new tab |
-| A-L40 | Listing Sources: property 8, source 1 | D | app.js from `data.js` | external, new tab |
+| A-L31 | Listing Sources: property 1, source 1 | D | app.js from `<REF-A-source>/data.js` | external, new tab |
+| A-L32 | Listing Sources: property 1, source 2 | D | app.js from `<REF-A-source>/data.js` | external, new tab |
+| A-L33 | Listing Sources: property 2, source 1 | D | app.js from `<REF-A-source>/data.js` | external, new tab |
+| A-L34 | Listing Sources: property 3, source 1 | D | app.js from `<REF-A-source>/data.js` | external, new tab |
+| A-L35 | Listing Sources: property 3, source 2 | D | app.js from `<REF-A-source>/data.js` | external, new tab |
+| A-L36 | Listing Sources: property 4, source 1 | D | app.js from `<REF-A-source>/data.js` | external, new tab |
+| A-L37 | Listing Sources: property 5, source 1 | D | app.js from `<REF-A-source>/data.js` | external, new tab |
+| A-L38 | Listing Sources: property 6, source 1 | D | app.js from `<REF-A-source>/data.js` | external, new tab |
+| A-L39 | Listing Sources: property 7, source 1 | D | app.js from `<REF-A-source>/data.js` | external, new tab |
+| A-L40 | Listing Sources: property 8, source 1 | D | app.js from `<REF-A-source>/data.js` | external, new tab |
 | A-L41 | Demographic Sources: QuickFacts, geography 1 | D | app.js from `regional` | external, new tab |
 | A-L42 | Demographic Sources: QuickFacts, geography 2 | D | app.js from `regional` | external, new tab |
 | A-L43 | Demographic Sources: QuickFacts, geography 3 | D | app.js from `regional` | external, new tab |
@@ -507,9 +524,9 @@ Findings the inventory surfaced:
 |---|---|---|---|---|
 | A-A01 | `index.html` | T+D | hand-written; mixes layout with deal text | AS, gated, encrypted at rest |
 | A-A02 | `styles.css` | T | hand-written; superset of REF-V (every REF-V rule plus 64) | AS, gated, encrypted at rest |
-| A-A03 | `app.js` | T+D | hand-written; template code with deal values inside | AS, gated, encrypted at rest |
-| A-A04 | `data.js` (properties, regional, reports, competition, municipal income, micro-zones, developments) | D | hand-built data | AS, gated, encrypted at rest |
-| A-A05 | `properties.json` (build input for the Tour List allowlist; also served) | D | hand-built; identical to the properties in `data.js` | AS, gated, encrypted at rest |
+| A-A03 | `<REF-A-source>/app.js` | T+D | hand-written; template code with deal values inside | AS, gated, encrypted at rest |
+| A-A04 | `<REF-A-source>/data.js` (properties, regional, reports, competition, municipal income, micro-zones, developments) | D | hand-built data | AS, gated, encrypted at rest |
+| A-A05 | `<REF-A-source>/properties.json` (build input for the Tour List allowlist; also served) | D | hand-built; identical to the properties in `<REF-A-source>/data.js` | AS, gated, encrypted at rest |
 | A-A06 | Redirect page HTML 1 of 5 | T | hand-written | AS, gated, encrypted at rest |
 | A-A07 | Redirect page HTML 2 of 5 | T | hand-written | AS, gated, encrypted at rest |
 | A-A08 | Redirect page HTML 3 of 5 | T | hand-written | AS, gated, encrypted at rest |
@@ -592,14 +609,14 @@ Findings the inventory surfaced:
 | V-S11 | Purchases view | T | index.html | VS, gated |
 | V-S12 | Selection intro paragraph and six screening-factor chips | T+D | index.html; paragraph per deal, chips identical in both sites | VS, gated |
 | V-S13 | Properties At A Glance: note, purchase map, locator note, table, parking note | T+D | index.html + app.js; notes and dates per deal | VS, gated |
-| V-S14 | Choose A Property directory | T+D | index.html + app.js from `data.js` | VS, gated |
+| V-S14 | Choose A Property directory | T+D | index.html + app.js from `<REF-V-source>/data.js` | VS, gated |
 | V-S15 | Market-context card: listing shown but excluded from the shortlist | T+D | app.js from the `market-context` property; explanation text hard-coded | VS, gated |
 | V-S16 | Purchases call to action (Start Tour List) | T | index.html | VS, gated |
 | V-S17 | Demographics view | T | index.html | VS, gated |
 | V-S18 | Regional growth: heading, area label, four stat tiles, reach paragraph, source link | D | index.html, values hand-written | VS, gated |
 | V-S19 | Local Age and Household Context heading | T | index.html | VS, gated |
 | V-S20 | Household Context: median household income comparison | T+D | index.html + app.js (values hard-coded in app.js) | VS, gated |
-| V-S21 | Higher-Income Household Context with "Geography and source notes" disclosure | T+D | index.html + app.js from `affluent-data.js` | VS, gated |
+| V-S21 | Higher-Income Household Context with "Geography and source notes" disclosure | T+D | index.html + app.js from `<REF-V-source>/affluent-data.js` | VS, gated |
 | V-S22 | "Sources and methodology" disclosure | D | index.html, hand-written | VS, gated |
 | V-S23 | Demographics source-links note | D | index.html | VS, gated |
 | V-S24 | Tour List view: intro, available panel, selected panel, status line, drop target, save and reload buttons, not-an-appointment note | T | index.html + app.js | VS, gated |
@@ -609,7 +626,7 @@ Findings the inventory surfaced:
 | V-S28 | Property dialog: logos, photo and caption, option number, four facts, Property Review, First Question To Resolve, discrepancy/possession/public-check notes, standard walkthrough note, floor-plan button, source caption, add-to-list toggle | T+D | app.js template; review-point text per property hard-coded in app.js | VS, gated |
 | V-S29 | Market-context dialog variant | T+D | app.js; explanation hard-coded | VS, gated |
 | V-S30 | Current-practice context dialog: client name, address, size, locator caveat, website link | D | app.js, all values hard-coded | VS, gated |
-| V-S31 | Project dialog: figure and credit, location, sponsor concept, map precision, status, latest update, scale, relevance, primary sources | T+D | app.js from `market-data.js`; image paths and credits hard-coded in app.js | VS, gated |
+| V-S31 | Project dialog: figure and credit, location, sponsor concept, map precision, status, latest update, scale, relevance, primary sources | T+D | app.js from `<REF-V-source>/market-data.js`; image paths and credits hard-coded in app.js | VS, gated |
 | V-S32 | Regional-context dialog for an institution anchor: name, address, category, precision, two source links | T+D | app.js from the anchors geojson | VS, gated |
 
 #### REF-V tools (28)
@@ -621,12 +638,12 @@ Findings the inventory surfaced:
 | V-T03 | Header-height tracker for sticky offsets | T | app.js | VS, gated (runs in the browser) |
 | V-T04 | Client-logo activation with wordmark fallback | T | app.js | VS, gated (runs in the browser) |
 | V-T05 | Home development map: MapLibre, local water and roads layers, zoom buttons, scroll zoom off, fit to markers | T+D | app.js; centre, zoom and layer files hard-coded per deal | VS, gated (runs in the browser) |
-| V-T06 | Development pins: numbered, preview on hover or focus, click opens project dialog | T+D | app.js from `development-coordinates.js` | VS, gated (runs in the browser) |
+| V-T06 | Development pins: numbered, preview on hover or focus, click opens project dialog | T+D | app.js from `<REF-V-source>/development-coordinates.js` | VS, gated (runs in the browser) |
 | V-T07 | Institution context markers: category icon, preview, click opens context dialog | T+D | app.js fetches the anchors geojson | VS, gated (runs in the browser) |
 | V-T08 | Current-practice marker on both maps, preview, click opens practice dialog | D | app.js; label letter, address and coordinates hard-coded | VS, gated (runs in the browser) |
 | V-T09 | Pin spacing: collision-avoiding offsets with stems; per-property preferred offsets | T+D | app.js; offsets hard-coded per property | VS, gated (runs in the browser) |
-| V-T10 | Purchase map: numbered locator pins, preview, click opens property | T+D | app.js from `coordinates.js` | VS, gated (runs in the browser) |
-| V-T11 | Purchase table: number, address button, asking, SF, parking, review point | T+D | app.js from `data.js`; one parking override hard-coded | VS, gated (runs in the browser) |
+| V-T10 | Purchase map: numbered locator pins, preview, click opens property | T+D | app.js from `<REF-V-source>/coordinates.js` | VS, gated (runs in the browser) |
+| V-T11 | Purchase table: number, address button, asking, SF, parking, review point | T+D | app.js from `<REF-V-source>/data.js`; one parking override hard-coded | VS, gated (runs in the browser) |
 | V-T12 | Property directory tiles: preview and open | T+D | app.js | VS, gated (runs in the browser) |
 | V-T13 | Hover/focus preview popover (property, project, context) | T | app.js | VS, gated (runs in the browser) |
 | V-T14 | Property dialog open, close button, backdrop close, focus return | T | app.js | VS, gated (runs in the browser) |
@@ -637,7 +654,7 @@ Findings the inventory surfaced:
 | V-T19 | Regional growth geography switch (3) and bar chart with projection | D | app.js, all figures hard-coded | VS, gated (runs in the browser) |
 | V-T20 | Age and household geography switch (2) and age donut | D | app.js, all figures hard-coded | VS, gated (runs in the browser) |
 | V-T21 | Median household income meters | D | app.js, figures hard-coded | VS, gated (runs in the browser) |
-| V-T22 | Income threshold switch (3) with combined, county and place bars | T+D | app.js from `affluent-data.js`; place short names hard-coded | VS, gated (runs in the browser) |
+| V-T22 | Income threshold switch (3) with combined, county and place bars | T+D | app.js from `<REF-V-source>/affluent-data.js`; place short names hard-coded | VS, gated (runs in the browser) |
 | V-T23 | Tour List available cards: drag handle, open, Add | T | app.js | VS, gated (runs in the browser) |
 | V-T24 | Tour List selected items: open, Remove, notes field with 2,000-character counter and NUL stripping | T | app.js | VS, gated (runs in the browser) |
 | V-T25 | Drag a card into the selections | T | app.js | VS, gated (runs in the browser) |
@@ -678,22 +695,22 @@ Findings the inventory surfaced:
 | V-L27 | Income comparison "View source", city state | D | index.html or app.js | external, new tab |
 | V-L28 | Income comparison "View source", county state | D | index.html or app.js | external, new tab |
 | V-L29 | Current-practice dialog: client website | D | index.html or app.js | external, new tab |
-| V-L30 | Property dialog "View Supplied Floor Plan", property with a plan #1 | T+D | app.js from `data.js` | gated file, new tab |
-| V-L31 | Property dialog "View Supplied Floor Plan", property with a plan #2 | T+D | app.js from `data.js` | gated file, new tab |
-| V-L32 | Property dialog "View Supplied Floor Plan", property with a plan #3 | T+D | app.js from `data.js` | gated file, new tab |
-| V-L33 | Project 1 dialog: primary source 1 | D | app.js from `market-data.js` | external, new tab |
-| V-L34 | Project 1 dialog: primary source 2 | D | app.js from `market-data.js` | external, new tab |
-| V-L35 | Project 1 dialog: primary source 3 | D | app.js from `market-data.js` | external, new tab |
-| V-L36 | Project 2 dialog: primary source 1 | D | app.js from `market-data.js` | external, new tab |
-| V-L37 | Project 2 dialog: primary source 2 | D | app.js from `market-data.js` | external, new tab |
-| V-L38 | Project 3 dialog: primary source 1 | D | app.js from `market-data.js` | external, new tab |
-| V-L39 | Project 3 dialog: primary source 2 | D | app.js from `market-data.js` | external, new tab |
-| V-L40 | Project 3 dialog: primary source 3 | D | app.js from `market-data.js` | external, new tab |
-| V-L41 | Project 3 dialog: primary source 4 | D | app.js from `market-data.js` | external, new tab |
-| V-L42 | Project 4 dialog: primary source 1 | D | app.js from `market-data.js` | external, new tab |
-| V-L43 | Project 4 dialog: primary source 2 | D | app.js from `market-data.js` | external, new tab |
-| V-L44 | Project 4 dialog: primary source 3 | D | app.js from `market-data.js` | external, new tab |
-| V-L45 | Project 4 dialog: primary source 4 | D | app.js from `market-data.js` | external, new tab |
+| V-L30 | Property dialog "View Supplied Floor Plan", property with a plan #1 | T+D | app.js from `<REF-V-source>/data.js` | gated file, new tab |
+| V-L31 | Property dialog "View Supplied Floor Plan", property with a plan #2 | T+D | app.js from `<REF-V-source>/data.js` | gated file, new tab |
+| V-L32 | Property dialog "View Supplied Floor Plan", property with a plan #3 | T+D | app.js from `<REF-V-source>/data.js` | gated file, new tab |
+| V-L33 | Project 1 dialog: primary source 1 | D | app.js from `<REF-V-source>/market-data.js` | external, new tab |
+| V-L34 | Project 1 dialog: primary source 2 | D | app.js from `<REF-V-source>/market-data.js` | external, new tab |
+| V-L35 | Project 1 dialog: primary source 3 | D | app.js from `<REF-V-source>/market-data.js` | external, new tab |
+| V-L36 | Project 2 dialog: primary source 1 | D | app.js from `<REF-V-source>/market-data.js` | external, new tab |
+| V-L37 | Project 2 dialog: primary source 2 | D | app.js from `<REF-V-source>/market-data.js` | external, new tab |
+| V-L38 | Project 3 dialog: primary source 1 | D | app.js from `<REF-V-source>/market-data.js` | external, new tab |
+| V-L39 | Project 3 dialog: primary source 2 | D | app.js from `<REF-V-source>/market-data.js` | external, new tab |
+| V-L40 | Project 3 dialog: primary source 3 | D | app.js from `<REF-V-source>/market-data.js` | external, new tab |
+| V-L41 | Project 3 dialog: primary source 4 | D | app.js from `<REF-V-source>/market-data.js` | external, new tab |
+| V-L42 | Project 4 dialog: primary source 1 | D | app.js from `<REF-V-source>/market-data.js` | external, new tab |
+| V-L43 | Project 4 dialog: primary source 2 | D | app.js from `<REF-V-source>/market-data.js` | external, new tab |
+| V-L44 | Project 4 dialog: primary source 3 | D | app.js from `<REF-V-source>/market-data.js` | external, new tab |
+| V-L45 | Project 4 dialog: primary source 4 | D | app.js from `<REF-V-source>/market-data.js` | external, new tab |
 | V-L46 | Institution anchor 1 dialog: address source | D | app.js from the anchors geojson | external, new tab |
 | V-L47 | Institution anchor 1 dialog: Census locator source | D | app.js from the anchors geojson | external, new tab |
 | V-L48 | Institution anchor 2 dialog: address source | D | app.js from the anchors geojson | external, new tab |
@@ -711,13 +728,13 @@ Findings the inventory surfaced:
 |---|---|---|---|---|
 | V-A01 | `index.html` | T+D | hand-written; mixes layout with deal text | VS, gated, encrypted at rest |
 | V-A02 | `styles.css` | T | hand-written; a strict subset of REF-A styles | VS, gated, encrypted at rest |
-| V-A03 | `app.js` | T+D | hand-written; template code with deal values inside | VS, gated, encrypted at rest |
-| V-A04 | `data.js` (properties, sources, floor plans) | D | hand-built data | VS, gated, encrypted at rest |
-| V-A05 | `coordinates.js` (property and practice locators) | D | hand-built data | VS, gated, encrypted at rest |
-| V-A06 | `development-coordinates.js` | D | hand-built data | VS, gated, encrypted at rest |
-| V-A07 | `market-data.js` (demographics, projects) | D | hand-built data | VS, gated, encrypted at rest |
-| V-A08 | `affluent-data.js` (income bands) | D | hand-built data | VS, gated, encrypted at rest |
-| V-A09 | `tour-api-config.js` (selection endpoint) | T+D | hand-written; path names the slug | VS, gated, encrypted at rest |
+| V-A03 | `<REF-V-source>/app.js` | T+D | hand-written; template code with deal values inside | VS, gated, encrypted at rest |
+| V-A04 | `<REF-V-source>/data.js` (properties, sources, floor plans) | D | hand-built data | VS, gated, encrypted at rest |
+| V-A05 | `<REF-V-source>/coordinates.js` (property and practice locators) | D | hand-built data | VS, gated, encrypted at rest |
+| V-A06 | `<REF-V-source>/development-coordinates.js` | D | hand-built data | VS, gated, encrypted at rest |
+| V-A07 | `<REF-V-source>/market-data.js` (demographics, projects) | D | hand-built data | VS, gated, encrypted at rest |
+| V-A08 | `<REF-V-source>/affluent-data.js` (income bands) | D | hand-built data | VS, gated, encrypted at rest |
+| V-A09 | `<REF-V-source>/tour-api-config.js` (selection endpoint) | T+D | hand-written; path names the slug | VS, gated, encrypted at rest |
 | V-A10 | CARR logo PNG | T | shared file (byte-identical in REF-A) | VS, gated, encrypted at rest |
 | V-A11 | Client logo PNG | D | supplied | VS, gated, encrypted at rest |
 | V-A12 | Heading font TTF | T | shared file (byte-identical in REF-A) | VS, gated, encrypted at rest |
@@ -767,11 +784,11 @@ browser ─► share.doctorcre.com/<slug>/ ─► carr-mcp Worker: portal-web.js
 | Module | Repo | Interface | What it hides |
 |---|---|---|---|
 | Data package schema `carr.market-study.v1` | carr-system `client-portal/market-study.v1.schema.json` | One JSON Schema plus a synthetic fixture | Every per-deal field and its type |
-| Package builder | carr-system `tools/client-portal/` | `build(deal, research) -> package` | Overlaying the record-layer fields onto a research package |
-| Reference extractor (migration tool, deleted in S22) | carr-system `tools/client-portal/` | `extract(site-folder) -> package` | Reading today's data files and hard-coded app.js values |
+| Package builder | carr-system, planned `tools/client-portal/` | `build(deal, research) -> package` | Overlaying the record-layer fields onto a research package |
+| Reference extractor (migration tool, deleted in S22) | carr-system, planned `tools/client-portal/` | `extract(site-folder) -> package` | Reading today's data files and hard-coded app.js values |
 | Template | doctorcre-app, shipped under `/portal/` | `render(package)` in the browser | All layout, maps, charts, the ownership model, the Tour List UI |
-| Portal adapter `portal-web.js` | carr-system `mcp-server/src/` | `handle(request, env, ctx, seams)` for host share.doctorcre.com | Gate, session, routing, CSP, file release, API |
-| Record-layer functions and verbs | carr-system migrations and `client-portal.ts` | `publish-market-study`, `share-portal-material`, `withdraw-portal-material`, `clear-portal-lockout`, plus S1's `register-client-portal` | Storage, isolation, versions, hashing |
+| Portal adapter planned `mcp-server/src/portal-web.js` | carr-system `mcp-server/src/` | `handle(request, env, ctx, seams)` for host share.doctorcre.com | Gate, session, routing, CSP, file release, API |
+| Record-layer functions and verbs | carr-system migrations and `mcp-server/src/client-portal.ts` | `publish-market-study`, `share-portal-material`, `withdraw-portal-material`, `clear-portal-lockout`, plus S1's `register-client-portal` | Storage, isolation, versions, hashing |
 
 One seam is real because two adapters exist on day one: the basemap
 (`local-layers`, `vector-style`). The reference extractor is not a second
@@ -932,18 +949,28 @@ so each template slice runs only its own rows; a full run omits it.
 is built against the copies).** A partner supplies each site password at run time
 through the terminal prompt; it is never stored, logged or committed. The harness:
 
-- signs in to the live site, requests every manifest path, and compares the
-  SHA-256 of each released body with the matching file in the read-only source
-  copy. Pass: every hash matches. This proves the copies are what clients see,
-  because the content keys cannot be read back. The successful sign-in also proves
-  the password the partner will register in the migration is the live one.
+- signs in to the live site, requests every path in the site's route manifest
+  (`--manifest`, read as data and never imported), and compares the SHA-256 of
+  each released body with the matching file in the read-only source copy (a
+  directory route with its `index.html`). It then requests each source file the
+  manifest omits, which must answer 404 (reported UNSERVED, matched against the
+  inventory, today only V-A34). Pass: every hash matches, no manifest path lacks
+  its source file, and nothing outside the manifest is served. This proves the
+  copies are what clients see, because the content keys are not read back. The
+  successful sign-in also proves the password the partner will register in the
+  migration is the live one.
 - runs every gate probe that needs no write and no induced fault against the live
   site and records the observed status, headers and redirect per gate row: the
   redirects, the sign-in page, a wrong password, every 404, 405, 403, 413, 415 and
   400 path, HEAD without a session, and the Tour List API's read-side errors. This
   recorded baseline is the reference for those gate rows. A wrong-password probe
   counts toward nothing today (no lockout exists on the live sites) and the run
-  sends fewer than five.
+  sends fewer than five (a test counts them in the probe file). A run sends about
+  14 non-GET requests to REF-A and 10 to REF-V, under the write limit; a 429 is
+  never recorded as the baseline: the row reports `FAIL rate-limited`, the run
+  writes no baseline file (so an earlier full one survives), and the partner
+  runs again after a minute. File fetches are paced at one per 150 ms so the
+  burst rule is not tripped; only a 404 counts a source file as UNSERVED.
 
 **Stage 1, extraction.** The reference extractor turns each source copy into a
 data package and its files. Pass: both packages validate against
@@ -951,11 +978,11 @@ data package and its files. Pass: both packages validate against
 package field (the probe file lists the field path per row).
 
 **Stage 2, item parity.** The reference is the reference sites' own Worker modules
-(the REF-V module and the REF-A origin module, copied from the read-only sources
+(the `carr-share` REF-V and REF-A modules, copied from the read-only sources
 into a scratch directory), run under Miniflare with a test content key and test
 password over the source files re-packed with that key. This is the real gate
 code, not a mimic, and Stage 0 proved the files equal what is live. The candidate
-is the template plus the extracted package served by `portal-web.js` under
+is the template plus the extracted package served by planned `mcp-server/src/portal-web.js` under
 `wrangler dev` with local R2 and a disposable Postgres. Both run the same probe
 file. Each inventory row has exactly one probe of one of these kinds:
 
@@ -1023,7 +1050,7 @@ Steps:
    as legacy bundles: their plaintext files served unchanged behind the same portal
    gate, after a Stage 0 hash check of each file against the live site. LEG-2's
    top-level `/recovery/` PDF paths become aliases inside the LEG-2 portal.
-3. **Copy each Tour List.** Preferred: export each D1 row from the Sites projects,
+3. **Copy each Tour List.** Preferred: export each D1 row from the `carr-share` D1 database,
    including REF-V's retired-listing entries and legacy notes column. Fallback: a
    partner signs in and the harness reads `GET /api/selection`, which omits the
    retired entries no viewer sees today. Either way, the imported row keeps the
@@ -1033,11 +1060,11 @@ Steps:
    (address resolves, password opens, each file releases).
 5. **Cut over.** Freeze Tour List saves on the old host (read-only flag in the
    share Worker), re-copy any Tour List whose version moved since step 3, move the
-   `share.doctorcre.com` custom domain from the Sites project to the carr-mcp
-   Worker route, and run the smoke set: every slug, its password, one file each,
-   one Tour List read. Rollback is re-attaching the domain to the Sites project,
+   `share.doctorcre.com` route from the `carr-share` Worker to the carr-mcp
+   Worker, and run the smoke set: every slug, its password, one file each,
+   one Tour List read. Rollback is re-attaching the route to `carr-share`,
    which stays deployed untouched for 14 days.
-6. **Retire** the two Sites projects after 14 days with no rollback, as a removal,
+6. **Retire** the `carr-share` Worker after 14 days with no rollback, as a removal,
    and delete the reference extractor in the same removal.
 
 What changes for clients: nothing in the address or password. Each client signs
@@ -1112,11 +1139,32 @@ fixture served twice, it reports PASS for every probe; one deliberate DOM change
 reports exactly that row as FAIL; `--rows` runs only the named rows; the probe
 file's IDs equal this document's inventory IDs. Check: harness self-test in CI.
 
+*Recorded deviation (WR227.S5, until S10).* No template renders the synthetic
+fixture before S10, so the CI self-test serves a small synthetic page built from
+the fixture's values and runs 16 of the 456 rows against it (gate, section, tool,
+link and media kinds); the other rows are proved only by running each reference
+site against itself at the Studio, from the read-only `carr-share` Worker source
+copies. S10 reopens this: once the template renders the fixture, CI runs every
+row the fixture can feed. The harness exit code follows the Result rule above: a
+`--rows` run exits 0 when FAIL = 0 and reports UNRUN rows (a `replaced` row whose
+feeds lie outside the slice is UNRUN); a run without `--rows` also needs UNRUN = 0,
+because the release needs every row accounted for. Each allowed difference lists
+in the probe file the aspects it may differ in; any other difference, a missing
+target or an error is FAIL.
+
 **S6. Stage 0: source fidelity and the live gate baseline.** A partner runs Stage 0
 for REF-A and REF-V, typing each password at the prompt. Acceptance: every
 released file hashes equal to the source copy; the live gate baseline is recorded
 for every gate row Stage 0 can reach without writes or induced faults. Check: the
 harness report (IDs, verdicts, hashes only) posted to the Work Request.
+
+*Recorded (WR227.S6).* Stage 0 is driven by the route manifest (`--manifest`), as
+this section always said; S5 had walked the source folder instead, which misses
+a manifest path whose source file is gone and never requests the directory
+routes. Against the current sources the manifests give REF-A 38 paths over its
+37 files and REF-V 34 paths over 33 of its 34 files, the other being V-A34. The
+code half of S6 ships in CI against a gated test server; the live half is the
+partner run, the only step that needs the passwords.
 
 **S7. Reference extractor.** A one-off migration tool that reads a site folder
 (today's data files plus the hard-coded app.js values the inventory marks) and
@@ -1135,7 +1183,7 @@ file, Tour List or material, and never any internal note; lockout returns its
 reason; passwords never reach `tool_call` or `event`. Check: Postgres test suite
 plus the grant-contract test.
 
-**S9. Portal adapter on staging.** `portal-web.js` with the routes above, wired to
+**S9. Portal adapter on staging.** planned `mcp-server/src/portal-web.js` with the routes above, wired to
 S8's functions, on a staging host, serving a minimal template shell. Acceptance:
 Stage 2 FAIL = 0 on every G row of both sites and on the REF-A redirect rows;
 Miniflare tests for each row, including per-portal cookies (signing in to one
@@ -1192,10 +1240,12 @@ PR.
 - That the deployed ciphertext equals the read-only source copies. The content
   keys are not readable; Stage 0 in S6 proves it before anything is built.
 - The DNS record for `share.doctorcre.com` was not read in this slice. Another
-  session recorded on 2026-10-27 that it is a CNAME to OpenAI Sites' custom-domain
-  host. S22 rereads it, and the cutover replaces it with the Worker custom domain.
-- Whether the Sites projects allow a D1 export. S21 tries it; the fallback is
-  stated in migration step 3.
+  session recorded on 2026-10-27 that it was a CNAME to OpenAI Sites' custom-domain
+  host; the `carr-share` Worker's own notes record that the same day's cutover
+  replaced it and keep the old record for rollback. S22 rereads it, and the
+  cutover replaces it with the carr-mcp Worker custom domain.
+- That a `carr-share` D1 export carries REF-V's retired-listing entries. S21
+  tries it; the fallback is stated in migration step 3.
 - Runtime behaviour of the live sites. This inventory comes from reading the code
   and data, not from clicking through the signed-in sites; S6 records the live
   gate behaviour.

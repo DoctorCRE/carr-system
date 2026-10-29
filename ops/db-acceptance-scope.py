@@ -76,20 +76,24 @@ def needs_full(paths: list[str]) -> bool:
 
 def changed_paths(event: dict) -> list[str] | None:
     pr = event.get('pull_request')
-    if not pr:
+    group = event.get('merge_group')
+    if group:
+        base, head = group['base_sha'], group['head_sha']
+    elif pr:
+        base, head = pr['base'].get('sha', 'origin/' + pr['base']['ref']), pr['head']['sha']
+    else:
         return None
-    base, head = pr['base'].get('sha', 'origin/' + pr['base']['ref']), pr['head']['sha']
     out = subprocess.run(['git', 'diff', '--name-only', '--no-renames', '-z', f'{base}...{head}'], cwd=ROOT, env=scrubbed_env(),
                          capture_output=True, text=True, check=True, timeout=120).stdout
     return [path for path in out.split('\0') if path]
 
 
 def classify() -> tuple[bool, list[str] | None, str]:
-    if os.environ.get('GITHUB_EVENT_NAME') != 'pull_request':
-        return True, None, 'non-PR event requires full proof'
+    if os.environ.get('GITHUB_EVENT_NAME') not in ('pull_request', 'merge_group'):
+        return True, None, 'non-diff event requires full proof'
     try:
         paths = changed_paths(json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text()))
-        full = True if paths is None else needs_full(paths)
+        full = paths is None or os.environ.get('GITHUB_EVENT_NAME') == 'merge_group' or needs_full(paths)
     except (KeyError, TypeError, AttributeError, OSError, ValueError, subprocess.SubprocessError):
         return True, None, 'diff unavailable; run full proof'
     if paths is None:

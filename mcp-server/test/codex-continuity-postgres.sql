@@ -1,7 +1,6 @@
 \set ON_ERROR_STOP on
 begin;
 
-
 insert into actor (id,slug,kind,display_name) values
  ('b1900000-0000-4000-8000-000000000001','codex-continuity-proof','automation','Continuity proof');
 
@@ -12,14 +11,6 @@ values
  ('b1900000-0000-4000-8000-000000000002','continuity-proof',
   'b1900000-0000-4000-8000-000000000001','native-proof','repo-proof','/proof',
   '{"objective":"preserve correction","next_action":"verify receipt"}');
-insert into codex_continuity_revision
- (checkpoint_id,checkpoint_version,state,created_by_actor_id)
-select id,checkpoint_version,state,owner_actor_id from codex_continuity_checkpoint
- where id='b1900000-0000-4000-8000-000000000002';
-insert into codex_continuity_event
- (organization_tenant_id,owner_actor_id,native_task_id,project_id,cwd,event_type,idempotency_key)
-values ('continuity-proof','b1900000-0000-4000-8000-000000000001',
- 'native-proof','repo-proof','/proof','pre_compact','proof-event');
 
 do $$
 declare denied boolean:=false;
@@ -66,31 +57,57 @@ begin
   exception when raise_exception then denied:=true;
   end;
   if not denied then raise exception 'cwd binding was mutable'; end if;
-  denied:=false;
-  begin
-    update codex_continuity_event set event_type='rewritten'
-     where idempotency_key='proof-event';
-  exception when insufficient_privilege then denied:=true;
-  end;
-  if not denied then raise exception 'writer could rewrite lifecycle receipts'; end if;
 end $$;
 reset role;
 
 do $$
-declare denied boolean:=false;
 begin
-  begin
-    update codex_continuity_revision set state='{}'
-     where checkpoint_id='b1900000-0000-4000-8000-000000000002';
-  exception when raise_exception then denied:=true;
-  end;
-  if not denied then raise exception 'revision was not append-only'; end if;
   if has_table_privilege('carr_reader','codex_continuity_checkpoint','INSERT') then
     raise exception 'reader unexpectedly has checkpoint write access';
   end if;
   if (select state->>'next_action' from codex_continuity_checkpoint
-       where id='b1900000-0000-4000-8000-000000000002')<>'verify receipt' then
+       where id='b1900000-0000-4000-8000-000000000002') is distinct from 'verify receipt' then
     raise exception 'checkpoint content was lost';
+  end if;
+end $$;
+
+insert into claude_continuity_leaf
+ (id,organization_tenant_id,surface_principal_actor_id,owner_actor_id,
+  session_id,transcript_path_digest,project_affinity)
+values
+ ('b1900000-0000-4000-8000-000000000005','continuity-proof',
+  'b1900000-0000-4000-8000-000000000001','b1900000-0000-4000-8000-000000000001',
+  'claude-proof',repeat('a',64),'repo-proof');
+set local role carr_writer;
+insert into claude_continuity_checkpoint
+ (leaf_id,state,cursor,source_observed_at)
+values ('b1900000-0000-4000-8000-000000000005','{"objective":"retain checkpoint"}','{}',now());
+update claude_continuity_checkpoint set checkpoint_version=2,
+ state='{"objective":"checkpoint updated"}'
+ where leaf_id='b1900000-0000-4000-8000-000000000005';
+reset role;
+
+do $$
+declare retired text;
+begin
+  foreach retired in array array[
+    'public.claude_continuity_event','public.codex_continuity_event',
+    'public.claude_continuity_revision','public.codex_continuity_revision',
+    'ops.retired_build_plan_review','ops.retired_build_admission_revision',
+    'public.investigation_evidence',
+    'public.sensitive_blob','public.search_candidate','public.actor_profile',
+    'public.ammo_item','ops.workflow_cutover_retire_receipt_use'
+  ] loop
+    if to_regclass(retired) is not null then
+      raise exception 'orphan table survived retirement: %', retired;
+    end if;
+  end loop;
+  if (select state->>'objective' from claude_continuity_checkpoint
+       where leaf_id='b1900000-0000-4000-8000-000000000005') is distinct from 'checkpoint updated' then
+    raise exception 'Claude checkpoint update was lost';
+  end if;
+  if to_regclass('public.event') is null then
+    raise exception 'continuity audit mirror was removed';
   end if;
 end $$;
 

@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { chicagoThirtyDayDeadline, DEADLINE_PLAIN, DEADLINE_GAP_SHIFTED,
-  DEADLINE_OVERLAP_ORIGIN_OFFSET } from "../src/journey-one-clock.v5.js";
+  DEADLINE_OVERLAP_ORIGIN_OFFSET } from "../src/journey-one-clock.v5.ts";
 const HOUR = 3600000;
 const ORIGIN = "2026-09-09T15:00:00.000Z";
 for (const [origin, due, hours] of [

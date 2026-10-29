@@ -25,7 +25,7 @@ core-card block and navigation pointers.
 
 The number of places a convention or a memory can live drops from six to two:
 - the `rule` table;
-- `rule-cards.v1.json` wording;
+- `ops/config/rule-cards.v1.json` wording;
 - hand-written CLAUDE.md and AGENTS.md prose;
 - the private memory folder;
 - `memory_item`;
@@ -89,7 +89,7 @@ The memory-relevant ones:
 
 | Capability | Verb(s) | Storage (migration) | Notes |
 |---|---|---|---|
-| Documents, scope | `new-doctrine-doc`, `doctrine-index`, `read-doctrine` | `doctrine_document` (0075): `content_class` (`playbook, sop, index, reference, dossier_narrative, distillation, rule`), `visibility shared/personal`, `owner_actor_id`, `review_policy_id` | `rule` is reserved "until the P7 rule-store ruling". `personal` means the scope a rule applies in, not who may read it |
+| Documents, scope | `new-doctrine-doc`, `doctrine-index`, `read-doctrine` | `doctrine_document` (0075): `content_class` (`playbook, sop, index, reference, dossier_narrative, distillation, rule`), `visibility` values `shared` and `personal`, `owner_actor_id`, `review_policy_id` | `rule` is reserved "until the P7 rule-store ruling". `personal` means the scope a rule applies in, not who may read it |
 | Memory "files" | `write-doctrine-section`, `change-doctrine-sections` (atomic, multiple sections), `doctrine-sections` (batch read of up to 50), `retire-doctrine-section` | `doctrine_section` (`section_key`, `current_version`, `body_hash`, `review_after`, `status active/retired`) | `section_key` is the analogue of a memory path |
 | Versions | (history inside the read verbs) | `doctrine_revision`: `version`, `parent_revision_id`, `actor_id`, `session_key`, `content_hash` (sha256), `commit_message`; `doctrine_change_set` with `op write/move/retire` | **`session_key` is filled with `actor.client_id`**, the OAuth client, not the session (`mcp-server/src/doctrine.js` L461–471) |
 | Precondition | `base_version` on every write; a stale value returns `version_conflict` | `expected_version` in `doctrine_change_set_item` | Same semantics as `content_sha256`. The hash is stored as well |
@@ -97,10 +97,10 @@ The memory-relevant ones:
 | Staleness clock | (write path) | `review_after = now() + policy.max_age_days` on every write | The hook for verification notes |
 | Search | `search-doctrine` (lexical + concepts + Workers AI semantic) | `doctrine_revision.search_vector`; embeddings (0958) | The analogue of grep across the store |
 | Snapshot and generation | `read-doctrine` with `if_generation_match` | `doctrine_snapshot(generation, content_hash)` | A consistent clone source for dreaming |
-| Gates | `dry-run-doctrine-gates` | **`doctrine_gate_check`** (0075). "A new gate is a function and a row": a `GATE_IMPLS` entry in `doctrine.js` plus an INSERT | **`banned_phrases`** (block) applies only to `playbook`, `sop` and `reference`. Its fallback list starts with the em-dash, and it supports `exempt_slugs`. The other gates are not class-scoped |
+| Gates | `dry-run-doctrine-gates` | **`doctrine_gate_check`** (0075). "A new gate is a function and a row": a `GATE_IMPLS` entry in `mcp-server/src/doctrine.js` plus an INSERT | **`banned_phrases`** (block) applies only to `playbook`, `sop` and `reference`. Its fallback list starts with the em-dash, and it supports `exempt_slugs`. The other gates are not class-scoped |
 | Rules (org conventions) | `standing-context`, `applicable-rules`, `find-rule`, `resolve-doctrine-rules` | `rule` (0001): `statement`, `human_quote`, `taught_by`, `scope`, `personal_to`, `status proposed/active/retired/superseded`, `activated_by`/`activated_at` (check: "no silent activation"), `supersedes`. **189 rules: 160 shared and 29 personal** | **No live verb writes it.** `teach`, `activate-rule`, `amend-rule` and `retire-rule` are retired (`ops/config/retired-verbs.v1.json` L155–165) |
-| Rule cards | (none; files) | `ops/config/rule-cards.v1.json` (60 cards). Each cites `source_rule_ids` (K01 cites three). `ops/sync-core-rule-cards.py` renders the core cards into CLAUDE.md/AGENTS.md, and `--check` (run by `ops/rule-cards-selftest.py`) fails a stale render | The wording is hand-authored in git, a second home for conventions. `rule` has **no column** for it |
-| Human-only acts | `humanOnly: true` admits any actor with `canExercisePartnerAuthority`, which includes the sponsored `claude`, `codex`, `joe-local` and `dell-local` agents (decision dc57f62d retired the humanOnly refusal). **`humanCallerOnly: true`** requires `authorizationClassForActor(actor) === "verified_partner"` however the caller is sponsored (decision cbe91287; `mcp-server/src/tools.js` L8866–8880) | — | Used today by `board-answers.js`, `email-next-step.ts` and `email-deal-progress.ts` |
+| Rule cards | (none; files) | `ops/config/rule-cards.v1.json` (60 cards). Each cites `source_rule_ids` (K01 cites three). `ops/sync-core-rule-cards.py` renders the core cards into CLAUDE.md and AGENTS.md, and `--check` (run by `ops/rule-cards-selftest.py`) fails a stale render | The wording is hand-authored in git, a second home for conventions. `rule` has **no column** for it |
+| Human-only acts | `humanOnly: true` admits any actor with `canExercisePartnerAuthority`, which includes the sponsored `claude`, `codex`, `joe-local` and `dell-local` agents (decision dc57f62d retired the humanOnly refusal). **`humanCallerOnly: true`** requires `authorizationClassForActor(actor) === "verified_partner"` however the caller is sponsored (decision cbe91287; `mcp-server/src/tools.js` L8866–8880) | — | Used today by `mcp-server/src/board-answers.js`, `mcp-server/src/email-next-step.ts` and `mcp-server/src/email-deal-progress.ts` |
 | Pending decisions | `governance-queue` (read only): "the ONE list of every open item waiting on Joe … rule approvals" | — | The app's existing approval surface |
 | Decision log | `log-decision`, `read-decision`, `update-decision`, `find-precedent` | decision table | Joe's rulings with their rationale |
 | A second memory store | `recall-memory` (read only) | `memory_item` + `memory_evidence` (0299; sponsor RLS 0573/0574/0579); also read by two 0303 functions (deletion #4) | **No write verb exists.** Recall returned none for a test query on 2026-10-27 |
@@ -109,8 +109,8 @@ The memory-relevant ones:
 ### 2.2 Private Claude memory
 
 The folder is `~/.claude/projects/-Users-booko-carr-system/memory/`. It holds
-`MEMORY.md` plus 104 topic files, about 195 KB in all, and one more file in
-`_to_delete/`. Claude Code loads the first 200 lines of `MEMORY.md` into every
+`~/.claude/projects/-Users-booko-carr-system/memory/MEMORY.md` plus 104 topic files, about 195 KB in all, and one more file in
+`_to_delete/`. Claude Code loads the first 200 lines of `~/.claude/projects/-Users-booko-carr-system/memory/MEMORY.md` into every
 Claude session on this repo and into nothing else. Codex, routines and the Dot
 never see it.
 
@@ -143,11 +143,11 @@ or environment IDs. None are quoted in this public repo.
 
 | Agent | Context today | Evidence |
 |---|---|---|
-| Claude Code session | CLAUDE.md (126 lines: the 12 generated core cards plus hand-written sections); auto-memory `MEMORY.md`; per-call cards from `hooks/rule-pack-preuse-reselection.py`; the carr MCP instructions ("OPENING ACT, every session: call standing-context FIRST") | CLAUDE.md says "No boot fetch is required", which contradicts the MCP instruction. `hooks/job-watchdog-digest.py` injects ops status; it is out of scope |
+| Claude Code session | CLAUDE.md (126 lines: the 12 generated core cards plus hand-written sections); auto-memory `~/.claude/projects/-Users-booko-carr-system/memory/MEMORY.md`; per-call cards from `hooks/rule-pack-preuse-reselection.py`; the carr MCP instructions ("OPENING ACT, every session: call standing-context FIRST") | CLAUDE.md says "No boot fetch is required", which contradicts the MCP instruction. `hooks/job-watchdog-digest.py` injects ops status; it is out of scope |
 | Codex job (`bin/codex-job`, 90 lines) | AGENTS.md (327 lines: the same generated cards plus 16 hand-written sections); a `Skills:` block plus the SKILL.md text from `bin/skill_picker.py` (`prepare()` L106–156); the card hook through the local, untracked `~/.codex/hooks.json`; the carr MCP | **Adds no shared rule text.** The briefs carry the rules by hand |
-| Hand-written briefs | 35 untracked `~/carr-system/scratchpad/jobs/brief-*.md`, sent by `launch.sh`, `runq.sh` and `review-after.sh` through `bin/codex-job` | The same blocks are copied in by hand: never open .env/credentials (33 of 35), don't edit the live checkout (31), Skills line (29), noreply email (28), no production writes (28), Step 0 (27), sizing (25), auto-merge (22), env/printenv ban (20), never force-push (20), Co-Authored-By (16), migration-number rule (14) |
+| Hand-written briefs | 35 untracked `~/carr-system/scratchpad/jobs/brief-*.md`, sent by `~/carr-system/scratchpad/jobs/launch.sh`, `~/carr-system/scratchpad/jobs/runq.sh` and `~/carr-system/scratchpad/jobs/review-after.sh` through `bin/codex-job` | The same blocks are copied in by hand: never open .env/credentials (33 of 35), don't edit the live checkout (31), Skills line (29), noreply email (28), no production writes (28), Step 0 (27), sizing (25), auto-merge (22), env/printenv ban (20), never force-push (20), Co-Authored-By (16), migration-number rule (14) |
 | `tools/room-bridge/brief-footer.md` | The rules line, the skill map and the VERDICT format | **Nothing on main appends it**, yet CLAUDE.md and AGENTS.md point to it as "the brief rules" |
-| Cloud routines (RemoteTrigger) | The prompt inside each trigger, on the claude.ai side; the templates `docs/agents/review-brief.md` and `scratchpad/jobs/brief-cloud-builder.md` (its own copy of the rules); CLAUDE.md through the checkout | These prompts **never pass through `bin/codex-job`** |
+| Cloud routines (RemoteTrigger) | The prompt inside each trigger, on the claude.ai side; the templates `docs/agents/review-brief.md` and `~/carr-system/scratchpad/jobs/brief-cloud-builder.md` (its own copy of the rules); CLAUDE.md through the checkout | These prompts **never pass through `bin/codex-job`** |
 | The Dot | Only the prompt `bin/review-pr` builds (L29–31) | Not named in the WR's ATTACH criterion |
 
 ### 2.4 Session transcripts
@@ -181,7 +181,7 @@ or environment IDs. None are quoted in this public repo.
 - **Attach.** One call to `attach-memory` at session start. It returns an
   **attach receipt** and records one `memory_session` row.
 - **Lesson.** A real-time write to `team-memory` made with the `attach_id`.
-- **Dream.** One run of `bin/dream`, which goes through these steps:
+- **Dream.** One run of planned `bin/dream`, which goes through these steps:
   - **Clone:** `$MEM` is the store at one generation; `$MEM_OUT` is a git
     directory made from it.
   - **One subagent per session.**
@@ -222,8 +222,8 @@ prose, the private folder and briefs.
   `governance-queue` lists these sections beside its existing rule approvals.
   On adoption, `adopt-rule` writes the active row and retires the proposal
   section in one transaction.
-- **Card wording lives on the rule** (D16). `sync-core-rule-cards.py` renders
-  `rule-cards.v1.json` and the CLAUDE.md/AGENTS.md block **from the store**.
+- **Card wording lives on the rule** (D16). `ops/sync-core-rule-cards.py` renders
+  `ops/config/rule-cards.v1.json` and the CLAUDE.md and AGENTS.md block **from the store**.
 - **CLAUDE.md and AGENTS.md** hold only the generated core-card block and
   navigation pointers. Their hand-written sections (12 in CLAUDE.md
   counting sub-sections, 16 in AGENTS.md) are migrated line by line in S5
@@ -306,8 +306,8 @@ native session-id channel.
 
 **D8. Where does the dream run, and how often?**
 *Decision:* nightly at 03:40 CT on the Studio: launchd
-`ops/launchd/com.carr.dream.plist` → `bin/run-scheduled.sh dream …` →
-`bin/dream` → headless `claude -p` on the subscription. There is no paid API,
+Planned `ops/launchd/com.carr.dream.plist` → `bin/run-scheduled.sh dream …` →
+planned `bin/dream` → headless `claude -p` on the subscription. There is no paid API,
 scheduled task or sidebar session. *Reopen if* weekly limits starve daytime
 work.
 
@@ -340,7 +340,7 @@ pasted.
 *Decision:* at the S1 merge, by freezing the folder read-only (`chmod -R a-w`,
 an operator step). Reads continue. The first dream backfills transcripts since
 the merge (S9). `autoMemoryEnabled: false` and the removal follow in S10,
-because whether the setting also stops loading `MEMORY.md` is unproven. *Reopen
+because whether the setting also stops loading `~/.claude/projects/-Users-booko-carr-system/memory/MEMORY.md` is unproven. *Reopen
 if* the freeze breaks session start.
 
 **D14. What does the dream do when a section moved since its clone?**
@@ -403,7 +403,7 @@ out: { attach_id,
            propose_with: "write-doctrine-section document=team-memory section_key=conventions/proposed/<slug>" },
          { name: "team-memory", access: "read_write" | "read_only",
            document: "team-memory", generation,
-           index: [ { section_key, title, version, content_hash,
+           index: [ { section_id, section_key, title, version, content_hash,
                       review_after, last_writer_surface } ],
            instructions: "Check the index before starting. Read with doctrine-sections.
              Write lessons as you learn them with write-doctrine-section
@@ -425,9 +425,9 @@ card import) and writes the active `rule` row with `taught_by` and
 |---|---|---|
 | Claude Code session | MCP server `instructions` + the generated CLAUDE.md block | "OPENING ACT: call `attach-memory` first", in both places |
 | Codex job | AGENTS.md (native) + the carr MCP | The same generated line. `bin/codex-job` puts the job log path in the brief's first line and refuses copied blocks (below) |
-| Cloud routine | The checkout's CLAUDE.md + the CARR connector on the trigger | Routine prompts **do not pass through `bin/codex-job`**. S7 strips the copied rules directly from `docs/agents/review-brief.md`, `brief-cloud-builder.md` and every live trigger prompt. After that, the only control is that routines attach; nothing refuses a future routine prompt that copies rules, and that is stated as a known gap |
+| Cloud routine | The checkout's CLAUDE.md + the CARR connector on the trigger | Routine prompts **do not pass through `bin/codex-job`**. S7 strips the copied rules directly from `docs/agents/review-brief.md`, `~/carr-system/scratchpad/jobs/brief-cloud-builder.md` and every live trigger prompt. After that, the only control is that routines attach; nothing refuses a future routine prompt that copies rules, and that is stated as a known gap |
 | The Dot | Its own CARR connector, if present | `bin/review-pr` asks it to attach read-only; nothing is pasted |
-| Dream | `./run.sh call` | `bin/dream` attaches as `surface: dream` |
+| Dream | `./run.sh call` | planned `bin/dream` attaches as `surface: dream` |
 
 **The launcher's refusal is narrow.** S7 takes the copied boilerplate blocks
 from the 35 briefs. Each block is the whole multi-line paragraph, normalized
@@ -465,7 +465,7 @@ This follows `joe-dreaming-pass.png` step for step.
    starts one Sonnet subagent per transcript.
 3. **Subagents read and write `$MEM_OUT`.** They merge, delete stale entries,
    add patterns, and append `Verified <date> from session <attach_id>`. The
-   orchestrator finishes the structure and writes `_dream/notes.md`, one entry
+   orchestrator finishes the structure and writes `<dream-output>/_dream/notes.md`, one entry
    per change unit with its sessions.
 4. **Diff.** `git diff` against the clone commit.
 5. **Verify.** All checks are deterministic.
@@ -497,12 +497,12 @@ in S1.
 | 2 | `tools/room-bridge/brief-footer.md` and its two pointers | `rule` rows | As #1 | S7 |
 | 3 | Hand-written convention prose in CLAUDE.md (126 lines) and AGENTS.md (327 lines) | `rule` rows + pointers | The S5 heading ledger has every line classified; the K12 rewrite is merged first | S5 |
 | 4 | `memory_item`, `memory_evidence`, `recall-memory`, their RLS (0573/0574/0579), and the memory branches of two 0303 functions | `team-memory` | **The database-side check, failing closed** (below) | S10 |
-| 5 | `MEMORY.md` and the 104-file private folder | `team-memory` + `rule` | Frozen at S1; the ledger maps 105 of 105; `autoMemoryEnabled: false`; tarred to `~/carr-local/archive/`, then removed by a human | S10 |
+| 5 | `~/.claude/projects/-Users-booko-carr-system/memory/MEMORY.md` and the 104-file private folder | `team-memory` + `rule` | Frozen at S1; the ledger maps 105 of 105; `autoMemoryEnabled: false`; tarred to `~/carr-local/archive/`, then removed by a human | S10 |
 | 6 | `bin/learning-weekly.sh` + selftests | Dream | Unscheduled; registry rows retire with it | S10 |
 | 7 | `bin/learning-monthly.sh` + selftests | Dream | As #6 | S10 |
 | 8 | `ops/corrections-sweep.py` + selftest, and the `corrections` miner in `pipelines/learning_jobs.py` | Dream | Callers swept to zero | S10 |
 | 9 | `hooks/session-brief.py` + selftest | `attach-memory` | Wired into no settings file | S10 |
-| 10 | Manual consolidate and retro passes (`consolidate-memory` on this folder, `brief-retro.md`) | Dream | The folder is gone and one dream has applied | S10 |
+| 10 | Manual consolidate and retro passes (`consolidate-memory` on this folder, `~/carr-system/scratchpad/jobs/brief-retro.md`) | Dream | The folder is gone and one dream has applied | S10 |
 | C1 | `ops/hermes-memory-check.py` + selftest (conditional) | Nothing | Only if Hermes memory is retired | S10 |
 | C2 | `claude_continuity_*` / `codex_continuity_*` as session records (conditional) | `memory_session` | Only if `read-session-identity` switches to `memory_session` | S10 |
 | C3 | `hooks/rule-pack-preuse-reselection.py` (conditional) | Attach + generated block | The D11 measurement; otherwise a logged exception | S11 |
@@ -514,13 +514,13 @@ in S1.
 | `ops.context_activation_compiler_items` (0303 L81; reads `public.memory_item` at L141) and `ops.render_context_activation_for_brief` (0303 L837; reads it at L864) | A migration in S10, **before** the drop, uses `create or replace` to remove the memory branch from both functions. Attach now delivers memory. These were PL/pgSQL bodies, so Postgres records no dependency and `drop table` alone would leave them failing at runtime |
 | `mcp-server/src/evidence-activation.js` (calls the second function, L87) and `ops/evidence-activation-db-gate.py` (L212, L240) | Re-run their tests against the replaced functions; drop any memory-row expectations |
 | `mcp-server/src/memory.js` (`memoryTools`) and its import in `mcp-server/src/tools.js` | Delete |
-| `mcp-server/src/doc-profile.js` verb list; `mcp-server/src/mcp.js` mentions | Remove `recall-memory` |
-| `mcp-server/test/memory-kernel.test.mjs`, `memory-rls-connection.test.mjs` | Delete |
-| `mcp-server/test/situation-retrieval-integration.test.mjs`, `doc-profile.test.mjs`, `tool-advertisement.test.mjs`, `bigint-version-responses.test.mjs`, `dot-security-definers-postgres.sql` | Remove their memory cases |
+| `mcp-server/src/doc-profile.ts` verb list; `mcp-server/src/mcp.js` mentions | Remove `recall-memory` |
+| `mcp-server/test/memory-kernel.test.mjs`, `mcp-server/test/memory-rls-connection.test.mjs` | Delete |
+| `mcp-server/test/situation-retrieval-integration.test.mjs`, `mcp-server/test/doc-profile.test.mjs`, `mcp-server/test/tool-advertisement.test.mjs`, `mcp-server/test/bigint-version-responses.test.mjs`, `mcp-server/test/dot-security-definers-postgres.sql` | Remove their memory cases |
 | `control-room/contracts/memory-evaluation-s0.v1.schema.json`, `control-room/contracts/fixtures/memory-evaluation-s0.synthetic.v1.json`, and `control-room/test/contracts.test.mjs` (L240–258) | Retire the contract, its fixture and its assertions together |
 | `ops/private-row-sponsor-rls-gate.py` (fails "enumeration is vacuous" without `memory_item`) | Run the behaviour proof over every fenced personal table the enumeration finds, and pass explicitly with "no fenced personal tables" when there are none. The enumeration still fails a new unfenced personal-scope table |
 | `ops/definer-hardening-selftest.py`, `ops/migration-production-proof-selftest.py`, `tools/test-schema-snapshot-roles.py`, `ops/fixtures/mcp-catalog/before-2026-10-05.json` | Remove the expectations; mark the historical catalog fixture as frozen |
-| `db/schema.sql`, `db/migration-baseline.json`, `bin/schema-snapshot.sh` output, `scac-mutation-registry.current.generated.js` | Regenerate after the drop |
+| `db/schema.sql`, `db/migration-baseline.json`, `bin/schema-snapshot.sh` output, `mcp-server/src/scac-mutation-registry.current.generated.js` | Regenerate after the drop |
 
 **The S10 drop fails closed.** The drop migration starts with a preflight
 `do` block. It raises an exception, so nothing is dropped, when this query
@@ -568,7 +568,7 @@ Added, 9 new parts:
 3. `adopt-rule`;
 4. the `memory_attach_required` gate function and row (with selftest);
 5. the `rule.card` column and its migration;
-6. `bin/dream` (clone, verify, apply, orchestrate);
+6. planned `bin/dream` (clone, verify, apply, orchestrate);
 7. the transcript condenser inside it;
 8. the `com.carr.dream` launchd plist;
 9. the `bin/codex-job` exact-block refusal (with selftest).
@@ -583,15 +583,15 @@ Modified, not new:
 
 Removed unconditionally, 10:
 1. copied rule blocks in 35 briefs and the routine prompts;
-2. `brief-footer.md`;
+2. `tools/room-bridge/brief-footer.md`;
 3. hand-written convention prose in CLAUDE.md and AGENTS.md;
 4. the memory kernel (2 tables, 3+ triggers, RLS policies, a verb, a module,
    a contract with its fixture, 2 function branches);
-5. the private folder with `MEMORY.md` (105 files);
-6. `learning-weekly.sh`;
-7. `learning-monthly.sh`;
-8. `corrections-sweep.py` with its miner;
-9. `session-brief.py`;
+5. the private folder with `~/.claude/projects/-Users-booko-carr-system/memory/MEMORY.md` (105 files);
+6. `bin/learning-weekly.sh`;
+7. `bin/learning-monthly.sh`;
+8. `ops/corrections-sweep.py` with its miner;
+9. `hooks/session-brief.py`;
 10. the manual consolidate and retro passes.
 
 Conditional, 3: C1–C3.
@@ -617,16 +617,16 @@ that the homes of truth for conventions and memory drop from six to two.
        session, returns `human_only_verb_requires_verified_partner`.
      - A proposal section cannot change `rule`.
 2. **Live (S6):** two headless `claude -p` sessions run against
-   `team-memory-test`. The fixture probe `tools/memory-probe-x` sleeps 60 s
+   `team-memory-test`. The planned fixture probe `tools/memory-probe-x` sleeps 60 s
    and counts its calls.
    - **Pass:** one probe run (A's), B cites A's memory, and B makes fewer tool
      calls than A.
 
 ### P2. Dreaming fixture (`DREAMING`)
 
-The fixture lives under `ops/fixtures/dream/`, all synthetic: five
+The planned fixture lives under `ops/fixtures/dream/`, all synthetic: five
 near-duplicate sections with five `attach_id`s, one stale section
-(`bin/fleet-sync.sh`), one confirmed section, and three condensed transcripts.
+(old script `bin/fleet-sync.sh`), one confirmed section, and three condensed transcripts.
 
 1. **CI (S8):** a hand-written `$MEM_OUT` goes through verify and apply.
    - **Pass:** one change set; 5→1 with four retired; the stale section retired
@@ -634,7 +634,7 @@ near-duplicate sections with five `attach_id`s, one stale section
      unchanged until apply; a second apply a no-op.
    - **Negative cases:** a moved section drops only its unit; a planted secret
      applies nothing; a change without a note applies nothing.
-2. **Live (S9):** `bin/dream --fixture` against a scratch document gives the
+2. **Live (S9):** planned `bin/dream --fixture` against a scratch document gives the
    same outcomes, checked by a script.
 
 ### P3. Deletion, attach and one-store safety
@@ -662,10 +662,10 @@ reports its net lines.
 | WR562.S1.J1 | This design. The orchestrator freezes the private folder at merge | tiny | Merged; the folder is unwritable and still readable |
 | WR562.S2.J1 | Storage + attach. `memory_session`; the gate row, function and selftest; the review policy; `attach-memory`; `attach_id` and `op: retire`; the `team-memory` and `dreams-log` documents; log D1–D16 | medium | P1 S2 cases red, then green; the existing doctrine gate tests pass |
 | WR562.S3.J1 | Seed team memory. The TEAM and PERSONAL files plus TEAM fragments, in one change set; list the contradictions | small | `dry-run-doctrine-gates` passes over every seed section; the secret scan is clean; ledger TEAM, STALE and DUP rows mapped |
-| WR562.S4.J1 | Org-conventions store. **Precondition: the K12 guidance PR has merged.** `adopt-rule` (`humanCallerOnly`), wired into the `governance-queue` approval; `governance-queue` lists proposal sections; the `rule.card` migration; `sync-core-rule-cards.py` renders from the store; the 60 cards and the uncovered ORG files staged as proposals; Joe adopts the batch in person | medium | P1 S4 refusals; the block renders from the store and `--check` passes; the ledger has all 105 rows mapped |
+| WR562.S4.J1 | Org-conventions store. **Precondition: the K12 guidance PR has merged.** `adopt-rule` (`humanCallerOnly`), wired into the `governance-queue` approval; `governance-queue` lists proposal sections; the `rule.card` migration; `ops/sync-core-rule-cards.py` renders from the store; the 60 cards and the uncovered ORG files staged as proposals; Joe adopts the batch in person | medium | P1 S4 refusals; the block renders from the store and `--check` passes; the ledger has all 105 rows mapped |
 | WR562.S5.J1 | Guidance prose into the store. A line ledger of CLAUDE.md and AGENTS.md: **convention** (→ proposal, then adoption), **navigation pointer** (keep), or **obsolete** (drop). Code documentation moves to the `docs/` file it describes, leaving a pointer. Add the heading allowlist to `--check` | medium | Every line classified; after Joe's in-person adoption both files hold only the generated block and pointers; `--check` fails a test file with a hand-written convention heading |
 | WR562.S6.J1 | Attach for Claude and Codex. MCP instructions; the generated attach line; the job-log path in `bin/codex-job` | small | P1 live test passes; one Claude and one Codex `memory_session` row |
-| WR562.S7.J1 | Attach for routines and the Dot; strip copies. Routine templates and live trigger prompts stripped; the Dot connector attach; the 35 briefs stripped; the exact-block refusal and selftest; delete `brief-footer.md` | small | P3 brief checks; routine and Dot rows exist (or "no connector" is recorded) |
+| WR562.S7.J1 | Attach for routines and the Dot; strip copies. Routine templates and live trigger prompts stripped; the Dot connector attach; the 35 briefs stripped; the exact-block refusal and selftest; delete `tools/room-bridge/brief-footer.md` | small | P3 brief checks; routine and Dot rows exist (or "no connector" is recorded) |
 | WR562.S8.J1 | Dream: clone, verify (rebase), apply; the condenser; the fixture | medium | P2 CI checks, including the negative cases |
 | WR562.S9.J1 | Dream: orchestrator, plist and token cap; the one-time backfill since the S1 merge | small | P2 live fixture; one nightly `dreams-log` entry with token counts |
 | WR562.S10.J1 | Deletions 4–10 (C1, C2 if their conditions hold). Replace the 0303 functions first; migrate every dependent; the drop with its fail-closed preflight; `autoMemoryEnabled: false`; archive, then a human removes the folder | medium | The database preflight and the repo grep return nothing; P3 drop checks; CI green |
@@ -683,12 +683,12 @@ production writes.
 
 - The S1 brief calls `work-request-card` with `human_ref`. The live schema
   takes `work_request`.
-- `brief-footer.md` is described as "the brief rules" in CLAUDE.md and
+- `tools/room-bridge/brief-footer.md` is described as "the brief rules" in CLAUDE.md and
   AGENTS.md, but nothing appends it (deletion #2 resolves this).
 - The local, untracked `~/carr-system/.codex/hooks.json` references
-  `hooks/builder-agent-gate.py`, which does not exist on main.
+  `hooks/builder-agent-gate.py`, which does not have an implementation on main.
 - `com.carr.fleet-sync` is still installed in `~/Library/LaunchAgents` and runs
-  the deleted `bin/fleet-sync.sh` every 5 minutes.
+  the deleted old script `bin/fleet-sync.sh` every 5 minutes.
 - CLAUDE.md says the core cards need "no boot fetch", while the MCP
   instructions say "call standing-context FIRST". S6's single "attach first"
   line resolves the conflict.

@@ -2,10 +2,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TOOLS } from '../src/tools.js';
+import { derivedIdempotencyKey } from '../src/derived-key.ts';
 
 const source = 'uptime-monitor:availability:v1';
 const actor = (slug) => ({ id: slug === 'a' ? '10000000-0000-0000-0000-000000000001' : '10000000-0000-0000-0000-000000000002', slug, human: false, via: 'local-token', client_id: slug });
-const args = (key, source_note = source) => ({ idempotency_key: key, kind: 'open_loop', domain: 'system', owner: 'claude',
+const args = (key, source_note = source) => ({ idempotency_key: derivedIdempotencyKey('test', key), kind: 'open_loop', domain: 'system', owner: 'claude',
   title: 'DoctorCRE uptime monitoring unavailable', body: 'Restore the monitor', source_note,
   blocker: 'other_lane', blocker_detail: 'Orchestrator must restore the uptime monitor' });
 

@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Run one Codex job in a fresh clone; return its final message and exit code."""
 import argparse
+import contextlib
+import fcntl
 import os
 from pathlib import Path
 import re
 import signal
+import runpy
+import stat
 import shutil
 import subprocess
 import sys
@@ -19,16 +23,102 @@ if python.is_file() and Path(sys.prefix) != python.parent.parent:
 from skill_picker import prepare
 
 
+def job_log():
+    """The file this job's output is redirected to: its transcript for attach-memory, made owner-only."""
+    try:
+        if not stat.S_ISREG(os.fstat(2).st_mode):
+            return None
+        with contextlib.suppress(OSError):
+            os.fchmod(2, 0o600)
+        if sys.platform == 'darwin':
+            return os.fsdecode(fcntl.fcntl(2, fcntl.F_GETPATH, bytes(1024)).rstrip(b'\0'))
+        return os.readlink('/proc/self/fd/2')
+    except OSError:
+        return None
+
+
+def output(argv, **options):
+    """A lookup's stdout, or None when it could not answer."""
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                              timeout=120, **options)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
+def delivery(clone, branch, start):
+    """Did the job push a new commit as a branch tip and open a PR for that branch?
+
+    A job that exits cleanly without either loses its work (2026-10-28 retro: the
+    round-2 fix for #2624 reported success but never pushed), so the clone's final
+    HEAD is checked on the remote rather than trusted from the job's own report.
+    Jobs may push to an existing PR's branch, so any branch whose tip is HEAD counts.
+    """
+    head = (output(['git', '-C', str(clone), 'rev-parse', 'HEAD']) or '').strip()
+    listing = output(['git', '-C', str(clone), 'ls-remote', '--heads', 'origin'])
+    tips = [ref.removeprefix('refs/heads/') for sha, ref in
+            (line.split('\t', 1) for line in (listing or '').splitlines())
+            if sha == head and head not in ('', start)]
+    found = branch if branch in tips else next(iter(tips), None)
+    pushed = found is not None
+    pr = 'unchecked'
+    if pushed:
+        url = output(['gh', 'pr', 'list', '--head', found, '--state', 'all',
+                      '--json', 'url', '--jq', '.[0].url // empty'], cwd=clone)
+        pr = 'unchecked' if url is None else url.strip() or 'none'
+    missing = [name for name, gap in (('push', not pushed), ('pr', pr in ('unchecked', 'none'))) if gap]
+    return missing, (f"Delivery: {'failed' if missing else 'ok'} missing={','.join(missing) or 'none'} "
+                     f"branch={found or ('unchecked' if listing is None else 'none')} "
+                     f'start={start} head={head or "unchecked"} pr={pr}')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('repo', help='owner/repo, Git URL, or local Git repository')
     parser.add_argument('branch', help='new branch name')
     parser.add_argument('brief')
     parser.add_argument('-c', '--config', action='append', default=[], metavar='key=value')
+    parser.add_argument("--timeout-seconds", type=int, default=10800, help="wall-clock cap (default: 3 hours)")
     args = parser.parse_args()
+    if args.timeout_seconds <= 0:
+        parser.error("--timeout-seconds must be positive")
+    timeout = runpy.run_path(str(Path(__file__).with_name("with-timeout.py")))
     repo = args.repo
     if not Path(repo).exists() and re.fullmatch(r'[\w.-]+/[\w.-]+', repo):
         repo = f'https://github.com/{repo}.git'
+    try:
+        cutoff = time.time() - 2 * 24 * 60 * 60
+        retained = [path for path in Path(tempfile.gettempdir()).glob('codex-job-*')
+                    if not path.is_symlink() and (path / 'checkout' / '.git').is_dir()
+                    and max(marker.stat().st_mtime
+                            for marker in (path, path / 'checkout',
+                                           path / 'checkout/.git/index',
+                                           path / 'checkout/.git/logs/HEAD', path / 'result.md')
+                            if marker.exists()) < cutoff]
+        if retained:
+            processes = subprocess.run(['ps', '-ww', '-axo', 'args='], check=True,
+                                       capture_output=True, text=True, timeout=5).stdout
+            active = []
+            for line in processes.splitlines():
+                if not re.search(r'(?:^|[/\s])codex(?:\s|$)', line.partition(' -')[0]):
+                    continue
+                match = re.search(r'(?:^|\s)(?:-C\s+|--cd(?:=|\s+))(.+)', line)
+                if match:
+                    locations = [Path(match[1][:end.start()].strip("\"'"))
+                                 for end in re.finditer(r'\s+(?=-)|$', match[1])]
+                    if not all(directory.is_absolute() for directory in locations):
+                        raise ValueError('Cannot establish relative Codex checkout')
+                    resolved = [directory.resolve(strict=True) for directory in locations
+                                if directory.is_dir()]
+                    if not resolved:
+                        raise ValueError('Cannot establish Codex checkout')
+                    active.extend(resolved)
+            for path in retained:
+                if not any(directory.is_relative_to(path.resolve()) for directory in active):
+                    shutil.rmtree(path)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
     workspace = Path(tempfile.mkdtemp(prefix='codex-job-'))
     clone = workspace / 'checkout'
     status, cloned = 1, False
@@ -38,9 +128,14 @@ def main():
                        check=True, stdin=subprocess.DEVNULL)
         cloned = True
         subprocess.run(['git', '-C', str(clone), 'checkout', '--quiet', '-b', args.branch], check=True)
+        start = subprocess.run(['git', '-C', str(clone), 'rev-parse', 'HEAD'], check=True,
+                               capture_output=True, text=True).stdout.strip()
         subprocess.run(['git', '-C', str(clone), 'config', 'user.email',
                         'jbookout@users.noreply.github.com'], check=True)
         brief, _ = prepare(args.brief, clone)
+        log = job_log()
+        brief = (f'Job log: {log} (pass it to attach-memory as transcript_ref).' if log
+                 else 'Job log: none (stderr is not a file).') + '\n\n' + brief
         result = clone.parent / 'result.md'
         command = ['codex', 'exec', '-C', str(clone), '--dangerously-bypass-hook-trust',
                    '-o', str(result)]
@@ -50,7 +145,11 @@ def main():
                                  stdout=sys.stderr, start_new_session=True)
         pgid = child.pid
         try:
-            code = child.wait()
+            try:
+                code = child.wait(timeout=args.timeout_seconds)
+            except subprocess.TimeoutExpired:
+                timeout["_terminate_group"](child)
+                code = 124
         finally:
             try:
                 os.killpg(pgid, signal.SIGTERM)
@@ -62,13 +161,15 @@ def main():
                 pass
             finally:
                 child.wait()
-        status = code
-        if result.exists():
-            try:
+        missing, report = delivery(clone, args.branch, start)
+        status = code or int(bool(missing))
+        try:
+            if result.exists():
                 print(result.read_text(), end='', flush=True)
-            except BrokenPipeError:
-                with open(os.devnull, 'w') as sink:
-                    os.dup2(sink.fileno(), sys.stdout.fileno())
+            print(report, flush=True)
+        except BrokenPipeError:
+            with open(os.devnull, 'w') as sink:
+                os.dup2(sink.fileno(), sys.stdout.fileno())
         return status
     finally:
         if status == 0 or not cloned:
