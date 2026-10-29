@@ -1,0 +1,114 @@
+schema_version: 1
+job_types:
+  feature-backend:
+    read_only: false
+    stages: &code_stages
+      shape: &shape
+        skills: []
+        sizing_required: true
+        sizes: [tiny, small, medium, large]
+        conditional_skills:
+          - skill: mattpocock-skills:grill-with-docs
+            sizes: [medium, large]
+      build: &build
+        skills:
+          - pstack:poteto-mode
+          - mattpocock-skills:tdd
+          - pstack:principle-prove-it-works
+      pr:
+        skills: [file-pr, mattpocock-skills:pr]
+        card_line_required: true
+        card_line_pattern: '^Card: WR[1-9][0-9]*\.S[1-9][0-9]*\.J[1-9][0-9]*$'
+      review: &review
+        skills: [mattpocock-skills:code-review]
+        executor: independent_model
+      fix-rounds:
+        skills: [babysit-pr]
+        conditional_skills:
+          - skill: modernize
+            when: main_changed
+        main_update: merge
+        rebase_allowed: false
+        force_push_allowed: false
+        max_rounds: 3
+      ship:
+        skills: []
+        required_checks: green
+        merge: auto
+        pin_head: true
+        delivery_verification_required: true
+      close:
+        skills: []
+        outcomes:
+          done: [slice_marked_done, pr_url]
+          retired: [slice_retired, reason]
+  feature-ui:
+    read_only: false
+    stages:
+      <<: *code_stages
+      build:
+        <<: *build
+        skills:
+          - pstack:poteto-mode
+          - mattpocock-skills:tdd
+          - pstack:principle-prove-it-works
+          - mattpocock-skills:codebase-design
+        screenshots:
+          viewports: [phone, desktop]
+          themes: [light, dark]
+          coverage: cartesian_product
+        taste_score:
+          minimum: 7.5
+          maximum: 10
+  bug-fix:
+    read_only: false
+    stages:
+      <<: *code_stages
+      build:
+        <<: *build
+        skills:
+          - pstack:poteto-mode
+          - mattpocock-skills:tdd
+          - pstack:principle-prove-it-works
+          - mattpocock-skills:diagnosing-bugs
+        regression_test: fails_before_fix_passes_after
+  removal-refactor:
+    read_only: false
+    stages:
+      <<: *code_stages
+      build:
+        <<: *build
+        skills:
+          - pstack:poteto-mode
+          - mattpocock-skills:tdd
+          - pstack:principle-prove-it-works
+          - zero-tech-debt
+        evidence: [no_remaining_callers_of_removed_code]
+  data-migration:
+    read_only: false
+    stages:
+      <<: *code_stages
+      build:
+        <<: *build
+        skills:
+          - pstack:poteto-mode
+          - mattpocock-skills:tdd
+          - pstack:principle-prove-it-works
+          - mattpocock-skills:domain-modeling
+        evidence: [parity_with_old_shape, rollback_step]
+  review:
+    read_only: true
+    stages: &read_only_stages
+      shape: *shape
+      build:
+        skills: [pstack:poteto-mode, pstack:principle-prove-it-works]
+      review: *review
+      close:
+        skills: []
+        artifact: report_file
+        outcomes:
+          done: [slice_marked_done, report_path]
+          retired: [slice_retired, reason]
+  research-audit:
+    read_only: true
+    stages: *read_only_stages

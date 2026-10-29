@@ -8,6 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'bin'))
 import skill_picker
 
@@ -35,6 +37,58 @@ class CatalogTests(unittest.TestCase):
             self.assertTrue(all(s.path.is_absolute() for s in skills))
             local.write_text('---\nname: local\ndescription: Updated immediately\n---\n')
             self.assertIn('Updated immediately', [s.description for s in skill_picker.catalog(repo, home=home)])
+
+    def test_catalog_reads_tstack_roots_and_deduplicates_symlinks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, repo = Path(tmp) / 'home', Path(tmp) / 'repo'
+            for root, name in (('.claude/skills', 'file-pr'), ('.codex/skills', 'modernize')):
+                path = home / root / name / 'SKILL.md'
+                path.parent.mkdir(parents=True)
+                path.write_text(f'---\nname: {name}\ndescription: Procedure {name}\n---\n')
+            alias = home / '.codex/skills/file-pr'
+            alias.symlink_to(home / '.claude/skills/file-pr', target_is_directory=True)
+            self.assertEqual([s.name for s in skill_picker.catalog(repo, home=home)],
+                             ['file-pr', 'modernize'])
+
+    def test_workflow_skills_resolve_in_fixture_home(self):
+        table = yaml.safe_load((Path(__file__).resolve().parents[1] /
+                                'ops/config/job-workflows.v1.yaml').read_text())
+        with tempfile.TemporaryDirectory() as tmp:
+            home, repo = Path(tmp) / 'home', Path(tmp) / 'repo'
+            inventories = {
+                '.claude/plugins/cache/cursor-plugins/pstack/1.0/skills':
+                    ('poteto-mode', 'principle-prove-it-works'),
+                '.claude/plugins/cache/claude-plugins-official/mattpocock-skills/1.0/skills/engineering':
+                    ('grill-with-docs', 'tdd', 'pr', 'code-review', 'codebase-design',
+                     'diagnosing-bugs', 'domain-modeling'),
+                '.claude/skills': ('file-pr', 'babysit-pr'),
+                '.codex/skills': ('modernize', 'zero-tech-debt'),
+            }
+            for root, names in inventories.items():
+                for name in names:
+                    path = home / root / name / 'SKILL.md'
+                    path.parent.mkdir(parents=True)
+                    path.write_text(f'---\nname: {name}\ndescription: Procedure {name}\n---\n')
+            available = {skill.name for skill in skill_picker.catalog(repo, home=home)}
+            jobs = table['job_types']
+            self.assertEqual(set(jobs), {'feature-ui', 'feature-backend', 'bug-fix',
+                                        'removal-refactor', 'data-migration', 'review', 'research-audit'})
+            for job_type, job in jobs.items():
+                with self.subTest(job_type=job_type):
+                    self.assertTrue(job['stages'])
+                    for stage in job['stages'].values():
+                        names = stage['skills'] + [item['skill'] for item in
+                                                   stage.get('conditional_skills', [])]
+                        self.assertFalse(set(names) - available,
+                                         f'{job_type}: unknown skills {set(names) - available}')
+                    if job['read_only']:
+                        self.assertTrue({'pr', 'fix-rounds', 'ship'}.isdisjoint(job['stages']))
+                        self.assertNotIn('mattpocock-skills:tdd', job['stages']['build']['skills'])
+                        self.assertEqual(job['stages']['close']['artifact'], 'report_file')
+                    else:
+                        self.assertEqual(set(job['stages']),
+                                         {'shape', 'build', 'pr', 'review', 'fix-rounds', 'ship', 'close'})
+                        self.assertEqual(job['stages']['fix-rounds']['max_rounds'], 3)
 
 
 class PickerTests(unittest.TestCase):

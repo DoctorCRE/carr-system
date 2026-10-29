@@ -28,6 +28,8 @@ def catalog(repo: Path, *, home: Path | None = None) -> list[Skill]:
             latest = max(versions, key=lambda p: tuple(int(n) for n in re.findall(r'\d+', p.parent.name)))
             roots.append((plugin + ':', latest))
     roots.extend(('', p) for p in sorted((home / '.agents/skills').glob('*')) if p.is_dir())
+    roots.extend(('', p) for root in (home / '.claude/skills', home / '.codex/skills')
+                 for p in sorted(root.glob('*')) if p.is_dir())
     roots.append(('', repo / '.claude/skills'))
     skills: dict[Path, Skill] = {}
     for prefix, root in roots:
