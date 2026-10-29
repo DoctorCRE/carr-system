@@ -138,7 +138,10 @@ class HookCommands(unittest.TestCase):
                 script.unlink()
                 script.mkdir()
                 result = run('')
-                if result.returncode == 0:
+                if result.returncode == 0 and 'CARR HOOK WARNING' in template:
+                    self.assertEqual(result.stdout, '')
+                    self.assertIn('WARNING', result.stderr)
+                elif result.returncode == 0:
                     output = json.loads(result.stdout)
                     self.assertTrue(output.get('continue') is False or
                                     output.get('hookSpecificOutput', {}).get('permissionDecision') == 'deny',

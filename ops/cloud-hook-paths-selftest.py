@@ -10,7 +10,7 @@ every Bash, Read, Grep and Glob call in a cloud session was refused.
 
 THE CONTRACT, per layout:
 
-  Mac layout   (~/carr-system/hooks exists)
+  Mac layout   (the canonical hook file exists)
       every hook runs from the canonical ~/carr-system path, never from the
       project directory. A branch or worktree cannot swap in its own gate.
 
@@ -18,8 +18,9 @@ THE CONTRACT, per layout:
       worktree-self-plumb.py and machine-converge.py do nothing: both act on
       machine state (worktree symlinks, the orphan reaper, a fast-forward of
       the canonical checkout, config-as-code install) that a container lacks.
-      The launch Card gate runs from $CLAUDE_PROJECT_DIR. A missing Card gate
-      denies the call. Missing machine hooks remain optional.
+      The launch Card gate runs from $CLAUDE_PROJECT_DIR. A missing canonical
+      Card gate also falls back to the project copy. If both copies are missing,
+      warn and allow. Machine hooks remain optional.
 
 Each command is run exactly as written in the tracked settings file, under
 every POSIX shell present, against throwaway HOME and project directories.
@@ -151,10 +152,28 @@ def cloud_cases() -> None:
                 for event, script, command in wired_commands():
                     payload = cases[event][0]
                     r = run(shell, command, env2, payload, bare)
-                    expected_block = script == 'agent-card-gate.py'
                     check(f"cloud/{os.path.basename(shell)} project dir {label}: {event} {script} missing policy",
-                          r.returncode == 0 and blocked(r) == expected_block,
+                          r.returncode == 0 and not blocked(r)
+                          and (script != "agent-card-gate.py" or "CARR HOOK WARNING" in r.stderr),
                           f"rc={r.returncode} stderr={r.stderr.strip()[-200:]!r}")
+
+
+def stale_canonical_cases() -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        tmp = Path(raw)
+        home = tmp / "home"
+        (home / "carr-system/hooks").mkdir(parents=True)
+        project = cloud_project(tmp)
+        for shell in SHELLS:
+            for event, script, command in wired_commands():
+                if script != "agent-card-gate.py":
+                    continue
+                result = run(shell, command, clean_env(home, project),
+                             {"hook_event_name": "PreToolUse", "tool_name": "Bash",
+                              "tool_input": {"command": "ls"}}, project)
+                check(f"stale canonical/{Path(shell).name}: project gate allows ls",
+                      result.returncode == 0 and not blocked(result) and not result.stderr,
+                      f"rc={result.returncode} stderr={result.stderr!r}")
 
 
 STUB = """#!/usr/bin/env python3
@@ -207,6 +226,7 @@ def main() -> int:
     contract_cases()
     cloud_cases()
     mac_cases()
+    stale_canonical_cases()
     print(f"\n{'FAIL' if FAILURES else 'PASS'}: {len(FAILURES)} failure(s)")
     return 1 if FAILURES else 0
 

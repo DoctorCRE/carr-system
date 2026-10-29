@@ -24,15 +24,28 @@ class AgentCardGate(unittest.TestCase):
                          'hooks/gate_paths.py', 'hooks/refused_content.py', 'lib/hook_runtime.py'):
             if (REPO / relative).exists():
                 shutil.copyfile(REPO / relative, self.root / relative)
+        self.now = None
+        self.home = self.root / 'home'
+        self.home.mkdir()
         self.lookup = self.root / 'tools/call-verb.py'
         self.lookup.write_text('import json, sys\nassert sys.argv[1:] == ["work-queue", "{}"]\n'
                                'print(json.dumps({"ok": True, "jobs": []}))\n')
 
     def run_hook(self, tool='Agent', **inputs):
-        return subprocess.run([sys.executable, self.root / 'hooks/agent-card-gate.py'],
+        if tool == 'Agent':
+            inputs.setdefault('run_in_background', True)
+            if inputs['run_in_background'] is None:
+                del inputs['run_in_background']
+        hook = self.root / 'hooks/agent-card-gate.py'
+        command = [sys.executable, hook]
+        if self.now is not None:
+            command = [sys.executable, '-c',
+                       f'import runpy, time; time.time = lambda: {self.now!r}; '
+                       f'runpy.run_path({str(hook)!r}, run_name="__main__")']
+        return subprocess.run(command,
                               input=json.dumps({'hook_event_name': 'PreToolUse',
                                                 'tool_name': tool, 'tool_input': inputs}),
-                              text=True, capture_output=True, env=fixture_env(), timeout=10)
+                              text=True, capture_output=True, env=dict(fixture_env(), HOME=str(self.home)), timeout=10)
 
     def test_agent_without_card_denied_with_mint_command(self):
         result = self.run_hook(prompt='Review the plan.')
@@ -55,6 +68,20 @@ class AgentCardGate(unittest.TestCase):
 
     def test_bash_codex_exec_without_card_denied(self):
         result = self.run_hook('Bash', command='codex exec "Review the plan."')
+        self.assertEqual(result.returncode, 2, result.stderr)
+
+    def test_codex_resume_continues_without_card(self):
+        self.lookup.write_text('raise SystemExit("queue must not be read")')
+        for command in ('codex exec resume --last "Continue."',
+                        'codex exec resume session-id "Continue."',
+                        'codex -m default e resume --last --full-auto',
+                        'codex exec resume --last; codex exec resume session-id'):
+            with self.subTest(command=command):
+                result = self.run_hook('Bash', command=command)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_resume_does_not_authorize_a_new_session(self):
+        result = self.run_hook('Bash', command='codex exec resume --last; codex exec "New job."')
         self.assertEqual(result.returncode, 2, result.stderr)
 
     def test_other_bash_and_launcher_untouched(self):
@@ -82,8 +109,71 @@ class AgentCardGate(unittest.TestCase):
                 result = self.run_hook('Bash', command=command)
                 self.assertEqual(result.returncode, 2, result.stderr)
 
-    def test_explore_has_no_exemption(self):
+    def test_foreground_helpers_need_no_card(self):
+        self.lookup.write_text('raise SystemExit("queue must not be read")')
+        for kind in ('Explore', 'Plan', 'general-purpose'):
+            with self.subTest(kind=kind):
+                result = self.run_hook(prompt='Search code.', subagent_type=kind,
+                                       run_in_background=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_agent_default_is_foreground(self):
+        result = self.run_hook(prompt='Search code.', run_in_background=None)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_background_explore_needs_card(self):
         self.assertEqual(self.run_hook(prompt='Search code.', subagent_type='Explore').returncode, 2)
+
+    def test_registered_card_survives_outage(self):
+        self.register_fixture()
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+        self.lookup.write_text('raise SystemExit(1)')
+        result = self.run_hook(prompt='Card: WR557.S6.J1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        unseen = self.run_hook(prompt='Card: WR557.S6.J2')
+        self.assertEqual(unseen.returncode, 2, unseen.stderr)
+        self.assertIn('lookup unreachable or invalid', unseen.stderr)
+
+    def test_cached_registration_expires_after_24_hours(self):
+        self.now = 1000000
+        self.register_fixture()
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+        self.lookup.write_text('raise SystemExit(1)')
+        self.now += 24 * 60 * 60 - 1
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+        self.now += 1
+        expired = self.run_hook(prompt='Card: WR557.S6.J1')
+        self.assertEqual(expired.returncode, 2, expired.stderr)
+        self.assertIn('lookup unreachable or invalid', expired.stderr)
+        self.assertIn('WR557.S6.J1', expired.stderr)
+
+    def test_live_unregistered_result_overrides_cache(self):
+        self.register_fixture()
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+        self.lookup.write_text('print(\'{"ok": true, "jobs": []}\')')
+        result = self.run_hook(prompt='Card: WR557.S6.J1')
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('not registered', result.stderr)
+        self.lookup.write_text('raise SystemExit(1)')
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
+
+    def test_cached_card_does_not_cover_other_launches(self):
+        self.register_fixture()
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+        self.lookup.write_text('raise SystemExit(1)')
+        result = self.run_hook('Bash', command="codex exec 'Card: WR557.S6.J1'; codex exec 'Card: WR557.S6.J2'")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('lookup unreachable or invalid', result.stderr)
+
+    def test_invalid_queue_uses_cached_registration(self):
+        self.register_fixture()
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+        for source in ('print("invalid JSON")', 'print("[]")',
+                       'print(\'{"ok": true, "jobs": [{}]}\')'):
+            with self.subTest(source=source):
+                self.lookup.write_text(source)
+                result = self.run_hook(prompt='Card: WR557.S6.J1')
+                self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_lookup_failure_denies(self):
         for source in ('raise SystemExit(1)', 'print("invalid JSON")',
