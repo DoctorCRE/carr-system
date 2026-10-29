@@ -427,3 +427,15 @@ test("database failures stay typed and never become an empty list", async () => 
   const unexpected = fakeClient({ fail: new Error("boom") });
   await assert.rejects(() => readBusinessRecord({ client: unexpected, actor: JOE, dataset: "clients", id: ID, correlationId: "c" }), /INTERNAL_ERROR/);
 });
+
+
+test('directory list and detail negotiate v1 or v2 explicitly', () => {
+ for (const contract of ['vendor-directory.v1', 'vendor-directory.v2']) {
+  const params = new URLSearchParams({contract});
+  assert.equal(parseBusinessQuery('vendors', params, 'joe').contract, contract);
+  assert.deepEqual(parseBusinessRecordQuery(params, 'joe'), {contract});
+ }
+ const unknown = new URLSearchParams({contract:'vendor-directory.v3'});
+ assert.throws(() => parseBusinessQuery('vendors', unknown, 'joe'), /QUERY_INVALID/);
+ assert.throws(() => parseBusinessRecordQuery(unknown, 'joe'), /QUERY_INVALID/);
+});

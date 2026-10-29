@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import assert from 'node:assert/strict';
+import { appKeysValid, vendorRowRequired, vendorRowOptional, vendorDetailRequired, vendorDetailOptional } from './fixtures/vendor-directory-app-keys.mjs';
 import { TOOLS } from '../src/tools.js';
 import { parseBusinessQuery, readBusinessList, readBusinessRecord } from '../src/workspace-business-read.js';
 
@@ -279,4 +280,21 @@ test('directory nests exact live named people without multiplying vendor counts'
  result=await directory(f.vendor);
  assert.deepEqual(result.detail.people,[]);
  assert.deepEqual(result.list.rows[0].people,[]);
+});
+
+
+test('v1 directory keys equal the main contract and satisfy strict app row and detail rules',async()=>{
+ const f=await candidate();
+ const result=await directory(f.vendor,'vendor-directory.v1');
+ const row=result.list.rows.find(row=>row.id===f.vendor);
+ // Main's v1 emits every optional directory field. These fixtures also pin its exact keys.
+ for(const [value,required,optional] of [
+  [row,vendorRowRequired,vendorRowOptional],
+  [result.detail,vendorDetailRequired,vendorDetailOptional],
+ ]) {
+  assert.equal(Object.hasOwn(value,'people'),false);
+  assert.deepEqual(Object.keys(value).sort(),[...required,...optional].sort());
+  assert.equal(appKeysValid(value,required,optional),true);
+  assert.equal(appKeysValid({...value,people:[]},required,optional),false,'app refuses leaked people');
+ }
 });
