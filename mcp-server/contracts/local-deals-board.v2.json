@@ -1,0 +1,9 @@
+{
+  "schema": "local-deals-board.v2",
+  "version": "2.0.0",
+  "verb": "deal-room-board",
+  "changes": {
+    "open_actions": "Each deal has up to three open next actions, ordered by due date with undated actions last and ID as a tie-breaker. Each action has id, owner, description and nullable due_on. Structured items are excluded.",
+    "last_step": "Each deal has the latest logged activity or completed next action, or null. It contains kind, summary and occurred_at. Activity kind and summary are preserved. Completed actions use kind completed_action and their outcome, falling back to the action description when no outcome is recorded. Field edits and last_touch are not steps."
+  }
+}

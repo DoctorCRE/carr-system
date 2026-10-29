@@ -3853,6 +3853,22 @@ export const TOOLS = {
                   'due_on',to_jsonb(i.due_on)#>>'{}','status',i.status,'bullets',i.item_bullets,'source_ref',i.source_ref)
                   order by i.created_order,i.id) from v_deal_room_action i where i.deal_id=b.id
                   and i.item_title is not null and i.status not in ('dropped', 'expired')),'[]'::jsonb) as items,
+                coalesce((select jsonb_agg(jsonb_build_object('id', n.id, 'owner', n.owner,
+                  'description', n.description, 'due_on', to_jsonb(n.due_on)#>>'{}')
+                  order by n.due_on nulls last, n.id)
+                  from (select id, owner, description, due_on from v_deal_room_action
+                         where deal_id=b.id and status='open' and item_title is null
+                         order by due_on nulls last, id limit 3) n), '[]'::jsonb) as open_actions,
+                (select jsonb_build_object('kind', step.kind, 'summary', step.summary,
+                                           'occurred_at', to_jsonb(step.occurred_at)#>>'{}')
+                   from (select a.kind, a.summary, a.occurred_at, a.id
+                           from v_deal_room_activity a where a.deal_id=b.id
+                         union all
+                         select 'completed_action', coalesce(nullif(e.new_value->>'outcome', ''),
+                           e.new_value->>'next_action', e.new_value->>'post_call_action'), e.recorded_at, e.id
+                           from v_deal_room_event e where e.subject_id=b.id and e.verb='complete-action'
+                             and e.new_value->>'status'='done') step
+                  order by step.occurred_at desc, step.id desc limit 1) as last_step,
                 (b.next_step is null or b.next_date is null) as next_step_required, b.market, b.segment,
                 b.client_id, b.client_ref, b.client_name, ce.client_status, ce.client_version,
                 ce.prospect_engagement_status, b.account_client_id, b.account_client_ref,
@@ -3919,7 +3935,7 @@ export const TOOLS = {
             and ($3::uuid is null or account_client_id=$3::uuid)
           order by started_at desc limit 1`,
         [actor.slug, workspace, args.account_client_id || null]);
-      return { schema_version: 'local-deals-board.v1', actor: actor.slug, deals: deals.rows.map(d => ({ ...d, short_name: shortDealHeading(d) })), closed_deals: closedDeals.rows.filter(d => d.outcome !== 'lost'), lost_deals: closedDeals.rows.filter(d => d.outcome === 'lost'), accounts: accounts.rows,
+      return { schema_version: 'local-deals-board.v2', actor: actor.slug, deals: deals.rows.map(d => ({ ...d, short_name: shortDealHeading(d) })), closed_deals: closedDeals.rows.filter(d => d.outcome !== 'lost'), lost_deals: closedDeals.rows.filter(d => d.outcome === 'lost'), accounts: accounts.rows,
         open_session: session.rows[0] || null };
     },
   },
