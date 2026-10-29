@@ -1389,8 +1389,12 @@ class AttachmentTests(unittest.TestCase):
     def ledger_text(self):
         return (self.tmp / 'send' / send_mod.LEDGER).read_text()
 
+    def dispatch(self, mail, key):
+        """The submitted transport, reached directly: drafts refuse attachments until the record carries them."""
+        return send_mod._write_transport(mail, key, self.ports, send_requested=True, submitted=True)
+
     def test_submitted_mail_sends_through_one_script_and_confirms(self):
-        result = send_mod.send_submitted(self.mail(), idempotency_key='k1', ports=self.ports)
+        result = self.dispatch(self.mail(), 'k1')
         self.assertEqual((result.state, result.mode, result.sent_item_id), (State.DONE, 'script', 'sent-7'))
         self.assertEqual(len(self.scripts), 1)
         self.assertEqual(self.forms, [])
@@ -1399,7 +1403,7 @@ class AttachmentTests(unittest.TestCase):
         rows = [json.loads(line) for line in self.ledger_text().splitlines()]
         self.assertEqual([r['attachments'] for r in rows],
                          [{'count': 1, 'sha256': [send_mod._digest(self.file)]}] * 2)
-        again = send_mod.send_submitted(self.mail(), idempotency_key='k1', ports=self.ports)
+        again = self.dispatch(self.mail(), 'k1')
         self.assertEqual(again.state, State.DONE)
         self.assertEqual(len(self.scripts), 1)
 
@@ -1415,44 +1419,67 @@ class AttachmentTests(unittest.TestCase):
 
     def test_partial_attachment_set_aborts_without_sending(self):
         self.reply = 'aborted'
-        result = send_mod.send_submitted(self.mail(), idempotency_key='k4', ports=self.ports)
+        result = self.dispatch(self.mail(), 'k4')
         self.assertEqual((result.state, result.reason), (State.FAILED, 'aborted_before_dispatch'))
         self.assertEqual(self.mailbox.sent, [])
         self.assertIn('aborted_before_dispatch', self.ledger_text())
 
-    def test_submitted_attachments_require_the_partner_copy(self):
-        for cc in ((), ('someone@example.test',), ('partner@example.test', 'someone@example.test')):
-            with self.subTest(cc=cc):
-                mail = replace(self.mail(), cc=cc)
-                result = send_mod.send_submitted(mail, idempotency_key='k8', ports=self.ports)
-                self.assertEqual((result.state, result.reason), (State.REFUSED, 'partner_copy_required'))
+    def test_only_a_validated_submission_reaches_the_transport(self):
+        from lib.outlook_outbox import SubmittedDraft
+        mail = self.mail()
+        self.assertTrue(send_mod.partner_copied(mail, self.settings))
+        result = send_mod.send_submitted(mail, ports=self.ports)
+        self.assertEqual((result.state, result.reason), (State.REFUSED, 'submission_required'))
+        with self.assertRaisesRegex(ValueError, '^attachments_not_wired$'):
+            SubmittedDraft('00000000-0000-0000-0000-000000000001', 1, 'a' * 64, mail)
         self.assertEqual((self.scripts, self.forms), ([], []))
         self.assertFalse((self.tmp / 'send' / send_mod.LEDGER).exists())
+
+    def test_partner_copy_rule(self):
+        for cc in ((), ('someone@example.test',), ('partner@example.test', 'someone@example.test')):
+            with self.subTest(cc=cc):
+                self.assertFalse(send_mod.partner_copied(replace(self.mail(), cc=cc), self.settings))
+        self.assertFalse(send_mod.partner_copied(replace(self.mail(), bcc=('x@example.test',)), self.settings))
 
     def test_another_default_sender_is_refused_before_dispatch(self):
         for default in ('someone@example.test_ActiveSyncMicrosoft_HxS', None, ACCOUNT):
             with self.subTest(default=default):
                 self.default = default
-                result = send_mod.send_submitted(self.mail(), idempotency_key='k10', ports=self.ports)
+                result = self.dispatch(self.mail(), 'k10')
                 self.assertEqual((result.state, result.reason), (State.FAILED, 'default_sender_mismatch'))
         self.assertEqual(self.scripts, [])
         self.assertFalse((self.tmp / 'send' / send_mod.LEDGER).exists())
 
     def test_default_sender_reads_the_profile_preference(self):
-        prefs = self.home / send_mod.PROFILE_PREFS
-        self.assertIsNone(self.real_default_sender(self.home))
-        prefs.parent.mkdir(parents=True)
+        profile = self.tmp / 'profile-a'
+        self.assertIsNone(self.real_default_sender(profile))
+        profile.mkdir()
+        prefs = profile / 'ProfilePreferences.plist'
         prefs.write_bytes(plistlib.dumps({'DefaultAccountIdentifier': 'a@example.test_ActiveSyncExchange_HxS'}))
-        self.assertEqual(self.real_default_sender(self.home), 'a@example.test_ActiveSyncExchange_HxS')
+        self.assertEqual(self.real_default_sender(profile), 'a@example.test_ActiveSyncExchange_HxS')
         prefs.write_bytes(b'not a plist')
-        self.assertIsNone(self.real_default_sender(self.home))
+        self.assertIsNone(self.real_default_sender(profile))
+
+    def test_configured_profile_controls_the_sender_check(self):
+        main, alternate = self.tmp / 'Main Identity', self.tmp / 'Alternate Identity'
+        for profile, default in ((main, 'someone@example.test_ActiveSyncMicrosoft_HxS'),
+                                 (alternate, f'{ACCOUNT}_ActiveSyncExchange_HxS')):
+            profile.mkdir()
+            (profile / 'ProfilePreferences.plist').write_bytes(
+                plistlib.dumps({'DefaultAccountIdentifier': default}))
+        self.enterContext(patch.object(send_mod, 'default_sender', self.real_default_sender))
+        for profile, state, k in ((main, State.FAILED, 'k12'), (alternate, State.DONE, 'k11')):
+            with self.subTest(profile=profile.name):
+                self.settings_for(attachment_root=str(self.root), attachment_max_bytes=1000, profile=str(profile))
+                self.assertEqual(self.dispatch(self.mail(), k).state, state)
+        self.assertEqual(len(self.scripts), 1)
 
     def test_failed_cleanup_is_its_own_failure_and_never_resends(self):
         self.ports.script_send = None
         with patch.object(send_mod.subprocess, 'run',
                           return_value=subprocess.CompletedProcess([], 0, 'cleanup_failed\n', '')) as run:
-            first = send_mod.send_submitted(self.mail(), idempotency_key='k9', ports=self.ports)
-            second = send_mod.send_submitted(self.mail(), idempotency_key='k9', ports=self.ports)
+            first = self.dispatch(self.mail(), 'k9')
+            second = self.dispatch(self.mail(), 'k9')
         self.assertEqual((first.state, first.reason), (State.FAILED, 'abort_cleanup_failed'))
         self.assertEqual((second.state, second.reason), (State.FAILED, 'abort_cleanup_failed'))
         self.assertEqual(run.call_count, 1)
@@ -1462,16 +1489,16 @@ class AttachmentTests(unittest.TestCase):
 
     def test_transport_failure_is_unconfirmed_and_never_retried(self):
         self.reply = send_mod.UiFailure('transport_TimeoutExpired_000000000000')
-        first = send_mod.send_submitted(self.mail(), idempotency_key='k5', ports=self.ports)
+        first = self.dispatch(self.mail(), 'k5')
         self.assertEqual(first.state, State.PRESSED_UNCONFIRMED)
-        second = send_mod.send_submitted(self.mail(), idempotency_key='k5', ports=self.ports)
+        second = self.dispatch(self.mail(), 'k5')
         self.assertEqual(second.state, State.PRESSED_UNCONFIRMED)
         self.assertEqual(len(self.scripts), 1)
 
     def test_file_changed_after_admission_is_refused_before_dispatch(self):
         mail = self.mail()
         self.file.write_bytes(b'%PDF-changed!!')
-        result = send_mod.send_submitted(mail, idempotency_key='k6', ports=self.ports)
+        result = self.dispatch(mail, 'k6')
         self.assertEqual((result.state, result.reason), (State.FAILED, 'attachment_changed'))
         self.assertEqual(self.scripts, [])
 
@@ -1530,7 +1557,7 @@ class AttachmentTests(unittest.TestCase):
 
     def test_control_characters_are_refused_before_dispatch(self):
         mail = replace(self.mail(), body='Bad \x07 bell')
-        result = send_mod.send_submitted(mail, idempotency_key='k7', ports=self.ports)
+        result = self.dispatch(mail, 'k7')
         self.assertEqual((result.state, result.reason), (State.FAILED, 'unscriptable_text'))
         self.assertEqual(self.scripts, [])
 

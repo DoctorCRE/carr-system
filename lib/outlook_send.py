@@ -39,8 +39,6 @@ from lib.outlook_settings import load_settings
 OUT = Path('out/outlook-send')
 LEDGER = 'ledger.jsonl'
 NOT_DISPATCHED = ('aborted_before_dispatch', 'abort_cleanup_failed')
-PROFILE_PREFS = Path('Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity/'
-                     'ProfilePreferences.plist')
 IDLE_SECONDS = 300
 DUPLICATE_WINDOW = 24 * 3600
 CLOCK_SKEW = 5
@@ -484,12 +482,13 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
     return _await_sent(item, key, print_, ports, ledger, pressed_at, mode, submitted)
 
 
-def default_sender(home: Path | None = None) -> str | None:
+def default_sender(profile: Path | None = None) -> str | None:
     """New Outlook's default account identifier (`<address>_<transport>`). Its scripting dictionary
     exposes no accounts, so this profile preference is the only pre-dispatch evidence of the account a
     scripted message sends from."""
     try:
-        ident = plistlib.loads(((home or Path.home()) / PROFILE_PREFS).read_bytes()).get('DefaultAccountIdentifier')
+        prefs = (profile or load_settings().profile) / 'ProfilePreferences.plist'
+        ident = plistlib.loads(prefs.read_bytes()).get('DefaultAccountIdentifier')
     except (OSError, plistlib.InvalidFileException, ValueError, AttributeError):
         return None
     return ident if isinstance(ident, str) else None
@@ -1042,13 +1041,16 @@ def partner_copied(mail: Mail, settings) -> bool:
             and settings.partner_cc != settings.account and mail.cc == (settings.partner_cc,))
 
 
-def send_submitted(mail: Mail, *, idempotency_key: str, ports: Ports) -> Result:
-    """Dispatch an immutable app submission, retaining all transport safeguards. Submitted mail skips
-    the native confirmation dialog: the partner's submit is the approval, and attachments additionally
-    require the other partner on CC."""
-    if mail.attachments and not partner_copied(mail, load_settings()):
+def send_submitted(draft, *, ports: Ports) -> Result:
+    """Dispatch a validated partner submission (outlook_outbox.SubmittedDraft), retaining all transport
+    safeguards. Submitted mail skips the native confirmation dialog: the partner's submit is the approval.
+    Attachments come only from the draft, which refuses them until the record binds approved files."""
+    from lib.outlook_outbox import SubmittedDraft  # the outbox imports this module
+    if not isinstance(draft, SubmittedDraft):
+        return Result(State.REFUSED, 'submission_required')
+    if draft.mail.attachments and not partner_copied(draft.mail, load_settings()):
         return Result(State.REFUSED, 'partner_copy_required')
-    return _write_transport(mail, idempotency_key, ports, send_requested=True, submitted=True)
+    return _write_transport(draft.mail, draft.key, ports, send_requested=True, submitted=True)
 
 
 def send(to, cc, bcc, subject: str, body: str, *, idempotency_key: str, record: str | None = None,

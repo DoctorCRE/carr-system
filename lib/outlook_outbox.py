@@ -19,6 +19,10 @@ class SubmittedDraft:
     sha256: str
     mail: send.Mail
 
+    def __post_init__(self):
+        if self.mail.attachments:
+            raise ValueError('attachments_not_wired')  # until the submitted record carries approved files
+
     @classmethod
     def parse(cls, row: dict, settings: OutlookSettings):
         ident = str(uuid.UUID(row['proposal_id']))
@@ -121,7 +125,7 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
                 receipt = dict(idempotency_key=key, proposal_id=ident, base_version=version,
                                sha256=digest, status='failed', reason=reason)
             else:
-                result = send.send_submitted(draft.mail, idempotency_key=draft.key, ports=ports)
+                result = send.send_submitted(draft, ports=ports)
                 if (result.state in (send.State.NOT_IDLE, send.State.PRESSED_UNCONFIRMED,
                                      send.State.WINDOW_NOT_CLOSED)
                         or result.reason in ('daily_cap', 'another_write_running', 'compose_window_open')):
