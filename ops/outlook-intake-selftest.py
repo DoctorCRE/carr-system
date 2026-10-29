@@ -8,6 +8,8 @@ import hashlib
 import json
 import os
 import re
+import runpy
+import struct
 from pathlib import Path
 import shutil
 import sqlite3
@@ -753,6 +755,122 @@ class IntakeTest(unittest.TestCase):
                 self.assertEqual((result.state, result.reason), ('failed', 'decode_failed'))
                 self.assertEqual(result.detail, detail)
                 self.assertEqual(self.fake.writes('log-activity'), [])
+
+    def cli_mail_fixture(self, records, folder_name='Drafts'):
+        helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
+        crate = ROOT / 'vendor/hxprobe'
+        REAL_RUN(['cargo', 'build', '--locked'], cwd=crate, check=True, capture_output=True)
+        envelopes = []
+        for folder_id, label in ((50, folder_name), (51, 'Sent Items')):
+            folder = bytearray(840)
+            struct.pack_into('<H', folder, 0, 0x004d)
+            struct.pack_into('<QIQQQ', folder, 10, folder_id, 2, 7, folder_id, 7)
+            folder.extend(b'\1\1\1\1\0' + helpers['utf16'](label))
+            envelopes.append(struct.pack('<HHIH', 5, 0x04d8, len(folder) + 10, 0) + folder)
+        binding = bytearray(helpers['message'](0x9999, sender=OWNER, sent=ts(-timedelta(days=60))))
+        struct.pack_into('<QIQQQ', binding, 418, 51, 2, 7, 51, 7)
+        self.store.write_bytes(helpers['STORE'](b''.join(envelopes) + b''.join(records) + binding))
+
+        def decode(source, files, target):
+            result = REAL_RUN([str(crate / 'target/debug/hxprobe'), 'db', str(source), str(target)],
+                              capture_output=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        ports = self.fake.ports()
+        ports.decode = decode
+        return ports
+
+    def test_cli_retains_short_folder_owned_messages_and_counts_empty_drafts(self):
+        helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
+        records = []
+        for key, preview in ((71, ''), (72, 'Pending'),
+                             (73, 'Synthetic local key study preview text for one message')):
+            record = helpers['message'](key, sender='', sent=0, preview=preview)
+            records.append(record.replace(struct.pack('<Q', helpers['EPOCH_TICKS']), b'\0' * 8))
+        ports = self.cli_mail_fixture(records)
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['empty_drafts'], 2)
+        self.assertEqual(result.counts['emails'], 1)
+        self.assertEqual(result.counts['unresolved_messages'], 1)
+        self.assertEqual(self.fake.writes('log-activity'), [])
+        self.store.write_bytes(self.store.read_bytes() + b'.')
+        retry = intake.run(self.repo, self.home, ports)
+        self.assertEqual(retry.counts['empty_drafts'], 2)
+        self.assertEqual(retry.counts['emails'], 0)
+        self.assertEqual(retry.counts['unresolved_messages'], 1)
+        self.assertEqual(self.fake.writes('log-activity'), [])
+        ports = self.cli_mail_fixture(records, folder_name='Inbox')
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.counts['empty_drafts'], 0)
+        self.assertEqual(result.counts['unresolved_messages'], 3)
+        self.assertEqual(self.fake.writes('log-activity'), [])
+
+    def test_cli_revisions_count_once_and_clear_incomplete_identity(self):
+        helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
+        incomplete = helpers['message'](71, sender='', sent=0)
+        incomplete = incomplete.replace(struct.pack('<Q', helpers['EPOCH_TICKS']), b'\0' * 8)
+        complete = helpers['message'](71, sent=ts(-timedelta(hours=1)))
+        ports = self.cli_mail_fixture([incomplete, complete], folder_name='Inbox')
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['emails'], 1)
+        self.assertEqual(result.counts['logged'], 1)
+        self.assertEqual(result.counts['unresolved_messages'], 0)
+        self.store.write_bytes(self.store.read_bytes() + b'.')
+        retry = intake.run(self.repo, self.home, ports)
+        self.assertEqual(retry.counts['emails'], 0)
+        self.assertEqual(retry.counts['unresolved_messages'], 0)
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+
+    def test_cli_complete_revision_clears_stale_unresolved_alias(self):
+        helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
+        ports = self.cli_mail_fixture([helpers['message'](71, sent=ts(-timedelta(hours=1)))],
+                                      folder_name='Inbox')
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.counts['logged'], 1)
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        ck, stale = intake.mail_identity(None, '', '', None, ['71'])
+        state['mail_unresolved'][stale] = {'ck': ck, 'sent': None,
+                                         'metadata_incomplete': True, 'participants': {}}
+        state['mail_keys'][stale] = ['71']
+        path.write_text(json.dumps(state))
+        self.store.write_bytes(self.store.read_bytes() + b'.')
+        retry = intake.run(self.repo, self.home, ports)
+        self.assertEqual(retry.counts['emails'], 0)
+        self.assertEqual(retry.counts['unresolved_messages'], 0)
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+
+    def test_cli_incomplete_revision_preserves_ownership_uncertainty(self):
+        helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
+        incomplete = bytearray(helpers['message'](71, sender='', sent=0))
+        struct.pack_into('<QIQQQ', incomplete, 418, 999, 2, 7, 999, 7)
+        complete = helpers['message'](71, sent=ts(-timedelta(hours=1)))
+        ports = self.cli_mail_fixture([incomplete, complete], folder_name='Inbox')
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['emails'], 0)
+        self.assertEqual(result.counts['mail_account_unresolved'], 1)
+        self.assertEqual(self.fake.writes('log-activity'), [])
+
+    def test_cli_complete_revision_settles_a_prior_incomplete_message(self):
+        helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
+        incomplete = helpers['message'](71, sender='', sent=0)
+        incomplete = incomplete.replace(struct.pack('<Q', helpers['EPOCH_TICKS']), b'\0' * 8)
+        ports = self.cli_mail_fixture([incomplete], folder_name='Inbox')
+        first = intake.run(self.repo, self.home, ports)
+        self.assertEqual(first.counts['unresolved_messages'], 1)
+        complete = helpers['message'](71, sent=ts(-timedelta(hours=1)))
+        ports = self.cli_mail_fixture([complete, incomplete], folder_name='Inbox')
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.counts['emails'], 0)
+        self.assertEqual(result.counts['logged'], 1)
+        self.assertEqual(result.counts['unresolved_messages'], 0)
+        self.store.write_bytes(self.store.read_bytes() + b'.')
+        retry = intake.run(self.repo, self.home, ports)
+        self.assertEqual(retry.counts['emails'], 0)
+        self.assertEqual(retry.counts['unresolved_messages'], 0)
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
 
     def test_incomplete_selected_messages_remain_distinct_and_unresolved(self):
         drafts = [mail(CLIENT.email, -timedelta(hours=1), copy_key='incomplete', local_keys=str(k))
