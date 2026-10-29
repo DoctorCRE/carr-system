@@ -6,6 +6,7 @@ import { searchDoctrineSituations } from "./situation-retrieval.js";
 import { authorizationClassForActor, organizationTenantForActor } from "./identity.js";
 import { deriveRuleDeliverySource, normalizeRuleMapDigest } from "./rule-delivery-source.ts";
 import { publicError } from "./public-errors.ts";
+import { queueCardId } from "./work-queue.js";
 
 const FIELDS = new Set(["idempotency_key", "situation", "title", "desired_outcome", "acceptance_criteria"]);
 const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
@@ -585,6 +586,12 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
               and ${readableWorkRequestSql("w")}
               /* work-request-intake:readable-card */`, [args.work_request, tenant])).rows[0];
         if (!row || !WORK_REQUEST_READ_STATES.includes(row.state)) throw new ToolError({ error: "work_request_not_found" });
+        const slices = (await c.query(
+          `select s.ordinal,s.title from ops.work_request_slice s
+             join ops.work_request w on w.id=s.work_request_id
+            where w.ref=$1 and w.organization_tenant_id=$2 and ${readableWorkRequestSql("w")}
+            order by s.ordinal /* work-request-intake:slices */`, [args.work_request, tenant])).rows
+          .map(slice => ({ slice_id: queueCardId(row.ref, slice.ordinal), title: slice.title }));
         const triaged = ["triaged", "ready"].includes(row.state);
         // Withdrawal preserves intake history, so triage is keyed on its
         // recorded timestamp rather than the current lifecycle state.
@@ -599,7 +606,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
         const acting = actingIdentityProjection(
           (await c.query(ACTING_IDENTITY + " /* work-request-intake:acting-identity */",
                          [args.work_request])).rows);
-        return { ok: true, human_ref: row.ref, title: row.title, desired_outcome: row.desired_outcome,
+        return { ok: true, human_ref: row.ref, title: row.title, desired_outcome: row.desired_outcome, slices,
           acting_identity: acting,
           acceptance_criteria: row.acceptance_criteria, state: row.state, version: Number(row.version),
           projection_state: WORK_REQUEST_PROJECTION_STATE[row.state],

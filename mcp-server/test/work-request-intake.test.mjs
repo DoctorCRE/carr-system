@@ -47,6 +47,7 @@ class IntakeFake {
       doctrine_source_label: "control-room#evidence", replayed: false,
       source_provenance: { policy_id: "lexical-dominant-v1" },
     }] };
+    if (sql.includes("work-request-intake:slices")) return { rows: [] };
     if (sql.includes("acting-identity")) return { rows: [] };
     if (sql.includes("work_request_card")) return { rows: [{
       ref: "WR-0001", state: "captured", version: 1, title: REQUEST.title,

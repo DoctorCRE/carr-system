@@ -6,7 +6,7 @@ import { isValidCorrelationId, logLine } from "./correlation.js";
 type PublicError = {
   error: string; correlation_id: string; hint: string;
   candidates?: Record<string, string | null>[]; retired_aliases?: Record<string, string | null>[];
-  current_version?: number; fields?: unknown[]; invalid_deal_ids?: string[];
+  current_version?: number; fields?: unknown[]; invalid_deal_ids?: string[]; recorded_titles?: string[];
 };
 type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSchema };
 
@@ -95,7 +95,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["invalid_work_request", "Supply a numeric Work Request reference such as WR-000014."],
   ["invalid_idempotency_key", "Supply a UUID as idempotency_key and reuse it only for the same action."],
   ["invalid_slice_plan", "Supply one through one hundred non-empty slice titles, each at most 200 characters."],
-  ["slice_plan_conflict", "Use the existing ordered slices; replacing their identities is refused."],
+  ["slice_plan_conflict", "Keep the recorded titles in order and append new titles after them."],
   ["slice_not_found", "Choose a slice from the recorded plan."],
   ["invalid_card_title", "Supply a card title of two or three plain words."],
   ["invalid_job_description", "Describe the job in one sentence."],
@@ -221,6 +221,10 @@ export function publicError(error: unknown, { env, inputSchema, fallback = "unha
   if (code === "invalid_call_context_deals")
     result.invalid_deal_ids = [...new Set((Array.isArray(payload?.invalid_deal_ids) ? payload.invalid_deal_ids : [])
       .filter(id => typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(id)))].slice(0, 50);
+  if (code === "slice_plan_conflict" && Array.isArray(payload?.recorded_titles)
+      && payload.recorded_titles.length <= 100
+      && payload.recorded_titles.every(title => typeof title === "string" && title.trim() && title.length <= 200))
+    result.recorded_titles = payload.recorded_titles;
   if (code === "version_conflict" && Number.isSafeInteger(payload?.current_version) && (payload!.current_version as number) >= 0)
     result.current_version = payload!.current_version as number;
   if (["invalid_idempotency_key", "invalid_report_problem", "invalid_report_problem_fields", "caller_authority_field_forbidden", "invalid_acceptance_criteria", "current_situation_source_not_found", "invalid_field_value", "validation_error", "value_not_in_declared_vocabulary", "unregistered_operation_fields", "missing_required", "invalid_boolean", "invalid_number", "tool_call_markup_in_value"].includes(code)) {

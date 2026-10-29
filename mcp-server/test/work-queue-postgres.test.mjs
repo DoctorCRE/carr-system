@@ -62,7 +62,7 @@ after(async () => {
 async function command(name, args = {}, client = c) {
   await client.query('begin');
   try {
-    await client.query('set local role carr_writer');
+    await client.query(`set local role ${name === 'work-request-card' ? 'carr_reader' : 'carr_writer'}`);
     const result = await executeRegisteredTool(client, actor, name, args);
     await client.query('commit');
     return result;
@@ -193,6 +193,56 @@ test('concurrent runners cannot start the same queued job twice', async () => {
     assert.equal((await command('work-queue')).jobs.find(row => row.work_request === work_request).runner_job_id,
       results.find(result => result.status === 'fulfilled').value.runner_job_id);
   } finally { await Promise.all(clients.map(client => client.end())); }
+});
+
+test('a plan can append slices while preserving earlier IDs and jobs, and repeat without change', async () => {
+  const work_request = await request('WR-000062');
+  const plan = slices => command('plan-work-request-slices', { work_request, slices, idempotency_key: randomUUID() });
+  const first = await plan(['First slice', 'Second slice']);
+  const dispatched = await command('dispatch-job', job(work_request, { slice: 2 }));
+  const appended = await plan(['First slice', 'Second slice', 'Third slice', 'Fourth slice']);
+  assert.deepEqual(appended.slices, [
+    { slice_id: 'WR62.S1', title: 'First slice' },
+    { slice_id: 'WR62.S2', title: 'Second slice' },
+    { slice_id: 'WR62.S3', title: 'Third slice' },
+    { slice_id: 'WR62.S4', title: 'Fourth slice' },
+  ]);
+  assert.deepEqual(appended.slices.slice(0, 2), first.slices);
+  assert.deepEqual(await plan(['First slice', 'Second slice', 'Third slice', 'Fourth slice']), appended);
+  assert.deepEqual((await command('work-queue')).jobs.filter(row => row.work_request === work_request).map(row => row.card_id), [dispatched.card_id]);
+  assert.equal((await command('dispatch-job', job(work_request, { slice: 4 }))).card_id, 'WR62.S4.J1');
+});
+
+test('renaming, reordering, or removing a slice refuses the plan and returns recorded titles', async () => {
+  const work_request = await request('WR-000063');
+  const slices = ['First slice', 'Second slice'];
+  const plan = titles => command('plan-work-request-slices', { work_request, slices: titles, idempotency_key: randomUUID() });
+  const recorded = await plan(slices);
+  for (const changed of [['Renamed slice', 'Second slice'], ['Second slice', 'First slice'], ['First slice'], []]) {
+    await assert.rejects(plan(changed), failure => {
+      assert.equal(failure.message, 'slice_plan_conflict');
+      const refusal = publicError(failure);
+      assert.equal(refusal.error, 'slice_plan_conflict');
+      assert.deepEqual(refusal.recorded_titles, ['First slice', 'Second slice']);
+      return true;
+    });
+    assert.deepEqual(await plan(slices), recorded);
+  }
+});
+
+test('the Work Request card reads recorded slice titles and S numbers, including appended slices', async () => {
+  const work_request = await request('WR-000064');
+  const card = () => command('work-request-card', { work_request });
+  assert.deepEqual((await card()).slices, []);
+  const plan = slices => command('plan-work-request-slices', { work_request, slices, idempotency_key: randomUUID() });
+  await assert.rejects(plan([]), { message: 'invalid_slice_plan' });
+  await plan(['Original slice']);
+  assert.deepEqual((await card()).slices, [{ slice_id: 'WR64.S1', title: 'Original slice' }]);
+  await plan(['Original slice', 'Appended slice']);
+  assert.deepEqual((await card()).slices, [
+    { slice_id: 'WR64.S1', title: 'Original slice' },
+    { slice_id: 'WR64.S2', title: 'Appended slice' },
+  ]);
 });
 
 test('the Worker and board share exact IDs without numeric precision loss', async () => {

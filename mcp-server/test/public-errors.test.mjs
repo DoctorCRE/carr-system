@@ -391,3 +391,23 @@ test("MCP names the caller authority field it refused", async t => {
   assert.deepEqual(payload.fields, ["actor"]);
   assert.doesNotMatch(JSON.stringify(body), /synthetic-private-value/);
 });
+
+test("MCP returns recorded slice titles only on a slice plan conflict", async t => {
+  const payload = await failure(t, new ToolError({ error: "slice_plan_conflict",
+    recorded_titles: ["First slice", "Second slice"], detail: privateText }));
+  assert.equal(payload.error, "slice_plan_conflict");
+  assert.deepEqual(payload.recorded_titles, ["First slice", "Second slice"]);
+  assert.deepEqual(Object.keys(payload).sort(), ["correlation_id", "error", "hint", "recorded_titles"]);
+});
+
+for (const recorded_titles of [[privateText, {}], ["x".repeat(201)], Array(101).fill("Slice"), "Slice"])
+  test("MCP omits malformed recorded slice titles", async t => {
+    const payload = await failure(t, new ToolError({ error: "slice_plan_conflict", recorded_titles }));
+    assert.equal(payload.error, "slice_plan_conflict");
+    assert.equal(Object.hasOwn(payload, "recorded_titles"), false);
+  });
+
+test("MCP omits recorded slice titles on unrelated refusals", async t => {
+  const payload = await failure(t, new ToolError({ error: "not_found", recorded_titles: [privateText] }));
+  assert.equal(Object.hasOwn(payload, "recorded_titles"), false);
+});
