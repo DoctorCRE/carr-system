@@ -1952,6 +1952,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "publish-census-inventory": {
+    "ingress_key": "mcp-tool:publish-census-inventory",
+    "source_locator": "mcp-server/src/census-inventory.js",
+    "schema_digest": "e4aa7ce018e2b08b4da37686d699eab0ca534cc0319d9df096401d96a4e31417",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-action-context": {
     "ingress_key": "mcp-tool:read-action-context",
     "source_locator": "mcp-server/src/rule-context-runtime.v5.js",
@@ -3677,6 +3687,24 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "grantable": false,
       "privilege": "update",
       "ingress_key": "db-relation-acl:public.tool_read_count:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.system_work_census_inventory",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.system_work_census_inventory:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.system_work_census_inventory",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.system_work_census_inventory:carr_writer:update",
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
     }
