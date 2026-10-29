@@ -49,6 +49,8 @@ before(async () => {
     await c.query(readFileSync(new URL('../../migrations/1024_work_request_job_start.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select 1 from schema_migrations where filename='1025_work_request_job_finished.sql'")).rows.length)
     await c.query(readFileSync(new URL('../../migrations/1025_work_request_job_finished.sql', import.meta.url), 'utf8'));
+  if (!(await c.query("select 1 from information_schema.columns where table_schema='ops' and table_name='work_request_job' and column_name='job_type'")).rows.length)
+    await c.query(readFileSync(new URL('../../migrations/1060_work_request_job_type.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => {
@@ -74,7 +76,7 @@ async function request(ref = 'WR-000014') {
   return ref;
 }
 const job = (work_request, extra = {}) => ({ idempotency_key: randomUUID(), work_request,
-  executor: 'codex', model: 'synthetic-model', effort: 'high', card_title: 'Queue work',
+  job_type: 'bug-fix', executor: 'codex', model: 'synthetic-model', effort: 'high', card_title: 'Queue work',
   description: 'Implement the synthetic queue behavior.', ...extra });
 
 test('dispatch mints a stable ID under implicit S1 and retries without another job', async () => {
@@ -317,4 +319,27 @@ test('launcher starts a queued card with actual execution settings and preserves
   assert.equal(row.model, 'selected-model');
   assert.equal(row.effort, 'medium');
   assert.equal(row.card_title, 'Queue work');
+});
+
+
+test('enqueue refuses missing and unknown workflow types without minting a job', async () => {
+  const work_request = await request('WR-000027');
+  for (const job_type of [undefined, 'unknown-workflow']) {
+    const args = job(work_request, { job_type });
+    if (job_type === undefined) delete args.job_type;
+    await assert.rejects(command('dispatch-job', args), { message: job_type === undefined ? 'invalid_job_type' : 'value_not_in_declared_vocabulary' });
+  }
+  assert.equal((await command('work-queue')).jobs.filter(row => row.work_request === work_request).length, 0);
+  await command('dispatch-job', job(work_request));
+  assert.equal((await command('work-queue')).jobs.find(row => row.work_request === work_request).job_type, 'bug-fix');
+});
+
+test('a runner cannot change the queued workflow type', async () => {
+  const work_request = await request('WR-000028');
+  const repository = 'DoctorCRE/carr-system';
+  await command('dispatch-job', job(work_request, { repository }));
+  const start = { work_request, slice: 1, job: 1, runner_job_id: 'typed-runner', repository, idempotency_key: randomUUID() };
+  await assert.rejects(command('dispatch-job', { ...start, job_type: 'review' }), { message: 'job_type_mismatch' });
+  await command('dispatch-job', { ...start, job_type: 'bug-fix' });
+  assert.equal((await command('work-queue')).jobs.find(row => row.work_request === work_request).job_type, 'bug-fix');
 });

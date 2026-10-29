@@ -23,7 +23,7 @@ python = Path(__file__).resolve().parents[1] / '.venv/bin/python'
 if python.is_file() and Path(sys.prefix) != python.parent.parent:
     os.execv(str(python), [str(python), __file__, *sys.argv[1:]])
 
-from skill_picker import prepare
+from skill_picker import prepare, header_type
 
 
 def job_log():
@@ -96,7 +96,7 @@ def register_job(args):
         runner = 'codex-' + str(uuid5(NAMESPACE_URL, repository + '/' + args.branch))
         facts = dict(idempotency_key=str(uuid5(NAMESPACE_URL, card + '/' + runner)),
                      work_request=f'WR-{int(match[1]):06d}', slice=int(match[2]), job=int(match[3]),
-                     runner_job_id=runner, repository=repository, executor='codex',
+                     runner_job_id=runner, repository=repository, executor='codex', job_type=header_type(args.brief),
                      model=settings.get('model', 'default'), effort=settings.get('model_reasoning_effort', 'default'),
                      card_title='Codex job', description='Execute the supplied job brief.')
         reply = output([sys.executable, str(Path(__file__).resolve().parents[1] / 'tools/call-verb.py'),

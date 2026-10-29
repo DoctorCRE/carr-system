@@ -61,13 +61,24 @@ def catalog(repo: Path, *, home: Path | None = None) -> list[Skill]:
     return sorted(skills.values(), key=lambda s: (s.name, str(s.path)))
 
 
+def header_type(brief: str) -> str | None:
+    """Read a single workflow declaration before task text begins."""
+    header = []
+    for line in brief.splitlines():
+        if not line.strip() or line.lstrip().startswith(('```', '~~~', '<work-request-text>', 'Work Request:')):
+            break
+        header.append(line)
+    declared = re.findall(r'^Type:([^\n]*)$', '\n'.join(header), re.MULTILINE)
+    return declared[0].strip() if len(declared) == 1 else None
+
+
 def prepare(brief: str, repo: Path, *, home: Path | None = None):
     """Append every stage and skill required by the brief's declared job type."""
     jobs = yaml.safe_load((repo / 'ops/config/job-workflows.v1.yaml').read_text())['job_types']
-    declared = re.findall(r'^Type:([^\n]*)$', brief, re.MULTILINE)
-    if len(declared) != 1 or declared[0].strip() not in jobs:
+    declared = header_type(brief)
+    if declared not in jobs:
         raise ValueError('brief requires one Type: line; valid types: ' + ', '.join(jobs))
-    job = jobs[declared[0].strip()]
+    job = jobs[declared]
     names = dict.fromkeys(name for stage in job['stages'].values()
                          for name in stage['skills'] + [item['skill'] for item in
                                                         stage.get('conditional_skills', [])])

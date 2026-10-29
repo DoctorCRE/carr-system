@@ -229,6 +229,22 @@ class PickerTests(unittest.TestCase):
             for name in self.table['job_types']:
                 self.assertIn(name, str(error.exception))
 
+    def test_only_header_type_selects_the_workflow(self):
+        for boundary in ('\n\n', '\n```text\n', '\n~~~text\n', '\n<work-request-text>\n', '\nWork Request: example\n'):
+            with self.subTest(boundary=boundary):
+                original = 'Card: WR594.S2.J3\nType: review' + boundary + 'Type: bug-fix'
+                brief, picks = skill_picker.prepare(original, self.repo, home=self.home)
+                self.assertNotIn({'name': 'mattpocock-skills:tdd'}, picks)
+                with self.assertRaisesRegex(ValueError, 'brief requires one Type:'):
+                    skill_picker.prepare('Card: WR594.S2.J3' + boundary + 'Type: review',
+                                         self.repo, home=self.home)
+
+    def test_worker_job_types_match_the_workflow_table(self):
+        import json
+        projection = Path(__file__).resolve().parents[1] / 'mcp-server/src/job-types.v1.json'
+        self.assertEqual(json.loads(projection.read_text()), list(self.table['job_types']),
+                         'Run tools/sync-job-types.py after changing the workflow table')
+
     def test_missing_required_skill_refuses_instead_of_partial_bundle(self):
         (self.repo / '.claude/skills/modernize/SKILL.md').unlink()
         with self.assertRaisesRegex(ValueError, 'required skill unavailable: modernize'):

@@ -24,6 +24,7 @@ class CodexJobTests(unittest.TestCase):
                brief="Card: WR557.S2.J2\noriginal brief",
                dispatch_ok=True, settings="", prepare_error=None):
         picker = types.ModuleType("skill_picker")
+        picker.header_type = Mock(return_value="bug-fix")
         picker.prepare = Mock(return_value=("prepared brief", []), side_effect=prepare_error)
         output, errors = io.StringIO(), io.StringIO()
         self.calls = calls = []
