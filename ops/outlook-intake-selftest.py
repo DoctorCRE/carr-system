@@ -779,30 +779,38 @@ class IntakeTest(unittest.TestCase):
         ports.decode = decode
         return ports
 
-    def test_cli_retains_short_folder_owned_messages_and_counts_empty_drafts(self):
+    def test_cli_historical_drafts_link_never_drops_short_sent_revision(self):
         helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
-        records = []
-        for key, preview in ((71, ''), (72, 'Pending'),
-                             (73, 'Synthetic local key study preview text for one message')):
-            record = helpers['message'](key, sender='', sent=0, preview=preview)
-            records.append(record.replace(struct.pack('<Q', helpers['EPOCH_TICKS']), b'\0' * 8))
-        ports = self.cli_mail_fixture(records)
+        draft = helpers['message'](71, sender='', sent=0, preview='')
+        draft = draft.replace(struct.pack('<Q', helpers['EPOCH_TICKS']), b'\0' * 8)
+        sent = bytearray(helpers['message'](71, sender=OWNER,
+                                          sent=ts(-timedelta(hours=1)), preview='Pending'))
+        struct.pack_into('<QIQQQ', sent, 418, 51, 2, 7, 51, 7)
+        for records in ([draft, sent], [sent, draft]):
+            with self.subTest(draft_first=records[0] is draft):
+                shutil.rmtree(self.out(), ignore_errors=True)
+                ports = self.cli_mail_fixture(records)
+                result = intake.run(self.repo, self.home, ports)
+                self.assertEqual(result.state, 'succeeded')
+                self.assertEqual(result.counts['emails'], 1)
+                self.assertEqual(result.counts['unresolved_messages'], 1)
+                self.assertEqual(self.fake.writes('log-activity'), [])
+
+    def test_cli_blank_draft_stays_unresolved_without_recount_on_redecode(self):
+        helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
+        draft = helpers['message'](71, sender='', sent=0, preview='')
+        draft = draft.replace(struct.pack('<Q', helpers['EPOCH_TICKS']), b'\0' * 8)
+        ports = self.cli_mail_fixture([draft])
         result = intake.run(self.repo, self.home, ports)
         self.assertEqual(result.state, 'succeeded')
-        self.assertEqual(result.counts['empty_drafts'], 2)
         self.assertEqual(result.counts['emails'], 1)
         self.assertEqual(result.counts['unresolved_messages'], 1)
         self.assertEqual(self.fake.writes('log-activity'), [])
         self.store.write_bytes(self.store.read_bytes() + b'.')
         retry = intake.run(self.repo, self.home, ports)
-        self.assertEqual(retry.counts['empty_drafts'], 2)
+        self.assertEqual(retry.state, 'succeeded')
         self.assertEqual(retry.counts['emails'], 0)
         self.assertEqual(retry.counts['unresolved_messages'], 1)
-        self.assertEqual(self.fake.writes('log-activity'), [])
-        ports = self.cli_mail_fixture(records, folder_name='Inbox')
-        result = intake.run(self.repo, self.home, ports)
-        self.assertEqual(result.counts['empty_drafts'], 0)
-        self.assertEqual(result.counts['unresolved_messages'], 3)
         self.assertEqual(self.fake.writes('log-activity'), [])
 
     def test_cli_revisions_count_once_and_clear_incomplete_identity(self):

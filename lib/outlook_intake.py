@@ -206,7 +206,7 @@ class Outcome:
     detail: str = ''
 
 
-MAIL_STORE_COUNTERS = ('mail_outside_selected_account', 'mail_account_ambiguous', 'mail_account_unresolved', 'empty_drafts')
+MAIL_STORE_COUNTERS = ('mail_outside_selected_account', 'mail_account_ambiguous', 'mail_account_unresolved')
 
 # Standing totals recomputed from state or the store every run; every other count is this run's.
 BACKLOG_COUNTS = frozenset((
@@ -460,7 +460,7 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
             if account_address.strip().lower() not in senders:
                 raise DecodeError('folder_account_mailbox_unverified')
         meta.update(mail_outside_selected_account=0, mail_account_ambiguous=0,
-                    mail_account_unresolved=0, empty_drafts=0)
+                    mail_account_unresolved=0)
         admitted = []
         for m in mails:
             owners = ownership.get(m['id'], {None})
@@ -469,9 +469,6 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
                       'mail_outside_selected_account' if owners != {account_id} else None)
             if account_id is not None and reason:
                 meta[reason] += 1
-            elif any(p.rsplit('/', 1)[-1].lower() == 'drafts' for p in paths.get(m['id'], [])) and len(
-                    ((m['body'] or '').strip() or (m['preview'] or '').strip()).split()) < 5:
-                meta['empty_drafts'] += 1
             else:
                 admitted.append(m)
         mails = admitted
