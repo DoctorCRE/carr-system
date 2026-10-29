@@ -8,6 +8,8 @@ import hashlib
 import json
 import os
 import re
+import runpy
+import struct
 from pathlib import Path
 import shutil
 import sqlite3
@@ -36,7 +38,8 @@ SCHEMA = """
 CREATE TABLE messages (id INTEGER PRIMARY KEY, block INTEGER, sender TEXT, sender_name TEXT,
   recipients TEXT, subject TEXT, message_id TEXT, body TEXT, html TEXT, body_words INTEGER,
   html_bytes INTEGER, body_kind TEXT, sent_unix INTEGER, sent_utc TEXT, subject_inherited INTEGER,
-  preview TEXT, body_source TEXT, copies INTEGER, copy_key TEXT);
+  preview TEXT, body_source TEXT, copies INTEGER, copy_key TEXT,
+  folder_links_unresolved INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE events (id INTEGER PRIMARY KEY, goid TEXT NOT NULL, start_unix INTEGER NOT NULL,
   end_unix INTEGER NOT NULL, start_utc TEXT NOT NULL, end_utc TEXT NOT NULL, subject TEXT,
   location TEXT, organizer_name TEXT, organizer_email TEXT, body TEXT,
@@ -82,7 +85,8 @@ def event(goid, start, minutes=60, subject='Site visit', attendees=(), organizer
                 lifecycle=lifecycle)
 
 
-def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identities=None, decoded=None):
+def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identities=None, decoded=None,
+             folder_membership=True):
     con = sqlite3.connect(path)
     con.executescript(SCHEMA)
     # Decoders built before WR-000502 have no local_keys column; keep testing that shape.
@@ -116,6 +120,18 @@ def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identiti
                     [('blocks_found', found), ('blocks_verified', verified), ('messages', len(mails)),
                      ('event_identities', len(events) if identities is None else identities),
                      ('events_decoded', len(events) if decoded is None else decoded)])
+    if folder_membership:
+        con.executescript("""
+            CREATE TABLE folders(id INTEGER PRIMARY KEY, account_id INTEGER, name TEXT,
+                                 parent_status TEXT, parent_id INTEGER);
+            CREATE TABLE message_folders(message_id INTEGER, folder_id INTEGER);
+        """)
+        con.execute("INSERT INTO folders VALUES(7,7,'Inbox','top',NULL)")
+        for row_id, m in enumerate(mails, 1):
+            account = m.get('folder_account', 7)
+            if account is not None:
+                con.execute("INSERT OR IGNORE INTO folders VALUES(?,?,'Inbox','top',NULL)", (account, account))
+                con.execute('INSERT INTO message_folders VALUES(?,?)', (row_id, account))
     con.commit()
     con.close()
 
@@ -226,6 +242,12 @@ class Fake:
         if self.on_decode:
             self.on_decode(store_copy.parent)
         db_path.write_bytes(self.fixture.read_bytes())
+        with closing(sqlite3.connect(db_path)) as con, con:
+            con.execute("INSERT INTO folders VALUES(-1,7,'Sent Items','top',NULL)")
+            con.execute('INSERT INTO messages(id,sender,sent_unix,copy_key) VALUES(-1,?,?,?)',
+                        (getattr(self.test, 'settings', None).account if hasattr(self.test, 'settings') else OWNER,
+                         1, 'binding-evidence'))
+            con.execute('INSERT INTO message_folders VALUES(-1,-1)')
 
     def ports(self):
         ports = dict(carr=self.carr, contacts=self.contacts,
@@ -466,13 +488,13 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(len(self.fake.writes('log-activity')), 2)
 
     def attachment_fixture(self, *, sender='pat@example.test', folders=('Inbox/Active Deals/Synthetic Deal',)):
-        write_db(self.fake.fixture, [mail(sender, -timedelta(hours=1))])
+        write_db(self.fake.fixture, [mail(sender, -timedelta(hours=1))], folder_membership=False)
         con = sqlite3.connect(self.fake.fixture)
         con.executescript("""
             CREATE TABLE message_keys(message_id INTEGER, local_key INTEGER);
             CREATE TABLE attachments(id INTEGER, message_key INTEGER, name TEXT, name_verified INTEGER,
                 content_type TEXT, size INTEGER, path TEXT);
-            CREATE TABLE folders(id INTEGER, name TEXT, parent_status TEXT, parent_id INTEGER);
+                        CREATE TABLE folders(id INTEGER, account_id INTEGER, name TEXT, parent_status TEXT, parent_id INTEGER);
             CREATE TABLE message_folders(message_id INTEGER, folder_id INTEGER);
             INSERT INTO message_keys VALUES(1,100);
         """)
@@ -484,10 +506,13 @@ class IntakeTest(unittest.TestCase):
             parent = None
             for j, name in enumerate(path.split('/')):
                 fid = i * 10 + j + 1
-                con.execute('INSERT INTO folders VALUES(?,?,?,?)',
-                            (fid, name, 'top' if parent is None else 'folder', parent))
+                con.execute('INSERT INTO folders VALUES(?,?,?,?,?)',
+                            (fid, 7, name, 'top' if parent is None else 'folder', parent))
                 parent = fid
             con.execute('INSERT INTO message_folders VALUES(1,?)', (parent,))
+        if not folders:
+            con.execute("INSERT INTO folders VALUES(1,7,NULL,'unknown',NULL)")
+            con.execute('INSERT INTO message_folders VALUES(1,1)')
         con.commit()
         con.close()
         self.copied, self.uploads, self.filed = [], {}, {}
@@ -699,15 +724,287 @@ class IntakeTest(unittest.TestCase):
         state = json.loads((self.out() / intake.STATE).read_text())
         self.assertFalse(state['attachments_pending'])
 
+    def test_conflicting_and_unresolved_ownership_fail_closed_with_receipts(self):
+        def links(_):
+            with sqlite3.connect(self.fake.fixture) as con:
+                con.execute("INSERT INTO folders VALUES(8,8,'Inbox','top',NULL)")
+                con.execute('INSERT INTO message_folders VALUES(1,8)')
+                con.execute('INSERT INTO message_folders VALUES(2,999)')
+        self.fake.on_decode = links
+        result = self.run_intake([mail(CLIENT.email, -timedelta(hours=i), copy_key=str(i))
+                                  for i in (1, 2)])
+        self.assertEqual(result.counts['emails'], 0)
+        self.assertEqual(result.counts['mail_account_ambiguous'], 1)
+        self.assertEqual(result.counts['mail_account_unresolved'], 1)
+        self.assertEqual(self.fake.writes('log-activity'), [])
+
+    def test_nonexistent_and_wrong_existing_account_keys_fail_plainly(self):
+        settings_path = next(self.home.rglob('outlook.json'))
+        original = json.loads(settings_path.read_text())
+        def sent_evidence(_):
+            with closing(sqlite3.connect(self.fake.fixture)) as con, con:
+                con.execute("UPDATE folders SET name='Sent Items' WHERE account_id=8")
+        self.fake.on_decode = sent_evidence
+        for account, detail in ((999, 'folder_account_id_not_found'),
+                                (8, 'folder_account_mailbox_unverified')):
+            with self.subTest(account=account):
+                settings_path.write_text(json.dumps({**original, 'folder_account_id': account}))
+                foreign = mail(CLIENT.email, -timedelta(hours=1))
+                foreign['folder_account'] = 8
+                result = self.run_intake([foreign])
+                self.assertEqual((result.state, result.reason), ('failed', 'decode_failed'))
+                self.assertEqual(result.detail, detail)
+                self.assertEqual(self.fake.writes('log-activity'), [])
+
+    def cli_mail_fixture(self, records, folder_name='Drafts'):
+        helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
+        crate = ROOT / 'vendor/hxprobe'
+        REAL_RUN(['cargo', 'build', '--locked'], cwd=crate, check=True, capture_output=True)
+        envelopes = []
+        for folder_id, label in ((50, folder_name), (51, 'Sent Items')):
+            folder = bytearray(840)
+            struct.pack_into('<H', folder, 0, 0x004d)
+            struct.pack_into('<QIQQQ', folder, 10, folder_id, 2, 7, folder_id, 7)
+            folder.extend(b'\1\1\1\1\0' + helpers['utf16'](label))
+            envelopes.append(struct.pack('<HHIH', 5, 0x04d8, len(folder) + 10, 0) + folder)
+        binding = bytearray(helpers['message'](0x9999, sender=OWNER, sent=ts(-timedelta(days=60))))
+        struct.pack_into('<QIQQQ', binding, 418, 51, 2, 7, 51, 7)
+        self.store.write_bytes(helpers['STORE'](b''.join(envelopes) + b''.join(records) + binding))
+
+        def decode(source, files, target):
+            result = REAL_RUN([str(crate / 'target/debug/hxprobe'), 'db', str(source), str(target)],
+                              capture_output=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        ports = self.fake.ports()
+        ports.decode = decode
+        return ports
+
+    def test_cli_historical_drafts_link_never_drops_short_sent_revision(self):
+        helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
+        draft = helpers['message'](71, sender='', sent=0, preview='')
+        draft = draft.replace(struct.pack('<Q', helpers['EPOCH_TICKS']), b'\0' * 8)
+        sent = bytearray(helpers['message'](71, sender=OWNER,
+                                          sent=ts(-timedelta(hours=1)), preview='Pending'))
+        struct.pack_into('<QIQQQ', sent, 418, 51, 2, 7, 51, 7)
+        for records in ([draft, sent], [sent, draft]):
+            with self.subTest(draft_first=records[0] is draft):
+                shutil.rmtree(self.out(), ignore_errors=True)
+                ports = self.cli_mail_fixture(records)
+                result = intake.run(self.repo, self.home, ports)
+                self.assertEqual(result.state, 'succeeded')
+                self.assertEqual(result.counts['emails'], 1)
+                self.assertEqual(result.counts['unresolved_messages'], 1)
+                self.assertEqual(self.fake.writes('log-activity'), [])
+
+    def test_cli_blank_draft_stays_unresolved_without_recount_on_redecode(self):
+        helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
+        draft = helpers['message'](71, sender='', sent=0, preview='')
+        draft = draft.replace(struct.pack('<Q', helpers['EPOCH_TICKS']), b'\0' * 8)
+        ports = self.cli_mail_fixture([draft])
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['emails'], 1)
+        self.assertEqual(result.counts['unresolved_messages'], 1)
+        self.assertEqual(self.fake.writes('log-activity'), [])
+        self.store.write_bytes(self.store.read_bytes() + b'.')
+        retry = intake.run(self.repo, self.home, ports)
+        self.assertEqual(retry.state, 'succeeded')
+        self.assertEqual(retry.counts['emails'], 0)
+        self.assertEqual(retry.counts['unresolved_messages'], 1)
+        self.assertEqual(self.fake.writes('log-activity'), [])
+
+    def test_cli_revisions_count_once_and_clear_incomplete_identity(self):
+        helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
+        incomplete = helpers['message'](71, sender='', sent=0)
+        incomplete = incomplete.replace(struct.pack('<Q', helpers['EPOCH_TICKS']), b'\0' * 8)
+        complete = helpers['message'](71, sent=ts(-timedelta(hours=1)))
+        ports = self.cli_mail_fixture([incomplete, complete], folder_name='Inbox')
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['emails'], 1)
+        self.assertEqual(result.counts['logged'], 1)
+        self.assertEqual(result.counts['unresolved_messages'], 0)
+        self.store.write_bytes(self.store.read_bytes() + b'.')
+        retry = intake.run(self.repo, self.home, ports)
+        self.assertEqual(retry.counts['emails'], 0)
+        self.assertEqual(retry.counts['unresolved_messages'], 0)
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+
+    def test_cli_complete_revision_clears_stale_unresolved_alias(self):
+        helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
+        ports = self.cli_mail_fixture([helpers['message'](71, sent=ts(-timedelta(hours=1)))],
+                                      folder_name='Inbox')
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.counts['logged'], 1)
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        ck, stale = intake.mail_identity(None, '', '', None, ['71'])
+        state['mail_unresolved'][stale] = {'ck': ck, 'sent': None,
+                                         'metadata_incomplete': True, 'participants': {}}
+        state['mail_keys'][stale] = ['71']
+        path.write_text(json.dumps(state))
+        self.store.write_bytes(self.store.read_bytes() + b'.')
+        retry = intake.run(self.repo, self.home, ports)
+        self.assertEqual(retry.counts['emails'], 0)
+        self.assertEqual(retry.counts['unresolved_messages'], 0)
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+
+    def test_cli_incomplete_revision_preserves_ownership_uncertainty(self):
+        helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
+        incomplete = bytearray(helpers['message'](71, sender='', sent=0))
+        struct.pack_into('<QIQQQ', incomplete, 418, 999, 2, 7, 999, 7)
+        complete = helpers['message'](71, sent=ts(-timedelta(hours=1)))
+        ports = self.cli_mail_fixture([incomplete, complete], folder_name='Inbox')
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['emails'], 0)
+        self.assertEqual(result.counts['mail_account_unresolved'], 1)
+        self.assertEqual(self.fake.writes('log-activity'), [])
+
+    def test_cli_complete_revision_settles_a_prior_incomplete_message(self):
+        helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
+        incomplete = helpers['message'](71, sender='', sent=0)
+        incomplete = incomplete.replace(struct.pack('<Q', helpers['EPOCH_TICKS']), b'\0' * 8)
+        ports = self.cli_mail_fixture([incomplete], folder_name='Inbox')
+        first = intake.run(self.repo, self.home, ports)
+        self.assertEqual(first.counts['unresolved_messages'], 1)
+        complete = helpers['message'](71, sent=ts(-timedelta(hours=1)))
+        ports = self.cli_mail_fixture([complete, incomplete], folder_name='Inbox')
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.counts['emails'], 0)
+        self.assertEqual(result.counts['logged'], 1)
+        self.assertEqual(result.counts['unresolved_messages'], 0)
+        self.store.write_bytes(self.store.read_bytes() + b'.')
+        retry = intake.run(self.repo, self.home, ports)
+        self.assertEqual(retry.counts['emails'], 0)
+        self.assertEqual(retry.counts['unresolved_messages'], 0)
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+
+    def test_incomplete_selected_messages_remain_distinct_and_unresolved(self):
+        drafts = [mail(CLIENT.email, -timedelta(hours=1), copy_key='incomplete', local_keys=str(k))
+                  for k in (71, 72, 73)]
+        drafts[0]['sender'] = None
+        drafts[1]['sent_unix'] = None
+        drafts[2].update(sender=None, sent_unix=None)
+        result = self.run_intake(drafts)
+        self.assertEqual(result.counts['emails'], 3)
+        self.assertEqual(result.counts['unresolved_messages'], 3)
+        self.assertEqual(self.fake.writes('log-activity'), [])
+        retry = self.run_intake(drafts)
+        self.assertEqual(retry.counts['emails'], 0)
+        self.assertEqual(retry.counts['unresolved_messages'], 3)
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertEqual(len(state['mail_unresolved']), 3)
+        self.assertTrue(all(item['metadata_incomplete'] for item in state['mail_unresolved'].values()))
+
+    def test_undated_message_can_resolve_when_metadata_decodes_later(self):
+        message = mail(CLIENT.email, -timedelta(hours=1), local_keys='91')
+        message['sent_unix'] = None
+        self.assertEqual(self.run_intake([message]).counts['unresolved_messages'], 1)
+        message['sent_unix'] = ts(-timedelta(hours=1))
+        result = self.run_intake([message])
+        self.assertEqual(result.counts['emails'], 0)
+        self.assertEqual(result.counts['unresolved_messages'], 0)
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+
+    def test_unkeyed_incomplete_rows_do_not_collapse_or_expire(self):
+        messages = [mail(None, -timedelta(days=60), copy_key='same') for _ in range(2)]
+        for message in messages:
+            message['sent_unix'] = None
+        result = self.run_intake(messages)
+        self.assertEqual(result.counts['unresolved_messages'], 2)
+        self.fake.now += timedelta(days=60)
+        retry = self.run_intake(messages)
+        self.assertEqual(retry.counts['emails'], 0)
+        self.assertEqual(retry.counts['unresolved_messages'], 2)
+
+    def test_account_folder_admits_inbox_mail_without_decoded_recipients(self):
+        message = mail('pat@example.test', -timedelta(hours=1), recipients=None)
+        write_db(self.fake.fixture, [message])
+        result = intake.run(self.repo, self.home, self.fake.ports())
+        self.assertEqual(result.state, 'succeeded')
+        [(_, activity)] = self.fake.writes('log-activity')
+        self.assertEqual(activity['ref'], 'C-901')
+        self.assertEqual(activity['kind'], 'email_in')
+
+    def test_outbound_unknown_recipients_waits_for_decode_then_logs(self):
+        message = mail(OWNER, -timedelta(hours=1), recipients=None, local_keys='77')
+        first = self.run_intake([message])
+        self.assertEqual(first.counts['unresolved_messages'], 1)
+        self.assertEqual(self.fake.writes('log-activity'), [])
+        message['recipients'] = 'pat@example.test'
+        second = self.run_intake([message])
+        self.assertEqual(second.counts['unresolved_messages'], 0)
+        [(_, activity)] = self.fake.writes('log-activity')
+        self.assertEqual((activity['ref'], activity['kind']), ('C-901', 'email_out'))
+
+    def test_outbound_cc_only_recipient_is_logged(self):
+        message = mail(OWNER, -timedelta(hours=1), recipients=None)
+        message['cc'] = 'pat@example.test'
+        result = self.run_intake([message])
+        self.assertEqual(result.counts['logged'], 1)
+        [(_, activity)] = self.fake.writes('log-activity')
+        self.assertEqual((activity['ref'], activity['kind']), ('C-901', 'email_out'))
+
+    def test_nested_folder_move_preserves_one_message(self):
+        message = mail('pat@example.test', -timedelta(hours=1), local_keys='77')
+        write_db(self.fake.fixture, [message])
+        with sqlite3.connect(self.fake.fixture) as con:
+            con.executemany('INSERT INTO folders VALUES(?,?,?,?,?)', [
+                (10, 7, 'Active Deals', 'top', None), (11, 7, 'Synthetic Deal', 'folder', 10),
+                (12, 7, 'Documents', 'folder', 11), (13, 7, 'Archive', 'top', None),
+                (14, 7, 'Sent Items', 'top', None)])
+            con.execute('UPDATE message_folders SET folder_id=12 WHERE message_id=1')
+        first = intake.run(self.repo, self.home, self.fake.ports())
+        self.assertEqual(first.counts['logged'], 1)
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+        self.assertEqual(intake._load(self.fake.fixture)[1][0]['folders'],
+                         ['Active Deals/Synthetic Deal/Documents'])
+        for destination in (7, 13, 14):
+            with self.subTest(destination=destination):
+                with sqlite3.connect(self.fake.fixture) as con:
+                    con.execute('UPDATE message_folders SET folder_id=? WHERE message_id=1', (destination,))
+                self.store.write_bytes(self.store.read_bytes() + b'.')
+                result = intake.run(self.repo, self.home, self.fake.ports())
+                self.assertEqual(result.counts['emails'], 0)
+                self.assertEqual(len(self.fake.writes('log-activity')), 1)
+
+    def test_unresolved_retries_do_not_count_as_new_emails(self):
+        message = mail('unknown@example.test', -timedelta(hours=1))
+        first = self.run_intake([message])
+        second = self.run_intake([message])
+        quiet = self.run_intake([message], touch=False)
+        self.assertEqual([r.counts['emails'] for r in (first, second, quiet)], [1, 0, 0])
+        self.assertEqual(second.counts['unresolved_messages'], 1)
+
+    def test_outbound_known_contact_with_machine_recipient_logs_and_settles(self):
+        message = mail(OWNER, -timedelta(hours=1),
+                       recipients='pat@example.test, noreply@example.test')
+        first = self.run_intake([message])
+        self.assertEqual((first.counts['logged'], first.counts['unresolved_messages']), (1, 0))
+        self.run_intake([message])
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+
+    def test_missing_folder_account_setting_refuses_before_decoding(self):
+        path = self.home / '.config/carr/outlook.json'
+        settings = json.loads(path.read_text())
+        settings.pop('folder_account_id')
+        path.write_text(json.dumps(settings))
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
+        self.assertEqual((result.state, result.reason), ('failed', 'folder_account_id_required'))
+        self.assertEqual(self.fake.decodes, 0)
+        self.assertEqual(self.fake.writes('log-activity'), [])
+
     def test_mail_intake_processes_only_the_configured_account(self):
         personal = mail('lee@example.test', -timedelta(hours=1),
-                        subject='Foreign mailbox', recipients='personal@example.test')
+                        subject='Foreign mailbox', recipients=OWNER)
+        personal['folder_account'] = 8
         business = mail('lee@example.test', -timedelta(hours=1), subject='Configured mailbox')
         result = self.run_intake([personal, business])
         self.assertEqual(result.state, 'succeeded')
-        self.assertEqual(result.counts['mail_other_accounts'], 1)
         [(_, activity)] = self.fake.writes('log-activity')
         self.assertEqual(activity['summary'], 'Email from lee@example.test: Configured mailbox')
+        self.assertEqual(result.counts['mail_outside_selected_account'], 1)
 
     def scheduled(self, outcome):
         """Feed the intake's own receipt line through bin/run-scheduled.sh and return the spool row."""
@@ -733,7 +1030,8 @@ class IntakeTest(unittest.TestCase):
         mails = [mail('pat@example.test', -timedelta(hours=1)),
                  mail('stranger@example.test', -timedelta(minutes=50), subject='New inquiry'),
                  mail('noreply@example.test', -timedelta(minutes=40), subject='Automated notice'),
-                 mail('lee@example.test', -timedelta(minutes=30), subject='Foreign', recipients='personal@example.test')]
+                 mail('lee@example.test', -timedelta(minutes=30), subject='Foreign', recipients=OWNER)]
+        mails[-1]['folder_account'] = 8
         succeeded = self.run_intake(mails)
         self.fake.fail_verbs.add('log-activity')
         self.fake.now += timedelta(minutes=30)
@@ -741,7 +1039,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual((succeeded.state, failed.state), ('succeeded', 'failed'))
         for outcome in (succeeded, failed):
             with self.subTest(state=outcome.state):
-                for key in ('skipped_automated', 'mail_other_accounts', 'lead_proposed', 'lead_refused'):
+                for key in ('skipped_automated', 'mail_outside_selected_account', 'lead_proposed', 'lead_refused'):
                     self.assertIn(key, outcome.counts)
                 state, detail, args = self.scheduled(outcome)
                 self.assertEqual(state, outcome.state)
@@ -750,29 +1048,32 @@ class IntakeTest(unittest.TestCase):
                 if outcome.state == 'failed':
                     self.assertEqual(args[args.index('--failure-class') + 1], outcome.reason)
 
-    def test_receipt_counts_header_exclusions_without_claiming_mail_was_processed(self):
+    def test_receipt_counts_messages_without_selected_folder_membership(self):
         excluded = [mail('lee@example.test', -timedelta(hours=1),
                          subject='Synthetic BCC or alias delivery', recipients=recipient)
                     for recipient in ('undisclosed-recipients:;', 'alias@example.test', 'list@example.test')]
+        for message in excluded:
+            message['folder_account'] = None
         result = self.run_intake(excluded)
         self.assertEqual((result.state, result.reason), ('succeeded', 'nothing_new'))
-        self.assertEqual(result.counts['mail_other_accounts'], 3)
+        self.assertEqual(result.counts['mail_account_unresolved'], 3)
         self.assertEqual(self.fake.writes('log-activity'), [])
         quiet = self.run_intake(excluded, touch=False)
         self.assertEqual(quiet.reason, 'store_unchanged')
-        self.assertEqual(quiet.counts['mail_other_accounts'], 3)
+        self.assertEqual(quiet.counts['mail_account_unresolved'], 3)
         accepted = self.run_intake([mail('lee@example.test', -timedelta(hours=1))])
-        self.assertEqual(accepted.counts['mail_other_accounts'], 0)
+        self.assertEqual(accepted.counts['mail_outside_selected_account'], 0)
 
     def test_first_run_after_upgrade_measures_exclusions_even_when_store_is_unchanged(self):
         excluded = [mail('lee@example.test', -timedelta(hours=1), recipients='alias@example.test')]
+        excluded[0]['folder_account'] = 8
         self.run_intake(excluded)
         path = self.out() / intake.STATE
         state = json.loads(path.read_text())
-        state.pop('mail_other_accounts')
+        state.pop('mail_outside_selected_account')
         path.write_text(json.dumps(state))
         result = self.run_intake(excluded, touch=False)
-        self.assertEqual(result.counts['mail_other_accounts'], 1)
+        self.assertEqual(result.counts['mail_outside_selected_account'], 1)
         self.assertEqual(self.fake.decodes, 2)
 
     def test_transient_backoff_and_blocked_requests_preserve_frozen_payloads(self):
@@ -1630,8 +1931,8 @@ class IntakeTest(unittest.TestCase):
         self.seed_legacy_mail_keys(original, ['9100', '9101'])
         reply = {**original, 'subject': 'Re: Suite review', 'local_keys': '9101'}
         result = self.run_intake([reply])
-        self.assertEqual((result.state, result.reason), ('succeeded', 'processed'))
-        self.assertEqual(result.counts['legacy_merged_suppressed'], 1)
+        self.assertEqual((result.state, result.reason), ('succeeded', 'nothing_new'))
+        self.assertEqual(result.counts['mail_rows_reusing_prior_identity'], 1)
         self.assertEqual([args['email_context']['subject']
                           for _, args in self.fake.writes('log-activity')], ['Suite review'])
         self.assertEqual(self.mail_keys()[ident(original)], ['9100', '9101'])
@@ -1661,7 +1962,7 @@ class IntakeTest(unittest.TestCase):
         for _ in range(2):
             result = self.run_intake(rows)
             self.assertEqual(result.state, 'succeeded')
-            self.assertEqual(result.counts['legacy_merged_suppressed'], 2)
+            self.assertEqual(result.counts['mail_rows_reusing_prior_identity'], 2)
         self.assertEqual([args['email_context']['subject']
                           for _, args in self.fake.writes('log-activity')], ['Suite review', 'New matter'])
 
@@ -1672,7 +1973,7 @@ class IntakeTest(unittest.TestCase):
         result = self.run_intake([{**original, 'local_keys': '9100'},
                                   {**original, 'local_keys': '9101', 'subject': 'Re: Suite question'}, new])
         self.assertEqual(result.state, 'succeeded')
-        self.assertEqual(result.counts['legacy_merged_suppressed'], 2)
+        self.assertEqual(result.counts['mail_rows_reusing_prior_identity'], 2)
         self.assertEqual(len(self.fake.writes('log-activity')), 2)
 
     def test_existing_preview_hydrates_from_its_keyed_row(self):
@@ -1953,8 +2254,8 @@ class IntakeTest(unittest.TestCase):
         self.fake.calls.clear()
         first = self.run_intake(broken + [mail('pat@example.test', -timedelta(hours=1))])
         self.assertEqual((first.state, first.counts['decoder_alarm']), ('degraded', 1))
-        self.assertIn('recipients: 4.8%', self.report_text())
-        self.assertIn('sent_time: 4.8%', self.report_text())
+        self.assertIn('recipients: 4.5%', self.report_text())
+        self.assertIn('sent_time: 9.1%', self.report_text())
         self.assertIn('recipients', self.report_text().split('failing: ')[1].splitlines()[0])
         self.assertIn('sent_time', self.report_text().split('failing: ')[1].splitlines()[0])
         self.assertTrue(self.fake.calls)
@@ -1968,13 +2269,13 @@ class IntakeTest(unittest.TestCase):
         sample = [mail(OWNER, -timedelta(hours=1), subject=f'Synthetic {i}', recipients='pat@example.test')
                   for i in range(19)] + [mail(OWNER, -timedelta(hours=1), subject='', recipients=None)]
         expected = {'decoder_block_verification_bp': 9990, 'decoder_sender_bp': 10000,
-                    'decoder_subject_bp': 9500, 'decoder_recipients_bp': 9500, 'decoder_sent_time_bp': 10000,
-                    'decoder_folder_bp': 0}
+                    'decoder_subject_bp': 9500, 'decoder_recipients_bp': 9048, 'decoder_sent_time_bp': 10000,
+                    'decoder_folder_bp': 10000}
         processed = self.run_intake(sample)
         self.assertEqual({k: v for k, v in processed.counts.items() if k.endswith('_bp')}, expected)
         expected_samples = {'decoder_block_verification_sample': 1000, 'decoder_sender_sample': 20,
-                            'decoder_subject_sample': 20, 'decoder_recipients_sample': 20,
-                            'decoder_sent_time_sample': 20, 'decoder_folder_sample': 20,
+                            'decoder_subject_sample': 20, 'decoder_recipients_sample': 21,
+                            'decoder_sent_time_sample': 21, 'decoder_folder_sample': 20,
                             'decoder_attachment_metadata_sample': 0}
         self.assertEqual({k: v for k, v in processed.counts.items() if k.endswith('_sample')}, expected_samples)
         unchanged = self.run_intake(sample, touch=False)
@@ -2233,7 +2534,18 @@ class IntakeTest(unittest.TestCase):
         self.assertNotIn('vendor.test', self.report_text())
         result = self.run_intake(mails)
         self.assertEqual([verb for verb, _ in self.fake.calls], ['email-router-queue', 'email-router-queue'])
-        self.assertEqual(result.counts['skipped_automated'], 3, 'a count of retained mail, not per run')
+        self.assertEqual(result.counts['skipped_automated'], 0, 'settled messages are not recounted')
+
+    def test_machine_sender_settles_once_and_leaves_no_unresolved_backlog(self):
+        message = mail('noreply@example.test', -timedelta(hours=1))
+        first = self.run_intake([message])
+        second = self.run_intake([message])
+        self.assertEqual((first.counts['emails'], second.counts['emails']), (1, 0))
+        self.assertEqual((first.counts['skipped_automated'], second.counts['skipped_automated']), (1, 0))
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertEqual(state['mail_unresolved'], {})
+        self.assertEqual(self.fake.intent_calls, [])
+        self.assertEqual(self.fake.writes('log-activity'), [])
 
     def test_role_and_human_senders_are_never_skipped_as_machines(self):
         for address in ('marketing.director@practice.test', 'news.desk@paper.test', 'updates@practice.test',
@@ -2243,13 +2555,12 @@ class IntakeTest(unittest.TestCase):
                         'mailer-daemon@x.test', 'postmaster@x.test', 'bounces+123@x.test'):
             self.assertTrue(intake.automated(address), address)
 
-    def test_skipped_machine_mail_logs_once_a_record_carries_the_address(self):
+    def test_settled_machine_mail_is_not_reopened_by_a_later_contact_mapping(self):
         m = mail('noreply@vendor.test', -timedelta(hours=1))
         self.assertEqual(self.run_intake([m]).counts['skipped_automated'], 1)
         self.fake.contacts_rows.append(intake.Contact('noreply@vendor.test', 'V-903', 'Portal Vendor'))
-        result = self.run_intake([m], touch=False)
-        [(_, args)] = self.fake.writes('log-activity')
-        self.assertEqual(args['ref'], 'V-903')
+        result = self.run_intake([m])
+        self.assertEqual(self.fake.writes('log-activity'), [])
         self.assertEqual(result.counts['skipped_automated'], 0)
 
     def test_a_machine_address_with_a_mapping_problem_is_reported_not_hidden(self):
@@ -2450,7 +2761,8 @@ class IntakeTest(unittest.TestCase):
         run, backlog = receipt['counts']['run'], receipt['counts']['backlog']
         self.assertEqual((run['emails'], run['logged']), (2, 1))
         for standing in ('unresolved_addresses', 'unresolved_messages', 'unmatched', 'hydration_pending',
-                         'calendar_copies_in_store', 'calendar_expired_total', 'mapping_missing'):
+                         'calendar_copies_in_store', 'calendar_expired_total', 'mapping_missing',
+                         'mail_outside_selected_account', 'mail_rows_reusing_prior_identity'):
             self.assertIn(standing, backlog)
             self.assertNotIn(standing, run)
         for old in ('calendar_lifecycle_unsupported', 'calendar_unresolved_expired'):
@@ -3048,19 +3360,13 @@ class AttachmentMetadataTest(unittest.TestCase):
             {'id': 9, 'name': 'Certain.pdf', 'size': 256,
              'content_type': 'application/pdf', 'content_id': None}]])
 
-    def test_configured_account_excludes_foreign_and_substring_addresses(self):
-        con = sqlite3.connect(self.path)
-        con.execute('UPDATE messages SET sender=?, recipients=? WHERE id=1',
-                    ('BUSINESS@example.test', 'other@example.test'))
-        con.execute('UPDATE messages SET recipients=? WHERE id=2',
-                    ('Other <other@example.test>, Business <BUSINESS@example.test>',))
-        con.execute('UPDATE messages SET recipients=? WHERE id=3',
-                    ('notbusiness@example.test, business@example.test.invalid',))
-        con.commit()
-        con.close()
-        _, mails, _ = intake._load(self.path, account='business@example.test')
+    def test_folder_account_excludes_foreign_mail_even_when_headers_name_owner(self):
+        with sqlite3.connect(self.path) as con:
+            con.execute("INSERT INTO folders VALUES(8,8,'Inbox','top',NULL)")
+            con.execute('UPDATE message_folders SET folder_id=8 WHERE message_id=3')
+        _, mails, _ = intake._load(self.path, account_id=7)
         self.assertEqual([m['subject'] for m in mails], ['m0', 'm1'])
-        _, foreign, _ = intake._load(self.path, account='personal@example.test')
+        _, foreign, _ = intake._load(self.path, account_id=9)
         self.assertEqual(foreign, [])
 
     def test_collapsed_copies_keep_each_attachment_when_the_full_body_wins(self):
@@ -3104,7 +3410,7 @@ class FolderTest(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         path = Path(tmp.name) / 'store.db'
         write_db(path, [mail('pat@example.test', -timedelta(hours=1), subject=f'm{i}', copy_key=f'k{i}')
-                        for i in range(1, 6)])
+                        for i in range(1, 6)], folder_membership=False)
         con = sqlite3.connect(path)
         con.executescript(self.FOLDERS if columns else self.FOLDERS.replace(
             ',\n      block INTEGER NOT NULL, parent_status TEXT NOT NULL, parent_id INTEGER', ', block INTEGER'))
@@ -3136,7 +3442,8 @@ class FolderTest(unittest.TestCase):
                                                 columns=False).values())), {()})
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        write_db(Path(tmp.name) / 'old.db', [mail('pat@example.test', -timedelta(hours=1))])
+        write_db(Path(tmp.name) / 'old.db', [mail('pat@example.test', -timedelta(hours=1))],
+                 folder_membership=False)
         _, [m], _ = intake._load(Path(tmp.name) / 'old.db')
         self.assertEqual(m['folders'], [])
 
@@ -3347,7 +3654,7 @@ class LoadObjectFieldsTest(unittest.TestCase):
     def test_object_subject_recovers_missing_heuristic_and_recipients_in_order(self):
         with sqlite3.connect(self.db) as con:
             con.execute('UPDATE messages SET subject=NULL, recipients=NULL')
-        meta, mails, _ = self.load(OWNER)
+        meta, mails, _ = self.load(7)
         self.assertEqual(len(mails), 1)
         self.assertEqual(mails[0]['subject'], 'Re: Café 🏢')
         self.assertEqual(mails[0]['recipients'], 'first@example.test, second@example.test')
@@ -3362,7 +3669,7 @@ class LoadObjectFieldsTest(unittest.TestCase):
     def test_cc_only_message_counts_as_having_recipients(self):
         with sqlite3.connect(self.db) as con:
             con.execute("DELETE FROM recipients WHERE kind='to'")
-        meta, mails, _ = self.load(OWNER)
+        meta, mails, _ = self.load(7)
         self.assertEqual(len(mails), 1)
         self.assertIsNone(mails[0]['recipients'])
         self.assertEqual(mails[0]['cc'], OWNER)
@@ -3393,7 +3700,7 @@ class LoadObjectFieldsTest(unittest.TestCase):
         self.assertEqual(row['recipients'], OWNER)
         self.assertIsNone(row['conversation_id'])
 
-    def test_shared_item_key_never_projects_fields_or_passes_account_filter(self):
+    def test_shared_item_key_never_projects_fields(self):
         for competing_key in (False, True):
             with self.subTest(competing_key=competing_key):
                 with sqlite3.connect(self.db) as con:
@@ -3413,9 +3720,9 @@ class LoadObjectFieldsTest(unittest.TestCase):
                     self.assertEqual(rows[row_id]['recipients'], recipient)
                     self.assertIsNone(rows[row_id]['conversation_id'])
                     self.assertIsNone(rows[row_id]['cc'])
-                meta, mails, _ = self.load(OWNER)
-                self.assertEqual(mails, [])
-                self.assertEqual(meta['mail_other_accounts'], 2)
+                meta, mails, _ = self.load(7)
+                self.assertEqual(len(mails), 1)
+                self.assertEqual(meta['mail_account_unresolved'], 1)
 
     def test_missing_or_unknown_recipient_kinds_do_not_erase_legacy_addresses(self):
         for status in ('none', 'listed'):

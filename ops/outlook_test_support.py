@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def write_settings(home: Path, repo: Path, **overrides) -> Path:
-    values = dict(owner='fixture-owner', account='owner@example.test', internal_domain='example.test',
+    values = dict(folder_account_id=7, owner='fixture-owner', account='owner@example.test', internal_domain='example.test',
                   partner_cc='copy.partner@example.test', timezone='America/Chicago', repo=str(repo),
                   profile=str(home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity'),
                   vendor=str(home / 'carr-local/hxstore-reverse-engineering'),

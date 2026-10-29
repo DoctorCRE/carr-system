@@ -36,6 +36,18 @@ class SettingsTest(unittest.TestCase):
         self.assertFalse(settings.mcp_credentials.exists())
         self.assertFalse(settings.database_credentials.exists())
 
+    def test_folder_account_key_is_validated_without_guessing_from_address(self):
+        self.assertEqual(load_settings(self.home).folder_account_id, 7)
+        values = json.loads(self.path.read_text())
+        values.pop('folder_account_id')
+        self.path.write_text(json.dumps(values))
+        self.assertIsNone(load_settings(self.home).folder_account_id)
+        for value in (None, True, 0, -1, '7', 7.5, 2**63):
+            with self.subTest(value=value):
+                write_settings(self.home, self.repo, folder_account_id=value)
+                with self.assertRaisesRegex(SettingsError, 'folder_account_id'):
+                    load_settings(self.home)
+
     def test_optional_signing_identity_is_validated(self):
         self.assertEqual(load_settings(self.home).signing_identity, '')
         write_settings(self.home, self.repo, signing_identity='Fixture Code Signing')

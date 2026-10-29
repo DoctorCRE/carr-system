@@ -41,6 +41,7 @@ class OutlookSettings:
     model: str = 'haiku'
     partner_cc: str = ''
     signing_identity: str = ''
+    folder_account_id: int | None = None
     attachment_root: Path | None = None
     attachment_max_bytes: int = 0
 
@@ -131,6 +132,9 @@ def load_settings(home: Path | None = None) -> OutlookSettings:
         if (not isinstance(identity, str) or not identity.strip() or identity == '-'
                 or identity != identity.strip() or any(ord(c) < 32 for c in identity)):
             fail('signing_identity', 'must name a code-signing identity without control characters or surrounding spaces')
+    if 'folder_account_id' in values and (type(values['folder_account_id']) is not int
+                                           or not 0 < values['folder_account_id'] < 2**63):
+        fail('folder_account_id', 'must be a positive signed 64-bit store account key')
     if 'attachment_root' in values:
         root = values['attachment_root']
         if (not isinstance(root, str) or not Path(root).is_absolute() or '..' in Path(root).parts
@@ -140,7 +144,7 @@ def load_settings(home: Path | None = None) -> OutlookSettings:
     if 'attachment_max_bytes' in values and (type(values['attachment_max_bytes']) is not int
                                              or values['attachment_max_bytes'] <= 0):
         fail('attachment_max_bytes', 'must be a positive integer')
-    for name in sorted(expected - {'model', 'partner_cc', 'signing_identity', 'attachment_root',
+    for name in sorted(expected - {'model', 'partner_cc', 'signing_identity', 'folder_account_id', 'attachment_root',
                                    'attachment_max_bytes'}):
         if name not in values:
             fail(name, 'required')

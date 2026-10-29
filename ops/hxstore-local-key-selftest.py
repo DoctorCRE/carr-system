@@ -68,17 +68,46 @@ class LocalKeyExportTests(unittest.TestCase):
                     for prefix in ('', 'Re: ', 'Fw: ', 'Fwd: ')]
         with tempfile.TemporaryDirectory() as tmp:
             source, target = Path(tmp) / 'synthetic.hxd', Path(tmp) / 'synthetic.db'
-            source.write_bytes(STORE(b''.join(
+            folder = bytearray(840)
+            struct.pack_into('<H', folder, 0, 0x004d)
+            struct.pack_into('<QIQQQ', folder, 10, 50, 2, 7, 50, 7)
+            folder.extend(b'\1\1\1\1\0' + utf16('Inbox'))
+            envelope = struct.pack('<HHIH', 5, 0x04d8, len(folder) + 10, 0) + folder
+            source.write_bytes(STORE(envelope + b''.join(
                 message(0x2000 + i, sender='owner@example.test', sent=1_793_000_000 - i * 30,
                         subject=subject) for i, subject in enumerate(subjects))))
             result = subprocess.run([str(CRATE / 'target/debug/hxprobe'), 'db', str(source), str(target)],
                                     capture_output=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
-            _, mails, _ = intake._load(target, account='owner@example.test')
+            _, mails, _ = intake._load(target, account_id=7)
             self.assertCountEqual([m['subject'] for m in mails], subjects)
             prepared = intake._best_copies(mails)
             self.assertCountEqual([intake.email_context(m, 'example.test')['subject']
                                    for m in prepared], subjects)
+
+    def test_conflicting_or_unresolved_copy_ownership_never_admits_message(self):
+        for unresolved in (False, True):
+            with self.subTest(unresolved=unresolved), tempfile.TemporaryDirectory() as tmp:
+                source, target = Path(tmp) / 'synthetic.hxd', Path(tmp) / 'synthetic.db'
+                envelopes = []
+                for folder_id, account in ((50, 7), (51, 8)):
+                    folder = bytearray(840)
+                    struct.pack_into('<H', folder, 0, 0x004d)
+                    struct.pack_into('<QIQQQ', folder, 10, folder_id, 2, account, folder_id, account)
+                    folder.extend(b'\1\1\1\1\0' + utf16('Inbox'))
+                    envelopes.append(struct.pack('<HHIH', 5, 0x04d8, len(folder) + 10, 0) + folder)
+                copy = bytearray(message(0x1001))
+                struct.pack_into('<QIQQQ', copy, 418, 999 if unresolved else 51, 2, 8,
+                                 999 if unresolved else 51, 8)
+                source.write_bytes(STORE(b''.join(envelopes) + message(0x1001) + copy))
+                subprocess.run([str(CRATE / 'target/debug/hxprobe'), 'db', str(source), str(target)],
+                               capture_output=True, check=True, timeout=30)
+                with sqlite3.connect(target) as db:
+                    self.assertEqual(db.execute('SELECT copies FROM messages').fetchall(), [(2,)])
+                meta, mails, _ = intake._load(target, account_id=7)
+                self.assertEqual(mails, [])
+                counter = 'mail_account_unresolved' if unresolved else 'mail_account_ambiguous'
+                self.assertEqual(meta[counter], 1)
 
     def test_revisions_of_one_message_export_its_key(self):
         rows, meta = self.export(message(0x1001), message(0x1001))
