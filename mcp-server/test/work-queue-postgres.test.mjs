@@ -148,10 +148,10 @@ test('concurrent dispatch and same-key retries mint once, and rollback leaves no
   } finally { await Promise.all(clients.map(client => client.end())); }
 });
 
-test('a runner records its start once without minting another card', async () => {
+test('a runner adopts an unbound repository and records its start once without minting another card', async () => {
   const work_request = await request('WR-000017');
   const repository = 'DoctorCRE/carr-system';
-  await command('dispatch-job', job(work_request, { repository }));
+  await command('dispatch-job', job(work_request));
   const start = { work_request, slice: 1, job: 1, repository, runner_job_id: 'codex-job-synthetic', idempotency_key: randomUUID() };
   const first = await command('dispatch-job', start);
   assert.equal(first.card_id, 'WR17.S1.J1');
@@ -159,6 +159,7 @@ test('a runner records its start once without minting another card', async () =>
   assert.deepEqual(await command('dispatch-job', start), { ...first, replayed: true });
   const queued = (await command('work-queue')).jobs.filter(row => row.work_request === work_request);
   assert.equal(queued.length, 1);
+  assert.equal(queued[0].repository, repository);
   assert.equal(queued[0].runner_job_id, 'codex-job-synthetic');
   assert.ok(queued[0].started_at);
   await assert.rejects(command('dispatch-job', { ...start, runner_job_id: 'another-runner', idempotency_key: randomUUID() }),
@@ -167,10 +168,10 @@ test('a runner records its start once without minting another card', async () =>
 
 test('a runner can only claim a job bound to its repository', async () => {
   const work_request = await request('WR-000019');
-  const repository = 'DoctorCRE/carr-system';
+  const repository = 'jbookout/doctorcre-app';
   await command('dispatch-job', job(work_request, { repository }));
   const start = { work_request, job: 1, repository, runner_job_id: 'bound-runner', idempotency_key: randomUUID() };
-  await assert.rejects(command('dispatch-job', { ...start, repository: 'jbookout/doctorcre-app' }),
+  await assert.rejects(command('dispatch-job', { ...start, repository: 'DoctorCRE/carr-system' }),
     failure => { assert.equal(failure.message, 'job_repository_mismatch'); assert.equal(publicError(failure).error, 'job_repository_mismatch'); return true; });
   let queued = (await command('work-queue')).jobs.find(row => row.work_request === work_request);
   assert.equal(queued.repository, repository);
