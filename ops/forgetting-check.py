@@ -16,6 +16,10 @@ yet migrated — prints SKIP line, never a traceback).
 
 import os
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.credential_file import read_env_file  # noqa: E402
 
 TRACKED = ["event", "tool_call", "tool_read_count", "record_flag", "ingest_inbox",
            "activity", "source_capture", "loop_item"]
@@ -40,10 +44,7 @@ def main() -> int:
     if not os.path.exists(ENV):
         print("SKIP: no db.env")
         return 2
-    url = None
-    for line in open(ENV):
-        if line.startswith("CARR_DB_JOBS_URL="):
-            url = line.split("=", 1)[1].strip().strip('"').strip("'")
+    url = read_env_file(ENV, syntax="prefix-double-single").get("CARR_DB_JOBS_URL")
     if not url:
         print("SKIP: no CARR_DB_JOBS_URL in db.env")
         return 2
