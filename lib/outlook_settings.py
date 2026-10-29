@@ -41,6 +41,8 @@ class OutlookSettings:
     model: str = 'haiku'
     partner_cc: str = ''
     signing_identity: str = ''
+    attachment_root: Path | None = None
+    attachment_max_bytes: int = 0
 
     @property
     def decoder(self) -> Path:
@@ -129,7 +131,17 @@ def load_settings(home: Path | None = None) -> OutlookSettings:
         if (not isinstance(identity, str) or not identity.strip() or identity == '-'
                 or identity != identity.strip() or any(ord(c) < 32 for c in identity)):
             fail('signing_identity', 'must name a code-signing identity without control characters or surrounding spaces')
-    for name in sorted(expected - {'model', 'partner_cc', 'signing_identity'}):
+    if 'attachment_root' in values:
+        root = values['attachment_root']
+        if (not isinstance(root, str) or not Path(root).is_absolute() or '..' in Path(root).parts
+                or str(Path(root)) != root or any(ord(c) < 32 for c in root)):
+            fail('attachment_root', 'must be a normalized absolute path')
+        values['attachment_root'] = Path(root)
+    if 'attachment_max_bytes' in values and (type(values['attachment_max_bytes']) is not int
+                                             or values['attachment_max_bytes'] <= 0):
+        fail('attachment_max_bytes', 'must be a positive integer')
+    for name in sorted(expected - {'model', 'partner_cc', 'signing_identity', 'attachment_root',
+                                   'attachment_max_bytes'}):
         if name not in values:
             fail(name, 'required')
         value = values[name]
