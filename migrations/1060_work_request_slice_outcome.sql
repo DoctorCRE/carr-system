@@ -1,6 +1,7 @@
 -- rollback: forward fix only; preserve recorded slice outcomes.
 -- expand-contract: expand with a default open outcome; existing readers ignore it.
 -- lock-review: the small queue slice table takes an ALTER lock; no table scan outside constraint validation.
+alter table ops.work_request_slice add column version integer not null default 1 check (version > 0);
 alter table ops.work_request_slice add column outcome jsonb not null default '{"outcome":"open"}'::jsonb
   check (coalesce(jsonb_typeof(outcome) = 'object' and outcome->>'outcome' in ('open','done','retired')
     and (outcome->>'outcome' = 'open' or

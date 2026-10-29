@@ -174,7 +174,7 @@ test('user-facing completion preserves an exercised journey and refuses duplicat
 });
 
 
-test('completion refuses open slices and all-retired plans, then accepts a done and retired plan', async () => {
+test('completion refuses open slices and accepts an all-retired plan', async () => {
   const ref = 'WR-999030';
   await sourcedRequest(ref);
   const id = (await c.query('select id from ops.work_request where ref=$1', [ref])).rows[0].id;
@@ -183,15 +183,12 @@ test('completion refuses open slices and all-retired plans, then accepts a done 
   await assert.rejects(command('complete-work-request', args, actor, 'carr_writer'), error => {
     assert.equal(publicError(error).error, 'work_request_open_slices'); return true;
   });
-  const retire = slice => command('close-work-request-slice', { work_request: ref, slice, outcome: 'retired', reason: 'Scope is no longer needed.', idempotency_key: randomUUID() }, actor, 'carr_writer');
+  const retire = async slice => command('close-work-request-slice', { work_request: ref, slice, base_version: (await command('work-request-card', { work_request: ref }, actor, 'carr_reader')).slices[slice - 1].version, outcome: 'retired', reason: 'Scope is no longer needed.', idempotency_key: randomUUID() }, actor, 'carr_writer');
   await retire(1);
   await retire(2);
-  await assert.rejects(command('complete-work-request', args, actor, 'carr_writer'), error => {
-    assert.equal(publicError(error).error, 'work_request_all_slices_retired'); return true;
-  });
-  await command('close-work-request-slice', { work_request: ref, slice: 1, outcome: 'done', change_refs: args.change_refs, idempotency_key: randomUUID() }, actor, 'carr_writer');
+  args.base_version = (await command('work-request-card', { work_request: ref }, actor, 'carr_reader')).version;
   assert.equal((await command('complete-work-request', args, actor, 'carr_writer')).state, 'confirmed_closed');
-  for (const [name, extra] of [['close-work-request-slice', { slice: 1, outcome: 'open', reason: 'More scope.' }],
+  for (const [name, extra] of [['close-work-request-slice', { slice: 1, base_version: 4, outcome: 'retired', reason: 'More scope.' }],
     ['plan-work-request-slices', { slices: ['Build scope', 'Retired scope', 'New scope'] }]])
     await assert.rejects(command(name, { work_request: ref, idempotency_key: randomUUID(), ...extra }, actor, 'carr_writer'),
       error => publicError(error).error === 'work_request_terminal_state');

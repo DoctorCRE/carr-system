@@ -62,6 +62,8 @@ after(async () => {
 });
 
 async function command(name, args = {}, client = c, role = name === 'work-request-card' ? 'carr_reader' : 'carr_writer') {
+  if (name === 'close-work-request-slice' && !Object.hasOwn(args, 'base_version'))
+    args = { ...args, base_version: (await command('work-request-card', { work_request: args.work_request })).slices.find(row => row.slice_id === queueCardId(args.work_request, args.slice)).version };
   await client.query('begin');
   try {
     await client.query(`set local role ${role}`);
@@ -240,11 +242,11 @@ test('the Work Request card reads recorded slice titles and S numbers, including
   const plan = slices => command('plan-work-request-slices', { work_request, slices, idempotency_key: randomUUID() });
   await assert.rejects(plan([]), { message: 'invalid_slice_plan' });
   await plan(['Original slice']);
-  assert.deepEqual((await card()).slices, [{ slice_id: 'WR64.S1', title: 'Original slice', outcome: 'open' }]);
+  assert.deepEqual((await card()).slices, [{ slice_id: 'WR64.S1', title: 'Original slice', version: 1, outcome: 'open' }]);
   await plan(['Original slice', 'Appended slice']);
   assert.deepEqual((await card()).slices, [
-    { slice_id: 'WR64.S1', title: 'Original slice', outcome: 'open' },
-    { slice_id: 'WR64.S2', title: 'Appended slice', outcome: 'open' },
+    { slice_id: 'WR64.S1', title: 'Original slice', version: 1, outcome: 'open' },
+    { slice_id: 'WR64.S2', title: 'Appended slice', version: 1, outcome: 'open' },
   ]);
 });
 
@@ -266,34 +268,22 @@ test('queue grants preserve the current catalog seal and reject wider grants', a
   assert.equal(await current(), true);
 });
 
-test('the read saves a finish once on the side connection, and later reads keep it after the PR leaves the window', async () => {
+test('queue reads observe merged PRs without persisting job or slice outcomes', async () => {
   const work_request = await request('WR-000061');
-  const done = (await command('dispatch-job', job(work_request))).card_id;
-  await c.query("update ops.work_request_job set created_at=now()-interval '20 days' where work_request_id=(select id from ops.work_request where ref=$1)", [work_request]);
-  const pending = (await command('dispatch-job', job(work_request))).card_id;
-  const bounds = [], writes = [];
-  const merged = { repo: 'DoctorCRE/carr-system', number: 77, url: 'u77', title: 'PR 77', draft: false, state: 'merged', updated_at: '2026-10-27T12:00:00Z', cards: [done] };
-  const reader = sources => ({ query: (text, params) => c.query(text, params),
-    pullRequests: async (repos, since) => { bounds.push(since); return repos.map(repo => ({ repo, state: 'ok', prs: repo === merged.repo ? sources : [] })); },
-    sideWrite: (text, params) => { writes.push(params[2]); return c.query(text, params); } });
-  const first = await command('work-queue', {}, reader([merged]));
-  assert.equal(first.jobs.find(row => row.card_id === done).stage, 'merged');
-  assert.equal(writes.length, 2, 'save the job finish and slice outcome');
-  assert.equal(first.slices.find(row => row.slice_id === 'WR61.S1').outcome, 'done');
-  await command('work-queue', {}, reader([merged]));
-  const later = await command('work-queue', {}, reader([]));
-  assert.equal(writes.length, 2, 'saved job and slice finishes are never written again');
-  assert.equal(later.slices.find(row => row.slice_id === 'WR61.S1').derived_from, done);
-  const saved = later.jobs.find(row => row.card_id === done);
-  assert.deepEqual([saved.stage, saved.stale, saved.prs.map(pr => pr.card_id)], ['merged', false, [`${done}.carr#77`]]);
-  const open = later.jobs.find(row => row.card_id === pending);
-  assert.equal(open.stage, 'queued');
-  assert.equal(bounds[0], first.jobs.find(row => row.card_id === done).created_at, 'before the finish is saved, the old job bounds the window');
-  const unfinished = later.jobs.filter(row => row.card_id !== done).map(row => row.created_at).sort();
-  assert.equal(bounds.at(-1), unfinished[0], 'once saved, the window starts at the oldest unfinished job');
-  assert.ok(bounds.at(-1) > bounds[0] && bounds.at(-1) <= open.created_at);
+  const { card_id } = await command('dispatch-job', job(work_request));
+  const writes = [];
+  const reader = { query: (...args) => c.query(...args),
+    pullRequests: async repos => repos.map(repo => ({ repo, state: 'ok', prs: repo === 'DoctorCRE/carr-system' ? [
+      { repo, number: 77, url: 'https://github.com/DoctorCRE/carr-system/pull/77', cards: [card_id], state: 'merged' }] : [] })),
+    sideWrite: (...args) => writes.push(args) };
+  const first = await command('work-queue', {}, reader, 'carr_reader');
+  assert.equal(first.jobs.find(row => row.card_id === card_id).stage, 'merged');
+  assert.equal(first.slices.find(row => row.slice_id === 'WR61.S1').outcome, 'open');
+  assert.deepEqual(writes, []);
+  assert.equal(first.slices.some(row => row.work_request === 'WR-000064'), false, 'the queue excludes slices for Work Requests with no queue jobs');
+  assert.equal((await command('work-queue')).jobs.find(row => row.card_id === card_id).stage, 'queued');
+  assert.equal((await command('work-request-card', { work_request })).slices[0].outcome, 'open');
 });
-
 
 test('launcher registers an exact card and start atomically, with registered slices only', async () => {
   const work_request = await request('WR-000025');
@@ -310,7 +300,6 @@ test('launcher registers an exact card and start atomically, with registered sli
   assert.ok(rows[0].started_at);
 });
 
-
 test('launcher starts a queued card with actual execution settings and preserves its copy', async () => {
   const work_request = await request('WR-000026');
   const repository = 'DoctorCRE/carr-system';
@@ -323,13 +312,12 @@ test('launcher starts a queued card with actual execution settings and preserves
   assert.equal(row.card_title, 'Queue work');
 });
 
-
-test('slice retirement and reopening require reasons and replay one outcome event', async () => {
+test('slice retirement requires a reason and replays one outcome event', async () => {
   const work_request = await request('WR-000070');
   await command('plan-work-request-slices', { work_request, slices: ['Build slice', 'Replacement slice'], idempotency_key: randomUUID() });
   const close = { work_request, slice: 1, outcome: 'retired', idempotency_key: randomUUID() };
   await assert.rejects(command('close-work-request-slice', close), { message: 'slice_reason_required' });
-  const args = { ...close, reason: 'The replacement covers this work.', superseded_by: 2 };
+  const args = { ...close, base_version: 1, reason: 'The replacement covers this work.', superseded_by: 2 };
   const first = await command('close-work-request-slice', args);
   assert.equal(first.outcome, 'retired');
   assert.equal(first.superseded_by, 'WR70.S2');
@@ -339,75 +327,92 @@ test('slice retirement and reopening require reasons and replay one outcome even
   assert.equal((await c.query('select count(*) from event where idempotency_key=$1', [args.idempotency_key])).rows[0].count, '1');
   const card = () => command('work-request-card', { work_request });
   assert.equal((await card()).slices[0].outcome, 'retired');
-  const reopen = { ...close, outcome: 'open', idempotency_key: randomUUID() };
-  await assert.rejects(command('close-work-request-slice', reopen), { message: 'slice_reason_required' });
-  await command('close-work-request-slice', { ...reopen, reason: 'Build the original scope after all.' });
-  assert.equal((await card()).slices[0].outcome, 'open');
-  assert.equal((await command('work-queue')).slices.find(row => row.slice_id === 'WR70.S1').outcome, 'open');
+
 });
 
 test('done requires merged change evidence and preserves it in the card and queue', async () => {
   const work_request = await request('WR-000071');
   await command('plan-work-request-slices', { work_request, idempotency_key: randomUUID() });
+  await command('dispatch-job', job(work_request));
   const close = extra => command('close-work-request-slice', { work_request, slice: 1, outcome: 'done', idempotency_key: randomUUID(), ...extra });
   for (const change_refs of [undefined, [], [null], [{ pr_url: 'https://example.com/pull/1', merge_commit_sha: 'a'.repeat(40) }],
     [{ pr_url: 'https://github.com/DoctorCRE/carr-system/pull/1', merge_commit_sha: 'abc' }]]) {
     await assert.rejects(close({ change_refs }), { message: 'slice_merged_change_required' });
   }
+  await assert.rejects(close({ outcome: 'retired', reason: 'Replacement scope.', superseded_by: 1 }), { message: 'invalid_slice_successor' });
+  await assert.rejects(close({ outcome: 'retired', reason: 'Replacement scope.', superseded_by: 99 }), { message: 'slice_not_found' });
+  await assert.rejects(close({ slice: 99, base_version: 1 }), { message: 'slice_not_found' });
+  await assert.rejects(close({ outcome: 'open' }), { message: 'value_not_in_declared_vocabulary' });
   const change_refs = [{ pr_url: 'https://github.com/DoctorCRE/carr-system/pull/2674', merge_commit_sha: 'a'.repeat(40) }];
   const { ok, ...done } = await close({ change_refs });
   assert.equal(done.outcome, 'done');
   assert.deepEqual(done.change_refs, change_refs);
   assert.deepEqual((await command('work-request-card', { work_request })).slices[0], { title: 'Synthetic queue work', ...done });
   assert.deepEqual((await command('work-queue')).slices.find(row => row.slice_id === done.slice_id), { title: 'Synthetic queue work', work_request, ...done });
-  await assert.rejects(close({ outcome: 'retired', reason: 'Replacement scope.', superseded_by: 1 }), { message: 'invalid_slice_successor' });
-  await assert.rejects(close({ outcome: 'retired', reason: 'Replacement scope.', superseded_by: 99 }), { message: 'slice_not_found' });
-  await assert.rejects(command('close-work-request-slice', { work_request, slice: 99, outcome: 'open', reason: 'Build missing scope.', idempotency_key: randomUUID() }), { message: 'slice_not_found' });
+
 });
 
-
-test('a saved merged job completes its open slice, retries a lost write, and respects retirement and reopening', async () => {
+test('derived completion refuses missing merge SHAs and records valid evidence under the outcome actor', async () => {
   const work_request = await request('WR-000072');
-  await command('plan-work-request-slices', { work_request, slices: ['Merged work', 'Retired work', 'Unmerged work'], idempotency_key: randomUUID() });
-  const done = await command('dispatch-job', job(work_request));
-  for (const slice of [2, 3]) await command('dispatch-job', job(work_request, { slice }));
-  const close = extra => command('close-work-request-slice', { work_request, slice: 1, idempotency_key: randomUUID(), ...extra });
-  const merged = { stage: 'merged', prs: [{ state: 'merged', url: 'https://github.com/DoctorCRE/carr-system/pull/2674' }] };
-  await c.query(`update ops.work_request_job set finished=$2::jsonb where work_request_id=(select id from ops.work_request where ref=$1)`, [work_request, JSON.stringify(merged)]);
-  await c.query(`update ops.work_request_job set finished='{"stage":"closed","prs":[{"state":"closed"}]}' where work_request_id=(select id from ops.work_request where ref=$1) and slice_ordinal=3`, [work_request]);
-  const slice = async (reader = c) => (await command('work-queue', {}, reader)).slices.find(row => row.slice_id === 'WR72.S1');
-  assert.equal((await slice()).outcome, 'done', 'a lost optional write does not fail the read');
-  assert.equal((await command('work-request-card', { work_request })).slices[0].outcome, 'open', 'no side connection means nothing was persisted');
-  await close({ slice: 2, outcome: 'retired', reason: 'The work is obsolete.' });
-  const reader = { query: (...args) => c.query(...args), sideWrite: (...args) => c.query(...args) };
-  assert.equal((await slice(reader)).derived_from, done.card_id);
-  const card = await command('work-request-card', { work_request });
-  assert.deepEqual(card.slices.map(row => row.outcome), ['done', 'retired', 'open']);
-  assert.equal((await slice()).outcome, 'done');
-  await close({ outcome: 'open', reason: 'Additional work is required.' });
-  assert.equal((await slice(reader)).outcome, 'open', 'the same merged job cannot undo an explicit reopening');
-  assert.equal((await close({ outcome: 'done' })).derived_from, done.card_id, 'explicit completion may reuse saved merged evidence');
-  await close({ outcome: 'open', reason: 'A new job must finish the remaining work.' });
-  await command('dispatch-job', job(work_request));
-  await c.query(`update ops.work_request_job set finished=$2::jsonb where work_request_id=(select id from ops.work_request where ref=$1) and slice_ordinal=1 and j_number=2`, [work_request, JSON.stringify(merged)]);
-  assert.equal((await slice(reader)).derived_from, 'WR72.S1.J2', 'a new merged job can finish the reopened slice');
+  const { card_id } = await command('dispatch-job', job(work_request));
+  const close = () => command('close-work-request-slice', { work_request, slice: 1, outcome: 'done', idempotency_key: randomUUID() });
+  const pr_url = 'https://github.com/DoctorCRE/carr-system/pull/2674';
+  const save = async pr => c.query(`update ops.work_request_job set finished=$2::jsonb
+    where work_request_id=(select id from ops.work_request where ref=$1)`, [work_request, JSON.stringify({ stage: 'merged', prs: [pr] })]);
+  await save({ state: 'merged', url: pr_url });
+  await assert.rejects(close(), { message: 'slice_merged_change_required' });
+  assert.equal((await command('work-request-card', { work_request })).slices[0].outcome, 'open');
+  const merge_commit_sha = 'c'.repeat(40);
+  await save({ state: 'merged', url: pr_url, merge_commit_sha });
+  const done = await close();
+  assert.equal(done.derived_from, card_id);
+  assert.equal(done.outcome_by, actor.slug);
+  assert.deepEqual(done.change_refs, [{ pr_url, merge_commit_sha }]);
+  assert.deepEqual((await command('work-request-card', { work_request })).slices[0].change_refs, done.change_refs);
 });
 
+test('a recorded outcome refuses another outcome and preserves merged PR evidence', async () => {
+  const work_request = await request('WR-000074');
+  await command('plan-work-request-slices', { work_request, idempotency_key: randomUUID() });
+  const close = extra => command('close-work-request-slice', { work_request, slice: 1, idempotency_key: randomUUID(), ...extra });
+  const change_refs = [{ pr_url: 'https://github.com/DoctorCRE/carr-system/pull/2674', merge_commit_sha: 'b'.repeat(40) }];
+  await close({ outcome: 'done', change_refs });
+  for (const outcome of ['retired', 'done']) {
+    await assert.rejects(close({ outcome, reason: 'Changed scope.', ...(outcome === 'done' ? { change_refs } : {}) }),
+      { message: 'slice_outcome_already_recorded' });
+    assert.deepEqual((await command('work-request-card', { work_request })).slices[0].change_refs, change_refs);
+  }
+  await command('plan-work-request-slices', { work_request, slices: ['Synthetic queue work', 'Retired scope'], idempotency_key: randomUUID() });
+  await close({ slice: 2, outcome: 'retired', reason: 'Obsolete scope.' });
+  await assert.rejects(close({ slice: 2, outcome: 'retired', reason: 'Another reason.' }), { message: 'slice_outcome_already_recorded' });
+});
 
-test('reader reconciliation uses its optional writer and cannot overwrite a newer retirement', async () => {
-  const work_request = await request('WR-000073');
-  const { card_id } = await command('dispatch-job', job(work_request));
-  const side = new pg.Client(connection), pending = [];
-  await side.connect();
+test('slice outcomes require a fresh slice version as base_version', async () => {
+  const work_request = await request('WR-000075');
+  await command('plan-work-request-slices', { work_request, slices: ['First scope', 'Second scope'], idempotency_key: randomUUID() });
+  const card = () => command('work-request-card', { work_request });
+  const { version: base_version } = (await card()).slices[0];
+  const close = extra => command('close-work-request-slice', { work_request, slice: 1, outcome: 'retired', reason: 'Obsolete scope.', idempotency_key: randomUUID(), base_version, ...extra });
+  await close({});
+  assert.equal((await card()).slices[0].version, base_version + 1);
+  await assert.rejects(close({}), { message: 'version_conflict' });
+  assert.equal((await card()).slices[1].outcome, 'open');
+  await assert.rejects(close({ base_version: (await card()).slices[0].version }), { message: 'slice_outcome_already_recorded' });
+  await close({ slice: 2, base_version: (await card()).slices[1].version });
+  assert.equal((await card()).slices[1].outcome, 'retired');
+});
+
+test('concurrent outcome writers with the same slice version cannot replace the winner', async () => {
+  const work_request = await request('WR-000076');
+  await command('plan-work-request-slices', { work_request, idempotency_key: randomUUID() });
+  const { version: base_version } = (await command('work-request-card', { work_request })).slices[0];
+  const clients = await Promise.all(Array.from({ length: 2 }, async () => { const client = new pg.Client(connection); await client.connect(); return client; }));
   try {
-    await side.query('set role carr_writer');
-    const reader = { query: (...args) => c.query(...args),
-      pullRequests: async repos => repos.map(repo => ({ repo, state: 'ok', prs: repo === 'DoctorCRE/carr-system' ? [
-        { repo, number: 77, url: 'https://github.com/DoctorCRE/carr-system/pull/77', cards: [card_id], state: 'merged' }] : [] })),
-      sideWrite: (...args) => { pending.push(() => side.query(...args)); } };
-    assert.equal((await command('work-queue', {}, reader, 'carr_reader')).slices.find(row => row.slice_id === 'WR73.S1').outcome, 'done');
-    await command('close-work-request-slice', { work_request, slice: 1, outcome: 'retired', reason: 'The scope was cancelled after the read.', idempotency_key: randomUUID() });
-    for (const write of pending) await write();
-    assert.equal((await command('work-request-card', { work_request })).slices[0].outcome, 'retired');
-  } finally { await side.end(); }
+    const results = await Promise.allSettled(clients.map((client, i) => command('close-work-request-slice',
+      { work_request, slice: 1, outcome: 'retired', reason: `Obsolete scope ${i}.`, base_version, idempotency_key: randomUUID() }, client)));
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+    assert.equal(results.find(result => result.status === 'rejected').reason.message, 'version_conflict');
+    const winner = results.find(result => result.status === 'fulfilled').value;
+    assert.equal((await command('work-request-card', { work_request })).slices[0].reason, winner.reason);
+  } finally { await Promise.all(clients.map(client => client.end())); }
 });
