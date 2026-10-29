@@ -1,58 +1,15 @@
 #!/usr/bin/env python3
-"""migration-order-gate.py — a change may only add migrations ABOVE the base.
+"""Refuse migration slot collisions without requiring merge order to match numbers.
 
-THE RULE. Every migration file this change adds must carry a number strictly
-greater than the highest migration number already on the base branch at the
-moment the check runs. A branch that minted 0783 when main stood at 0782, and
-then fell behind a main that merged 0785..0787, fails here until it is
-renumbered above main's new maximum.
+Full filenames and checksums identify applied migrations. An unused number may
+merge after a higher number; a number already allocated on the base cannot be
+reused. Frozen historical collisions remain validated by the shared contract.
 
-WHY, measured. The release pipeline applies migrations to the staging candidate
-and to production in filename order, and both then require the source ledger to
-EXTEND what they applied: tools/staging-project-replacement.py refuses with
-"partial candidate ledger is not an exact source prefix", and tools/migrate.py
-refuses a reordered ledger in production. A number below an applied one can
-never apply cleanly again. It happened three times in two days — 0757 (fixed by
-#1464), the 0769/0770 pair (#1500) and 0783 (#1498, renumbered to 0800) — and
-each time every worker release stopped at staging-prepare until a human noticed
-and renumbered by hand. This check prevents a branch merging a number main
-has already moved past.
+In merge_group runs the base is the group's base_sha, which includes groups
+ahead of this one even when origin/main has not advanced. Missing Git refs or
+incomplete event data fail closed.
 
-WHY THE BASE BRANCH AND NOT THE APPLIED LEDGER. CI has no production credential
-by construction, and db/schema.sql's committed ledger lags production by
-hundreds of migrations, so neither can answer "what is applied". Main's tree is
-an upper bound on what any release can have applied — the pipeline only ever
-releases main — so "above main's maximum" implies "above anything applied".
-
-WHERE IT FIRES. ops/ci.sh's gates class, which runs in the required
-`ops/ci.sh --strict` context on every pull_request and merge_group event. In a
-merge_group run the base is the group's `base_sha` from the event, not
-origin/main: a queued PR's group is built on the groups ahead of it, whose
-migrations will reach main first. On 2026-10-28 #2560's group sat on #2503's
-group (1020..1023) while origin/main still stopped at 1017, so 1018 looked
-"above main", merged under 1020, and production refused a reordered ledger
-until #2595 renumbered it to 1024 (WR-000570).
-
-WHAT COUNTS AS ADDED: migration filenames present in HEAD's tree and absent
-from BOTH the merge-base tree and the base tree. Measuring against the merge
-base is what keeps a branch that is merely behind from owning main's later
-moves: when main renames or deletes a migration after the fork, the old name is
-still in HEAD's tree but also in the merge base, so it never counts. On a merge
-ref or an updated branch the merge base is the base tip, so the two trees agree.
-A rename on the branch counts as the new name, which is how a fix forward
-passes.
-
-DELIBERATELY STRICTER THAN THE RELEASE INVARIANT. The pipeline only needs an
-added number above what staging and production have APPLIED, and main's
-maximum may not have applied anywhere yet. This gate still refuses any number
-at or below main's maximum, because it cannot read what is applied (below), so
-a PR that would in fact have been harmless must renumber too.
-
-Exit 0 clean · 1 an added migration is not above the base maximum · 2 the base
-could not be read, which is not a pass.
-
-  ops/migration-order-gate.py                       # base = merge_group base_sha, origin/$GITHUB_BASE_REF or origin/main
-  ops/migration-order-gate.py --base <ref> [--head <ref>]
+Exit 0 clean, 1 collision, 2 unreadable input.
 """
 # doctrine: scripted-release-pipeline
 from __future__ import annotations
@@ -81,11 +38,6 @@ def number(path: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def highest_number(paths: Iterable[str]) -> int | None:
-    nums = [n for n in (number(p) for p in paths) if n is not None]
-    return max(nums) if nums else None
-
-
 def added(base_paths: set[str], fork_paths: set[str], head_paths: set[str]) -> dict[str, int]:
     """Migrations the change itself adds (in HEAD, in neither the fork nor the
     base), each with its number."""
@@ -95,11 +47,10 @@ def added(base_paths: set[str], fork_paths: set[str], head_paths: set[str]) -> d
 
 def violations(base_paths: set[str], fork_paths: set[str],
                head_paths: set[str]) -> list[str]:
-    """Added migrations whose number is not strictly above the base maximum."""
-    ceiling = highest_number(base_paths)
-    if ceiling is None:
-        return []
-    return [p for p, n in added(base_paths, fork_paths, head_paths).items() if n <= ceiling]
+    """Added migrations that reuse a number already allocated on the base."""
+    occupied = {number(path) for path in base_paths}
+    return [path for path, slot in added(base_paths, fork_paths, head_paths).items()
+            if slot in occupied]
 
 
 def default_base(environ: Mapping[str, str], event: Mapping | None = None) -> str:
@@ -170,30 +121,22 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     bad = violations(base_paths, fork_paths, head_paths)
-    ceiling = highest_number(base_paths)
     if not bad:
         count = len(added(base_paths, fork_paths, head_paths))
-        print(f"migration-order-gate: OK — {count} added migration(s), all above "
-              f"{base}'s highest ({ceiling:04d})" if ceiling is not None
-              else "migration-order-gate: OK — base has no migrations")
+        print(f"migration-order-gate: OK — {count} added migration(s), no base slot collisions")
         return 0
 
-    print(f"migration-order-gate: REFUSED — {len(bad)} added migration(s) not above "
-          f"{base}'s highest number {ceiling:04d}:", file=sys.stderr)
+    print(f"migration-order-gate: REFUSED — {len(bad)} added migration(s) reuse "
+          f"a slot allocated on {base}:", file=sys.stderr)
     targets = renames(base_paths, set(added(base_paths, fork_paths, head_paths)) - set(bad), bad)
     for path in bad:
         target = targets.get(path.rsplit("/", 1)[-1])
         print(f"  {path}" + (f" → next free slot: {MIGRATIONS_DIR}/{target}" if target else ""),
               file=sys.stderr)
     print(
-        "  The release pipeline applies migrations in filename order and requires the\n"
-        "  source ledger to extend what staging and production already applied; a\n"
-        "  number at or below main's maximum can never apply in order.\n"
-        "  Fix: choose a number above main and earlier open PRs, then git mv each file to\n"
-        "  that number, update every reference to the old filename (tests, SCAC\n"
-        "  seals, tools/migrate.py atomic groups), and push. Renumbering is safe only\n"
-        "  while the file has applied nowhere — this gate exists so that stays true.",
-        file=sys.stderr)
+        "  Choose an unused number above main and open PR allocations, rename each\n"
+        "  conflicting file, and update its references before it applies anywhere.\n"
+        "  Applied filenames and checksums are immutable.", file=sys.stderr)
     return 1
 
 

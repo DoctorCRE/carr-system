@@ -582,12 +582,10 @@ def validate_applied_ledger(
     migrations: list[tuple[str, str, str]], applied: dict[str, str],
     baseline: MigrationBaseline | None = None,
 ) -> None:
-    """Refuse missing, edited, or reordered ledger state.
+    """Validate immutable applied identities, baseline coverage and atomic groups.
 
-    The effective applied set accounts for the exact historical rename aliases,
-    then must be an uninterrupted prefix of the current migration tree.  A
-    later applied row after any earlier hole is not a harmless partial deploy:
-    applying the hole now would reorder history and may violate dependencies.
+    Files absent from the ledger remain pending even when a later filename
+    applied first. Filename order determines each run's pending order only.
     """
     current = {name: digest for name, _sql, digest in migrations}
     if baseline is not None:
@@ -638,20 +636,6 @@ def validate_ledger_identities(current: dict[str, str], applied: dict[str, str])
                 "partial strict atomic migration group is forbidden: expected "
                 + ", ".join(group) + "; found " + ", ".join(present)
             )
-    first_hole: str | None = None
-    later_applied: list[str] = []
-    for name in sorted(current):
-        if name not in effective_applied:
-            first_hole = first_hole or name
-        elif first_hole is not None:
-            later_applied.append(name)
-    if later_applied:
-        raise AppliedMigrationLedgerError(
-            "migration ledger is reordered: earlier migration is pending "
-            f"({first_hole}) while later migration(s) are already applied: "
-            + ", ".join(later_applied)
-            + ". Stop; reconcile dependency history before applying anything."
-        )
 
 
 def main() -> None:

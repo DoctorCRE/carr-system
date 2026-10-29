@@ -102,6 +102,49 @@ with tempfile.TemporaryDirectory() as tmp:
         check('an unmerged branch shadows from its common base', shadow.default_base() == base)
         git('merge', '--no-commit', 'main')
         check('a pending main merge shadows from the main it incorporated', shadow.default_base() == main)
+        event = work / 'merge-group.json'
+        event.write_text('{"merge_group":{"base_sha":"' + base + '"}}')
+        with patch.dict(shadow.os.environ, {'GITHUB_EVENT_NAME': 'merge_group', 'GITHUB_EVENT_PATH': str(event)}):
+            check('merge queue replays its group base even when origin/main differs', shadow.default_base() == base)
+            event.write_text('{"merge_group":{}}')
+            with patch.object(shadow, 'find_pg18', return_value=pathlib.Path('/synthetic/bin')):
+                check('a merge queue event without its base fails closed', shadow.main([]) == 2)
+
+print("base deployment order")
+with tempfile.TemporaryDirectory() as tmp:
+    work = pathlib.Path(tmp)
+    repo = work / 'repo'
+    (repo / 'migrations').mkdir(parents=True)
+    (repo / 'db').mkdir()
+    (repo / 'tools').mkdir()
+    env = fixture_env()
+    def base_git(*args):
+        return subprocess.run(['git', *args], cwd=repo, env=env,
+                              capture_output=True, text=True, check=True).stdout.strip()
+    base_git('init', '-q', '-b', 'main')
+    base_git('config', 'user.name', 'Fixture')
+    base_git('config', 'user.email', 'fixture@example.invalid')
+    base_git('config', 'core.hooksPath', '/dev/null')
+    (repo / 'migrations/0002_higher.sql').write_bytes(b"select 'base\rvalue';\n")
+    (repo / 'db/migration-baseline.json').write_text('{}\n')
+    base_git('add', 'migrations/0002_higher.sql', 'db/migration-baseline.json')
+    message = work / 'commit-message'
+    message.write_text('Synthetic base with higher migration\n')
+    base_git('commit', '-q', '-F', str(message))
+    base_revision = base_git('rev-parse', 'HEAD')
+    (repo / 'migrations/0001_lower.sql').write_text('select 1;\n')
+    for name in ('migrate.py', 'migration_baseline.py', 'migration_number_contract.py'):
+        (repo / 'tools' / name).write_text('current policy for ' + name)
+    with patch.object(shadow, 'REPO', repo):
+        runner = shadow.materialize_base(base_revision, work / 'base-source')
+    check('base deployment excludes the lower migration introduced by HEAD',
+          sorted(path.name for path in (runner.parent.parent / 'migrations').iterdir()) == ['0002_higher.sql'])
+    check('base deployment preserves SQL bytes',
+          (runner.parent.parent / 'migrations/0002_higher.sql').read_bytes() == b"select 'base\rvalue';\n")
+    check('base deployment carries its own manifest',
+          (runner.parent.parent / 'db/migration-baseline.json').read_text() == '{}\n')
+    check('base deployment uses the current runner policy',
+          runner.read_text() == 'current policy for migrate.py')
 
 # A CHECK constraint can hold a literal carriage return (the SCAC ingress_key
 # checks do). Universal-newline text IO rewrites it to a line feed, which then
@@ -117,9 +160,20 @@ with tempfile.TemporaryDirectory() as tmp:
 
 with tempfile.TemporaryDirectory() as tmp:
     work = pathlib.Path(tmp)
+    labels: list[str] = []
+    different_order = False
+    fail_shutdown = True
     def fake_run(command, env, label, log):
+        labels.append(label)
         if label == "bin/schema-snapshot.sh":
-            (work / 'candidate.sql').write_text(snapshot(T, R1))
+            pathlib.Path(command[-1]).write_text(snapshot(T, R1))
+        if label == "canonical migration ledger":
+            return '{"0001_a.sql":"aa","0002_b.sql":"bb"}'
+        if label.startswith("dump "):
+            tables = "-- Name: deal; Type: TABLE; Schema: public; Owner: -\n" + T
+            if different_order and label == "dump canonical schema and grants":
+                tables += "CREATE TABLE widget(id int);\n"
+            pathlib.Path(command[-1]).write_text(tables)
         return ''
     def fake_process(command, **kwargs):
         if command[0] == 'git':
@@ -133,9 +187,13 @@ with tempfile.TemporaryDirectory() as tmp:
             data = pathlib.Path(command[command.index('-D') + 1])
             data.mkdir(parents=True, exist_ok=True)
             (data / 'PG_VERSION').write_text('18')
-        rc = 1 if command[-1] in ('stop', 'status') else 0
+        rc = 0
+        if command[-1] == 'status':
+            rc = 1 if fail_shutdown else 3
+        elif command[-1] == 'stop' and fail_shutdown:
+            rc = 1
         return subprocess.CompletedProcess(command, rc, '', '')
-    with patch.object(shadow.seeds, 'compare'), patch.object(shadow, 'run', side_effect=fake_run), patch.object(shadow.subprocess, 'run', side_effect=fake_process), patch.object(shadow, 'free_port', return_value=55701):
+    with patch.object(shadow, 'materialize_base', return_value=work / 'base-source/tools/migrate.py'), patch.object(shadow.seeds, 'compare'), patch.object(shadow, 'run', side_effect=fake_run), patch.object(shadow.subprocess, 'run', side_effect=fake_process), patch.object(shadow, 'free_port', return_value=55701):
         try:
             shadow.shadow('HEAD', pathlib.Path('/synthetic/bin'), work)
         except shadow.StepFailed:
@@ -144,6 +202,17 @@ with tempfile.TemporaryDirectory() as tmp:
             check("failed shutdown fails the shadow result", False)
     check("the base snapshot loads with its carriage return intact",
           b"\r" in (work / 'base.sql').read_bytes())
+    check("the shadow applies the base before migrations introduced by HEAD",
+          labels.index('base migrations before HEAD') < labels.index('tools/migrate.py --apply'))
+    different_order, fail_shutdown = True, False
+    with patch.object(shadow, 'materialize_base', return_value=work / 'base-source/tools/migrate.py'), patch.object(shadow.seeds, 'compare'), patch.object(shadow, 'run', side_effect=fake_run), patch.object(shadow.subprocess, 'run', side_effect=fake_process), patch.object(shadow, 'free_port', return_value=55701):
+        try:
+            shadow.shadow('HEAD', pathlib.Path('/synthetic/bin'), work)
+        except shadow.StepFailed as exc:
+            check("a silent schema overwrite caused by migration order is refused",
+                  'base-first migration order differs from canonical rebuild' in str(exc), str(exc))
+        else:
+            check("a silent schema overwrite caused by migration order is refused", False)
 
 with tempfile.TemporaryDirectory() as tmp:
     bins = pathlib.Path(tmp)

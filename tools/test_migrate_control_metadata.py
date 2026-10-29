@@ -124,8 +124,8 @@ class ApprovedControlMigrationTests(unittest.TestCase):
         with self.psycopg.connect(self.dsn, autocommit=True) as conn:
             conn.execute('update doctrine_meta set generation=generation+1 where id=1')
             for statement, message in (
-                ("update schema_migrations set sha256=repeat('f',64) where filename=(select min(filename) from schema_migrations)", 'schema ledger prefix rewrite refused'),
-                ("delete from schema_migrations where filename=(select max(filename) from schema_migrations)", 'schema ledger rollback refused'),
+                ("update schema_migrations set sha256=repeat('f',64) where filename=(select min(filename) from schema_migrations)", 'applied schema migration rows are immutable'),
+                ("delete from schema_migrations where filename=(select max(filename) from schema_migrations)", 'applied schema migration rows are immutable'),
                 ('update doctrine_meta set generation=generation-1 where id=1', 'doctrine generation rollback refused'),
                 ('delete from ops.rule_load_layer where rule_id=(select rule_id from ops.rule_load_layer limit 1)', 'rule delivery projection is not activation-safe'),
             ):

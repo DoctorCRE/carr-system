@@ -63,6 +63,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 from migration_baseline import MANIFEST, MigrationBaseline, runner_sha256
 from migration_source import migration_names
+from migrate import validate_ledger_identities
 
 # The pre-P2 artifact included editable browser source. P2 replaces it with a
 # separately content-addressed DoctorCRE artifact, while historical SHAs must
@@ -343,13 +344,9 @@ def migration_set(sha: str, since: str | None = None) -> tuple[list[str], str]:
 def applied_schema_ledger(sha: str) -> tuple[int, str, str]:
     """Read the candidate's immutable expected post-rollout ledger.
 
-    ``db/schema.sql`` is generated from the canonical ``schema_migrations``
-    ledger.  Its rows must be the exact filename/content prefix of the migration
-    tree: the snapshot says what was applied when it was generated, while a
-    pending suffix is the normal commit -> CI -> migrate -> refresh workflow.
-    The release itself binds the complete tree because that is the exact ledger
-    it must observe after rollout.  Applied timestamps are excluded from the
-    digest because they are not schema identity.
+    Snapshot rows must retain their exact filename/checksum identities in the
+    source tree. Pending files may sort before applied files. The release binds
+    the complete post-rollout tree, excluding timestamps from schema identity.
     """
     snapshot = git("show", f"{sha}:db/schema.sql")
     if snapshot.count(SCHEMA_LEDGER_COPY) != 1:
@@ -377,13 +374,14 @@ def applied_schema_ledger(sha: str) -> tuple[int, str, str]:
         sys.exit("release-manifest: applied schema ledger filenames must be unique")
     rows.sort()
 
-    # The generated snapshot is a release input, not a second migration
-    # catalog.  Fail closed unless it is an exact filename/content PREFIX of
-    # the complete tree.  A suffix may be pending; a hole, rename, edit, or
-    # insertion before an applied row may not.  Compare full filenames
-    # (including optional letter suffixes), never numeric prefixes.
     tree_rows = migration_tree_ledger(sha)
-    ensure_exact_schema_prefix(rows, tree_rows)
+    try:
+        if MANIFEST in git("ls-tree", "--name-only", sha, "--", MANIFEST).splitlines():
+            baseline = MigrationBaseline.from_document(json.loads(git("show", f"{sha}:{MANIFEST}")))
+            baseline.validate_coverage(dict(rows))
+        validate_ledger_identities(dict(tree_rows), dict(rows))
+    except ValueError as exc:
+        raise SystemExit(f"release-manifest: db/schema.sql exact migration ledger: {exc}") from exc
     return schema_ledger_identity(tree_rows)
 
 
@@ -415,26 +413,6 @@ def migration_tree_ledger(sha: str) -> list[tuple[str, str]]:
     if not rows:
         sys.exit("release-manifest: target SHA has no migration identities")
     return rows
-
-
-def ensure_exact_schema_prefix(
-        snapshot_rows: list[tuple[str, str]],
-        migration_rows: list[tuple[str, str]]) -> None:
-    """Require snapshot rows to be the exact applied prefix of the tree."""
-    if len(snapshot_rows) <= len(migration_rows) \
-            and snapshot_rows == migration_rows[:len(snapshot_rows)]:
-        return
-    only_snapshot = sorted(set(snapshot_rows) - set(migration_rows))
-    only_tree = sorted(set(migration_rows) - set(snapshot_rows))
-    detail = []
-    if only_snapshot:
-        detail.append(f"snapshot-only={only_snapshot[:3]}")
-    if only_tree:
-        detail.append(f"migrations-only={only_tree[:3]}")
-    raise SystemExit(
-        "release-manifest: db/schema.sql exact migration ledger is not an "
-        "applied filename/content prefix of migrations/*.sql at the target SHA"
-        + (" (" + "; ".join(detail) + ")" if detail else ""))
 
 
 def schema_ledger_identity(
