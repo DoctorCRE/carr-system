@@ -480,8 +480,9 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             let convo_ids: Vec<String> =
                 m.all(schema::Key::ConversationId).iter().map(|s| s.to_string()).collect();
 
-            // A record with neither a sender nor readable text is a stub.
-            if r.sender.is_none() && r.body.split_whitespace().count() < 5 {
+            // A local identity or folder link is evidence even without readable text.
+            if r.local_keys.is_empty() && r.folder_ids.is_empty()
+                && r.sender.is_none() && r.body.split_whitespace().count() < 5 {
                 continue;
             }
 
@@ -492,7 +493,11 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             // excluded -- the store reuses one across a conversation, so keying
             // on it merges distinct messages, and pairing it with anything else
             // splits the revisions of one. See SPEC.md 4.7.
-            let key = format!("{:?}|{:?}|{:?}", r.local_keys, r.sender, r.sent_unix);
+            let key = if r.local_keys.is_empty() {
+                format!("{:?}|{:?}|{:?}", r.local_keys, r.sender, r.sent_unix)
+            } else {
+                format!("{:?}", r.local_keys)
+            };
             for id in &convo_ids {
                 if let Some(sub) = &r.subject {
                     convo_subject.entry(id.clone()).or_insert_with(|| sub.clone());
@@ -891,6 +896,13 @@ fn merge(prev: &mut record::Record, r: record::Record) {
     prev.folder_ids.extend(r.folder_ids);
     prev.local_keys.extend(r.local_keys);
     prev.copies += r.copies;
+    if prev.sender.is_none() {
+        prev.sender = r.sender;
+    }
+    prev.sent_unix = match (prev.sent_unix, r.sent_unix) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    };
     if prev.preview.is_none() {
         prev.preview = r.preview;
     }

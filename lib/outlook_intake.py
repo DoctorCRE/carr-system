@@ -206,11 +206,11 @@ class Outcome:
     detail: str = ''
 
 
-ACCOUNT_COUNTERS = ('mail_outside_selected_account', 'mail_account_ambiguous', 'mail_account_unresolved')
+MAIL_STORE_COUNTERS = ('mail_outside_selected_account', 'mail_account_ambiguous', 'mail_account_unresolved', 'empty_drafts')
 
 # Standing totals recomputed from state or the store every run; every other count is this run's.
 BACKLOG_COUNTS = frozenset((
-    *ACCOUNT_COUNTERS, 'mail_rows_reusing_prior_identity',
+    *MAIL_STORE_COUNTERS, 'mail_rows_reusing_prior_identity',
     'hydration_pending', 'hydration_expired', 'unresolved_messages', 'unresolved_read',
     'unresolved_read_abandoned', 'unresolved_expired', 'unresolved_calendar', 'unresolved_addresses', 'unmatched',
     'requests_blocked', 'calendar_lifecycle_unsupported',
@@ -460,7 +460,7 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
             if account_address.strip().lower() not in senders:
                 raise DecodeError('folder_account_mailbox_unverified')
         meta.update(mail_outside_selected_account=0, mail_account_ambiguous=0,
-                    mail_account_unresolved=0)
+                    mail_account_unresolved=0, empty_drafts=0)
         admitted = []
         for m in mails:
             owners = ownership.get(m['id'], {None})
@@ -469,6 +469,9 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
                       'mail_outside_selected_account' if owners != {account_id} else None)
             if account_id is not None and reason:
                 meta[reason] += 1
+            elif any(p.rsplit('/', 1)[-1].lower() == 'drafts' for p in paths.get(m['id'], [])) and len(
+                    ((m['body'] or '').strip() or (m['preview'] or '').strip()).split()) < 5:
+                meta['empty_drafts'] += 1
             else:
                 admitted.append(m)
         mails = admitted
@@ -790,6 +793,12 @@ class Run:
                                            'metadata_incomplete': True, 'participants': {}}
                 keys[m['ident']] = m['local_keys']
                 continue
+            if m['local_keys']:
+                for ident, item in list(unresolved.items()):
+                    if (ident != m['ident'] and item.get('metadata_incomplete')
+                            and set(keys.get(ident, [])) == set(m['local_keys'])):
+                        unresolved.pop(ident)
+                        keys.pop(ident, None)
             prior = next(((ident, sent) for ident, sent in retries.get(m['ck'], [])
                           if sent is not None and abs(sent - m['first_sent']) <= COPY_WINDOW), None)
             if prior:
@@ -1570,7 +1579,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         counts = {**mapping_counts(state), **calendar_counts(state),
                   'emails': 0, 'skipped_automated': 0,
                   'mail_rows_reusing_prior_identity': state.get('mail_rows_reusing_prior_identity', 0),
-                  **{name: state.get(name, 0) for name in ACCOUNT_COUNTERS}, **health_counts(state.get('decoder_health'))}
+                  **{name: state.get(name, 0) for name in MAIL_STORE_COUNTERS}, **health_counts(state.get('decoder_health'))}
         return Outcome('succeeded', 'store_unchanged', counts)
     try:
         with _decode(home, out, ports.decode, settings.folder_account_id, settings.account) as (meta, mails, events, db, files):
@@ -1625,7 +1634,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     state['hydration_check_at'] = int((now + REFRESH_INTERVAL).timestamp())
     work = Run(ports, state, now, out, settings)
     work.counts['mail_rows_reusing_prior_identity'] = sum(bool(m.get('mail_rows_reusing_prior_identity')) for m in mails)
-    work.counts.update({name: meta[name] for name in ACCOUNT_COUNTERS})
+    work.counts.update({name: meta[name] for name in MAIL_STORE_COUNTERS})
     work.counts['decoder_alarm'] = alarm
     work.counts.update(health_counts(health))
     if health.get('error_class'):
@@ -1649,7 +1658,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         work.leads(matcher)
         work.full_text(complete_mails)
         mail_processed = bool(work.written or any(value for key, value in work.counts.items()
-                                                  if key not in (*ACCOUNT_COUNTERS, 'mail_rows_reusing_prior_identity',
+                                                  if key not in (*MAIL_STORE_COUNTERS, 'mail_rows_reusing_prior_identity',
                                                                  'decoder_alarm')
                                                   and not key.endswith(('_bp', '_sample'))))
         work.events(events, matcher, since)
@@ -1685,7 +1694,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         _save(out, state)
         return Outcome('failed', failed, counts)
     state.update(store=signature, high_water=int(now.timestamp()), contact_map=matcher.fingerprint(), attachment_policy=1,
-                 **{name: meta[name] for name in ACCOUNT_COUNTERS},
+                 **{name: meta[name] for name in MAIL_STORE_COUNTERS},
                  folder_account_id=settings.folder_account_id, account_binding=_hash(settings.account.strip().lower()),
                  mail_rows_reusing_prior_identity=work.counts['mail_rows_reusing_prior_identity'])
     _prune(state, now)
