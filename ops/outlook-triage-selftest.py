@@ -494,6 +494,24 @@ class PreflightQuitTest(FakeOutlookCase):
             self.assertIsNone(self.prepare())
         self.assertEqual(len(self.called('osascript')), 1)
 
+    def test_interrupted_state_publish_keeps_previous_snapshot_readable(self):
+        self.given(windows=[ORDINARY])
+        previous = json.loads(self.state.read_text())
+
+        def interrupted_dump(value, output):
+            output.write('{"running":')
+            output.flush()
+            self.assertEqual(json.loads(self.state.read_text()), previous)
+            raise InterruptedError('writer interrupted before publication')
+
+        with patch.dict(os.environ, self.env, clear=True), \
+                patch.object(sys, 'argv', ['osascript']), \
+                patch('json.dump', side_effect=interrupted_dump), \
+                self.assertRaises(InterruptedError):
+            exec(compile(FAKE.replace('{python}', sys.executable), '<fake-outlook>', 'exec'), {})
+        self.assertEqual(json.loads(self.state.read_text()), previous)
+
+
     def test_refused_quit_times_out_without_relaunch(self):
         self.given(windows=[ORDINARY], menu_quit_ignored=True, osascript_quit_ignored=True)
         outcome = self.prepare(Waits(1, 0, 0, 0.01, 0, 0, 0))
