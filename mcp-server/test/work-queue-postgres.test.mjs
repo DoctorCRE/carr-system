@@ -343,3 +343,19 @@ test('a runner cannot change the queued workflow type', async () => {
   await command('dispatch-job', { ...start, job_type: 'bug-fix' });
   assert.equal((await command('work-queue')).jobs.find(row => row.work_request === work_request).job_type, 'bug-fix');
 });
+
+test('a typed runner starts an untyped job and stores its workflow type exactly once', async () => {
+  const work_request = await request('WR-000029');
+  const repository = 'DoctorCRE/carr-system';
+  await command('dispatch-job', job(work_request, { repository }));
+  await c.query('update ops.work_request_job set job_type=null where work_request_id=(select id from ops.work_request where ref=$1)', [work_request]);
+  const start = { work_request, job: 1, repository, job_type: 'bug-fix', runner_job_id: 'legacy-runner', idempotency_key: randomUUID() };
+  assert.equal((await command('dispatch-job', start)).card_id, 'WR29.S1.J1');
+  const queued = (await command('work-queue')).jobs.filter(row => row.work_request === work_request);
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].job_type, 'bug-fix');
+  assert.equal(queued[0].runner_job_id, 'legacy-runner');
+  assert.ok(queued[0].started_at);
+  await assert.rejects(command('dispatch-job', { ...start, runner_job_id: 'second-runner', idempotency_key: randomUUID() }),
+    { message: 'job_already_started' });
+});
