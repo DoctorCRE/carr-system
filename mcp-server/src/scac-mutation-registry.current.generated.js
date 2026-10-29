@@ -628,6 +628,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "close-work-request-slice": {
+    "ingress_key": "mcp-tool:close-work-request-slice",
+    "source_locator": "mcp-server/src/work-queue.js",
+    "schema_digest": "d05688430d13bfb77b2ffbcdad6627c23585cf9496b3238a6e6183985974b841",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "commit-winning-property": {
     "ingress_key": "mcp-tool:commit-winning-property",
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
@@ -3705,6 +3715,15 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "grantable": false,
       "privilege": "update",
       "ingress_key": "db-relation-acl:public.system_work_census_inventory:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "ops.work_request_slice",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:ops.work_request_slice:carr_writer:update",
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
     }
