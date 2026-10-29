@@ -268,21 +268,30 @@ test('queue grants preserve the current catalog seal and reject wider grants', a
   assert.equal(await current(), true);
 });
 
-test('queue reads observe merged PRs without persisting job or slice outcomes', async () => {
+test('the read saves a finish once on the side connection, and later reads keep it after the PR leaves the window', async () => {
   const work_request = await request('WR-000061');
-  const { card_id } = await command('dispatch-job', job(work_request));
-  const writes = [];
-  const reader = { query: (...args) => c.query(...args),
-    pullRequests: async repos => repos.map(repo => ({ repo, state: 'ok', prs: repo === 'DoctorCRE/carr-system' ? [
-      { repo, number: 77, url: 'https://github.com/DoctorCRE/carr-system/pull/77', cards: [card_id], state: 'merged' }] : [] })),
-    sideWrite: (...args) => writes.push(args) };
-  const first = await command('work-queue', {}, reader, 'carr_reader');
-  assert.equal(first.jobs.find(row => row.card_id === card_id).stage, 'merged');
-  assert.equal(first.slices.find(row => row.slice_id === 'WR61.S1').outcome, 'open');
-  assert.deepEqual(writes, []);
-  assert.equal(first.slices.some(row => row.work_request === 'WR-000064'), false, 'the queue excludes slices for Work Requests with no queue jobs');
-  assert.equal((await command('work-queue')).jobs.find(row => row.card_id === card_id).stage, 'queued');
-  assert.equal((await command('work-request-card', { work_request })).slices[0].outcome, 'open');
+  const done = (await command('dispatch-job', job(work_request))).card_id;
+  await c.query("update ops.work_request_job set created_at=now()-interval '20 days' where work_request_id=(select id from ops.work_request where ref=$1)", [work_request]);
+  const pending = (await command('dispatch-job', job(work_request))).card_id;
+  const bounds = [], writes = [];
+  const merged = { repo: 'DoctorCRE/carr-system', number: 77, url: 'u77', title: 'PR 77', draft: false, state: 'merged', updated_at: '2026-10-27T12:00:00Z', cards: [done] };
+  const reader = sources => ({ query: (text, params) => c.query(text, params),
+    pullRequests: async (repos, since) => { bounds.push(since); return repos.map(repo => ({ repo, state: 'ok', prs: repo === merged.repo ? sources : [] })); },
+    sideWrite: (text, params) => { writes.push(params[2]); return c.query(text, params); } });
+  const first = await command('work-queue', {}, reader([merged]));
+  assert.equal(first.jobs.find(row => row.card_id === done).stage, 'merged');
+  assert.equal(writes.length, 1, 'one single-row write for the newly finished job');
+  await command('work-queue', {}, reader([merged]));
+  const later = await command('work-queue', {}, reader([]));
+  assert.equal(writes.length, 1, 'a saved finish is never written again');
+  const saved = later.jobs.find(row => row.card_id === done);
+  assert.deepEqual([saved.stage, saved.stale, saved.prs.map(pr => pr.card_id)], ['merged', false, [`${done}.carr#77`]]);
+  const open = later.jobs.find(row => row.card_id === pending);
+  assert.equal(open.stage, 'queued');
+  assert.equal(bounds[0], first.jobs.find(row => row.card_id === done).created_at, 'before the finish is saved, the old job bounds the window');
+  const unfinished = later.jobs.filter(row => row.card_id !== done).map(row => row.created_at).sort();
+  assert.equal(bounds.at(-1), unfinished[0], 'once saved, the window starts at the oldest unfinished job');
+  assert.ok(bounds.at(-1) > bounds[0] && bounds.at(-1) <= open.created_at);
 });
 
 test('launcher registers an exact card and start atomically, with registered slices only', async () => {
@@ -352,10 +361,10 @@ test('done requires merged change evidence and preserves it in the card and queu
 
 });
 
-test('derived completion refuses missing merge SHAs and records valid evidence under the outcome actor', async () => {
+test('done requires explicit change evidence even when a merged job finish is saved', async () => {
   const work_request = await request('WR-000072');
-  const { card_id } = await command('dispatch-job', job(work_request));
-  const close = () => command('close-work-request-slice', { work_request, slice: 1, outcome: 'done', idempotency_key: randomUUID() });
+  await command('dispatch-job', job(work_request));
+  const close = extra => command('close-work-request-slice', { work_request, slice: 1, outcome: 'done', idempotency_key: randomUUID(), ...extra });
   const pr_url = 'https://github.com/DoctorCRE/carr-system/pull/2674';
   const save = async pr => c.query(`update ops.work_request_job set finished=$2::jsonb
     where work_request_id=(select id from ops.work_request where ref=$1)`, [work_request, JSON.stringify({ stage: 'merged', prs: [pr] })]);
@@ -364,8 +373,8 @@ test('derived completion refuses missing merge SHAs and records valid evidence u
   assert.equal((await command('work-request-card', { work_request })).slices[0].outcome, 'open');
   const merge_commit_sha = 'c'.repeat(40);
   await save({ state: 'merged', url: pr_url, merge_commit_sha });
-  const done = await close();
-  assert.equal(done.derived_from, card_id);
+  await assert.rejects(close(), { message: 'slice_merged_change_required' });
+  const done = await close({ change_refs: [{ pr_url, merge_commit_sha }] });
   assert.equal(done.outcome_by, actor.slug);
   assert.deepEqual(done.change_refs, [{ pr_url, merge_commit_sha }]);
   assert.deepEqual((await command('work-request-card', { work_request })).slices[0].change_refs, done.change_refs);
