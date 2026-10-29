@@ -2,6 +2,7 @@
 """Exercise the actual Codex job launcher without Git, model, or network calls."""
 import contextlib
 import io
+import json
 import os
 from pathlib import Path
 import runpy
@@ -19,16 +20,24 @@ DELIVERED = ("Delivery: ok missing=none branch=test-job start=start head=pushed 
 
 
 class CodexJobTests(unittest.TestCase):
-    def launch(self, *, status=0, repo="DoctorCRE/carr-system", configs=(), result=True):
+    def launch(self, *, status=0, repo="DoctorCRE/carr-system", configs=(), result=True,
+               brief="Card: WR557.S2.J2\noriginal brief",
+               dispatch_ok=True, settings=""):
         picker = types.ModuleType("skill_picker")
         picker.prepare = Mock(return_value=("prepared brief", []))
         output, errors = io.StringIO(), io.StringIO()
-        calls, heads = [], iter(["start\n", "pushed\n"])  # the start point, then the delivered HEAD
+        self.calls = calls = []
+        heads = iter(["start\n", "pushed\n"])  # the start point, then the delivered HEAD
         scratch = tempfile.TemporaryDirectory()  # the startup prune never sees the real temp dir
         self.addCleanup(scratch.cleanup)
+        Path(scratch.name, "config.toml").write_text(settings)
 
         def execute(argv, **kwargs):
             calls.append((argv, kwargs))
+            if "dispatch-job" in argv:
+                return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({
+                    "ok": dispatch_ok, "card_id": "WR557.S2.J2",
+                    "runner_job_id": json.loads(argv[-1])["runner_job_id"]}))
             if argv[:2] == ["codex", "exec"]:
                 if result:
                     Path(argv[argv.index("-o") + 1]).write_text("job result\n")
@@ -42,10 +51,11 @@ class CodexJobTests(unittest.TestCase):
             code = execute(argv, **kwargs).returncode
             return types.SimpleNamespace(pid=12345, wait=lambda **options: code)
 
-        args = ["codex-job", repo, "test-job", "original brief"]
+        args = ["codex-job", repo, "test-job", brief]
         for config in configs:
             args.extend(["-c", config])
         with (
+            patch.dict(os.environ, {"CODEX_HOME": scratch.name}),
             patch.dict(sys.modules, {"skill_picker": picker}),
             patch("tempfile.gettempdir", return_value=scratch.name),
             patch("os.execv"),  # keep the test interpreter; no runtime re-exec
@@ -58,6 +68,9 @@ class CodexJobTests(unittest.TestCase):
         ):
             launcher = runpy.run_path(str(ROOT / "bin/codex-job"))
             code = launcher["main"]()
+        calls = [call for call in calls if "dispatch-job" not in call[0]]
+        if not calls:
+            return code, errors.getvalue(), [], picker.prepare
         self.addCleanup(shutil.rmtree, Path(calls[0][0][-1]).parent, True)
         codex = next(call for call in calls if call[0][:2] == ["codex", "exec"])
         return code, output.getvalue(), [*calls[:2], codex], picker.prepare
@@ -75,9 +88,43 @@ class CodexJobTests(unittest.TestCase):
                                       calls[-1][0][-1]])
         self.assertTrue(calls[-1][0][-1].endswith("\n\nprepared brief"))
         self.assertEqual(calls[-1][1]["stdin"], subprocess.DEVNULL)
-        prepare.assert_called_once_with("original brief", Path(clone))
+        prepare.assert_called_once_with("Card: WR557.S2.J2\noriginal brief", Path(clone))
         self.assertEqual((code, output), (0, "job result\n" + DELIVERED))
         self.assertFalse(Path(clone).parent.exists(), "temporary clone must be cleaned up")
+
+    def test_launch_registers_exact_card_and_execution_facts(self):
+        self.launch(configs=('model=fixture-model', 'model_reasoning_effort=high'))
+        dispatch = next(argv for argv, _ in self.calls if 'dispatch-job' in argv)
+        facts = json.loads(dispatch[-1])
+        self.assertEqual((facts['work_request'], facts['slice'], facts['job']), ('WR-000557', 2, 2))
+        self.assertEqual((facts['repository'], facts['executor'], facts['model'], facts['effort']),
+                         ('DoctorCRE/carr-system', 'codex', 'fixture-model', 'high'))
+        self.assertLess(self.calls.index(next(call for call in self.calls if 'dispatch-job' in call[0])),
+                        self.calls.index(next(call for call in self.calls if call[0][:2] == ['codex', 'exec'])))
+
+    def test_execution_facts_use_config_defaults_and_cli_overrides(self):
+        self.launch(settings='model = "configured-model"\nmodel_reasoning_effort = "medium"\n',
+                    configs=('model_reasoning_effort="high"',))
+        facts = json.loads(next(argv[-1] for argv, _ in self.calls if 'dispatch-job' in argv))
+        self.assertEqual((facts['model'], facts['effort']), ('configured-model', 'high'))
+
+    def test_invalid_or_unregistered_cards_never_launch(self):
+        for brief, allowed, card in (('no card', True, '<missing>'),
+                                     ('Card: V2 cleanup', True, 'V2 cleanup'),
+                                     ('Card: WR557.S2.J2', False, 'WR557.S2.J2')):
+            with self.subTest(brief=brief):
+                code, errors, calls, _ = self.launch(brief=brief, dispatch_ok=allowed)
+                self.assertEqual(code, 1)
+                self.assertEqual(calls, [])
+                self.assertEqual(errors, f'codex-job: {card}: job registration refused\n')
+
+    def test_same_runner_retry_has_one_registration_identity(self):
+        receipts = set()
+        for _ in range(2):
+            self.launch()
+            facts = json.loads(next(argv[-1] for argv, _ in self.calls if 'dispatch-job' in argv))
+            receipts.add((facts['idempotency_key'], facts['runner_job_id']))
+        self.assertEqual(len(receipts), 1)
 
     def launch_with_stderr(self, target):
         saved = os.dup(2)
