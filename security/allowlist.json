@@ -1,4 +1,5 @@
 {
+  "schema": "leak-guard-allowlist.v1",
   "entries": [
     {
       "path": "security/fixtures/synthetic-contact.json",
@@ -678,6 +679,5 @@
       "reason": "Pushed PR history (e9e50256..913d2ade) named a synthetic fixture deal whose words collide with a client fingerprint; renamed at the next commit, so only these historical blobs carry it.",
       "value_sha256": "b5d8dfb4d92c397df16cda0399e543925f248f2e1172876a39bd40d4812dc1ab"
     }
-  ],
-  "schema": "leak-guard-allowlist.v1"
+  ]
 }
