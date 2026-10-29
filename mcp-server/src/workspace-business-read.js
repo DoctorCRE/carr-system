@@ -186,13 +186,16 @@ function boundedTerritory(params) {
   return value || null;
 }
 
+const DIRECTORY_CONTRACTS = ["vendor-directory.v1", "vendor-directory.v2"];
+
 export function parseBusinessQuery(dataset, searchParams, viewerSlug) {
   if (!DATASETS.includes(dataset)) throw businessError("QUERY_INVALID", { parameter: "dataset" });
   const params = searchParams instanceof URLSearchParams ? searchParams : new URLSearchParams(searchParams || "");
   requireExactKeys(params, LIST_KEYS[dataset], viewerSlug);
+  const contract = oneOf(params, "contract", DIRECTORY_CONTRACTS, null);
   const base = {
     dataset,
-    ...(oneOf(params,"contract",["vendor-directory.v1"],null) ? {contract:"vendor-directory.v1"} : {}),
+    ...(contract ? {contract} : {}),
     scope: oneOf(params, "scope", SCOPES, DEFAULT_SCOPE),
     q: searchTerm(params),
     owner: oneOf(params, "owner", ["all", "joe", "dell"], "all"),
@@ -209,7 +212,7 @@ export function parseBusinessQuery(dataset, searchParams, viewerSlug) {
 export function parseBusinessRecordQuery(searchParams, viewerSlug) {
   const params = searchParams instanceof URLSearchParams ? searchParams : new URLSearchParams(searchParams || "");
   requireExactKeys(params, RECORD_KEYS, viewerSlug);
-  const contract=oneOf(params,"contract",["vendor-directory.v1"],null);
+  const contract=oneOf(params,"contract",DIRECTORY_CONTRACTS,null);
   return contract ? {contract} : {};
 }
 
@@ -621,7 +624,7 @@ export async function readBusinessList({ client, actor, tenant = organizationTen
     values: [actor.slug, ...values],
     sort: query.sort,
     page: query.page,
-    people: !clients && query.contract === 'vendor-directory.v1',
+    people: !clients && query.contract === 'vendor-directory.v2',
   });
 
   let pageResult;
@@ -673,7 +676,7 @@ export async function readBusinessList({ client, actor, tenant = organizationTen
 // exact payload shape while DoctorCRE pins the expanded contract revision.
 function directoryProjection(row, dataset, contract, observedAt) {
   const result = {...row};
-  if (contract === 'vendor-directory.v1') {
+  if (DIRECTORY_CONTRACTS.includes(contract)) {
     if (dataset === 'vendors') result.relationship = enrichRelationship(row.relationship, observedAt);
     return result;
   }
@@ -699,7 +702,7 @@ export async function readBusinessRecord({ client, actor, tenant = organizationT
     from: clients ? CLIENT_FROM : VENDOR_FROM,
     where,
     values: [actor.slug, id],
-    people: !clients && contract === 'vendor-directory.v1',
+    people: !clients && contract === 'vendor-directory.v2',
   });
 
   let result;

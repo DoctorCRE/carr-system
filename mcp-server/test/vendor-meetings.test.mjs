@@ -9,7 +9,7 @@ import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import assert from 'node:assert/strict';
 import { appKeysValid, vendorRowRequired, vendorRowOptional, vendorDetailRequired, vendorDetailOptional } from './fixtures/vendor-directory-app-keys.mjs';
 import { TOOLS } from '../src/tools.js';
-import { parseBusinessQuery, readBusinessList, readBusinessRecord } from '../src/workspace-business-read.js';
+import { parseBusinessQuery, parseBusinessRecordQuery, readBusinessList, readBusinessRecord } from '../src/workspace-business-read.js';
 
 test('vendor meetings exposes a read-only versioned contract', () => {
   assert.ok(TOOLS['read-vendor-meetings'], 'V01 vendor meetings reader is registered');
@@ -214,12 +214,12 @@ test('not-workable and out-of-market vendors stay in Research, never Suggested',
  assert.ok((await read({view:'research'})).items.find(i=>i.vendor_id===avoided.vendor).missing.includes('workable_vendor'));
 });
 
-async function directory(vendor, contract = 'vendor-directory.v1') {
+async function directory(vendor, contract = 'vendor-directory.v2') {
  await c.query('begin read only');
  try {
   await c.query('set local role carr_reader');
   const options = {client:c, actor, dataset:'vendors', correlationId:'synthetic-directory'};
-  const detail = await readBusinessRecord({...options,id:vendor,contract});
+  const detail = await readBusinessRecord({...options,id:vendor,...parseBusinessRecordQuery(new URLSearchParams(contract ? {contract} : {}),'joe')});
   const list = await readBusinessList({...options,query:parseBusinessQuery('vendors',new URLSearchParams({q:detail.record.name,...(contract ? {contract} : {})}),'joe')});
   return {detail:detail.record,list};
  } finally {await c.query('rollback');}

@@ -1,6 +1,6 @@
 {
   "schema": "carr-vendor-directory.v1",
-  "version": "1.2.0",
+  "version": "1.1.0",
   "transport": "authenticated same-origin /api/v1/business/{clients,vendors} and MCP update-vendor",
   "query": {
     "contract": "vendor-directory.v1 opts into these fields; absent selector preserves the existing v1 row and facet shapes",
@@ -30,13 +30,11 @@
       "vertical",
       "deal_type",
       "last_deal_at",
-      "territory",
-      "people"
+      "territory"
     ],
     "vendor_detail": [
       "relationship",
-      "loan_programs",
-      "people"
+      "loan_programs"
     ]
   },
   "relationship": {
@@ -92,15 +90,5 @@
     "deal_evidence": "complete replacement array <=100; exact live deal_id, referred/worked role, occurred_at, evidence_kind mail/calendar/salesforce/entry, nonblank evidence_ref; duplicate deal/role refuses",
     "verify_deal_history": "only verified human Joe/Dell may set true; server stamps time; any evidence replacement without verification invalidates coverage",
     "audit": "existing version guard, transaction, idempotency envelope and field-level event history"
-  },
-  "people": {
-    "shape": "Array of {company,contact,office,research}, ordered by contact UUID. Nested under each vendor in list and detail. Empty when no exact live named person is recorded. Does not multiply vendor totals or alter vendor pagination.",
-    "identity": "Uses v_vendor_assignment_context. Person vendors select themselves. Organization vendors select only live named people whose org_id is that organization. Deleted and merged people are excluded. Missing email, phone or cell never excludes a person.",
-    "company": "Exact live organization {id,name} or null. Company identity never verifies a person office.",
-    "contact": "Exact live person {id,name,email,phone,cell}. Unknown contact channels remain null.",
-    "office": "Verified {street_address,city,state,finding_id,source,observed_at,expires_on} or null. Uses the same latest-finding verification as read-vendor-meetings. Requires source_backed, found true, office location, nonblank string street_address/city/state, nonblank source, nonfuture observation and unexpired finding. Internal and proposed-correction findings cannot verify an office.",
-    "research": "{status,finding_id,observed_at,expires_on} for the newest address finding on the exact person. Status is not_researched, needs_review or office_verified. Describes recorded finding progress only, never a queued or running enrichment job. A newer unusable finding prevents revival of an older verified office.",
-    "source": "Existing party and record_flag facts through v_vendor_assignment_context and v_record_flag_subject. Write findings with the existing record-finding owner verb. No new write path or invented business data.",
-    "scope": "Office location is distinct from recorded vendor territory. Office verification does not assert meeting readiness, contact permission, approved client need, market membership or introduction state."
   }
 }
