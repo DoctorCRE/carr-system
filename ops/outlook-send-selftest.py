@@ -1365,7 +1365,8 @@ class AttachmentTests(unittest.TestCase):
                            script_send=self.script_send)
 
     def settings_for(self, **overrides):
-        write_settings(self.home, ROOT, account=ACCOUNT, internal_domain='example.test', **overrides)
+        write_settings(self.home, ROOT, account=ACCOUNT, internal_domain='example.test',
+                       partner_cc='partner@example.test', **overrides)
         self.settings = load_settings(self.home)
         self.enterContext(patch.object(send_mod, 'load_settings', lambda: self.settings))
 
@@ -1392,6 +1393,9 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(self.forms, [])
         self.assertNotIn('packet-001', self.ledger_text())
         self.assertNotIn('deal-001', self.ledger_text())
+        rows = [json.loads(line) for line in self.ledger_text().splitlines()]
+        self.assertEqual([r['attachments'] for r in rows],
+                         [{'count': 1, 'sha256': [send_mod._digest(self.file)]}] * 2)
         again = send_mod.send_submitted(self.mail(), idempotency_key='k1', ports=self.ports)
         self.assertEqual(again.state, State.DONE)
         self.assertEqual(len(self.scripts), 1)
@@ -1412,6 +1416,28 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual((result.state, result.reason), (State.FAILED, 'aborted_before_dispatch'))
         self.assertEqual(self.mailbox.sent, [])
         self.assertIn('aborted_before_dispatch', self.ledger_text())
+
+    def test_submitted_attachments_require_the_partner_copy(self):
+        for cc in ((), ('someone@example.test',), ('partner@example.test', 'someone@example.test')):
+            with self.subTest(cc=cc):
+                mail = replace(self.mail(), cc=cc)
+                result = send_mod.send_submitted(mail, idempotency_key='k8', ports=self.ports)
+                self.assertEqual((result.state, result.reason), (State.REFUSED, 'partner_copy_required'))
+        self.assertEqual((self.scripts, self.forms), ([], []))
+        self.assertFalse((self.tmp / 'send' / send_mod.LEDGER).exists())
+
+    def test_failed_cleanup_is_its_own_failure_and_never_resends(self):
+        self.ports.script_send = None
+        with patch.object(send_mod.subprocess, 'run',
+                          return_value=subprocess.CompletedProcess([], 0, 'cleanup_failed\n', '')) as run:
+            first = send_mod.send_submitted(self.mail(), idempotency_key='k9', ports=self.ports)
+            second = send_mod.send_submitted(self.mail(), idempotency_key='k9', ports=self.ports)
+        self.assertEqual((first.state, first.reason), (State.FAILED, 'abort_cleanup_failed'))
+        self.assertEqual((second.state, second.reason), (State.FAILED, 'abort_cleanup_failed'))
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(self.mailbox.sent, [])
+        script = run.call_args.kwargs['input']
+        self.assertIn('delete m\non error\nreturn "cleanup_failed"', script)
 
     def test_transport_failure_is_unconfirmed_and_never_retried(self):
         self.reply = send_mod.UiFailure('transport_TimeoutExpired_000000000000')

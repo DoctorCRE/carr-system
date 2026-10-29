@@ -37,6 +37,7 @@ from lib.outlook_settings import load_settings
 
 OUT = Path('out/outlook-send')
 LEDGER = 'ledger.jsonl'
+NOT_DISPATCHED = ('aborted_before_dispatch', 'abort_cleanup_failed')
 IDLE_SECONDS = 300
 DUPLICATE_WINDOW = 24 * 3600
 CLOCK_SKEW = 5
@@ -282,15 +283,18 @@ class Ledger:
         for row in map(json.loads, self.path.read_text().splitlines()):
             latest[row['key']] = row
         return any(row.get('fingerprint') == print_ and row['at'] >= since
-                   and row['state'] != 'aborted_before_dispatch' for row in latest.values())
+                   and row['state'] not in NOT_DISPATCHED for row in latest.values())
 
     def append(self, key: str, kind: str, state: str, print_: str, at: float,
-               sent_item_id: str | None = None) -> None:
+               sent_item_id: str | None = None, attachments: tuple[Attachment, ...] = ()) -> None:
+        row = {'key': key, 'kind': kind, 'state': state, 'fingerprint': print_,
+               'at': int(at), 'sent_item_id': sent_item_id}
+        if attachments:
+            row['attachments'] = {'count': len(attachments), 'sha256': [a.sha256 for a in attachments]}
         fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         try:
             os.fchmod(fd, 0o600)
-            os.write(fd, (json.dumps({'key': key, 'kind': kind, 'state': state, 'fingerprint': print_,
-                                      'at': int(at), 'sent_item_id': sent_item_id}) + '\n').encode())
+            os.write(fd, (json.dumps(row) + '\n').encode())
             os.fsync(fd)
         finally:
             os.close(fd)
@@ -394,8 +398,8 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
         done = next((r for r in rows if r['state'] == State.DONE.value and r.get('sent_item_id')), None)
         if done:
             return Result(State.DONE, 'confirmed_in_mailbox', sent_item_id=done['sent_item_id'])
-        if rows[-1]['state'] == 'aborted_before_dispatch':
-            return Result(State.FAILED, 'aborted_before_dispatch')
+        if rows[-1]['state'] in NOT_DISPATCHED:
+            return Result(State.FAILED, rows[-1]['state'])
         try:
             item_id = confirmed_mail(ports.mailbox.snapshot(), item, min(r['at'] for r in rows) - CLOCK_SKEW)
         except Exception:
@@ -489,15 +493,16 @@ def _script_write(mail: Mail, key: str, ports: Ports, ledger: Ledger) -> Result:
     if any(ord(c) < 32 and c not in '\n\r\t' for c in mail.subject + mail.body):
         return Result(State.FAILED, 'unscriptable_text')
     print_ = fingerprint(mail)
-    ledger.append(key, 'send', 'pressing', print_, ports.now())
+    ledger.append(key, 'send', 'pressing', print_, ports.now(), attachments=mail.attachments)
     pressed_at = ports.now()
     try:
         outcome = (ports.script_send or applescript_send)(mail)
     except UiFailure:
         outcome = None
-    if outcome == 'aborted':
-        ledger.append(key, 'send', 'aborted_before_dispatch', print_, ports.now())
-        return Result(State.FAILED, 'aborted_before_dispatch', 'script')
+    if outcome in ('aborted', 'cleanup_failed'):
+        state = 'aborted_before_dispatch' if outcome == 'aborted' else 'abort_cleanup_failed'
+        ledger.append(key, 'send', state, print_, ports.now(), attachments=mail.attachments)
+        return Result(State.FAILED, state, 'script')
     return _await_sent(mail, key, print_, ports, ledger, pressed_at, 'script', True)
 
 
@@ -517,10 +522,11 @@ def _await_sent(item: Mail | Event, key: str, print_: str, ports: Ports, ledger:
         except Exception:
             return False
 
+    attached = item.attachments if isinstance(item, Mail) else ()
     if not _wait(confirmed, ports.confirm_seconds, ports):
-        ledger.append(key, kind, State.PRESSED_UNCONFIRMED.value, print_, ports.now())
+        ledger.append(key, kind, State.PRESSED_UNCONFIRMED.value, print_, ports.now(), attachments=attached)
         return Result(State.PRESSED_UNCONFIRMED, 'not_in_mailbox_yet', mode)
-    ledger.append(key, kind, State.DONE.value, print_, ports.now(), sent_item_id)
+    ledger.append(key, kind, State.DONE.value, print_, ports.now(), sent_item_id, attached)
     return Result(State.DONE, 'confirmed_in_mailbox', mode, sent_item_id=sent_item_id)
 
 
@@ -697,7 +703,8 @@ def applescript(mail: Mail) -> str:
                   for a in addresses]
     lines += [f'make new attachment at m with properties {{file:f{i}}}' for i in range(len(mail.attachments))]
     lines += [f'if (count of attachments of m) is not {len(mail.attachments)} then error "partial"',
-              'on error', 'try', 'delete m', 'end try', 'return "aborted"', 'end try',
+              'on error', 'try', 'delete m', 'on error', 'return "cleanup_failed"', 'end try',
+              'return "aborted"', 'end try',
               'send m', 'return "sent"', 'end tell']
     return '\n'.join(lines)
 
@@ -1013,8 +1020,18 @@ def default_ports(repo: Path | None = None) -> Ports:
 
 # ---- public interface --------------------------------------------------------
 
+def partner_copied(mail: Mail, settings) -> bool:
+    """A partner submission goes to one person and copies exactly the other partner."""
+    return (len(mail.to) == 1 and not mail.bcc and bool(settings.partner_cc)
+            and settings.partner_cc != settings.account and mail.cc == (settings.partner_cc,))
+
+
 def send_submitted(mail: Mail, *, idempotency_key: str, ports: Ports) -> Result:
-    """Dispatch an immutable app submission, retaining all transport safeguards."""
+    """Dispatch an immutable app submission, retaining all transport safeguards. Submitted mail skips
+    the native confirmation dialog: the partner's submit is the approval, and attachments additionally
+    require the other partner on CC."""
+    if mail.attachments and not partner_copied(mail, load_settings()):
+        return Result(State.REFUSED, 'partner_copy_required')
     return _write_transport(mail, idempotency_key, ports, send_requested=True, submitted=True)
 
 

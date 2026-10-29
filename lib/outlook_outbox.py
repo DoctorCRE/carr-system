@@ -33,9 +33,10 @@ class SubmittedDraft:
         if row['sha256'] != text_hash:
             raise ValueError('submission_hash_mismatch')
         to, cc = send._addresses(row['to']), send._addresses(row['cc'])
-        if len(to) != 1 or cc != (settings.partner_cc,):
+        mail = send.Mail(to, cc, (), subject, body)
+        if not send.partner_copied(mail, settings):
             raise ValueError('submission_recipients_invalid')
-        return cls(ident, version, text_hash, send.Mail(to, cc, (), subject, body))
+        return cls(ident, version, text_hash, mail)
 
     @property
     def key(self):
