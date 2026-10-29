@@ -30,8 +30,8 @@ with other addresses is flagged shared_role, never matched: it may serve many pe
 Unresolved mail and calendar candidates expire after 30 days (unresolved_expired,
 calendar_unresolved_expired). Mail
 whose only unknown participants are machine senders (no-reply, mailer-daemon,
-postmaster, bounces) is not business: it is retained, uncounted as unresolved, and
-logs if a record later carries the address. Any other unknown inbound sender's email
+postmaster, bounces) is settled once as not business, outside the unresolved backlog.
+Any other unknown inbound sender's email
 gets one model read (lib/unresolved_email.py) proposing what it applies to: an open
 deal, a known contact at a new address, a new matter, or not business. Business queues
 the address once on the claim card through propose-email-lead with that reasoning, where
@@ -53,8 +53,8 @@ Each decoded email carries its observed folder paths (Inbox, Sent Items, user
 subfolders such as Active Deals/<deal>) as `folders`; matched client attachments use them to resolve one deal.
 Attachment metadata travels as `attachments` with id, name, size, content_type and
 nullable content_id. Cache paths and bytes stay in the private decoder output.
-Only mail naming the configured account as sender or recipient enters intake;
-BCC-only mail without that evidence is omitted.
+Mail enters intake through membership in the configured folder account, including
+all user subfolders. Decoded recipients provide context, never admission evidence.
 
 An email whose body is still only Outlook's preview is logged with the preview
 and flagged preview_only. A later full body is logged as a note.
@@ -208,7 +208,8 @@ class Outcome:
 
 # Standing totals recomputed from state or the store every run; every other count is this run's.
 BACKLOG_COUNTS = frozenset((
-    'hydration_pending', 'hydration_expired', 'unresolved_messages', 'skipped_automated', 'unresolved_read',
+    'mail_outside_selected_account', 'mail_rows_reusing_prior_identity',
+    'hydration_pending', 'hydration_expired', 'unresolved_messages', 'unresolved_read',
     'unresolved_read_abandoned', 'unresolved_expired', 'unresolved_calendar', 'unresolved_addresses', 'unmatched',
     'requests_blocked', 'calendar_lifecycle_unsupported',
     'calendar_lifecycle_canceled', 'calendar_requests_quarantined', 'calendar_unresolved_expired',
@@ -416,7 +417,7 @@ def _message_object_fields(con: sqlite3.Connection) -> dict[int, dict]:
     return found
 
 
-def _load(db: Path, account: str | None = None) -> tuple[dict, list[dict], list[dict]]:
+def _load(db: Path, account_id: int | None = None) -> tuple[dict, list[dict], list[dict]]:
     con = sqlite3.connect(db)
     con.row_factory = sqlite3.Row
     try:
@@ -437,11 +438,12 @@ def _load(db: Path, account: str | None = None) -> tuple[dict, list[dict], list[
             m.update(object_fields.get(m['id'], {}))
         mail_count = len(mails)
         meta['health_store_mails'] = list(mails)
-        if account is not None:
-            account = account.lower()
-            mails = [m for m in mails if account == (m['sender'] or '').lower()
-                     or account in _addresses(m['recipients']) or account in _addresses(m.get('cc'))]
-        meta['mail_other_accounts'] = mail_count - len(mails)
+        if account_id is not None:
+            owned = {row[0] for row in con.execute(
+                'SELECT DISTINCT mf.message_id FROM message_folders mf '
+                'JOIN folders f ON f.id = mf.folder_id WHERE f.account_id = ?', (account_id,))}
+            mails = [m for m in mails if m['id'] in owned]
+        meta['mail_outside_selected_account'] = mail_count - len(mails)
         for m in mails:
             message_id = m.pop('id')
             m['row_ids'] = [message_id]
@@ -530,7 +532,7 @@ def _remove(work: Path) -> None:
 
 
 @contextmanager
-def _decode(home: Path, out: Path, decode: Callable[[Path, Path, Path], None]):
+def _decode(home: Path, out: Path, decode: Callable[[Path, Path, Path], None], account_id: int):
     work = Path(tempfile.mkdtemp(prefix=WORK_PREFIX, dir=out))
     try:
         copy = work / 'store.hxd'
@@ -538,7 +540,7 @@ def _decode(home: Path, out: Path, decode: Callable[[Path, Path, Path], None]):
         files = work / 'Files'
         db = work / 'store.db'
         decode(copy, files, db)
-        yield (*_load(db, account=load_settings(home).account), db, files)
+        yield (*_load(db, account_id=account_id), db, files)
     finally:
         _remove(work)
 
@@ -557,7 +559,8 @@ def _flag_day(unix: int | None) -> str | None:
 def _parties(m: dict, domain: str) -> list[tuple[str, str | None]]:
     """The outside addresses an email is filed against: its recipients if we sent it, else its sender."""
     if _internal(m['sender'], domain):
-        return [(a, None) for a in _addresses(m['recipients']) if not _internal(a, domain)]
+        addresses = dict.fromkeys(_addresses(m['recipients']) + _addresses(m.get('cc')))
+        return [(a, None) for a in addresses if not _internal(a, domain)]
     return [(m['sender'].lower(), _clean_name(m['sender_name'], m['subject']))]
 
 
@@ -577,7 +580,7 @@ def _best_copies(mails: list[dict], state: dict | None = None) -> list[dict]:
         if candidates:
             ck = ident.rsplit(':', 1)[0]
             for prior in candidates:
-                prior['legacy_merged_suppressed'] = len(keys) > 1 or len(candidates) > 1
+                prior['mail_rows_reusing_prior_identity'] = len(keys) > 1 or len(candidates) > 1
                 prior['ck'], prior['ident'] = ck, ident
                 claimed.add(id(prior))
     rows.sort(key=lambda m: (m['ck'], m['sent_unix']))
@@ -757,16 +760,23 @@ class Run:
                 m['ident'], m['sent_unix'] = prior
             if (m['sent_unix'] < since and m['ident'] not in unresolved) or m['sent_unix'] > self.now.timestamp() + 300:
                 continue
-            if m['ident'] not in unresolved and any(abs(t - m['sent_unix']) <= COPY_WINDOW for t in done.get(m['ck'], [])):
+            outbound = _internal(m['sender'], self.settings.internal_domain)
+            recipients_unknown = outbound and not (_addresses(m['recipients']) or _addresses(m.get('cc')))
+            if m['ident'] not in unresolved and any(
+                    abs(t - m['sent_unix']) <= COPY_WINDOW for t in done.get(m['ck'], [])):
                 continue
             if m['local_keys']:
                 keys[m['ident']] = sorted(set(keys.get(m['ident'], [])) | set(m['local_keys']))
-            outbound = _internal(m['sender'], self.settings.internal_domain)
             parties = _parties(m, self.settings.internal_domain)
+            self.counts['emails'] += int(m['ident'] not in unresolved)
             if not parties:
-                done.setdefault(m['ck'], []).append(m['sent_unix'])
+                if recipients_unknown:
+                    unresolved[m['ident']] = {'ck': m['ck'], 'sent': m['sent_unix'],
+                                               'recipients_unknown': True, 'participants': {}}
+                else:
+                    unresolved.pop(m['ident'], None)
+                    done.setdefault(m['ck'], []).append(m['sent_unix'])
                 continue
-            self.counts['emails'] += 1
             refs = []
             for address, name in parties:
                 ref = matcher.ref(address)
@@ -778,10 +788,16 @@ class Run:
                 elif ref not in refs:
                     refs.append(ref)
             progress = unresolved.setdefault(m['ident'], {'ck': m['ck'], 'sent': m['sent_unix']})
+            progress.pop('recipients_unknown', None)
             progress['participants'] = {_hash(address): matcher.classify(address) for address, _ in parties
                                         if matcher.classify(address)}
+            if not refs and progress['participants'] and set(progress['participants'].values()) == {'automated'}:
+                unresolved.pop(m['ident'], None)
+                done.setdefault(m['ck'], []).append(m['sent_unix'])
+                self.counts['skipped_automated'] += 1
+                continue
             completed = progress.setdefault('completed_refs', [])
-            missing = bool(progress['participants'])
+            missing = any(reason != 'automated' for reason in progress['participants'].values())
             if not outbound and matcher.classify(m['sender']) == 'missing' and proposable(m['sender']):
                 self.lead_candidates.append((m, progress))
             refs = [ref for ref in refs if ref not in completed]
@@ -1222,18 +1238,16 @@ class Run:
 
 
 def mapping_counts(state: dict) -> dict:
-    """Retained machine-only mail is counted as skipped, never as unresolved."""
+    """Report the remaining mapping backlog, excluding settled mail."""
     mail = state.get('mail_unresolved', {})
     calendar = state.get('calendar_unresolved', {})
     participants = {}
     for item in [*mail.values(), *calendar.values()]:
         participants.update(item.get('participants', {}))
     participants = {h: r for h, r in participants.items() if r != 'automated'}
-    machine_only = sum(bool(item.get('participants')) and set(item['participants'].values()) == {'automated'}
-                       for item in mail.values())
     return {'hydration_pending': len(state.get('pending_full', {})),
             'hydration_expired': sum(bool(p.get('expired')) for p in state.get('pending_full', {}).values()),
-            'unresolved_messages': len(mail) - machine_only, 'skipped_automated': machine_only,
+            'unresolved_messages': len(mail),
             'unresolved_read': sum(item.get('read', 'abandoned') != 'abandoned' for item in mail.values()),
             'unresolved_read_abandoned': sum(item.get('read') == 'abandoned' for item in mail.values()),
             'unresolved_expired': state.get('unresolved_expired', 0),
@@ -1483,6 +1497,8 @@ def _save(out: Path, state: dict) -> None:
 
 def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     settings = load_settings(home)
+    if settings.folder_account_id is None:
+        return Outcome('failed', 'folder_account_id_required')
     try:
         store = resolve_store(home)
     except FileNotFoundError:
@@ -1508,15 +1524,17 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     hydration_due = bool(state.get('pending_full')) and now.timestamp() >= state.get('hydration_check_at', 0)
     review_due = 'calendar_review_at' not in state or (state['calendar_review_at'] is not None
                                                       and now.timestamp() >= state['calendar_review_at'])
-    if not state.get('decoder_degraded') and 'mail_other_accounts' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('attachment_policy') == 1 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due'):
+    if not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and 'mail_outside_selected_account' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('attachment_policy') == 1 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due'):
         if state.get('pending_full'):
             Run(ports, state, now, out, settings).full_text([])
             _save(out, state)
         counts = {**mapping_counts(state), **calendar_counts(state),
-                  'mail_other_accounts': state['mail_other_accounts'], **health_counts(state.get('decoder_health'))}
+                  'emails': 0, 'skipped_automated': 0,
+                  'mail_rows_reusing_prior_identity': state.get('mail_rows_reusing_prior_identity', 0),
+                  'mail_outside_selected_account': state['mail_outside_selected_account'], **health_counts(state.get('decoder_health'))}
         return Outcome('succeeded', 'store_unchanged', counts)
     try:
-        with _decode(home, out, ports.decode) as (meta, mails, events, db, files):
+        with _decode(home, out, ports.decode, settings.folder_account_id) as (meta, mails, events, db, files):
             return _process(out, ports, settings, state, signature, now, matcher, meta, mails, events, db, files)
     except FullDiskAccessRequired as error:
         return Outcome('failed', str(error), detail=error.detail)
@@ -1567,8 +1585,8 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     mails = _best_copies(mails, state)
     state['hydration_check_at'] = int((now + REFRESH_INTERVAL).timestamp())
     work = Run(ports, state, now, out, settings)
-    work.counts['legacy_merged_suppressed'] = sum(bool(m.get('legacy_merged_suppressed')) for m in mails)
-    work.counts['mail_other_accounts'] = meta['mail_other_accounts']
+    work.counts['mail_rows_reusing_prior_identity'] = sum(bool(m.get('mail_rows_reusing_prior_identity')) for m in mails)
+    work.counts['mail_outside_selected_account'] = meta['mail_outside_selected_account']
     work.counts['decoder_alarm'] = alarm
     work.counts.update(health_counts(health))
     if health.get('error_class'):
@@ -1591,7 +1609,8 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         work.leads(matcher)
         work.full_text(mails)
         mail_processed = bool(work.written or any(value for key, value in work.counts.items()
-                                                  if key not in ('mail_other_accounts', 'decoder_alarm')
+                                                  if key not in ('mail_outside_selected_account', 'mail_rows_reusing_prior_identity',
+                                                                 'decoder_alarm')
                                                   and not key.endswith(('_bp', '_sample'))))
         work.events(events, matcher, since)
         snapshot, agenda_counts = agenda(events, meta, settings, now)
@@ -1626,7 +1645,9 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         _save(out, state)
         return Outcome('failed', failed, counts)
     state.update(store=signature, high_water=int(now.timestamp()), contact_map=matcher.fingerprint(), attachment_policy=1,
-                 mail_other_accounts=meta['mail_other_accounts'])
+                 mail_outside_selected_account=meta['mail_outside_selected_account'],
+                 folder_account_id=settings.folder_account_id,
+                 mail_rows_reusing_prior_identity=work.counts['mail_rows_reusing_prior_identity'])
     _prune(state, now)
     _save(out, state)
     counts.update(mapping_counts(state))  # a run that expires items reports them itself

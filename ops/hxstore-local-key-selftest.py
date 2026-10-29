@@ -68,13 +68,18 @@ class LocalKeyExportTests(unittest.TestCase):
                     for prefix in ('', 'Re: ', 'Fw: ', 'Fwd: ')]
         with tempfile.TemporaryDirectory() as tmp:
             source, target = Path(tmp) / 'synthetic.hxd', Path(tmp) / 'synthetic.db'
-            source.write_bytes(STORE(b''.join(
+            folder = bytearray(840)
+            struct.pack_into('<H', folder, 0, 0x004d)
+            struct.pack_into('<QIQQQ', folder, 10, 50, 2, 7, 50, 7)
+            folder.extend(b'\1\1\1\1\0' + utf16('Inbox'))
+            envelope = struct.pack('<HHIH', 5, 0x04d8, len(folder) + 10, 0) + folder
+            source.write_bytes(STORE(envelope + b''.join(
                 message(0x2000 + i, sender='owner@example.test', sent=1_793_000_000 - i * 30,
                         subject=subject) for i, subject in enumerate(subjects))))
             result = subprocess.run([str(CRATE / 'target/debug/hxprobe'), 'db', str(source), str(target)],
                                     capture_output=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
-            _, mails, _ = intake._load(target, account='owner@example.test')
+            _, mails, _ = intake._load(target, account_id=7)
             self.assertCountEqual([m['subject'] for m in mails], subjects)
             prepared = intake._best_copies(mails)
             self.assertCountEqual([intake.email_context(m, 'example.test')['subject']

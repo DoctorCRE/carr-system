@@ -54,12 +54,17 @@ No installer runs as part of this source change. The later installation for anot
 
 Every field in the command is required. Unknown or duplicate fields are rejected.
 There are no owner, address, profile or credential fallbacks.
+Before deploying the folder-based intake, add the independently verified `folder_account_id` to the private machine settings.
+An absent key fails intake before copying or decoding. Changing the selected key forces a decode even for an unchanged store.
+The decoder exports folder ownership but does not map its numeric account key to a mailbox address.
+
 Optional `signing_identity` names this Mac's code-signing certificate. Omit it for ad-hoc signing.
 
 | Fields | Type and meaning |
 | --- | --- |
 | `owner` | Lowercase record-layer owner principal. It does not assert authenticated identity. |
 | `account` | Lowercase mailbox address used for window and Sent Items checks. |
+| `folder_account_id` | Positive signed 64-bit local account key from the decoded `folders.account_id`. Required for intake, optional for other services. Establish the key independently on a research copy and bind it to the configured mailbox. No address-based inference or fallback. |
 | `internal_domain` | Lowercase domain used for internal email matching. |
 | `timezone` | IANA timezone used for local windows, reports and the daily send limit. |
 | `repo` | Absolute path of the checkout the Outlook jobs run from, canonicalized when loaded. Only `bin/install-outlook-intake.sh` creates or moves it, so pulling the canonical checkout ships no Outlook code. |

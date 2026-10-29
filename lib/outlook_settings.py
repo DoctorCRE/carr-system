@@ -41,6 +41,7 @@ class OutlookSettings:
     model: str = 'haiku'
     partner_cc: str = ''
     signing_identity: str = ''
+    folder_account_id: int | None = None
 
     @property
     def decoder(self) -> Path:
@@ -129,7 +130,10 @@ def load_settings(home: Path | None = None) -> OutlookSettings:
         if (not isinstance(identity, str) or not identity.strip() or identity == '-'
                 or identity != identity.strip() or any(ord(c) < 32 for c in identity)):
             fail('signing_identity', 'must name a code-signing identity without control characters or surrounding spaces')
-    for name in sorted(expected - {'model', 'partner_cc', 'signing_identity'}):
+    if 'folder_account_id' in values and (type(values['folder_account_id']) is not int
+                                           or not 0 < values['folder_account_id'] < 2**63):
+        fail('folder_account_id', 'must be a positive signed 64-bit store account key')
+    for name in sorted(expected - {'model', 'partner_cc', 'signing_identity', 'folder_account_id'}):
         if name not in values:
             fail(name, 'required')
         value = values[name]
