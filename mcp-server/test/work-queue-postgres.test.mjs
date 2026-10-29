@@ -238,3 +238,32 @@ test('the read saves a finish once on the side connection, and later reads keep 
   assert.equal(bounds.at(-1), unfinished[0], 'once saved, the window starts at the oldest unfinished job');
   assert.ok(bounds.at(-1) > bounds[0] && bounds.at(-1) <= open.created_at);
 });
+
+
+test('launcher registers an exact card and start atomically, with registered slices only', async () => {
+  const work_request = await request('WR-000025');
+  const args = job(work_request, { slice: 2, job: 7, runner_job_id: 'codex-launcher', repository: 'DoctorCRE/carr-system' });
+  await assert.rejects(command('dispatch-job', args), { message: 'slice_not_found' });
+  await command('plan-work-request-slices', { work_request, slices: ['First slice', 'Second slice'], idempotency_key: randomUUID() });
+  const first = await command('dispatch-job', args);
+  assert.equal(first.card_id, 'WR25.S2.J7');
+  assert.equal(first.runner_job_id, 'codex-launcher');
+  assert.deepEqual(await command('dispatch-job', args), { ...first, replayed: true });
+  const rows = (await command('work-queue')).jobs.filter(row => row.work_request === work_request);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].model, 'synthetic-model');
+  assert.ok(rows[0].started_at);
+});
+
+
+test('launcher starts a queued card with actual execution settings and preserves its copy', async () => {
+  const work_request = await request('WR-000026');
+  const repository = 'DoctorCRE/carr-system';
+  await command('dispatch-job', job(work_request, { repository }));
+  await command('dispatch-job', job(work_request, { repository, job: 1, runner_job_id: 'queued-launcher',
+    model: 'selected-model', effort: 'medium', card_title: 'Codex job' }));
+  const row = (await command('work-queue')).jobs.find(row => row.work_request === work_request);
+  assert.equal(row.model, 'selected-model');
+  assert.equal(row.effort, 'medium');
+  assert.equal(row.card_title, 'Queue work');
+});
