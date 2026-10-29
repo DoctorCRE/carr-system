@@ -25,6 +25,12 @@ export const PULL_REQUEST_TTL_MS = 60_000;
 // and review and merge wait on others, so none of those is ever stale.
 export const STALE_AFTER_MS = 24 * 3_600_000;
 const CARD_LINE = /^Card:[ \t]*(WR\d+\.S\d+\.J\d+)\b/gmu;
+const validSliceChange = change => change && typeof change === 'object' && Object.keys(change).length === 2
+  && typeof change.pr_url === 'string' && typeof change.merge_commit_sha === 'string'
+  && /^https:\/\/github[.]com\/(DoctorCRE\/carr-system|jbookout\/(doctorcre-app|software-factory))\/pull\/[1-9][0-9]*$/.test(change.pr_url)
+  && /^[0-9a-fA-F]{40}$/.test(change.merge_commit_sha);
+const mergedJobChanges = finished => finished?.stage === 'merged' ? finished.prs.filter(pr => pr.state === 'merged')
+  .map(pr => ({ pr_url: pr.url, ...(pr.merge_commit_sha ? { merge_commit_sha: pr.merge_commit_sha } : {}) })) : [];
 const unavailablePullRequests = async repos => repos.map(repo => ({ repo, state: 'unavailable', reason: 'no_github_reader', prs: [] }));
 
 // One GitHub search per repository per TTL, shared by every caller in this isolate; failures are cached too.
@@ -110,7 +116,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
     if (args.idempotency_key && !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(args.idempotency_key)) refuse('invalid_idempotency_key');
   };
   const request = async (c, actor, ref) => {
-    const row = (await c.query(`select w.id,w.ref,w.title from ops.work_request w
+    const row = (await c.query(`select w.id,w.ref,w.title,w.state from ops.work_request w
       where w.ref=$1 and w.organization_tenant_id=$2 and ${readableWorkRequestSql('w')}`, [ref, organizationTenantForActor(actor)])).rows[0];
     if (!row) refuse('work_request_not_found');
     return row;
@@ -128,6 +134,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         return withEnvelope(c, actor, name, args, async () => {
           await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', ['work-queue:' + organizationTenantForActor(actor)]);
           const wr = await request(c, actor, args.work_request);
+          if (['confirmed_closed', 'declined', 'superseded', 'failed'].includes(wr.state)) refuse('work_request_terminal_state');
           const result = await run(c, actor, args, wr);
           await writeEvent(c, actor, name, 'ops_work_request', wr.id, { field: 'work_queue', new: result, idempotency_key: args.idempotency_key });
           return { ok: true, ...result };
@@ -143,9 +150,40 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         if (prior.some((row, index) => row.title !== titles[index]))
           throw new ToolError({ error: 'slice_plan_conflict', recorded_titles: prior.map(row => row.title) });
         if (!titles.length) refuse('invalid_slice_plan');
-        if (titles.length > prior.length) await c.query(`insert into ops.work_request_slice
+        if (titles.length > prior.length) await c.query(`insert into ops.work_request_slice (work_request_id,ordinal,title)
           select $1,$3::integer+ordinality,title from unnest($2::text[]) with ordinality as s(title,ordinality)`, [wr.id, titles.slice(prior.length), prior.length]);
         return { slices: titles.map((title, index) => ({ slice_id: queueCardId(wr.ref, index + 1), title })) };
+      }),
+    'close-work-request-slice': command('close-work-request-slice', 'Record a done or retired slice, or explicitly reopen it with a reason. Done requires merged change evidence.',
+      { slice, outcome: { ...text(), enum: ['open', 'done', 'retired'] }, reason: text(2000), superseded_by: positive,
+        change_refs: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false,
+          properties: { pr_url: text(300), merge_commit_sha: text(40) }, required: ['pr_url', 'merge_commit_sha'] } } },
+      ['slice', 'outcome'], async (c, actor, args, wr) => {
+        if (!['open', 'done', 'retired'].includes(args.outcome)) refuse('invalid_slice_outcome');
+        if (args.outcome !== 'done' && !args.reason?.trim()) refuse('slice_reason_required');
+        if (args.superseded_by != null && (args.outcome !== 'retired' || args.superseded_by === args.slice)) refuse('invalid_slice_successor');
+        if (args.superseded_by != null && !(await c.query('select 1 from ops.work_request_slice where work_request_id=$1 and ordinal=$2',
+          [wr.id, args.superseded_by])).rows.length) refuse('slice_not_found');
+        let changes = args.change_refs, derived_from;
+        if (args.outcome === 'done') {
+          if (changes == null) {
+            const job = (await c.query(`select j_number,finished from ops.work_request_job
+              where work_request_id=$1 and slice_ordinal=$2 and finished->>'stage'='merged' order by j_number limit 1`, [wr.id, args.slice])).rows[0];
+            if (job) { changes = mergedJobChanges(job.finished); derived_from = queueCardId(wr.ref, args.slice, job.j_number); }
+          }
+          if (!Array.isArray(changes) || !changes.length || (!derived_from && changes.some(change => !validSliceChange(change)))) refuse('slice_merged_change_required');
+        } else if (changes != null) refuse('invalid_slice_outcome');
+        const reopened_after_job = args.outcome === 'open' ? Number((await c.query(`select coalesce(max(j_number),0) as last
+          from ops.work_request_job where work_request_id=$1 and slice_ordinal=$2`, [wr.id, args.slice])).rows[0].last) : undefined;
+        const record = { outcome: args.outcome, outcome_by: actor.slug, outcome_at: new Date().toISOString(),
+          ...(args.reason ? { reason: args.reason.trim() } : {}),
+          ...(reopened_after_job != null ? { reopened_after_job } : {}),
+          ...(args.outcome === 'done' ? { change_refs: changes, ...(derived_from ? { derived_from } : {}) } : {}),
+          ...(args.superseded_by ? { superseded_by: queueCardId(wr.ref, args.superseded_by) } : {}) };
+        const saved = (await c.query(`update ops.work_request_slice set outcome=$3::jsonb
+          where work_request_id=$1 and ordinal=$2 returning ordinal`, [wr.id, args.slice, JSON.stringify(record)])).rows[0];
+        if (!saved) refuse('slice_not_found');
+        return { slice_id: queueCardId(wr.ref, saved.ordinal), ...record };
       }),
     'dispatch-job': command('dispatch-job', 'Mint a queued job from facts, or record a runner start for an existing job exactly once.',
       { slice, job: positive, runner_job_id: text(), repository: { ...text(), enum: repositories }, executor: text(), model: text(), effort: text(), card_title: text(80), description: text(500) },
@@ -171,7 +209,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         if (!/^[A-Za-z']+( [A-Za-z']+){1,2}$/.test(args.card_title)) refuse('invalid_card_title');
         if (args.description.trim().split(/[.!?](?:\s|$)/u).filter(Boolean).length !== 1) refuse('invalid_job_description');
         const ordinal = args.slice || 1;
-        if (!starting) await c.query(`insert into ops.work_request_slice select $1,1,$2
+        if (!starting) await c.query(`insert into ops.work_request_slice (work_request_id,ordinal,title) select $1,1,$2
           where not exists (select 1 from ops.work_request_slice where work_request_id=$1)`, [wr.id, wr.title]);
         if (!(await c.query('select 1 from ops.work_request_slice where work_request_id=$1 and ordinal=$2', [wr.id, ordinal])).rows.length) refuse('slice_not_found');
         const priority = Number((await c.query(`select coalesce(max(j.priority),0)+1 as next from ops.work_request_job j
@@ -213,7 +251,30 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         // it runs only on the first observation, writes no audit row, and a lost write is redone by the next read.
         for (const { key, finished } of finishes) c.sideWrite?.(`update ops.work_request_job set finished=$4::jsonb
           where work_request_id=$1 and slice_ordinal=$2 and j_number=$3 and finished is null`, [...key, JSON.stringify(finished)]);
-        return { ok: true, stale_after_hours: STALE_AFTER_MS / 3_600_000, ...view };
+        const slices = (await c.query(`select s.*,w.ref as work_request from ops.work_request_slice s
+          join ops.work_request w on w.id=s.work_request_id where w.organization_tenant_id=$1
+          and ${readableWorkRequestSql('w')} order by w.ref,s.ordinal`, [organizationTenantForActor(actor)])).rows;
+        const observed = new Map(finishes.map(({ key, finished }) => [key.join('/'), finished]));
+        const finishedJobs = rows.map(job => ({ ...job,
+          finished: job.finished ?? observed.get([job.work_request_id, job.slice_ordinal, job.j_number].join('/')) }));
+        const projected = slices.map(row => {
+          const completed = finishedJobs.find(job => {
+            if (job.work_request_id !== row.work_request_id || job.slice_ordinal !== row.ordinal
+              || job.j_number <= (row.outcome.reopened_after_job ?? 0)) return false;
+            return job.finished?.stage === 'merged' && job.finished.prs.some(pr => pr.state === 'merged');
+          });
+          let outcome = row.outcome;
+          if (outcome.outcome === 'open' && completed) {
+            outcome = { outcome: 'done', change_refs: mergedJobChanges(completed.finished),
+              derived_from: queueCardId(row.work_request, row.ordinal, completed.j_number),
+              outcome_by: actor.slug, outcome_at: new Date().toISOString() };
+            c.sideWrite?.(`update ops.work_request_slice set outcome=$3::jsonb
+              where work_request_id=$1 and ordinal=$2 and outcome=$4::jsonb`,
+            [row.work_request_id, row.ordinal, JSON.stringify(outcome), JSON.stringify(row.outcome)]);
+          }
+          return { slice_id: queueCardId(row.work_request, row.ordinal), work_request: row.work_request, title: row.title, ...outcome };
+        });
+        return { ok: true, slices: projected, stale_after_hours: STALE_AFTER_MS / 3_600_000, ...view };
       } },
   };
 }

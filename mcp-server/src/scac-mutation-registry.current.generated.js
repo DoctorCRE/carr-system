@@ -628,6 +628,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "close-work-request-slice": {
+    "ingress_key": "mcp-tool:close-work-request-slice",
+    "source_locator": "mcp-server/src/work-queue.js",
+    "schema_digest": "b3937536dd547bca2d7646ab8b150580033bfe1a2789ff1905b586a64a969a53",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "commit-winning-property": {
     "ingress_key": "mcp-tool:commit-winning-property",
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",

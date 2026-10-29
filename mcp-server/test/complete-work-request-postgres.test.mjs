@@ -23,6 +23,9 @@ before(async () => {
   const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
   await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
   await c.query(readFileSync(new URL('../../migrations/1006_complete_work_request.sql', import.meta.url), 'utf8'));
+  for (const name of ['1017_work_request_queue.sql', '1025_work_request_job_finished.sql', '1060_work_request_slice_outcome.sql'])
+    if (!(await c.query('select 1 from schema_migrations where filename=$1', [name])).rows.length)
+      await c.query(readFileSync(new URL('../../migrations/' + name, import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => { try { await c?.end(); } finally { await fixture?.close(); } });
@@ -168,4 +171,28 @@ test('user-facing completion preserves an exercised journey and refuses duplicat
   assert.equal((await command('complete-work-request',args,actor,'carr_writer')).state,'confirmed_closed');
   const row=(await c.query("select completion_evidence from ops.work_request where ref='WR-999028'")).rows[0];
   assert.equal(row.completion_evidence.user_journey_ref,'Synthetic exercised journey');
+});
+
+
+test('completion refuses open slices and all-retired plans, then accepts a done and retired plan', async () => {
+  const ref = 'WR-999030';
+  await sourcedRequest(ref);
+  const id = (await c.query('select id from ops.work_request where ref=$1', [ref])).rows[0].id;
+  await c.query("insert into ops.work_request_slice(work_request_id,ordinal,title) values($1,1,'Build scope'),($1,2,'Retired scope')", [id]);
+  const args = completion(ref);
+  await assert.rejects(command('complete-work-request', args, actor, 'carr_writer'), error => {
+    assert.equal(publicError(error).error, 'work_request_open_slices'); return true;
+  });
+  const retire = slice => command('close-work-request-slice', { work_request: ref, slice, outcome: 'retired', reason: 'Scope is no longer needed.', idempotency_key: randomUUID() }, actor, 'carr_writer');
+  await retire(1);
+  await retire(2);
+  await assert.rejects(command('complete-work-request', args, actor, 'carr_writer'), error => {
+    assert.equal(publicError(error).error, 'work_request_all_slices_retired'); return true;
+  });
+  await command('close-work-request-slice', { work_request: ref, slice: 1, outcome: 'done', change_refs: args.change_refs, idempotency_key: randomUUID() }, actor, 'carr_writer');
+  assert.equal((await command('complete-work-request', args, actor, 'carr_writer')).state, 'confirmed_closed');
+  for (const [name, extra] of [['close-work-request-slice', { slice: 1, outcome: 'open', reason: 'More scope.' }],
+    ['plan-work-request-slices', { slices: ['Build scope', 'Retired scope', 'New scope'] }]])
+    await assert.rejects(command(name, { work_request: ref, idempotency_key: randomUUID(), ...extra }, actor, 'carr_writer'),
+      error => publicError(error).error === 'work_request_terminal_state');
 });

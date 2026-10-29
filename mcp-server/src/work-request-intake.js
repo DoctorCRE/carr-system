@@ -587,11 +587,11 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
               /* work-request-intake:readable-card */`, [args.work_request, tenant])).rows[0];
         if (!row || !WORK_REQUEST_READ_STATES.includes(row.state)) throw new ToolError({ error: "work_request_not_found" });
         const slices = (await c.query(
-          `select s.ordinal,s.title from ops.work_request_slice s
+          `select s.ordinal,s.title,s.outcome from ops.work_request_slice s
              join ops.work_request w on w.id=s.work_request_id
             where w.ref=$1 and w.organization_tenant_id=$2 and ${readableWorkRequestSql("w")}
             order by s.ordinal /* work-request-intake:slices */`, [args.work_request, tenant])).rows
-          .map(slice => ({ slice_id: queueCardId(row.ref, slice.ordinal), title: slice.title }));
+          .map(slice => ({ slice_id: queueCardId(row.ref, slice.ordinal), title: slice.title, ...slice.outcome }));
         const triaged = ["triaged", "ready"].includes(row.state);
         // Withdrawal preserves intake history, so triage is keyed on its
         // recorded timestamp rather than the current lifecycle state.
@@ -779,6 +779,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
         if (!["verified_partner", "sponsored_agent"].includes(authorizationClass))
           throw new ToolError({ error: "sponsored_actor_required", authorization_class: authorizationClass });
         return withEnvelope(c, actor, "complete-work-request", { ...args, _server_actor_id: actor.id }, async () => {
+          await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', ['work-queue:' + organizationTenantForActor(actor)]);
           const current = (await c.query('select id, state, version, acceptance_criteria from ops.work_request where ref=$1 for update', [args.human_ref])).rows[0];
           if (!current) throw new ToolError({ error: "work_request_not_found" });
           if (["confirmed_closed", "declined", "superseded", "failed"].includes(current.state))
@@ -786,6 +787,9 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
           if (Number(current.version) !== args.base_version) throw new ToolError({ error: "version_conflict" });
           if (!["captured", "triaged", "ready", "verification"].includes(current.state))
             throw new ToolError({ error: "work_request_not_completable" });
+          const slices = (await c.query('select outcome from ops.work_request_slice where work_request_id=$1', [current.id])).rows;
+          if (slices.some(slice => slice.outcome.outcome === 'open')) throw new ToolError({ error: 'work_request_open_slices' });
+          if (slices.length && slices.every(slice => slice.outcome.outcome === 'retired')) throw new ToolError({ error: 'work_request_all_slices_retired' });
           const capsule = {
             acceptance_predicates: current.acceptance_criteria.map(criterion => {
               const lines = Array.isArray(args.criterion_evidence) ? args.criterion_evidence.filter(line => line?.id === criterion.id) : [];
