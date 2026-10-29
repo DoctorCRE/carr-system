@@ -240,6 +240,8 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         }
     }
 
+    let message_objects = objects.messages();
+
     for suffix in ["", "-wal", "-shm"] {
         let _ = std::fs::remove_file(format!("{db_path}{suffix}"));
     }
@@ -374,6 +376,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              conversation_depth INTEGER, -- 0 for a thread start, +1 per reply level
              in_reply_to        TEXT,    -- parent Message-ID without angle brackets
              subject            TEXT,    -- '' when the store holds an empty subject
+             sender             TEXT,
              -- 'listed' (rows in recipients), 'none' (no recipient objects) or
              -- 'conflict' (cached revisions of a recipient disagree; none exported).
              recipients_status  TEXT NOT NULL
@@ -460,6 +463,27 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 .filter(|t| Some(**t) != r.sender.as_deref())
                 .map(|t| t.to_string())
                 .collect();
+            if r.local_keys.len() == 1 {
+                if let Some(object) = r.local_keys.first().and_then(|key| message_objects.get(key)) {
+                    if let Some(subject) = object.subject.as_ref().filter(|s| !s.trim().is_empty()) {
+                        r.subject = Some(subject.clone());
+                    }
+                    if let Some(sender) = object.sender.as_ref().filter(|s| !s.trim().is_empty()) {
+                        if r.sender.as_deref() != Some(sender) {
+                            r.sender_name = None;
+                        }
+                        r.sender = Some(sender.clone());
+                    }
+                    if let Some(recipients) = &object.recipients {
+                        let listed: Vec<String> = recipients.iter()
+                            .filter(|r| matches!(r.kind, message::TO | message::CC))
+                            .map(|r| r.address.clone()).collect();
+                        if !listed.is_empty() {
+                            r.recipients = listed;
+                        }
+                    }
+                }
+            }
             r.preview = m.get(schema::Key::Preview).map(str::to_string);
             if r.html.is_some() {
                 r.body_source = Some("inline");
@@ -628,7 +652,6 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     let with_folder = best.iter().filter(|r| !r.folder_ids.is_empty()).count();
     let multi_folder = best.iter().filter(|r| r.folder_ids.len() > 1).count();
     println!("  {} folders; {with_folder}/{stored} messages linked ({multi_folder} with multiple observed folders)", folders.folders.len());
-    let message_objects = objects.messages();
     println!(
         "  {} message objects; {} with a conversation, {} with recipients",
         message_objects.len(),
@@ -683,8 +706,8 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         }
         let mut ins_object = tx
             .prepare(
-                "INSERT INTO message_objects(local_key,conversation_id,conversation_depth,in_reply_to,subject,
-                                             recipients_status) VALUES (?1,?2,?3,?4,?5,?6)",
+                "INSERT INTO message_objects(local_key,conversation_id,conversation_depth,in_reply_to,subject,sender,
+                                             recipients_status) VALUES (?1,?2,?3,?4,?5,?6,?7)",
             )
             .expect("prepare message objects");
         let mut ins_recipient = tx
@@ -701,7 +724,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             let conversation = m.conversation_id.map(|g| g.iter().map(|b| format!("{b:02x}")).collect::<String>());
             ins_object
                 .execute(rusqlite::params![*key as i64, conversation, m.conversation_depth.map(|d| d as i64),
-                                           m.in_reply_to, m.subject, status])
+                                           m.in_reply_to, m.subject, m.sender, status])
                 .expect("insert message object");
             let mut positions: BTreeMap<u32, i64> = BTreeMap::new();
             for r in m.recipients.iter().flatten() {

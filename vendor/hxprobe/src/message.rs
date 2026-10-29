@@ -22,6 +22,7 @@ pub(crate) const RECIPIENT: (&[u16], u16) = (&[0x015e], 0x0055);
 const CONVERSATION_INDEX: usize = 1166;
 const IN_REPLY_TO: usize = 1202;
 const ITEM_CLASS: usize = 1226;
+const SENDER: usize = 1386;
 const SUBJECT: usize = 1422;
 /// The variable part starts after the descriptor table.
 const DESCRIPTORS_END: usize = 1430;
@@ -43,11 +44,12 @@ pub fn kind_name(code: u32) -> Option<&'static str> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct Revision {
     conversation_index: Option<Vec<u8>>,
     in_reply_to: Option<String>,
     subject: Option<String>,
+    sender: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,17 +69,17 @@ pub struct Message {
     pub in_reply_to: Option<String>,
     /// `Some("")` when the store holds an empty subject.
     pub subject: Option<String>,
+    pub sender: Option<String>,
     /// `None` when revisions of one recipient object disagree.
     pub recipients: Option<Vec<Recipient>>,
 }
 
 #[derive(Default)]
 pub struct Index {
-    revisions: BTreeMap<u64, BTreeSet<RevisionKey>>,
+    revisions: BTreeMap<u64, BTreeSet<Revision>>,
     recipients: BTreeMap<u64, BTreeMap<u64, BTreeSet<RecipientKey>>>,
 }
 
-type RevisionKey = (Option<Vec<u8>>, Option<String>, Option<String>);
 type RecipientKey = (u32, String, String);
 
 fn u32_at(data: &[u8], at: usize) -> Option<u32> {
@@ -136,6 +138,7 @@ fn revision(object: &[u8]) -> Option<Revision> {
         conversation_index: index,
         in_reply_to: in_reply_to.flatten(),
         subject: subject.flatten(),
+        sender: field(SENDER)?.and_then(text),
     })
 }
 
@@ -165,7 +168,7 @@ impl Index {
                 continue;
             };
             if let Some(r) = revision(object) {
-                self.revisions.entry(key).or_default().insert((r.conversation_index, r.in_reply_to, r.subject));
+                self.revisions.entry(key).or_default().insert(r);
             }
         }
         for (_, object) in folder::envelopes(data, RECIPIENT) {
@@ -179,7 +182,7 @@ impl Index {
         self.revisions
             .iter()
             .map(|(&key, revs)| {
-                let index = agreed(revs.iter().map(|r| r.0.clone())).flatten();
+                let index = agreed(revs.iter().map(|r| r.conversation_index.clone())).flatten();
                 let recipients = match self.recipients.get(&key) {
                     None => Some(Vec::new()),
                     // Object keys give the order within each kind.
@@ -192,8 +195,9 @@ impl Index {
                 let message = Message {
                     conversation_id: index.as_ref().map(|i| i[6..22].try_into().unwrap()),
                     conversation_depth: index.as_ref().map(|i| (i.len() - 22) / 5),
-                    in_reply_to: agreed(revs.iter().map(|r| r.1.clone())).flatten(),
-                    subject: agreed(revs.iter().map(|r| r.2.clone())).flatten(),
+                    in_reply_to: agreed(revs.iter().map(|r| r.in_reply_to.clone())).flatten(),
+                    subject: agreed(revs.iter().map(|r| r.subject.clone())).flatten(),
+                    sender: agreed(revs.iter().map(|r| r.sender.clone())).flatten(),
                     recipients,
                 };
                 (key, message)

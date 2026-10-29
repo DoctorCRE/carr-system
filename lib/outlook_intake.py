@@ -206,7 +206,14 @@ class Outcome:
     detail: str = ''
 
 
-MAIL_STORE_COUNTERS = ('mail_outside_selected_account', 'mail_account_ambiguous', 'mail_account_unresolved')
+SUBJECT_FOLDER_CLASSES = {
+    'sent': ('sent', 'sent items', 'sent mail'), 'inbox': ('inbox',), 'archive': ('archive',),
+    'deleted': ('deleted items', 'deleted', 'trash'), 'junk': ('junk email', 'junk', 'spam'),
+    'drafts': ('drafts',), 'user': (), 'unknown': (),
+}
+MAIL_STORE_COUNTERS = ('mail_outside_selected_account', 'mail_account_ambiguous', 'mail_account_unresolved',
+                       'admitted', 'subject_decoded', 'subject_missing',
+                       *('subject_missing_' + kind for kind in SUBJECT_FOLDER_CLASSES))
 
 # Standing totals recomputed from state or the store every run; every other count is this run's.
 BACKLOG_COUNTS = frozenset((
@@ -390,7 +397,7 @@ def _attachment_metadata(con: sqlite3.Connection) -> dict[int, list[dict]]:
 
 
 def _message_object_fields(con: sqlite3.Connection) -> dict[int, dict]:
-    """Use stored fields only for one-to-one message row and object links."""
+    """Project agreed object fields when a row names exactly one local key."""
     tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if not {'message_objects', 'message_keys'} <= tables:
         return {}
@@ -400,16 +407,17 @@ def _message_object_fields(con: sqlite3.Connection) -> dict[int, dict]:
                 "SELECT local_key, kind, address FROM recipients WHERE kind IN ('to', 'cc') "
                 'ORDER BY local_key, kind, position'):
             recipients.setdefault(key, {}).setdefault(kind, []).append(address)
+    object_columns = {r['name'] for r in con.execute('PRAGMA table_info(message_objects)')}
+    sender = 'o.sender' if 'sender' in object_columns else 'NULL AS sender'
     found = {}
     for row in con.execute(
             'WITH k AS (SELECT message_id, MIN(local_key) AS local_key FROM message_keys '
-            'GROUP BY message_id HAVING COUNT(DISTINCT local_key) = 1), '
-            'unique_keys AS (SELECT local_key FROM message_keys '
-            'GROUP BY local_key HAVING COUNT(DISTINCT message_id) = 1) '
-            'SELECT k.message_id, o.local_key, o.subject, o.conversation_id, o.recipients_status '
-            'FROM k JOIN unique_keys ON unique_keys.local_key = k.local_key '
+            'GROUP BY message_id HAVING COUNT(DISTINCT local_key) = 1) '
+            f'SELECT k.message_id, o.local_key, o.subject, o.conversation_id, o.recipients_status, {sender} '
+            'FROM k '
             'JOIN message_objects o ON o.local_key = k.local_key'):
-        fields = {name: row[name] for name in ('subject', 'conversation_id') if row[name] is not None}
+        fields = {name: row[name] for name in ('subject', 'conversation_id', 'sender')
+                  if row[name] is not None and str(row[name]).strip()}
         lists = recipients.get(row['local_key'])
         # No observed recipient objects does not prove an empty recipient list.
         if row['recipients_status'] == 'listed' and lists:
@@ -417,6 +425,22 @@ def _message_object_fields(con: sqlite3.Connection) -> dict[int, dict]:
                           cc=', '.join(lists.get('cc', [])) or None)
         found[row['message_id']] = fields
     return found
+
+
+def _subject_counts(mails: list[dict]) -> dict:
+    counts = dict.fromkeys(('subject_decoded', 'subject_missing',
+                            *('subject_missing_' + kind for kind in SUBJECT_FOLDER_CLASSES)), 0)
+    counts['admitted'] = len(mails)
+    for mail in mails:
+        if (mail['subject'] or '').strip():
+            counts['subject_decoded'] += 1
+            continue
+        counts['subject_missing'] += 1
+        folders = {path.rsplit('/', 1)[-1].strip().lower() for path in mail['folders']}
+        kind = next((kind for kind, names in SUBJECT_FOLDER_CLASSES.items() if folders.intersection(names)),
+                    'user' if folders else 'unknown')
+        counts['subject_missing_' + kind] += 1
+    return counts
 
 
 def _load(db: Path, account_id: int | None = None, account_address: str | None = None) -> tuple[dict, list[dict], list[dict]]:
@@ -437,7 +461,10 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
             f'{local_keys}, {context_columns} FROM messages')]
         object_fields = _message_object_fields(con)
         for m in mails:
-            m.update(object_fields.get(m['id'], {}))
+            fields = object_fields.get(m['id'], {})
+            if fields.get('sender') and fields['sender'].lower() != (m['sender'] or '').lower():
+                m['sender_name'] = None
+            m.update(fields)
         meta['health_store_mails'] = list(mails)
         ownership: dict[int, set[int | None]] = {}
         if account_id is not None:
@@ -477,6 +504,7 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
             m['row_ids'] = [message_id]
             m['folders'] = paths.get(message_id, [])
             m['attachments'] = attachments.get(message_id, [])
+        meta.update(_subject_counts(mails))
         meta['health_mails'] = mails
         events = [dict(r) for r in con.execute('SELECT * FROM events')]
         attendees: dict[int, list] = {}
@@ -1569,7 +1597,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     hydration_due = bool(state.get('pending_full')) and now.timestamp() >= state.get('hydration_check_at', 0)
     review_due = 'calendar_review_at' not in state or (state['calendar_review_at'] is not None
                                                       and now.timestamp() >= state['calendar_review_at'])
-    if state.get('account_binding') == _hash(settings.account.strip().lower()) and not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and 'mail_outside_selected_account' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('attachment_policy') == 1 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due'):
+    if state.get('account_binding') == _hash(settings.account.strip().lower()) and not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and all(name in state for name in MAIL_STORE_COUNTERS) and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('attachment_policy') == 1 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due'):
         if state.get('pending_full'):
             Run(ports, state, now, out, settings).full_text([])
             _save(out, state)
@@ -1613,7 +1641,8 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     _save(out, state)
     if 'block_verification' in health['failing'] and 'block_verification' in health['eligible']:
         work = Run(ports, state, now, out, settings)
-        work.counts.update(decoder_alarm=alarm, writes_deferred=1, **health_counts(health))
+        work.counts.update(decoder_alarm=alarm, writes_deferred=1, **health_counts(health),
+                           **{name: meta[name] for name in MAIL_STORE_COUNTERS})
         work.report(out)
         state['decoder_alarm_delivered'] = True
         _save(out, state)
@@ -1621,6 +1650,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     if (meta.get('event_identities') or 0) > 0 and not meta.get('events_decoded'):
         work = Run(ports, state, now, out, settings)
         work.counts.update(health_counts(health))
+        work.counts.update({name: meta[name] for name in MAIL_STORE_COUNTERS})
         if health.get('error_class'):
             work.counts['decoder_health_error_' + health['error_class']] = 1
         work.report(out)

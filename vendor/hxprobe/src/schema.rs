@@ -128,7 +128,7 @@ pub fn build_bounded(blob: &[u8], anchor: usize, end: usize, back: usize) -> Map
         .collect();
     for (i, f) in nearest.iter().enumerate() {
         let t = f.text.trim();
-        if record::looks_like_email(t) {
+        if record::looks_like_email(t) && !is_message_id(t) {
             push!(Key::SenderAddress, f, -(i as isize) - 1, record::undouble_pub(t));
             // The display name is the run *immediately* adjacent to the
             // address -- either just before it (the schema's Name/Address
@@ -166,8 +166,10 @@ pub fn build_bounded(blob: &[u8], anchor: usize, end: usize, back: usize) -> Map
         let seq = i as isize + 1;
         let t = f.text.trim();
 
-        if is_message_id(t) && !slots.iter().any(|s| s.key == Key::InternetMessageId) {
-            push!(Key::InternetMessageId, f, seq, t.trim_matches(['<', '>']).to_string());
+        if is_message_id(t) {
+            if !slots.iter().any(|s| s.key == Key::InternetMessageId) {
+                push!(Key::InternetMessageId, f, seq, t.trim_matches(['<', '>']).to_string());
+            }
             continue;
         }
         if record::looks_like_email(t) {
@@ -209,6 +211,7 @@ pub fn build_bounded(blob: &[u8], anchor: usize, end: usize, back: usize) -> Map
         .iter()
         .filter(|f| f.rel <= SUBJECT_MAX_REL)
         .chain(before.iter().rev())
+        .filter(|f| !is_message_id(&record::undouble_pub(f.text.trim())))
         .collect();
     // The `Topic` half of the pair is not always a standalone run. It is
     // commonly appended to the packed recipient-name collection, so the record
