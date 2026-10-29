@@ -7,7 +7,9 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import assert from 'node:assert/strict';
+import { appKeysValid, vendorRowRequired, vendorRowOptional, vendorDetailRequired, vendorDetailOptional } from './fixtures/vendor-directory-app-keys.mjs';
 import { TOOLS } from '../src/tools.js';
+import { parseBusinessQuery, parseBusinessRecordQuery, readBusinessList, readBusinessRecord } from '../src/workspace-business-read.js';
 
 test('vendor meetings exposes a read-only versioned contract', () => {
   assert.ok(TOOLS['read-vendor-meetings'], 'V01 vendor meetings reader is registered');
@@ -141,7 +143,7 @@ test('holds and vendor or lead restrictions stay out of Suggested',async()=>{
 });
 
 test('both partners traverse exact contacts and scoped Unicode searches without duplicated pages',async(t)=>{
- t.mock.timers.enable({apis:['Date'],now:Date.now()});
+ t.mock.timers.enable({apis:['Date'],now:Date.parse('2026-01-01T00:00:00Z')});
  const query='界'.repeat(80);
  const f=await candidate({name:query});
  const second=(await c.query("insert into party(kind,name,org_id,created_by,updated_by) values('person',$1,$2,$3,$3) returning id",[query+' second',f.company,actor.id])).rows[0].id;
@@ -210,4 +212,89 @@ test('not-workable and out-of-market vendors stay in Research, never Suggested',
  const avoided=await candidate();
  await c.query("update vendor set disposition='avoid' where id=$1",[avoided.vendor]);
  assert.ok((await read({view:'research'})).items.find(i=>i.vendor_id===avoided.vendor).missing.includes('workable_vendor'));
+});
+
+async function directory(vendor, contract = 'vendor-directory.v2') {
+ await c.query('begin read only');
+ try {
+  await c.query('set local role carr_reader');
+  const options = {client:c, actor, dataset:'vendors', correlationId:'synthetic-directory'};
+  const detail = await readBusinessRecord({...options,id:vendor,...parseBusinessRecordQuery(new URLSearchParams(contract ? {contract} : {}),'joe')});
+  const list = await readBusinessList({...options,query:parseBusinessQuery('vendors',new URLSearchParams({q:detail.record.name,...(contract ? {contract} : {})}),'joe')});
+  return {detail:detail.record,list};
+ } finally {await c.query('rollback');}
+}
+
+test('directory list and detail expose named people and verified offices without requiring phone or email',async()=>{
+ const f=await candidate();
+ const result=await directory(f.vendor);
+ const person=result.detail.people[0];
+ assert.equal(person.contact.id,f.contact);
+ assert.equal(person.contact.email,null);
+ assert.equal(person.contact.phone,null);
+ assert.equal(person.company.id,f.company);
+ assert.equal(person.office.street_address,OFFICE_STREET);
+ assert.equal(person.office.source,'https://example.invalid/team');
+ assert.equal(person.research.status,'office_verified');
+ assert.deepEqual(result.list.rows.find(row=>row.id===f.vendor).people,[person]);
+ const legacy=await directory(f.vendor,null);
+ assert.equal(Object.hasOwn(legacy.detail,'people'),false);
+ assert.equal(Object.hasOwn(legacy.list.rows.find(row=>row.id===f.vendor),'people'),false);
+});
+
+test('directory research follows the newest finding and never inherits an organization office',async()=>{
+ const f=await candidate({office:false});
+ await finding(f.company);
+ let person=(await directory(f.vendor)).detail.people[0];
+ assert.equal(person.office,null);
+ assert.equal(person.research.status,'not_researched');
+ await finding(f.contact);
+ assert.equal((await directory(f.vendor)).detail.people[0].research.status,'office_verified');
+ for(const [value,columns] of [
+  [{found:false},{}], [{found:'yes'},{}], [{epistemic_status:'disputed'},{}], [{internal:true},{}],
+  [{proposes_correction:{field:'address',proposed:'Other office'}},{}],
+  [{location_type:'home'},{}], [{street_address:' '},{}], [{city:42},{}],
+  [{},{expires_on:'2000-01-01'}], [{},{observed_at:'2099-01-01'}],
+ ]) {
+  await finding(f.contact,value,columns);
+  person=(await directory(f.vendor)).detail.people[0];
+  assert.equal(person.office,null);
+  assert.equal(person.research.status,'needs_review');
+  assert.ok(person.research.finding_id);
+  assert.ok(person.research.observed_at);
+ }
+});
+
+test('directory nests exact live named people without multiplying vendor counts',async()=>{
+ const f=await candidate();
+ const other=(await c.query("insert into party(kind,name,org_id,created_by,updated_by) values('person','Synthetic second contact',$1,$2,$2) returning id",[f.company,actor.id])).rows[0].id;
+ let result=await directory(f.vendor);
+ assert.equal(result.list.total,1);
+ assert.equal(result.list.rows.length,1);
+ assert.deepEqual(result.detail.people.map(p=>p.contact.id),[f.contact,other].sort());
+ assert.deepEqual(result.list.rows[0].people,result.detail.people);
+ const direct=(await c.query("insert into vendor(party_id,category,created_by,updated_by) values($1,'fixture_lender',$2,$2) returning id",[f.contact,actor.id])).rows[0].id;
+ assert.deepEqual((await directory(direct)).detail.people.map(p=>p.contact.id),[f.contact]);
+ await c.query("update party set deleted_at=now() where id=$1",[other]);
+ await c.query("update party set name=' ' where id=$1",[f.contact]);
+ result=await directory(f.vendor);
+ assert.deepEqual(result.detail.people,[]);
+ assert.deepEqual(result.list.rows[0].people,[]);
+});
+
+
+test('v1 directory keys equal the main contract and satisfy strict app row and detail rules',async()=>{
+ const f=await candidate();
+ const result=await directory(f.vendor,'vendor-directory.v1');
+ const row=result.list.rows.find(row=>row.id===f.vendor);
+ // Main's v1 emits every optional directory field. These fixtures also pin its exact keys.
+ for(const [value,required,optional] of [
+  [row,vendorRowRequired,vendorRowOptional],
+  [result.detail,vendorDetailRequired,vendorDetailOptional],
+ ]) {
+  assert.equal(Object.hasOwn(value,'people'),false);
+  assert.deepEqual(Object.keys(value).sort(),[...required,...optional].sort());
+  assert.equal(appKeysValid(value,required,optional),true);
+  assert.equal(appKeysValid({...value,people:[]},required,optional),false,'app refuses leaked people');
+ }
 });
