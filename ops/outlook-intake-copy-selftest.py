@@ -380,6 +380,10 @@ class InstallerTest(unittest.TestCase):
                          'ops/launchd/com.carr.outlook-outbox.plist',
                          'ops/launchd/com.carr.outlook-triage.plist'):
             shutil.copyfile(ROOT / relative, self.repo / relative)
+        shutil.copytree(ROOT / 'lib', self.repo / 'lib', dirs_exist_ok=True)
+        shutil.copyfile(ROOT / 'ops/config-as-code.py', self.repo / 'ops/config-as-code.py')
+        shutil.copyfile(ROOT / 'ops/git_env.py', self.repo / 'ops/git_env.py')
+        shutil.copytree(ROOT / 'ops/config', self.repo / 'ops/config')
         for relative in ('vendor/hxprobe/Cargo.toml', 'spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py'):
             (self.repo / relative).write_text('synthetic decoder source\n')
         (self.repo / '.venv/bin/python').symlink_to(sys.executable)
@@ -403,7 +407,7 @@ class InstallerTest(unittest.TestCase):
         self.sign_tools = self.root / 'signing tools'
         self.sign_tools.mkdir()
         launchctl = self.sign_tools / 'launchctl'
-        launchctl.write_text('#!/bin/sh\nexit 0\n')
+        launchctl.write_text('#!/bin/sh\necho \"Could not find service \\\"com.carr.outlook-refresh\\\"\" >&2\nexit 113\n')
         launchctl.chmod(0o700)
         self.sign_log = self.root / 'signing-calls'
         codesign = self.sign_tools / 'codesign'
@@ -435,6 +439,38 @@ else:
                    'installer-test', str(self.home), str(self.repo / f'bin/install-outlook-{name}.sh'), *args]
         return subprocess.run(command, capture_output=True, text=True, check=check,
                               env={**fixture_env(), 'SIGN_LOG': str(self.sign_log), **(signing_env or {})})
+
+    def test_installer_retires_refresh_and_is_repeatable(self):
+        agents = self.home / 'Library/LaunchAgents'
+        agents.mkdir(parents=True)
+        live = agents / 'com.carr.outlook-refresh.plist'
+        live.write_bytes(plistlib.dumps({'Label': 'com.carr.outlook-refresh'}))
+        marker = self.root / 'loaded'
+        marker.write_text(str(live))
+        launchctl = self.sign_tools / 'launchctl'
+        launchctl.write_text("""#!/usr/bin/python3
+import os, pathlib, sys
+marker = pathlib.Path(os.environ['LAUNCH_MARKER'])
+if sys.argv[1] == 'bootout':
+    marker.unlink()
+elif marker.exists():
+    print('path = ' + marker.read_text())
+else:
+    print('Could not find service "com.carr.outlook-refresh"', file=sys.stderr)
+    sys.exit(113)
+""")
+        launchctl.chmod(0o700)
+        result = self.install(check=False, signing_env={'LAUNCH_MARKER': str(marker)})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(marker.exists())
+        self.assertFalse(live.exists())
+        copies = list((self.home / 'Library/LaunchAgents-quarantine/carr-retired').glob('*/com.carr.outlook-refresh.plist'))
+        self.assertEqual(len(copies), 1)
+        self.install(signing_env={'LAUNCH_MARKER': str(marker)})
+        self.assertEqual(len(list(copies[0].parent.parent.glob('*/com.carr.outlook-refresh.plist'))), 1)
+        marker.write_text(str(live))
+        self.install(signing_env={'LAUNCH_MARKER': str(marker)})
+        self.assertFalse(marker.exists())
 
     def test_installer_uses_settings_without_a_machine_role_and_preserves_the_granted_binary(self):
         result = self.install()

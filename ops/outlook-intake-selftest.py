@@ -1795,6 +1795,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(args['detail'], 'Can we meet Thursday at ten')
         self.assertEqual(result.counts['preview_only'], 1)
         self.assertIn('preview_only', self.report_text())
+        self.assertFalse((self.out() / 'needs-refresh.json').exists())
 
     def test_hydration_rechecks_sidecars_despite_unsupported_calendar(self):
         preview = mail('pat@example.test', -timedelta(hours=1), body='Hello', kind='preview', copy_key='hydrate')

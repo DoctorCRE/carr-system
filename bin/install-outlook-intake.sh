@@ -51,6 +51,18 @@ if [ "$REPO" != "$RUNTIME" ]; then
   exec /bin/zsh "$RUNTIME/bin/install-outlook-intake.sh" "$@"
 fi
 "$PY" -m lib.outlook_settings service intake
+"$PY" - "$REPO" <<'PYCODE'
+import importlib.util
+from pathlib import Path
+import sys
+
+repo = Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location('config_as_code', repo / 'ops/config-as-code.py')
+config = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(config)
+if config.reconcile_retired_launchd(True, ['com.carr.outlook-refresh.plist']):
+    raise SystemExit('install-outlook-intake: could not retire Outlook refresh LaunchAgent')
+PYCODE
 LABEL="com.carr.outlook-intake"
 SOURCE="$REPO/ops/launchd/$LABEL.plist"
 DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -99,6 +111,7 @@ from lib.outlook_settings import load_settings
 
 settings = load_settings(home)
 settings.require_repo(repo)
+
 
 from lib.outlook_helper import install_helper
 

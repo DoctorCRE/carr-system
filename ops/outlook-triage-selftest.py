@@ -1060,6 +1060,51 @@ class RefreshTest(FakeOutlookCase):
         self.assertIn('coverage=coverage_identity_ambiguous', result.detail)
 
 
+    def test_incomplete_and_changing_scans_block_triage_action(self):
+        from lib.outlook_ui import Window
+        hidden = msg('sender-hidden', 'subject-hidden', unread=True)
+        cases = [({'scroll_stuck': True}, 'coverage_incomplete'),
+                 ({'read_on_scroll': [hidden['label']]}, 'coverage_changed'),
+                 ({'replace_on_restore': ARRIVAL}, 'coverage_changed'),
+                 ({'replace_on_first_scroll': ARRIVAL}, 'coverage_changed')]
+        for options, reason in cases:
+            with self.subTest(options=options):
+                self.given([self.READ_BODY, self.UNREAD_BODY, hidden], visible_limit=2, **options)
+                with patch.dict(os.environ, self.env, clear=True):
+                    result = triage.preserve_unread(Window(4242, 13, Waits(2, 0, 0, 0, 0, 0, 0)),
+                        triage.Report(), lambda tabs: self.fail('action ran'), lambda: False)
+                self.assertEqual((result.state, result.reason), ('skipped', 'unread_set_unverified'))
+                self.assertIn('coverage=' + reason, result.detail)
+                state = json.loads(self.state.read_text())
+                self.assertEqual(state['selections'], [])
+                self.assertEqual(state['moved'], [])
+                self.assertEqual(state['offsets'].get('only', 0), 0)
+                self.assertNotIn('sender-', result.detail)
+
+    def test_duplicate_identity_below_first_page_blocks_triage_action(self):
+        from lib.outlook_ui import Window
+        self.given([self.READ_BODY, self.UNREAD_BODY, UNREAD, UNREAD], visible_limit=2)
+        with patch.dict(os.environ, self.env, clear=True):
+            result = triage.preserve_unread(Window(4242, 13, Waits(2, 0, 0, 0, 0, 0, 0)),
+                triage.Report(), lambda tabs: self.fail('action ran'), lambda: False)
+        self.assertEqual((result.state, result.reason), ('skipped', 'unread_set_unverified'))
+        self.assertIn('coverage=coverage_identity_ambiguous', result.detail)
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state['selections'], [])
+        self.assertEqual(state['offsets'], {'only': 0})
+
+    def test_failed_tab_switch_blocks_triage_action(self):
+        from lib.outlook_ui import Window, UiError
+        self.given(tabs={'focused': [self.READ_BODY], 'other': [UNREAD]}, tab_switch_ignored=True)
+        with patch.dict(os.environ, self.env, clear=True):
+            with self.assertRaises(UiError) as error:
+                triage.preserve_unread(Window(4242, 13, Waits(2, 0, 0, 0, 0, 0, 0)),
+                    triage.Report(), lambda tabs: self.fail('action ran'), lambda: False)
+        self.assertIn('tab_switch_failed requested=other before=focused observed=focused', str(error.exception))
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state['selections'], [])
+        self.assertEqual(self.unread_labels(state), {UNREAD['label']})
+
     def test_list_scrolling_preserves_selection_and_every_read_flag(self):
         from lib.outlook_ui import Window
         hidden = msg('sender-hidden', 'subject-hidden', unread=True)

@@ -1465,7 +1465,7 @@ def cmd_pull(apply):
     return 0
 
 
-def reconcile_retired_launchd(apply):
+def reconcile_retired_launchd(apply, filenames=None):
     """Unload and quarantine CARR definitions absent from the repository.
 
     Holds prevent activation of declared jobs, not retirement of deleted jobs.
@@ -1475,18 +1475,22 @@ def reconcile_retired_launchd(apply):
     if not os.path.isdir(LAUNCHD_REPO):
         print(f"  RETIRE FAILED  template directory is unavailable: {LAUNCHD_REPO}")
         return [LAUNCHD_REPO]
-    for filename in carr_plists():
+    for filename in carr_plists() if filenames is None else filenames:
         if os.path.lexists(launchd_repo_path(filename)):
             continue
         label = filename.removesuffix(".plist")
         live = os.path.join(LAUNCHD_SRC, filename)
         try:
-            if os.path.islink(live) or not os.path.isfile(live):
-                raise ValueError("installed definition is not a regular file")
-            with open(live, "rb") as source:
-                definition = plistlib.load(source)
-            if not isinstance(definition, dict) or definition.get("Label") != label:
-                raise ValueError("plist Label does not match its CARR filename")
+            exists = os.path.lexists(live)
+            if not exists and filenames is None:
+                continue
+            if exists:
+                if os.path.islink(live) or not os.path.isfile(live):
+                    raise ValueError("installed definition is not a regular file")
+                with open(live, "rb") as source:
+                    definition = plistlib.load(source)
+                if not isinstance(definition, dict) or definition.get("Label") != label:
+                    raise ValueError("plist Label does not match its CARR filename")
             if not apply:
                 print(f"  would retire  {filename} (no repository template)")
                 continue
@@ -1501,6 +1505,8 @@ def reconcile_retired_launchd(apply):
                 state, detail = launchd_registration(label)
                 if stopped.returncode or state != "absent":
                     raise ValueError(f"bootout not verified: {stopped.stderr.strip()} {detail}")
+            if not exists:
+                continue
             quarantine = os.path.join(HOME, "Library", "LaunchAgents-quarantine", "carr-retired")
             os.makedirs(quarantine, exist_ok=True)
             # Each retirement reserves a private directory, so repeated runs
