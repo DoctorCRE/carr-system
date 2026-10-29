@@ -699,6 +699,22 @@ class IntakeTest(unittest.TestCase):
         state = json.loads((self.out() / intake.STATE).read_text())
         self.assertFalse(state['attachments_pending'])
 
+    def test_account_folder_admits_inbox_mail_without_decoded_recipients(self):
+        message = mail('pat@example.test', -timedelta(hours=1), recipients=None)
+        write_db(self.fake.fixture, [message])
+        with sqlite3.connect(self.fake.fixture) as con:
+            con.executescript("""
+                CREATE TABLE folders(id INTEGER, account_id INTEGER, name TEXT, parent_status TEXT, parent_id INTEGER);
+                CREATE TABLE message_folders(message_id INTEGER, folder_id INTEGER);
+                INSERT INTO folders VALUES(1,7,'Inbox','top',NULL);
+                INSERT INTO message_folders VALUES(1,1);
+            """)
+        result = intake.run(self.repo, self.home, self.fake.ports())
+        self.assertEqual(result.state, 'succeeded')
+        [(_, activity)] = self.fake.writes('log-activity')
+        self.assertEqual(activity['ref'], 'C-901')
+        self.assertEqual(activity['kind'], 'email_in')
+
     def test_mail_intake_processes_only_the_configured_account(self):
         personal = mail('lee@example.test', -timedelta(hours=1),
                         subject='Foreign mailbox', recipients='personal@example.test')
