@@ -315,6 +315,21 @@ class IntakeTest(unittest.TestCase):
     def report_text(self):
         return '\n'.join(p.read_text() for p in sorted(self.out().glob('report-*.md')))
 
+    def test_receipt_subject_coverage_counts_all_admitted_messages_and_persists(self):
+        old = mail('one@example.test', -timedelta(days=40), subject='')
+        recent = mail('two@example.test', -timedelta(hours=1), subject='Synthetic topic')
+        missing = mail('three@example.test', -timedelta(hours=2), subject='')
+        outside = dict(mail('four@example.test', -timedelta(hours=1), subject=''), folder_account=8)
+        result = self.run_intake([old, recent, missing, outside])
+        for outcome in (result, intake.run(self.repo, self.home, self.fake.ports())):
+            counts = json.loads(intake.receipt_line(outcome).split(' ', 1)[1])['counts']['backlog']
+            self.assertEqual(counts['admitted'], 4)
+            self.assertEqual(counts['subject_decoded'], 1)
+            self.assertEqual(counts['subject_missing'], 3)
+            self.assertEqual(counts['subject_missing_inbox'], 2)
+            self.assertEqual(counts['subject_missing_drafts'], 0)
+            self.assertEqual(counts['subject_missing_sent'], 1)
+
     def test_confirmed_email_links_attach_once_to_existing_deal(self):
         urls = ['https://www.loopnet.com/Listing/123', 'https://www.crexi.com/properties/456',
                 'https://docs.google.com/document/d/synthetic',
@@ -3637,11 +3652,11 @@ class LoadObjectFieldsTest(unittest.TestCase):
             con.executescript("""
                 CREATE TABLE message_keys(message_id INTEGER, local_key INTEGER);
                 CREATE TABLE message_objects(local_key INTEGER PRIMARY KEY, subject TEXT,
-                    conversation_id TEXT, recipients_status TEXT NOT NULL);
+                    conversation_id TEXT, recipients_status TEXT NOT NULL, sender TEXT);
                 CREATE TABLE recipients(local_key INTEGER, kind TEXT, kind_code INTEGER,
                     position INTEGER, address TEXT, name TEXT);
                 INSERT INTO message_keys VALUES(1,71);
-                INSERT INTO message_objects VALUES(71,'Re: Café 🏢','synthetic-thread','listed');
+                INSERT INTO message_objects VALUES(71,'Re: Café 🏢','synthetic-thread','listed','actual@example.test');
                 INSERT INTO recipients VALUES(71,'to',204,2,'second@example.test','Second');
                 INSERT INTO recipients VALUES(71,'to',204,1,'first@example.test','First');
                 INSERT INTO recipients VALUES(71,'cc',205,1,'owner@example.test','Owner');
@@ -3679,10 +3694,10 @@ class LoadObjectFieldsTest(unittest.TestCase):
     def test_object_subject_replaces_inherited_or_wrong_heuristic(self):
         self.assertEqual(self.load()[1][0]['subject'], 'Re: Café 🏢')
 
-    def test_explicit_empty_subject_is_preserved(self):
+    def test_draft_without_object_subject_keeps_text_match(self):
         with sqlite3.connect(self.db) as con:
             con.execute("UPDATE message_objects SET subject=''")
-        self.assertEqual(self.load()[1][0]['subject'], '')
+        self.assertEqual(self.load()[1][0]['subject'], 'Legacy topic')
 
     def test_null_subject_and_recipient_conflict_keep_legacy_fields(self):
         with sqlite3.connect(self.db) as con:
@@ -3700,29 +3715,27 @@ class LoadObjectFieldsTest(unittest.TestCase):
         self.assertEqual(row['recipients'], OWNER)
         self.assertIsNone(row['conversation_id'])
 
-    def test_shared_item_key_never_projects_fields(self):
+    def test_shared_key_inline_row_uses_object_fields_without_cross_pairing_multiple_keys(self):
         for competing_key in (False, True):
             with self.subTest(competing_key=competing_key):
                 with sqlite3.connect(self.db) as con:
                     con.execute('DELETE FROM messages WHERE id=2')
                     con.execute('DELETE FROM message_keys WHERE message_id=2')
-                    con.execute("UPDATE messages SET recipients='legacy-one@example.test'")
+                    con.execute("UPDATE messages SET sender='wrong@example.test', subject=NULL, "
+                                "body_kind='full', body='<html>synthetic inline body</html>' WHERE id=1")
                     con.execute("INSERT INTO messages(id,sender,recipients,subject,sent_unix,local_keys) "
-                                "VALUES(2,'other@example.test','legacy-two@example.test','Other topic',?,?)",
+                                "VALUES(2,'other@example.test','legacy@example.test','Other topic',?,?)",
                                 (ts(-timedelta(hours=2)), '71,72' if competing_key else '71'))
                     con.execute('INSERT INTO message_keys VALUES(2,71)')
                     if competing_key:
                         con.execute('INSERT INTO message_keys VALUES(2,72)')
                 rows = {m['row_ids'][0]: m for m in self.load()[1]}
-                for row_id, subject, recipient in ((1, 'Legacy topic', 'legacy-one@example.test'),
-                                                   (2, 'Other topic', 'legacy-two@example.test')):
-                    self.assertEqual(rows[row_id]['subject'], subject)
-                    self.assertEqual(rows[row_id]['recipients'], recipient)
-                    self.assertIsNone(rows[row_id]['conversation_id'])
-                    self.assertIsNone(rows[row_id]['cc'])
-                meta, mails, _ = self.load(7)
-                self.assertEqual(len(mails), 1)
-                self.assertEqual(meta['mail_account_unresolved'], 1)
+                self.assertEqual(rows[1]['subject'], 'Re: Café 🏢')
+                self.assertEqual(rows[1]['sender'], 'actual@example.test')
+                self.assertEqual(rows[1]['recipients'], 'first@example.test, second@example.test')
+                self.assertEqual(rows[2]['subject'], 'Other topic' if competing_key else 'Re: Café 🏢')
+                self.assertEqual(rows[2]['sender'], 'other@example.test' if competing_key else 'actual@example.test')
+                self.assertEqual(rows[2]['conversation_id'], None if competing_key else 'synthetic-thread')
 
     def test_missing_or_unknown_recipient_kinds_do_not_erase_legacy_addresses(self):
         for status in ('none', 'listed'):

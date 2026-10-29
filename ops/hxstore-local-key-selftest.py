@@ -109,6 +109,12 @@ class LocalKeyExportTests(unittest.TestCase):
                 counter = 'mail_account_unresolved' if unresolved else 'mail_account_ambiguous'
                 self.assertEqual(meta[counter], 1)
 
+    def test_repeated_message_ids_are_neither_subjects_nor_recipients(self):
+        rows, _ = self.export(message(0x1001, subject='<synthetic-id@example.test>'),
+                              columns='subject, recipients')
+        self.assertNotEqual(rows[0][0], '<synthetic-id@example.test>')
+        self.assertNotIn('synthetic-id@example.test', rows[0][1] or '')
+
     def test_revisions_of_one_message_export_its_key(self):
         rows, meta = self.export(message(0x1001), message(0x1001))
         self.assertEqual(rows, [('pat@example.test', 1_793_000_000, 2, str(0x1001))])

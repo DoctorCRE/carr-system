@@ -9,9 +9,14 @@ import sqlite3
 import struct
 import subprocess
 import tempfile
+import sys
+from unittest.mock import patch
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from lib import outlook_send as send
+
 CRATE = ROOT / 'vendor/hxprobe'
 STORE = runpy.run_path(str(ROOT / 'ops/hxstore-observe-selftest.py'))['store']
 BASE = 1700
@@ -32,7 +37,7 @@ def index(guid, replies=0):
 
 
 def message(key, guid=b'\x11' * 16, replies=0, subject='Synthetic thread', sender='pat@example.test',
-            in_reply_to=None, conversation_index=None):
+            in_reply_to=None, conversation_index=None, inline=False):
     """A class 00c9 message object with its expanded 00ca header at +480."""
     obj = bytearray(BASE)
     struct.pack_into('<H', obj, 0, 0x00c9)
@@ -47,11 +52,18 @@ def message(key, guid=b'\x11' * 16, replies=0, subject='Synthetic thread', sende
               'message_id': utf16(f'<{key}@example.test>'), 'subject': utf16(subject),
               'topic': utf16(subject.removeprefix('Re: ')),
               'conversation_index': conversation_index or index(guid, replies)}
+    if inline:
+        values = {'row_sender': utf16('wrong@example.test'), 'item_class': values.pop('item_class'),
+                  'sent': struct.pack('<Q', 1_793_000_000 * 10_000_000 + 621_355_968_000_000_000),
+                  'message_id': values.pop('message_id'), 'duplicate_id': utf16(f'<{key}@example.test>'),
+                  'html': b'<html><body>Synthetic inline message body with enough words.</body></html>',
+                  **values}
     if in_reply_to:
         values['in_reply_to'] = utf16(f'<{in_reply_to}@example.test>')
     data = b''
     for name, value in values.items():
-        struct.pack_into('<II', obj, SLOTS[name], len(data), len(value) | 0x8000_0000)
+        if name in SLOTS:
+            struct.pack_into('<II', obj, SLOTS[name], len(data), len(value) | 0x8000_0000)
         data += value
     return envelope(0x060f, bytes(obj) + data + utf16('Synthetic preview text for one message object'))
 
@@ -85,12 +97,17 @@ class RecipientThreadExportTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(source.read_bytes(), before)
             with sqlite3.connect(target) as db:
+                sender = 'sender' if 'sender' in {r[1] for r in db.execute('PRAGMA table_info(message_objects)')} else 'NULL'
                 return {
                     'recipients': db.execute('SELECT local_key, kind, kind_code, position, address, name '
                                              'FROM recipients ORDER BY local_key, kind_code, position').fetchall(),
                     'objects': db.execute('SELECT local_key, conversation_id, conversation_depth, in_reply_to, '
                                           'subject, recipients_status FROM message_objects '
                                           'ORDER BY local_key').fetchall(),
+                    'senders': db.execute(f'SELECT local_key, {sender} FROM message_objects ORDER BY local_key').fetchall(),
+                    'messages': db.execute('SELECT sender, subject, recipients, copies FROM messages ORDER BY id').fetchall(),
+                    'sent': tuple(send.SentRow(*r) for r in db.execute(
+                        'SELECT sender, recipients, subject, sent_unix, message_id FROM messages')),
                     'threads': db.execute('SELECT conversation_id, messages, latest_local_key '
                                           'FROM threads ORDER BY conversation_id').fetchall(),
                     'meta': dict(db.execute('SELECT key, value FROM meta')),
@@ -136,6 +153,27 @@ class RecipientThreadExportTests(unittest.TestCase):
                                           (0x9002, None, None, None, None, 'conflict')])
         self.assertEqual(out['recipients'], [(0x9001, 'to', TO, 1, 'amy@example.test', 'amy@example.test')])
         self.assertEqual(out['meta']['recipient_conflicts'], 1)
+
+    def test_inline_sent_row_decodes_object_fields_and_merges_revisions(self):
+        out = self.export(message(0xc101, sender='owner@example.test', subject='Synthetic sent topic', inline=True),
+                          message(0xc101, sender='owner@example.test', subject='Synthetic sent topic'),
+                          recipient(0xc101, 0xc111, TO, 'target@example.test'))
+        self.assertEqual(out['messages'], [('owner@example.test', 'Synthetic sent topic', 'target@example.test', 2)])
+
+    def test_confirmed_mail_matches_decoded_inline_sent_row(self):
+        out = self.export(message(0xc101, sender='owner@example.test', subject='Synthetic sent topic', inline=True),
+                          recipient(0xc101, 0xc111, TO, 'target@example.test'))
+        mail = send.Mail(('target@example.test',), (), (), 'Synthetic sent topic', 'Synthetic body')
+        with patch.object(send, 'account', return_value='owner@example.test'):
+            self.assertEqual(send.confirmed_mail(send.Snapshot(out['sent'], ()), mail, 1_793_000_000 - 5),
+                             f'{0xc101}@example.test')
+
+    def test_sender_is_exported_only_when_cached_revisions_agree(self):
+        out = self.export(message(0xc001, sender='actual@example.test'),
+                          message(0xc001, sender='actual@example.test'),
+                          message(0xc002, sender='one@example.test'),
+                          message(0xc002, sender='two@example.test'))
+        self.assertEqual(out['senders'], [(0xc001, 'actual@example.test'), (0xc002, None)])
 
     def test_an_empty_stored_subject_is_kept_apart_from_an_unknown_one(self):
         out = self.export(message(0xa001, subject=''))
