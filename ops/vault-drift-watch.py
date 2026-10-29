@@ -96,6 +96,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # the case which must say so: it requires --recovery --reason WHY, and refuses
 # with the seam named otherwise.
 sys.path.insert(0, str(_PATHLIB.Path(__file__).resolve().parents[1]))
+from lib.credential_file import read_env_file  # noqa: E402
 from lib.drive_recovery import (  # noqa: E402
     SEAM_MISSING_EXIT, add_recovery_arguments, require_recovery)
 
@@ -227,11 +228,9 @@ def load_export_ledger():
     env_path = os.path.expanduser("~/.config/carr/db.env")
     url = os.environ.get("CARR_DB_EXPORTER_URL") or os.environ.get("CARR_DB_JOBS_URL")
     if not url and os.path.exists(env_path):
-        for key in ("CARR_DB_EXPORTER_URL=", "CARR_DB_JOBS_URL="):
-            for line in open(env_path):
-                if line.startswith(key):
-                    url = line.split("=", 1)[1].strip().strip('"').strip("'")
-                    break
+        for key in ("CARR_DB_EXPORTER_URL", "CARR_DB_JOBS_URL"):
+            url = read_env_file(env_path, syntax="prefix-double-single",
+                                duplicates="first", names=(key,)).get(key)
             if url:
                 break
     if not url:

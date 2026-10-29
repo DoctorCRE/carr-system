@@ -22,7 +22,7 @@ class LeadStageJobTests(unittest.TestCase):
                 raise OSError("private-sentinel launch failure")
             with self.subTest(failure=failure), patch.object(job.record_call, "_run_process", run):
                 try:
-                    job.call_verb("record-lead-contact", args)
+                    job.require_record_reply("record-lead-contact", args)
                 except Exception:
                     rendered = traceback.format_exc()
                 else:

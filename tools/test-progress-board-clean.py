@@ -133,7 +133,7 @@ class CleanupTests(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in path.parent.iterdir()), ["test.json"])
 
     def test_live_apply_is_refused_before_reads(self):
-        with patch.object(board, "call_verb") as call:
+        with patch.object(board, "board_reply") as call:
             with self.assertRaises(SystemExit):
                 board.main(["reconcile", "test", "--live", "--apply"])
             call.assert_not_called()

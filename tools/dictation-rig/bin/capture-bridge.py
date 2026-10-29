@@ -46,7 +46,7 @@ from pathlib import Path
 from typing import Any
 
 import post_call
-from post_call import call_verb
+from post_call import call_record_command
 
 # --- constants -------------------------------------------------------------
 
@@ -488,7 +488,7 @@ def apply_automatic(session_dir: Path) -> bool:
     outcomes: dict[str, str | None] = {}
     for change in pending:
         candidate_id = change["candidate_id"]
-        ok, reply = call_verb("resolve-candidate", {
+        ok, reply = call_record_command("resolve-candidate", {
             "idempotency_key": str(uuid.uuid5(uuid.NAMESPACE_URL, f"post-call-auto:{session_dir.name}:{candidate_id}")),
             "candidate_id": candidate_id, "accept": True, "automatic": True,
             "note": f"Applied automatically from the {call_day} pipeline call",
