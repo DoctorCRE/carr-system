@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import plistlib
 import re
 import subprocess
 import stat
@@ -38,6 +39,8 @@ from lib.outlook_settings import load_settings
 OUT = Path('out/outlook-send')
 LEDGER = 'ledger.jsonl'
 NOT_DISPATCHED = ('aborted_before_dispatch', 'abort_cleanup_failed')
+PROFILE_PREFS = Path('Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity/'
+                     'ProfilePreferences.plist')
 IDLE_SECONDS = 300
 DUPLICATE_WINDOW = 24 * 3600
 CLOCK_SKEW = 5
@@ -481,6 +484,17 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
     return _await_sent(item, key, print_, ports, ledger, pressed_at, mode, submitted)
 
 
+def default_sender(home: Path | None = None) -> str | None:
+    """New Outlook's default account identifier (`<address>_<transport>`). Its scripting dictionary
+    exposes no accounts, so this profile preference is the only pre-dispatch evidence of the account a
+    scripted message sends from."""
+    try:
+        ident = plistlib.loads(((home or Path.home()) / PROFILE_PREFS).read_bytes()).get('DefaultAccountIdentifier')
+    except (OSError, plistlib.InvalidFileException, ValueError, AttributeError):
+        return None
+    return ident if isinstance(ident, str) else None
+
+
 def _script_write(mail: Mail, key: str, ports: Ports, ledger: Ledger) -> Result:
     """Compose, attach, verify and send in one AppleScript run; a partial attachment set never sends."""
     for attached in mail.attachments:
@@ -492,6 +506,8 @@ def _script_write(mail: Mail, key: str, ports: Ports, ledger: Ledger) -> Result:
             return Result(State.FAILED, 'attachment_changed')
     if any(ord(c) < 32 and c not in '\n\r\t' for c in mail.subject + mail.body):
         return Result(State.FAILED, 'unscriptable_text')
+    if not (default_sender() or '').lower().startswith(f'{account()}_'):
+        return Result(State.FAILED, 'default_sender_mismatch')
     print_ = fingerprint(mail)
     ledger.append(key, 'send', 'pressing', print_, ports.now(), attachments=mail.attachments)
     pressed_at = ports.now()

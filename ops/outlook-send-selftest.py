@@ -13,6 +13,7 @@ import traceback
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
+import plistlib
 import importlib.util
 import os
 from pathlib import Path
@@ -1357,6 +1358,8 @@ class AttachmentTests(unittest.TestCase):
         self.file.write_bytes(b'%PDF-synthetic')
         self.settings_for(attachment_root=str(self.root), attachment_max_bytes=1000)
         self.enterContext(patch.object(send_mod, 'account', lambda: ACCOUNT))
+        self.default, self.real_default_sender = f'{ACCOUNT}_ActiveSyncExchange_HxS', send_mod.default_sender
+        self.enterContext(patch.object(send_mod, 'default_sender', lambda: self.default))
         self.mailbox, self.clock, self.scripts, self.forms = FakeMailbox(), Clock(), [], []
         self.reply = 'sent'
         self.ports = Ports(lambda item: self.forms.append(item), self.mailbox, lambda: 600,
@@ -1425,6 +1428,24 @@ class AttachmentTests(unittest.TestCase):
                 self.assertEqual((result.state, result.reason), (State.REFUSED, 'partner_copy_required'))
         self.assertEqual((self.scripts, self.forms), ([], []))
         self.assertFalse((self.tmp / 'send' / send_mod.LEDGER).exists())
+
+    def test_another_default_sender_is_refused_before_dispatch(self):
+        for default in ('someone@example.test_ActiveSyncMicrosoft_HxS', None, ACCOUNT):
+            with self.subTest(default=default):
+                self.default = default
+                result = send_mod.send_submitted(self.mail(), idempotency_key='k10', ports=self.ports)
+                self.assertEqual((result.state, result.reason), (State.FAILED, 'default_sender_mismatch'))
+        self.assertEqual(self.scripts, [])
+        self.assertFalse((self.tmp / 'send' / send_mod.LEDGER).exists())
+
+    def test_default_sender_reads_the_profile_preference(self):
+        prefs = self.home / send_mod.PROFILE_PREFS
+        self.assertIsNone(self.real_default_sender(self.home))
+        prefs.parent.mkdir(parents=True)
+        prefs.write_bytes(plistlib.dumps({'DefaultAccountIdentifier': 'a@example.test_ActiveSyncExchange_HxS'}))
+        self.assertEqual(self.real_default_sender(self.home), 'a@example.test_ActiveSyncExchange_HxS')
+        prefs.write_bytes(b'not a plist')
+        self.assertIsNone(self.real_default_sender(self.home))
 
     def test_failed_cleanup_is_its_own_failure_and_never_resends(self):
         self.ports.script_send = None
