@@ -59,6 +59,7 @@ NEONCTL = os.path.join(REPO, "mcp-server", "node_modules", ".bin", "neonctl")
 # two Homebrew prefixes therefore resolved to the bare name on that machine and
 # every psql path died as FileNotFoundError deep inside subprocess — see
 # psql_bin() below, which now refuses in words instead.
+from lib.credential_file import read_env_file
 from lib.local_principal import LocalPrincipalError, local_actor_slug as _established_actor_slug
 from lib.machine_prerequisites import PSQL_CANDIDATES, find_executable
 RECEIPT_LOG = os.path.join(REPO, "out", "break-glass-receipts.log")
@@ -120,12 +121,7 @@ def _neon_api_key() -> str:
         return key
     env_file = os.path.join(os.path.expanduser("~"), ".config", "carr", "db.env")
     try:
-        with open(env_file, encoding="utf-8") as fh:
-            for line in fh:
-                if line.startswith("NEON_API_KEY="):
-                    # db.env values are shell-quoted so `set -a; . db.env` survives
-                    # an & in a DSN; strip the quotes the same way db_url() does.
-                    return line.split("=", 1)[1].strip().strip("\"'")
+        return read_env_file(env_file, syntax="prefix", duplicates="first", names=("NEON_API_KEY",)).get("NEON_API_KEY", "")
     except OSError:
         pass
     return ""

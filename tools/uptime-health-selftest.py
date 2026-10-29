@@ -38,7 +38,7 @@ class UptimeHealthTests(unittest.TestCase):
                 mock.patch.dict(sys.modules, uptime_health=module), \
                 mock.patch.dict(os.environ, {"CARR_UPTIME_RESPONSE_STATE": str(destination / "response.json")}), \
                 mock.patch.object(module, "row", partial(module.row, read=read, now=NOW)), \
-                mock.patch.object(module, "call_verb", return_value={"ok": True, "loop_id": "fixture-loop"}), \
+                mock.patch.object(module, "loop_reply", return_value={"ok": True, "loop_id": "fixture-loop"}), \
                 mock.patch.object(health_breach, "record_door", return_value=SimpleNamespace(ok=True, reply={"loops": []})), \
                 mock.patch.object(subprocess, "run", side_effect=AssertionError("unexpected subprocess")) as process, \
                 contextlib.redirect_stdout(io.StringIO()) as stdout, \
@@ -137,7 +137,7 @@ class UptimeHealthTests(unittest.TestCase):
         from unittest.mock import patch
         def call(name, payload):
             return {"ok": True, "loop_id": "fixture"}
-        with patch.object(module, "call_verb", side_effect=call):
+        with patch.object(module, "loop_reply", side_effect=call):
             self.assertEqual(module.reconcile_monitor(True, False, root), "open")
 
     def test_invalid_saved_retry_key_reports_error(self):

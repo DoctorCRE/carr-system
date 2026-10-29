@@ -17,7 +17,7 @@
 # there. Pulling the canonical checkout therefore never ships Outlook code, and
 # the granted helper's compiled paths stay the same on every later run.
 #
-# Usage: ./bin/install-outlook-intake.sh
+# Usage: ./bin/install-outlook-intake.sh [--rebuild-helper]
 
 set -eu
 
@@ -48,7 +48,7 @@ if [ "$REPO" != "$RUNTIME" ]; then
     fi
   done
   print -- "install-outlook-intake: Outlook jobs run from $RUNTIME at $SHA"
-  exec /bin/zsh "$RUNTIME/bin/install-outlook-intake.sh"
+  exec /bin/zsh "$RUNTIME/bin/install-outlook-intake.sh" "$@"
 fi
 "$PY" -m lib.outlook_settings service intake
 "$PY" -m lib.outlook_settings service refresh
@@ -84,12 +84,17 @@ fi
 "$PY" "$REPO/ops/hxprobe-source-digest.py" --build-into "$VENDOR"
 rm -f "$PIN"
 
-"$REPO/.venv/bin/python" - "$REPO" "$HOME" <<'PY'
+"$REPO/.venv/bin/python" - "$REPO" "$HOME" "$@" <<'PY'
+import argparse
 import os
 from pathlib import Path
 import sys
 
-repo, home = (Path(value).resolve() for value in sys.argv[1:])
+parser = argparse.ArgumentParser()
+parser.add_argument('--rebuild-helper', action='store_true',
+                    help='allow replacing the copy helper; ad-hoc signing requires a Full Disk Access re-grant')
+args = parser.parse_args(sys.argv[3:])
+repo, home = (Path(value).resolve() for value in sys.argv[1:3])
 sys.path.insert(0, str(repo))
 from lib.outlook_settings import load_settings
 
@@ -98,7 +103,7 @@ settings.require_repo(repo)
 
 from lib.outlook_helper import install_helper
 
-install_helper(settings)
+install_helper(settings, rebuild_helper=args.rebuild_helper)
 
 if 'outbox' in settings.services:
     label = 'com.carr.outlook-outbox'

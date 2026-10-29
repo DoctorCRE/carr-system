@@ -54,6 +54,8 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, REPO)
+from lib.credential_file import read_env_file  # noqa: E402
 OUT = os.path.join(REPO, "out", "fetch-allowlist.txt")
 
 # Staleness bound. The book changes when a client is added, which is not daily,
@@ -96,22 +98,9 @@ HOST_OK = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0
 # views or columns are skipped rather than fatal — this must not become the
 # reason a nightly run fails.
 #
-# VENDORS ARE DELIBERATELY EXCLUDED, and the first run is why. Including
-# v_export_vendors produced 98 extra domains that were not practice websites at
-# all: wellsfargo.com, bankofamerica.com, morganstanley.com, usbank.com, pnc.com,
-# mckesson.com, adp.com, hoganlovells.com, uab.edu. Those are the EMPLOYERS of
-# people in the vendor network — a banker, a lawyer, a distributor rep — and the
-# inference "a contact's email domain is a site we need to fetch" simply does not
-# hold for an employee of a large institution the way it holds for a practice
-# owner.
-#
-# The cost of getting that wrong is not theoretical. This list also extends the
-# BASH allowlist, where curl can POST, so shipping it as first written would have
-# granted every session an outbound POST channel to ninety-eight major financial,
-# legal and healthcare domains — a far better exfiltration target than anything
-# the guard currently blocks. Clients and leads only: those are the practice
-# sites the verification work actually needs to read (rules 5d44d3f3, d26d63b0),
-# and each is one owner-operator's own domain.
+# Vendor employer domains do not establish a need to fetch a practice website.
+# This list also extends the Bash allowlist, where curl can POST. Only client
+# and lead practice domains belong here (rules 5d44d3f3, d26d63b0).
 SOURCES = [
     ("v_export_clients", '"Email"'),
     ("v_export_leads", '"Email"'),
@@ -122,10 +111,7 @@ def _db_url():
     path = os.path.expanduser("~/.config/carr/db.env")
     if not os.path.exists(path):
         return None
-    for line in open(path):
-        if line.startswith("CARR_DB_EXPORTER_URL="):
-            return line.split("=", 1)[1].strip().strip("'\"")
-    return None
+    return read_env_file(path, syntax="prefix", duplicates="first", names=("CARR_DB_EXPORTER_URL",)).get("CARR_DB_EXPORTER_URL")
 
 
 def _raw_via_verb():

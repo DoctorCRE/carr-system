@@ -265,7 +265,7 @@ class PagedPublicationTests(unittest.TestCase):
         self.path = root / "boards/carr-v5.json"
         self.store = {}
         self.writes = []
-        self.enterContext(patch.object(board, "call_verb", side_effect=self.call))
+        self.enterContext(patch.object(board, "board_reply", side_effect=self.call))
         self.inventory = {'schema': 'system-work-external.v1', 'items': [], 'complete': True,
                           'observed_at': '2026-10-21T12:00:00Z', 'coverage': [], 'completed_pr_history': True}
         self.enterContext(patch('system_work_cache.cached_github', return_value=self.inventory))
@@ -315,7 +315,7 @@ class PagedPublicationTests(unittest.TestCase):
                 if calls == 2:
                     raise RuntimeError("page outage")
             return self.call(verb, args)
-        with patch.object(board, "call_verb", side_effect=outage):
+        with patch.object(board, "board_reply", side_effect=outage):
             with self.assertRaisesRegex(RuntimeError, "page outage"):
                 board.publish_board("carr-v5", costs={})
         self.assertEqual(self.store["carr-v5"], previous["carr-v5"])
@@ -335,7 +335,7 @@ class PagedPublicationTests(unittest.TestCase):
             if verb == "read-progress-board" and "-snapshot-" in args["board_id"]:
                 result["snapshot"] = None
             return result
-        with patch.object(board, "call_verb", side_effect=no_readback):
+        with patch.object(board, "board_reply", side_effect=no_readback):
             with self.assertRaisesRegex(RuntimeError, "page did not read back"):
                 board.publish_board("carr-v5", costs={})
         self.assertNotIn("carr-v5", self.store)

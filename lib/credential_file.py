@@ -1,18 +1,9 @@
 """The one Python reader of ~/.config/carr/*.env credential files.
 
-These files have two consumers with one contract. Shell jobs load them with
-`set -a; . db.env` (bin/nightly.sh, the GitHub production deployment workflow and the rest), so a
-DSN carrying `&` must be single-quoted. Python jobs used to parse them with
-their own `split("=", 1)` lines, at least nine of them, each slightly
-different. On 2026-08-02 quoting a value for the shell broke four of those
-readers at once and blinded the monitor that would have reported it.
-
-read_env_file() reads a line the way the shell does: optional `export`,
-single quotes literal (including rotate-credential's `'\\''` escape), double
-quotes with backslash escapes, a trailing `# comment` dropped, the last
-assignment winning. A line the shell could not parse (an unterminated quote)
-sets nothing here either, but unlike the shell it does not take the rest of
-the file down with it; tools/health-check.py's `zsh -n` row reports that.
+The default syntax reads literal shell assignments for callers that share files
+with shell jobs. Explicit historical profiles preserve the existing syntax,
+quote handling, and duplicate selection of older Python consumers. They do not
+execute or expand shell expressions.
 
 Nothing here prints, logs or returns a value to anything but its caller.
 """
@@ -70,20 +61,62 @@ def _literal_value(raw: str) -> str:
     return "".join(value)
 
 
-def read_env_file(path: str | os.PathLike[str]) -> dict[str, str]:
+def read_env_file(path: str | os.PathLike[str], *, syntax: str = "shell",
+                  duplicates: str = "last", names: tuple[str, ...] = ()) -> dict[str, str]:
     """Read literal NAME=value assignments, without executing or expanding shell
-    expressions. Raises OSError when the file cannot be read."""
+    expressions. Raises OSError when the file cannot be read.
+
+    Historical readers retain their literal assignment syntax through explicit
+    profiles: prefix, prefix-double-single, trimmed, and paired. Duplicate
+    selection and quote handling remain part of each caller's contract.
+    Selected first-prefix reads stop as soon as all requested names are found,
+    preserving the original readers' decoding errors and early return behavior.
+    """
+    if syntax not in ("shell", "prefix", "prefix-double-single", "trimmed", "paired"):
+        raise ValueError(f"unknown credential syntax: {syntax}")
+    if duplicates not in ("first", "last"):
+        raise ValueError(f"unknown duplicate policy: {duplicates}")
     values: dict[str, str] = {}
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
-        match = _ASSIGNMENT.match(line)
-        if not match:
-            continue
-        name, raw = match.groups()
-        try:
-            value = _literal_value(raw)
-        except ValueError:
-            continue
-        values[name] = value
+    with Path(path).open(encoding="utf-8") as source:
+        lines = source if syntax.startswith("prefix") else source.read().splitlines()
+        for line in lines:
+            if syntax != "shell":
+                if syntax in ("trimmed", "paired"):
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                if "=" not in line:
+                    continue
+                name, value = line.split("=", 1)
+                if syntax in ("trimmed", "paired"):
+                    name = name.strip()
+                if names and name not in names:
+                    continue
+                value = value.strip()
+                if syntax == "paired":
+                    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                        value = value[1:-1]
+                elif syntax == "prefix-double-single":
+                    value = value.strip('"').strip("'")
+                else:
+                    value = value.strip("\"'")
+                if duplicates == "last" or name not in values:
+                    values[name] = value
+                if duplicates == "first" and names and all(name in values for name in names):
+                    break
+                continue
+            match = _ASSIGNMENT.match(line)
+            if not match:
+                continue
+            name, raw = match.groups()
+            if names and name not in names:
+                continue
+            try:
+                value = _literal_value(raw)
+            except ValueError:
+                continue
+            if duplicates == "last" or name not in values:
+                values[name] = value
     return values
 
 

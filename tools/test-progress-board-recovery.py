@@ -70,7 +70,7 @@ class BoardRecoveryTests(unittest.TestCase):
                 "default_answer": "one", "asker_ref": "orchestrator:synthetic"}
         args["idempotency_key"] = board.stable_key("ask-board-question", args)
         with patch.object(board.repo_lib("record_call"), "call_verb", side_effect=fixture):
-            self.assertTrue(board.call_verb("ask-board-question", args)["ok"])
+            self.assertTrue(board.board_reply("ask-board-question", args)["ok"])
         self.assertEqual(len(fixture.writes), 1)
 
     def test_transport_diagnostics_exclude_reply_payload(self):
@@ -78,7 +78,7 @@ class BoardRecoveryTests(unittest.TestCase):
         result = record.VerbResult("read-progress-board", record.TRANSIENT, detail="synthetic-private-payload")
         with patch.object(record, "call_verb", return_value=result):
             with self.assertRaises(RuntimeError) as raised:
-                board.call_verb("read-progress-board", {"board_id": "synthetic"})
+                board.board_reply("read-progress-board", {"board_id": "synthetic"})
         self.assertNotIn("synthetic-private-payload", str(raised.exception))
         self.assertIn("elapsed=", str(raised.exception))
 
