@@ -1068,7 +1068,8 @@ class RefreshTest(FakeOutlookCase):
         before_unread = self.unread_labels(json.loads(self.state.read_text()))
         with patch.dict(os.environ, self.env, clear=True):
             result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                        waits=Waits(2, 0, 0, 0, 0, 0, 0))
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                                        now_fn=lambda: EVENING.replace(hour=10))
         self.assertEqual((result.state, result.reason), ('succeeded', 'refreshed'))
         state = json.loads(self.state.read_text())
         self.assertEqual(self.unread_labels(state), before_unread)
@@ -1103,7 +1104,8 @@ class RefreshTest(FakeOutlookCase):
         before = self.unread_labels(json.loads(self.state.read_text()))
         with patch.dict(os.environ, self.env, clear=True):
             result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                        waits=Waits(2, 0, 0, 0, 0, 0, 0))
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                                        now_fn=lambda: EVENING.replace(hour=10))
         self.assertEqual((result.state, result.reason), ('succeeded', 'refreshed'))
         state = json.loads(self.state.read_text())
         self.assertEqual(self.unread_labels(state), before)
@@ -1127,7 +1129,8 @@ class RefreshTest(FakeOutlookCase):
                 queue = path.read_bytes()
                 with patch.dict(os.environ, self.env, clear=True):
                     result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                                waits=Waits(2, 0, 0, 0, 0, 0, 0))
+                                                waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                                                now_fn=lambda: EVENING.replace(hour=10))
                 self.assertEqual((result.state, result.reason), ('skipped', 'unread_set_unverified'))
                 self.assertIn('coverage=' + reason, result.detail)
                 state = json.loads(self.state.read_text())
@@ -1145,7 +1148,8 @@ class RefreshTest(FakeOutlookCase):
         before = path.read_bytes()
         with patch.dict(os.environ, self.env, clear=True):
             result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                        waits=Waits(2, 0, 0, 0, 0, 0, 0))
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                                        now_fn=lambda: EVENING.replace(hour=10))
         self.assertEqual((result.state, result.reason), ('skipped', 'unread_set_unverified'))
         self.assertIn('coverage=coverage_identity_ambiguous', result.detail)
         state = json.loads(self.state.read_text())
@@ -1192,7 +1196,8 @@ class RefreshTest(FakeOutlookCase):
         before = path.read_bytes()
         with patch.dict(os.environ, self.env, clear=True), redirect_stderr(io.StringIO()):
             result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                        waits=Waits(2, 0, 0, 0, 0, 0, 0))
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                                        now_fn=lambda: EVENING.replace(hour=10))
         self.assertEqual((result.state, result.reason), ('failed', 'ui_error'))
         self.assertEqual(result.detail, 'at switch_tab: tab_switch_failed requested=other '
                          'before=focused observed=focused')
@@ -1210,7 +1215,8 @@ class RefreshTest(FakeOutlookCase):
                 path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
                 with patch.dict(os.environ, self.env, clear=True):
                     outcome = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                                  waits=Waits(2, 0, 0, 0, 0, 0, 0))
+                                                  waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                                                  now_fn=lambda: EVENING.replace(hour=10))
                 self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
                 self.assertNotIn('opened_at', json.loads(path.read_text())[0])
                 self.assert_no_restart()
@@ -1278,7 +1284,8 @@ class RefreshTest(FakeOutlookCase):
                       side_effect=UiError('inbox_row_not_found', step='_inbox_rows')), \
                 redirect_stderr(output):
             result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                        waits=Waits(2, 0, 0, 0, 0, 0, 0))
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                                        now_fn=lambda: EVENING.replace(hour=10))
         self.assertEqual((result.state, result.reason), ('failed', 'ui_error'))
         self.assertIn('outlook-refresh UiError at _inbox_rows: inbox_row_not_found',
                       output.getvalue())
@@ -1293,7 +1300,8 @@ class RefreshTest(FakeOutlookCase):
                 patch('lib.outlook_refresh.Window.search',
                       side_effect=UiError('search_field_not_found', step='search')):
             result = outlook_refresh.run(self.repo, EVENING.replace(hour=10),
-                                        waits=Waits(2, 0, 0, 0, 0, 0, 0))
+                                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                                        now_fn=lambda: EVENING.replace(hour=10))
         self.assertEqual((result.state, result.reason), ('failed', 'search_field_not_found'))
         self.assertEqual(result.detail, 'at search: search_field_not_found')
         output = io.StringIO()
@@ -1318,7 +1326,8 @@ class RefreshTest(FakeOutlookCase):
                         redirect_stderr(output), redirect_stdout(output):
                     result = outlook_refresh.run(
                         self.repo, EVENING.replace(hour=10),
-                        waits=Waits(2, 0, 0, 0, 0, 0, 0))
+                        waits=Waits(2, 0, 0, 0, 0, 0, 0),
+                        now_fn=lambda: EVENING.replace(hour=10))
                 self.assertEqual((result.state, result.reason), ('failed', reason))
                 self.assertEqual(output.getvalue(),
                                  f'outlook-refresh {error.__name__}: {message}\n')
