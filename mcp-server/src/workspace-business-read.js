@@ -1,3 +1,4 @@
+import { vendorDirectoryPayload } from './vendor-people.js';
 // Read paginated client and vendor workspace data.
 import { networkStatement, projectNetwork } from './relationship-network.ts';
 import { vendorRelationshipJoin, enrichRelationship } from "./vendor-relationship.ts";
@@ -250,7 +251,7 @@ function bind(values, value) {
  * is evaluated once; the count reads it whole and `ordered` reads its page, so
  * an out-of-range page still reports the real total rather than looking empty.
  */
-function pageStatement({ columns, from, where, values, sort, page }) {
+function pageStatement({ columns, from, where, values, sort, page, people = false }) {
   const limitIndex = values.length + 1;
   const text = `with filtered as (
     select ${columns}
@@ -264,11 +265,11 @@ function pageStatement({ columns, from, where, values, sort, page }) {
   )
   select (select count(*) from filtered)::int as total_count,
          ${VIEWER_OWNER} is not null as viewer_owner_resolved,
-         coalesce((select json_agg(o.row_payload order by o.rn) from ordered o), '[]'::json) as rows`;
+         coalesce((select json_agg(${people ? vendorDirectoryPayload('o') : 'o.row_payload'} order by o.rn) from ordered o), '[]'::json) as rows`;
   return { text, values: [...values, PAGE_SIZE, (page - 1) * PAGE_SIZE] };
 }
 
-function recordStatement({ columns, from, where, values }) {
+function recordStatement({ columns, from, where, values, people = false }) {
   return {
     text: `with filtered as (
     select ${columns}
@@ -278,7 +279,7 @@ function recordStatement({ columns, from, where, values }) {
   )
   select (select count(*) from filtered)::int as match_count,
          ${VIEWER_OWNER} is not null as viewer_owner_resolved,
-         (select f.row_payload from filtered f limit 1) as record`,
+         (select ${people ? vendorDirectoryPayload('f') : 'f.row_payload'} from filtered f limit 1) as record`,
     values,
   };
 }
@@ -620,6 +621,7 @@ export async function readBusinessList({ client, actor, tenant = organizationTen
     values: [actor.slug, ...values],
     sort: query.sort,
     page: query.page,
+    people: !clients && query.contract === 'vendor-directory.v1',
   });
 
   let pageResult;
@@ -693,10 +695,11 @@ export async function readBusinessRecord({ client, actor, tenant = organizationT
   const clients = dataset === "clients";
   const where = [...(clients ? CLIENT_LIVE : VENDOR_LIVE), `${clients ? "c.id" : "v.id"} = $2::uuid`];
   const statement = recordStatement({
-    columns: `${clients ? CLIENT_RECORD_PAYLOAD : VENDOR_RECORD_PAYLOAD} as row_payload`,
+    columns: `${clients ? "c.id" : "v.id"} as id, ${clients ? CLIENT_RECORD_PAYLOAD : VENDOR_RECORD_PAYLOAD} as row_payload`,
     from: clients ? CLIENT_FROM : VENDOR_FROM,
     where,
     values: [actor.slug, id],
+    people: !clients && contract === 'vendor-directory.v1',
   });
 
   let result;
