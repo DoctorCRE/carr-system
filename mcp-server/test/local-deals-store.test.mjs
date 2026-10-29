@@ -203,6 +203,39 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       } finally { await c.query('reset role'); }
     }));
 
+    await t.test('board exposes ordered open actions and recorded last steps', async () => transaction(async () => {
+      await fixture(false);
+      await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'dell','Synthetic Partner Two','human',true)", [id(8)]);
+      await c.query("update deal set segment='Synthetic edit' where id=$1", [id(4)]);
+      const board = async () => (await TOOLS['deal-room-board'].handler(c, actor, {workspace:'team'}));
+      let value = await board();
+      const contract = JSON.parse(readFileSync(path.join(root, 'mcp-server/contracts/local-deals-board.v2.json'), 'utf8'));
+      assert.equal(value.schema_version, contract.schema);
+      assert.equal(contract.version, '2.0.0');
+      assert.equal(value.deals[0].last_step, null);
+      assert.deepEqual(value.deals[0].open_actions, []);
+      await c.query(`insert into next_action(id,subject_type,subject_id,owner_id,description,due_on,created_by)
+        values($1,'deal',$3,$4,'Later action','2027-02-01',$4),($2,'deal',$3,$5,'Earlier action','2027-01-01',$5)`, [id(10),id(11),id(4),actor.id,id(8)]);
+      value = await board();
+      assert.deepEqual(value.deals[0].open_actions, [
+        {id:id(11),owner:'dell',description:'Earlier action',due_on:'2027-01-01'},
+        {id:id(10),owner:'joe',description:'Later action',due_on:'2027-02-01'},
+      ]);
+      await c.query(`insert into next_action(id,subject_type,subject_id,owner_id,description,due_on,created_by)
+        values($1,'deal',$3,$4,'Undated action',null,$4),($2,'deal',$3,$4,'Third action','2027-03-01',$4)`, [id(13),id(14),id(4),actor.id]);
+      value = await board();
+      assert.deepEqual(value.deals[0].open_actions.map(action => action.id), [id(11),id(10),id(14)]);
+      await c.query("insert into activity(id,occurred_at,actor_id,kind,summary,deal_id) values($1,'2026-01-02T12:00:00Z',$2,'call','Synthetic call',$3)", [id(12),actor.id,id(4)]);
+      value = await board();
+      assert.equal(value.deals[0].last_step.kind, 'call');
+      assert.equal(value.deals[0].last_step.summary, 'Synthetic call');
+      assert.equal(new Date(value.deals[0].last_step.occurred_at).toISOString(), '2026-01-02T12:00:00.000Z');
+      await TOOLS['complete-action'].handler(c, actor, {idempotency_key:randomUUID(),ref:id(4),outcome:'Synthetic outcome'});
+      value = await board();
+      assert.equal(value.deals[0].last_step.kind, 'completed_action');
+      assert.equal(value.deals[0].last_step.summary, 'Synthetic outcome');
+    }));
+
     await t.test('partner status update supersedes an overdue step and flags the next-step gap', async () => transaction(async () => {
       await fixture(true);
       const yesterday = (await c.query("select (current_date-1)::text as day")).rows[0].day;
@@ -1177,6 +1210,9 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
             assert.equal(result.deals[0].base_version, reads['read-deal-reconciliation'].base_version,
               'the displayed board values and replacement writes share the Deal version');
             delete prior.closed_deals; delete prior.lost_deals;
+            assert.equal(prior.schema_version, 'local-deals-board.v2');
+            prior.schema_version = 'local-deals-board.v1';
+            delete prior.deals[0].open_actions; delete prior.deals[0].last_step;
           }
           if (name === 'get-deal-room') {
             assert.equal(prior.schema_version,'deal-timeline.v1');
