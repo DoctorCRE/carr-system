@@ -295,7 +295,8 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              flag_due_unix INTEGER,  -- NULL also when the flag has no due date
              flag_completed_unix INTEGER,
              moved_to_other INTEGER, -- 1 after a one-time move to Other
-             pinned       INTEGER
+             pinned       INTEGER,
+             folder_links_unresolved INTEGER NOT NULL
          );
          CREATE TABLE message_folders (
              message_id INTEGER NOT NULL REFERENCES messages(id),
@@ -425,6 +426,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         for loc in records(&b.data, &needle) {
             let Some(mut r) = record::parse(o, &b.data, loc.anchor) else { continue };
             r.folder_ids = folder_links.get(&loc.anchor).cloned().unwrap_or_default();
+            r.folder_links_unresolved = r.folder_ids.is_empty();
             r.local_keys = key_links.get(&loc.anchor).into_iter().copied().collect();
             let m = schema::build_bounded(&b.data, loc.anchor, loc.end, loc.back);
 
@@ -712,9 +714,9 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                    (block,sender,sender_name,recipients,subject,message_id,body,
                     html,body_words,html_bytes,body_kind,sent_unix,sent_utc,
                     subject_inherited,preview,body_source,copies,copy_key,local_keys,
-                    flag_status,flag_due_unix,flag_completed_unix,moved_to_other,pinned)
+                    flag_status,flag_due_unix,flag_completed_unix,moved_to_other,pinned,folder_links_unresolved)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,
-                         datetime(?12,'unixepoch'),?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)",
+                         datetime(?12,'unixepoch'),?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)",
             )
             .expect("prepare");
 
@@ -749,6 +751,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 d.and_then(|d| d.completed_unix).flatten(),
                 d.and_then(|d| d.moved_to_other),
                 d.and_then(|d| d.pinned),
+                r.folder_links_unresolved as i64,
             ])
             .expect("insert");
             let message_id = tx.last_insert_rowid();
@@ -884,6 +887,7 @@ fn local_keys(r: &record::Record) -> Option<String> {
 
 /// Combine a later revision of a message into the copy already held.
 fn merge(prev: &mut record::Record, r: record::Record) {
+    prev.folder_links_unresolved |= r.folder_links_unresolved;
     prev.folder_ids.extend(r.folder_ids);
     prev.local_keys.extend(r.local_keys);
     prev.copies += r.copies;

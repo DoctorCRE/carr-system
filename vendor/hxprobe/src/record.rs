@@ -29,6 +29,7 @@ pub struct Record {
     pub recipients: Vec<String>,
     /// Folder keys observed across cached revisions; this is not a live view.
     pub folder_ids: std::collections::BTreeSet<u64>,
+    pub folder_links_unresolved: bool,
     /// Local message keys of the message objects this record was read from.
     pub local_keys: std::collections::BTreeSet<u64>,
     pub subject: Option<String>,
