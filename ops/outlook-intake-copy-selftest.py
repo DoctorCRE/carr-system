@@ -423,14 +423,14 @@ else:
 ''')
         codesign.chmod(0o700)
 
-    def install(self, name='intake', check=True, signing_env=None):
+    def install(self, name='intake', check=True, signing_env=None, args=()):
         if name == 'intake' and self.config.exists():
             values = json.loads(self.config.read_text())
             if str(self.sign_tools) not in values['executable_path'].split(':'):
                 values['executable_path'] = f"{self.sign_tools}:{values['executable_path']}"
                 self.config.write_text(json.dumps(values))
-        command = ['/bin/zsh', '-f', '-c', 'export HOME="$1"; exec /bin/zsh -f "$2"',
-                   'installer-test', str(self.home), str(self.repo / f'bin/install-outlook-{name}.sh')]
+        command = ['/bin/zsh', '-f', '-c', 'export HOME="$1"; exec /bin/zsh -f "$2" "${@:3}"',
+                   'installer-test', str(self.home), str(self.repo / f'bin/install-outlook-{name}.sh'), *args]
         return subprocess.run(command, capture_output=True, text=True, check=check,
                               env={**fixture_env(), 'SIGN_LOG': str(self.sign_log), **(signing_env or {})})
 
@@ -463,23 +463,61 @@ else:
         self.install()
         before_bytes = self.helper.read_bytes()
         before_mtime = self.helper.stat().st_mtime_ns
+        before_pin = self.helper.with_suffix('.pin').read_bytes()
         result = self.install()
         self.assertEqual(self.helper.read_bytes(), before_bytes)
         self.assertEqual(self.helper.stat().st_mtime_ns, before_mtime)
+        self.assertEqual(self.helper.with_suffix('.pin').read_bytes(), before_pin)
         self.assertNotIn('Full Disk Access', result.stdout)
+
+    def test_changed_digest_refuses_before_touching_helper_or_pin(self):
+        self.install()
+        before = (self.helper.read_bytes(), self.helper.stat().st_mtime_ns,
+                  self.helper.with_suffix('.pin').read_bytes(), self.sign_log.read_bytes())
+        source = self.repo / 'tools/outlook-intake-copy.c'
+        source.write_text(source.read_text().replace('snapshot failed', 'fixture snapshot failed'))
+        result = self.install(check=False)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('--rebuild-helper', result.stderr)
+        self.assertIn('Full Disk Access', result.stderr)
+        self.assertEqual((self.helper.read_bytes(), self.helper.stat().st_mtime_ns,
+                          self.helper.with_suffix('.pin').read_bytes(), self.sign_log.read_bytes()), before)
+
+    def test_changed_settings_or_missing_pin_require_explicit_rebuild(self):
+        self.install()
+        before = self.helper.read_bytes(), self.helper.stat().st_mtime_ns, self.sign_log.read_bytes()
+        values = json.loads(self.config.read_text())
+        values['profile'] = str(self.home / 'Changed Profile')
+        self.config.write_text(json.dumps(values))
+        for missing_pin in (False, True):
+            with self.subTest(missing_pin=missing_pin):
+                if missing_pin:
+                    values['profile'] = str(self.profile)
+                    self.config.write_text(json.dumps(values))
+                    self.helper.with_suffix('.pin').unlink()
+                result = self.install(check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('--rebuild-helper', result.stderr)
+                self.assertEqual((self.helper.read_bytes(), self.helper.stat().st_mtime_ns,
+                                  self.sign_log.read_bytes()), before)
+                if missing_pin:
+                    self.assertFalse(self.helper.with_suffix('.pin').exists())
 
     def test_source_change_rebuilds_once_and_names_the_binary_needing_access(self):
         self.install()
         before = self.helper.read_bytes()
         source = self.repo / 'tools/outlook-intake-copy.c'
         source.write_text(source.read_text().replace('snapshot failed', 'fixture snapshot failed'))
-        result = self.install()
+        result = self.install(args=('--rebuild-helper',))
         self.assertNotEqual(self.helper.read_bytes(), before)
         warning = f'ad-hoc helper rebuilds need a Full Disk Access re-grant for {self.helper}'
         self.assertEqual(sum(warning in line for line in result.stdout.splitlines()), 1)
+        self.assertIn('System Settings > Privacy & Security > Full Disk Access', result.stdout)
+        self.assertIn(f'Remove the old entry and add {self.helper} again', result.stdout)
+        self.assertIn('next scheduled intake run succeeds', result.stdout)
         before_bytes = self.helper.read_bytes()
         before_mtime = self.helper.stat().st_mtime_ns
-        result = self.install()
+        result = self.install(args=('--rebuild-helper',))
         self.assertEqual(self.helper.read_bytes(), before_bytes)
         self.assertEqual(self.helper.stat().st_mtime_ns, before_mtime)
         self.assertNotIn('Full Disk Access', result.stdout)
@@ -489,7 +527,7 @@ else:
         values = json.loads(self.config.read_text())
         values['profile'] = str(self.home / 'Changed Profile')
         self.config.write_text(json.dumps(values))
-        result = self.install()
+        result = self.install(args=('--rebuild-helper',))
         scope = subprocess.run([str(self.helper), '--scope'], capture_output=True, text=True, check=True)
         self.assertEqual(scope.stdout.splitlines()[0], values['profile'])
         self.assertIn(f'ad-hoc helper rebuilds need a Full Disk Access re-grant for {self.helper}', result.stdout)
@@ -499,14 +537,14 @@ else:
         values = json.loads(self.config.read_text())
         values['signing_identity'] = 'Fixture Signing Identity'
         self.config.write_text(json.dumps(values))
-        result = self.install()
+        result = self.install(args=('--rebuild-helper',))
         self.assertNotIn('re-grant', result.stdout)
         calls = [json.loads(line) for line in self.sign_log.read_text().splitlines()]
         self.assertEqual(calls[0][:-1], ['--force', '-s', '-', '--identifier', 'outlook-intake-copy'])
         self.assertEqual(calls[1][:-1], ['--force', '-s', 'Fixture Signing Identity',
                                        '--identifier', 'outlook-intake-copy'])
         self.helper.with_suffix('.pin').unlink()
-        result = self.install()
+        result = self.install(args=('--rebuild-helper',))
         self.assertNotIn('re-grant', result.stdout)
         self.assertEqual(self.sign_log.read_text().count('"-d", "-r-"'), 2)
         load_settings(self.home).verify_helper()
@@ -533,7 +571,7 @@ else:
                              ({'REQUIREMENT': 'designated => certificate leaf = H"123" or cdhash H"123"'},
                               'certificate designated requirement')):
             with self.subTest(env=env):
-                result = self.install(check=False, signing_env=env)
+                result = self.install(check=False, signing_env=env, args=('--rebuild-helper',))
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(message, result.stderr)
                 self.assertNotIn('re-grant', result.stdout)
@@ -652,6 +690,18 @@ elif args[0] == 'build':
         self.assertEqual(self.git(runtime, 'rev-parse', 'HEAD'), second)
         self.assertTrue((runtime / 'lib/later_change.py').is_file())
         self.assertEqual(self.helper.stat().st_mtime_ns, before, 'a re-run keeps the granted helper and its compiled paths')
+
+        source = self.repo / 'tools/outlook-intake-copy.c'
+        source.write_text(source.read_text().replace('snapshot failed', 'fixture snapshot failed'))
+        self.git(self.repo, 'add', 'tools/outlook-intake-copy.c')
+        self.git(self.repo, 'commit', '--quiet', '-m', 'helper change')
+        before = self.helper.read_bytes()
+        refused = self.install(check=False)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn('--rebuild-helper', refused.stderr)
+        self.assertEqual(self.helper.read_bytes(), before)
+        self.install(args=('--rebuild-helper',))
+        self.assertNotEqual(self.helper.read_bytes(), before)
 
         (runtime / 'lib/later_change.py').write_text('LATER = False\n')
         refused = self.install(check=False)

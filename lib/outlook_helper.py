@@ -10,7 +10,7 @@ import tempfile
 from lib.outlook_settings import OutlookSettings, SettingsError
 
 
-def install_helper(settings: OutlookSettings) -> None:
+def install_helper(settings: OutlookSettings, *, rebuild_helper: bool = False) -> None:
     repo = settings.repo
     source = repo / 'tools/outlook-intake-copy.c'
     helper = settings.copy_helper
@@ -23,6 +23,11 @@ def install_helper(settings: OutlookSettings) -> None:
     wanted = hashlib.sha256(source.read_bytes() + json.dumps([flags, settings.signing_identity]).encode()).hexdigest()
     helper.parent.mkdir(parents=True, exist_ok=True)
     if not (helper.is_file() and os.access(helper, os.X_OK) and pin.is_file() and pin.read_text() == wanted):
+        if helper.exists() and not rebuild_helper:
+            raise SettingsError(f'refusing to replace Outlook helper {helper}; '
+                                'rerun bin/install-outlook-intake.sh --rebuild-helper explicitly. '
+                                'Replacing an ad-hoc-signed helper loses Full Disk Access; '
+                                'be ready to re-grant it in System Settings.')
         with tempfile.TemporaryDirectory(dir=helper.parent) as temp:
             built = Path(temp) / helper.name
             subprocess.run(['/usr/bin/cc', *flags, str(source), '-o', str(built)], check=True)
@@ -46,5 +51,9 @@ def install_helper(settings: OutlookSettings) -> None:
             os.replace(built, helper)
             if not settings.signing_identity:
                 print(f'install-outlook-intake: ad-hoc helper rebuilds need a Full Disk Access re-grant for {helper}', flush=True)
+                print('All re-grant steps are required:')
+                print('  1. Open System Settings > Privacy & Security > Full Disk Access.')
+                print(f'  2. Remove the old entry and add {helper} again, with access enabled.')
+                print('  3. Check that the next scheduled intake run succeeds.')
         pin.write_text(wanted)
     settings.verify_helper()
