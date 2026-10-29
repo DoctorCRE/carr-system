@@ -6,6 +6,10 @@ retain suppression, the ten-item daily limit, duplicate checks and idle checks.
 A local delivery latch prevents ambiguous effects from being
 repeated. Successful delivery is confirmed against Sent Items or the calendar
 before logging an activity. Diagnostics contain no addresses, subjects or bodies.
+
+Attachments ride only on partner-submitted mail. They must be regular files under the configured
+attachment root and within its size cap, and are sent by one AppleScript run that refuses a partial
+set. The ledger records their sha256 inside the fingerprint, never their names.
 """
 from __future__ import annotations
 
@@ -80,12 +84,20 @@ class Result:
 
 
 @dataclass(frozen=True)
+class Attachment:
+    path: Path
+    sha256: str
+    size: int
+
+
+@dataclass(frozen=True)
 class Mail:
     to: tuple[str, ...]
     cc: tuple[str, ...]
     bcc: tuple[str, ...]
     subject: str
     body: str
+    attachments: tuple[Attachment, ...] = ()
 
     @property
     def recipients(self) -> tuple[str, ...]:
@@ -146,6 +158,7 @@ class Ports:
     sleep: Callable[[float], None] = time.sleep
     out: Path = OUT
     contacts: Callable[[], list[tuple[str, str, str]]] = lambda: []
+    script_send: Callable[[Mail], str] | None = None
     close_seconds: float = 30
     confirm_seconds: float = 300
     poll_seconds: float = 20
@@ -192,8 +205,11 @@ def _addresses(values) -> tuple[str, ...]:
 def fields(item: Mail | Event) -> dict[str, str]:
     """The exact text each form field must read back."""
     if isinstance(item, Mail):
-        return {'to': '; '.join(item.to), 'cc': '; '.join(item.cc), 'bcc': '; '.join(item.bcc),
-                'subject': item.subject, 'body': item.body}
+        shown = {'to': '; '.join(item.to), 'cc': '; '.join(item.cc), 'bcc': '; '.join(item.bcc),
+                 'subject': item.subject, 'body': item.body}
+        if item.attachments:
+            shown['attachments'] = ','.join(a.sha256 for a in item.attachments)
+        return shown
     return {'subject': item.subject, 'start': item.start.isoformat(), 'end': item.end.isoformat(),
             'location': item.location, 'body': item.body, 'attendees': '; '.join(item.attendees)}
 
@@ -201,7 +217,47 @@ def fields(item: Mail | Event) -> dict[str, str]:
 def fingerprint(item: Mail | Event) -> str:
     identity = (['send', account(), _norm(item.subject), sorted(item.recipients)] if isinstance(item, Mail)
                 else ['event', account(), _norm(item.subject), int(item.start.timestamp())])
+    if isinstance(item, Mail) and item.attachments:
+        identity.append(sorted(a.sha256 for a in item.attachments))
     return hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+
+
+def _digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, 'rb') as handle:
+        for block in iter(lambda: handle.read(1 << 20), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def attachments(paths) -> tuple[Attachment, ...]:
+    """Regular files under the configured attachment root, within the size cap. Errors carry no path."""
+    if not paths:
+        return ()
+    settings = load_settings()
+    if settings.attachment_root is None or not settings.attachment_max_bytes:
+        raise ValueError('attachment_settings_missing')
+    try:
+        root = settings.attachment_root.resolve(strict=True)
+    except OSError:
+        raise ValueError('attachment_root_missing') from None
+    found = []
+    for raw in paths:
+        if not isinstance(raw, (str, Path)) or not Path(raw).is_absolute():
+            raise ValueError('attachment_path_not_absolute')
+        try:
+            real = Path(raw).resolve(strict=True)
+            info = real.stat()
+        except OSError:
+            raise ValueError('attachment_missing') from None
+        if root not in real.parents:
+            raise ValueError('attachment_outside_root')
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError('attachment_not_regular_file')
+        found.append(Attachment(real, _digest(real), info.st_size))
+    if sum(a.size for a in found) > settings.attachment_max_bytes:
+        raise ValueError('attachments_too_large')
+    return tuple(found)
 
 
 # ---- ledger ------------------------------------------------------------------
@@ -312,6 +368,8 @@ def _write_transport(item: Mail | Event, key: str, ports: Ports, record: str | N
     """Send one mail or save one event, at most once per key and per mailbox match."""
     if not isinstance(key, str) or not key.strip():
         raise ValueError('idempotency_key is required')
+    if isinstance(item, Mail) and item.attachments and not submitted:
+        return Result(State.REFUSED, 'attachments_require_submission')
     out = ports.out
     out.mkdir(parents=True, exist_ok=True)
     os.chmod(out, 0o700)
@@ -366,6 +424,8 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
         return Result(State.FAILED, 'idle_time_unreadable')
     if idle < IDLE_SECONDS:
         return Result(State.NOT_IDLE, 'user_active')
+    if isinstance(item, Mail) and item.attachments:
+        return _script_write(item, key, ports, ledger)
     try:
         form = ports.open_form(item)
     except UiFailure as exc:
@@ -414,7 +474,36 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
     if not _wait(form.closed, ports.close_seconds, ports):
         ledger.append(key, kind, State.WINDOW_NOT_CLOSED.value, print_, ports.now())
         return Result(State.WINDOW_NOT_CLOSED, reason if mode is None else 'window_still_open', mode)
+    return _await_sent(item, key, print_, ports, ledger, pressed_at, mode, submitted)
 
+
+def _script_write(mail: Mail, key: str, ports: Ports, ledger: Ledger) -> Result:
+    """Compose, attach, verify and send in one AppleScript run; a partial attachment set never sends."""
+    for attached in mail.attachments:
+        try:
+            unchanged = attached.path.stat().st_size == attached.size and _digest(attached.path) == attached.sha256
+        except OSError:
+            unchanged = False
+        if not unchanged:
+            return Result(State.FAILED, 'attachment_changed')
+    if any(ord(c) < 32 and c not in '\n\r\t' for c in mail.subject + mail.body):
+        return Result(State.FAILED, 'unscriptable_text')
+    print_ = fingerprint(mail)
+    ledger.append(key, 'send', 'pressing', print_, ports.now())
+    pressed_at = ports.now()
+    try:
+        outcome = (ports.script_send or applescript_send)(mail)
+    except UiFailure:
+        outcome = None
+    if outcome == 'aborted':
+        ledger.append(key, 'send', 'aborted_before_dispatch', print_, ports.now())
+        return Result(State.FAILED, 'aborted_before_dispatch', 'script')
+    return _await_sent(mail, key, print_, ports, ledger, pressed_at, 'script', True)
+
+
+def _await_sent(item: Mail | Event, key: str, print_: str, ports: Ports, ledger: Ledger, pressed_at: float,
+                mode: str | None, submitted: bool) -> Result:
+    kind = _kind(item)
     sent_item_id = None
 
     def confirmed() -> bool:
@@ -593,6 +682,30 @@ def _mailto_handler() -> str:
 
 def _open_url(url: str) -> None:
     _run(['open', '-g', url], capture_output=True, timeout=60)
+
+
+def applescript(mail: Mail) -> str:
+    """The script that makes, addresses and attaches one message, then sends it only if every
+    attachment landed. Outlook's dictionary cannot find a message again, so `m` is the only handle."""
+    lit = lambda text: json.dumps(text, ensure_ascii=False)
+    lines = [f'set f{i} to POSIX file {lit(str(a.path))}' for i, a in enumerate(mail.attachments)]
+    lines += ['tell application "Microsoft Outlook"',
+              f'set m to make new outgoing message with properties {{subject:{lit(mail.subject)}, '
+              f'plain text content:{lit(mail.body)}}}', 'try']
+    for kind, addresses in (('to', mail.to), ('cc', mail.cc), ('bcc', mail.bcc)):
+        lines += [f'make new {kind} recipient at m with properties {{email address:{{address:{lit(a)}}}}}'
+                  for a in addresses]
+    lines += [f'make new attachment at m with properties {{file:f{i}}}' for i in range(len(mail.attachments))]
+    lines += [f'if (count of attachments of m) is not {len(mail.attachments)} then error "partial"',
+              'on error', 'try', 'delete m', 'end try', 'return "aborted"', 'end try',
+              'send m', 'return "sent"', 'end tell']
+    return '\n'.join(lines)
+
+
+def applescript_send(mail: Mail) -> str:
+    """Run the script on stdin so no address, subject or path reaches argv."""
+    return _run(['osascript', '-'], input=applescript(mail), capture_output=True, text=True,
+                timeout=120).stdout.strip()
 
 
 class Window:
@@ -906,8 +1019,11 @@ def send_submitted(mail: Mail, *, idempotency_key: str, ports: Ports) -> Result:
 
 
 def send(to, cc, bcc, subject: str, body: str, *, idempotency_key: str, record: str | None = None,
-         ports: Ports | None = None, send_requested: bool = False) -> Result:
-    """Prepare one email; send it only when requested for this item."""
+         ports: Ports | None = None, send_requested: bool = False, attachments=()) -> Result:
+    """Prepare one email; send it only when requested for this item. Attachments travel only with a
+    partner-submitted draft (send_submitted), so here they are refused before anything runs."""
+    if attachments:
+        return Result(State.REFUSED, 'attachments_require_submission')
     mail = Mail(_addresses(to), _addresses(cc), _addresses(bcc), subject, body)
     if not mail.to or not subject.strip():
         raise ValueError('an email needs a To address and a subject')
@@ -950,7 +1066,8 @@ def main(argv: list[str]) -> int:
     key, record = spec.pop('idempotency_key'), spec.pop('record', None)
     if args.kind == 'send':
         result = send(spec.get('to', ()), spec.get('cc', ()), spec.get('bcc', ()), spec['subject'],
-                      spec.get('body', ''), idempotency_key=key, record=record, send_requested=args.send)
+                      spec.get('body', ''), idempotency_key=key, record=record, send_requested=args.send,
+                      attachments=spec.get('attachments', ()))
     else:
         result = create_event(spec['subject'], datetime.fromisoformat(spec['start']),
                               datetime.fromisoformat(spec['end']), spec.get('location', ''),
