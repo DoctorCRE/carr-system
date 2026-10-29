@@ -133,7 +133,3 @@ print -- "install-outlook-intake: it is NOT loaded. To load it, run:"
 print -- "  install -m 644 '$RENDERED' '$DEST'"
 print -- "  launchctl bootstrap gui/$(id -u) '$DEST'"
 print -- "install-outlook-intake: private reports: $REPO/out/outlook-intake/"
-
-# Retire a previously installed refresh job.
-launchctl bootout "gui/$(id -u)/com.carr.outlook-refresh" 2>/dev/null || true
-rm -f "$HOME/Library/LaunchAgents/com.carr.outlook-refresh.plist"
