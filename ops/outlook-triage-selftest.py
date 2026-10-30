@@ -747,6 +747,30 @@ class PreflightQuitTest(FakeOutlookCase):
         self.assertNotIn(ACCOUNT, outcome.detail)
         self.assert_no_restart()
 
+    def test_unreadable_candidates_report_same_probe_without_titles(self):
+        from lib.outlook_ui import cua
+        second = window(16, f'Private title • {ACCOUNT}', 1230, 800, True)
+        self.given(windows=[ORDINARY | {'title': f'Secret title • {ACCOUNT}'}, second])
+        probes = {13: {'degraded_reason': 'ax_window_unresolved', 'elements': [
+                      {'role': 'AXButton', 'label': 'New Mail'},
+                      {'role': 'AXTable', 'label': 'Message List'}]},
+                  16: {'elements': [{'role': 'AXButton', 'label': 'Private subject'}]}}
+        seen = []
+        def probe(tool, arguments):
+            if tool == 'get_window_state' and arguments['window_id'] in probes:
+                seen.append(arguments['window_id'])
+                return probes[arguments['window_id']]
+            return cua(tool, arguments)
+        with patch('lib.outlook_ui.cua', side_effect=probe):
+            outcome = self.prepare()
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'no_usable_main_window'))
+        self.assertEqual(seen, [13, 16])
+        self.assertIn('"unresolved":true,"new_mail_found":true,"message_list_found":true,"element_count":2', outcome.detail)
+        self.assertIn('"unresolved":false,"new_mail_found":false,"message_list_found":false,"element_count":1', outcome.detail)
+        for private in ('Secret title', 'Private title', 'Private subject', ACCOUNT):
+            self.assertNotIn(private, outcome.detail)
+        self.assert_no_restart()
+
     def test_different_new_mail_button_name_prevents_restart(self):
         for label in ('New Mail Rule', 'New Mail Rule, pressed'):
             with self.subTest(label=label):
