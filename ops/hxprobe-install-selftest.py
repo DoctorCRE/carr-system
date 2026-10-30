@@ -51,6 +51,13 @@ class InstalledDecoderTest(unittest.TestCase):
         codesign = self.repo / '.venv/bin/codesign'
         codesign.write_text(f'#!{sys.executable}\n')
         codesign.chmod(0o700)
+        launchctl = self.repo / '.venv/bin/launchctl'
+        launchctl.write_text(f'#!{sys.executable}\nimport sys\n'
+                             'if len(sys.argv) != 3 or sys.argv[1] != "print" or not sys.argv[2].endswith("/com.carr.outlook-refresh"):\n'
+                             '    sys.exit(1)\n'
+                             'sys.stderr.write(\'Could not find service "com.carr.outlook-refresh"\\n\')\n'
+                             'sys.exit(113)\n')
+        launchctl.chmod(0o700)
         (self.repo / '.gitignore').write_text('.venv/\nout\ntarget/\n')
         self.git('init', '--quiet')
         self.commit('fixture')
