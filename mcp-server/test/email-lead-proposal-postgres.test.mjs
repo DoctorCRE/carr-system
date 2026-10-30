@@ -388,3 +388,44 @@ test('only the mailbox owner confirms: the other partner and machine callers are
   await assert.rejects(confirm(local, { pool_id: id, base_version: 1 }), error => error.payload?.error === 'email_lead_not_found');
   assert.deepEqual(await pool(id), { status: 'pool', version: 1, promoted_lead_id: null });
 });
+
+test('confirmation refuses a sender who became a client after proposal without writes', async () => {
+  await fixtures();
+  const id = await queued(joeHome(), 'became.client@confirm.test', { applies_to: 'new_matter' });
+  await c.query("update party set email='became.client@confirm.test' where id=(select party_id from client where roster_ref='C-999451')");
+  const before = await counts();
+  await assert.rejects(confirm(joeHome(), { pool_id: id, base_version: 1 }), error => error.payload?.error === 'email_lead_sender_known');
+  assert.deepEqual(await counts(), before);
+  assert.deepEqual(await pool(id), { status: 'pool', version: 1, promoted_lead_id: null });
+});
+
+test('confirmation refuses senders with lead, vendor, or another open deal', async () => {
+  const { open } = await fixtures();
+  for (const kind of ['lead', 'vendor', 'open_deal']) {
+    const address = `${kind}@guard.confirm.test`;
+    const id = await queued(joeHome(), address, { applies_to: 'new_matter' });
+    const person = (await c.query("insert into party(kind,name,email,created_by,updated_by) values('person','Synthetic guard',$1,$2,$2) returning id", [address, actor.id])).rows[0].id;
+    if (kind === 'lead') await c.query("insert into lead(party_id,registry_ref,stage,created_by,updated_by) values($1,'L-999899','new',$2,$2)", [person, actor.id]);
+    if (kind === 'vendor') await c.query("insert into vendor(party_id,category,vendor_ref,created_by,updated_by) values($1,'banker','V-SYNTHETIC-899',$2,$2)", [person, actor.id]);
+    if (kind === 'open_deal') await c.query("insert into deal_participant(deal_id,party_id,role,set_by) values($1,$2,'email_contact',$3)", [open, person, actor.id]);
+    const before = await counts();
+    await assert.rejects(confirm(joeHome(), { pool_id: id, base_version: 1 }), error => error.payload?.error === 'email_lead_sender_known' && error.payload.reason === kind);
+    assert.deepEqual(await counts(), before);
+    assert.deepEqual(await pool(id), { status: 'pool', version: 1, promoted_lead_id: null });
+  }
+});
+
+test('email contact read uses the real view and excludes ineligible deal contacts', async () => {
+  const { open, closed } = await fixtures();
+  const cases = ['eligible', 'role', 'closed', 'left', 'merged'];
+  for (const kind of cases) {
+    const person = (await c.query("insert into party(kind,name,email,created_by,updated_by) values('person','Synthetic view',$1,$2,$2) returning id", [`${kind}@view.confirm.test`, actor.id])).rows[0].id;
+    if (kind === 'role') await c.query("insert into lead(party_id,registry_ref,stage,created_by,updated_by) values($1,'L-999898','new',$2,$2)", [person, actor.id]);
+    if (kind === 'merged') await c.query("update party set merged_into=(select party_id from client where roster_ref='C-999451') where id=$1", [person]);
+    await c.query("insert into deal_participant(deal_id,party_id,role,set_by,to_at) values($1,$2,'email_contact',$3,case when $4 then now() else null end)", [kind === 'closed' ? closed : open, person, actor.id, kind === 'left']);
+  }
+  const result = await leadCommand(joeHome(), 'email-match-contacts', {});
+  const matches = result.contacts.filter(item => item.address.endsWith('@view.confirm.test') && [open, closed].includes(item.ref));
+  assert.deepEqual(matches.map(item => item.address), ['eligible@view.confirm.test']);
+  assert.ok(result.contacts.some(item => item.address === 'role@view.confirm.test' && item.ref === 'L-999898'));
+});
