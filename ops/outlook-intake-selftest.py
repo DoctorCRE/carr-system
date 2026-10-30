@@ -66,10 +66,12 @@ def ts(delta: timedelta) -> int:
 
 
 def mail(sender, sent, subject='Suite question', body='Can we meet Thursday?', name=None,
-         recipients=OWNER, kind='full', copy_key=None, local_keys=None, flag=None, due=None, done=None):
+         recipients=OWNER, kind='full', copy_key=None, local_keys=None, flag=None, due=None, done=None,
+         message_id=None):
     return dict(flag_status=flag, flag_due_unix=due, flag_completed_unix=done, sender=sender, sender_name=name, recipients=recipients, subject=subject,
                 body=body, body_kind=kind, sent_unix=ts(sent),
-                copy_key=copy_key or f'{sender}\x1f{subject.lower()}\x1f{body.lower()}', local_keys=local_keys)
+                copy_key=copy_key or f'{sender}\x1f{subject.lower()}\x1f{body.lower()}', local_keys=local_keys,
+                message_id=message_id)
 
 
 def ident(m):
@@ -86,7 +88,7 @@ def event(goid, start, minutes=60, subject='Site visit', attendees=(), organizer
 
 
 def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identities=None, decoded=None,
-             folder_membership=True, slot_decoder=False):
+             folder_membership=True, rejected=None):
     con = sqlite3.connect(path)
     con.executescript(SCHEMA)
     # Decoders built before WR-000502 have no local_keys column; keep testing that shape.
@@ -101,6 +103,8 @@ def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identiti
                      m['body_kind'], m['sent_unix'], m['copy_key']))
         if keyed:
             con.execute('UPDATE messages SET local_keys = ? WHERE id = last_insert_rowid()', (m.get('local_keys'),))
+    for row_id, m in enumerate(mails, 1):
+        con.execute('UPDATE messages SET message_id=? WHERE id=?', (m.get('message_id'), row_id))
     for field in ('conversation_id', 'cc', 'flag_status', 'flag_due_unix', 'flag_completed_unix'):
         if any(m.get(field) is not None for m in mails):
             con.execute(f'ALTER TABLE messages ADD COLUMN {field} {"INTEGER" if field.endswith("_unix") else "TEXT"}')
@@ -121,7 +125,7 @@ def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identiti
                      ('event_identities', len(events) if identities is None else identities),
                      ('events_decoded', len(events) if decoded is None else decoded),
                      # The slot decoder (WR-000589) reports rejected messages; older decoders do not.
-                     *([('messages_rejected', 0)] if slot_decoder else [])])
+                     *([('messages_rejected', rejected)] if rejected is not None else [])])
     if folder_membership:
         con.executescript("""
             CREATE TABLE folders(id INTEGER PRIMARY KEY, account_id INTEGER, name TEXT,
@@ -1023,22 +1027,57 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual((moved.counts['emails'], moved.counts['full_text_notes']), (0, 1))
         self.assertEqual([a['kind'] for _, a in self.fake.writes('log-activity')], ['email_in', 'note'])
 
-    def test_keyless_state_is_retired_once_when_the_decoder_keys_every_row(self):
-        # A keyless preview filed by the anchor decoder, then the same email from the slot decoder with a
-        # store key and a corrected (earlier) time: no second email_in, and no orphaned hydration entry.
-        first = self.run_intake([mail('pat@example.test', -timedelta(hours=1), kind='preview')])
-        self.assertEqual((first.counts['logged'], first.counts['preview_only']), (1, 1))
-        self.fake.now += timedelta(minutes=30)
-        switched = self.run_intake([mail('pat@example.test', -timedelta(hours=2), local_keys='77')], slot_decoder=True)
-        self.assertEqual((switched.counts['logged'], switched.counts['legacy_keyless_retired'],
-                          switched.counts['legacy_keyed_baseline']), (0, 1, 1))
+    # Decoder identity changes (WR-000589): the anchor decoder named a message by content, the slot decoder
+    # by store key; both export its Message-ID, and the intake carries state across by it.
+
+    def test_keyless_preview_hands_its_pending_full_text_to_the_keyed_row(self):
+        old = mail('pat@example.test', -timedelta(hours=1), kind='preview', message_id='<a@example.test>')
+        self.assertEqual(self.run_intake([old]).counts['preview_only'], 1)
+        new = mail('pat@example.test', -timedelta(hours=2), local_keys='77', message_id='<a@example.test>')
+        result = self.run_intake([new], rejected=0)
+        self.assertEqual((result.counts['logged'], result.counts['full_text_notes'], result.counts['mail_inherited'],
+                          result.counts['legacy_unmatched']), (0, 1, 1, 0))
+        self.assertEqual([a['kind'] for _, a in self.fake.writes('log-activity')], ['email_in', 'note'])
+
+    def test_unseen_keyed_mail_sent_before_the_upgrade_is_filed(self):
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1), message_id='<a@example.test>')])
+        unseen = mail('pat@example.test', -timedelta(hours=2), subject='Unseen', local_keys='78',
+                      message_id='<b@example.test>')
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=1), local_keys='77',
+                                       message_id='<a@example.test>'), unseen], rejected=0)
+        self.assertEqual((result.counts['logged'], result.counts['mail_rekeyed']), (1, 1))
+        self.assertEqual([a['email_context']['subject'] for _, a in self.fake.writes('log-activity')],
+                         ['Suite question', 'Unseen'])
+
+    def test_unresolved_outbound_mail_files_after_the_upgrade_once_its_contact_exists(self):
+        sent = dict(sender=OWNER, sent=-timedelta(hours=1), recipients='new@example.test', message_id='<c@example.test>')
+        first = self.run_intake([mail(**sent)])
+        self.assertEqual((first.counts['logged'], len(json.loads((self.out() / intake.STATE).read_text())
+                                                         ['mail_unresolved'])), (0, 1))
+        self.fake.contacts_rows.append(intake.Contact('new@example.test', 'C-903', 'New Example'))
+        result = self.run_intake([mail(**sent, local_keys='79')], rejected=0)
+        self.assertEqual((result.counts['logged'], result.counts['unresolved_messages']), (1, 0))
+        [(_, activity)] = self.fake.writes('log-activity')
+        self.assertEqual((activity['ref'], activity['kind']), ('C-903', 'email_out'))
+
+    def test_old_new_old_new_decoders_file_each_email_and_its_full_text_once(self):
+        old = mail('pat@example.test', -timedelta(hours=1), kind='preview', message_id='<a@example.test>')
+        new = mail('pat@example.test', -timedelta(hours=2), local_keys='77', message_id='<a@example.test>')
+        for rows, rejected in (([old], None), ([new], 0), ([old], None), ([new], 0)):
+            self.fake.now += timedelta(minutes=30)
+            self.assertEqual(self.run_intake(rows, rejected=rejected).state, 'succeeded')
+        self.assertEqual([a['kind'] for _, a in self.fake.writes('log-activity')], ['email_in', 'note'])
         state = json.loads((self.out() / intake.STATE).read_text())
         self.assertEqual((state['pending_full'], state['mail_unresolved']), ({}, {}))
-        later = mail('lee@example.test', timedelta(minutes=10), subject='New after switch', local_keys='78')
-        self.fake.now += timedelta(minutes=30)
-        after = self.run_intake([mail('pat@example.test', -timedelta(hours=2), local_keys='77'), later], slot_decoder=True)
-        self.assertEqual((after.counts['logged'], after.counts['legacy_keyless_retired']), (1, 0))
-        self.assertEqual([a['kind'] for _, a in self.fake.writes('log-activity')], ['email_in', 'email_in'])
+
+    def test_message_layout_alarm_clears_and_rearms_on_the_rejection_count(self):
+        rows = [mail('pat@example.test', -timedelta(hours=1), local_keys='77')]
+        alarms = []
+        for rejected in (1, 0, 1):
+            result = self.run_intake(rows, rejected=rejected)
+            state = json.loads((self.out() / intake.STATE).read_text())
+            alarms.append((result.counts['decoder_alarm'], result.counts['decoder_rejected'], state['decoder_degraded']))
+        self.assertEqual(alarms, [(1, 1, True), (0, 0, False), (1, 1, True)])
 
     def test_nested_folder_move_preserves_one_message(self):
         message = mail('pat@example.test', -timedelta(hours=1), local_keys='77')
@@ -2444,13 +2483,13 @@ class IntakeTest(unittest.TestCase):
                   for i in range(19)] + [mail(OWNER, -timedelta(hours=1), subject='', recipients=None)]
         expected = {'decoder_block_verification_bp': 9990, 'decoder_sender_bp': 10000,
                     'decoder_subject_bp': 9500, 'decoder_recipients_bp': 9048, 'decoder_sent_time_bp': 10000,
-                    'decoder_folder_bp': 10000, 'decoder_message_layout_bp': 10000}
+                    'decoder_folder_bp': 10000}
         processed = self.run_intake(sample)
         self.assertEqual({k: v for k, v in processed.counts.items() if k.endswith('_bp')}, expected)
         expected_samples = {'decoder_block_verification_sample': 1000, 'decoder_sender_sample': 20,
                             'decoder_subject_sample': 20, 'decoder_recipients_sample': 21,
                             'decoder_sent_time_sample': 21, 'decoder_folder_sample': 20,
-                            'decoder_attachment_metadata_sample': 0, 'decoder_message_layout_sample': 21}
+                            'decoder_attachment_metadata_sample': 0}
         self.assertEqual({k: v for k, v in processed.counts.items() if k.endswith('_sample')}, expected_samples)
         unchanged = self.run_intake(sample, touch=False)
         self.assertEqual(unchanged.reason, 'store_unchanged')

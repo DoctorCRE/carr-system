@@ -110,7 +110,7 @@ COPY_WINDOW = 86_400
 # Fractions and percentage-point drops for decoder health.
 DECODER_HEALTH_FLOORS = {'block_verification': 0.95, 'sender': 0.5,
                          'subject': 0.5, 'recipients': 0.5, 'sent_time': 0.5, 'folder': 0.0,
-                         'attachment_metadata': 0.0, 'message_layout': 1.0}
+                         'attachment_metadata': 0.0}
 DECODER_HEALTH_DROP = 0.20
 DECODER_HEALTH_MIN_SAMPLE = 20
 AGENDA_BOARD = 'calendar-agenda'
@@ -225,7 +225,7 @@ MAIL_STORE_COUNTERS = ('decoder_rejected', 'mail_outside_selected_account', 'mai
 # Standing totals recomputed from state or the store every run; every other count is this run's.
 BACKLOG_COUNTS = frozenset((
     *MAIL_STORE_COUNTERS, 'mail_rows_reusing_prior_identity',
-    'hydration_pending', 'hydration_expired', 'unresolved_messages', 'unresolved_read',
+    'hydration_pending', 'hydration_expired', 'unresolved_messages', 'unresolved_read', 'legacy_unmatched',
     'unresolved_read_abandoned', 'unresolved_expired', 'unresolved_recipients_unknown',
     'unresolved_calendar', 'unresolved_addresses', 'unmatched',
     'requests_blocked', 'calendar_lifecycle_unsupported',
@@ -501,7 +501,7 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
         columns = {r['name'] for r in con.execute('PRAGMA table_info(messages)')}
         local_keys = 'local_keys' if 'local_keys' in columns else 'NULL AS local_keys'
         context_columns = ', '.join(name if name in columns else f'NULL AS {name}'
-                                    for name in ('conversation_id', 'cc', 'flag_status', 'flag_due_unix',
+                                    for name in ('message_id', 'conversation_id', 'cc', 'flag_status', 'flag_due_unix',
                                                  'flag_completed_unix', 'folder_links_unresolved'))
         mails = [dict(r) for r in con.execute(
             'SELECT id, sender, sender_name, recipients, subject, body, preview, body_kind, sent_unix, copy_key, '
@@ -599,10 +599,6 @@ def _decoder_health(meta: dict, since: int, now: datetime, baseline: dict) -> di
     samples['attachment_metadata'] = len(attachments)
     rates['attachment_metadata'] = (sum(bool(a['name'] and a['size'] is not None) for a in attachments)
                                     / len(attachments) if attachments else None)
-    # Messages the decoder rejected never reach the rows above, so they are measured on their own.
-    rejected = int(meta.get('decoder_rejected') or 0)
-    samples['message_layout'] = len(store_rows) + rejected
-    rates['message_layout'] = len(store_rows) / samples['message_layout'] if samples['message_layout'] else None
     eligible = {name: rate for name, rate in rates.items()
                 if rate is not None and samples[name] >= DECODER_HEALTH_MIN_SAMPLE}
     failing = [name for name, rate in eligible.items() if
@@ -610,7 +606,8 @@ def _decoder_health(meta: dict, since: int, now: datetime, baseline: dict) -> di
                (name in baseline and rate < baseline[name] - DECODER_HEALTH_DROP)]
     if not found:
         failing.append('block_verification')
-    if rejected and 'message_layout' not in failing:
+    # Rejected messages never reach the sampled rows, so this failure follows the counter alone.
+    if meta.get('decoder_rejected'):
         failing.append('message_layout')
     return {'rates': rates, 'samples': samples, 'eligible': eligible, 'failing': failing, 'messages': len(rows),
             'store_messages': len(store_rows)}
@@ -696,30 +693,6 @@ def _same_mail(m: dict, sent: int, at: int) -> bool:
     to the Date slot, up to days earlier than the old anchor scan), so keyed rows match on ck alone;
     keyless rows sharing a content ck must also fall within COPY_WINDOW."""
     return bool(m['local_keys']) or abs(sent - at) <= COPY_WINDOW
-
-
-def _retire_keyless_state(state: dict, meta: dict) -> int:
-    """Retire state left by keyless decoder rows, once, on the first run of the slot decoder.
-
-    The slot decoder (it reports `messages_rejected`) exports one keyed row per message.
-
-    Keyless rows were identified by content (copy hash plus send time) and keyed rows by store key;
-    no exact link exists between the two, and guessing one from content would merge distinct
-    template messages. So the switch is a cutover: keyless pending full-text and unresolved
-    entries are retired and counted, and keyed mail with no saved state that was sent before the
-    last pre-switch run (`keyed_since`) is taken as already seen by that run instead of filed again.
-    """
-    if 'keyed_since' in state or 'messages_rejected' not in meta:
-        return 0
-    state['keyed_since'] = state.get('high_water')
-    keys = state.get('mail_keys', {})
-    retired = 0
-    for table in (state.setdefault('pending_full', {}), state.setdefault('mail_unresolved', {})):
-        for ident in [i for i in table if not any(not k.startswith('decoded-row-') for k in keys.get(i, []))]:
-            del table[ident]
-            keys.pop(ident, None)
-            retired += 1
-    return retired
 
 
 def _best_copies(mails: list[dict], state: dict | None = None) -> list[dict]:
@@ -831,7 +804,7 @@ class Run:
                                       'reads_abandoned', 'read_context_failed', 'flags_unfiled', 'flags_unmatched',
                                       'flags_unknown', 'flags_untracked', 'flags_reflagged', 'flags_filed',
                                       'flags_completed', 'flags_cleared', 'flags_closed_elsewhere',
-                                      'legacy_keyed_baseline')}
+                                      'mail_rekeyed', 'mail_inherited')}
         self.deals: dict[str, str] = {}
         self.written: list[tuple[str, str, str, str]] = []
         self.unmatched: set[tuple[str, str, str]] = set()
@@ -907,7 +880,42 @@ class Run:
 
     # emails
 
+    def reconcile(self, mails: list[dict]) -> None:
+        """Carry mail state across decoder identity changes by RFC Message-ID.
+
+        Decoders name a message differently (store key, or content hash for keyless rows) but agree
+        on its Message-ID, saved in `mail_ids` as the identity that holds its state. State held under
+        another identity of the same Message-ID is pointed at this row: pending and unresolved entries
+        keep their identity (their record-layer writes are keyed by it) and take this row's ck and
+        time, so the retry and full-text matches below find them; mail already done is done under
+        this row's ck too. Moving in either direction gives the same result, so no transition is tracked.
+        """
+        done, ids = self.state.setdefault('mail_done', {}), self.state.setdefault('mail_ids', {})
+        held = (self.state.setdefault('mail_unresolved', {}), self.state.setdefault('pending_full', {}))
+        for m in mails:
+            mid = (m.get('message_id') or '').strip().strip('<>').lower()
+            if not mid:
+                continue
+            prior = ids.get(mid, m['ident'])
+            ck, _, sent = prior.rpartition(':')
+            for table in held:
+                if prior in table and table[prior]['ck'] != m['ck']:
+                    self.counts['mail_inherited'] += 1
+                    table[prior].update(ck=m['ck'], sent=m['sent_unix'])
+            if (ck != m['ck'] and sent != 'None' and m['sent_unix'] not in done.get(m['ck'], [])
+                    and any(abs(t - int(sent)) <= COPY_WINDOW for t in done.get(ck, []))):
+                done.setdefault(m['ck'], []).append(m['sent_unix'])
+                self.counts['mail_rekeyed'] += 1
+            ids[mid] = prior if any(prior in table for table in held) else m['ident']
+
+    def legacy_unmatched(self) -> int:
+        """Held keyless entries that no Message-ID names: kept, never deleted, and counted."""
+        named, keys = set(self.state.get('mail_ids', {}).values()), self.state.get('mail_keys', {})
+        return sum(ident not in named and all(k.startswith('decoded-row-') for k in keys.get(ident, []))
+                   for table in ('mail_unresolved', 'pending_full') for ident in self.state.get(table, {}))
+
     def emails(self, mails: list[dict], matcher: Matcher, since: int) -> None:
+        self.reconcile([m for m in mails if not m['metadata_incomplete']])
         done = self.state.setdefault('mail_done', {})
         unresolved = self.state.setdefault('mail_unresolved', {})
         pending = self.state.setdefault('pending_full', {})
@@ -937,13 +945,6 @@ class Run:
             outbound = _internal(m['sender'], self.settings.internal_domain)
             recipients_unknown = outbound and not (_addresses(m['recipients']) or _addresses(m.get('cc')))
             if m['ident'] not in unresolved and any(_same_mail(m, t, m['sent_unix']) for t in done.get(m['ck'], [])):
-                continue
-            cutover = self.state.get('keyed_since')
-            if (cutover and m['local_keys'] and m['sent_unix'] <= cutover
-                    and m['ident'] not in unresolved and m['ident'] not in keys):
-                # Seen by the last keyless-decoder run; see _retire_keyless_state.
-                done.setdefault(m['ck'], []).append(m['sent_unix'])
-                self.counts['legacy_keyed_baseline'] += 1
                 continue
             if m['local_keys']:
                 keys[m['ident']] = sorted(set(keys.get(m['ident'], [])) | set(m['local_keys']))
@@ -1453,6 +1454,9 @@ def _prune(state: dict, now: datetime) -> None:
     state['unresolved_expired'] = state.get('unresolved_expired', 0) + len(expired)
     state['mail_done'] = {ck: ts for ck, ts in ((ck, [t for t in v if t >= horizon])
                                                  for ck, v in state.get('mail_done', {}).items()) if ts}
+    held = set(unresolved) | set(state.get('pending_full', {}))
+    state['mail_ids'] = {mid: ident for mid, ident in state.get('mail_ids', {}).items() if ident in held
+                         or (ident.rsplit(':', 1)[1] != 'None' and int(ident.rsplit(':', 1)[1]) >= horizon)}
     state['mail_keys'] = {ident: k for ident, k in state.get('mail_keys', {}).items()
                           if ident in unresolved or ident in state.get('pending_full', {}) or ident in state.get('flags', {})
                           or (ident.rsplit(':', 1)[1] != 'None' and int(ident.rsplit(':', 1)[1]) >= horizon)}
@@ -1752,7 +1756,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
                   'eligible': {}, 'failing': [], 'messages': 0}
     state['decoder_health'] = health
     prior_failures = state.get('decoder_failures', [])
-    unresolved = [name for name in prior_failures if name not in health['eligible']]
+    unresolved = [name for name in prior_failures if name not in health['eligible'] and name != 'message_layout']
     alarm = int(bool(health['failing']) and not state.get('decoder_alarm_delivered', False))
     state['decoder_failures'] = list(dict.fromkeys(health['failing'] + unresolved))
     state['decoder_degraded'] = bool(state['decoder_failures'])
@@ -1778,11 +1782,9 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         _save(out, state)
         return Outcome('failed', 'calendar_decode_empty', work.counts)
 
-    retired = _retire_keyless_state(state, meta)
     mails = _best_copies(mails, state)
     state['hydration_check_at'] = int((now + REFRESH_INTERVAL).timestamp())
     work = Run(ports, state, now, out, settings)
-    work.counts['legacy_keyless_retired'] = retired
     work.counts['mail_rows_reusing_prior_identity'] = sum(bool(m.get('mail_rows_reusing_prior_identity')) for m in mails)
     work.counts.update({name: meta[name] for name in MAIL_STORE_COUNTERS})
     work.counts['decoder_alarm'] = alarm
@@ -1804,6 +1806,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
                 args = json.loads(request['payload'])
                 work.write(request['verb'], args, 'pending write')
         work.emails(mails, matcher, since)
+        work.counts['legacy_unmatched'] = work.legacy_unmatched()
         work.observe_flags(complete_mails, matcher)
         work.leads(matcher)
         work.full_text(complete_mails)
