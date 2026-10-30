@@ -36,7 +36,7 @@ test('a requested checklist row receives a quarantined PDF without becoming sati
     await c.query("insert into deal values($1,$3,'purchase','joe'),($2,$3,'purchase','joe')", [deal, other, randomUUID()]);
     await c.query("insert into v_ref_index values('deal',$1,'D-1','Synthetic closing'),('deal',$2,'D-2','Synthetic other')", [deal, other]);
     for (const s of CHECKLIST_SOURCES) await c.query("insert into doctrine_section values($1,'active',$2)", [s.section_id, s.content_hash]);
-    await c.query(readFileSync(new URL('../../migrations/1071_requirement_requests.sql', import.meta.url), 'utf8'));
+    await c.query(readFileSync(new URL('../../migrations/1072_requirement_requests.sql', import.meta.url), 'utf8'));
     const call = async (name, args) => {
       await c.query('begin');
       try {
