@@ -345,21 +345,19 @@ def body_fingerprint(body: str) -> str:
 
 
 def _mail_confirmation(snapshot: Snapshot, mail: Mail, since: float) -> tuple[str | None, str]:
-    mismatch = False
     for row in snapshot.sent:
         listed = set(re.findall(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+", (row.recipients or '').lower()))
         if (row.sender.lower() == account() and row.sent_unix >= since
                 and row.subject == mail.subject
                 and listed == set(mail.recipients) and row.item_id):
             if row.body_fingerprint is not None and row.body_fingerprint != body_fingerprint(mail.body):
-                mismatch = True
-                continue
+                return row.item_id, 'body_mismatch'
             return row.item_id, 'body_verified' if row.body_fingerprint is not None else 'body_unverified'
-    return None, 'body_mismatch' if mismatch else 'not_in_mailbox_yet'
+    return None, 'not_in_mailbox_yet'
 
 
 def confirmed_mail(snapshot: Snapshot, mail: Mail, since: float) -> str | None:
-    """Require exact recipients, Sent Items identity and any readable full body."""
+    """Require exact recipients and Sent Items identity."""
     return _mail_confirmation(snapshot, mail, since)[0]
 
 
@@ -430,7 +428,7 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
         rows = [r for r in map(json.loads, ledger.path.read_text().splitlines()) if r.get('key') == key]
         done = next((r for r in reversed(rows) if r['state'] == State.DONE.value and r.get('sent_item_id')), None)
         if done and done.get('sent_at'):
-            return Result(State.DONE, done.get('body_status', 'body_unverified'), sent_item_id=done['sent_item_id'], sent_at=done['sent_at'])
+            return Result(State.DONE, done.get('body_status', 'confirmed_in_mailbox'), sent_item_id=done['sent_item_id'], sent_at=done['sent_at'])
         if rows[-1]['state'] in NOT_DISPATCHED:
             return Result(State.FAILED, rows[-1]['state'])
         body_status = 'not_in_mailbox_yet'
@@ -446,10 +444,8 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
         if done:
             return Result(State.PRESSED_UNCONFIRMED, 'sent_time_unavailable')
         if ports.now() - min(r['at'] for r in rows) >= DUPLICATE_WINDOW:
-            return Result(State.FAILED, f'unconfirmed_after_{DUPLICATE_WINDOW}'
-                          + (':body_mismatch' if body_status == 'body_mismatch' else ''))
-        return Result(State.PRESSED_UNCONFIRMED,
-                      'body_mismatch' if body_status == 'body_mismatch' else 'previous_attempt_unconfirmed')
+            return Result(State.FAILED, f'unconfirmed_after_{DUPLICATE_WINDOW}')
+        return Result(State.PRESSED_UNCONFIRMED, 'previous_attempt_unconfirmed')
     if send_requested and (ledger.states(key) or ledger.contains_item(fingerprint(item),
             ports.now() - DUPLICATE_WINDOW if isinstance(item, Mail) else 0)):
         return Result(State.DUPLICATE_KEY, 'key_already_pressed')

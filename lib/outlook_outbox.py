@@ -57,7 +57,7 @@ class SubmittedDraft:
         if result.state is send.State.DONE and result.sent_item_id and result.sent_at:
             return dict(args, status='sent', sent_item_id=result.sent_item_id,
                         sent_at=result.sent_at, sender_account=send.account(),
-                        **({'reason': 'body_unverified'} if result.reason == 'body_unverified' else {}))
+                        **({'reason': result.reason} if result.reason in ('body_unverified', 'body_mismatch') else {}))
         reason = result.reason if (result.reason == 'aborted_before_dispatch' or result.reason.startswith('unconfirmed_after_')) else f'{result.state.value}:{result.reason}'
         return dict(args, status='failed', reason=reason)
 

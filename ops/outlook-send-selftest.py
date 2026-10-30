@@ -1501,32 +1501,7 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual(draft.receipt(result), receipt)
         self.assertNotIn(self.draft['body'], json.dumps(receipt))
 
-    def test_altered_body_after_dispatch_remains_unconfirmed(self):
-        self.sent_body_fingerprint = send_mod.body_fingerprint('Truncated.')
-        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
-        result = send_mod.send_submitted(draft, ports=self.ports)
-        self.assertEqual((result.state, result.reason),
-                         (State.PRESSED_UNCONFIRMED, 'body_mismatch'))
-        self.assertIsNone(send_mod.confirmed_mail(
-            self.mailbox.snapshot(), draft.mail, NOW - 5))
-        ledger = (self.settings.send_state / send_mod.LEDGER).read_text()
-        self.assertIn('body_mismatch', ledger)
-        self.assertNotIn('Truncated.', ledger)
-
-    def test_altered_sent_body_does_not_confirm(self):
-        self.settings.send_state.mkdir(parents=True)
-        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
-        send_mod.Ledger(self.settings.send_state / send_mod.LEDGER).append(
-            draft.key, 'send', 'pressing', send_mod.fingerprint(draft.mail), NOW)
-        row = SentRow(ACCOUNT, '; '.join(draft.mail.recipients), draft.mail.subject,
-                      int(NOW), 'sent-42', send_mod.body_fingerprint('Altered text.'))
-        self.mailbox.sent.append(row)
-        result = send_mod.send_submitted(draft, ports=self.ports)
-        self.assertEqual((result.state, result.reason),
-                         (State.PRESSED_UNCONFIRMED, 'body_mismatch'))
-        self.assertEqual(self.sent, [])
-
-    def test_body_mismatch_expires_without_another_send(self):
+    def test_altered_body_confirms_without_resending_after_duplicate_window(self):
         self.settings.send_state.mkdir(parents=True)
         draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
         send_mod.Ledger(self.settings.send_state / send_mod.LEDGER).append(
@@ -1535,11 +1510,32 @@ class OutboxTests(unittest.TestCase):
         self.mailbox.sent.append(SentRow(
             ACCOUNT, '; '.join(draft.mail.recipients), draft.mail.subject, int(NOW),
             'sent-42', send_mod.body_fingerprint('Altered text.')))
-        self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
+        self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
         [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
-        self.assertEqual(receipt['reason'],
-                         f'unconfirmed_after_{send_mod.DUPLICATE_WINDOW}:body_mismatch')
+        self.assertEqual(receipt['reason'], 'body_mismatch')
         self.assertEqual(self.sent, [])
+        self.assertNotIn('Altered text.', (self.settings.send_state / send_mod.LEDGER).read_text())
+
+    def test_short_body_with_decoder_preview_substitution_confirms(self):
+        self.draft['body'] = 'Thanks.'
+        self.draft['sha256'] = __import__('hashlib').sha256(json.dumps(
+            dict(subject=self.draft['subject'], body=self.draft['body']),
+            ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+        self.sent_body_fingerprint = send_mod.body_fingerprint('Thanks. Outlook preview footer')
+        self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
+        [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
+        self.assertEqual(receipt['reason'], 'body_mismatch')
+        self.assertEqual(len(self.sent), 1)
+
+    def test_existing_done_receipt_keeps_original_reason(self):
+        self.settings.send_state.mkdir(parents=True)
+        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        send_mod.Ledger(self.settings.send_state / send_mod.LEDGER).append(
+            draft.key, 'send', 'done', send_mod.fingerprint(draft.mail), NOW,
+            'sent-42', sent_at='2026-01-01T00:00:00Z')
+        result = send_mod.send_submitted(draft, ports=self.ports)
+        self.assertEqual(result.reason, 'confirmed_in_mailbox')
+        self.assertNotIn('reason', draft.receipt(result))
 
     def test_contact_policy_refusal_records_failed_receipt_without_sending(self):
         carr = self.ports.carr
