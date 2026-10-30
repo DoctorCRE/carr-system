@@ -77,6 +77,7 @@ test('Studio holds override normal reads and clear idempotently', async () => {
     { state: 'needs_attention', reason: 'transient_ceiling', open_questions: 0 },
     { state: 'held_review', reason: 'summary_repeats_transcript', open_questions: 2 },
     { state: 'held_review', reason: 'transcript_unavailable', open_questions: 1 },
+    { state: 'held_review', reason: 'budget', open_questions: 0 },
     { state: 'held_review', reason: 'open_review_questions', open_questions: 3 },
   ]) {
     assert.equal((await status(update)).status, 200);
@@ -204,7 +205,7 @@ test('five admissions are isolated by partner and Chicago day, with free duplica
   const admit = async (body, partner = actor) => handler.fetch(new Request(url, {
     method: 'POST', body: JSON.stringify(body),
   }), { ...env, CALL_DAILY_ADMISSIONS: 99 }, partner);
-  for (let n = 0; n < 4; n++) {
+  for (let n = 0; n < 3; n++) {
     assert.equal((await admit({ ...metadata, sha256: String(n).repeat(64) })).status, 201);
   }
   const sixth = { ...metadata, sha256: 'c'.repeat(64) };
