@@ -86,6 +86,11 @@ const job = (work_request, extra = {}) => ({ idempotency_key: randomUUID(), work
   executor: 'codex', model: 'synthetic-model', effort: 'high', card_title: `Build work ${String.fromCharCode(97 + Math.floor(titleNumber / 26))}${String.fromCharCode(97 + titleNumber++ % 26)}`,
   description: 'Build the synthetic queue behavior.', ...extra });
 
+test('job version constraint is valid after migrations', async () => {
+  const { rows } = await c.query("select convalidated from pg_constraint where conrelid='ops.work_request_job'::regclass and conname='work_request_job_version_positive'");
+  assert.deepEqual(rows, [{ convalidated: true }]);
+});
+
 test('dispatch mints a stable ID under implicit S1 and retries without another job', async () => {
   const work_request = await request();
   const args = job(work_request);
@@ -131,6 +136,7 @@ test('refusals preserve the queue and name the rejected operation', async () => 
     ['plan-work-request-slices', { ...plan, slices: null }, 'invalid_slice_plan'],
     ['dispatch-job', job('WR-000014', { card_title: 'Too many card words' }), 'invalid_card_title'],
     ['dispatch-job', job('WR-000014', { description: 'First sentence. Second sentence.' }), 'invalid_job_description'],
+    ['dispatch-job', job('WR-000014', { description: 'Build cards\nwith tests.' }), 'invalid_job_description'],
     ['prioritize-job', { ...plan, job: 99, position: 1 }, 'job_not_found'],
     ['prioritize-job', { ...plan, job: 1, position: 99 }, 'priority_out_of_range'],
   ]) await assert.rejects(command(name, { ...args, idempotency_key: randomUUID() }), failure => { assert.equal(failure.message, error); assert.equal(publicError(failure).error, error); return true; });
@@ -492,6 +498,7 @@ test('retitle changes only labels, replays safely, and enforces mint refusals', 
     [{ card_title: 'Review rename proof' }, 'card_title_duplicate'],
     [{ card_title: 'Require far too many words' }, 'invalid_card_title'],
     [{ description: 'Build one. Review two.' }, 'invalid_job_description'],
+    [{ description: 'Build cards\nwith tests.' }, 'invalid_job_description'],
     [{ description: 'Implement the change.' }, 'invalid_job_description'],
     [{ card_id: 'WR94.S1.J999' }, 'job_not_found'],
   ]) await assert.rejects(command('retitle-job', { ...args, base_version: 2, ...changes, idempotency_key: randomUUID() }), { message: error });
