@@ -270,6 +270,7 @@ class SendTests(unittest.TestCase):
         self.config = write_settings(self.home, ROOT, account=ACCOUNT, internal_domain='company.test')
         self.enterContext(patch.object(send_mod, 'load_settings', lambda: load_settings(home=self.home)))
         self.enterContext(patch.object(ui, 'load_settings', lambda: load_settings(home=self.home)))
+        self.enterContext(patch.object(ui, 'screen_locked', return_value=False))
         self.dialog = self.enterContext(patch.object(send_mod.subprocess, 'run',
             return_value=subprocess.CompletedProcess(['osascript'], 0, 'true\n', '')))
 
