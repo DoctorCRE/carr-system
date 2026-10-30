@@ -984,6 +984,86 @@ class IntakeTest(unittest.TestCase):
                 self.assertEqual(result.counts['emails'], 0)
                 self.assertEqual(len(self.fake.writes('log-activity')), 1)
 
+    def test_receipt_measures_every_work_folder_without_recipient_filtering(self):
+        messages = [mail('pat@example.test', -timedelta(hours=1), subject=f'Synthetic {i}',
+                         recipients='alias@example.test', local_keys=str(100 + i)) for i in range(8)]
+        messages[-1]['folder_account'] = 8
+        write_db(self.fake.fixture, messages)
+        with sqlite3.connect(self.fake.fixture) as con:
+            con.executemany('INSERT INTO folders VALUES(?,?,?,?,?)', [
+                (10, 7, 'Sent Items', 'top', None), (11, 7, 'Drafts', 'top', None),
+                (12, 7, 'Archive', 'top', None), (13, 7, 'Projects', 'folder', 7),
+                (14, 7, 'Synthetic', 'folder', 13), (15, 7, 'Documents', 'folder', 14),
+                (16, 7, 'Deleted Items', 'top', None), (17, 7, 'Junk Email', 'top', None)])
+            for message_id, folder_id in enumerate((7, 10, 11, 12, 15, 16, 17), 1):
+                con.execute('UPDATE message_folders SET folder_id=? WHERE message_id=?',
+                            (folder_id, message_id))
+            con.execute('INSERT INTO message_folders VALUES(5,7)')
+            con.execute('INSERT INTO message_folders VALUES(5,14)')
+        first = intake.run(self.repo, self.home, self.fake.ports())
+        self.assertEqual(first.state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 7)
+
+        for result in (first, intake.run(self.repo, self.home, self.fake.ports())):
+            counts = json.loads(intake.receipt_line(result).split(' ', 1)[1])['counts']['backlog']
+            self.assertEqual((counts['stored'], counts['admitted']), (8, 8))
+            self.assertEqual(counts['mail_outside_selected_account'], 1)
+            for kind, expected in (('inbox', 2), ('sent', 2), ('drafts', 1), ('archive', 1),
+                                   ('user', 1), ('deleted', 1), ('junk', 1), ('unknown', 0)):
+                self.assertEqual((counts['stored_' + kind], counts['admitted_' + kind]),
+                                 (expected, expected), kind)
+        with sqlite3.connect(self.fake.fixture) as con:
+            con.execute('DELETE FROM message_folders WHERE message_id=5')
+            con.execute('INSERT INTO message_folders VALUES(5,12)')
+        self.store.write_bytes(self.store.read_bytes() + b'.')
+        moved = intake.run(self.repo, self.home, self.fake.ports())
+        self.assertEqual((moved.counts['stored'], moved.counts['admitted']), (8, 8))
+        self.assertEqual((moved.counts['stored_user'], moved.counts['stored_archive']), (0, 2))
+        self.assertEqual(len(self.fake.writes('log-activity')), 7)
+
+    def test_receipt_explains_only_work_account_admission_gaps(self):
+        messages = [mail('pat@example.test', -timedelta(hours=1), subject=f'Synthetic {i}',
+                         local_keys=str(100 + i)) for i in range(6)]
+        messages[3]['folder_account'] = 8
+        messages[4]['folder_account'] = None
+        write_db(self.fake.fixture, messages)
+        with sqlite3.connect(self.fake.fixture) as con:
+            con.execute('INSERT INTO message_folders VALUES(1,8)')
+            con.execute('INSERT INTO message_folders VALUES(2,999)')
+            con.execute('UPDATE messages SET folder_links_unresolved=1 WHERE id=3')
+            con.execute("INSERT INTO folders VALUES(10,7,NULL,'unknown',NULL)")
+            con.execute('UPDATE message_folders SET folder_id=10 WHERE message_id=6')
+        result = intake.run(self.repo, self.home, self.fake.ports())
+        self.assertEqual(result.state, 'succeeded')
+        counts = json.loads(intake.receipt_line(result).split(' ', 1)[1])['counts']['backlog']
+        self.assertEqual((counts['stored'], counts['admitted']), (5, 1))
+        self.assertEqual((counts['stored_not_admitted_account_ambiguous'],
+                          counts['stored_not_admitted_account_unresolved']), (1, 3))
+        self.assertEqual((counts['stored_inbox'], counts['admitted_inbox']), (3, 0))
+        self.assertEqual((counts['stored_unknown'], counts['admitted_unknown']), (1, 0))
+        self.assertEqual((counts['stored_sent'], counts['admitted_sent']), (1, 1))
+        self.assertEqual(counts['mail_outside_selected_account'], 1)
+        self.assertEqual(self.fake.writes('log-activity'), [])
+
+    def test_receipt_upgrade_recounts_unchanged_store_and_preserves_counts_on_write_failure(self):
+        message = mail('pat@example.test', -timedelta(hours=1), local_keys='77')
+        self.run_intake([message])
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        for name in ('stored', 'stored_inbox', 'admitted_inbox'):
+            state.pop(name)
+        path.write_text(json.dumps(state))
+        upgraded = self.run_intake([message], touch=False)
+        self.assertEqual((upgraded.counts['stored'], upgraded.counts['stored_inbox'],
+                          upgraded.counts['admitted_inbox']), (2, 1, 1))
+        self.assertEqual(self.fake.decodes, 2)
+        self.fake.fail_verbs.add('log-activity')
+        failed = self.run_intake([message, mail('pat@example.test', -timedelta(minutes=5),
+                                               subject='Synthetic follow-up', local_keys='78')])
+        self.assertEqual(failed.reason, 'writes_failed')
+        counts = json.loads(intake.receipt_line(failed).split(' ', 1)[1])['counts']['backlog']
+        self.assertEqual((counts['stored'], counts['admitted']), (3, 3))
+
     def test_unresolved_retries_do_not_count_as_new_emails(self):
         message = mail('unknown@example.test', -timedelta(hours=1))
         first = self.run_intake([message])
