@@ -129,9 +129,24 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       }
       await c.query("insert into deal(id,client_id,name,deal_type,phase,owner,attention,next_date,created_by,updated_by) values($1,$2,'Synthetic Assignment','renewal','research','joe',true,current_date-1,$3,$3)", [id(4), id(3), actor.id]);
     };
+    const jevStub = (verdict = 'yes', confidence = 0.99) => ({ systemOne: async request => ({
+      answers: Object.fromEntries(Object.keys(request.questions).map(key => [key,
+        key.startsWith('quote_') ? {type: 'choice', choice: 'quote_0'} :
+          {type: 'choice', choice: verdict, confidence, probabilities: Object.fromEntries(
+            ['yes', 'no', 'unclear'].map(v => [v, v === verdict ? 0.98 : 0.01]))}])) }) });
+    const addNote = async (client, who, args) => {
+      const result = await TOOLS['add-deal-note'].handler(client, who, args);
+      return TOOLS['add-deal-note'].afterCommit(client, who, args, result, async fn => {
+        await client.query('savepoint assessment_apply');
+        try { return await fn(); }
+        catch (error) { await client.query('rollback to savepoint assessment_apply'); throw error; }
+        finally { await client.query('release savepoint assessment_apply'); }
+      });
+    };
     const transaction = async fn => {
+      c.jevClient = jevStub();
       await c.query('begin');
-      try { await fn(); } finally { await c.query('rollback'); }
+      try { await fn(); } finally { delete c.jevClient; delete c.jevApiKey; await c.query('rollback'); }
     };
 
     await t.test('deal detail survives missing checklist storage and recovers after migration 0922', async t => {
@@ -256,14 +271,231 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal(value.deals[0].last_step.summary, 'Synthetic outcome');
     }));
 
-    await t.test('partner status update supersedes an overdue step and flags the next-step gap', async () => transaction(async () => {
+    await t.test('unavailable Jev leaves the overdue action open with an assessment receipt', async () => transaction(async () => {
+      await fixture(false);
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      delete c.jevClient;
+      const update = await addNote(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'The landlord sent revised terms today.',
+      });
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'open');
+      assert.equal(update.overdue_assessment.reason, 'missing_credentials');
+    }));
+
+    for (const [verdict, confidence, failure] of [['yes', 0.99], ['no', 0.99], ['unclear', 0.99], ['yes', 0.2], ['yes', 0.6], ['yes', 0.99, true]])
+      await t.test(`content assessment ${verdict} confidence ${confidence} failure ${!!failure}`, async () => transaction(async () => {
+        await c.query('create trigger next_action_touch before update on next_action for each row execute function trg_touch_row()');
+        await fixture(false);
+        const prior = await TOOLS['set-next-step'].handler(c, actor, {
+          base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+          idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+        });
+        let calls = 0;
+        const sdk = jevStub(verdict, confidence);
+        c.jevClient = { systemOne: async request => {
+          calls++;
+          assert.equal(request.state.actions.length, 1);
+          assert.equal(Object.keys(request.questions).length, 2);
+          if (failure) throw Error('synthetic provider budget failure');
+          return sdk.systemOne(request);
+        } };
+        const args = { idempotency_key: randomUUID(), deal: id(4),
+          text: 'The landlord sent the requested revised terms.', next_step: 'Review revised terms', next_date: '2030-01-01' };
+        const result = await addNote(c, actor, args);
+        const replay = await addNote(c, actor, args);
+        assert.equal(calls, failure ? 2 : 1, 'successful assessments are never repeated');
+        assert.equal(replay.replayed, true);
+        const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+        const resolved = verdict === 'yes' && confidence === 0.99 && !failure;
+        assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, resolved ? 'done' : 'open');
+        assert.equal(room.next_step, 'Review revised terms');
+        assert.equal(room.next_date, '2030-01-01');
+        const assessment = room.events.find(e => e.field === 'overdue_assessment');
+        if (failure) {
+          assert.equal(result.overdue_assessment.pending, true);
+          assert.ok(room.events.some(e => e.field === 'overdue_assessment_status' && e.new_value.reason === 'jev_unavailable'));
+          return;
+        }
+        assert.equal(assessment.new_value.note_id, result.note_id);
+        assert.equal(assessment.new_value.update, args.text);
+        if (!failure) assert.equal(assessment.new_value.quote, args.text);
+        const reviews = await executeRegisteredTool(c, actor, 'read-deal-update-reviews', {});
+        assert.equal(reviews.proposals.length, !failure && (verdict === 'unclear' || confidence < 0.9) ? 1 : 0);
+        if (resolved) {
+          const undone = await executeRegisteredTool(c, actor, 'review-deal-update', {
+            idempotency_key: randomUUID(), assessment_id: assessment.id, decision: 'undo', reason: 'Synthetic correction',
+          });
+          assert.equal(undone.decision, 'undo');
+          const after = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+          assert.equal(after.next_actions.find(a => a.id === prior.next_action_id).status, 'open');
+          assert.equal(after.next_date, '2020-01-01', 'undo restores the coupled prior plan');
+          assert.equal(after.next_step, 'Request revised terms');
+          assert.equal(after.next_actions.find(a => a.id === result.next_action_id).status, 'dropped');
+        }
+      }));
+
+    await t.test('overdue proposals belong only to the action owner', async () => transaction(async () => {
+      await fixture(false);
+      const dell = {...actor, id: id(7), slug: 'dell'};
+      await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'dell','Synthetic Partner Two','human',true)", [dell.id]);
+      await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      c.jevClient = jevStub('unclear');
+      await addNote(c, actor, {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord may have sent terms.'});
+      await c.query("update event set personal_scope='none' where field='overdue_assessment'");
+      const joeReviews = await executeRegisteredTool(c, actor, 'read-deal-update-reviews', {});
+      assert.equal(joeReviews.proposals.length, 1);
+      assert.equal((await executeRegisteredTool(c, dell, 'read-deal-update-reviews', {})).proposals.length, 0);
+      await assert.rejects(executeRegisteredTool(c, dell, 'review-deal-update', {
+        idempotency_key: randomUUID(), assessment_id: joeReviews.proposals[0].assessment_id, decision: 'resolve', reason: 'Synthetic review',
+      }), error => error.payload?.error === 'not_action_owner');
+    }));
+
+    await t.test('one update resolves only the satisfied overdue action', async () => transaction(async () => {
+      await fixture(false);
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      const other = await accept(id(4), 'joe', '2020-01-01');
+      c.jevClient = {systemOne: async request => {
+        const answers = {};
+        for (const [i, action] of request.state.actions.entries()) {
+          const verdict = action.id === prior.next_action_id ? 'yes' : 'no';
+          answers[`action_${i}`] = {type: 'choice', choice: verdict, confidence: 0.99,
+            probabilities: Object.fromEntries(['yes', 'no', 'unclear'].map(v => [v, v === verdict ? 0.98 : 0.01]))};
+          answers[`quote_${i}`] = {type: 'choice', choice: 'quote_0'};
+        }
+        return {answers};
+      }};
+      await addNote(c, actor, {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord sent the revised terms.'});
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'done');
+      assert.equal((await c.query('select status from capture_post_call_action where id=$1', [other])).rows[0].status, 'open');
+    }));
+
+    await t.test('a stale assessment stops preserving an overdue action after 14 days', async () => transaction(async () => {
+      await fixture(false);
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      c.jevClient = jevStub('unclear');
+      await addNote(c, actor, {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord may have sent terms.'});
+      await c.query("update event set recorded_at=current_timestamp - interval '15 days' where field='overdue_assessment'");
+      await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Follow up again', next_date: '2030-01-01',
+      });
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'dropped');
+    }));
+
+    for (const decision of ['resolve', 'dismiss']) await t.test(`Home review can ${decision} an uncertain update after a separate next-step command`, async () => transaction(async () => {
+      await fixture(false);
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      c.jevClient = jevStub('unclear');
+      await addNote(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'The landlord may have sent terms.',
+      });
+      await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Review revised terms', next_date: '2030-01-01',
+      });
+      let room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'open');
+      const reviews = await executeRegisteredTool(c, actor, 'read-deal-update-reviews', {});
+      assert.equal(reviews.proposals.length, 1);
+      const args = {idempotency_key: randomUUID(), assessment_id: reviews.proposals[0].assessment_id,
+        decision, reason: 'Synthetic partner review'};
+      await executeRegisteredTool(c, actor, 'review-deal-update', args);
+      assert.equal((await executeRegisteredTool(c, actor, 'review-deal-update', args)).replayed, true);
+      room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, decision === 'resolve' ? 'done' : 'open');
+      assert.equal((await executeRegisteredTool(c, actor, 'read-deal-update-reviews', {})).proposals.length, 0);
+    }));
+
+    await t.test('provider budget failures retry once and retain a visible pending assessment', async st => transaction(async () => {
+      await fixture(false);
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      delete c.jevClient;
+      c.jevApiKey = 'synthetic';
+      let calls = 0;
+      st.mock.method(globalThis, 'fetch', async () => {
+        calls++;
+        return new Response(JSON.stringify({error: 'synthetic budget exhausted'}), {status: 429});
+      });
+      const result = await addNote(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'The requested revised terms were received.',
+      });
+      assert.equal(calls, 2, 'one bounded retry follows a provider rate limit');
+      assert.equal(result.overdue_assessment.reason, 'jev_budget_exhausted');
+      assert.equal((await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)})).next_actions.find(a => a.id === prior.next_action_id).status, 'open');
+    }));
+
+    for (const newer of ['action', 'plan']) await t.test(`undo refuses a newer ${newer} change`, async () => transaction(async () => {
+      await c.query('create trigger next_action_touch before update on next_action for each row execute function trg_touch_row()');
+      await fixture(false);
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      await addNote(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'The requested revised terms were received.',
+        next_step: 'Review the terms', next_date: '2030-01-01',
+      });
+      const assessment = (await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)})).events.find(e => e.field === 'overdue_assessment');
+      if (newer === 'action') await c.query('update next_action set description=$2 where id=$1', [prior.next_action_id, 'Corrected synthetic action']);
+      else await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'New partner plan', next_date: '2031-01-01',
+      });
+      await assert.rejects(executeRegisteredTool(c, actor, 'review-deal-update', {
+        idempotency_key: randomUUID(), assessment_id: assessment.id, decision: 'undo', reason: 'Synthetic undo',
+      }), error => ['overdue_action_changed', 'newer_change_exists'].includes(error.payload?.error));
+    }));
+
+    await t.test('undo restores every action completed by the same update', async () => transaction(async () => {
+      await fixture(false);
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      const callAction = await accept(id(4), 'joe', '2020-01-01');
+      await addNote(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'The requested revised terms were received.',
+        next_step: 'Review the terms', next_date: '2030-01-01',
+      });
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      const assessment = room.events.find(e => e.field === 'overdue_assessment');
+      await executeRegisteredTool(c, actor, 'review-deal-update', {
+        idempotency_key: randomUUID(), assessment_id: assessment.id, decision: 'undo', reason: 'Synthetic correction',
+      });
+      const after = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      for (const action of [prior.next_action_id, callAction])
+        assert.equal(after.next_actions.find(a => a.id === action).status, 'open');
+    }));
+
+    await t.test('supported partner status update completes an overdue step and flags the next-step gap', async () => transaction(async () => {
       await fixture(true);
       const yesterday = (await c.query("select (current_date-1)::text as day")).rows[0].day;
       const prior = await TOOLS['set-next-step'].handler(c, actor, {
         base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: yesterday,
       });
-      const update = await TOOLS['add-deal-note'].handler(c, actor, {
+      const update = await addNote(c, actor, {
         idempotency_key: randomUUID(), deal: id(4), text: 'Revised terms received for review',
       });
       const board = await TOOLS['deal-room-board'].handler(c, actor, {workspace: 'all'});
@@ -274,14 +506,14 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal(Number(board.accounts[0].overdue_deals), 0);
       assert.equal(update.next_step_required, true);
       assert.match(update.prompt, /next step.*date/i);
-      const followup = await TOOLS['add-deal-note'].handler(c, actor, {
+      const followup = await addNote(c, actor, {
         idempotency_key: randomUUID(), deal: id(4), text: 'Further context with no new plan yet',
       });
       assert.equal(followup.next_step_required, true, 'the plan gap stays visible on later updates');
       assert.match(followup.prompt, /next step.*date/i);
 
       const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
-      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'dropped');
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'done');
       assert.ok(room.thread.some(n => n.id === prior.next_step_id && n.text === 'Request revised terms'));
       assert.ok(room.thread.some(n => n.id === update.note_id));
       assert.ok(room.events.some(e => e.verb === 'add-deal-note' && e.field === 'next_date' &&
@@ -353,19 +585,19 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: dates.past,
       });
-      const args = {idempotency_key: randomUUID(), deal: id(4), text: 'Revised terms received',
+      const args = {idempotency_key: randomUUID(), deal: id(4), text: 'The revised terms were received today',
         next_step: 'Review revised terms', next_date: dates.future};
-      const update = await TOOLS['add-deal-note'].handler(c, actor, args);
-      const replay = await TOOLS['add-deal-note'].handler(c, actor, args);
+      const update = await addNote(c, actor, args);
+      const replay = await addNote(c, actor, args);
       assert.equal(replay.replayed, true);
       assert.equal(replay.note_id, update.note_id);
       const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
       assert.equal(room.next_date, dates.future);
       assert.equal(room.next_step, 'Review revised terms');
       assert.equal(room.next_step_required, false);
-      assert.equal(room.thread.filter(n => n.text === 'Revised terms received').length, 1);
+      assert.equal(room.thread.filter(n => n.text === 'The revised terms were received today').length, 1);
       assert.equal(room.thread.filter(n => n.kind === 'next_step').length, 2);
-      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'dropped');
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'done');
       assert.equal(room.next_actions.find(a => a.id === update.next_action_id).status, 'open');
     }));
 
@@ -377,7 +609,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
           base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
           idempotency_key: randomUUID(), deal: id(4), text: 'Review revised terms', next_date: day,
         });
-        await TOOLS['add-deal-note'].handler(c, actor, {
+        await addNote(c, actor, {
           idempotency_key: randomUUID(), deal: id(4), text: 'Additional context before review',
         });
         const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
@@ -390,7 +622,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Independent follow-up', next_date: dates.past,
       });
-      await TOOLS['add-deal-note'].handler(c, actor, {
+      await addNote(c, actor, {
         idempotency_key: randomUUID(), deal: id(4), text: 'Context from the other partner',
       });
       const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
@@ -483,24 +715,26 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
           await accept(id(4), 'dell', dates.past)];
         const otherDeal = await accept(id(9), 'joe', dates.past);
         const args = {idempotency_key: randomUUID(), deal: id(4)};
-        if (writer === 'add-deal-note') Object.assign(args, {text: 'Terms received', next_step: 'Review revised terms', next_date: dates.future});
+        if (writer === 'add-deal-note') Object.assign(args, {text: 'The requested terms were received today', next_step: 'Review revised terms', next_date: dates.future});
         if (writer === 'set-next-step') Object.assign(args, {base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version, text: 'Review revised terms', next_date: dates.future});
         if (writer === 'set-next-action') Object.assign(args, {ref: id(4), description: 'Review revised terms', due_on: dates.future});
         if (writer === 'patch-deal-field') Object.assign(args, {field: 'phase', value: 'legal', base_event_id: null});
         if (writer === 'update-deal') Object.assign(args, {fields: {phase: 'legal'}, base_version:
           (await TOOLS['read-deal-reconciliation'].handler(c, actor, {deal: id(4)})).base_version});
-        const update = await TOOLS[writer].handler(c, actor, args);
+        const update = await (writer === 'add-deal-note' ? addNote(c, actor, args) : TOOLS[writer].handler(c, actor, args));
         if (writer === 'set-next-action') assert.ok(update.dropped_post_call_action_ids.includes(expired),
           'replacement receipts must include expired Call Mode actions');
         assert.equal((await TOOLS[writer].handler(c, actor, args)).replayed, true);
         const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
-        assert.equal(room.next_actions.find(a => a.id === expired).status, 'dropped', 'expired accepted actions must be superseded');
+        assert.equal(room.next_actions.find(a => a.id === expired).status, writer === 'add-deal-note' ? 'done' : 'dropped');
         // set-next-action explicitly replaces all of this owner's actions, including future ones.
         for (const action of writer === 'set-next-action' ? preserved.slice(2) : preserved)
           assert.equal(room.next_actions.find(a => a.id === action).status, 'open');
         const other = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(9)});
         assert.equal(other.next_actions.find(a => a.id === otherDeal).status, 'open');
-        const events = room.events.filter(e => e.verb === writer && e.field === 'next_action' && e.new_value.superseded_action_ids?.includes(expired));
+        const events = room.events.filter(e => e.verb === writer && (writer === 'add-deal-note'
+          ? e.field === 'overdue_assessment' && e.new_value.action.id === expired
+          : e.field === 'next_action' && e.new_value.superseded_action_ids?.includes(expired)));
         assert.equal(events.length, 1, 'supersession must retain one attributed event on retry');
         assert.equal(events[0].actor, 'joe');
         assert.ok(events[0].recorded_at);
@@ -575,18 +809,18 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       const expired = await accept(id(4), 'joe', dates.past);
       const native = {id: id(8), slug: 'codex', human: false, native_agent_verified: true, sponsoring_human_slug: 'joe'};
       await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'codex','Synthetic Runtime','automation',true)", [native.id]);
-      await TOOLS['add-deal-note'].handler(c, native, {
+      await addNote(c, native, {
         idempotency_key: randomUUID(), deal: id(4), text: 'Partner supplied updated terms',
       });
       const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
       assert.equal(room.next_date, dates.future);
       assert.equal(room.next_step, 'Review revised terms');
-      assert.equal(room.next_actions.find(a => a.id === expired).status, 'dropped');
-      assert.ok(room.events.some(e => e.actor === 'codex' && e.field === 'next_action' &&
-        e.new_value.superseded_action_ids.includes(expired) && e.recorded_at));
+      assert.equal(room.next_actions.find(a => a.id === expired).status, 'done');
+      assert.ok(room.events.some(e => e.actor === 'codex' && e.field === 'overdue_assessment' &&
+        e.new_value.action.id === expired && e.recorded_at));
     }));
 
-    await t.test('a verified native partner update supersedes the sponsor action with runtime attribution', async () => transaction(async () => {
+    await t.test('a verified native partner update completes the sponsor action with runtime attribution', async () => transaction(async () => {
       await fixture(false);
       const past = (await c.query("select (current_date-1)::text as day")).rows[0].day;
       const prior = await TOOLS['set-next-step'].handler(c, actor, {
@@ -595,12 +829,12 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       });
       const native = {id: id(8), slug: 'codex', human: false, native_agent_verified: true, sponsoring_human_slug: 'joe'};
       await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'codex','Synthetic Runtime','automation',true)", [native.id]);
-      await TOOLS['add-deal-note'].handler(c, native, {
+      await addNote(c, native, {
         idempotency_key: randomUUID(), deal: id(4), text: 'Revised terms received from partner',
       });
       const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
       assert.equal(room.next_date, null);
-      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'dropped');
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'done');
       assert.ok(room.events.some(e => e.verb === 'add-deal-note' && e.field === 'next_date' && e.actor === 'codex'));
     }));
 
@@ -616,13 +850,13 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         idempotency_key: randomUUID(), deal: id(4), field: 'next_date', value: dates[reschedule],
         base_event_id: board.deals[0].field_base.next_date.id,
       });
-      await TOOLS['add-deal-note'].handler(c, actor, {
-        idempotency_key: randomUUID(), deal: id(4), text: 'Partner progress update',
+      await addNote(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Partner confirms the terms were reviewed',
       });
       const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
       assert.equal(room.next_date, reschedule === 'future' ? dates.future : null);
       assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status,
-        reschedule === 'future' ? 'open' : 'dropped');
+        reschedule === 'future' ? 'open' : 'done');
     }));
 
     await t.test('a remaining partner plan supplies the next step and date consistently', async () => transaction(async () => {
@@ -638,8 +872,8 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Request proposed terms', next_date: dates.past,
       });
-      const update = await TOOLS['add-deal-note'].handler(c, actor, {
-        idempotency_key: randomUUID(), deal: id(4), text: 'Proposed terms received',
+      const update = await addNote(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'The proposed terms were received',
       });
       const board = await TOOLS['deal-room-board'].handler(c, actor, {});
       assert.equal(board.deals[0].next_step, 'Review proposed terms');
@@ -657,7 +891,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         idempotency_key: randomUUID(), deal: id(4), text: 'Request terms', next_date: past,
       });
       for (const fields of [{next_step: 'Review terms'}, {next_date: '2026-02-30'}, {next_date: past}]) {
-        await assert.rejects(TOOLS['add-deal-note'].handler(c, actor, {
+        await assert.rejects(addNote(c, actor, {
           idempotency_key: randomUUID(), deal: id(4), text: 'Status update', ...fields,
         }), e => e.payload?.error === 'next_step_and_date_required');
       }
@@ -1525,6 +1759,97 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       } finally {
         await c.query(`create or replace view v_deal_room_phase_change as ${definition}`);
       }
+    });
+    await t.test('slow overdue assessment sees the committed update without a held transaction', async () => {
+      await c.query('begin');
+      await fixture(false);
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      let committed = false;
+      let calls = 0;
+      c.jevClient = { systemOne: async (request, options) => {
+        calls++;
+        const observer = new pg.Client(connection);
+        await observer.connect();
+        try { committed = (await observer.query("select 1 from deal_note where deal_id=$1 and text='The landlord sent the requested revised terms.'", [id(4)])).rows.length === 1; }
+        finally { await observer.end(); }
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(resolve, 1200);
+          options.signal.addEventListener('abort', () => { clearTimeout(timer); reject(options.signal.reason); }, {once: true});
+        });
+        return jevStub().systemOne(request);
+      } };
+      const args = {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord sent the requested revised terms.'};
+      let result = await TOOLS['add-deal-note'].handler(c, actor, args);
+      await c.query('commit');
+      const transact = async fn => {
+        await c.query('begin');
+        try { const value = await fn(); await c.query('commit'); return value; }
+        catch (error) { await c.query('rollback'); throw error; }
+      };
+      if (TOOLS['add-deal-note'].afterCommit)
+        result = await TOOLS['add-deal-note'].afterCommit(c, actor, args, result, transact);
+      assert.equal(committed, true, 'Jev must see the committed update from another connection');
+      assert.equal(calls, 1);
+      assert.equal((await c.query('select status from next_action where id=$1', [prior.next_action_id])).rows[0].status, 'done');
+      const submit = async args => {
+        const saved = await transact(() => TOOLS['add-deal-note'].handler(c, actor, args));
+        return TOOLS['add-deal-note'].afterCommit(c, actor, args, saved, transact);
+      };
+      const replace = async () => transact(async () => TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      }));
+      await replace();
+      const timeoutArgs = {...args, idempotency_key: randomUUID()};
+      let failures = 0;
+      c.jevClient = {systemOne: async () => { failures++; throw new DOMException('synthetic timeout', 'TimeoutError'); }};
+      const pending = await submit(timeoutArgs);
+      assert.equal(failures, 2, 'one immediate retry');
+      assert.equal(pending.overdue_assessment.pending, true);
+      assert.equal(pending.overdue_assessment.attempts, 2);
+      assert.equal((await c.query('select 1 from deal_note where id=$1', [pending.note_id])).rows.length, 1);
+      assert.ok((await c.query("select 1 from event where field='overdue_assessment_status' and new_value->>'reason'='jev_unavailable'")).rows.length);
+      let successes = 0;
+      c.jevClient = {systemOne: async request => { successes++; return jevStub().systemOne(request); }};
+      assert.equal((await submit(timeoutArgs)).overdue_assessment.items[0].resolved, true);
+      assert.equal((await submit(timeoutArgs)).replayed, true);
+      assert.equal(successes, 1, 'replay has exactly one successful Jev call');
+      await replace();
+      c.jevClient = {systemOne: async request => {
+        const observer = new pg.Client(connection);
+        await observer.connect();
+        try {
+          const backend = (await observer.query('select xact_start from pg_stat_activity where pid=$1', [c.processID])).rows[0];
+          assert.equal(backend.xact_start, null, 'no transaction is held during Jev');
+          await observer.query('update next_action set version=version+1 where id=$1', [request.state.actions[0].id]);
+        } finally { await observer.end(); }
+        return jevStub().systemOne(request);
+      }};
+      const conflict = await submit({...args, idempotency_key: randomUUID()});
+      assert.equal(conflict.overdue_assessment.reason, 'overdue_action_changed');
+      assert.equal((await c.query("select count(*)::int as n from next_action where status='open' and subject_id=$1", [id(4)])).rows[0].n, 1);
+      let nextRunCalls = 0;
+      const deferredArgs = {...args, idempotency_key: randomUUID()};
+      c.jevClient = {systemOne: async () => { throw new DOMException('synthetic timeout', 'TimeoutError'); }};
+      assert.equal((await submit(deferredArgs)).overdue_assessment.pending, true);
+      c.jevClient = {systemOne: async request => {
+        nextRunCalls++;
+        return jevStub(request.state.update === 'We are still waiting for revised terms.' ? 'no' : 'yes').systemOne(request);
+      }};
+      await submit({...args, idempotency_key: randomUUID(), text: 'We are still waiting for revised terms.'});
+      assert.equal(nextRunCalls, 2, 'next update retries the prior pending assessment');
+      assert.equal((await c.query("select count(*)::int as n from next_action where status='open' and subject_id=$1", [id(4)])).rows[0].n, 0);
+      await replace();
+      let exhausted = 0;
+      c.jevClient = {systemOne: async () => { exhausted++; throw Object.assign(Error('synthetic service failure'), {status: 503}); }};
+      const exhaustedArgs = {...args, idempotency_key: randomUUID()};
+      await submit(exhaustedArgs);
+      await submit(exhaustedArgs);
+      await submit(exhaustedArgs);
+      assert.equal(exhausted, 3, 'three attempts across runs is the hard bound');
     });
   } finally {
     try {
