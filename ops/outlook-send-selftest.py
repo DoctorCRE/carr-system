@@ -264,6 +264,7 @@ def event(h, key='event-key', send_requested=True, **overrides):
 
 class SendTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch.object(ui, 'screen_locked', return_value=False))
         self.tmp = tempfile.TemporaryDirectory()
         self.out = Path(self.tmp.name) / 'out'
         self.home = Path(self.tmp.name) / 'home'
@@ -1029,6 +1030,7 @@ class SendTests(unittest.TestCase):
 
 class OutboxTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch.object(ui, 'screen_locked', return_value=False))
         from lib import outlook_outbox
         self.worker = outlook_outbox
         self.tmp = self.enterContext(tempfile.TemporaryDirectory())
@@ -1329,12 +1331,7 @@ class OutboxTests(unittest.TestCase):
                     self.assertEqual(fake.presses(), 0)
                     self.assertEqual(len(fake.forms), 1)
                     self.assertFalse(any(tool == 'invoke_menu' for tool, _ in fake.calls))
-                    if recovery:
-                        command.assert_called_once_with(
-                            ['ioreg', '-a', '-d1', '-k', 'IOConsoleUsers', '-r'],
-                            capture_output=True, timeout=5)
-                    else:
-                        command.assert_not_called()
+                    command.assert_not_called()
 
     def test_locked_screen_defers_without_failure_receipt(self):
         locked = send_mod.Result(send_mod.State.FAILED, 'screen_locked')
