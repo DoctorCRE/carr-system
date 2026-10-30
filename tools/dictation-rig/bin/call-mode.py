@@ -194,6 +194,7 @@ def current_state(recordings: Path = RECORDINGS) -> dict[str, Any]:
     sessions = [status for path in directories
                 if not (path / "ingested.json").exists()
                 if (status := session_status(path)) is not None]
+    sessions.sort(key=lambda status: status["started_at"], reverse=True)
     active = next((path for path in directories if is_recording(path)), None)
     if active:
         context = read_json(active / CONTEXT_FILE) or {}
@@ -223,6 +224,7 @@ def session_status(path: Path) -> dict[str, Any] | None:
     context = read_json(path / CONTEXT_FILE) or {}
     base = {
         "session": path.name,
+        "started_at": started_at(path),
         "mode": context.get("mode") or "other_call",
         "speaker_labels": context.get("speaker_labels") or {},
     }

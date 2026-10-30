@@ -145,6 +145,17 @@ class CallModeTests(unittest.TestCase):
                          ["ready_review", "blocked", "awaiting_context", "needs_attention"])
         self.assertTrue(all(item["status_text"] for item in result["sessions"]))
 
+    def test_new_failure_receipt_does_not_reorder_recorded_calls(self) -> None:
+        older = self.session("older-call")
+        newer = self.session("newer-call")
+        post_call.write_private(older / call_mode.CONTEXT_FILE, {"started_at": "2026-10-29T10:00:00Z"})
+        post_call.write_private(newer / call_mode.CONTEXT_FILE, {"started_at": "2026-10-29T11:00:00Z"})
+        (older / "meta.json").write_text("{}")
+        (newer / "transcript.json").write_text("{}")
+        post_call.write_private(older / post_call.STATUS_FILE, {"state": "needs_attention"})
+        os.utime(newer, (time.time() - 100, time.time() - 100))
+        self.assertEqual([row["session"] for row in self.state()["sessions"]], ["newer-call", "older-call"])
+
     def test_successful_poll_retry_clears_failure_and_shows_post_call_state(self) -> None:
         session = self.session("recovered-model")
         (session / "meta.json").write_text("{}")
