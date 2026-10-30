@@ -58,5 +58,6 @@ test('ordinary router mode retains the existing bounded classification contract'
   assert.equal(result.schema_version, 'email-router-queue.v2');
   assert.match(calls[0].sql, /a\.kind in \('email_in','email_out'\)/);
   assert.match(calls[0].sql, /make_interval\(days=>\$1\)/);
-  assert.deepEqual(calls[0].args, [3, [], 26, 'joe', actor.id]);
+  assert.deepEqual(calls[0].args.slice(0, 5), [3, [], 26, 'joe', actor.id]);
+  assert.ok(!Number.isNaN(Date.parse(calls[0].args[5])), 'window start is the server clock');
 });
