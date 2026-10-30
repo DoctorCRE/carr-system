@@ -38,6 +38,7 @@ function originPaths(node) {
   if (EMAIL_KINDS.has(node.kind) || (node.entry_kind === 'activity' && EMAIL_KINDS.has(node.verb))
       || 'email_source' in node || 'email_context' in node)
     out.push(...own(['summary', 'detail', 'body', 'subject', 'captured_text']), ['email_context', 'subject']);
+  if ('conversation_id' in node && 'latest_message_at' in node) out.push(['subject']);
   if (typeof node.seat === 'string' && !PARTNER_SEATS.has(node.seat.toLowerCase())) out.push(['body']);
   if (typeof node.comment_ref === 'string') out.push(['comment']);
   if (typeof node.source_note === 'string' && MACHINE_SOURCE.test(node.source_note.trim()))

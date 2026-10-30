@@ -81,6 +81,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     }
     await c.query('alter table activity add column if not exists email_source jsonb');
     await c.query('alter table activity add column if not exists email_context jsonb');
+    await c.query('grant select on activity to carr_reader');
     for (const table of ['actor','party','deal']) await c.query(`alter table ${table} add primary key(id)`);
     await c.query(readMigration('0951_deal_vendor_assignments.sql').split('-- Current catalog reseal')[0]);
     const touch = schema.match(/CREATE FUNCTION public\.trg_touch_row\(\) RETURNS trigger[\s\S]*?end \$\$;/)?.[0];
@@ -171,6 +172,25 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         await c.query('delete from doctrine_section');
       }
     });
+    await t.test('deal room returns email threads in latest message order', async () => transaction(async () => {
+      await fixture(false);
+      for (const [n, conversation, subject, when] of [
+        [1, 'thread-a', 'synthetic-older', '2026-01-01T00:00:00Z'],
+        [2, 'thread-b', 'synthetic-middle', '2026-01-02T00:00:00Z'],
+        [3, 'thread-a', 'synthetic-latest', '2026-01-03T00:00:00Z'],
+      ]) await c.query(`insert into activity(id,actor_id,kind,summary,deal_id,occurred_at,email_context)
+        values($1,$2,'email_in','synthetic',$3,$4,$5)`,
+      [id(100+n), actor.id, id(4), when, JSON.stringify({ conversation_id: conversation, subject })]);
+      await c.query('set role carr_reader');
+      let room;
+      try { room = await TOOLS['get-deal-room'].handler(c, actor, {deal:id(4)}); }
+      finally { await c.query('reset role'); }
+      assert.deepEqual(room.email_threads.map(({conversation_id, subject, latest_message_at}) =>
+        [conversation_id, subject, new Date(latest_message_at).toISOString()]), [
+        ['thread-a', 'synthetic-latest', '2026-01-03T00:00:00.000Z'],
+        ['thread-b', 'synthetic-middle', '2026-01-02T00:00:00.000Z'],
+      ]);
+    }));
     const accept = async (deal, owner, due) => {
       const candidate = randomUUID();
       await c.query(`insert into capture_post_call_candidate
@@ -1222,6 +1242,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
             delete prior.schema_version;
             delete prior.lease;
             delete prior.checklist;
+            delete prior.email_threads;
           }
           rowsOf(prior).forEach(row => {
             for (const field of ['phase_started_on','short_name','items','item_schema_version','client_portal_url']) delete row[field];
