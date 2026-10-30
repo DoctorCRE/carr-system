@@ -966,10 +966,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
       scheduleWriterReadCall(tool, actor, name, readOk,
         env.ctx?.waitUntil?.bind(env.ctx), insertFn);
     }
-    if (!backgroundOwnsConnection) {
-      const cleanup = pool.end().catch(() => {});
-      env.ctx?.waitUntil?.(cleanup);
-    }
+    if (!backgroundOwnsConnection) env.ctx?.waitUntil?.(pool.end());
   }
 }
 
