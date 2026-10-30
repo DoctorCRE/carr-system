@@ -145,7 +145,8 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
                 result = send.send_submitted(draft, ports=ports)
                 if (result.state in (send.State.NOT_IDLE, send.State.PRESSED_UNCONFIRMED,
                                      send.State.WINDOW_NOT_CLOSED)
-                        or result.reason in ('daily_cap', 'another_write_running', 'compose_window_open')):
+                        or result.reason in ('daily_cap', 'another_write_running', 'compose_window_open',
+                                         'screen_locked')):
                     counts['deferred'] += 1
                     if result.reason == 'sent_time_unavailable':
                         counts['sent_unrecorded'] += 1

@@ -1,6 +1,7 @@
 // Manage disposable PostgreSQL fixtures and their concurrency limits.
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const supervisors = new Set();
@@ -93,7 +94,7 @@ export async function acquirePostgresFixtureGroup() {
 
 // The supervisor owns the cluster before initdb/start and survives abrupt Node exit.
 export async function acquireDisposablePostgres({ prefix, pgCtl, dataName = 'data' }) {
-  const fixture = await supervisor(['--supervise', '--prefix', prefix, '--pg-ctl', pgCtl, '--data-name', dataName], line => {
+  const fixture = await supervisor(['--supervise', '--prefix', prefix, '--pg-ctl', pgCtl, '--data-name', dataName, '--directory', tmpdir()], line => {
     if (!line.startsWith('/')) throw new Error('invalid PostgreSQL fixture root response');
     return line;
   });
