@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""Preview or apply Work Request closure using merged pull requests' first Card lines."""
+import argparse
+import json
+from pathlib import Path
+import re
+import subprocess
+import sys
+from uuid import uuid4
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def read_json(command):
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode:
+        raise ValueError(f'{Path(command[0]).name} failed: {result.stderr.strip()}')
+    return json.loads(result.stdout)
+
+
+def call(verb, args):
+    reply = read_json([str(ROOT / 'run.sh'), 'call', verb, json.dumps(args)])
+    if reply.get('ok') is not True:
+        raise ValueError(f'{verb} refused the request')
+    return reply
+
+
+def plan_close(card, prs, selected):
+    calls, blocked, changes = [], [], {}
+    if card['state'] == 'confirmed_closed':
+        return dict(calls=[], blocked=[], all_closed=True, change_refs=[])
+    if card['state'] in ('declined', 'superseded', 'failed'):
+        raise ValueError('Work Request has a terminal disposition')
+    slices = card['slices']
+    if selected and selected not in {s['slice_id'] for s in slices}:
+        raise ValueError('slice not found')
+    for row in slices:
+        sid = row['slice_id']
+        refs = row.get('change_refs', []) if row['outcome'] == 'done' else []
+        if row['outcome'] == 'open' and (not selected or sid == selected):
+            matching = [pr for pr in prs if pr['slice_id'] == sid]
+            refs = [pr['change_ref'] for pr in matching if pr['state'] == 'MERGED']
+            if any(pr['state'] == 'OPEN' for pr in matching):
+                blocked.append(dict(slice_id=sid, reason='open pull request'))
+                continue
+            if not refs:
+                blocked.append(dict(slice_id=sid, reason='no merged pull request'))
+                continue
+            calls.append(dict(verb='close-work-request-slice', args=dict(
+                work_request=card['human_ref'], slice=int(sid.split('.S')[1]),
+                base_version=row['version'], outcome='done', change_refs=refs,
+                idempotency_key=str(uuid4()))))
+        for ref in refs:
+            changes[ref['pr_url']] = ref
+    closing = {c['args']['slice'] for c in calls}
+    all_closed = bool(slices) and all(s['outcome'] != 'open' or int(s['slice_id'].split('.S')[1]) in closing for s in slices)
+    return dict(calls=calls, blocked=blocked, all_closed=all_closed,
+                change_refs=list(changes.values()))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, epilog=
+        'Dry run is the default. Apply may close eligible slices while reporting blockers with exit 1. '
+        'Completion evidence JSON has criterion_evidence [{id, evidence}], user_facing (boolean), '
+        'and user_journey_ref for user-facing work. The server authenticates the independent attestor.')
+    parser.add_argument('target', help='Work Request (WR-000557 or WR557) or slice (WR557.S5)')
+    parser.add_argument('--apply', action='store_true', help='execute the printed close calls')
+    parser.add_argument('--completion-evidence', type=Path,
+                        help='JSON containing criterion_evidence, user_facing, and optional user_journey_ref')
+    args = parser.parse_args()
+    target = re.fullmatch(r'WR-?0*([1-9][0-9]*)(?:\.S([1-9][0-9]*))?', args.target)
+    if not target:
+        parser.error('target must be a Work Request or slice ID')
+    number = int(target[1])
+    ref, prefix = f'WR-{number:06d}', f'WR{number}'
+    selected = f'{prefix}.S{target[2]}' if target[2] else None
+    card = call('work-request-card', dict(work_request=ref))
+    if card['state'] == 'confirmed_closed':
+        print(json.dumps(dict(apply=args.apply, **plan_close(card, [], selected)), indent=2))
+        return 0
+    address = json.loads((ROOT / 'mcp-server/src/progress-address.v1.json').read_text())
+    prs = []
+    for repo in address['repositories']:
+        found = read_json(['gh', 'pr', 'list', '--repo', repo, '--state', 'all',
+                           '--search', f'in:body "Card: {prefix}"', '--limit', '1000',
+                           '--json', 'body,state,url,mergeCommit'])
+        if len(found) >= 1000:
+            raise ValueError(f'{repo} search may be truncated; refusing an incomplete close')
+        for pr in found:
+            lines = (pr.get('body') or '').splitlines()
+            match = re.fullmatch(rf'Card: ({prefix}\.S[1-9][0-9]*)\.J[1-9][0-9]*', lines[0] if lines else '')
+            if not match:
+                continue
+            change = dict(pr_url=pr['url'], merge_commit_sha=(pr.get('mergeCommit') or {}).get('oid'))
+            if pr['state'] == 'MERGED' and (not re.fullmatch(r'[0-9a-fA-F]{40}', change['merge_commit_sha'] or '')
+                    or not re.fullmatch(rf'https://github\.com/{re.escape(repo)}/pull/[1-9][0-9]*', pr['url'])):
+                raise ValueError('merged pull request lacks a full merge SHA or repository URL')
+            prs.append(dict(slice_id=match[1], state=pr['state'], change_ref=change))
+    plan = plan_close(card, prs, selected)
+    if plan['all_closed']:
+        if args.completion_evidence is None:
+            plan['blocked'].append(dict(work_request=ref, reason='completion requires --completion-evidence'))
+        else:
+            evidence = json.loads(args.completion_evidence.read_text())
+            fields = {'criterion_evidence', 'user_facing', 'user_journey_ref'}
+            if (not isinstance(evidence, dict) or set(evidence) - fields
+                    or type(evidence.get('user_facing')) is not bool
+                    or not isinstance(evidence.get('criterion_evidence'), list)):
+                raise ValueError('completion evidence requires criterion_evidence and explicit user_facing')
+            lines = evidence['criterion_evidence']
+            if (len(lines) != len(card['acceptance_criteria']) or
+                    any(not isinstance(line, dict) or set(line) != {'id', 'evidence'}
+                        or not isinstance(line['evidence'], str) or not line['evidence'].strip() for line in lines)
+                    or sorted(line['id'] for line in lines) != sorted(c['id'] for c in card['acceptance_criteria'])):
+                raise ValueError('supply evidence for each acceptance criterion exactly once')
+            if evidence['user_facing'] and (not isinstance(evidence.get('user_journey_ref'), str)
+                                           or not evidence['user_journey_ref'].strip()):
+                raise ValueError('user-facing completion requires user_journey_ref')
+            if not plan['change_refs']:
+                raise ValueError('completion requires merged change references')
+            plan['calls'].append(dict(verb='complete-work-request', args=dict(
+                human_ref=ref, base_version=card['version'], change_refs=plan['change_refs'],
+                idempotency_key=str(uuid4()), **evidence)))
+    print(json.dumps(dict(apply=args.apply, **plan), indent=2), flush=True)
+    if args.apply:
+        for command in plan['calls']:
+            result = call(command['verb'], command['args'])
+            print(json.dumps(dict(verb=command['verb'], result=result)), flush=True)
+        return int(bool(plan['blocked']))
+    return 0
+
+
+if __name__ == '__main__':
+    try:
+        raise SystemExit(main())
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        print(f'close-work-request: {error}', file=sys.stderr)
+        raise SystemExit(1)

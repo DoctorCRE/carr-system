@@ -430,6 +430,78 @@ with tempfile.TemporaryDirectory() as directory:
         check("valid test override does not validate an unused fallback",
               mod.find_postgres_binaries().initdb.parent == selected)
 
+# Exercise the real local CI process and its real disposable PostgreSQL server.
+import shutil
+import socket
+import subprocess
+import time
+
+with tempfile.TemporaryDirectory(prefix="local-pg-kill-test-") as directory:
+    repo = Path(directory)
+    (repo / "ops").mkdir()
+    ci = repo / "ops/ci.sh"
+    ci.write_text(f"#!/bin/sh\necho $$ > {repo / 'ready'}\nexec sleep 60\n")
+    ci.chmod(0o755)
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    script = """
+import importlib.util, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location('local_pg_ci_child', sys.argv[1])
+m = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = m
+spec.loader.exec_module(m)
+original = m.DisposablePostgres
+class Fixture(original):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        print(self.root, flush=True)
+m.DisposablePostgres = Fixture
+m.run_local_ci(repo=Path(sys.argv[2]), ci_class='migration', port=int(sys.argv[3]))
+"""
+    child = subprocess.Popen([sys.executable, '-u', '-c', script, str(MODULE_PATH), str(repo), str(port)],
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    assert child.stdout is not None
+    stdout = child.stdout
+    root = None
+    pid = None
+    try:
+        root = Path(stdout.readline().strip())
+        deadline = time.monotonic() + 20
+        pidfile = root / 'data/postmaster.pid'
+        while not (repo / 'ready').exists() and child.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if (repo / 'ready').exists() and pidfile.exists():
+            pid = int(pidfile.read_text().splitlines()[0])
+        child.kill()
+        child.wait(timeout=5)
+        deadline = time.monotonic() + 15
+        alive = pid is not None
+        while pid is not None and alive and time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                alive = False
+            if alive:
+                time.sleep(0.1)
+        check("SIGKILL of local CI stops its PostgreSQL process", pid is not None and not alive)
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+        if (repo / 'ready').exists():
+            try:
+                os.kill(int((repo / 'ready').read_text()), 9)
+            except ProcessLookupError:
+                pass
+        if root and (root / 'data/postmaster.pid').exists():
+            bins = mod.find_postgres_binaries()
+            subprocess.run([str(bins.pg_ctl), '-D', str(root / 'data'), '-m', 'immediate', '-w', 'stop'], capture_output=True)
+        if root and root.exists():
+            shutil.rmtree(root, ignore_errors=True)
+        stdout.close()
+
 print(f"local PG CI selftest — {passed}/{passed + len(failed)} passed")
 if failed:
     print("FAILED: " + "; ".join(failed))
