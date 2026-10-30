@@ -11,6 +11,7 @@ checks in post_call_jev.py can never block the review pack.
 from __future__ import annotations
 
 import contextlib
+from copy import deepcopy
 import hashlib
 import json
 import os
@@ -768,15 +769,20 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
                                              for item in _report_candidates(report)):
             import post_call_jev
 
-            resume_context = context_from_session(session_dir) or fetch_context(session_dir)
-            stored = read_json(session_dir / CONTEXT_FILE) or {}
-            resume_context = {**resume_context, "speaker_labels": stored.get("speaker_labels"),
-                       "local_partner": stored.get("recorder")}
-            transcript = read_json(session_dir / "transcript.json")
-            if transcript is None:
-                raise ContractError("transcript.json is required to resume Jev checks")
-            post_call_jev.check_distillation(report, resume_context, transcript, client=_jev_fixture_client(),
-                                            budget_ledger=session_dir.parent / ".jev-budget.json")
+            try:
+                resume_context = context_from_session(session_dir) or fetch_context(session_dir)
+                stored = read_json(session_dir / CONTEXT_FILE) or {}
+                resume_context = {**resume_context, "speaker_labels": stored.get("speaker_labels"),
+                           "local_partner": stored.get("recorder")}
+                transcript = read_json(session_dir / "transcript.json")
+                if transcript is None:
+                    raise ContractError("transcript.json is required to resume Jev checks")
+                resumed = deepcopy(report)
+                post_call_jev.check_distillation(resumed, resume_context, transcript, client=_jev_fixture_client(),
+                                                budget_ledger=session_dir.parent / ".jev-budget.json")
+                report = resumed
+            except Exception as exc:
+                _deal_check_unavailable(report, session_dir, exc)
             write_private(session_dir / REPORT_FILE, report)
         existing = read_json(session_dir / STATUS_FILE)
         if existing is not None and existing.get("state") in {"ready_review", "filed"}:
@@ -841,19 +847,23 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
             result, speaker_context, transcript, client=_jev_fixture_client(),
             budget_ledger=session_dir.parent / ".jev-budget.json")
     except Exception as exc:
-        exception_class = type(exc).__name__
-        deal_check_status = {"status": "unavailable", "exception_class": exception_class}
-        result["deal_check"] = deal_check_status
-        try:
-            LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            with LOG_PATH.open("a", encoding="utf-8") as handle:
-                handle.write(f"{now()} deal check unavailable session={session_dir.name} "
-                             f"exception={exception_class}\n")
-        except OSError:
-            pass
+        _deal_check_unavailable(result, session_dir, exc)
     result = mark_automatic(result, transcript, speaker_context)
     write_private(session_dir / REPORT_FILE, result)
     return _complete_session(session_dir, result)
+
+
+def _deal_check_unavailable(result: dict[str, Any], session_dir: Path, exc: Exception) -> None:
+    exception_class = type(exc).__name__
+    deal_check_status = {"status": "unavailable", "exception_class": exception_class}
+    result["deal_check"] = deal_check_status
+    try:
+        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(f"{now()} deal check unavailable session={session_dir.name} "
+                         f"exception={exception_class}\n")
+    except OSError:
+        pass
 
 
 def _report_candidates(report: dict[str, Any]) -> list[dict[str, Any]]:
