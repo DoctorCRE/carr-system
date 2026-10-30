@@ -51,6 +51,9 @@ class InstalledDecoderTest(unittest.TestCase):
         codesign = self.repo / '.venv/bin/codesign'
         codesign.write_text(f'#!{sys.executable}\n')
         codesign.chmod(0o700)
+        security = self.repo / '.venv/bin/security'
+        security.write_text(f'#!{sys.executable}\nprint("     0 valid identities found")\n')
+        security.chmod(0o700)
         launchctl = self.repo / '.venv/bin/launchctl'
         launchctl.write_text(f'#!{sys.executable}\nimport sys\n'
                              'if len(sys.argv) != 3 or sys.argv[1] != "print" or not sys.argv[2].endswith("/com.carr.outlook-refresh"):\n'

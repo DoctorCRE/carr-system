@@ -1,5 +1,7 @@
 #!/bin/zsh
 # Build and pin the research-only copier, then render its on-demand LaunchAgent.
+# With the CARR Local Helpers identity it signs the copier to a stable requirement,
+# so a rebuild keeps Full Disk Access.
 set -eu
 
 if (( $# != 0 )); then
@@ -23,6 +25,16 @@ import tempfile
 if len(sys.argv) != 3:
     raise SystemExit('install-outlook-research-copy: unexpected arguments')
 repo, home = (Path(value).resolve() for value in sys.argv[1:])
+sys.path.insert(0, str(repo))
+from lib import helper_signing
+
+identifier = 'com.carr.outlook-research-copy'
+try:
+    sha1 = helper_signing.certificate_sha1()
+except helper_signing.SigningError as error:
+    raise SystemExit(f'install-outlook-research-copy: {error}')
+if not sha1:
+    print(helper_signing.FALLBACK, file=sys.stderr, flush=True)
 source = repo / 'tools/outlook-research-copy.c'
 helper = home / 'carr-local/bin/outlook-research-copy'
 profile = home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity'
@@ -30,7 +42,8 @@ root = home / 'carr-local/outlook-research'
 flags = ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
          f'-DOUTLOOK_PROFILE={json.dumps(str(profile))}',
          f'-DOUTLOOK_RESEARCH_ROOT={json.dumps(str(root))}']
-wanted = hashlib.sha256(source.read_bytes() + json.dumps(flags).encode()).hexdigest()
+signer = [flags, identifier, sha1] if sha1 else flags
+wanted = hashlib.sha256(source.read_bytes() + json.dumps(signer).encode()).hexdigest()
 pin = helper.with_suffix('.pin')
 helper.parent.mkdir(parents=True, exist_ok=True)
 current = None
@@ -45,6 +58,11 @@ if not (helper.is_file() and not helper.is_symlink() and os.access(helper, os.X_
         built = Path(temp) / helper.name
         subprocess.run(['/usr/bin/cc', *flags, str(source), '-o', str(built)], check=True)
         built.chmod(0o700)
+        if sha1:
+            try:
+                helper_signing.sign(built, identifier, sha1)
+            except helper_signing.SigningError as error:
+                raise SystemExit(f'install-outlook-research-copy: {error}')
         digest = hashlib.sha256(built.read_bytes()).hexdigest()
         os.replace(built, helper)
         temporary_pin = Path(temp) / 'pin'
@@ -68,7 +86,10 @@ os.close(fd)
 destination = home / f'Library/LaunchAgents/{label}.plist'
 print(f'Built and pinned {helper}.')
 print('Grant Full Disk Access in System Settings > Privacy & Security > Full Disk Access > +.')
-print(f'Add {helper}. Rebuilding the binary requires re-granting access.')
+if sha1:
+    print(f'Add {helper} once. It is signed by {helper_signing.IDENTITY}, so rebuilds keep the grant.')
+else:
+    print(f'Add {helper}. Rebuilding the binary requires re-granting access.')
 print('The job is not loaded. Run both load commands:')
 print(f'  mkdir -p {shlex.quote(str(destination.parent))} && install -m 644 {shlex.quote(str(rendered))} {shlex.quote(str(destination))}')
 print(f'  launchctl bootstrap gui/{os.getuid()} {shlex.quote(str(destination))}')

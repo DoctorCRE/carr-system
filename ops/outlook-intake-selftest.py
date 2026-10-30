@@ -2584,7 +2584,8 @@ class IntakeTest(unittest.TestCase):
         for code in (errno.EPERM, errno.EACCES):
             with patch('subprocess.run', return_value=subprocess.CompletedProcess([], code)):
                 result = self.run_intake()
-            self.assertIn('grant Full Disk Access to', intake.status_line(result))
+            self.assertIn(f'grant Full Disk Access to {self.home}/carr-local/bin/outlook-intake-copy',
+                          intake.status_line(result))
             self.assertEqual(result.state, 'failed')
 
     def test_helper_timeout_fails_and_cleans_up(self):
