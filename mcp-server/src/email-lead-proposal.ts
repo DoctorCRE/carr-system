@@ -155,14 +155,14 @@ export function emailLeadProposalTools({ withEnvelope, writeEvent, updatePartyCo
             fail('email_lead_input_invalid');
           const address: string = row.email;
           const carried = await carriers(c, address);
-          if (carried.length) {
+          if (applies === 'new_matter' && carried.length) {
             const role = (await c.query(`select subject_type, ref from v_ref_index where party_id = any($1::uuid[])
-              and subject_type in ('client','lead','vendor') and not merged limit 1`, [carried])).rows[0];
+              and subject_type in ('client','lead','vendor') and not merged order by subject_type, ref limit 1`, [carried])).rows[0];
             if (role) fail('email_lead_sender_known', { reason: role.subject_type, ref: role.ref });
             const otherDeal = (await c.query(`select d.id, d.name from deal_participant dp join deal d on d.id=dp.deal_id
               where dp.party_id = any($1::uuid[]) and dp.to_at is null and d.phase<>'closed'
-                and d.closed_on is null and d.invoiced_on is null and ($2::uuid is null or d.id<>$2::uuid) limit 1`,
-              [carried, applies === 'existing_deal' ? deal : null])).rows[0];
+                and d.closed_on is null and d.invoiced_on is null limit 1`,
+              [carried])).rows[0];
             if (otherDeal) fail('email_lead_sender_known', { reason: 'open_deal', deal_id: otherDeal.id, deal_name: otherDeal.name });
           }
           const provenance = { pool_id: row.id, message_ref: row.source_row.message_ref, mailbox_owner: owner,

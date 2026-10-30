@@ -300,6 +300,25 @@ test('confirming a known contact at a new address adds the address to that party
     ['We need about 3,000 square feet', true, 'existing_party', false]);
 });
 
+test('confirming an existing client succeeds when the client already carries the sender address', async () => {
+  await fixtures();
+  const address = 'carried.client@confirm.test';
+  const id = await queued(joeHome(), address, { applies_to: 'existing_party', party: 'C-999451' });
+  const person = (await c.query("update party set email=$1 where id=(select party_id from client where roster_ref='C-999451') returning id", [address])).rows[0].id;
+  const result = await confirm(joeHome(), { pool_id: id, base_version: 1 });
+  assert.deepEqual([result.status, result.applies_to, result.party_id], ['confirmed', 'existing_party', person]);
+});
+
+test('confirming an existing deal succeeds when the sender is already a participant', async () => {
+  const { open } = await fixtures();
+  const address = 'carried.deal@confirm.test';
+  const id = await queued(joeHome(), address, { applies_to: 'existing_deal', deal: open });
+  const person = (await c.query("insert into party(kind,name,email,created_by,updated_by) values('person','Synthetic participant',$1,$2,$2) returning id", [address, actor.id])).rows[0].id;
+  await c.query("insert into deal_participant(deal_id,party_id,role,set_by) values($1,$2,'email_contact',$3)", [open, person, actor.id]);
+  const result = await confirm(joeHome(), { pool_id: id, base_version: 1 });
+  assert.deepEqual([result.status, result.applies_to, result.deal_id, result.party_id], ['confirmed', 'existing_deal', open, person]);
+});
+
 test('confirming an open deal attaches a minimal sender party to it, which the intake deal contacts carry', async () => {
   const { open } = await fixtures();
   const id = await queued(joeHome(), 'landlord.rep@confirm.test', { applies_to: 'existing_deal', deal: open });
