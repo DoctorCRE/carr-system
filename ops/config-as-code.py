@@ -1994,6 +1994,91 @@ def git_hooks_path_report() -> str:
     return f"  git core.hooksPath: {observed or '(unset)'} — {note} [informational]"
 
 
+def install_launchd_templates(filenames, apply, held_labels):
+    """Converge selected tracked agents through the standard installer."""
+    launchd_activation_failures = []
+    if apply:
+        os.makedirs(LAUNCHD_SRC, exist_ok=True)
+    for f in filenames:
+        if f in {"local.ds4-flash-next.plist", "com.carr.flash-idle-stop.plist"}:
+            continue
+        source = read(launchd_repo_path(f))
+        if (launchd_calendar.plist_label(source or "") or f.removesuffix(".plist")) in held_labels:
+            continue
+        if f in OUTLOOK_INSTALLERS:
+            print(f"  SKIP  {f} (installer-owned: {OUTLOOK_INSTALLERS[f]})")
+            continue
+        if f in PRIMARY_ONLY and not IS_PRIMARY:
+            live = os.path.join(LAUNCHD_SRC, f)
+            if os.path.exists(live):
+                if retire_primary_only_plist(f, live, apply) == "failed":
+                    launchd_activation_failures.append(f)
+            else:
+                print(f"  SKIP  {f} (writes shared state; runs on the primary machine only)")
+            continue
+        if f in SECONDARY_ONLY and IS_PRIMARY:
+            print(f"  SKIP  {f} (the nightly chain already does this here)")
+            continue
+        dest = os.path.join(LAUNCHD_SRC, f)
+        if source is None:
+            print(f"  ERROR  cannot render {f} because its tracked source is missing")
+            launchd_activation_failures.append(f)
+            continue
+        refusal = launchd_template_refusal(source)
+        if refusal:
+            # Never install a schedule launchd will load and then never fire:
+            # the job would look installed and be dead (see the block above
+            # refused_launchd_templates). The installed copy is left as it is.
+            print(f"  REFUSED  {f}: {refusal}")
+            launchd_activation_failures.append(f)
+            continue
+        body = concrete(source)
+        body_matches = launchd_texts_match(read(dest), source)
+        if body_matches and not apply and not os.path.exists(dest + ".pending-reload"):
+            continue
+        gone = missing_targets(body)
+        if gone:
+            print(f"  SKIP  {f} (not built on this machine: {gone[0]})")
+            continue
+        if body_matches:
+            print(f"  VERIFY LOADED  {dest}")
+        else:
+            print(f"  {'WRITE' if apply else 'would write'}  {dest}")
+        if apply:
+            # Load it, do not print a command for a human to paste (rule
+            # e313a3ca). Writing the plist and stopping leaves the job on disk
+            # and dead: on a fresh machine that means the nightly never runs,
+            # so the record-derived fetch allowlist is generated once by the
+            # migration and then never refreshed as clients are added. A
+            # pending marker keeps an interrupted reload visible until an
+            # absent-before/load/registered-after sequence verifies it.
+            outcome = install_launchd_plist(f, dest, body, body_matches)
+            if outcome == "failed":
+                launchd_activation_failures.append(f)
+
+    return launchd_activation_failures
+
+
+def cmd_install_launchd(labels, apply):
+    """Install only the named agents, leaving other machine configuration alone."""
+    if not labels or any(not re.fullmatch(r"com\.carr\.[A-Za-z0-9.-]+", label)
+                         or not os.path.isfile(launchd_repo_path(label + ".plist"))
+                         for label in labels):
+        print("install-launchd: named tracked com.carr labels are required")
+        return 2
+    filenames = [label + ".plist" for label in dict.fromkeys(labels)]
+    try:
+        held = {label for label, filename in zip(dict.fromkeys(labels), filenames)
+                if launchd_off_reason(filename, read(launchd_repo_path(filename)))}
+        for label in sorted(held):
+            print(f"  REFUSED  {label}: activation is held off")
+        failures = install_launchd_templates(filenames, apply, held)
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(f"install-launchd: refused ({type(exc).__name__})")
+        return 1
+    return 1 if failures or held else 0
+
+
 def cmd_install(apply):
     """repo -> machine. The half that makes a second machine possible."""
     try:
@@ -2144,64 +2229,9 @@ def cmd_install(apply):
 
     launchd_activation_failures = reconcile_retired_launchd(apply)
     launchd_activation_failures += quarantine_definition_only_plists(apply, held_labels)
-    if apply:
-        os.makedirs(LAUNCHD_SRC, exist_ok=True)
-    for f in sorted(os.listdir(LAUNCHD_REPO)) if os.path.isdir(LAUNCHD_REPO) else []:
-        if f in {"local.ds4-flash-next.plist", "com.carr.flash-idle-stop.plist"}:
-            continue
-        source = read(launchd_repo_path(f))
-        if (launchd_calendar.plist_label(source or "") or f.removesuffix(".plist")) in held_labels:
-            continue
-        if f in OUTLOOK_INSTALLERS:
-            print(f"  SKIP  {f} (installer-owned: {OUTLOOK_INSTALLERS[f]})")
-            continue
-        if f in PRIMARY_ONLY and not IS_PRIMARY:
-            live = os.path.join(LAUNCHD_SRC, f)
-            if os.path.exists(live):
-                if retire_primary_only_plist(f, live, apply) == "failed":
-                    launchd_activation_failures.append(f)
-            else:
-                print(f"  SKIP  {f} (writes shared state; runs on the primary machine only)")
-            continue
-        if f in SECONDARY_ONLY and IS_PRIMARY:
-            print(f"  SKIP  {f} (the nightly chain already does this here)")
-            continue
-        dest = os.path.join(LAUNCHD_SRC, f)
-        source = read(launchd_repo_path(f))
-        if source is None:
-            print(f"  ERROR  cannot render {f} because its tracked source is missing")
-            return 1
-        refusal = launchd_template_refusal(source)
-        if refusal:
-            # Never install a schedule launchd will load and then never fire:
-            # the job would look installed and be dead (see the block above
-            # refused_launchd_templates). The installed copy is left as it is.
-            print(f"  REFUSED  {f}: {refusal}")
-            launchd_activation_failures.append(f)
-            continue
-        body = concrete(source)
-        body_matches = launchd_texts_match(read(dest), source)
-        if body_matches and not apply and not os.path.exists(dest + ".pending-reload"):
-            continue
-        gone = missing_targets(body)
-        if gone:
-            print(f"  SKIP  {f} (not built on this machine: {gone[0]})")
-            continue
-        if body_matches:
-            print(f"  VERIFY LOADED  {dest}")
-        else:
-            print(f"  {'WRITE' if apply else 'would write'}  {dest}")
-        if apply:
-            # Load it, do not print a command for a human to paste (rule
-            # e313a3ca). Writing the plist and stopping leaves the job on disk
-            # and dead: on a fresh machine that means the nightly never runs,
-            # so the record-derived fetch allowlist is generated once by the
-            # migration and then never refreshed as clients are added. A
-            # pending marker keeps an interrupted reload visible until an
-            # absent-before/load/registered-after sequence verifies it.
-            outcome = install_launchd_plist(f, dest, body, body_matches)
-            if outcome == "failed":
-                launchd_activation_failures.append(f)
+    launchd_activation_failures += install_launchd_templates(
+        sorted(os.listdir(LAUNCHD_REPO)) if os.path.isdir(LAUNCHD_REPO) else [],
+        apply, held_labels)
 
     # Git hooks. Added 2026-08-03, when Dell was granted WRITE and it turned out
     # branch protection is unavailable on a private free-plan repo — so the pull
@@ -2755,6 +2785,13 @@ def main():
         return cmd_install_codex_continuity_mcp(apply)
     if mode == "verify-codex-continuity-mcp":
         return cmd_install_codex_continuity_mcp(False)
+    if mode == "install-launchd":
+        import argparse
+        parser = argparse.ArgumentParser(prog=f"config-as-code.py {mode}")
+        parser.add_argument("labels", nargs="+")
+        parser.add_argument("--apply", action="store_true")
+        options = parser.parse_args(sys.argv[2:])
+        return cmd_install_launchd(options.labels, options.apply)
     if mode == "install":
         return cmd_install(apply)
     if mode == "install-flash-on-demand":

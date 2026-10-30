@@ -32,7 +32,7 @@ for label in "$@"; do
 done
 
 echo "install-agent-via-config.sh: applying tracked config for: $*"
-"$PY" "$CONFIG_AS_CODE" install --apply
+"$PY" "$CONFIG_AS_CODE" install-launchd "$@" --apply
 
 # Verify, per label, against launchd itself rather than trusting the writer.
 status=0
