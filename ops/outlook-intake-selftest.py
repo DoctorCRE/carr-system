@@ -3107,6 +3107,15 @@ class IntakeTest(unittest.TestCase):
             self.assertNotIn(old, {**run, **backlog})
         self.assertEqual(result.counts['decoder_alarm'], run['decoder_alarm'])
 
+    def test_calendar_receipt_names_describe_stored_copies_and_held_writes(self):
+        outcome = intake.Outcome('succeeded', 'processed', {
+            'calendar_lifecycle_unsupported': 4, 'calendar_lifecycle_canceled': 2,
+            'calendar_requests_quarantined': 1, 'calendar_unresolved_expired': 3})
+        receipt = json.loads(intake.receipt_line(outcome).split(' ', 1)[1])
+        self.assertEqual(receipt['counts'], {'run': {}, 'backlog': {
+            'calendar_copies_in_store': 4, 'calendar_canceled_copies_in_store': 2,
+            'calendar_write_requests_held': 1, 'calendar_expired_total': 3}})
+
     def test_lead_outcomes_are_counted_from_the_disposition_on_every_run(self):
         self.fake.intent_reply = read('new_matter', 'Wants a clinic suite.')
         m = mail('new.doctor@practice.test', -timedelta(hours=2), name='Dana Doctor')
