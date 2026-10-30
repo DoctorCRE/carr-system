@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -20,6 +21,8 @@ const partner = { id: '00000000-0000-4000-8000-000000000001', slug: 'joe', human
 const job = { id: '00000000-0000-4000-8000-000000000002', slug: 'codex', human: false, sponsoring_human_slug: 'joe' };
 const FACT_FUNCTIONS = /^ops\.(record_fact_observations|promote_fact|list_fact_conflicts|record_human_fact|list_fact_review|resolve_fact_review|read_deal_extraction_source|record_deal_extraction)\(/;
 const hash = n => n.toString(16).padStart(64, '0');
+const localPython = new URL('../../.venv/bin/python', import.meta.url).pathname;
+const python = process.env.CARR_CI_PYTHON || (existsSync(localPython) ? localPython : 'python3');
 
 const observation = (id, patch = {}) => {
   const { source = {}, ...rest } = patch;
@@ -160,7 +163,7 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
       try {
         await writeFile(path.join(dir,'plan.json'),JSON.stringify(plan));
         await writeFile(path.join(dir,'validation.json'),JSON.stringify(await validate()));
-        execFileSync(new URL('../../.venv/bin/python', import.meta.url).pathname,['-c', `import sys,json,os,io,subprocess,importlib.util
+        execFileSync(python,['-c', `import sys,json,os,io,subprocess,importlib.util
 from contextlib import redirect_stdout
 from unittest.mock import patch
 from openpyxl import Workbook,load_workbook

@@ -543,16 +543,6 @@ def main() -> int:
         scrub = scrub_docx(working)
         to_pdf(working, pdf)          # re-render so the record copy matches the scrubbed file
 
-    if comparison:
-        try:
-            verified_after = validate_comparison(plan)
-            if verified_after != verified:
-                raise FillError("comparison changed during export")
-        except (FillError, subprocess.SubprocessError, ValueError) as exc:
-            shutil.rmtree(directory)
-            print(f"STOP: comparison validation: {exc}", file=sys.stderr)
-            return 2
-
     text = doc_text(working)
     leaks = leak_guard(text, plan.get("listing_side_names", []))
     lint = run_lint(text, plan["basename"][:40])
@@ -567,6 +557,16 @@ def main() -> int:
             client = build_client_copy(working, plan, fmap, prior_drops)
         except FillError as e:
             print(f"STOP: client copy: {e}", file=sys.stderr)
+            return 2
+
+    if comparison:
+        try:
+            verified_after = validate_comparison(plan)
+            if verified_after != verified:
+                raise FillError("comparison changed during export")
+        except (FillError, subprocess.SubprocessError, ValueError) as exc:
+            shutil.rmtree(directory)
+            print(f"STOP: comparison validation: {exc}", file=sys.stderr)
             return 2
 
     client_failed = bool(client and client.get("produced") and not client.get("passed"))
