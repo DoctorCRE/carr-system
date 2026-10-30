@@ -23,7 +23,7 @@ python = Path(__file__).resolve().parents[1] / '.venv/bin/python'
 if python.is_file() and Path(sys.prefix) != python.parent.parent:
     os.execv(str(python), [str(python), __file__, *sys.argv[1:]])
 
-from skill_picker import prepare
+from skill_picker import prepare, header_type
 
 
 def job_log():
@@ -104,7 +104,7 @@ def register_job(args):
         runner = 'codex-' + str(uuid5(NAMESPACE_URL, repository + '/' + args.branch))
         facts = dict(idempotency_key=str(uuid5(NAMESPACE_URL, card + '/' + runner)),
                      work_request=f'WR-{int(match[1]):06d}', slice=int(match[2]), job=int(match[3]),
-                     runner_job_id=runner, repository=repository, executor='codex',
+                     runner_job_id=runner, repository=repository, executor='codex', job_type=header_type(args.brief),
                      model=settings.get('model', 'default'), effort=settings.get('model_reasoning_effort', 'default'),
                      card_title=headers['Title'], description=headers['Description'])
         reply = output([sys.executable, str(Path(__file__).resolve().parents[1] / 'tools/call-verb.py'),
@@ -128,6 +128,11 @@ def main():
     args = parser.parse_args()
     if args.timeout_seconds <= 0:
         parser.error("--timeout-seconds must be positive")
+    try:
+        brief, _ = prepare(args.brief, Path(__file__).resolve().parents[1])
+    except (OSError, ValueError) as error:
+        print(f'codex-job: {error}', file=sys.stderr)
+        return 1
     if not register_job(args):
         return 1
     timeout = runpy.run_path(str(Path(__file__).with_name("with-timeout.py")))
@@ -179,7 +184,6 @@ def main():
                                capture_output=True, text=True).stdout.strip()
         subprocess.run(['git', '-C', str(clone), 'config', 'user.email',
                         'jbookout@users.noreply.github.com'], check=True)
-        brief, _ = prepare(args.brief, clone)
         log = job_log()
         brief = (f'Job log: {log} (pass it to attach-memory as transcript_ref).' if log
                  else 'Job log: none (stderr is not a file).') + '\n\n' + brief

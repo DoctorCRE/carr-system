@@ -119,7 +119,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "add-loop": {
     "ingress_key": "mcp-tool:add-loop",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "54c7ab9b14c77a8d6bcb4989dbf33e96358a632d7eba11d9c7a4bdf93843f7f1",
+    "schema_digest": "63aa16a75cef37e0be66bc0549596127c975f3809eeb4060ed7b3f4919f1c366",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -951,7 +951,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "dispatch-job": {
     "ingress_key": "mcp-tool:dispatch-job",
     "source_locator": "mcp-server/src/work-queue.js",
-    "schema_digest": "cf4eb6feedff876ac1d8786a1c59236389ef9d4e23e636d7c91915c45f87b2a3",
+    "schema_digest": "64fb13bd07030c4bd940be0f43e1bd7dcae37d25230bf203d999ec12d7b54906",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -3727,15 +3727,6 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "ingress_key": "db-relation-acl:public.system_work_census_inventory:carr_writer:update",
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
-    },
-    {
-      "grantee": "carr_writer",
-      "relation": "ops.work_request_slice",
-      "grantable": false,
-      "privilege": "update",
-      "ingress_key": "db-relation-acl:ops.work_request_slice:carr_writer:update",
-      "ingress_kind": "db_relation_acl",
-      "relation_kind": "r"
     }
   ],
   "secdef_execute": [
@@ -3930,21 +3921,6 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.adopt_rule(p_section_id uuid, p_base_version bigint, p_idempotency_key text, p_reason text)",
       "volatility": "v",
       "ingress_key": "db-function-acl:ops.adopt_rule(p_section_id uuid, p_base_version bigint, p_idempotency_key text, p_reason text):carr_authority:execute",
-      "ingress_kind": "db_function_acl",
-      "function_kind": "f",
-      "security_definer": true
-    },
-    {
-      "config": [
-        "search_path=pg_catalog, pg_temp"
-      ],
-      "grantee": "carr_jobs",
-      "parallel": "u",
-      "grantable": false,
-      "privilege": "execute",
-      "signature": "ops.reap_expired_runs(p_service_id uuid, p_environment text, p_run_key text, p_limit integer)",
-      "volatility": "v",
-      "ingress_key": "db-function-acl:ops.reap_expired_runs(p_service_id uuid, p_environment text, p_run_key text, p_limit integer):carr_jobs:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true

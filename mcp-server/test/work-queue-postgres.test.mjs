@@ -51,6 +51,8 @@ before(async () => {
     await c.query(readFileSync(new URL('../../migrations/1024_work_request_job_start.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select 1 from schema_migrations where filename='1025_work_request_job_finished.sql'")).rows.length)
     await c.query(readFileSync(new URL('../../migrations/1025_work_request_job_finished.sql', import.meta.url), 'utf8'));
+  if (!(await c.query("select 1 from information_schema.columns where table_schema='ops' and table_name='work_request_job' and column_name='job_type'")).rows.length)
+    await c.query(readFileSync(new URL('../../migrations/1061_work_request_job_type.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select 1 from schema_migrations where filename='1060_work_request_slice_outcome.sql'")).rows.length)
     await c.query(readFileSync(new URL('../../migrations/1060_work_request_slice_outcome.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select 1 from schema_migrations where filename='1062_work_request_job_version.sql'")).rows.length)
@@ -85,7 +87,7 @@ async function request(ref = 'WR-000014') {
 }
 let titleNumber = 0;
 const job = (work_request, extra = {}) => ({ idempotency_key: randomUUID(), work_request,
-  executor: 'codex', model: 'synthetic-model', effort: 'high', card_title: `Build work ${String.fromCharCode(97 + Math.floor(titleNumber / 26))}${String.fromCharCode(97 + titleNumber++ % 26)}`,
+  job_type: 'bug-fix', executor: 'codex', model: 'synthetic-model', effort: 'high', card_title: `Build work ${String.fromCharCode(97 + Math.floor(titleNumber / 26))}${String.fromCharCode(97 + titleNumber++ % 26)}`,
   description: 'Build the synthetic queue behavior.', ...extra });
 
 test('job version constraint is valid after migrations', async () => {
@@ -352,6 +354,46 @@ test('launcher starts an existing legacy card with its stored copy', async () =>
   await command('dispatch-job', job(work_request, { repository, job: 1, runner_job_id: 'legacy-runner',
     card_title: queued.card_title, description: queued.description }));
   assert.equal((await command('work-queue')).jobs.find(row => row.work_request === work_request).runner_job_id, 'legacy-runner');
+});
+
+
+test('enqueue refuses missing and unknown workflow types without minting a job', async () => {
+  const work_request = await request('WR-000027');
+  for (const job_type of [undefined, 'unknown-workflow']) {
+    const args = job(work_request, { job_type });
+    if (job_type === undefined) delete args.job_type;
+    await assert.rejects(command('dispatch-job', args), { message: job_type === undefined ? 'invalid_job_type' : 'value_not_in_declared_vocabulary' });
+  }
+  assert.equal((await command('work-queue')).jobs.filter(row => row.work_request === work_request).length, 0);
+  await command('dispatch-job', job(work_request));
+  assert.equal((await command('work-queue')).jobs.find(row => row.work_request === work_request).job_type, 'bug-fix');
+});
+
+test('a runner cannot change the queued workflow type', async () => {
+  const work_request = await request('WR-000028');
+  const repository = 'DoctorCRE/carr-system';
+  await command('dispatch-job', job(work_request, { repository }));
+  const start = { work_request, slice: 1, job: 1, runner_job_id: 'typed-runner', repository, idempotency_key: randomUUID() };
+  await assert.rejects(command('dispatch-job', { ...start, job_type: 'review' }), { message: 'job_type_mismatch' });
+  await command('dispatch-job', { ...start, job_type: 'bug-fix' });
+  assert.equal((await command('work-queue')).jobs.find(row => row.work_request === work_request).job_type, 'bug-fix');
+});
+
+test('a typed runner starts an untyped job and stores its workflow type exactly once', async () => {
+  const work_request = await request('WR-000029');
+  const repository = 'DoctorCRE/carr-system';
+  await command('dispatch-job', job(work_request, { repository }));
+  await c.query('update ops.work_request_job set job_type=null where work_request_id=(select id from ops.work_request where ref=$1)', [work_request]);
+  const start = { work_request, job: 1, repository, job_type: 'bug-fix', runner_job_id: 'legacy-runner', idempotency_key: randomUUID() };
+  assert.equal((await command('dispatch-job', start)).card_id, 'WR29.S1.J1');
+  const queued = (await command('work-queue')).jobs.filter(row => row.work_request === work_request);
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].job_type, 'bug-fix');
+  assert.equal(queued[0].runner_job_id, 'legacy-runner');
+  assert.ok(queued[0].started_at);
+  await assert.rejects(command('dispatch-job', { ...start, runner_job_id: 'second-runner', idempotency_key: randomUUID() }),
+    { message: 'job_already_started' });
+
 });
 
 test('slice retirement requires a reason and replays one outcome event', async () => {
