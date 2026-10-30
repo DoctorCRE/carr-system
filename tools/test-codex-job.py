@@ -227,14 +227,14 @@ print(json.dumps({{'ok': True, 'card_id': 'WR557.S2.J2', 'runner_job_id': args['
         self.assertEqual(job.returncode, 1)
         self.assertTrue(line.startswith('Delivery: failed missing=pr ') and line.endswith(' pr=unchecked'), line)
 
-    def test_stacked_job_survives_one_failed_remote_listing(self):
+    def test_failed_remote_listing_reports_error(self):
         git = self.root / 'git'
         marker = self.root / 'listing-failed'
         real_git = shutil.which('git')
         git.write_text(f'#!{sys.executable}\nimport os, pathlib, sys\n'
                        f'marker = pathlib.Path({str(marker)!r})\n'
                        "if 'ls-remote' in sys.argv and not marker.exists():\n"
-                       "    marker.touch()\n    sys.exit(1)\n"
+                       "    marker.touch()\n    print('fatal: unable to access https://user:secret@example.com/repo', file=sys.stderr)\n    sys.exit(7)\n"
                        f'os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n')
         git.chmod(0o755)
         subprocess.run(['git', '-C', str(self.root / 'seed'), 'push', '-q', str(self.origin),
@@ -246,8 +246,11 @@ print(json.dumps({{'ok': True, 'card_id': 'WR557.S2.J2', 'runner_job_id': args['
         job = self.launch(body, brief=PR_BRIEF, push=False)
         stdout, stderr = job.communicate(timeout=15)
         line, errors = stdout.decode(), stderr.decode()
-        self.assertEqual(job.returncode, 0, line + errors)
-        self.assertIn('Delivery: ok missing=none branch=test/job', line)
+        self.assertEqual(job.returncode, 1, line + errors)
+        self.assertIn('branch=unchecked', line, errors)
+        self.assertIn('exit=7', line)
+        self.assertIn('fatal: unable to access https://example.com/repo', line)
+        self.assertNotIn('user:secret', line)
 
     def test_pushed_job_with_its_pr_succeeds(self):
         self.pr_url.write_text('https://github.com/o/r/pull/2\n')
