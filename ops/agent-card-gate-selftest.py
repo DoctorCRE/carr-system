@@ -66,6 +66,11 @@ class AgentCardGate(unittest.TestCase):
         result = self.run_hook(prompt='Card: WR557.S6.J1\nReview the plan.')
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_registered_card_allows_foreground_agent(self):
+        self.register_fixture()
+        result = self.run_hook(prompt='Card: WR557.S6.J1\nReview the plan.', run_in_background=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_bash_codex_exec_without_card_denied(self):
         result = self.run_hook('Bash', command='codex exec "Review the plan."')
         self.assertEqual(result.returncode, 2, result.stderr)
@@ -109,17 +114,15 @@ class AgentCardGate(unittest.TestCase):
                 result = self.run_hook('Bash', command=command)
                 self.assertEqual(result.returncode, 2, result.stderr)
 
-    def test_foreground_helpers_need_no_card(self):
-        self.lookup.write_text('raise SystemExit("queue must not be read")')
+    def test_foreground_agents_need_card(self):
         for kind in ('Explore', 'Plan', 'general-purpose'):
             with self.subTest(kind=kind):
                 result = self.run_hook(prompt='Search code.', subagent_type=kind,
                                        run_in_background=False)
-                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.returncode, 2, result.stderr)
 
-    def test_agent_default_is_foreground(self):
-        result = self.run_hook(prompt='Search code.', run_in_background=None)
-        self.assertEqual(result.returncode, 0, result.stderr)
+    def test_agent_default_foreground_needs_card(self):
+        self.assertEqual(self.run_hook(prompt='Search code.', run_in_background=None).returncode, 2)
 
     def test_background_explore_needs_card(self):
         self.assertEqual(self.run_hook(prompt='Search code.', subagent_type='Explore').returncode, 2)
