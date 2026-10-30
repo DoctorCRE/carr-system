@@ -195,6 +195,11 @@ def current_state(recordings: Path = RECORDINGS) -> dict[str, Any]:
                 if not (path / "ingested.json").exists()
                 if (status := session_status(path)) is not None]
     sessions.sort(key=lambda status: status["started_at"], reverse=True)
+    cutoff = time.time() - 14 * 86400
+    visible = [status for status in sessions if status["state"] == "needs_attention"
+               or datetime.fromisoformat(status["started_at"].replace("Z", "+00:00")).timestamp() >= cutoff]
+    hidden_older_count = len(sessions) - len(visible)
+    sessions = visible
     active = next((path for path in directories if is_recording(path)), None)
     if active:
         context = read_json(active / CONTEXT_FILE) or {}
@@ -204,6 +209,7 @@ def current_state(recordings: Path = RECORDINGS) -> dict[str, Any]:
         }
         return {
             "sessions": sessions,
+            "hidden_older_count": hidden_older_count,
             "state": "recording",
             "started_at": started_at(active),
             "session": active.name,
@@ -216,8 +222,8 @@ def current_state(recordings: Path = RECORDINGS) -> dict[str, Any]:
     if newest:
         status = session_status(newest)
         if status:
-            return {**status, "local_partner": local_partner, "sessions": sessions}
-    return {"state": "idle", "local_partner": local_partner, "sessions": sessions}
+            return {**status, "local_partner": local_partner, "sessions": sessions, "hidden_older_count": hidden_older_count}
+    return {"state": "idle", "local_partner": local_partner, "sessions": sessions, "hidden_older_count": hidden_older_count}
 
 
 def session_status(path: Path) -> dict[str, Any] | None:
@@ -250,11 +256,17 @@ def session_status(path: Path) -> dict[str, Any] | None:
         base["extraction_attempts"] = post_status.get("extraction_attempts", 0)
     elif (path / "ingested.json").exists():
         state = "filed"
-    elif state not in messages:
+    elif state is not None and state not in messages:
+        return {**base, "state": "state_unknown", "status_text": "Unrecognized post-call state. Check this call."}
+    elif state is None:
         if (path / "transcript.json").exists():
             state = "ready_to_extract"
         elif (path / "meta.json").exists():
-            if time.time() - (path / "meta.json").stat().st_mtime > TERMINAL_AGE_SECONDS:
+            try:
+                age = time.time() - (path / "meta.json").stat().st_mtime
+            except OSError:
+                return {**base, "state": "state_unknown", "status_text": messages["state_unknown"]}
+            if age > TERMINAL_AGE_SECONDS:
                 return {**base, "state": "needs_attention",
                         "status_text": "Transcription has not finished. The local recording is saved."}
             state = "transcribing"
@@ -397,7 +409,7 @@ header{background:var(--deep);color:white;padding:18px 22px;display:flex;align-i
 </style></head><body><main><header><span class="brand">CARR Call Mode</span><span class="bridge">Quill local recorder</span></header>
 <section class="stage" id="stage"><div class="orb">●</div><div class="timer" id="timer">Ready</div><div class="status" id="status">Quill is ready on this Mac.</div><div class="speakers" id="speakers">Separate tracks identify the local partner and the other side without a third-party voiceprint.</div></section>
 <section class="actions"><label id="consentRow" style="display:flex;gap:10px;align-items:flex-start;font-size:12px;color:var(--muted);line-height:1.4"><input id="consent" type="checkbox" style="margin-top:2px">I have told everyone on this call that it will be recorded.</label><div class="row" id="startRow"><button class="primary" data-start="weekly_deal_call">Start weekly deal call</button><button data-start="other_call">Start another call</button></div><button class="danger" id="stop" hidden>Stop and process</button></section>
-<section class="actions" aria-label="Unfiled calls"><h2>Unfiled calls</h2><ul id="sessions"></ul></section>
+<section class="actions" aria-label="Unfiled calls"><h2>Unfiled calls</h2><ul id="sessions"></ul><p id="hiddenOlder"></p></section>
 <p class="note">The audible recording announcement remains part of Quill. Stopping the call starts local transcription. Next steps and phases stated plainly update the cards, each listed with Undo; anything unsettled waits for Joe or Dell. Emails stay drafts.</p></main>
 <script>
 const $=(s)=>document.querySelector(s);let snapshot={state:'idle'};
@@ -406,6 +418,7 @@ function paint(s){snapshot=s;const rec=s.state==='recording';$('#stage').classLi
   $('#timer').textContent=rec?elapsed(s.started_at):({idle:'Ready',transcribing:'Processing',ready_to_extract:'Transcript ready',filed:'Summary saved',state_unknown:'Check Quill',needs_attention:'Needs attention'}[s.state]||s.state.replaceAll('_',' '));
   $('#status').textContent=rec?'Recording is live.':s.status_text||'Quill is ready on this Mac.';
   $('#sessions').replaceChildren(...(s.sessions||[]).map(item=>{const row=document.createElement('li');row.textContent=item.session+' · '+item.status_text;return row}));
+  $('#hiddenOlder').textContent=s.hidden_older_count?`${s.hidden_older_count} older unfiled calls hidden.`:'';
   const l=s.speaker_labels||{};$('#speakers').innerHTML=l.mic?'<b>'+l.mic+'</b> on the microphone · <b>'+l.system+'</b> on system audio':'Separate tracks identify the local partner and the other side without a third-party voiceprint.'}
 async function api(path,body){const r=await fetch('/api/'+path,{method:body?'POST':'GET',headers:body?{'content-type':'application/json','X-CARR-Call-Mode':'deal-room-v1'}:{},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw new Error(d.error||'Call Mode failed');return d}
 async function refresh(){try{paint(await api('state'))}catch(e){$('#status').textContent=e.message}}

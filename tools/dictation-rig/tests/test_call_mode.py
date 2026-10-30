@@ -98,6 +98,61 @@ class CallModeTests(unittest.TestCase):
         with patch.object(call_mode, "partner_from_device", return_value="Joe"):
             return call_mode.current_state(self.recordings)
 
+    def test_unrecognized_post_call_state_is_visible_as_unknown(self) -> None:
+        session = self.session("held")
+        (session / "transcript.json").write_text("{}")
+        post_call.write_private(session / post_call.STATUS_FILE, {"state": "held_review"})
+        self.assertEqual(self.state()["state"], "state_unknown")
+
+    def test_stale_interrupted_transcription_retries_and_respects_cap(self) -> None:
+        session = self.session("interrupted")
+        (session / "meta.json").write_text("{}")
+        (session / ".capture.json").write_text(json.dumps({"session_token": "fixture"}))
+        post_call.write_private(session / transcribe_session.STATUS_FILE, {
+            "state": "transcribing", "transcription_attempts": 1, "updated_at": "2000-01-01T00:00:00Z"})
+        with patch.object(transcribe_session, "resolve_model", side_effect=transcribe_session.TranscribeError("unavailable")) as model:
+            for _ in range(4):
+                capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session)
+            self.assertEqual(model.call_count, 2)
+        self.assertEqual(post_call.read_json(session / transcribe_session.STATUS_FILE)["transcription_attempts"], 3)
+        self.assertIn("held after 3", capture_bridge.LOG_PATH.read_text())
+
+    def test_stale_final_attempt_is_held_only_when_lock_is_free(self) -> None:
+        import fcntl
+        session = self.session("stale-final")
+        (session / ".capture.json").write_text(json.dumps({"session_token": "fixture"}))
+        status_path = session / transcribe_session.STATUS_FILE
+        post_call.write_private(status_path, {"state": "transcribing", "transcription_attempts": 3,
+                                              "updated_at": "2000-01-01T00:00:00Z"})
+        with (session / ".transcription.lock").open("a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session)
+            self.assertEqual(post_call.read_json(status_path)["state"], "transcribing")
+        capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session)
+        self.assertEqual(post_call.read_json(status_path)["state"], "needs_attention")
+        self.assertIn("held after 3", capture_bridge.LOG_PATH.read_text())
+
+    def test_unfiled_hides_old_calls_except_needs_attention(self) -> None:
+        for name, state in (("old", "blocked"), ("old-attention", "needs_attention"), ("recent", "blocked")):
+            session = self.session(name)
+            post_call.write_private(session / post_call.STATUS_FILE, {"state": state})
+            stamp = time.time() - (15 * 86400 if name.startswith("old") else 60)
+            os.utime(session, (stamp, stamp))
+        result = self.state()
+        self.assertEqual({row["session"] for row in result["sessions"]}, {"old-attention", "recent"})
+        self.assertEqual(result["hidden_older_count"], 1)
+
+    def test_missing_meta_during_stat_does_not_break_state(self) -> None:
+        session = self.session("race")
+        (session / "meta.json").write_text("{}")
+        original = Path.stat
+        def raced(path, *args, **kwargs):
+            if path == session / "meta.json":
+                raise FileNotFoundError()
+            return original(path, *args, **kwargs)
+        with patch.object(Path, "stat", raced):
+            self.state()
+
     def test_fatal_transcription_stays_visible_after_age_cutoff(self) -> None:
         session = self.session("failed-model")
         (session / "meta.json").write_text("{}")
@@ -297,7 +352,7 @@ class CallModeTests(unittest.TestCase):
         self.assertEqual(self.state()["state"], "state_unknown")
 
     def test_old_unfinished_transcription_remains_visible(self) -> None:
-        self.assertEqual(self.state(), {"state": "idle", "local_partner": "Joe", "sessions": []})
+        self.assertEqual(self.state(), {"state": "idle", "local_partner": "Joe", "sessions": [], "hidden_older_count": 0})
 
         session = self.session("old-terminal")
         (session / "meta.json").write_text("{}")
