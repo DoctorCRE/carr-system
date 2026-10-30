@@ -6,7 +6,7 @@ FROM public.next_action n
 WHERE n.subject_type='deal' AND n.item_title IS NULL AND n.status IN ('open','done')
   AND (n.status='open' OR NOT EXISTS (
     SELECT 1 FROM public.deal_note step
-    WHERE step.deal_id=n.subject_id AND step.kind='next_step' AND step.created_at>n.created_at))
+    WHERE step.deal_id=n.subject_id AND step.kind='next_step' AND step.created_at>n.updated_at))
   AND NOT EXISTS (
     SELECT 1 FROM public.event request
     WHERE request.subject_type='deal' AND request.subject_id=n.subject_id
