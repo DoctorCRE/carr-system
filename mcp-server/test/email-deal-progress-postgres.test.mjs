@@ -1306,8 +1306,8 @@ test('thread continuity files an unchanged reply but a new doctor defeats inheri
     recipients: [{ email: 'broker@internal.example', internal: true, kind: 'to' }] };
   const prior = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
     summary: 'Email from Synthetic vendor: Coastal property', detail: quote,
-    occurred_at: new Date(NOW - 60000).toISOString(), email_context: context });
-  await c.query('update activity set deal_id=$2 where id=$1', [prior.activity_id,deal]);
+    email_context: context });
+  await c.query("update activity set deal_id=$2, occurred_at=now()-interval '1 minute' where id=$1", [prior.activity_id,deal]);
   const reply = async extra => command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
     summary: 'Email from Synthetic vendor: Re: Coastal property', detail: quote,
     email_context: { ...context, recipients: [...context.recipients,...extra] } });
@@ -1378,8 +1378,8 @@ test('subject continuity tolerates reply spacing and refuses a thread older than
     recipients: [{ email: 'broker@internal.example', kind: 'to', internal: true }] };
   const prior = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
     kind: 'email_in', summary: 'Email from Vendor: Synthetic practice', detail: quote,
-    occurred_at: new Date(NOW - 60000).toISOString(), email_context: context });
-  await c.query('update activity set deal_id=$2 where id=$1', [prior.activity_id,deal]);
+    email_context: context });
+  await c.query("update activity set deal_id=$2, occurred_at=now()-interval '1 minute' where id=$1", [prior.activity_id,deal]);
   const reply = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
     kind: 'email_in', summary: 'Email from Vendor: Re: Synthetic practice', detail: quote,
     email_context: { ...context, subject: '   Re:    Synthetic practice  ' } });
