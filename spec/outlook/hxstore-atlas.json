@@ -22,7 +22,7 @@
       "sha256": "af4abd79a95f36a325e0d12e9994df80add60851e9c54bc88cd7a4c6e1c9b6d8"
     },
     "vendor/hxprobe/src/calendar.rs": {
-      "revision": "55e33ca4807d082e6bb3f8a3124d8e6aedf58c2d",
+      "revision": "a636d9e680227346781ebf0b5b473901b2cb5314",
       "sha256": "d2f3c52c428ff2e8bd471b848c15f26af1725d620392048078d1b81b3f781c3c"
     },
     "vendor/hxprobe/src/record.rs": {
@@ -42,15 +42,15 @@
       "sha256": "796850d32e1169eecd7e70094072b438ccb0530a4b7fa7d5dd70c65edee3461b"
     },
     "vendor/hxprobe/src/category.rs": {
-      "revision": "4b9f1a53c9742cab8e77a22ab64ed58a392e4e41",
+      "revision": "dc643e76a322f5865e7eb8be4147890862177480",
       "sha256": "1a244e42d2f4ed4a4fc9a3141061ca187aea90c51874bf5e442a88a63d1c9e41"
     },
     "vendor/hxprobe/src/detail.rs": {
-      "revision": "4b9f1a53c9742cab8e77a22ab64ed58a392e4e41",
+      "revision": "dc643e76a322f5865e7eb8be4147890862177480",
       "sha256": "b7f10a2112bbb8a3d7a4a10fc97f04ff757e2e514caf1fef10aa0929d54c7d58"
     },
     "vendor/hxprobe/src/message.rs": {
-      "revision": "c05046af59640733739fc653e47ba1ff866a19a3",
+      "revision": "f160135d4e5d38613ecf05643e64d8ba4975920d",
       "sha256": "8f5ae1e61d55cc02d385f0cda01ff1513f84d803095c841c8c38497dc86b94e7"
     }
   },
