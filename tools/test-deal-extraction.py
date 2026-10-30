@@ -59,7 +59,7 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual(submitted['receipt']['grounding_changes'], ['base_rent_per_sf'])
         self.assertEqual(submitted['observations'][0]['value'], '24')
         self.assertEqual(submitted['observations'][0]['confidence_tier'], 'human_review')
-        self.assertEqual(len(submitted['receipt']['abstentions']), 2)
+        self.assertEqual(len(submitted['receipt']['abstentions']), 3)
         self.assertEqual(submitted['receipt']['cost_usd'], '0.02')
         run_job(job, call=store, read_bytes=lambda doc: self.fail('retry read source'),
                 text_pages=lambda data: [], model=model)

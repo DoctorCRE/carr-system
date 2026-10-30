@@ -21,7 +21,7 @@ test('stored extraction jobs bind identity, replay one batch, and review abstent
     await c.query(await readFile(new URL('../../migrations/0001_init.sql', import.meta.url), 'utf8'));
     await c.query('create schema ops; create role carr_reader; create role carr_writer; create role carr_authority; create role dot_reader');
     await c.query("create function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as $$select '{\"secdef_execute\":[]}'::jsonb$$");
-    for (const file of ['0983_fact_store.sql', '1070_fact_review.sql', '1078_deal_extraction.sql', '1079_deal_extraction_reruns.sql'])
+    for (const file of ['0983_fact_store.sql', '1070_fact_review.sql', '1078_deal_extraction.sql', '1079_deal_extraction_reruns.sql', '1081_deal_schedules.sql'])
       await c.query(await readFile(new URL(`../../migrations/${file}`, import.meta.url), 'utf8'));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner'),($2,'codex','automation','Synthetic extractor')", [partner.id, job.id]);
     const entity_ref = randomUUID(), document_ref = randomUUID(), hash = 'a'.repeat(64);

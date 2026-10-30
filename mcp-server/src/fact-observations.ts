@@ -1,5 +1,8 @@
 // Validate and manage economic fact observations.
 import { authorizationClassForActor, organizationTenantForActor } from './identity.js';
+import scheduleSchema from '../../lib/deal_schedule.schema.json' with { type: 'json' };
+import type { Schema } from '@cfworker/json-schema';
+import { Validator } from '@cfworker/json-schema';
 import { ToolError } from './tool-error.ts';
 import type { Actor, Db, VerbInputs } from './verb-contract.ts';
 
@@ -11,8 +14,10 @@ export const CONTRACTS: Record<string, FactContract> = {
   base_rent_per_sf: { units: { 'USD/SF/year': 1, 'USD/SF/month': 12 }, unit: 'USD/SF/year', expenseBasis: true },
   landlord_ti_per_sf: { units: { 'USD/SF': 1 }, unit: 'USD/SF' },
   term_months: { units: { months: 1, years: 12 }, unit: 'months' },
+  rent_schedule: { units: { schedule: 1 }, unit: 'schedule' },
   free_rent_months: { units: { months: 1 }, unit: 'months' },
 };
+const scheduleValidator = new Validator(structuredClone(scheduleSchema) as Schema);
 const EXPENSE_BASES = ['nnn', 'modified_gross', 'full_service_gross', 'gross'];
 const DECIMAL = /^(?:0|[1-9][0-9]{0,29})(?:\.[0-9]{1,18})?$/;
 const CONTENT_HASH = /^[a-fA-F0-9]{64}$/;
@@ -20,7 +25,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const text = (maxLength: number) => ({ type: 'string', minLength: 1, maxLength });
 const uuid = { type: 'string', pattern: UUID.source, minLength: 36, maxLength: 36 };
 const sourceSchema = { type: 'object', additionalProperties: false, properties: {
-  document_ref: text(200), page_start: { type: 'integer', minimum: 1, maximum: 100000 },
+  document_ref: text(200), region_id: text(100), page_start: { type: 'integer', minimum: 1, maximum: 100000 },
   page_end: { type: 'integer', minimum: 1, maximum: 100000 }, cited_text: text(4000),
   content_hash: { type: 'string', pattern: CONTENT_HASH.source, minLength: 64, maxLength: 64 },
   document_family_id: text(200),
@@ -42,6 +47,7 @@ const observationRequired = ['id', 'fact_key', 'value', 'unit', 'source', 'metho
 const observationSchema = { anyOf: Object.entries(CONTRACTS).map(([key, contract]) => {
   const { expense_basis, ...properties } = observationProperties;
   return { type: 'object', additionalProperties: false, properties: { ...properties,
+    value: key === 'rent_schedule' ? scheduleSchema : properties.value,
     fact_key: { type: 'string', enum: [key] }, unit: { type: 'string', enum: Object.keys(contract.units) },
     ...(contract.expenseBasis ? { expense_basis } : {}),
   }, required: [...observationRequired, ...(contract.expenseBasis ? ['expense_basis'] : [])] };
@@ -86,11 +92,21 @@ export function validateFactObservations(args: Record<string, any>, extra: strin
     ids.add(o.id);
     if (typeof o.fact_key !== 'string' || !Object.hasOwn(CONTRACTS, o.fact_key)) invalid();
     const contract = CONTRACTS[o.fact_key];
-    if (typeof o.unit !== 'string' || !Object.hasOwn(contract.units, o.unit) || typeof o.value !== 'string' || !DECIMAL.test(o.value)) invalid();
+    if (o.fact_key === 'rent_schedule') {
+      if (!scheduleValidator.validate(o.value).valid) invalid();
+      let end = 0;
+      for (const period of o.value) {
+        if (!(end < period.start_month.value && period.start_month.value <= period.end_month.value)) invalid();
+        end = period.end_month.value;
+      }
+      if (o.value.some((p: Record<string, {source: {method: string}}>) => Object.values(p).some(f => f.source.method === 'ocr')) && o.method !== 'ocr') invalid();
+    }
+    if (typeof o.unit !== 'string' || !Object.hasOwn(contract.units, o.unit) || (o.fact_key !== 'rent_schedule' && (typeof o.value !== 'string' || !DECIMAL.test(o.value)))) invalid();
     if (contract.expenseBasis ? !EXPENSE_BASES.includes(o.expense_basis) : Object.hasOwn(o, 'expense_basis')) invalid();
     object(o.source, Object.keys(sourceSchema.properties), sourceSchema.required);
     string(o.source.document_ref, 200);
     string(o.source.cited_text, 4000);
+    if (Object.hasOwn(o.source, 'region_id')) string(o.source.region_id, 100);
     if (Object.hasOwn(o.source, 'content_hash') && (typeof o.source.content_hash !== 'string'
       || o.source.content_hash.length !== 64 || !CONTENT_HASH.test(o.source.content_hash))) invalid();
     if (Object.hasOwn(o.source, 'document_family_id')) string(o.source.document_family_id, 200);
@@ -124,8 +140,8 @@ export function factObservationTools() {
         validateFactObservations(args);
         // expense_basis is read only for expense-basis contracts, where validate() required it.
         const observations = args.observations.map(input => ({ input,
-          effective_confidence_tier: input.method === 'ocr' ? 'human_review' : input.confidence_tier,
-          normalized: { value: normalize(input.value, CONTRACTS[input.fact_key].units[input.unit]),
+          effective_confidence_tier: input.method === 'ocr' || input.fact_key === 'rent_schedule' ? 'human_review' : input.confidence_tier,
+          normalized: { value: input.fact_key === 'rent_schedule' ? input.value.map(period => Object.fromEntries(Object.entries(period).map(([k, field]) => [k, field.value]))) : normalize(input.value, CONTRACTS[input.fact_key].units[input.unit]),
             unit: CONTRACTS[input.fact_key].unit,
             ...(CONTRACTS[input.fact_key].expenseBasis ? { expense_basis: (input as { expense_basis?: string }).expense_basis } : {}) },
         }));
