@@ -55,6 +55,7 @@ before(async () => {
   await c.query(readFileSync(new URL('../../migrations/1026_email_recent_outcomes_index.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select to_regclass('public.v_email_thread_filing_event') as relation")).rows[0].relation)
     await c.query(readFileSync(new URL('../../migrations/1023_email_thread_filing_events.sql', import.meta.url), 'utf8'));
+  await c.query(readFileSync(new URL('../../migrations/1069_email_non_deal_steps.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic physician',$1,$1) returning id", [actor.id])).rows[0].id;
   await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
@@ -1757,22 +1758,23 @@ async function automaticThreadFiling() {
   const context = { subject: 'Synthetic thread', conversation_id: randomUUID(),
     sender: { email: 'sender@example.test', name: 'Synthetic Sender', internal: false }, recipients: [] };
   const prior = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
-    summary: 'Synthetic thread', detail: quote, occurred_at: new Date(NOW - 60000).toISOString(), email_context: context });
+    summary: 'Synthetic thread', detail: quote, email_context: context });
   await c.query('update activity set deal_id=$2 where id=$1', [prior.activity_id, deal]);
   const reply = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
-    summary: 'Synthetic reply', detail: quote, occurred_at: new Date(NOW).toISOString(), email_context: context });
+    summary: 'Synthetic reply', detail: quote, email_context: context });
+  const capturedAt = (await c.query('select occurred_at from activity where id=$1', [reply.activity_id])).rows[0].occurred_at.getTime();
   await command('inherit-email-thread', { idempotency_key: randomUUID(), activity_id: reply.activity_id,
     thread_activity_id: prior.activity_id }, router(), 'carr_writer');
   const filings = await command('list-email-thread-filings', {}, actor, 'carr_reader');
   const filing = filings.filings.find(item => item.activity_id === reply.activity_id);
   assert.ok(filing);
-  return { prior, reply, filing };
+  return { prior, reply, filing, capturedAt };
 }
 test('filing list provides source email and recorded version for undo', async () => {
-  const { reply, filing } = await automaticThreadFiling();
+  const { reply, filing, capturedAt } = await automaticThreadFiling();
   assert.equal(filing.subject, 'Synthetic thread');
   assert.equal(filing.sender_name, 'Synthetic Sender');
-  assert.equal(new Date(filing.occurred_at).toISOString(), new Date(NOW).toISOString());
+  assert.equal(new Date(filing.occurred_at).toISOString(), new Date(capturedAt).toISOString());
   assert.equal(filing.activity_version, 2);
   assert.equal(filing.activity_id, reply.activity_id);
   assert.equal(filing.deal, deal);
@@ -1958,4 +1960,118 @@ test('an unconfirmed receipt never creates sent correspondence', async () => {
   await refuses(command('record-email-sent', args, machineFor('joe'), 'carr_writer'), 'email_draft_sent_confirmation_required');
   await command('record-email-sent', { ...args, status: 'failed', reason: 'unconfirmed_after_86400' }, machineFor('joe'), 'carr_writer');
   assert.deepEqual((await command('get-deal-room', { deal: sentDeal })).activities, []);
+});
+
+
+test('a client email without a deal reaches partner review and confirms only the reviewed action', async () => {
+  const source = await email(askQuote);
+  const args = { activity_id: source.activity_id, evidence_quote: askQuote,
+    text: 'Send the floor plan', next_date: '2027-01-08', owner: 'joe' };
+  const stored = await command('record-email-proposal', { ...args, kind: 'next_step', confidence: 0.9,
+    idempotency_key: randomUUID() }, router(), 'carr_writer');
+  const item = (await command('list-email-proposals', { include_non_deal: true }, actor, 'carr_reader')).proposals.find(p => p.id === stored.proposal_id);
+  assert.equal((await command('list-email-proposals', {}, actor, 'carr_reader')).proposals.some(p => p.id === stored.proposal_id), false);
+  assert.equal(item.deal, null);
+  assert.equal(item.preview.subject_type, 'client');
+  assert.equal(item.preview.requires_confirmation, true);
+  assert.equal(item.confirm_verb, 'confirm-email-next-step');
+  const before = await command('get-next-action', { ref: clientRef, owner: 'joe' });
+  const key = randomUUID();
+  const confirmed = await command('confirm-email-next-step', { ...args,
+    proposal_digest: item.preview.proposal_digest, idempotency_key: key }, actor, 'carr_writer');
+  assert.equal(confirmed.email_proposal_id, stored.proposal_id);
+  assert.equal(confirmed.status, 'confirmed');
+  assert.notEqual((await command('get-next-action', { ref: clientRef, owner: 'joe' })).action.id, before.action?.id);
+  assert.equal((await command('confirm-email-next-step', { ...args,
+    proposal_digest: item.preview.proposal_digest, idempotency_key: key }, actor, 'carr_writer')).replayed, true);
+});
+
+test('blocked email proposals expire after 30 days while actionable and recent items remain', async () => {
+  const make = async () => {
+    const source = await email(askQuote);
+    const proposal = await command('record-email-proposal', { kind: 'next_step', activity_id: source.activity_id,
+      evidence_quote: askQuote, text: 'Review synthetic request', next_date: '2027-01-08', confidence: 0.9,
+      idempotency_key: randomUUID() }, router());
+    return { ...proposal, activity_id: source.activity_id };
+  };
+  const oldBlocked = await make(), oldValid = await make(), recentBlocked = await make();
+  await c.query("update activity set detail='The original email was withdrawn.' where id=any($1::uuid[])",
+    [[oldBlocked.activity_id,recentBlocked.activity_id]]);
+  await c.query("update email_proposal set created_at=now()-interval '31 days' where id=any($1::uuid[])",
+    [[oldBlocked.proposal_id,oldValid.proposal_id]]);
+  const key = randomUUID();
+  const result = await command('record-email-proposal', { mode: 'expire_blocked', idempotency_key: key }, actor, 'carr_writer');
+  assert.equal(result.expired_count, 1);
+  const archived = (await command('list-email-proposals', { status: 'dismissed', include_non_deal: true }, actor, 'carr_reader')).proposals
+    .find(row => row.id === oldBlocked.proposal_id);
+  assert.match(archived.resolution.reason, /30 days.*email_next_step_quote_invalid/);
+  assert.equal(archived.source.evidence_quote, askQuote);
+  assert.equal(archived.confirm_verb, null);
+  const pending = (await command('list-email-proposals', { include_non_deal: true }, actor, 'carr_reader')).proposals;
+  assert.ok(pending.some(row => row.id === oldValid.proposal_id && row.preview));
+  assert.ok(pending.some(row => row.id === recentBlocked.proposal_id && row.preview_error));
+  assert.equal((await command('record-email-proposal', { mode: 'expire_blocked', idempotency_key: key }, actor)).replayed, true);
+});
+
+for (const subjectType of ['lead','vendor','client']) test(`${subjectType} mail keeps its subject and refuses stale or machine confirmation`, async () => {
+  const party = (await c.query(`insert into party(kind,name,created_by,updated_by)
+    values('person','Synthetic non-deal contact',$1,$1) returning id`, [actor.id])).rows[0].id;
+  const query = {
+    client: "insert into client(party_id,status,created_by,updated_by,roster_ref) values($1,'fixture_active',$2,$2,$3) returning id",
+    vendor: "insert into vendor(party_id,category,created_by,updated_by,vendor_ref) values($1,'banker',$2,$2,$3) returning id",
+    lead: "insert into lead(party_id,stage,created_by,updated_by,registry_ref) values($1,'new',$2,$2,$3) returning id",
+  }[subjectType];
+  const ref = `${{ client: 'C', lead: 'L', vendor: 'V' }[subjectType]}-${Math.floor(Math.random()*10000000)}`;
+  const subject = (await c.query(query, [party,actor.id,ref])).rows[0].id;
+  const source = await command('log-activity', { idempotency_key: randomUUID(), ref: subject, kind: 'email_in',
+    summary: 'Synthetic non-deal request', detail: askQuote });
+  const args = { activity_id: source.activity_id, evidence_quote: askQuote, text: 'Send the floor plan',
+    next_date: '2027-01-08', owner: 'dell' };
+  const stored = await command('record-email-proposal', { ...args, kind: 'next_step', confidence: 0.9,
+    idempotency_key: randomUUID() }, router(), 'carr_writer');
+  let preview = await command('preview-email-next-step', args, actor, 'carr_reader');
+  assert.equal(preview.subject_id, subject);
+  assert.equal(preview.subject_type, subjectType);
+  assert.equal((await command('get-next-action', { ref: subject, owner: 'dell' })).action, null);
+  await assert.rejects(command('confirm-email-next-step', { ...args, proposal_digest: preview.proposal_digest,
+    idempotency_key: randomUUID() }, router()), error => error.payload?.error === 'human_only_verb_requires_verified_partner');
+  await command('set-next-action', { idempotency_key: randomUUID(), ref: subject, owner: 'dell', description: 'Changed after preview' });
+  await assert.rejects(command('confirm-email-next-step', { ...args, proposal_digest: preview.proposal_digest,
+    idempotency_key: randomUUID() }), error => error.payload?.error === 'email_next_step_proposal_stale');
+  preview = await command('preview-email-next-step', args, actor, 'carr_reader');
+  assert.equal(preview.current_next_step, 'Changed after preview');
+  const result = await command('confirm-email-next-step', { ...args, proposal_digest: preview.proposal_digest,
+    idempotency_key: randomUUID() }, actor, 'carr_writer');
+  assert.equal(result.email_proposal_id, stored.proposal_id);
+  assert.equal((await command('get-next-action', { ref: subject, owner: 'dell' })).action.id, result.next_action_id);
+  const history = (await command('catch-me-up', { ref: subject })).timeline;
+  assert.ok(history.some(event => event.verb === 'confirm-email-next-step'));
+  assert.equal((await command('read-email-proposal-source', { proposal_id: stored.proposal_id })).source.evidence_quote, askQuote);
+});
+
+test('expiry pages past old actionable proposals and cannot expire another mailbox', async () => {
+  await c.query('delete from email_proposal');
+  for (let i=0;i<200;i++) {
+    const source = await email(askQuote);
+    await command('record-email-proposal', { kind: 'next_step', activity_id: source.activity_id,
+      evidence_quote: askQuote, text: 'Synthetic pending review', next_date: '2027-01-08', confidence: 0.9,
+      idempotency_key: randomUUID() }, router());
+  }
+  await c.query("update email_proposal set created_at=now()-interval '32 days'");
+  const source = await email(askQuote);
+  const blocked = await command('record-email-proposal', { kind: 'next_step', activity_id: source.activity_id,
+    evidence_quote: askQuote, text: 'Synthetic blocked review', next_date: '2027-01-08', confidence: 0.9,
+    idempotency_key: randomUUID() }, router());
+  await c.query("update activity set detail='Withdrawn request' where id=$1", [source.activity_id]);
+  await c.query("update email_proposal set created_at=now()-interval '31 days' where id=$1", [blocked.proposal_id]);
+  const otherPartner = { ...(await c.query("select id,slug from actor where slug='dell'")).rows[0], human: true };
+  assert.equal((await command('record-email-proposal', { mode: 'expire_blocked', idempotency_key: randomUUID() }, otherPartner)).checked_count, 0);
+  const page = await command('record-email-proposal', { mode: 'expire_blocked', idempotency_key: randomUUID() }, actor, 'carr_writer');
+  assert.equal(page.expired_count, 0);
+  assert.equal(page.more, true);
+  const next = await command('record-email-proposal', { mode: 'expire_blocked', cursor: page.next_cursor,
+    idempotency_key: randomUUID() }, actor, 'carr_writer');
+  assert.equal(next.expired_count, 1);
+  assert.equal(next.next_cursor, null);
+  assert.equal((await command('list-email-proposals', { status: 'dismissed', limit: 50, include_non_deal: true })).proposals[0].id, blocked.proposal_id);
 });
