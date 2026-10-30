@@ -110,20 +110,31 @@ class AtlasContractTests(unittest.TestCase):
 
     def test_evidence_binds_exact_vendor_sources(self):
         for source, binding in self.atlas["sources"].items():
-            exists = subprocess.run(["git", "cat-file", "-e", f"{binding['revision']}^{{commit}}"],
-                                    cwd=ROOT, capture_output=True).returncode == 0
-            revision = binding["revision"] if exists else "HEAD"
-            raw = subprocess.run(["git", "show", f"{revision}:{source}"], cwd=ROOT,
-                                 capture_output=True, check=True).stdout
-            self.assertEqual(hashlib.sha256(raw).hexdigest(), binding["sha256"], source)
+            revision = binding["revision"]
+            reachable = subprocess.run(["git", "merge-base", "--is-ancestor", revision, "origin/main"],
+                                       cwd=ROOT, capture_output=True).returncode == 0
+            self.assertTrue(reachable, f"{source}: {revision} not reachable from origin/main")
+            result = subprocess.run(["git", "show", f"{revision}:{source}"], cwd=ROOT, capture_output=True)
+            self.assertEqual(result.returncode, 0, f"{source}: missing at {revision}")
+            self.assertEqual(hashlib.sha256(result.stdout).hexdigest(), binding["sha256"],
+                             f"{source}: digest mismatch at {revision}")
 
-    def test_evidence_survives_discarded_branch_revision(self):
+    def test_evidence_rejects_unreachable_revision(self):
         source = "vendor/hxprobe/src/attachment.rs"
         self.atlas["sources"] = {source: self.atlas["sources"][source]}
-        self.atlas["sources"][source]["revision"] = "0" * 40
-        self.test_evidence_binds_exact_vendor_sources()
+        tree = subprocess.check_output(["git", "rev-parse", "origin/main^{tree}"], cwd=ROOT, text=True).strip()
+        commit = subprocess.check_output(["git", "-c", "user.name=Atlas Test", "-c", "user.email=atlas@example.test",
+                                          "commit-tree", tree, "-m", "unreachable atlas test"], cwd=ROOT, text=True).strip()
+        for revision in (commit, "0" * 40):
+            self.atlas["sources"][source]["revision"] = revision
+            with self.subTest(revision=revision), self.assertRaisesRegex(AssertionError, "not reachable from origin/main"):
+                self.test_evidence_binds_exact_vendor_sources()
+
+    def test_evidence_rejects_digest_mismatch(self):
+        source = "vendor/hxprobe/src/attachment.rs"
+        self.atlas["sources"] = {source: self.atlas["sources"][source]}
         self.atlas["sources"][source]["sha256"] = "0" * 64
-        with self.assertRaises(AssertionError):
+        with self.assertRaisesRegex(AssertionError, "digest mismatch"):
             self.test_evidence_binds_exact_vendor_sources()
 
     def test_invalid_contracts_emit_no_partial_reference_or_source_excerpts(self):
