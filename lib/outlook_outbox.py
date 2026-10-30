@@ -83,7 +83,7 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
     if (send._addresses([settings.partner_cc]) != (settings.partner_cc,)
             or not settings.partner_cc or settings.partner_cc == settings.account):
         raise ValueError('partner_copy_required')
-    counts = dict(sent=0, failed=0, deferred=0, receipt_failed=0, compose_window_open=0, sent_unrecorded=0)
+    counts = dict(sent=0, failed=0, deferred=0, receipt_failed=0, compose_window_open=0, sent_unrecorded=0, quarantined=0)
     ports.out.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(ports.out, 0o700)
     root = ports.out / 'outbox'
@@ -119,7 +119,16 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
         if (box.get('schema_version') != 'email-outbox.v1' or box.get('owner') != settings.owner
                 or not isinstance(box.get('drafts'), list)):
             raise ValueError('outbox_identity_or_schema_mismatch')
+        quarantine = root / 'quarantine'
+        quarantine.mkdir(exist_ok=True, mode=0o700)
+        os.chmod(quarantine, 0o700)
         for row in box['drafts']:
+            row_hash = hashlib.sha256(json.dumps(row, sort_keys=True, ensure_ascii=False,
+                separators=(',', ':')).encode()).hexdigest()
+            quarantined = quarantine / f'{row_hash}.json'
+            if quarantined.exists():
+                counts['quarantined'] += 1
+                continue
             if isinstance(row, dict) and isinstance(row.get('proposal_id'), str) and row['proposal_id'] in pending:
                 continue
             try:
@@ -130,8 +139,10 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
                     ident = str(uuid.UUID(row['proposal_id']))
                     version, digest = row['version'], row['sha256']
                     if type(version) is not int or version < 1 or not isinstance(digest, str) or not re.fullmatch(r'[a-f0-9]{64}', digest):
-                        continue
+                        raise ValueError('invalid_identity')
                 except (ValueError, KeyError, TypeError, AttributeError):
+                    _save(quarantined, dict(row_sha256=row_hash, reason='invalid_submission'))
+                    counts['quarantined'] += 1
                     continue
                 key = str(uuid.uuid5(uuid.NAMESPACE_URL, f'outlook-outbox|{ident}|{version}'))
                 reason = str(exc) if str(exc) in (
@@ -179,16 +190,16 @@ def main() -> int:
         repo = settings.repo
         counts = run(settings, send.default_ports())
         print('outlook-outbox ' + ' '.join(f'{key}={value}' for key, value in counts.items()))
-        failed = bool(counts['failed'] or counts['receipt_failed'] or counts['deferred'])
+        failed = bool(counts['failed'] or counts['receipt_failed'])
         reason = 'send_failed' if counts['failed'] else ('receipt_failed' if counts['receipt_failed']
                   else ('deferred' if counts['deferred'] else 'processed'))
     except Exception as exc:
         print(f'outlook-outbox failed {type(exc).__name__}')
     try:
-        print(receipt_line('outlook-outbox', 'failed' if failed else 'succeeded', reason, counts, repo))
+        print(receipt_line('outlook-outbox', 'failed' if failed else ('skipped' if counts.get('deferred') else 'succeeded'), reason, counts, repo))
     except Exception:
         pass
-    return int(failed)
+    return 1 if failed else (78 if counts.get('deferred') else 0)
 
 
 if __name__ == '__main__':
