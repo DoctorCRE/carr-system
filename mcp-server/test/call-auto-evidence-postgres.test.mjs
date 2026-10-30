@@ -285,6 +285,8 @@ for (const kind of ['activity', 'meeting_record']) test(`${kind} closing the cur
     assert.equal(room.next_step, null, 'finished action must not appear as the current step');
     assert.equal(room.next_date, null, 'finished action must not appear overdue');
     assert.equal(room.next_step_required, true);
+    const board = (await command('deal-room-board')).deals.find(d => d.id === deal);
+    assert.deepEqual([board.next_step, board.next_date, board.next_step_required], [null, null, true]);
     assert.equal(room.events.filter(e => e.field === 'next_step').length, 1, 'projection must not rewrite the stored plan');
   } finally { delete c.jevClient; }
 });
@@ -328,6 +330,8 @@ for (const verdict of ['no', 'down']) for (const later of ['note', 'activity', '
       assert.equal(room.next_step, 'Review revised terms', 'closing the hidden action must preserve the call step');
       assert.equal(room.next_date, '2030-01-01', 'closing the hidden action must preserve the call date');
       assert.equal(room.next_step_required, false);
+      const board = (await command('deal-room-board')).deals.find(d => d.id === deal);
+      assert.deepEqual([board.next_step, board.next_date, board.next_step_required], ['Review revised terms', '2030-01-01', false]);
       assert.deepEqual(room.items, before.items);
       assert.deepEqual(room.events.filter(e => ['next_step', 'next_date'].includes(e.field)),
         before.events.filter(e => ['next_step', 'next_date'].includes(e.field)));
