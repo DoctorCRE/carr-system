@@ -2027,6 +2027,49 @@ class CaptureBridgePostCallTests(unittest.TestCase):
         self.assertEqual(report["joe_tasks"][0]["candidate_id"], "action-id")
         self.assertEqual(report["deal_updates"][0]["candidate_id"], "update-id")
 
+    def test_partner_resolves_question_via_route_then_poll_files_call(self) -> None:
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        for key in ("joe_tasks", "dell_tasks", "deal_updates", "draft_proposals"):
+            report[key] = []
+        report["review_questions"] = [{"id": "q1", "question": "Which deal?", "resolved": False}]
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        response = {"state": "distilling", "post_call": True, "meeting_record": None,
+                    "candidates": {"pending": 0}, "candidate_statuses": [],
+                    "post_call_report": {"filed": False}}
+
+        def request(_method, url, _body, _headers):
+            if url.endswith("/capture/session"):
+                return 200, response
+            if url.endswith("/capture/post-call/report"):
+                return 200, {"filed": True, "candidate_count": 0}
+            if url.endswith("/capture/status"):
+                return 200, {"ok": True}
+            raise AssertionError(url)
+
+        def runner(*_args, **_kwargs):
+            return SimpleNamespace(returncode=capture_bridge.poll_cmd(self.cfg, self.session))
+
+        sync = call_mode.sync_post_call
+        with (
+            patch.object(call_mode, "RECORDINGS", self.session.parent),
+            patch.object(capture_bridge, "http_request", side_effect=request),
+            patch.object(call_mode, "sync_post_call", side_effect=lambda path: sync(path, runner)),
+        ):
+            capture_bridge.poll_cmd(self.cfg, self.session)
+            self.assertFalse((self.session / "ingested.json").exists())
+            handler = CallModeHttpTests().handler(
+                "/api/post-call/questions/q1/resolve",
+                json.dumps({"session": self.session.name, "resolution": "Dell meant deal A."}).encode(),
+                "http://127.0.0.1:4682",
+            )
+            handler.do_POST()
+        value = handler.send_json.call_args.args[0]
+        self.assertNotIn("error", value)
+        self.assertTrue(value["report"]["review_questions"][0]["resolved"])
+        self.assertEqual(value["report"]["review_questions"][0]["resolution"], "Dell meant deal A.")
+        self.assertEqual(value["status"]["session"], self.session.name)
+        self.assertTrue((self.session / "ingested.json").exists())
+
     def test_poll_syncs_all_lanes_files_report_then_marks_purge_safe(self) -> None:
         report = post_call.read_json(self.session / post_call.REPORT_FILE)
         assert report is not None
