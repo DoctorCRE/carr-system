@@ -122,7 +122,7 @@ import sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--rebuild-helper', action='store_true',
-                    help='allow replacing the copy helper; ad-hoc signing requires a Full Disk Access re-grant')
+                    help='allow replacing the copy helper; ad-hoc rebuilds and signing identity changes require a Full Disk Access re-grant')
 args = parser.parse_args(sys.argv[3:])
 repo, home = (Path(value).resolve() for value in sys.argv[1:3])
 sys.path.insert(0, str(repo))

@@ -393,7 +393,7 @@ if '-s' in sys.argv:
         sys.stderr.write('specified item could not be found in the keychain')
         sys.exit(1)
     given = [arg[3:] for arg in sys.argv if arg.startswith('-r=')]
-    known[sys.argv[-1]] = given[0] if given else 'designated => cdhash H"0123"'
+    known[str(Path(sys.argv[-1]).stat().st_ino)] = given[0] if given else 'designated => cdhash H"0123"'
     signed.write_text(json.dumps(known))
 elif '--verify' in sys.argv:
     pass
@@ -401,7 +401,7 @@ elif 'REQUIREMENT' in os.environ:
     print(os.environ['REQUIREMENT'], file=sys.stderr)
 else:
     print('Executable=' + sys.argv[-1], file=sys.stderr)
-    print(known.get(sys.argv[-1], 'designated => cdhash H"0123"'))
+    print(known.get(str(Path(sys.argv[-1]).stat().st_ino), 'designated => cdhash H"0123"'))
 '''
 
 # Read-only keychain queries; IDENTITY_NAME lists one valid identity of that name.
@@ -520,7 +520,7 @@ else:
         result = self.install()
         self.assertTrue(self.helper.is_file())
         self.assertEqual(stat.S_IMODE(self.helper.stat().st_mode), 0o700)
-        self.assertIn(f'ad-hoc helper rebuilds need a Full Disk Access re-grant for {self.helper}', result.stdout)
+        self.assertIn(f'helper replacements need a Full Disk Access re-grant for {self.helper}', result.stdout)
         self.assertFalse((self.home / 'Library/LaunchAgents').exists())
         for service in ('intake',):
             rendered = plistlib.loads((self.repo / f'out/com.carr.outlook-{service}.plist').read_bytes())
@@ -592,7 +592,7 @@ else:
         source.write_text(source.read_text().replace('snapshot failed', 'fixture snapshot failed'))
         result = self.install(args=('--rebuild-helper',))
         self.assertNotEqual(self.helper.read_bytes(), before)
-        warning = f'ad-hoc helper rebuilds need a Full Disk Access re-grant for {self.helper}'
+        warning = f'helper replacements need a Full Disk Access re-grant for {self.helper}'
         self.assertEqual(sum(warning in line for line in result.stdout.splitlines()), 1)
         self.assertIn('System Settings > Privacy & Security > Full Disk Access', result.stdout)
         self.assertIn(f'Remove the old entry and add {self.helper} again', result.stdout)
@@ -612,7 +612,7 @@ else:
         result = self.install(args=('--rebuild-helper',))
         scope = subprocess.run([str(self.helper), '--scope'], capture_output=True, text=True, check=True)
         self.assertEqual(scope.stdout.splitlines()[0], values['profile'])
-        self.assertIn(f'ad-hoc helper rebuilds need a Full Disk Access re-grant for {self.helper}', result.stdout)
+        self.assertIn(f'helper replacements need a Full Disk Access re-grant for {self.helper}', result.stdout)
 
     def identity(self, name='CARR Local Helpers', **extra):
         return {'IDENTITY_NAME': name, 'IDENTITY_SHA1': IDENTITY_SHA1, **extra}
@@ -644,13 +644,52 @@ else:
         self.assertNotIn('re-grant', result.stdout)
         load_settings(self.home).verify_helper()
 
-    def test_a_new_identity_replaces_the_ad_hoc_helper(self):
+    def test_a_new_identity_requires_explicit_rebuild_before_replacing_the_ad_hoc_helper(self):
         self.install()
-        before = self.helper.with_suffix('.pin').read_text()
-        self.install(signing_env=self.identity())
+        before = (self.helper.read_bytes(), self.helper.stat().st_mtime_ns,
+                  self.helper.with_suffix('.pin').read_bytes(), len([c for c in self.calls() if c[0] == '--force']))
+        result = self.install(check=False, signing_env=self.identity())
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('--rebuild-helper', result.stderr)
+        self.assertIn('System Settings > Privacy & Security > Full Disk Access', result.stderr)
+        self.assertIn(f'Remove the old entry and add {self.helper} again', result.stderr)
+        self.assertEqual((self.helper.read_bytes(), self.helper.stat().st_mtime_ns,
+                          self.helper.with_suffix('.pin').read_bytes(), len([c for c in self.calls() if c[0] == '--force'])), before)
+
+    def test_a_new_identity_with_explicit_rebuild_replaces_and_prints_the_regrant_notice(self):
+        self.install()
+        before = self.helper.with_suffix('.pin').read_bytes()
+        refused = self.install(check=False, signing_env=self.identity())
+        result = self.install(signing_env=self.identity(), args=('--rebuild-helper',))
+        self.assertNotEqual(self.helper.with_suffix('.pin').read_bytes(), before)
         forced = [call for call in self.calls() if call[0] == '--force']
         self.assertEqual(forced[-1][1:5], ['-s', IDENTITY_SHA1, '--identifier', 'com.carr.outlook-intake-copy'])
-        self.assertNotEqual(self.helper.with_suffix('.pin').read_text(), before)
+        notice = f'helper replacements need a Full Disk Access re-grant for {self.helper}'
+        self.assertEqual(result.stdout.count(notice), 1)
+        notice_start = result.stdout.index('install-outlook-intake: helper replacements')
+        notice_end = result.stdout.index('next scheduled intake run succeeds.', notice_start) + len('next scheduled intake run succeeds.')
+        self.assertIn(result.stdout[notice_start:notice_end], refused.stderr)
+        self.assertIn('System Settings > Privacy & Security > Full Disk Access', result.stdout)
+        self.assertIn(f'Remove the old entry and add {self.helper} again', result.stdout)
+        self.assertIn('After re-granting access, run the launch commands printed by the installer.', result.stdout)
+        before = self.helper.read_bytes(), self.helper.stat().st_mtime_ns, self.sign_log.read_bytes()
+        result = self.install(signing_env=self.identity())
+        self.assertNotIn('re-grant', result.stdout)
+        self.assertEqual((self.helper.read_bytes(), self.helper.stat().st_mtime_ns, self.sign_log.read_bytes()), before)
+
+    def test_a_different_certificate_requires_rebuild_and_regrant(self):
+        self.install(signing_env=self.identity())
+        before = self.helper.read_bytes(), self.helper.stat().st_mtime_ns, self.helper.with_suffix('.pin').read_bytes()
+        other = self.identity(IDENTITY_SHA1='ABCDEF0123456789ABCDEF0123456789ABCDEF01')
+        result = self.install(check=False, signing_env=other)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('--rebuild-helper', result.stderr)
+        self.assertIn(f'Remove the old entry and add {self.helper} again', result.stderr)
+        self.assertEqual((self.helper.read_bytes(), self.helper.stat().st_mtime_ns,
+                          self.helper.with_suffix('.pin').read_bytes()), before)
+        result = self.install(signing_env=other, args=('--rebuild-helper',))
+        self.assertIn(f'Remove the old entry and add {self.helper} again', result.stdout)
+        self.assertNotEqual(self.helper.with_suffix('.pin').read_bytes(), before[2])
 
     def test_missing_identity_prints_one_line_and_keeps_the_pinned_ad_hoc_helper(self):
         result = self.install()
