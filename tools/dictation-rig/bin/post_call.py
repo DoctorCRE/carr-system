@@ -1144,8 +1144,11 @@ def resolve_question(session_dir: Path, question_id: str, resolution: str) -> di
     _string(resolution, "resolution")
     for question in report.get("review_questions", []):
         if question.get("id") == question_id:
+            if question.get("resolved") is True:
+                raise ContractError("already_resolved")
             question["resolved"] = True
             question["resolution"] = resolution
+            # TODO #2779: write through update_report under the session lock.
             write_private(session_dir / REPORT_FILE, report)
             return {"question_id": question_id, "resolved": True}
     raise ContractError("unknown question id")

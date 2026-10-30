@@ -315,6 +315,21 @@ class CallModeHttpTests(unittest.TestCase):
         handler.send_json = Mock()
         return handler
 
+    def test_embedded_page_can_read_questions_without_get_origin_header(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            session = Path(tmp) / "2026.08.10-review"
+            session.mkdir()
+            post_call.write_private(session / post_call.REPORT_FILE, {"review_questions": []})
+            handler = self.handler(f"/api/post-call?session={session.name}", b"", None)
+            handler.headers["Sec-Fetch-Site"] = "same-origin"
+            with patch.object(call_mode, "RECORDINGS", session.parent):
+                handler.do_GET()
+            self.assertNotIn("error", handler.send_json.call_args.args[0])
+            del handler.headers[call_mode.POST_HEADER]
+            handler.send_json.reset_mock()
+            handler.do_GET()
+            handler.send_json.assert_called_once_with({"error": "origin_not_allowed"}, 403)
+
     def test_question_resolution_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             session = Path(tmp) / "2026.08.10-review"
@@ -1341,17 +1356,17 @@ class PostCallTests(unittest.TestCase):
         self.assertIn("system", question["question"])
         self.assertIn("Dell", question["question"])
         self.assertIsNone(post_call.retention_ready(self.session, "b" * 64))
-        post_call.write_private(self.session / "ingested.json", {
-            "post_call": True, "aggregate_report_hash": "a" * 64,
-            "backend_report_sha256": "b" * 64, "pending_items": 0,
-            "ingested_at": "2000-01-01T00:00:00Z",
-        })
         command = ["/bin/sh", str(BIN_DIR / "purge-recordings.sh")]
         isolated = {"HOME": str(home), "PATH": "/usr/bin:/bin"}
         subprocess.run(command, check=True, env=isolated)
         self.assertTrue((self.session / "mic.caf").exists())
         post_call.resolve_question(self.session, question["id"], "File knowingly with Dell audio missing.")
         self.assertIsNotNone(post_call.retention_ready(self.session, "b" * 64))
+        post_call.write_private(self.session / "ingested.json", {
+            "post_call": True, "aggregate_report_hash": "a" * 64,
+            "backend_report_sha256": "b" * 64, "pending_items": 0,
+            "ingested_at": "2000-01-01T00:00:00Z",
+        })
         subprocess.run(command, check=True, env=isolated)
         self.assertFalse((self.session / "mic.caf").exists())
 
@@ -2140,6 +2155,23 @@ class CaptureBridgePostCallTests(unittest.TestCase):
         self.assertTrue(final["backend_report_sha256"])
         for key in ("joe_tasks", "deal_updates", "draft_proposals"):
             self.assertEqual(final[key][0]["candidate_status"], "confirmed")
+
+    def test_question_hold_keeps_candidate_dispositions_current(self) -> None:
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        report["joe_tasks"][0].update(candidate_id="action-id", candidate_status="pending")
+        report["review_questions"] = [{"id": "q1", "question": "Which deal?", "resolved": False}]
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        response = {"state": "distilling", "post_call": True, "meeting_record": None,
+                    "candidates": {"pending": 0},
+                    "candidate_statuses": [{"id": "action-id", "status": "confirmed"}]}
+        with (
+            patch.object(capture_bridge, "publish_cmd", return_value=0),
+            patch.object(capture_bridge, "http_request", return_value=(200, response)),
+        ):
+            capture_bridge.poll_cmd(self.cfg, self.session)
+        visible = post_call.report_for_deal_room(self.session)["report"]
+        self.assertEqual(visible["joe_tasks"][0]["candidate_status"], "confirmed")
+        self.assertFalse((self.session / "ingested.json").exists())
 
     def test_poll_holds_question_only_call_before_filing_or_done(self) -> None:
         report = post_call.read_json(self.session / post_call.REPORT_FILE)
