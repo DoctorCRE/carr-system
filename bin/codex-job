@@ -60,6 +60,8 @@ def delivery(clone, branch, start):
     """
     head = (output(['git', '-C', str(clone), 'rev-parse', 'HEAD']) or '').strip()
     listing = output(['git', '-C', str(clone), 'ls-remote', '--heads', 'origin'])
+    if listing is None:
+        listing = output(['git', '-C', str(clone), 'ls-remote', '--heads', 'origin'])
     tips = [ref.removeprefix('refs/heads/') for sha, ref in
             (line.split('\t', 1) for line in (listing or '').splitlines())
             if sha == head and head not in ('', start)]
