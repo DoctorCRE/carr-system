@@ -75,12 +75,12 @@ class ReviewGate(unittest.TestCase):
                 pr = {"title": title, "changed_files": 0, "additions": 1, "deletions": 0, "head": {"sha": "abc"}}
                 self.assertEqual(gate.approved(pr, [], comments), expected)
 
-    def test_newest_verdict_at_head_wins(self):
+    def test_changes_at_head_vetoes_later_approval(self):
         changes, approve = {"body": "VERDICT: CHANGES\nReviewed-SHA: abc\nReviewer: grok"}, {"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok"}
-        stale = [{"body": "VERDICT: CHANGES\nReviewed-SHA: old"}, {"body": "VERDICT: APPROVE\nReviewed-SHA: old"}]
+        stale = [{"body": "VERDICT: CHANGES\nReviewed-SHA: old\nReviewer: grok"}, {"body": "VERDICT: APPROVE\nReviewed-SHA: old"}]
         for additions in (1, 151):
-            for comments, expected in [([changes, approve], True), ([approve, changes], False), ([approve, *stale], True),
-                                       ([changes, *stale], False), (stale, additions == 1), ([changes, approve, {"body": "noise"}], True)]:
+            for comments, expected in [([changes, approve], False), ([approve, changes], False), ([approve, *stale], True), ([*stale, approve], True),
+                                       ([changes, *stale], False), (stale, additions == 1), ([changes, approve, {"body": "noise"}], False)]:
                 with self.subTest(additions=additions, comments=comments):
                     pr = {"changed_files": 0, "additions": additions, "deletions": 0, "head": {"sha": "abc"}}
                     self.assertEqual(gate.approved(pr, [], comments), expected)
@@ -127,7 +127,7 @@ class ReviewGate(unittest.TestCase):
             return {"body": f"VERDICT: {verdict}\nReviewed-SHA: abc\nReviewer: grok", "user": {"login": "jbookout"}, **date, **extra}
         early = {"created_at": "2026-01-01T00:00:00Z"}
         late = {"submitted_at": "2026-01-02T00:00:00Z"}
-        cases = [(item("CHANGES", early), item("APPROVE", late), "success"),
+        cases = [(item("CHANGES", early), item("APPROVE", late), "failure"),
                  (item("APPROVE", early), item("CHANGES", late), "failure"),
                  (item("APPROVE", early), item("CHANGES", late, body="VERDICT: CHANGES\nReviewed-SHA: abc\nReviewer: Claude Sonnet 5.5 (independent)"), "failure"),
                  (item("APPROVE", early), item("CHANGES", late, state="DISMISSED"), "success")]

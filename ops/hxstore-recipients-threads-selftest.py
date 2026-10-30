@@ -37,8 +37,11 @@ def index(guid, replies=0):
 
 
 def message(key, guid=b'\x11' * 16, replies=0, subject='Synthetic thread', sender='pat@example.test',
-            in_reply_to=None, conversation_index=None, inline=False):
-    """A class 00c9 message object with its expanded 00ca header at +480."""
+            in_reply_to=None, conversation_index=None, inline=False, row_sender='wrong@example.test', runs=()):
+    """A class 00c9 message object with its expanded 00ca header at +480.
+
+    `None` leaves the sender or subject slot unset, as a draft revision does. Inline rows carry `runs`
+    as extra text after the anchor."""
     obj = bytearray(BASE)
     struct.pack_into('<H', obj, 0, 0x00c9)
     struct.pack_into('<Q', obj, 10, key)
@@ -48,16 +51,17 @@ def message(key, guid=b'\x11' * 16, replies=0, subject='Synthetic thread', sende
         struct.pack_into('<Q', obj, at, key)
     struct.pack_into('<H', obj, 888, 0x004d)
     struct.pack_into('<QIQQQ', obj, 898, 50, 2, 7, 50, 7)
-    values = {'sender': utf16(sender), 'item_class': utf16('IPM.Note'),
-              'message_id': utf16(f'<{key}@example.test>'), 'subject': utf16(subject),
-              'topic': utf16(subject.removeprefix('Re: ')),
+    values = {'sender': sender and utf16(sender), 'item_class': utf16('IPM.Note'),
+              'message_id': utf16(f'<{key}@example.test>'), 'subject': subject is not None and utf16(subject),
+              'topic': subject is not None and utf16(subject.removeprefix('Re: ')),
               'conversation_index': conversation_index or index(guid, replies)}
+    values = {name: value for name, value in values.items() if value}
     if inline:
-        values = {'row_sender': utf16('wrong@example.test'), 'item_class': values.pop('item_class'),
+        values = {'row_sender': utf16(row_sender), 'item_class': values.pop('item_class'),
                   'sent': struct.pack('<Q', 1_793_000_000 * 10_000_000 + 621_355_968_000_000_000),
                   'message_id': values.pop('message_id'), 'duplicate_id': utf16(f'<{key}@example.test>'),
                   'html': b'<html><body>Synthetic inline message body with enough words.</body></html>',
-                  **values}
+                  **{f'run{i}': utf16(run) for i, run in enumerate(runs)}, **values}
     if in_reply_to:
         values['in_reply_to'] = utf16(f'<{in_reply_to}@example.test>')
     data = b''
@@ -167,6 +171,49 @@ class RecipientThreadExportTests(unittest.TestCase):
         with patch.object(send, 'account', return_value='owner@example.test'):
             self.assertEqual(send.confirmed_mail(send.Snapshot(out['sent'], ()), mail, 1_793_000_000 - 5),
                              f'{0xc101}@example.test')
+
+    def test_a_draft_revision_with_unset_fields_does_not_hide_the_sent_ones(self):
+        # A recent Sent Items row keeps its unsent draft revision, with no sender or subject yet, while
+        # the row text holds the recipient and the account address glued into one run (WR-000589).
+        out = self.export(message(0xc201, sender='owner@example.test', subject='Synthetic sent topic', inline=True,
+                                  row_sender='target@example.test' + 'owner@example.test'),
+                          message(0xc201, sender=None, subject=None),
+                          recipient(0xc201, 0xc211, TO, 'target@example.test'))
+        self.assertEqual(out['senders'], [(0xc201, 'owner@example.test')])
+        self.assertEqual({row[:3] for row in out['messages']},
+                         {('owner@example.test', 'Synthetic sent topic', 'target@example.test')})
+        mail = send.Mail(('target@example.test',), (), (), 'Synthetic sent topic', 'Synthetic body')
+        with patch.object(send, 'account', return_value='owner@example.test'):
+            self.assertEqual(send.confirmed_mail(send.Snapshot(out['sent'], ()), mail, 1_793_000_000 - 5),
+                             f'{0xc201}@example.test')
+
+    def test_text_addresses_are_undoubled_and_glued_pairs_are_not_addresses(self):
+        out = self.export(message(0xc301, sender=None, inline=True, row_sender='owner@example.test' * 2,
+                                  runs=('cy@example.test' * 2, 'amy@example.test' + 'max@example.test')))
+        self.assertEqual([row[:3] for row in out['messages']],
+                         [('owner@example.test', 'Synthetic thread', 'cy@example.test')])
+
+    def test_a_glued_sender_run_leaves_the_sender_unknown_and_keeps_the_recipient(self):
+        out = self.export(message(0xc401, sender=None, inline=True,
+                                  row_sender='target@example.test' + 'owner@example.test', runs=('cy@example.test',)))
+        self.assertEqual([row[:3] for row in out['messages']], [(None, 'Synthetic thread', 'cy@example.test')])
+
+    def test_keyless_row_takes_the_subject_pair_just_before_its_anchor(self):
+        # Layout B: the header precedes the anchor. These subjects fail the prose checks (mostly digits, a
+        # file name), but the stored Topic/NormalizedSubject pair beside the anchor identifies them.
+        for subject, topic in (('RE: 2026-10-14 #4471', '2026-10-14 #4471'), ('Scan_0001.pdf', 'Scan_0001.pdf')):
+            with self.subTest(subject=subject):
+                row = (utf16('owner@example.test') + utf16('Synthetic preview text for a keyless row here')
+                       + utf16(subject) + utf16(topic) + utf16('IPM.Note')
+                       + struct.pack('<Q', 1_793_000_000 * 10_000_000 + 621_355_968_000_000_000))
+                out = self.export(row)
+                self.assertEqual([row[:2] for row in out['messages']], [('owner@example.test', subject)])
+
+    def test_a_fragment_of_the_next_run_is_not_a_subject_pair(self):
+        row = (utf16('owner@example.test') + utf16('Synthetic preview text for a keyless row here')
+               + utf16('2026') + utf16('Invoice batch 2026') + utf16('IPM.Note')
+               + struct.pack('<Q', 1_793_000_000 * 10_000_000 + 621_355_968_000_000_000))
+        self.assertEqual([row[:2] for row in self.export(row)['messages']], [('owner@example.test', None)])
 
     def test_sender_is_exported_only_when_cached_revisions_agree(self):
         out = self.export(message(0xc001, sender='actual@example.test'),

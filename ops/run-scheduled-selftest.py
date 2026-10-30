@@ -71,6 +71,86 @@ class ScheduledRunTests(unittest.TestCase):
         self.assertNotIn("SYNTHETIC_PRIVATE", observed)
         self.assertFalse(list((self.root / "out").glob("outlook-intake-receipt.*")))
 
+    def test_runtime_fields_reach_ops_detail(self):
+        for behind in (3, None):
+            receipt = {"state": "succeeded", "reason": "processed", "counts": {},
+                       "runtime_sha": "abc1234", "runtime_behind": behind}
+            result = self.invoke_intake(receipt, code=0)
+            self.assertEqual(result.returncode, 0)
+            args = json.loads(self.rows()[-1][3])
+            self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
+
+    def test_invalid_runtime_fields_do_not_enter_ops_detail(self):
+        for sha, behind in (('PRIVATE_TEXT', 2), ('abc1234', -1), ('abc1234', True),
+                            ('abc1234', 'PRIVATE_TEXT')):
+            receipt = {'state': 'succeeded', 'reason': 'processed', 'counts': {},
+                       'runtime_sha': sha, 'runtime_behind': behind}
+            self.invoke_intake(receipt, code=0)
+            args = json.loads(self.rows()[-1][3])
+            self.assertEqual(json.loads(args[args.index('--detail') + 1]),
+                             {'state': 'succeeded', 'reason': 'processed', 'counts': {}})
+
+    def test_other_outlook_receipts_reach_ops_detail(self):
+        for service in ('outlook-triage', 'outlook-outbox'):
+            receipt = {'state': 'succeeded', 'reason': 'processed', 'counts': {},
+                       'runtime_sha': 'abc1234', 'runtime_behind': None,
+                       'runtime_note': 'main_unknown_locally'}
+            child = self.root / 'other.py'
+            child.write_text(f"print({(service + '-receipt ' + json.dumps(receipt))!r})")
+            result = subprocess.run(['/bin/zsh', str(self.root / 'bin/run-scheduled.sh'),
+                                     service, service + '.run', sys.executable, str(child)],
+                                    cwd=self.root, env=self.env, text=True, capture_output=True, timeout=15)
+            self.assertEqual(result.returncode, 0)
+            args = json.loads(self.rows()[-1][3])
+            self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
+
+    def test_receipt_tempfile_failure_still_runs_service(self):
+        (self.root / 'out').write_text('synthetic unavailable receipt directory')
+        marker = self.root / 'service-ran'
+        result = subprocess.run(['/bin/zsh', str(self.root / 'bin/run-scheduled.sh'),
+            'outlook-outbox', 'outbox.run', sys.executable, '-c',
+            f'from pathlib import Path; Path({str(marker)!r}).touch()'], cwd=self.root,
+            env=self.env, text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue(marker.exists())
+
+    def test_failed_outbox_keeps_exit_failure_class_and_real_reason(self):
+        receipt = dict(state='failed', reason='send_failed', counts=dict(sent=1, failed=1))
+        child = self.root / 'failed-outbox.py'
+        child.write_text(f"print({('outlook-outbox-receipt ' + json.dumps(receipt))!r})\nraise SystemExit(1)\n")
+        result = subprocess.run(['/bin/zsh', str(self.root / 'bin/run-scheduled.sh'),
+            'outlook-outbox', 'outbox.run', sys.executable, str(child)], cwd=self.root,
+            env=self.env, text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 1)
+        args = json.loads(self.rows()[-1][3])
+        self.assertEqual(args[args.index('--failure-class') + 1], 'exit_1')
+        self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
+
+    def test_null_runtime_sha_preserves_note(self):
+        self.invoke_intake(dict(state='succeeded', reason='processed', counts={},
+                                runtime_sha=None, runtime_behind=None, runtime_note='history_incomplete'), code=0)
+        args = json.loads(self.rows()[-1][3])
+        self.assertEqual(json.loads(args[args.index('--detail') + 1])['runtime_note'], 'history_incomplete')
+
+    def test_service_status_and_stderr_reach_private_service_logs(self):
+        for service, status in (('outlook-outbox', 'sent=1 failed=1'),
+                                ('outlook-triage', 'moved=1 left=2')):
+            log = self.root / 'out' / (service + '-launchd.log')
+            log.parent.mkdir(exist_ok=True)
+            child = self.root / 'logging.py'
+            child.write_text('import sys\n' + f'print({status!r})\n' +
+                             'print("synthetic service error", file=sys.stderr)\n')
+            with log.open('w') as output:
+                os.chmod(log, 0o600)
+                result = subprocess.run(['/bin/zsh', str(self.root / 'bin/run-scheduled.sh'),
+                    service, service + '.run', sys.executable, str(child)], cwd=self.root,
+                    env=self.env, stdout=output, stderr=output, timeout=15)
+            self.assertEqual(result.returncode, 0)
+            self.assertIn(status, log.read_text())
+            self.assertIn('synthetic service error', log.read_text())
+            self.assertEqual(log.stat().st_mode & 0o777, 0o600)
+            self.assertNotIn('synthetic service error', (self.root / 'out/run-scheduled.log').read_text())
+
     def test_link_failure_reason_reaches_receipt_and_spool(self):
         receipt = {"state": "failed", "reason": "email_links_read_failed", "counts": {"email_links_pending": 2}}
         result = self.invoke_intake(receipt)

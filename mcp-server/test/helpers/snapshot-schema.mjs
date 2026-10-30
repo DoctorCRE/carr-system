@@ -7,9 +7,9 @@ export async function restoreEventIdentity(client, snapshot) {
   await client.query(identity);
 }
 
-// Snapshots lag migrations: apply the client portal link migration when the restored snapshot predates it.
-export async function applyPendingPortalLink(client) {
+export async function applyPendingDealRoomReads(client) {
   const { rows } = await client.query("select to_regclass('public.v_deal_client_portal') as view");
   if (!rows[0].view)
     await client.query(readFileSync(new URL('../../../migrations/1013_register_client_portal.sql', import.meta.url), 'utf8'));
+  await client.query(readFileSync(new URL('../../../migrations/1064_deal_sent_correspondence.sql', import.meta.url), 'utf8'));
 }

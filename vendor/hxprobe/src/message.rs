@@ -156,6 +156,9 @@ fn recipient(object: &[u8]) -> Option<(u64, u64, RecipientKey)> {
 }
 
 /// One value all revisions agree on, or `None`.
+///
+/// Callers pass only the revisions that set a field. A sent message keeps its draft revision, which
+/// leaves the sender and subject unset, and that silence is not a disagreement.
 fn agreed<T: Clone + Ord>(values: impl Iterator<Item = T>) -> Option<T> {
     let set: BTreeSet<T> = values.collect();
     (set.len() == 1).then(|| set.into_iter().next().unwrap())
@@ -182,7 +185,7 @@ impl Index {
         self.revisions
             .iter()
             .map(|(&key, revs)| {
-                let index = agreed(revs.iter().map(|r| r.conversation_index.clone())).flatten();
+                let index = agreed(revs.iter().filter_map(|r| r.conversation_index.clone()));
                 let recipients = match self.recipients.get(&key) {
                     None => Some(Vec::new()),
                     // Object keys give the order within each kind.
@@ -195,9 +198,9 @@ impl Index {
                 let message = Message {
                     conversation_id: index.as_ref().map(|i| i[6..22].try_into().unwrap()),
                     conversation_depth: index.as_ref().map(|i| (i.len() - 22) / 5),
-                    in_reply_to: agreed(revs.iter().map(|r| r.in_reply_to.clone())).flatten(),
-                    subject: agreed(revs.iter().map(|r| r.subject.clone())).flatten(),
-                    sender: agreed(revs.iter().map(|r| r.sender.clone())).flatten(),
+                    in_reply_to: agreed(revs.iter().filter_map(|r| r.in_reply_to.clone())),
+                    subject: agreed(revs.iter().filter_map(|r| r.subject.clone())),
+                    sender: agreed(revs.iter().filter_map(|r| r.sender.clone())),
                     recipients,
                 };
                 (key, message)
