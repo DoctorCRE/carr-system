@@ -81,7 +81,6 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     }
     await c.query('alter table activity add column if not exists email_source jsonb');
     await c.query('alter table activity add column if not exists email_context jsonb');
-    await c.query('grant select on activity to carr_reader');
     for (const table of ['actor','party','deal']) await c.query(`alter table ${table} add primary key(id)`);
     await c.query(readMigration('0951_deal_vendor_assignments.sql').split('-- Current catalog reseal')[0]);
     const touch = schema.match(/CREATE FUNCTION public\.trg_touch_row\(\) RETURNS trigger[\s\S]*?end \$\$;/)?.[0];

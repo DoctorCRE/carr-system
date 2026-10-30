@@ -9231,7 +9231,7 @@ registerTools({
              nullif(email_context->>'conversation_id','') as conversation_id,
              email_context->>'subject' as subject,
              to_jsonb(occurred_at)#>>'{}' as latest_message_at, occurred_at, id
-           from activity where deal_id=$1 and kind in ('email_in','email_out') and email_context is not null
+           from v_deal_room_activity where deal_id=$1 and kind in ('email_in','email_out') and email_context is not null
            order by email_context->>'conversation_id',
                     case when nullif(email_context->>'conversation_id','') is null then id end,
                     occurred_at desc, id desc
