@@ -241,12 +241,16 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'submit-email-draft': {
       write: true, humanOnly: true, humanCallerOnly: true,
-      description: 'The owning partner submits the exact final subject, body and displayed to/cc arrays from a review card. Missing or changed recipients refuse email_draft_recipients_mismatch. Approval freezes the original sender as recipient and the other partner actor.email as cc. Missing copy address refuses. Enqueues for that partner’s Mac; does not send mail.',
+      description: 'The owning partner submits the exact final subject, body and displayed to/cc arrays from a review card. Missing or changed recipients refuse email_draft_recipients_mismatch. Approval freezes the original sender as recipient, the other partner actor.email as cc, and the supplied attachment paths and sha256. Paths must be canonical absolute paths under the local attachment root. Missing copy address refuses. Enqueues for that partner’s Mac; does not send mail.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: [...Object.keys(draftProperties), 'subject', 'body'], properties: { ...draftProperties,
           subject: { type: 'string', minLength: 1, maxLength: 998 }, body: { type: 'string', maxLength: 20000 },
           to: { type: 'array', minItems: 1, maxItems: 1, items: { type: 'string', format: 'email' } },
-          cc: { type: 'array', minItems: 1, maxItems: 1, items: { type: 'string', format: 'email' } } } },
+          cc: { type: 'array', minItems: 1, maxItems: 1, items: { type: 'string', format: 'email' } },
+          attachments: { type: 'array', maxItems: 50, items: { type: 'object', additionalProperties: false,
+            required: ['path', 'sha256'], properties: {
+              path: { type: 'string', minLength: 2, maxLength: 4096, pattern: '^/(?:[^/\\u0000]+/)*[^/\\u0000]+$' },
+              sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' } } } } } },
       handler: async (c, actor, args) => {
         if (actor.human !== true || !['joe', 'dell'].includes(actor.slug)) fail('email_draft_not_owner');
         await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
@@ -261,8 +265,11 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           const recipients = await draftRecipients(c, row, true);
           if (['to', 'cc'].some(field => !Array.isArray(args[field]) || args[field].length !== 1 ||
               args[field][0] !== recipients[field][0])) fail('email_draft_recipients_mismatch');
+          if ((args.attachments ?? []).some(a => a.path.split('/').some(part => part === '.' || part === '..')))
+            fail('email_draft_attachment_path_invalid');
           const submitted = { subject: args.subject, body: args.body,
-            sha256: sha256(JSON.stringify({ subject: args.subject, body: args.body })), ...recipients };
+            sha256: sha256(JSON.stringify({ subject: args.subject, body: args.body })), ...recipients,
+            attachments: args.attachments ?? [] };
           await c.query(`update email_proposal set status='approved_to_send',version=version+1,
             submitted_email=$2::jsonb,submitted_at=now(),resolved_by=$3,resolved_at=now(),
             send_result=null,result_recorded_at=null where id=$1`,
@@ -270,7 +277,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           await writeEvent(c, actor, 'submit-email-draft', 'deal', row.deal_id, {
             new: { proposal_id: row.id, sha256: submitted.sha256, to: submitted.to, cc: submitted.cc },
             cause: 'human_stated', idempotency_key: args.idempotency_key });
-          return { ok: true, proposal_id: row.id, status: 'approved_to_send', version: row.version + 1, ...submitted };
+          const { attachments, ...shown } = submitted;
+          return { ok: true, proposal_id: row.id, status: 'approved_to_send', version: row.version + 1, ...shown,
+            attachment_count: attachments.length, attachment_sha256: attachments.map(a => a.sha256) };
         });
       },
     },
@@ -289,12 +298,14 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'record-email-sent': {
       write: true,
-      description: 'The owning partner’s Mac records sent only after Sent Items confirms, or failed with a reason. Requires submitted text sha256 and base_version. A failed result leaves the outbox to prevent ambiguous automatic resend. Never sends mail.',
+      description: 'The owning partner’s Mac records sent only after Sent Items confirms, or failed with a reason. Requires submitted text sha256 and base_version. Sent results also require the observed sent_at and sender_account matching the owning partner. Atomically appends email_out correspondence with frozen recipients and attachment names and hashes; retries of that send identity do not duplicate it. A failed result leaves the outbox to prevent ambiguous automatic resend. Never sends mail.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: [...Object.keys(draftProperties), 'status', 'sha256'], properties: { ...draftProperties,
           status: { type: 'string', enum: ['sent', 'failed'] },
           sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
           sent_item_id: { type: 'string', minLength: 1, maxLength: 500 },
+          sender_account: { type: 'string', format: 'email' },
+          sent_at: { type: 'string', format: 'date-time' },
           reason: { type: 'string', maxLength: 500 } } },
       handler: async (c, actor, args) => {
         if (actor.human === true) fail('email_sender_identity_required');
@@ -302,12 +313,30 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
         return withEnvelope(c, actor, 'record-email-sent', args, async () => {
           const row = await draftRow(c, args.proposal_id, owner);
+          if (row.status === 'sent' && args.status === 'sent' && row.version === args.base_version + 1
+              && args.sha256 === row.submitted_email.sha256
+              && args.sent_item_id === row.send_result.sent_item_id
+              && args.sender_account === row.send_result.sender_account
+              && args.sent_at === row.send_result.sent_at)
+            return { ok: true, replayed: true, proposal_id: row.id, version: row.version, ...row.send_result };
           if (row.status !== 'approved_to_send') fail('email_draft_not_approved');
           checkVersion(row, args.base_version);
           if (args.sha256 !== row.submitted_email.sha256) fail('email_draft_submission_mismatch');
           if (args.status === 'failed' && !args.reason?.trim()) fail('email_draft_failure_reason_required');
           if (args.status === 'sent' && !args.sent_item_id?.trim()) fail('email_draft_sent_confirmation_required');
-          const result = args.status === 'sent' ? { status: 'sent', sent_item_id: args.sent_item_id }
+          if (args.status === 'sent') {
+            const account = (await c.query('select email from actor where slug=$1', [owner])).rows[0]?.email;
+            if (!args.sender_account || args.sender_account !== account) fail('email_draft_sender_mismatch');
+            if (!args.sent_at || !Number.isFinite(Date.parse(args.sent_at))) fail('email_draft_sent_time_required');
+            const context = { send_id: row.id, sent_item_id: args.sent_item_id, deal: row.deal_id,
+              sender_account: args.sender_account, to: row.submitted_email.to, cc: row.submitted_email.cc,
+              sent_at: args.sent_at, attachments: (row.submitted_email.attachments ?? []).map(a => ({
+                file_name: a.path.split('/').at(-1), sha256: a.sha256 })) };
+            await c.query(`insert into activity(occurred_at,actor_id,kind,summary,deal_id,source,email_context)
+              values($1,$2,'email_out','Partner-submitted email sent',$3,'outlook',$4::jsonb)`,
+            [args.sent_at, actor.id, row.deal_id, JSON.stringify(context)]);
+          }
+          const result = args.status === 'sent' ? { status: 'sent', sent_item_id: args.sent_item_id, sender_account: args.sender_account, sent_at: args.sent_at }
             : { status: 'failed', reason: args.reason };
           await c.query(`update email_proposal set status=$2,version=version+1,send_result=$3::jsonb,result_recorded_at=now()
             where id=$1`, [row.id, args.status, JSON.stringify(result)]);

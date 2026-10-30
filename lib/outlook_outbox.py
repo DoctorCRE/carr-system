@@ -19,10 +19,6 @@ class SubmittedDraft:
     sha256: str
     mail: send.Mail
 
-    def __post_init__(self):
-        if self.mail.attachments:
-            raise ValueError('attachments_not_wired')  # until the submitted record carries approved files
-
     @classmethod
     def parse(cls, row: dict, settings: OutlookSettings):
         ident = str(uuid.UUID(row['proposal_id']))
@@ -37,7 +33,14 @@ class SubmittedDraft:
         if row['sha256'] != text_hash:
             raise ValueError('submission_hash_mismatch')
         to, cc = send._addresses(row['to']), send._addresses(row['cc'])
-        mail = send.Mail(to, cc, (), subject, body)
+        approved = row.get('attachments', [])
+        if not isinstance(approved, list) or any(not isinstance(a, dict) or set(a) != {'path', 'sha256'} for a in approved):
+            raise ValueError('invalid_submission')
+        attached = send.attachments([a['path'] for a in approved])
+        if any(a.sha256 != expected['sha256'] or str(a.path) != expected['path']
+               for a, expected in zip(attached, approved)):
+            raise ValueError('submission_attachment_mismatch')
+        mail = send.Mail(to, cc, (), subject, body, attached)
         if not send.partner_copied(mail, settings):
             raise ValueError('submission_recipients_invalid')
         return cls(ident, version, text_hash, mail)
@@ -49,8 +52,9 @@ class SubmittedDraft:
     def receipt(self, result: send.Result):
         args = dict(idempotency_key=self.key, proposal_id=self.proposal_id,
                     base_version=self.version, sha256=self.sha256)
-        if result.state is send.State.DONE and result.sent_item_id:
-            return dict(args, status='sent', sent_item_id=result.sent_item_id)
+        if result.state is send.State.DONE and result.sent_item_id and result.sent_at:
+            return dict(args, status='sent', sent_item_id=result.sent_item_id,
+                        sent_at=result.sent_at, sender_account=send.account())
         reason = result.reason if (result.reason == 'aborted_before_dispatch' or result.reason.startswith('unconfirmed_after_')) else f'{result.state.value}:{result.reason}'
         return dict(args, status='failed', reason=reason)
 
@@ -95,6 +99,13 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
             receipt = json.loads(path.read_text())
             pending.add(receipt['proposal_id'])
             try:
+                if receipt.get('status') == 'sent' and not receipt.get('sent_at'):
+                    snapshot = ports.mailbox.snapshot()
+                    item = next(r for r in snapshot.sent if r.item_id == receipt['sent_item_id']
+                                and r.sender.lower() == settings.account)
+                    receipt = dict(receipt, sent_at=send._sent_time(snapshot, item.item_id),
+                                   sender_account=settings.account)
+                    _save(path, receipt)
                 reply = ports.carr('record-email-sent', receipt)
                 if reply.get('ok') is not True:
                     raise ValueError('receipt_refused')
