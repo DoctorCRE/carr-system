@@ -184,7 +184,7 @@ if name == 'ioreg':
     if args == ['-a', '-d1', '-k', 'IOConsoleUsers', '-r']:
         import plistlib
         if state.get('ioreg_unreadable'):
-            print('unreadable')
+            print(state.get('ioreg_output', 'unreadable'))
         else:
             sys.stdout.buffer.write(plistlib.dumps([{'IOConsoleUsers': [
                 {'CGSSessionScreenIsLocked': state.get('screen_locked', False)}]}]))
@@ -515,6 +515,7 @@ class PreflightQuitTest(FakeOutlookCase):
 
     def test_unlocked_or_unreadable_lock_probe_follows_existing_preflight(self):
         for options in ({'screen_locked': False}, {'ioreg_unreadable': True},
+                        {'ioreg_unreadable': True, 'ioreg_output': '<?xml version="1.0"?><plist><array>'},
                         {'screen_locked': True, 'ioreg_exit': 1}):
             with self.subTest(options=options):
                 self.calls.unlink(missing_ok=True)

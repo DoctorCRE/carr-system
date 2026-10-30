@@ -28,6 +28,7 @@ import re
 import subprocess
 import time
 from typing import Callable
+from xml.parsers.expat import ExpatError
 
 APP = 'Microsoft Outlook'
 MAILBOX_TITLE = re.compile(r'. • [^\s@]+@[^\s@]+\.[^\s@]+$')
@@ -300,7 +301,7 @@ def screen_locked() -> bool:
         if result.returncode:
             return False
         roots = plistlib.loads(result.stdout)
-    except (OSError, subprocess.TimeoutExpired, ValueError):
+    except (OSError, subprocess.TimeoutExpired, ValueError, ExpatError):
         return False
     if not isinstance(roots, list):
         return False
