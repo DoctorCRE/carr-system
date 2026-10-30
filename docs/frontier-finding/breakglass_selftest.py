@@ -34,6 +34,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -139,7 +140,8 @@ def test_duplicate_snapshot_identities_are_lossless() -> None:
 class Cluster:
     def __init__(self, port: int, bin_dir: Path):
         self.port = port
-        self.fixture = DisposablePostgres("carr-breakglass_selftest.", bin_dir / "pg_ctl")
+        self.fixture = DisposablePostgres("carr-breakglass_selftest.", bin_dir / "pg_ctl",
+                                          directory=tempfile.gettempdir())
         self.root = self.fixture.root
         self.data = self.root / "data"
         self.bin_dir = bin_dir
