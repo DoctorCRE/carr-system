@@ -1307,8 +1307,8 @@ test('thread continuity files an unchanged reply but a new doctor defeats inheri
     recipients: [{ email: 'broker@internal.example', internal: true, kind: 'to' }] };
   const prior = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
     summary: 'Email from Synthetic vendor: Coastal property', detail: quote,
-    occurred_at: new Date(NOW - 60000).toISOString(), email_context: context });
-  await c.query('update activity set deal_id=$2 where id=$1', [prior.activity_id,deal]);
+    email_context: context });
+  await c.query("update activity set deal_id=$2, occurred_at=now()-interval '1 minute' where id=$1", [prior.activity_id,deal]);
   const reply = async extra => command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
     summary: 'Email from Synthetic vendor: Re: Coastal property', detail: quote,
     email_context: { ...context, recipients: [...context.recipients,...extra] } });
@@ -1379,8 +1379,8 @@ test('subject continuity tolerates reply spacing and refuses a thread older than
     recipients: [{ email: 'broker@internal.example', kind: 'to', internal: true }] };
   const prior = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
     kind: 'email_in', summary: 'Email from Vendor: Synthetic practice', detail: quote,
-    occurred_at: new Date(NOW - 60000).toISOString(), email_context: context });
-  await c.query('update activity set deal_id=$2 where id=$1', [prior.activity_id,deal]);
+    email_context: context });
+  await c.query("update activity set deal_id=$2, occurred_at=now()-interval '1 minute' where id=$1", [prior.activity_id,deal]);
   const reply = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
     kind: 'email_in', summary: 'Email from Vendor: Re: Synthetic practice', detail: quote,
     email_context: { ...context, subject: '   Re:    Synthetic practice  ' } });
@@ -1458,6 +1458,23 @@ const submitDraft = (proposal, extra = {}, identity = actor) => command('submit-
   subject: 'Re: Floor plan', body: 'I will review.', to: ['sender@example.test'],
   cc: [identity.slug === 'dell' ? 'joe@example.test' : 'dell@example.test'], ...extra }, identity, 'carr_writer');
 const refuses = (promise, code) => assert.rejects(promise, error => error.payload?.error === code);
+
+test('only the mailbox owner can dismiss a reply draft', async () => {
+  const dell = { ...(await c.query("insert into actor(slug,kind,display_name) values('dell','human','Synthetic Dell') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
+  for (const [owner, other] of [[actor, dell], [dell, actor]]) {
+    const proposal = await draftFor(owner.slug);
+    const args = { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+      base_version: 1, reason: 'Already handled' };
+    await refuses(command('dismiss-email-proposal', args, other, 'carr_writer'), 'email_draft_not_owner');
+    const pending = (await command('list-email-proposals', {}, owner, 'carr_reader')).proposals
+      .find(item => item.id === proposal.proposal_id);
+    assert.equal(pending.status, 'pending');
+    assert.equal(pending.version, 1);
+    const dismissed = await command('dismiss-email-proposal', args, owner, 'carr_writer');
+    assert.equal(dismissed.status, 'dismissed');
+    assert.equal((await command('dismiss-email-proposal', args, owner, 'carr_writer')).replayed, true);
+  }
+});
 
 test('recent reply outcomes are bounded, ordered and scoped to the partner', async () => {
   await c.query('delete from email_proposal');
