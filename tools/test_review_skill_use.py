@@ -1,3 +1,4 @@
+"""Exercise the PR review check for build skill use in session logs."""
 import json
 from pathlib import Path
 import tempfile
