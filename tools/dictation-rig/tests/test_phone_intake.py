@@ -46,7 +46,37 @@ class PhoneIntakeTests(unittest.TestCase):
             phone_intake.receive(self.root, self.metadata, io.BytesIO(b'x' * len(self.audio)))
         self.assertFalse(list(self.root.glob('phone-*/transfer.json')))
 
-    def test_processor_reports_holds_question_changes_and_clear_without_private_text(self):
+    def test_status_exchange_picks_up_answers_and_reports_the_local_count(self):
+        import post_call
+        phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
+        session = self.root / f"phone-{self.metadata['session_id']}"
+        post_call.write_private(session / post_call.REPORT_FILE, {
+            'report': {'summary': 'Private summary'},
+            'review_questions': [{'id': 'q1', 'question': 'Confirm closure?', 'resolved': False}],
+        })
+        bridge = phone_intake.bridge_module()
+        updates = []
+
+        def http(_method, _url, body, headers):
+            self.assertEqual(headers['Authorization'], 'Bearer synthetic-service-secret')
+            updates.append(body)
+            return 200, {'ok': True, 'question_answers': [] if len(updates) == 1 else [
+                {'question_id': 'q1', 'answer': 'dismiss'}]}
+
+        cfg = {'base_url': 'https://api.example.test'}
+        with patch.object(bridge, 'http_request', side_effect=http):
+            self.assertTrue(phone_intake.publish_status(session, cfg, 'synthetic-service-secret', bridge))
+            self.assertTrue(phone_intake.publish_status(session, cfg, 'synthetic-service-secret', bridge))
+            self.assertTrue(phone_intake.publish_status(session, cfg, 'synthetic-service-secret', bridge))
+        question = post_call.read_json(session / post_call.REPORT_FILE)['review_questions'][0]
+        self.assertTrue(question['resolved'])
+        self.assertEqual(question['resolution'], 'dismiss')
+        self.assertEqual(updates[0]['review_questions'], [{'id': 'q1', 'question': 'Confirm closure?'}])
+        self.assertEqual(updates[1], updates[0])
+        self.assertEqual(updates[2], {'state': None, 'reason': None, 'open_questions': 0, 'review_questions': []})
+        self.assertNotIn('Private summary', json.dumps(updates))
+
+    def test_processor_reports_questions_and_holds_without_transcript_or_summary(self):
         import post_call
         phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
         session = self.root / f"phone-{self.metadata['session_id']}"
@@ -79,17 +109,18 @@ class PhoneIntakeTests(unittest.TestCase):
             post_call.write_private(session / 'ingested.json', {'ok': True})
             post_call.write_private(session / post_call.STATUS_FILE, {'state': 'filed'})
             report = {'report': {'summary': 'private summary'}, 'review_questions': [
-                {'question': 'private question', 'resolved': False}, {'question': 'resolved question', 'resolved': True}]}
+                {'id': 'q1', 'question': 'Review the closure?', 'resolved': False}, {'id': 'q2', 'question': 'resolved question', 'resolved': True}]}
             post_call.write_private(session / post_call.REPORT_FILE, report)
             fail[0] = True
             phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
             fail[0] = False
             phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
-            self.assertEqual(updates[-2:], [{'state': 'held_review', 'reason': 'open_review_questions', 'open_questions': 1}] * 2)
+            self.assertEqual(updates[-2:], [{'state': 'held_review', 'reason': 'open_review_questions', 'open_questions': 1,
+                                           'review_questions': [{'id': 'q1', 'question': 'Review the closure?'}]}] * 2)
             report['review_questions'][0]['resolved'] = True
             post_call.write_private(session / post_call.REPORT_FILE, report)
             phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
-            self.assertEqual(updates[-1], {'state': None, 'reason': None, 'open_questions': 0})
+            self.assertEqual(updates[-1], {'state': None, 'reason': None, 'open_questions': 0, 'review_questions': []})
         payloads = json.dumps(updates)
         self.assertNotIn('private', payloads)
         self.assertEqual(output.getvalue(), '')
