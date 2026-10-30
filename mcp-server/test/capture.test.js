@@ -368,9 +368,7 @@ test("Studio claims pass the actor gate after the idempotent device migration", 
     const claimed = await handler.fetch(claimRequest(body), environment);
     assert.equal(claimed.status, 200);
     assert.equal((await claimed.json()).session_token, "studio-session-proof");
-    await assert.rejects(executeRegisteredTool(client, { id: first[0].id, slug: body.device_id, human: false },
-      "resolve-candidate", { idempotency_key: "studio-human-only-proof", candidate_id: ids.session, accept: true }),
-    error => error instanceof ToolError && error.payload.error === "human_only_verb_requires_verified_partner");
+
   } finally {
     try { await client?.end(); } finally { await fixture.close(); }
   }

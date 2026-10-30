@@ -10,8 +10,8 @@
 -- THE SLUG IS THE DEVICE ID. This slug MUST equal the device_id the rig
 -- sends and the key in CAPTURE_TOKENS. Three names, one string.
 --
--- KIND. The device is automation, never human. It posts proposals;
--- resolve-candidate is humanOnly and refuses a device actor.
+-- KIND. The device is automation, never human, matching quill-joe-mac.
+-- Provisioning a device must not give it a human identity.
 --
 -- REVOCATION. Remove the device from the secret map to revoke claims.
 -- The precedent also describes active=false as revocation, but the current
