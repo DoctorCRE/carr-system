@@ -21,7 +21,7 @@ from outlook_test_support import write_settings
 
 CRATE = ROOT / 'vendor/hxprobe'
 SOURCES = ('vendor/hxprobe', 'spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py')
-INSTALLER_FILES = ('ops/hxprobe-source-digest.py', 'ops/config-as-code.py', 'ops/git_env.py', 'ops/config/services.json', 'bin/install-outlook-intake.sh', 'tools/outlook-intake-copy.c',
+INSTALLER_FILES = ('ops/hxprobe-source-digest.py', 'ops/config-as-code.py', 'ops/git_env.py', 'ops/config/services.json', 'bin/install-outlook-intake.sh', 'bin/run-scheduled.sh', 'tools/outlook-intake-copy.c',
                    'ops/launchd/com.carr.outlook-intake.plist', 'tools/credential_env.py')
 
 
@@ -131,10 +131,10 @@ class InstalledDecoderTest(unittest.TestCase):
         state.parent.mkdir(parents=True, exist_ok=True)
         state.write_text(json.dumps({'mail_unresolved': {}}))
         built = self.receipt()
-        # No copy helper exists in this fixture, so the pass fails, and the old decoder must stay.
+        # No Outlook profile exists in this fixture, so reconciliation must preserve the old decoder.
         failed = self.install(check=False)
         self.assertNotEqual(failed.returncode, 0)
-        self.assertIn('outlook-intake failed reconcile_failed', failed.stdout)
+        self.assertIn('child_exit=1 state=failed', (self.repo / 'out/run-scheduled.log').read_text())
         self.assertEqual(self.receipt(), built)
         state.write_text(json.dumps({'mail_unresolved': {}, 'mail_ids': {}}))
         self.install()

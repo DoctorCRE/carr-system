@@ -304,6 +304,18 @@ int openat(int fd, const char *name, int flags, ...) {
                     f'outlook.{service}', str(self.root / '.venv/bin/python'), *tail])
         self.assertNotEqual(self.copy('--run-outbox', '/tmp/command').returncode, 0)
 
+    def test_existing_intake_mode_carries_reconcile_selection_without_new_arguments(self):
+        (self.root / 'bin').mkdir()
+        (self.root / 'bin/run-scheduled.sh').write_text(
+            'printf "%s\\n" "$CARR_OUTLOOK_RECONCILE_ONLY" "$@"\nexit 23\n')
+        result = self.copy('--run-intake', cwd=self.root,
+                           env={**os.environ, 'CARR_OUTLOOK_RECONCILE_ONLY': '1'})
+        self.assertEqual(result.returncode, 23)
+        self.assertEqual(result.stdout.decode().splitlines(), ['1', 'outlook-intake', 'outlook.intake',
+            str(self.root / '.venv/bin/python'), '-c',
+            'from lib.outlook_intake import main; raise SystemExit(main())'])
+        self.assertNotEqual(self.copy('--run-intake', '--reconcile-only').returncode, 0)
+
     def test_runtime_refuses_a_settings_profile_that_differs_from_the_granted_binary(self):
         settings_home = tempfile.TemporaryDirectory()
         self.addCleanup(settings_home.cleanup)
@@ -483,6 +495,29 @@ class InstallerTest(unittest.TestCase):
                    'installer-test', str(self.home), str(self.repo / f'bin/install-outlook-{name}.sh'), *args]
         return subprocess.run(command, capture_output=True, text=True, check=check,
                               env={**fixture_env(), 'SIGN_LOG': str(self.sign_log), **(signing_env or {})})
+
+    def test_reconcile_uses_granted_helper_before_replacement_and_stops_on_failure(self):
+        self.install()
+        state = self.repo / 'out/outlook-intake/state.json'
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text('{"mail_unresolved": {}}')
+        marker = self.root / 'reconcile-selection'
+        wrapper = self.repo / 'bin/run-scheduled.sh'
+        wrapper.write_text(f'printf "%s" "$CARR_OUTLOOK_RECONCILE_ONLY" > "{marker}"\nexit 23\n')
+        (self.repo / 'lib/outlook_intake.py').write_text('raise SystemExit("reconcile bypassed the helper")\n')
+        before = self.helper.read_bytes()
+        with (self.repo / 'tools/outlook-intake-copy.c').open('a') as source:
+            source.write('\n/* Changed helper source requires replacement. */\n')
+        failed = self.install(check=False, args=('--rebuild-helper',))
+        self.assertEqual(failed.returncode, 23, failed.stderr)
+        self.assertEqual(marker.read_text(), '1')
+        self.assertEqual(self.helper.read_bytes(), before)
+        wrapper.write_text(f'test "$CARR_OUTLOOK_RECONCILE_ONLY" = 1 || exit 24\n'
+                           f'printf \'{{"mail_ids": {{}}}}\' > "{state}"\n')
+        self.install(args=('--rebuild-helper',))
+        self.assertIn('mail_ids', json.loads(state.read_text()))
+        wrapper.write_text('exit 25\n')
+        self.install()
 
     def test_installer_retires_refresh_and_is_repeatable(self):
         agents = self.home / 'Library/LaunchAgents'

@@ -1122,6 +1122,28 @@ class IntakeTest(unittest.TestCase):
         result = self.run_intake([new], rejected=0)
         self.assertEqual((result.counts['logged'], result.counts['full_text_notes']), (0, 1))
 
+    def test_helper_environment_selects_reconcile_only_without_filing_or_routing(self):
+        old = mail('pat@example.test', -timedelta(hours=1), kind='preview', message_id='<a@example.test>')
+        self.run_intake([old])
+        path = self.out() / intake.STATE
+        saved = json.loads(path.read_text())
+        del saved['mail_ids']
+        self.fake.calls.clear()
+        for args, selection in (([], '1'), (['--reconcile-only'], '0')):
+            with self.subTest(args=args, selection=selection):
+                path.write_text(json.dumps(saved))
+                with patch.object(intake, '__file__', str(self.repo / 'lib/outlook_intake.py')), \
+                        patch.object(Path, 'home', return_value=self.home), \
+                        patch.object(intake, '_carr', return_value=self.fake.carr), \
+                        patch.object(intake, '_decoder', return_value=self.fake.decode), \
+                        patch.object(intake, 'run', side_effect=AssertionError('normal intake ran')), \
+                        patch.object(email_router, 'step', side_effect=AssertionError('router ran')), \
+                        patch.dict(os.environ, {'CARR_OUTLOOK_RECONCILE_ONLY': selection}), \
+                        patch.object(sys, 'argv', ['-c', *args]), patch('sys.stdout'):
+                    self.assertEqual(intake.main(), 0)
+                self.assertEqual(len(json.loads(path.read_text())['mail_ids']), 1)
+                self.assertEqual(self.fake.calls, [])
+
     def test_reconcile_only_pass_never_overwrites_state_a_concurrent_run_saved(self):
         first = mail('pat@example.test', -timedelta(hours=2), message_id='<a@example.test>')
         self.run_intake([first])
