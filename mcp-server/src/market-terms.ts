@@ -57,7 +57,8 @@ export function rebuildMarketTerms(snapshot: Snapshot, query: Query = {}) {
   return { ok: true, schema_version: 'market-terms.v1', empty: rows.length === 0, rows,
     coverage: { ...snapshot.coverage, coverage_scope: 'tenant_all_recorded_sources',
       unclassified_receipts: snapshot.coverage.canonical_receipts - snapshot.coverage.classified_receipts,
-      unsupported_receipts: snapshot.receipts.filter(receipt => !receipt.eligible).length,
+      unsupported_receipts: snapshot.coverage.canonical_receipts - snapshot.coverage.classified_receipts
+        + snapshot.receipts.filter(receipt => !receipt.eligible).length,
       comparable_rows: rows.length, comparable_deals: new Set(rows.map(row => row.entity_ref)).size },
   };
 }

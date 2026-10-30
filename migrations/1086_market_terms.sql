@@ -53,6 +53,17 @@ language sql stable security definer set search_path=pg_catalog,pg_temp as $$
     from ops.canonical_fact f join ops.market_term_context x on x.canonical_fact_id=f.id
       and x.organization_tenant_id=f.organization_tenant_id
     where f.organization_tenant_id=p_tenant
+      and not exists (
+        select 1 from ops.canonical_fact newer
+        where newer.organization_tenant_id=f.organization_tenant_id
+          and newer.entity_ref=f.entity_ref and newer.fact_key=f.fact_key
+          and newer.version>f.version
+          and not exists (select 1 from ops.market_term_context nx where nx.canonical_fact_id=newer.id)
+          and not exists (select 1 from ops.canonical_fact latest
+            where latest.organization_tenant_id=newer.organization_tenant_id
+              and latest.entity_ref=newer.entity_ref and latest.fact_key=newer.fact_key
+              and latest.version>newer.version)
+      )
   ), supported as (
     select f.*,s.sources,
       f.basis='human_review' or exists(
@@ -95,7 +106,7 @@ language sql stable security definer set search_path=pg_catalog,pg_temp as $$
       'recorded_documents',(select count(distinct document_ref) from ops.fact_observation where organization_tenant_id=p_tenant),
       'observations',(select count(*) from ops.fact_observation where organization_tenant_id=p_tenant),
       'canonical_receipts',(select count(*) from ops.canonical_fact where organization_tenant_id=p_tenant),
-      'classified_receipts',(select count(*) from facts),
+      'classified_receipts',(select count(*) from ops.market_term_context where organization_tenant_id=p_tenant),
       'quarantined_extractor_versions',(select coalesce(jsonb_agg(extractor_version order by extractor_version),'[]')
         from ops.market_term_quarantine where organization_tenant_id=p_tenant)))
 $$;

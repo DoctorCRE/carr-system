@@ -8,7 +8,7 @@ import { executeRegisteredTool } from '../src/tools.js';
 import { rebuildMarketTerms } from '../src/market-terms.ts';
 
 const actor = { id: '00000000-0000-4000-8000-000000000001', slug: 'joe', human: true };
-const migration = new URL('../../migrations/1077_market_terms.sql', import.meta.url);
+const migration = new URL('../../migrations/1086_market_terms.sql', import.meta.url);
 
 test('market terms project confirmed history with explicit coverage', async t => {
   const db = await postgresDatabase('market-terms-');
@@ -132,6 +132,17 @@ test('market terms project confirmed history with explicit coverage', async t =>
       assert.deepEqual(await read(query), out);
     });
 
+    await t.test('a newer contextless canonical version cannot leave an older term current', async () => {
+      const entity = randomUUID(), submarket = 'Synthetic Correction';
+      await term({ entity, submarket, value: '20' });
+      const before = await read({ submarket });
+      await term({ entity, value: '30', classified: false });
+      const after = await read({ submarket });
+      assert.deepEqual(after.rows, []);
+      assert.equal(after.coverage.unclassified_receipts, before.coverage.unclassified_receipts + 1);
+      assert.equal(after.coverage.unsupported_receipts, before.coverage.unsupported_receipts + 1);
+    });
+
     await t.test('extractor quarantine recomputes support while preserving human review and unaffected independent evidence', async () => {
       const submarket = 'Synthetic Quarantine';
       const human = await term({ submarket, versions: ['synthetic-bad'] });
@@ -146,7 +157,7 @@ test('market terms project confirmed history with explicit coverage', async t =>
       const after = await read(query);
       assert.deepEqual(new Set(after.rows.map(r => r.canonical_fact_id)), new Set([human.id, kept.id]));
       assert.ok(!after.rows.some(r => r.canonical_fact_id === lost.id));
-      assert.equal(after.coverage.unsupported_receipts, 1);
+      assert.equal(after.coverage.unsupported_receipts, before.coverage.unsupported_receipts + 1);
       assert.equal(after.rows.find(r => r.canonical_fact_id === human.id).sources[0].quarantined, true);
       assert.equal(after.rows.find(r => r.canonical_fact_id === kept.id).source_coverage.unaffected_observations, 2);
       assert.deepEqual(after.coverage.quarantined_extractor_versions, ['synthetic-bad']);
