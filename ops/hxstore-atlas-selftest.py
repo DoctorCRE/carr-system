@@ -5,6 +5,7 @@ import copy
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -49,6 +50,19 @@ class AtlasContractTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, f"{source}: missing at {revision}")
             self.assertEqual(hashlib.sha256(result.stdout).hexdigest(), binding["sha256"],
                              f"{source}: digest mismatch at {revision}")
+
+    def test_mail_evidence_names_functions_in_the_pinned_reader_and_exporter(self):
+        message = next(e for e in self.atlas['entries'] if e['id'] == 'object.class.00c9')
+        self.assertIn({'source': 'vendor/hxprobe/src/main.rs', 'symbol': 'cmd_db'}, message['evidence'])
+        for source in ('vendor/hxprobe/src/main.rs', 'vendor/hxprobe/src/message.rs'):
+            revision = self.atlas['sources'][source]['revision']
+            code = subprocess.check_output(['git', 'show', f'{revision}:{source}'], cwd=ROOT, text=True)
+            symbols = {ev['symbol'] for entry in self.atlas['entries'] for ev in entry['evidence']
+                       if ev['source'] == source}
+            for symbol in symbols:
+                with self.subTest(source=source, symbol=symbol):
+                    self.assertIsNotNone(re.search(r'\bfn\s+' + re.escape(symbol.split('::')[-1]) + r'\s*\(', code),
+                                         f'{source}: {symbol} absent at {revision}')
 
     def test_evidence_rejects_unreachable_revision(self):
         source = "vendor/hxprobe/src/attachment.rs"

@@ -967,6 +967,14 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(len(state['mail_unresolved']), 3)
         self.assertTrue(all(item['metadata_incomplete'] for item in state['mail_unresolved'].values()))
 
+    def test_keyless_senderless_messages_at_the_same_time_remain_separate(self):
+        messages = [mail(None, -timedelta(hours=1), copy_key='same-copy') for _ in range(2)]
+        result = self.run_intake(messages)
+        self.assertEqual((result.counts['emails'], result.counts['unresolved_messages']), (2, 2))
+        self.assertEqual(self.fake.writes('log-activity'), [])
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertEqual(len(state['mail_unresolved']), 2)
+
     def test_undated_message_can_resolve_when_metadata_decodes_later(self):
         message = mail(CLIENT.email, -timedelta(hours=1), local_keys='91')
         message['sent_unix'] = None
