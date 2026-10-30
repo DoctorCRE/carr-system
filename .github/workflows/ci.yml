@@ -166,7 +166,7 @@ jobs:
         run: bash ops/ci-postgres.sh
 
       - name: Install document export dependencies
-        if: contains(matrix.classes, 'unit') && matrix.gate_shard == 1
+        if: contains(matrix.classes, 'unit') || matrix.classes == 'gates'
         timeout-minutes: 5
         run: |
           sudo apt-get update -qq
