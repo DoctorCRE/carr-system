@@ -48,6 +48,9 @@ test('stored extraction jobs bind identity, replay one batch, and review abstent
     const replay = await invoke('record-deal-extraction', args);
     assert.equal(replay.replayed, true);
     assert.equal(replay.batch_id, first.batch_id);
+    const divergent = await invoke('record-deal-extraction', { ...args, observations: [{ ...observation, value: '25' }] });
+    assert.equal(divergent.batch_id, first.batch_id);
+    assert.equal(divergent.replayed, true);
     assert.equal((await invoke('read-deal-extraction-source', contract)).receipt.job_id, first.job_id);
     await assert.rejects(invoke('record-deal-extraction', { ...args, model: 'changed' }), e => e.payload.error === 'validation_error' || e.payload.error === 'key_reuse');
     await assert.rejects(invoke('record-deal-extraction', args, partner), e => e.payload.error === 'not_in_profile');

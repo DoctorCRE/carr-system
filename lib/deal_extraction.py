@@ -63,6 +63,8 @@ def validate_fields(reply, pages) -> dict[str, dict[str, Any]]:
             if set(field) != {'fact_key', 'status', 'reason'} or field['reason'] not in (
                     'absent', 'no_text_layer', 'unsupported_schedule', 'unsupported_ocr', 'ambiguous', 'ungrounded'):
                 raise ValueError('invalid abstention')
+            if (status == 'not_present') != (field['reason'] == 'absent'):
+                raise ValueError('abstention status and reason disagree')
             continue
         required = {'fact_key', 'status', 'value', 'unit', 'page', 'cited_text', 'region'}
         if field['fact_key'] == 'base_rent_per_sf':

@@ -60,6 +60,7 @@ export function dealExtractionTools() {
         if (Object.keys(contract).some(key => args.receipt.contract[key] !== request[key])) invalid();
         const accounted = [...args.observations.map(o => o.fact_key), ...args.receipt.abstentions.map(a => a.fact_key)];
         if (accounted.length !== 4 || new Set(accounted).size !== 4) invalid();
+        if (args.receipt.abstentions.some(a => (a.status === 'not_present') !== (a.reason === 'absent'))) invalid();
         if (args.observations.length) validateFactObservations({ entity_ref: args.entity_ref, observations: args.observations });
         if (args.receipt.passes[0].phase !== 'extract' || args.receipt.passes[1].phase !== 'ground') invalid();
         if (args.receipt.proposed_effects.length !== args.observations.length

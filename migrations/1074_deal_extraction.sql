@@ -11,8 +11,7 @@ create table ops.deal_extraction_job (
   content_hash text not null check(content_hash ~ '^[0-9a-f]{64}$'),
   receipt jsonb not null,
   batch_id uuid references ops.fact_observation_batch(id),
-  recorded_at timestamptz not null default now(),
-  unique(organization_tenant_id,id)
+  recorded_at timestamptz not null default now()
 );
 create index deal_extraction_job_field on ops.deal_extraction_job(organization_tenant_id,entity_ref);
 create trigger deal_extraction_job_append_only before update or delete on ops.deal_extraction_job

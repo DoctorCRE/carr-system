@@ -235,14 +235,35 @@
                   ]
                 },
                 "status": {
+                  "const": "not_present"
+                },
+                "reason": {
+                  "const": "absent"
+                }
+              },
+              "required": [
+                "fact_key",
+                "status",
+                "reason"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "fact_key": {
                   "enum": [
-                    "not_present",
-                    "unreadable"
+                    "base_rent_per_sf",
+                    "landlord_ti_per_sf",
+                    "term_months",
+                    "free_rent_months"
                   ]
+                },
+                "status": {
+                  "const": "unreadable"
                 },
                 "reason": {
                   "enum": [
-                    "absent",
                     "no_text_layer",
                     "unsupported_schedule",
                     "unsupported_ocr",
