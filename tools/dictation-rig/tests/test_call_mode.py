@@ -526,6 +526,7 @@ class PostCallTests(unittest.TestCase):
         self.assertTrue(any("default" in q["question"].lower() for q in result["review_questions"]))
         post_call.write_private(self.session / post_call.REPORT_FILE, result)
         self.assertEqual(post_call.sanitized_candidates(self.session)["post_call_items"][0]["due_on"], "2026-11-02")
+        self.assertTrue(post_call.sanitized_candidates(self.session)["post_call_items"][0]["due_defaulted"])
 
     def test_weekly_transcript_without_app_fetches_context_and_processes_once(self) -> None:
         call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
@@ -1124,6 +1125,7 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(report["dell_tasks"][0]["due_on"], "2026-10-27")
         self.assertEqual(report["dell_tasks"][0]["evidence"], quote)
         self.assertEqual(post_call.sanitized_candidates(self.session)["post_call_items"][0]["due_on"], "2026-10-27")
+        self.assertFalse(post_call.sanitized_candidates(self.session)["post_call_items"][0]["due_defaulted"])
 
     def test_ambiguous_deadlines_keep_items_for_review_without_blocking_the_call(self) -> None:
         cases = (

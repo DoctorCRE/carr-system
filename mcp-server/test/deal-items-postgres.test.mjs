@@ -45,6 +45,7 @@ before(async () => {
   if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
   else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
   await applyPendingDealRoomReads(c);
+  await c.query(readFileSync(new URL('../../migrations/1067_post_call_due_provenance.sql', import.meta.url), 'utf8'));
   await c.query(readFileSync(new URL('../../migrations/1003_notification_morning_midnight.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic physician',$1,$1) returning id", [actor.id])).rows[0].id;
@@ -488,8 +489,8 @@ test('post-call follow-ups merge into existing open steps through the writer rol
     await c.query("select set_config('carr.acting_actor_slug','joe',true), set_config('carr.verified_human_actor_slug','joe',true)");
     for (const [index, description] of ['Call synthetic duplicate vendor', 'Call another synthetic vendor', '  CALL   another synthetic vendor  '].entries()) {
       const candidate = (await c.query(`insert into capture_post_call_candidate(session_id,idempotency_key,batch_hash,
-        item_index,kind,deal_id,assignee_slug,action_description,due_on,evidence_quote,confidence)
-        values($1,$2,'synthetic',0,'assigned_action',$3,'joe',$4,'2026-11-02','Joe will call this vendor',0.9) returning id`,
+        item_index,kind,deal_id,assignee_slug,action_description,due_on,due_defaulted,evidence_quote,confidence)
+        values($1,$2,'synthetic',0,'assigned_action',$3,'joe',$4,'2026-11-02',false,'Joe will call this vendor',0.9) returning id`,
       [session, randomUUID(), deal, description])).rows[0].id;
       await c.query('set local role carr_writer');
       const result = await executeRegisteredTool(c, actor, 'resolve-post-call-candidate', {
@@ -502,5 +503,76 @@ test('post-call follow-ups merge into existing open steps through the writer rol
     assert.equal(actions.length, 1);
     assert.equal((await c.query("select due_on::text from next_action where id=$1", [prior.item.id])).rows[0].due_on, '2026-11-02');
     assert.equal((await c.query("select count(*)::int as n from capture_post_call_candidate where session_id=$1 and status='confirmed'", [session])).rows[0].n, 3);
+  } finally { await c.query('rollback'); }
+});
+
+test('same-text post-call follow-ups keep each partner owner', async () => {
+  await c.query('begin');
+  try {
+    const dell = (await c.query("insert into actor(slug,kind,display_name) values('dell','human','Synthetic Dell') on conflict(slug) do update set active=true returning id")).rows[0].id;
+    const nonce = randomUUID();
+    const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,
+      consent_announced_at,session_token_hash,expires_at,state_at)
+      values($1,'synthetic-device',$2,'meeting',now(),now(),$1,now()+interval '1 hour',now()) returning id`, [nonce, actor.id])).rows[0].id;
+    await c.query("select set_config('carr.acting_actor_slug','joe',true), set_config('carr.verified_human_actor_slug','joe',true)");
+    for (const source of ['next_action', 'capture_post_call_action']) {
+      const description = source === 'next_action' ? 'Send probe LOI' : 'Send second probe LOI';
+      const propose = async assignee => (await c.query(`insert into capture_post_call_candidate(session_id,idempotency_key,batch_hash,
+        item_index,kind,deal_id,assignee_slug,action_description,due_on,evidence_quote,confidence)
+        values($1,$2,'synthetic',0,'assigned_action',$3,$4,$5,'2026-11-02','Send the probe LOI',0.9) returning id`,
+      [session, randomUUID(), deal, assignee, description])).rows[0].id;
+      const accept = async candidate => {
+        await c.query('set local role carr_writer');
+        try { return await executeRegisteredTool(c, actor, 'resolve-post-call-candidate', {
+          candidate_id: candidate, accept: true, idempotency_key: randomUUID(),
+        }); } finally { await c.query('reset role'); }
+      };
+      const prior = source === 'next_action'
+        ? (await executeRegisteredTool(c, actor, 'record-deal-item', { deal, ...item(description), idempotency_key: randomUUID() })).item.id
+        : (await accept(await propose('joe'))).ref;
+      const accepted = await accept(await propose('dell'));
+      assert.notEqual(accepted.ref, prior, source);
+      assert.equal((await c.query(`select owner_id from ${source} where id=$1`, [prior])).rows[0].owner_id, actor.id);
+      assert.equal((await c.query('select owner_id from capture_post_call_action where id=$1', [accepted.ref])).rows[0].owner_id, dell);
+    }
+  } finally { await c.query('rollback'); }
+});
+
+
+test('post-call merges keep partner dates unless the incoming date is stated', async () => {
+  await c.query('begin');
+  try {
+    const nonce = randomUUID();
+    const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,
+      consent_announced_at,session_token_hash,expires_at,state_at)
+      values($1,'synthetic-device',$2,'meeting',now(),now(),$1,now()+interval '1 hour',now()) returning id`, [nonce, actor.id])).rows[0].id;
+    await c.query("select set_config('carr.acting_actor_slug','joe',true), set_config('carr.verified_human_actor_slug','joe',true)");
+    for (const source of ['next_action', 'capture_post_call_action']) {
+      const description = source === 'next_action' ? 'Call dated vendor' : 'Call second dated vendor';
+      const accept = async (due, defaulted) => {
+        const candidate = (await c.query(`insert into capture_post_call_candidate(session_id,idempotency_key,batch_hash,
+          item_index,kind,deal_id,assignee_slug,action_description,due_on,due_defaulted,evidence_quote,confidence)
+          values($1,$2,'synthetic',0,'assigned_action',$3,'joe',$4,$5,$6,'Joe will call vendor',0.9) returning id`,
+        [session, randomUUID(), deal, description, due, defaulted])).rows[0].id;
+        await c.query('set local role carr_writer');
+        try { return await executeRegisteredTool(c, actor, 'resolve-post-call-candidate', {
+          candidate_id: candidate, accept: true, idempotency_key: randomUUID(),
+        }); } finally { await c.query('reset role'); }
+      };
+      const prior = source === 'next_action'
+        ? (await executeRegisteredTool(c, actor, 'record-deal-item', { deal, ...item(description), idempotency_key: randomUUID() })).item.id
+        : (await accept('2026-10-23', false)).ref;
+      for (const [due, defaulted, expected] of [
+        ['2026-11-02', true, '2026-10-23'],
+        ['2026-11-03', false, '2026-11-03'],
+        ['2026-11-04', true, '2026-11-03'],
+        ['2026-11-05', null, '2026-11-03'],
+        [null, false, '2026-11-03'],
+      ]) {
+        assert.equal((await accept(due, defaulted)).ref, prior);
+        assert.equal((await c.query(`select due_on::text from ${source} where id=$1`, [prior])).rows[0].due_on, expected, `${source}: ${due}/${defaulted}`);
+        assert.equal((await c.query("select new_value->>'due_on' as due_on from event where verb='resolve-post-call-candidate' and new_value->>'next_action_id'=$1 order by mutation_order desc limit 1", [prior])).rows[0].due_on, expected);
+      }
+    }
   } finally { await c.query('rollback'); }
 });

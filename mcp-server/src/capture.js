@@ -260,10 +260,11 @@ function validatePostCallCandidates(body) {
     if (item.evidence_quote.length > 500 || wordCount(item.evidence_quote) > 15)
       return { error: "evidence_quote_too_long", max_words: 15 };
     if (item.kind === "assigned_action") {
-      if (Object.keys(item).some(key => !["kind", "deal_id", "assignee", "action", "due_on", "evidence_quote", "confidence"].includes(key)))
+      if (Object.keys(item).some(key => !["kind", "deal_id", "assignee", "action", "due_on", "due_defaulted", "evidence_quote", "confidence"].includes(key)))
         return { error: "invalid_assigned_action" };
       if (!['joe', 'dell'].includes(item.assignee) || typeof item.action !== "string" ||
           !item.action.trim() || item.action.length > 500 ||
+          (item.due_defaulted != null && typeof item.due_defaulted !== "boolean") ||
           (item.due_on != null && !/^\d{4}-\d{2}-\d{2}$/u.test(item.due_on)))
         return { error: "invalid_assigned_action" };
     }
@@ -282,7 +283,7 @@ function validatePostCallCandidates(body) {
 function postCallPayload(item) {
   if (item.kind === "assigned_action") return {
     deal_id: item.deal_id, assignee: item.assignee, action: item.action.trim(),
-    due_on: item.due_on || null,
+    due_on: item.due_on || null, due_defaulted: item.due_defaulted ?? null,
   };
   return { deal_id: item.deal_id, recipient_party_id: item.recipient_party_id,
     recipient_ref: item.recipient_ref, subject: item.subject.trim(), body_sha256: item.body_sha256 };
@@ -403,11 +404,12 @@ async function postCallCandidates(request, dependencies) {
       await client.query(
         `insert into capture_post_call_candidate
            (session_id,idempotency_key,batch_hash,item_index,kind,deal_id,assignee_slug,
-            action_description,due_on,recipient_party_id,recipient_ref,email_subject,body_sha256,
+            action_description,due_on,due_defaulted,recipient_party_id,recipient_ref,email_subject,body_sha256,
             evidence_quote,confidence)
          select $1,$2,$3,item.ordinality - 1,item.value->>'kind',(item.value->'payload'->>'deal_id')::uuid,
                 item.value->'payload'->>'assignee',item.value->'payload'->>'action',
-                (item.value->'payload'->>'due_on')::date,(item.value->'payload'->>'recipient_party_id')::uuid,
+                (item.value->'payload'->>'due_on')::date,(item.value->'payload'->>'due_defaulted')::boolean,
+                (item.value->'payload'->>'recipient_party_id')::uuid,
                 item.value->'payload'->>'recipient_ref',item.value->'payload'->>'subject',
                 item.value->'payload'->>'body_sha256',item.value->>'evidence_quote',
                 (item.value->>'confidence')::numeric

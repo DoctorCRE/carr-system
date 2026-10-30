@@ -9990,7 +9990,7 @@ registerTools({
         hint: "this verb requires a partner or a server-verified Codex/Claude session sponsored by one" });
       const { candidate, resolution } = await prepareCaptureCandidate(c, actor, args, {
         table: "capture_post_call_candidate",
-        read: `select id,kind,deal_id,assignee_slug,action_description,to_jsonb(due_on)#>>'{}' as due_on,recipient_party_id,
+        read: `select id,kind,deal_id,assignee_slug,action_description,due_defaulted,to_jsonb(due_on)#>>'{}' as due_on,recipient_party_id,
                 recipient_ref,email_subject,body_sha256,status,resulting_ref,evidence_quote
            from capture_post_call_candidate where id=$1 for update
            /* capture:resolve-post-call-read */`,
@@ -10032,24 +10032,25 @@ registerTools({
       const existing = (await c.query(
         `select id,item_bullets,source from (
            select id,item_bullets,'next_action' as source,created_at as ordered_at from next_action
-             where subject_type='deal' and subject_id=$1 and status='open'
+             where subject_type='deal' and subject_id=$1 and status='open' and owner_id=$3
                and lower(regexp_replace(btrim(description), '\\s+', ' ', 'g'))=$2
            union all
            select id,item_bullets,'capture_post_call_action' as source,accepted_at as ordered_at from capture_post_call_action
-             where deal_id=$1 and status='open'
+             where deal_id=$1 and status='open' and owner_id=$3
                and lower(regexp_replace(btrim(description), '\\s+', ' ', 'g'))=$2
          ) actions order by ordered_at,id limit 1 /* capture:followup-existing */`,
-        [candidate.deal_id, stepKey])).rows[0];
+        [candidate.deal_id, stepKey, assignee.rows[0].id])).rows[0];
       const actionTable = existing?.source === 'next_action' ? 'next_action' : 'capture_post_call_action';
       if (existing) await c.query(`select id from ${actionTable} where id=$1 for update`, [existing.id]);
       const bullets = [...(existing?.item_bullets || []), ...item.bullets]
         .filter((bullet, index, all) => all.findIndex(other => JSON.stringify(other) === JSON.stringify(bullet)) === index);
       const action = existing ? await c.query(
-        `update ${actionTable} set due_on=$2,owner_id=$3,item_bullets=$4::jsonb,updated_at=clock_timestamp()
-          where id=$1 returning id /* capture:followup-merge */`,
-        [existing.id, candidate.due_on, assignee.rows[0].id, JSON.stringify(bullets)]) : await c.query(
+        `update ${actionTable} set due_on=case when $4 and $2::date is not null then $2::date else due_on end,
+          item_bullets=$3::jsonb,updated_at=clock_timestamp()
+          where id=$1 returning id,due_on::text as due_on /* capture:followup-merge */`,
+        [existing.id, candidate.due_on || null, JSON.stringify(bullets), candidate.due_defaulted === false]) : await c.query(
         `insert into capture_post_call_action (candidate_id,deal_id,owner_id,due_on,description,accepted_by,item_title,item_bullets,source_ref)
-         values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9) returning id
+         values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9) returning id,due_on::text as due_on
          /* capture:resolve-post-call-action */`,
         [candidate.id, candidate.deal_id, assignee.rows[0].id, candidate.due_on || null,
          candidate.action_description, actor.id, item.title, JSON.stringify(item.bullets), item.source_ref]);
@@ -10061,7 +10062,7 @@ registerTools({
       await writeEvent(c, actor, "resolve-post-call-candidate", "deal", candidate.deal_id, {
         field: "next_action", new: { next_action_id: action.rows[0].id,
           assignee: candidate.assignee_slug, description: candidate.action_description,
-          due_on: candidate.due_on || null }, idempotency_key: args.idempotency_key,
+          due_on: action.rows[0].due_on }, idempotency_key: args.idempotency_key,
       });
       return { ok: true, candidate_id: candidate.id, status: "confirmed",
         ref: String(action.rows[0].id), assignee: candidate.assignee_slug };

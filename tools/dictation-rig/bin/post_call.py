@@ -1213,7 +1213,8 @@ def sanitized_candidates(session_dir: Path) -> dict[str, Any]:
                 continue
             post_call_items.append({
                 "kind": "assigned_action", "deal_id": task["deal_id"], "assignee": owner,
-                "action": task["title"], "due_on": task.get("due_on"), "evidence_quote": task["evidence"],
+                "action": task["title"], "due_on": task.get("due_on"),
+                "due_defaulted": task.get("due_defaulted"), "evidence_quote": task["evidence"],
                 "confidence": 0.5,
             })
             bindings.append(_candidate_binding(list_name, index, "post_call"))

@@ -78,8 +78,8 @@ with `candidates` and `send: false`. Each candidate has `id`, `session_id`,
 Task payloads contain `deal_id`, `assignee`, `action`, and `due_on`.
 When no usable deadline is stated, default to the next Monday through Friday
 after the recorded call date in America/Chicago. If the recording has no date,
-use the processing date in that timezone. The private task carries
-`due_defaulted: true` and a visible review question names the default. An
+use the processing date in that timezone. This weekday rule does not skip holidays.
+The task and stored candidate carry `due_defaulted: true` and a visible review question names the default. An
 ambiguous spoken deadline still retains its review question. Defaulted tasks
 remain proposals, just like explicitly dated tasks.
 Email payloads contain `deal_id`, `recipient_party_id`, `recipient_ref`,
@@ -181,10 +181,13 @@ with all item questions in one request. The local process supplies
 
 ### Post-call reliability
 
-Accepting the same step for the same deal merges into its oldest open action,
-including actions entered outside Call Mode. Matching ignores case and repeated
-whitespace; it does not infer paraphrases. Confirmation updates the due date and
-assignee and combines evidence bullets. Closed actions remain history.
+Accepting the same step for the same deal and owner merges into its oldest open
+action, including actions entered outside Call Mode. Matching ignores case and
+repeated whitespace; it does not infer paraphrases. Confirmation combines
+evidence bullets and never changes the owner. It replaces the existing due date
+only when the incoming date is stated (`due_defaulted: false`) and nonempty.
+Defaulted, missing, and historical dates with unknown provenance preserve the
+existing date. Closed actions remain history.
 
 Extraction, context-fetch failures, and bridge synchronization each stop after
 three failed attempts, with five and fifteen minutes between attempts. The local
