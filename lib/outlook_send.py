@@ -125,6 +125,10 @@ class SentRow:
     sent_unix: int
     item_id: str | None = None
 
+    @property
+    def sent_at(self) -> str:
+        return datetime.fromtimestamp(self.sent_unix, timezone.utc).isoformat()
+
 
 @dataclass(frozen=True)
 class EventRow:
@@ -342,7 +346,7 @@ def confirmed_mail(snapshot: Snapshot, mail: Mail, since: float) -> str | None:
 
 def _sent_time(snapshot: Snapshot, item_id: str) -> str:
     row = next(r for r in snapshot.sent if r.item_id == item_id)
-    return datetime.fromtimestamp(row.sent_unix, timezone.utc).isoformat()
+    return row.sent_at
 
 
 def event_in_mailbox(snapshot: Snapshot, event: Event) -> bool:

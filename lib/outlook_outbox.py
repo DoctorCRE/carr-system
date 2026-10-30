@@ -103,7 +103,7 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
                     snapshot = ports.mailbox.snapshot()
                     item = next(r for r in snapshot.sent if r.item_id == receipt['sent_item_id']
                                 and r.sender.lower() == settings.account)
-                    receipt = dict(receipt, sent_at=send._sent_time(snapshot, item.item_id),
+                    receipt = dict(receipt, sent_at=item.sent_at,
                                    sender_account=settings.account)
                     _save(path, receipt)
                 reply = ports.carr('record-email-sent', receipt)
