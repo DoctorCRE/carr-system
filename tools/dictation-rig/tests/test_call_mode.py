@@ -315,6 +315,38 @@ class CallModeHttpTests(unittest.TestCase):
         handler.send_json = Mock()
         return handler
 
+    def test_question_resolution_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            session = Path(tmp) / "2026.08.10-review"
+            session.mkdir()
+            post_call.write_private(session / post_call.REPORT_FILE, {
+                "review_questions": [{"id": "q1", "question": "Which deal?", "resolved": False}],
+            })
+            with patch.object(call_mode, "RECORDINGS", session.parent), patch.object(call_mode, "sync_post_call") as sync:
+                for question_id, resolution, status, error in (
+                    ("bad-id", "Deal A", 404, "unknown question id"),
+                    ("q1", " ", 400, "resolution must be a non-empty string"),
+                    ("q1", None, 400, "resolution must be a non-empty string"),
+                ):
+                    with self.subTest(question_id=question_id, resolution=resolution):
+                        handler = self.handler(
+                            f"/api/post-call/questions/{question_id}/resolve",
+                            json.dumps({"session": session.name, "resolution": resolution}).encode(),
+                            "http://127.0.0.1:4682",
+                        )
+                        handler.do_POST()
+                        handler.send_json.assert_called_once_with({"error": error}, status)
+                post_call.resolve_question(session, "q1", "Deal A")
+                handler = self.handler(
+                    "/api/post-call/questions/q1/resolve",
+                    json.dumps({"session": session.name, "resolution": "Deal B"}).encode(),
+                    "http://127.0.0.1:4682",
+                )
+                handler.do_POST()
+                handler.send_json.assert_called_once_with({"error": "already_resolved"}, 409)
+                self.assertEqual(post_call.read_json(session / post_call.REPORT_FILE)["review_questions"][0]["resolution"], "Deal A")
+                sync.assert_not_called()
+
     def test_post_requires_an_allowlisted_browser_origin(self) -> None:
         handler = self.handler("/api/stop", b"{}", None)
         handler.do_POST()
@@ -1358,7 +1390,7 @@ class PostCallTests(unittest.TestCase):
         unchanged = post_call.read_json(self.session / post_call.REPORT_FILE)
         self.assertNotIn("backend_report_sha256", unchanged)
 
-    def test_purger_holds_unresolved_review_even_with_old_filing_receipt(self) -> None:
+    def test_pre_change_filed_session_purges_despite_unresolved_question(self) -> None:
         home = Path(self.tmp.name) / "home"
         session = home / "Recordings" / "2026.01.01-1200"
         session.mkdir(parents=True)
@@ -1376,9 +1408,6 @@ class PostCallTests(unittest.TestCase):
         })
         command = ["/bin/sh", str(BIN_DIR / "purge-recordings.sh")]
         isolated = {"HOME": str(home), "PATH": "/usr/bin:/bin"}
-        subprocess.run(command, check=True, env=isolated)
-        self.assertTrue((session / "mic.caf").exists())
-        post_call.resolve_question(session, report["review_questions"][0]["id"], "Dell meant deal A.")
         subprocess.run(command, check=True, env=isolated)
         self.assertFalse((session / "mic.caf").exists())
 
