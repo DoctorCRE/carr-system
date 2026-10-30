@@ -128,15 +128,43 @@ async function claim(request, env, dependencies) {
   }
 }
 
+async function renew(request, env, dependencies) {
+  const device = captureDevice(request, env);
+  if (!device) return json({ error: "unauthorized" }, 401);
+  const body = await requestBody(request);
+  if (typeof body?.session_token !== "string" || !body.session_token)
+    return json({ error: "unauthorized" }, 401);
+  try {
+    await dependencies.withWriter(async client => {
+      const result = await client.query(
+        `select s.id,s.state,
+                exists(select 1 from capture_post_call_report r where r.session_id=s.id) as filed
+           from capture_session s where s.session_token_hash=$1 and s.device_id=$2
+           for update of s /* capture:renew-owner */`, [await sha256(body.session_token), device]);
+      const session = result.rows[0];
+      if (!session) refuse(401, { error: "unauthorized" });
+      if (session.state === "done" || session.state === "failed" || session.filed)
+        refuse(409, { error: "terminal_state" });
+      // Keep the same credential so a lost response or concurrent bridge retry is safe.
+      await client.query(
+        `update capture_session set expires_at=now()+($2 * interval '1 second')
+          where id=$1 and expires_at <= now() /* capture:renew-expiry */`,
+        [session.id, CAPTURE_SESSION_TTL_SECONDS]);
+    });
+    return json({ ok: true, ttl_seconds: CAPTURE_SESSION_TTL_SECONDS });
+  } catch (error) { return dependencies.errorResponse(error); }
+}
+
 async function authenticatedSession(client, opaque, lock = false) {
   if (typeof opaque !== "string" || !opaque) refuse(401, { error: "unauthorized" });
   const tokenHash = await sha256(opaque);
   const result = await client.query(
-    `select id, state, post_call, to_jsonb(state_at)#>>'{}' as state_at
+    `select id, state, post_call, to_jsonb(state_at)#>>'{}' as state_at, expires_at <= now() as expired
        from capture_session
-      where session_token_hash=$1 and expires_at > now()
+      where session_token_hash=$1
       ${lock ? "for update" : ""} /* capture:session-auth */`, [tokenHash]);
   if (!result.rows.length) refuse(401, { error: "unauthorized" });
+  if (result.rows[0].expired) refuse(401, { error: "session_token_expired" });
   return result.rows[0];
 }
 
@@ -540,6 +568,7 @@ export function createCaptureHandler(overrides = {}) {
       const dependencies = { ...configured, errorResponse: error => errorResponse(error, env) };
       const path = new URL(request.url).pathname;
       if (path === "/capture/claim" && request.method === "POST") return claim(request, env, dependencies);
+      if (path === "/capture/renew" && request.method === "POST") return renew(request, env, dependencies);
       if (path === "/capture/status" && request.method === "POST") return status(request, dependencies);
       if (path === "/capture/candidates" && request.method === "POST") return candidates(request, dependencies);
       if (path === "/capture/post-call/candidates" && request.method === "POST") return postCallCandidates(request, dependencies);
