@@ -184,8 +184,13 @@ def _windows(pid: int) -> list[dict]:
 
 def button_matches(element: dict, name: str) -> bool:
     """Match an AX button name before Outlook's comma-separated state suffixes."""
-    return (element.get('role') == 'AXButton'
-            and str(element.get('label') or '').split(', ', 1)[0] == name)
+    label = element.get('label') or ''
+    if element.get('role') != 'AXButton' or not label or not name:
+        return False
+    base, separator, state = str(label).partition(', ')
+    return base == name and (not separator or all(part in {
+        'pressed', 'selected', 'expanded', 'collapsed', 'checked', 'unchecked',
+    } for part in state.split(', ')))
 
 
 def _readable(pid: int, window: dict) -> bool:

@@ -28,7 +28,8 @@ lookback. Records are never created, merged or renamed.
 A role address (front desk, info, office...) that shares a record's email field
 with other addresses is flagged shared_role, never matched: it may serve many people.
 Unresolved mail and calendar candidates expire after 30 days (unresolved_expired,
-calendar_unresolved_expired). Mail
+calendar_unresolved_expired), except sent mail whose recipients are unknown: it is held
+and counted (unresolved_recipients_unknown) until it decodes with recipients. Mail
 whose only unknown participants are machine senders (no-reply, mailer-daemon,
 postmaster, bounces) is settled once as not business, outside the unresolved backlog.
 Any other unknown inbound sender's email
@@ -91,6 +92,7 @@ OUT = Path('out/outlook-intake')
 STATE = 'state.json'
 WORK_PREFIX = 'work-'
 WINDOW = (time(7, 0), time(19, 30))
+COVERAGE_CHECK_AT = time(18, 0)  # the first successful run from here judges the day's coverage once
 WRITE_VERBS = frozenset({'log-activity', 'publish-board-snapshot', 'propose-email-lead', 'attach-deal-file',
                          'record-deal-item', 'complete-deal-item', 'drop-action'})
 FLAG_ITEM_TITLE = 'Follow up flagged email'
@@ -213,7 +215,8 @@ FOLDER_CLASSES = {
     'drafts': ('drafts',), 'user': (), 'unknown': (),
 }
 MAIL_STORE_COUNTERS = ('mail_outside_selected_account', 'mail_account_ambiguous', 'mail_account_unresolved',
-                       'stored', 'admitted', 'stored_not_admitted_account_ambiguous',
+                       'stored', 'admitted', 'stored_multi_class', 'mail_account_unknown_not_stored', 'body_complete',
+                       'stored_not_admitted_account_ambiguous',
                        'stored_not_admitted_account_unresolved',
                        *(prefix + kind for prefix in ('stored_', 'admitted_') for kind in FOLDER_CLASSES),
                        'subject_decoded', 'subject_missing',
@@ -223,7 +226,8 @@ MAIL_STORE_COUNTERS = ('mail_outside_selected_account', 'mail_account_ambiguous'
 BACKLOG_COUNTS = frozenset((
     *MAIL_STORE_COUNTERS, 'mail_rows_reusing_prior_identity',
     'hydration_pending', 'hydration_expired', 'unresolved_messages', 'unresolved_read',
-    'unresolved_read_abandoned', 'unresolved_expired', 'unresolved_calendar', 'unresolved_addresses', 'unmatched',
+    'unresolved_read_abandoned', 'unresolved_expired', 'unresolved_recipients_unknown',
+    'unresolved_calendar', 'unresolved_addresses', 'unmatched',
     'requests_blocked', 'calendar_lifecycle_unsupported',
     'calendar_lifecycle_canceled', 'calendar_requests_quarantined', 'calendar_unresolved_expired',
     'calendar_follow_up_reviews', 'calendar_follow_up_trimmed', 'calendar_agenda_items'))
@@ -233,13 +237,28 @@ RECEIPT_NAMES = {'calendar_lifecycle_unsupported': 'calendar_copies_in_store',
 LEAD_OUTCOMES = {'proposed': 'lead_proposed', 'known_party': 'lead_known_party', 'refused': 'lead_refused'}
 
 
+COVERAGE_SHORTFALLS = ('coverage_messages_shortfall', 'coverage_subjects_shortfall', 'coverage_text_shortfall')
+
+
+def coverage_verdict(counts: dict) -> dict:
+    """WR-000587's daily check: messages not admitted (ALL-MESSAGES), admitted without a
+    subject (ALL-SUBJECTS) and admitted without full text (ALL-TEXT). All zero is a pass."""
+    return dict(zip(COVERAGE_SHORTFALLS, (
+        counts['stored'] - counts['admitted'] + counts['mail_account_unknown_not_stored'],
+        counts['admitted'] - counts['subject_decoded'],
+        counts['admitted'] - counts['body_complete'])))
+
+
 def receipt_counts(counts: dict) -> dict:
     """Split run deltas from standing totals, including the current mail snapshot.
 
-    stored/admitted count decoder message rows, never folder links. The per-class
-    totals count a message once in each observed class, so cached move links can
-    overlap classes. stored_not_admitted_* explains gaps within the selected
-    account; mail_account_* also includes rows without selected-account evidence.
+    stored/admitted/subject_decoded/body_complete count decoder message rows, never
+    folder links. A folder's class is its top-level folder's. The per-class totals count
+    a message once in each class of the selected account; stored_multi_class counts the
+    messages in more than one class (cached move links). stored_not_admitted_* explains gaps within the selected account;
+    mail_account_unknown_not_stored counts rows the decoder placed in no account. The
+    first successful run at or after COVERAGE_CHECK_AT each local day adds
+    coverage_verdict() to the run counts.
     """
     split: dict[str, dict] = {'run': {}, 'backlog': {}}
     for name, value in counts.items():
@@ -355,11 +374,10 @@ def in_window(now: datetime) -> bool:
 
 # ---- the decoded store -------------------------------------------------------
 
-def _folder_paths(con: sqlite3.Connection) -> dict[int, list[str]]:
-    """Message row id -> sorted observed folder paths ("Inbox/Active Deals/Deal A").
+def _folder_path_map(con: sqlite3.Connection) -> dict[int, str]:
+    """Folder id -> full path ("Inbox/Active Deals/Deal A").
 
-    Cached revisions can still place a moved message in its previous folder too. A folder
-    with an unnamed, unknown or cyclic ancestor has no path. Older decoders export no parents."""
+    A folder with an unnamed, unknown or cyclic ancestor has no path. Older decoders export no parents."""
     tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if not {'folders', 'message_folders'} <= tables:
         return {}
@@ -382,10 +400,18 @@ def _folder_paths(con: sqlite3.Connection) -> dict[int, list[str]]:
             folder = parent
         return None
 
+    return {folder: p for folder in folders if (p := path(folder)) is not None}
+
+
+def _folder_paths(con: sqlite3.Connection, folder_paths: dict[int, str]) -> dict[int, list[str]]:
+    """Message row id -> sorted observed folder paths. Cached revisions can still place a
+    moved message in its previous folder too."""
+    if not folder_paths:
+        return {}
     found: dict[int, set[str]] = {}
     for message, folder in con.execute('SELECT message_id, folder_id FROM message_folders'):
-        if (p := path(folder)) is not None:
-            found.setdefault(message, set()).add(p)
+        if folder in folder_paths:
+            found.setdefault(message, set()).add(folder_paths[folder])
     return {message: sorted(paths) for message, paths in found.items()}
 
 
@@ -438,19 +464,26 @@ def _message_object_fields(con: sqlite3.Connection) -> dict[int, dict]:
     return found
 
 
-def _subject_counts(mails: list[dict]) -> dict:
+def _folder_kind(path: str | None) -> str:
+    """A folder's class is its top-level folder's: Projects/Archive is user, Inbox/Deals is inbox."""
+    top = (path or '').split('/', 1)[0].strip().lower()
+    return next((kind for kind, names in FOLDER_CLASSES.items() if top in names), 'user' if top else 'unknown')
+
+
+def _coverage_counts(mails: list[dict], classes: dict[int, set[str]]) -> dict:
+    """Subject and full-text coverage over every admitted message; a message counts once per class."""
     counts = dict.fromkeys(('subject_decoded', 'subject_missing',
                             *('subject_missing_' + kind for kind in FOLDER_CLASSES)), 0)
     counts['admitted'] = len(mails)
+    counts['body_complete'] = sum(m['body_kind'] == 'full' and bool((m['body'] or '').strip()) for m in mails)
     for mail in mails:
         if (mail['subject'] or '').strip():
             counts['subject_decoded'] += 1
             continue
         counts['subject_missing'] += 1
-        folders = {path.rsplit('/', 1)[-1].strip().lower() for path in mail['folders']}
-        kind = next((kind for kind, names in FOLDER_CLASSES.items() if folders.intersection(names)),
-                    'user' if folders else 'unknown')
-        counts['subject_missing_' + kind] += 1
+        kinds = classes.get(mail['id']) or {_folder_kind(path) for path in mail['folders']} or {'unknown'}
+        for kind in kinds:
+            counts['subject_missing_' + kind] += 1
     return counts
 
 
@@ -459,7 +492,8 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
     con.row_factory = sqlite3.Row
     try:
         meta = {r['key']: r['value'] for r in con.execute('SELECT key, value FROM meta')}
-        paths = _folder_paths(con)
+        folder_paths = _folder_path_map(con)
+        paths = _folder_paths(con, folder_paths)
         attachments = _attachment_metadata(con)
         # Decoders built before WR-000502 export no local_keys column.
         columns = {r['name'] for r in con.execute('PRAGMA table_info(messages)')}
@@ -480,14 +514,12 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
         ownership: dict[int, set[int | None]] = {}
         folder_classes: dict[int, set[str]] = {}
         if account_id is not None:
-            for message, owner, name in con.execute(
-                    'SELECT mf.message_id, f.account_id, f.name FROM message_folders mf '
+            for message, folder, owner, name in con.execute(
+                    'SELECT mf.message_id, mf.folder_id, f.account_id, f.name FROM message_folders mf '
                     'LEFT JOIN folders f ON f.id = mf.folder_id'):
                 ownership.setdefault(message, set()).add(owner if name is not None else None)
                 if owner == account_id:
-                    kind = next((kind for kind, names in FOLDER_CLASSES.items()
-                                 if (name or '').strip().lower() in names), 'user' if name else 'unknown')
-                    folder_classes.setdefault(message, set()).add(kind)
+                    folder_classes.setdefault(message, set()).add(_folder_kind(folder_paths.get(folder)))
         if account_address is not None:
             if 'folder_links_unresolved' not in columns:
                 raise DecodeError('folder_ownership_evidence_required')
@@ -512,6 +544,7 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
             kinds = folder_classes.get(m['id'], set())
             if kinds:
                 meta['stored'] += 1
+                meta['stored_multi_class'] += len(kinds) > 1
                 for kind in kinds:
                     meta['stored_' + kind] += 1
                     if reason is None:
@@ -520,15 +553,18 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
                     meta['stored_not_admitted_' + reason.removeprefix('mail_')] += 1
             if account_id is not None and reason:
                 meta[reason] += 1
+                if reason == 'mail_account_unresolved' and not kinds:
+                    meta['mail_account_unknown_not_stored'] += 1
             else:
                 admitted.append(m)
         mails = admitted
         for m in mails:
+            m['folders'] = paths.get(m['id'], [])
+        meta.update(_coverage_counts(mails, folder_classes))
+        for m in mails:
             message_id = m.pop('id')
             m['row_ids'] = [message_id]
-            m['folders'] = paths.get(message_id, [])
             m['attachments'] = attachments.get(message_id, [])
-        meta.update(_subject_counts(mails))
         meta['health_mails'] = mails
         events = [dict(r) for r in con.execute('SELECT * FROM events')]
         attendees: dict[int, list] = {}
@@ -1344,6 +1380,7 @@ def mapping_counts(state: dict) -> dict:
     return {'hydration_pending': len(state.get('pending_full', {})),
             'hydration_expired': sum(bool(p.get('expired')) for p in state.get('pending_full', {}).values()),
             'unresolved_messages': len(mail),
+            'unresolved_recipients_unknown': sum(bool(item.get('recipients_unknown')) for item in mail.values()),
             'unresolved_read': sum(item.get('read', 'abandoned') != 'abandoned' for item in mail.values()),
             'unresolved_read_abandoned': sum(item.get('read') == 'abandoned' for item in mail.values()),
             'unresolved_expired': state.get('unresolved_expired', 0),
@@ -1359,7 +1396,8 @@ def _prune(state: dict, now: datetime) -> None:
     oldest = now.timestamp() - UNRESOLVED_DAYS.total_seconds()
     unresolved = state.get('mail_unresolved', {})
     expired = [ident for ident, item in unresolved.items()
-               if not item.get('metadata_incomplete') and item['sent'] is not None and item['sent'] < oldest]
+               if not item.get('metadata_incomplete') and not item.get('recipients_unknown')
+               and item['sent'] is not None and item['sent'] < oldest]
     for ident in expired:
         del unresolved[ident]
     state['unresolved_expired'] = state.get('unresolved_expired', 0) + len(expired)
@@ -1581,6 +1619,15 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
                 return Outcome('failed', 'flags_pending', outcome.counts)
             if work.counts['links_filed']:
                 outcome.reason = 'processed'
+            local = ports.now().astimezone(settings.timezone)
+            if local.time() >= COVERAGE_CHECK_AT and state.get('coverage_check_day') != local.date().isoformat():
+                state['coverage_check_day'] = local.date().isoformat()
+                _save(out, state)
+                shortfalls = coverage_verdict(outcome.counts)
+                failed = any(shortfalls.values())
+                outcome.counts.update(shortfalls, coverage_checked=1, coverage_failed=int(failed))
+                if failed:
+                    outcome.state, outcome.reason = 'failed', 'coverage_failed'
             return outcome
         except CleanupError:
             return Outcome('failed', 'cleanup_failed')
