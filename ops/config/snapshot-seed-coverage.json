@@ -64,7 +64,7 @@
     "ops.execution_environment_conformance": "governed execution seeds appended as deterministic SQL (0309)",
     "ops.execution_environment_provider": "governed execution seeds appended as deterministic SQL (0309)",
     "ops.execution_environment_provider_event": "governed execution seeds appended as deterministic SQL (0309)",
-    "ops.fact_key_contract": "Migration 0983 seeds the four WR-000039 E09a normalization contracts (fact key, canonical unit, unit multipliers, expense-basis requirement). Closed reference configuration that ops.fact_observation and ops.canonical_fact reference by foreign key; no client, party, deal, document, or event content.",
+    "ops.fact_key_contract": "Migration 0983 seeds the four WR-000039 E09a normalization contracts (fact key, canonical unit, unit multipliers, expense-basis requirement). Closed reference configuration that ops.fact_observation and ops.canonical_fact reference by foreign key; no client, party, deal, document, or event content. Migration 1081 adds the structured rent_schedule contract. Separate selectors preserve exact counts before and after that migration.",
     "ops.guidance_registry": "the registry's own singleton header row; guidance-registry-db-gate fails without it",
     "ops.job_definition": "Only renewal-radar-source-daily:v1 and engineering-slice:v1. Reviewed selectors render their current contract fields after their seeding migration enters the ledger; operational timestamps and legacy-disable observations are omitted. No runs, leases, or arbitrary jobs are carried.",
     "ops.rule_delivery_activation_target": "the exact ledger-appropriate reviewed cutover targets; without them a rebuild has no cutover target set",
@@ -277,9 +277,22 @@
     {
       "table": "ops.fact_key_contract",
       "migration": "0983_fact_store.sql",
-      "where": "true",
+      "where": "fact_key <> 'rent_schedule'",
       "order_by": "fact_key",
       "exact_rows": 4,
+      "columns": [
+        "fact_key",
+        "canonical_unit",
+        "unit_multipliers",
+        "expense_basis_required"
+      ]
+    },
+    {
+      "table": "ops.fact_key_contract",
+      "migration": "1081_deal_schedules.sql",
+      "where": "fact_key = 'rent_schedule'",
+      "order_by": "fact_key",
+      "exact_rows": 1,
       "columns": [
         "fact_key",
         "canonical_unit",
