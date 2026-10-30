@@ -499,7 +499,7 @@ m.run_local_ci(repo=Path(sys.argv[2]), ci_class='migration', port=int(sys.argv[3
             bins = mod.find_postgres_binaries()
             subprocess.run([str(bins.pg_ctl), '-D', str(root / 'data'), '-m', 'immediate', '-w', 'stop'], capture_output=True)
         if root and root.exists():
-            shutil.rmtree(root)
+            shutil.rmtree(root, ignore_errors=True)
         stdout.close()
 
 print(f"local PG CI selftest — {passed}/{passed + len(failed)} passed")
