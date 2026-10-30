@@ -17,6 +17,8 @@ import sys
 import tempfile
 import time
 import unittest
+import threading
+from concurrent.futures import ThreadPoolExecutor
 import urllib.error
 from email.message import Message
 from pathlib import Path
@@ -79,6 +81,129 @@ def tearDownModule() -> None:
         log_patch.stop()
     for client_patch in reversed(_CLIENT_PATCHES):
         client_patch.stop()
+
+
+class ReportConcurrencyTests(unittest.TestCase):
+    def draft_report(self, session):
+        post_call.write_private(session / post_call.REPORT_FILE, {"draft_proposals": [{
+            "draft_id": "draft", "content_hash": "approved", "candidate_id": "candidate",
+            "candidate_status": "confirmed", "recipient_email": "fixture@example.test",
+            "subject": "Fixture", "body": "Offline fixture",
+        }]})
+
+    def test_concurrent_draft_requests_create_once(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = Path(directory)
+            self.draft_report(session)
+            entered = threading.Event()
+            second_progress = threading.Event()
+            resume = threading.Event()
+            flock = post_call.fcntl.flock
+            write = post_call.write_private
+
+            def creator(*args, **kwargs):
+                if threading.current_thread().name.endswith("_0"):
+                    entered.set()
+                    assert resume.wait(5), "creator was not released"
+                return SimpleNamespace(returncode=0)
+
+            def observed_lock(fd, operation):
+                if threading.current_thread().name.endswith("_1"):
+                    second_progress.set()
+                return flock(fd, operation)
+
+            def observed_write(path, value):
+                write(path, value)
+                if threading.current_thread().name.endswith("_1"):
+                    second_progress.set()
+
+            runner = Mock(side_effect=creator)
+            with (patch.object(post_call.fcntl, "flock", side_effect=observed_lock),
+                  patch.object(post_call, "write_private", side_effect=observed_write),
+                  ThreadPoolExecutor(max_workers=2) as pool):
+                first = pool.submit(post_call.create_outlook_draft, session, "draft", "approved", runner)
+                try:
+                    self.assertTrue(entered.wait(5))
+                    second = pool.submit(post_call.create_outlook_draft, session, "draft", "approved", runner)
+                    self.assertTrue(second_progress.wait(5))
+                finally:
+                    resume.set()
+                results = [first.result(timeout=5), second.result(timeout=5)]
+            self.assertEqual(runner.call_count, 1)
+            self.assertEqual([item["idempotent"] for item in results], [False, True])
+
+    def test_interrupted_draft_creation_requires_attention_on_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = Path(directory)
+            self.draft_report(session)
+            runner = Mock(side_effect=SystemExit("simulated process death"))
+            with self.assertRaises(SystemExit):
+                post_call.create_outlook_draft(session, "draft", "approved", runner)
+            retry = Mock(return_value=SimpleNamespace(returncode=0))
+            result = post_call.create_outlook_draft(session, "draft", "approved", retry)
+            self.assertEqual(result.get("state"), "needs_attention")
+            retry.assert_not_called()
+            visible = post_call.report_for_deal_room(session)["report"]["draft_proposals"][0]
+            self.assertEqual(visible["status"], "needs_attention")
+
+    def test_replayed_candidate_receipt_preserves_confirmed_disposition(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = Path(directory)
+            post_call.write_private(session / post_call.REPORT_FILE, {"joe_tasks": [{}]})
+            bindings = [{"list_name": "joe_tasks", "index": 0}]
+            post_call.apply_candidate_ids(session, bindings, ["task"])
+            post_call.apply_candidate_statuses(session, {"task": "confirmed"})
+            post_call.apply_candidate_ids(session, bindings, ["task"])
+            report = post_call.read_json(session / post_call.REPORT_FILE)
+            self.assertEqual(report["joe_tasks"][0]["candidate_status"], "confirmed")
+
+    def test_question_resolution_preserves_concurrent_disposition(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = Path(directory)
+            post_call.write_private(session / post_call.REPORT_FILE, {
+                "joe_tasks": [{"candidate_id": "task", "candidate_status": "pending"}],
+                "review_questions": [{"id": "question", "resolved": False}],
+            })
+            read = post_call.read_json
+            write = post_call.write_private
+            flock = post_call.fcntl.flock
+            snapshot_loaded = threading.Event()
+            second_progress = threading.Event()
+            resume = threading.Event()
+
+            def paused_read(path):
+                value = read(path)
+                if path.name == post_call.REPORT_FILE and threading.current_thread().name.endswith("_0"):
+                    snapshot_loaded.set()
+                    assert resume.wait(5), "first writer was not released"
+                return value
+
+            def observed_lock(fd, operation):
+                if threading.current_thread().name.endswith("_1"):
+                    second_progress.set()
+                return flock(fd, operation)
+
+            def observed_write(path, value):
+                write(path, value)
+                if threading.current_thread().name.endswith("_1"):
+                    second_progress.set()
+
+            with (patch.object(post_call, "read_json", side_effect=paused_read),
+                  patch.object(post_call, "write_private", side_effect=observed_write),
+                  patch.object(post_call.fcntl, "flock", side_effect=observed_lock),
+                  ThreadPoolExecutor(max_workers=2) as pool):
+                first = pool.submit(post_call.resolve_question, session, "question", "answered")
+                try:
+                    self.assertTrue(snapshot_loaded.wait(5))
+                    second = pool.submit(post_call.apply_candidate_statuses, session, {"task": "confirmed"})
+                    self.assertTrue(second_progress.wait(5))
+                finally:
+                    resume.set()
+                first.result(timeout=5)
+                second.result(timeout=5)
+            report = read(session / post_call.REPORT_FILE)
+            self.assertEqual(report["joe_tasks"][0]["candidate_status"], "confirmed")
+            self.assertEqual(report["review_questions"][0]["resolution"], "answered")
 
 
 class CallModeTests(unittest.TestCase):
