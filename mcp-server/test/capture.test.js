@@ -21,6 +21,7 @@ const joe = { id: ids.joe, slug: "joe", display: "Joe", human: true,
 class CaptureFake {
   constructor() {
     this.actors = new Map([["mac-studio", ids.device], ["joe", ids.joe]]);
+    this.inactiveActors = new Set();
     this.sessions = [];
     this.candidates = [];
     this.postCallCandidates = [];
@@ -53,7 +54,7 @@ class CaptureFake {
     if (sql.includes("capture:claim-nonce"))
       return { rows: this.sessions.filter(session => session.nonce === params[0]).map(session => ({ id: session.id })) };
     if (sql.includes("capture:device-actor"))
-      return { rows: this.actors.has(params[0]) ? [{ id: this.actors.get(params[0]) }] : [] };
+      return { rows: this.actors.has(params[0]) ? [{ id: this.actors.get(params[0]), active: !this.inactiveActors.has(params[0]) }] : [] };
     if (sql.includes("capture:claim-insert")) {
       this.sessions.push({ id: ids.session, nonce: params[0], device_id: params[1], actor_id: params[2],
         mode: params[3], started_at: params[4], consent_announced_at: params[5], token_hash: params[6],
@@ -63,7 +64,7 @@ class CaptureFake {
     if (sql.includes("capture:session-auth")) {
       const session = this.sessions.find(row => row.token_hash === params[0]);
       return { rows: session ? [{ id: session.id, state: session.state, post_call: session.post_call,
-        state_at: session.state_at }] : [] };
+        state_at: session.state_at, actor_active: !this.inactiveActors.has(session.device_id) }] : [] };
     }
     if (sql.includes("capture:status-update")) {
       const session = this.sessions.find(row => row.id === params[0]);
@@ -325,6 +326,22 @@ test("claim authenticates first, requires consent, and never mints on nonce repl
   assert.equal(replay.status, 409);
   assert.equal(r.randomCalls, 1);
   assert.equal(db.sessions.length, 1);
+});
+
+test("revoked devices cannot claim or continue a session", async () => {
+  const { db, r, token } = await claimed();
+  db.inactiveActors.add("mac-studio");
+  const environment = { CAPTURE_TOKENS: '{"mac-studio":"device-secret"}' };
+  const claim = await r.handler.fetch(claimRequest({ ...validClaim, nonce: "new-nonce" }), environment);
+  assert.equal(claim.status, 403);
+  assert.equal((await claim.json()).error, "device_revoked");
+  const status = await post(r.handler, "/capture/status", { session_token: token, state: "transcribing", at: validClaim.started_at });
+  assert.equal(status.status, 403);
+  assert.equal((await status.json()).error, "device_revoked");
+  db.actors.delete("mac-studio");
+  const unknown = await r.handler.fetch(claimRequest({ ...validClaim, nonce: "unknown-nonce" }), environment);
+  assert.equal(unknown.status, 503);
+  assert.equal((await unknown.json()).error, "device_actor_not_provisioned");
 });
 
 test("status transitions move forward, reject every backward edge, and stop at terminals", async () => {
