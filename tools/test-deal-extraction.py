@@ -212,15 +212,32 @@ class ExtractionTests(unittest.TestCase):
                 model=lambda *a, **k: {'output': output(), 'cost_usd': '0.01', 'model': 'haiku'})
         self.assertEqual(len(store.submissions[0]['observations']), 2)
 
-    def test_unknown_failed_cost_abstains_without_retry(self):
+    def test_timeout_can_retry_and_success_replays(self):
         from unittest.mock import Mock
         store = Source()
-        model = Mock(side_effect=RuntimeError('synthetic failure'))
-        run_job(ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'lease', 'haiku'),
-                call=store, read_bytes=lambda doc: TEXT, text_pages=lambda data: [TEXT.decode()], model=model)
-        self.assertEqual(model.call_count, 1)
-        self.assertFalse(store.submissions[0]['receipt']['cost_complete'])
-        self.assertEqual(store.submissions[0]['observations'], [])
+        model = Mock(side_effect=[TimeoutError('synthetic timeout'),
+                                  {'output': output(), 'cost_usd': '0.01', 'model': 'haiku'},
+                                  {'output': output(), 'cost_usd': '0.01', 'model': 'haiku'}])
+        job = ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'lease', 'haiku')
+        def run():
+            return run_job(job, call=store, read_bytes=lambda doc: TEXT,
+                           text_pages=lambda data: [TEXT.decode()], model=model)
+        with self.assertRaises(TimeoutError):
+            run()
+        self.assertEqual(store.submissions, [])
+        result = run()
+        self.assertEqual(len(store.submissions[0]['observations']), 2)
+        self.assertEqual(run(), result)
+        self.assertEqual(model.call_count, 3)
+
+    def test_model_error_does_not_record(self):
+        store = Source()
+        def model(*args, **kwargs):
+            raise RuntimeError('synthetic failure')
+        with self.assertRaises(RuntimeError):
+            run_job(ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'lease', 'haiku'),
+                    call=store, read_bytes=lambda doc: TEXT, text_pages=lambda data: [TEXT.decode()], model=model)
+        self.assertEqual(store.submissions, [])
 
 
 if __name__ == '__main__':

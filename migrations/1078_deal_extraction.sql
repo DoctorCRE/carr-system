@@ -13,6 +13,10 @@ create table ops.deal_extraction_job (
   batch_id uuid references ops.fact_observation_batch(id),
   recorded_at timestamptz not null default now()
 );
+create unique index deal_extraction_job_identity on ops.deal_extraction_job
+  (organization_tenant_id,document_ref,content_hash,(contract->>'extractor_version'),(contract->>'model'));
+
+
 create index deal_extraction_job_field on ops.deal_extraction_job(organization_tenant_id,entity_ref);
 create trigger deal_extraction_job_append_only before update or delete on ops.deal_extraction_job
   for each row execute function ops.fact_store_append_only();
@@ -44,6 +48,13 @@ begin
   if not found then return jsonb_build_object('ok',false,'error','document_not_found'); end if;
   if doc.mime<>'application/pdf' or doc.bytes not between 1 and 26214400 then
     return jsonb_build_object('ok',false,'error','unsupported_document');
+  end if;
+  select * into prior from ops.deal_extraction_job
+    where organization_tenant_id=p_tenant and document_ref=doc.id and content_hash=doc.sha256
+      and contract->>'extractor_version'=p_contract->>'extractor_version'
+      and contract->>'model'=p_contract->>'model';
+  if found then
+    return jsonb_build_object('ok',true,'receipt',prior.receipt||jsonb_build_object('replayed',true));
   end if;
   return jsonb_build_object('ok',true,'receipt',null,'document',jsonb_build_object(
     'document_ref',doc.id,'entity_ref',doc.subject_id,'organization_tenant_id',p_tenant,
