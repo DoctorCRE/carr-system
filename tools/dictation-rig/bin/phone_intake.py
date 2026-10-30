@@ -233,14 +233,14 @@ def extract(session: Path, *, decoder: str = '/opt/homebrew/bin/ffmpeg',
                                      '-protocol_whitelist', 'file,pipe', '-format_whitelist', 'wav,mov,mp3,matroska,webm',
                                      '-i', str(session / 'imported.audio'),
                                      '-t', str(maximum + 1), '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', str(wav)],
-                                    capture_output=True, timeout=180, check=False)
+                                    capture_output=True, timeout=180, check=False, env={'PATH': os.defpath})
             if result.returncode != 0:
                 raise ValueError('imported audio could not be decoded')
             with wave.open(str(wav), 'rb') as handle:
                 duration = handle.getnframes() / handle.getframerate()
             if duration <= 0 or duration > maximum:
                 raise ValueError('decoded duration exceeds call limit')
-            segments = transcribe_session.run_whisper(wav, model, transcribe_session.load_prompt(), Path(tmp), log, timeout=900)
+            segments = transcribe_session.run_whisper(wav, model, transcribe_session.load_prompt(), Path(tmp), log, timeout=900, env={'PATH': os.defpath})
             if not segments:
                 raise ValueError('no speech extracted')
         post_call.write_private(session / 'transcript.json', {
