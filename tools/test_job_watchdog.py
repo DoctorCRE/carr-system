@@ -114,6 +114,17 @@ class WatchdogTests(unittest.TestCase):
             watchdog.scan(self.root, self.config)
         self.assertEqual(watchdog.digest(self.root, self.config), "")
 
+    def test_failed_coverage_receipt_remains_visible_after_a_normal_run(self):
+        def receipt(state, reason, counts):
+            return 'outlook-intake-receipt ' + json.dumps({'state': state, 'reason': reason,
+                'counts': {'run': counts, 'backlog': {}}})
+        self.assertIn('coverage_failed', watchdog.degraded_receipt([
+            receipt('failed', 'coverage_failed', {'coverage_checked': 1, 'coverage_failed': 1}),
+            receipt('succeeded', 'processed', {})]))
+        self.assertIsNone(watchdog.degraded_receipt([
+            receipt('failed', 'coverage_failed', {'coverage_checked': 1, 'coverage_failed': 1}),
+            receipt('succeeded', 'processed', {'coverage_checked': 1, 'coverage_failed': 0})]))
+
     def test_a_split_receipt_reports_rates_from_the_run_counts(self):
         line = "outlook-intake-receipt " + json.dumps(
             {"counts": {"run": {"decoder_alarm": 1, "decoder_sender_bp": 4000, "emails": 3},
