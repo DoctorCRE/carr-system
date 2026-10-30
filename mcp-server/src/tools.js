@@ -2453,12 +2453,10 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
   await lockDealField(c, dealId, "next_date");
   await lockDealField(c, dealId, "next_step");
   const current = (await c.query(
-    `select d.next_date::text as next_date, d.next_date < current_date as overdue, d.owner,
+    `select b.next_date::text as next_date, b.next_date < current_date as overdue, d.owner,
             n.id as action_id, b.next_step
-       from deal d left join v_deal_room_board b on b.id=d.id left join lateral (
-         select id, description from next_action where subject_type='deal' and subject_id=d.id and status='open' and item_title is null
-          order by updated_at desc, id desc limit 1
-       ) n on true where d.id=$1 /* dealroom:status-plan */`, [dealId])).rows[0];
+       from deal d left join v_deal_room_board b on b.id=d.id
+       left join v_deal_current_action n on n.deal_id=d.id and n.status='open' where d.id=$1 /* dealroom:status-plan */`, [dealId])).rows[0];
   const dropped = (await c.query(
     `update next_action set status='dropped', updated_by=$2
       where subject_type='deal' and subject_id=$1 and owner_id=any($3::uuid[]) and status='open' and item_title is null
@@ -2481,9 +2479,9 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
     ...(supersededIds.length ? { superseded_action_ids: supersededIds,
       superseded_post_call_action_ids: postCall.map(a => a.id) } : {}) };
   const next = (await c.query(
-    `select description, due_on::text as due_on from next_action
-      where subject_type='deal' and subject_id=$1 and status='open' and item_title is null
-      order by updated_at desc, id desc limit 1 /* dealroom:remaining-plan */`, [dealId])).rows[0];
+    `select n.description, n.due_on::text as due_on from v_deal_current_action current_action
+      join next_action n on n.id=current_action.id
+      where current_action.deal_id=$1 and current_action.status='open' /* dealroom:remaining-plan */`, [dealId])).rows[0];
   const nextDate = next?.due_on ?? null;
   await c.query("update deal set next_date=$2, updated_by=$3 where id=$1 /* dealroom:set-next-date */",
     [dealId, nextDate, actor.id]);
@@ -2510,13 +2508,19 @@ const callNextStepItems = Symbol('call next step items');
 const captureKey = id => derivedIdempotencyKey("capture-candidate", id);
 const captureKeys = id => [`capture:${id}`, captureKey(id)];
 
-async function completedRetainedStep(c, dealId, candidateIds, step) {
+// A call creates a replacement action. The preceding plan event retains the original action ID.
+async function completedRetainedStep(c, dealId, candidateIds, firstStepEventId) {
   return (await c.query(
     `select 1 from event request join next_action n on n.subject_type='deal' and n.subject_id=$1
        and request.new_value->'actions' @> jsonb_build_array(jsonb_build_object('id',n.id::text,'source','next_action'))
       where request.subject_type='deal' and request.subject_id=$1 and request.field='overdue_assessment_pending'
-        and request.new_value->>'candidate_id'=any($2::text[]) and n.status='done' and n.description=$3
-      limit 1 /* call-outcome:undo-step-completed-prior */`, [dealId, candidateIds, step])).rows.length > 0;
+        and request.new_value->>'candidate_id'=any($2::text[]) and n.status='done'
+        and n.id::text=(select prior.new_value->>'next_action_id' from event prior
+          where prior.subject_type='deal' and prior.subject_id=$1 and prior.field='next_step'
+            and prior.new_value ? 'next_action_id'
+            and (prior.recorded_at,prior.id) < (select first.recorded_at,first.id from event first where first.id=$3)
+          order by prior.recorded_at desc,prior.id desc limit 1)
+      limit 1 /* call-outcome:undo-step-completed-prior */`, [dealId, candidateIds, firstStepEventId])).rows.length > 0;
 }
 
 async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args) {
@@ -2527,7 +2531,7 @@ async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args) {
   await lockDealField(c, dealId, "next_step");
   await versionGuard(c, "deal", dealId, args.base_version);
   const events = (await c.query(
-    `select field, old_value, new_value, recorded_at from event
+    `select id, field, old_value, new_value, recorded_at from event
       where subject_type='deal' and subject_id=$1 and idempotency_key=any($2::text[]) and field in ('next_step','next_date','next_action')
       order by recorded_at, id /* call-outcome:undo-step-events */`, [dealId, keys])).rows;
   const first = field => events.find(row => row.field === field);
@@ -2565,7 +2569,7 @@ async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args) {
   const shown = (await c.query("select next_step from v_deal_room_board where id=$1", [dealId])).rows[0]?.next_step ?? null;
   // The board shows the newest open ball, else the newest unhidden note. Put
   // back the note it showed, or hide the call's note when it showed none.
-  const completedPrior = await completedRetainedStep(c, dealId, [candidate.id], priorStep);
+  const completedPrior = await completedRetainedStep(c, dealId, [candidate.id], first("next_step").id);
   if (priorStep !== null && shown !== priorStep && !completedPrior)
     await c.query("insert into deal_note (deal_id, kind, text, actor_id, created_at) values ($1,'next_step',$2,$3,clock_timestamp()) /* call-outcome:undo-step-note */",
       [dealId, priorStep, actor.id]);
@@ -10246,7 +10250,7 @@ registerTools({
             ? first.old_value.board_next_step : first.old_value?.[field] ?? null;
           restored[field] = value;
           if (field==='next_step') {
-            if (value !== null && !await completedRetainedStep(c, dealId, own.map(row => row.id), value)) await c.query(`insert into deal_note(deal_id,kind,text,actor_id,created_at)
+            if (value !== null && !await completedRetainedStep(c, dealId, own.map(row => row.id), first.id)) await c.query(`insert into deal_note(deal_id,kind,text,actor_id,created_at)
               values($1,'next_step',$2,$3,clock_timestamp())`, [dealId,value,actor.id]);
           } else await c.query(`update deal set ${field}=$2,updated_by=$3 where id=$1`, [dealId,value,actor.id]);
           await writeEvent(c,actor,field==='phase' ? 'revert-deal-field' : 'undo-call', 'deal',dealId,{

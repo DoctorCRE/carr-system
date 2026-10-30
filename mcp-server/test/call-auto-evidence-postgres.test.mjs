@@ -377,7 +377,6 @@ for (const mode of ['whole-call', 'change']) for (const order of ['call-first', 
   } finally { delete c.jevClient; }
 });
 
-
 test('superseding a closed current step preserves an older hidden future action', async () => {
   const { deal, prior } = await filePhase('Synthetic closed current step', { kind: 'activity', overdue: true });
   await c.query("update next_action set status='done',updated_at=clock_timestamp() where id=$1", [prior.next_action_id]);
@@ -394,7 +393,6 @@ test('superseding a closed current step preserves an older hidden future action'
   assert.deepEqual(room.events.filter(e => ['next_step','next_date'].includes(e.field)),
     before.events.filter(e => ['next_step','next_date'].includes(e.field)));
 });
-
 
 for (const mode of ['whole-call', 'change']) test(`${mode} undo restores the prior action when a different completed retained action has the same text`, async () => {
   const first = await filePhase('We discussed parking at the other property.', {
