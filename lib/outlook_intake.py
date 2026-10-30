@@ -81,6 +81,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tempfile
 from typing import Callable
 import uuid
@@ -695,6 +696,18 @@ def _same_mail(m: dict, sent: int, at: int) -> bool:
     return bool(m['local_keys']) or abs(sent - at) <= COPY_WINDOW
 
 
+def _store_keys(local_keys: list[str]) -> list[str]:
+    """Real store keys, without the per-decode placeholders given to keyless incomplete rows."""
+    return sorted(k for k in local_keys if not k.startswith('decoded-row-'))
+
+
+def _legacy_unmatched(state: dict) -> int:
+    """Held keyless entries that no Message-ID names: kept, never deleted, and counted."""
+    named, keys = set(state.get('mail_ids', {}).values()), state.get('mail_keys', {})
+    return sum(ident not in named and not _store_keys(keys.get(ident, []))
+               for table in ('mail_unresolved', 'pending_full') for ident in state.get(table, {}))
+
+
 def _best_copies(mails: list[dict], state: dict | None = None) -> list[dict]:
     """Preserve keyed decoder rows; collapse only rows without store-item identity."""
     rows = []
@@ -804,7 +817,7 @@ class Run:
                                       'reads_abandoned', 'read_context_failed', 'flags_unfiled', 'flags_unmatched',
                                       'flags_unknown', 'flags_untracked', 'flags_reflagged', 'flags_filed',
                                       'flags_completed', 'flags_cleared', 'flags_closed_elsewhere',
-                                      'mail_rekeyed', 'mail_inherited')}
+                                      'mail_rekeyed', 'mail_inherited', 'message_id_ambiguous', 'mail_ids_reset')}
         self.deals: dict[str, str] = {}
         self.written: list[tuple[str, str, str, str]] = []
         self.unmatched: set[tuple[str, str, str]] = set()
@@ -881,38 +894,49 @@ class Run:
     # emails
 
     def reconcile(self, mails: list[dict]) -> None:
-        """Carry mail state across decoder identity changes by RFC Message-ID.
+        """Carry mail state across decoder identity changes by RFC Message-ID, when unambiguous.
 
         Decoders name a message differently (store key, or content hash for keyless rows) but agree
-        on its Message-ID, saved in `mail_ids` as the identity that holds its state. State held under
-        another identity of the same Message-ID is pointed at this row: pending and unresolved entries
-        keep their identity (their record-layer writes are keyed by it) and take this row's ck and
-        time, so the retry and full-text matches below find them; mail already done is done under
-        this row's ck too. Moving in either direction gives the same result, so no transition is tracked.
+        on its Message-ID. `mail_ids` saves, per verified mailbox, the identity holding each ID's state.
+        An ID reconciles only if at most one current keyed row carries it and every saved or current
+        identity it names that has a store key has that row's key; otherwise it is counted as
+        `message_id_ambiguous` and each key stays its own message. When it reconciles, pending and
+        unresolved entries keep their identity (their record-layer writes are keyed by it) and take
+        the row's ck and time, and mail already done is done under the row's ck. Either direction of
+        decoder change gives the same result, so no transition is tracked.
         """
-        done, ids = self.state.setdefault('mail_done', {}), self.state.setdefault('mail_ids', {})
+        account = _hash(self.settings.account.strip().lower())
+        if self.state.get('mail_ids_account') != account:
+            self.counts['mail_ids_reset'] += bool(self.state.get('mail_ids'))
+            self.state.update(mail_ids={}, mail_ids_account=account)
+        done, ids, keys = self.state.setdefault('mail_done', {}), self.state.setdefault('mail_ids', {}), self.state.setdefault('mail_keys', {})
         held = (self.state.setdefault('mail_unresolved', {}), self.state.setdefault('pending_full', {}))
+        groups: dict[str, list[dict]] = {}
         for m in mails:
-            mid = (m.get('message_id') or '').strip().strip('<>').lower()
-            if not mid:
+            if mid := (m.get('message_id') or '').strip().strip('<>').lower():
+                groups.setdefault(mid, []).append(m)
+        for mid, rows in groups.items():
+            target = next((m for m in rows if _store_keys(m['local_keys'])), rows[0])
+            priors = ({ids[mid]} if mid in ids else set()) | {m['ident'] for m in rows}
+            priors.discard(target['ident'])
+            if (len({tuple(_store_keys(m['local_keys'])) for m in rows} - {()}) > 1
+                    or any(_store_keys(keys.get(p, [])) not in ([], _store_keys(target['local_keys'])) for p in priors)):
+                self.counts['message_id_ambiguous'] += 1
                 continue
-            prior = ids.get(mid, m['ident'])
-            ck, _, sent = prior.rpartition(':')
-            for table in held:
-                if prior in table and table[prior]['ck'] != m['ck']:
-                    self.counts['mail_inherited'] += 1
-                    table[prior].update(ck=m['ck'], sent=m['sent_unix'])
-            if (ck != m['ck'] and sent != 'None' and m['sent_unix'] not in done.get(m['ck'], [])
-                    and any(abs(t - int(sent)) <= COPY_WINDOW for t in done.get(ck, []))):
-                done.setdefault(m['ck'], []).append(m['sent_unix'])
-                self.counts['mail_rekeyed'] += 1
-            ids[mid] = prior if any(prior in table for table in held) else m['ident']
-
-    def legacy_unmatched(self) -> int:
-        """Held keyless entries that no Message-ID names: kept, never deleted, and counted."""
-        named, keys = set(self.state.get('mail_ids', {}).values()), self.state.get('mail_keys', {})
-        return sum(ident not in named and all(k.startswith('decoded-row-') for k in keys.get(ident, []))
-                   for table in ('mail_unresolved', 'pending_full') for ident in self.state.get(table, {}))
+            holder = target['ident']
+            for prior in priors:
+                ck, _, sent = prior.rpartition(':')
+                for table in held:
+                    if prior in table:
+                        holder = prior
+                        if table[prior]['ck'] != target['ck']:
+                            self.counts['mail_inherited'] += 1
+                            table[prior].update(ck=target['ck'], sent=target['sent_unix'])
+                if (ck != target['ck'] and sent != 'None' and target['sent_unix'] not in done.get(target['ck'], [])
+                        and any(abs(t - int(sent)) <= COPY_WINDOW for t in done.get(ck, []))):
+                    done.setdefault(target['ck'], []).append(target['sent_unix'])
+                    self.counts['mail_rekeyed'] += 1
+            ids[mid] = holder
 
     def emails(self, mails: list[dict], matcher: Matcher, since: int) -> None:
         self.reconcile([m for m in mails if not m['metadata_incomplete']])
@@ -1634,6 +1658,35 @@ def _quarantine_calendar_requests(state: dict) -> None:
 
 
 
+def reconcile_only(repo: Path, home: Path, ports: Ports) -> Outcome:
+    """Record Message-IDs for saved state from the installed decoder's rows, filing nothing.
+
+    The installer runs this once, with the old decoder, before replacing it, so `mail_ids` exists when
+    the new decoder's identities arrive. State that already has `mail_ids` is left alone.
+    """
+    settings = load_settings(home)
+    settings.require_repo(repo)
+    out = repo / OUT
+    try:
+        state = json.loads((out / STATE).read_text())
+    except (OSError, ValueError):
+        return Outcome('succeeded', 'no_state')
+    if 'mail_ids' in state:
+        return Outcome('succeeded', 'already_reconciled')
+    fd = _private_fd(out / 'lock', os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with _decode(home, out, ports.decode, settings.folder_account_id, settings.account) as (_, mails, _, _, _):
+            work = Run(ports, state, ports.now(), out, settings)
+            work.reconcile([m for m in _best_copies(mails, state) if not m['metadata_incomplete']])
+    except (FullDiskAccessRequired, DecodeError, sqlite3.Error, OSError) as error:
+        return Outcome('failed', 'reconcile_failed', detail=type(error).__name__)
+    finally:
+        os.close(fd)
+    _save(out, state)
+    return Outcome('succeeded', 'reconciled', {**work.counts, 'mail_ids': len(state['mail_ids'])})
+
+
 def run(repo: Path, home: Path, ports: Ports) -> Outcome:
     settings = load_settings(home)
     settings.require_repo(repo)
@@ -1726,7 +1779,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         if state.get('pending_full'):
             Run(ports, state, now, out, settings).full_text([])
             _save(out, state)
-        counts = {**mapping_counts(state), **calendar_counts(state),
+        counts = {**mapping_counts(state), **calendar_counts(state), 'legacy_unmatched': _legacy_unmatched(state),
                   'emails': 0, 'skipped_automated': 0,
                   'mail_rows_reusing_prior_identity': state.get('mail_rows_reusing_prior_identity', 0),
                   **{name: state.get(name, 0) for name in MAIL_STORE_COUNTERS}, **health_counts(state.get('decoder_health'))}
@@ -1806,7 +1859,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
                 args = json.loads(request['payload'])
                 work.write(request['verb'], args, 'pending write')
         work.emails(mails, matcher, since)
-        work.counts['legacy_unmatched'] = work.legacy_unmatched()
+        work.counts['legacy_unmatched'] = _legacy_unmatched(state)
         work.observe_flags(complete_mails, matcher)
         work.leads(matcher)
         work.full_text(complete_mails)
@@ -1938,6 +1991,10 @@ def main() -> int:
                   decode=_decoder(home), now=lambda: datetime.now(timezone.utc),
                   read_unresolved=lambda mail, today, deals, parties: unresolved_email.ask(
                       mail, today, deals, parties, settings.model))
+    if sys.argv[1:] == ['--reconcile-only']:
+        outcome = reconcile_only(repo, home, ports)
+        print(status_line(outcome))
+        return EXIT[outcome.state]
     outcome = run(repo, home, ports)
     print(status_line(outcome))
     print(receipt_line(outcome, settings.repo))

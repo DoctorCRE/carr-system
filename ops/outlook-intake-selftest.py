@@ -1070,6 +1070,58 @@ class IntakeTest(unittest.TestCase):
         state = json.loads((self.out() / intake.STATE).read_text())
         self.assertEqual((state['pending_full'], state['mail_unresolved']), ({}, {}))
 
+    def test_a_reused_message_id_on_two_store_keys_never_merges(self):
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1), local_keys='77', message_id='<x@example.test>')])
+        other = mail('pat@example.test', -timedelta(hours=1), subject='Different', body='Another message',
+                     local_keys='78', message_id='<x@example.test>')
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=1), local_keys='77',
+                                       message_id='<x@example.test>'), other], rejected=0)
+        self.assertEqual((result.counts['logged'], result.counts['mail_rekeyed'], result.counts['message_id_ambiguous']),
+                         (1, 0, 1))
+
+    def test_a_reused_message_id_never_attaches_another_body_to_a_pending_preview(self):
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1), kind='preview', local_keys='77',
+                              message_id='<x@example.test>')])
+        lee = mail('lee@example.test', -timedelta(hours=1), subject='Lee topic', body='Lee body text',
+                   local_keys='78', message_id='<x@example.test>')
+        result = self.run_intake([lee], rejected=0)
+        self.assertEqual((result.counts['full_text_notes'], result.counts['mail_inherited'],
+                          result.counts['message_id_ambiguous']), (0, 0, 1))
+        self.assertEqual([(a['kind'], a['email_context']['sender']['email']) for _, a in self.fake.writes('log-activity')],
+                         [('email_in', 'pat@example.test'), ('email_in', 'lee@example.test')])
+        self.assertEqual(len(json.loads((self.out() / intake.STATE).read_text())['pending_full']), 1)
+
+    def test_message_ids_saved_for_another_mailbox_are_not_reused(self):
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1), message_id='<x@example.test>')])
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        state['mail_ids_account'] = 'another-mailbox'
+        path.write_text(json.dumps(state))
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=1), local_keys='78',
+                                       message_id='<x@example.test>')], rejected=0)
+        self.assertEqual((result.counts['mail_ids_reset'], result.counts['mail_rekeyed'], result.counts['logged']),
+                         (1, 0, 1))
+
+    def test_unchanged_store_receipts_still_count_legacy_entries(self):
+        old = mail('pat@example.test', -timedelta(hours=1), kind='preview')
+        self.assertEqual(self.run_intake([old]).counts['legacy_unmatched'], 1)
+        self.assertEqual(self.run_intake([old], touch=False).counts['legacy_unmatched'], 1)
+
+    def test_reconcile_only_pass_saves_message_ids_from_the_old_decoder_and_files_nothing(self):
+        old = mail('pat@example.test', -timedelta(hours=1), kind='preview', message_id='<a@example.test>')
+        self.run_intake([old])
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        del state['mail_ids']
+        path.write_text(json.dumps(state))
+        first = intake.reconcile_only(self.repo, self.home, self.fake.ports())
+        again = intake.reconcile_only(self.repo, self.home, self.fake.ports())
+        self.assertEqual((first.reason, first.counts['mail_ids'], again.reason), ('reconciled', 1, 'already_reconciled'))
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+        new = mail('pat@example.test', -timedelta(hours=9), local_keys='77', message_id='<a@example.test>')
+        result = self.run_intake([new], rejected=0)
+        self.assertEqual((result.counts['logged'], result.counts['full_text_notes']), (0, 1))
+
     def test_message_layout_alarm_clears_and_rearms_on_the_rejection_count(self):
         rows = [mail('pat@example.test', -timedelta(hours=1), local_keys='77')]
         alarms = []
