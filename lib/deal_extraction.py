@@ -137,7 +137,9 @@ def run_job(job: ExtractionJob, *, call: Callable, read_bytes: Callable,
             result = model(prompt, model=job.model, schema=schema, system_prompt=SYSTEM,
                            max_budget_usd=str(cap))
         except (RuntimeError, TimeoutError, subprocess.TimeoutExpired) as exc:
-            stopped = 'over_budget' if isinstance(exc, ModelBudgetExceeded) else 'model_failed'
+            if not isinstance(exc, ModelBudgetExceeded):
+                raise
+            stopped = 'over_budget'
             attempts.append({'phase': phase, 'attempt': 1, 'status': 'failed', 'cost_usd': None})
         else:
             try:
