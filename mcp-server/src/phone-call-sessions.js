@@ -63,6 +63,12 @@ function view(row) {
     filed: row.state === 'done', transferred: !!row.transferred_at };
 }
 
+async function handoffStatus(env, id) {
+  const response = await audioHandoff(env, `${id}?status`);
+  if (!response.ok) throw new Error('handoff_unavailable');
+  return response.json();
+}
+
 async function readSession(client, id, owner) {
   const result = await client.query(`select p.*, s.state from phone_call_session p
     join capture_session s on s.id=p.id where p.id=$1 and ($2::uuid is null or p.owner_id=$2)
@@ -171,7 +177,14 @@ export function createPhoneCallHandler({ withWriter }) {
         const [, id, operation] = match;
         const row = await withWriter(client => readSession(client, id, actor.id));
         if (!row) return json({ error: 'not_found' }, 404);
-        if (request.method === 'GET' && !operation) return json(view(row));
+        if (request.method === 'GET' && !operation) {
+          const result = view(row);
+          if (result.state === 'pending' && env.PHONE_AUDIO_HANDOFF) {
+            const status = await handoffStatus(env, id);
+            if (['queued', 'expired'].includes(status.state)) result.state = status.state;
+          }
+          return json(result);
+        }
         if (request.method === 'GET' && operation === 'report') {
           const candidates = await withWriter(async client => {
             const actions = await client.query(`select id,kind,deal_id,assignee_slug as assignee,
@@ -190,6 +203,12 @@ export function createPhoneCallHandler({ withWriter }) {
         if (row.byte_count > phoneCallByteLimit(env) ||
             row.duration_seconds > limit(env, 'CALL_MAX_SECONDS', 3600)) return json({ error: 'call_limit' }, 413);
         if (!env.PHONE_AUDIO_HANDOFF || !env.CALL_STUDIO_TOKEN) return json(view(row), 202);
+        const status = await handoffStatus(env, id);
+        if (status.state === 'queued') {
+          if (status.sha256 !== row.sha256 || status.byte_count !== Number(row.byte_count))
+            return json({ error: 'recording_mismatch' }, 409);
+          return json({ ...view(row), state: 'queued', queued: true, retry_after_seconds: 30 }, 202);
+        }
         const metadata = { schema_version: 1, session_id: id, owner: actor.slug,
           sha256: row.sha256, byte_count: Number(row.byte_count), duration_seconds: Number(row.duration_seconds),
           mime_type: row.mime_type, started_at: row.started_at, consent_announced_at: row.consent_announced_at,
@@ -199,7 +218,7 @@ export function createPhoneCallHandler({ withWriter }) {
           body: request.body, duplex: 'half',
         });
         if (!response.ok) return json({ ...view(row), error: 'audio_handoff_unavailable' }, response.status);
-        return json({ ...view(row), queued: true, retry_after_seconds: 30 }, 202);
+        return json({ ...view(row), state: 'queued', queued: true, retry_after_seconds: 30 }, 202);
       } catch { return json({ error: 'phone_intake_unavailable' }, 503); }
     },
   };

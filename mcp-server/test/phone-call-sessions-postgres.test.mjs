@@ -10,6 +10,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { handoffState } from './helpers/phone-handoff-state.mjs';
 import { PhoneAudioHandoff } from '../src/phone-audio-handoff.js';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { createPhoneCallHandler } from '../src/phone-call-sessions.js';
@@ -43,7 +44,7 @@ before(async () => {
 });
 after(async () => { try { await pool?.end(); } finally { await fixture?.close(); } });
 
-const handoff = new PhoneAudioHandoff();
+const handoff = new PhoneAudioHandoff(handoffState());
 const env = { CALL_STUDIO_TOKEN: 'synthetic-service-secret',
   PHONE_AUDIO_HANDOFF: { idFromName: n => n, get: () => handoff } };
 const url = 'https://app.example.test/api/v1/call-sessions';
