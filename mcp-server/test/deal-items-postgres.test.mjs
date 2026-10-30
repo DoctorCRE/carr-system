@@ -90,9 +90,27 @@ test('expanded deal history retains an update after fifty newer activities', asy
         from generate_series(0, 50) n`, [deal, actor.id]);
     const detail = await executeRegisteredTool(c, actor, 'get-deal-room', { deal });
     assert.equal(detail.activities.length, 51);
+    assert.equal(detail.activities_truncated, false);
     assert.equal(detail.activities[0].summary, 'Synthetic follow-up 50');
     assert.equal(detail.activities.at(-1).summary, 'Synthetic original requirement');
     assert.equal(new Set(detail.activities.map(activity => activity.id)).size, 51);
+  } finally {
+    await c.query('rollback');
+  }
+});
+
+test('deal history caps activities at 500 newest rows', async () => {
+  await c.query('begin');
+  try {
+    await c.query(`insert into activity (deal_id, actor_id, kind, summary, occurred_at, source)
+      select $1, $2, 'note', 'Synthetic activity ' || n,
+             '2026-01-01 12:00:00+00'::timestamptz + n * interval '1 minute', 'stated'
+        from generate_series(0, 500) n`, [deal, actor.id]);
+    const detail = await executeRegisteredTool(c, actor, 'get-deal-room', { deal });
+    assert.equal(detail.activities.length, 500);
+    assert.equal(detail.activities_truncated, true);
+    assert.equal(detail.activities[0].summary, 'Synthetic activity 500');
+    assert.equal(detail.activities.at(-1).summary, 'Synthetic activity 1');
   } finally {
     await c.query('rollback');
   }
