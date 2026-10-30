@@ -1,7 +1,7 @@
 // Keep queued phone audio in transactional object storage until acknowledgement or alarm expiry.
 const TTL_MS = 15 * 60 * 1000;
 const CAPACITY = 50 * 1024 * 1024;
-const CHUNK_BYTES = 2 * 1024 * 1024 - 1024;
+const CHUNK_BYTES = 1_900_000;
 const reply = (body, status = 200) => Response.json(body, {
   status, headers: { 'cache-control': 'no-store' },
 });
@@ -126,7 +126,7 @@ export class PhoneAudioHandoff {
         if (entry?.reservation !== reservation || entry.expiresAt <= Date.now()) throw new Error('expired');
         entry.chunks = Math.ceil(size / CHUNK_BYTES);
         for (let i = 0; i < entry.chunks; i++)
-          await tx.put(`audio:${id}:${i}`, audio.subarray(i * CHUNK_BYTES, (i + 1) * CHUNK_BYTES), { noCache: true });
+          await tx.put(`audio:${id}:${i}`, audio.slice(i * CHUNK_BYTES, (i + 1) * CHUNK_BYTES), { noCache: true });
         entry.state = 'queued';
         await tx.put('pending', pending);
       });
