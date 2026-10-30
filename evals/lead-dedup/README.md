@@ -41,3 +41,23 @@ deliberately. Zero class denominators produce null rates.
 
 Human review of each pair's label and rationale remains required before treating
 this fixture as adjudicated evidence. No human reviewer or signoff is fabricated.
+
+
+`origination.v1.json` contains synthetic NPPES and PECOS observations for the
+`practice-origination.v1` server contract. Run the fixture through the real
+registered import/read verbs on disposable PostgreSQL with
+`node --test mcp-server/test/practice-origination-postgres.test.mjs`.
+The cases cover replay, unchanged later publications, dated corrections, one
+latest card per source record, current relationship routing, address clusters,
+checkpoint conflicts, and visible feed stops. Imports never create a party.
+
+The local-file importer is `tools/import_practice_origination.py`. It accepts
+NPPES provider CSVs or PECOS enrollment extract CSVs, a source publication date,
+and an explicit `--apply`. It performs authenticated calls in sequential batches
+of at most 100 records and resumes from the last acknowledged file-hash/row
+checkpoint. A schema failure marks only that feed blocked; inaccessible local
+files mark it unavailable. This change adds no schedule or network source
+fetcher. Access terms and coverage live in
+`mcp-server/src/origination-sources.json`. Formation and recorder adapters remain
+disabled pending individual access review. Escambia FL and Baldwin AL are in
+recorder launch scope; other counties remain uncovered.
