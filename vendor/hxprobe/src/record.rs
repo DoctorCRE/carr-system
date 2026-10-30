@@ -554,7 +554,8 @@ pub fn parse(offset: usize, blob: &[u8], anchor: usize) -> Option<Record> {
                 .position(|f| is_email(f.text.trim()))
                 .map(|i| (tail[i].text.trim().to_lowercase(), tail[i + 1..].to_vec()))
         });
-    if let Some((addr, rest)) = picked {
+    // A run of glued addresses is a list, so this fallback has no sender either.
+    if let Some((addr, rest)) = picked.filter(|(a, _)| undouble(a).matches('@').count() == 1) {
         // The display name is the first plausible run after the address, not
         // the longest: the longest pulls in the subject or the body preview,
         // which sit in the same group. Values are often stored doubled
@@ -667,6 +668,16 @@ pub fn subject_like(s: &str) -> bool {
         return false;
     }
     is_subject_like(s) && !is_enum_value(s) && !is_opaque_blob(s)
+}
+
+/// Could this run be a subject when its position already says so? Only the value checks apply:
+/// one value, not an address, link, enum or identifier.
+pub fn subject_value(s: &str) -> bool {
+    split_packed(s).len() == 1
+        && (3..=400).contains(&s.chars().count())
+        && !s.contains('@')
+        && !s.contains("http")
+        && !is_enum_value(s)
 }
 
 /// Collapse a value the store writes twice with no separator.

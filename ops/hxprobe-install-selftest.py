@@ -21,7 +21,7 @@ from outlook_test_support import write_settings
 
 CRATE = ROOT / 'vendor/hxprobe'
 SOURCES = ('vendor/hxprobe', 'spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py')
-INSTALLER_FILES = ('ops/hxprobe-source-digest.py', 'bin/install-outlook-intake.sh', 'tools/outlook-intake-copy.c', 'lib/outlook_settings.py', 'lib/outlook_helper.py',
+INSTALLER_FILES = ('ops/hxprobe-source-digest.py', 'ops/config-as-code.py', 'ops/git_env.py', 'ops/config/services.json', 'bin/install-outlook-intake.sh', 'tools/outlook-intake-copy.c',
                    'ops/launchd/com.carr.outlook-intake.plist')
 
 
@@ -45,6 +45,7 @@ class InstalledDecoderTest(unittest.TestCase):
             (self.repo / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / relative, self.repo / relative)
         shutil.copytree(CRATE, self.repo / SOURCES[0], ignore=shutil.ignore_patterns('target'))
+        shutil.copytree(ROOT / 'lib', self.repo / 'lib', ignore=shutil.ignore_patterns('__pycache__'))
         (self.repo / '.venv/bin').mkdir(parents=True)
         (self.repo / '.venv/bin/python').symlink_to(sys.executable)
         codesign = self.repo / '.venv/bin/codesign'
@@ -74,7 +75,10 @@ class InstalledDecoderTest(unittest.TestCase):
         env['RUSTUP_HOME'] = os.environ.get('RUSTUP_HOME', str(Path.home() / '.rustup'))
         command = ['/bin/zsh', '-f', '-c', 'export HOME="$1"; exec /bin/zsh -f "$2"', 'installer-test',
                    str(self.home), str(self.repo / 'bin/install-outlook-intake.sh')]
-        return subprocess.run(command, capture_output=True, text=True, check=check, env=env)
+        result = subprocess.run(command, capture_output=True, text=True, env=env)
+        if check and result.returncode:
+            self.fail(f'installer failed ({result.returncode}):\n{result.stderr}\n{result.stdout}')
+        return result
 
     def receipt(self):
         return json.loads((self.vendor / '.carr-build.json').read_text())
