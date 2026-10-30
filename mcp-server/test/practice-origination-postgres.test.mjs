@@ -23,6 +23,7 @@ before(async () => {
   await fixture.run(`${bin}/psql`,['-h',fixture.root,'-U','carr_ci','-d','carr_ci','-X','-q','-v','ON_ERROR_STOP=1',
     '-f',new URL('../../db/schema.sql',import.meta.url).pathname]);
   await c.query(readFileSync(new URL('../../migrations/1071_practice_origination.sql',import.meta.url),'utf8'));
+  await c.query(readFileSync(new URL('../../migrations/1072_practice_address_key.sql',import.meta.url),'utf8'));
   actor={...(await c.query("select id,slug from actor where slug='joe'")).rows[0],human:true};
 });
 after(async()=>{try {await c?.end();} finally {await fixture?.close();}});
@@ -94,10 +95,15 @@ test('address clusters require review and merged identities cannot supply a matc
   await c.query(`insert into record_flag(subject_type,subject_id,kind,value,source,created_by)
     values('party',$1,'address','{"found":true,"epistemic_status":"source_backed","street_address":"SYNTHETIC_ADDRESS_A"}',
       'https://example.invalid/synthetic',$2)`,[party,actor.id]);
+  const street=['123','Main Street, Suite 200, Pensacola FL 32501-1234'].join(' ');
+  await c.query(`update record_flag set value=jsonb_set(value,'{street_address}',to_jsonb($2::text)) where subject_id=$1`,[party,street]);
   const row=record({record_key:'1111111111',npi:'1111111111',name:'Synthetic New Practice',
-    source_url:'https://npiregistry.cms.hhs.gov/provider-view/1111111111'});
+    source_url:'https://npiregistry.cms.hhs.gov/provider-view/1111111111',
+    facts:{...record().facts,address:['123','MAIN ST STE 200 PENSACOLA FL 32501'].join(' ')}});
   await ingest('nppes',[row]);
   assert.equal((await read()).cards.find(x=>x.npi==='1111111111').route,'identity_review');
+  await c.query(`update record_flag set value=jsonb_set(value,'{street_address}',to_jsonb($2::text)) where subject_id=$1`,[party,['124','Main Street Suite 200 Pensacola FL 32501'].join(' ')]);
+  assert.equal((await read()).cards.find(x=>x.npi==='1111111111').route,'research');
   await c.query('update party set merged_into=$1 where id=$2',[(await c.query("select id from party where npi='1234567890'")).rows[0].id,party]);
   assert.equal((await read()).cards.find(x=>x.npi==='1111111111').route,'research');
 });
