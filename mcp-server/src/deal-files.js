@@ -1,4 +1,5 @@
 // Record an archived email attachment against the deal its mail matched.
+import { recordRequirementReply } from './requirement-replies.js';
 import { ToolError } from "./tool-error.ts";
 
 export const REQUIREMENT_UPLOAD_MAX_BYTES = 1024 * 1024;
@@ -20,6 +21,7 @@ export function dealFileTools({ withEnvelope, writeEvent, resolveSubject }) {
       description: "Record one email attachment, already archived in R2 by the Studio intake under the quota guard, against the deal its mail matched. Takes the deal, the object key (documents/<client>/<first 16 of sha256>/<file name>), file name, type, sha256 and size; it never receives file bytes and cannot read the bucket, so the caller uploads first. Only deal document types (PDF, Word, Excel, PowerPoint, legacy Office) up to 25 MB. Replays of the same file on the same deal return the existing attachment row and write nothing; a key already filed on another record is refused. Writes one attachment row and one event; sends nothing.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
         idempotency_key: { type: "string" },
+        activity_id: { type: "string", format: "uuid", description: "Stored inbound source email for document reply review" },
         deal: { type: "string", description: "deal ref or name the matched mail resolved to" },
         r2_key: { type: "string" }, filename: { type: "string" }, mime: { type: "string" },
         sha256: { type: "string", description: "lowercase hex of the file bytes" },
@@ -44,10 +46,14 @@ export function dealFileTools({ withEnvelope, writeEvent, resolveSubject }) {
           [args.r2_key, deal.id, args.sha256]);
         const other = same.rows.find(row => row.r2_key === args.r2_key && (row.subject_type !== "deal" || row.subject_id !== deal.id));
         if (other) refuse("r2_key_on_other_record");
-        if (same.rows.length) return { ok: true, attachment_id: same.rows[0].id, existing: true };
+        if (same.rows.length) {
+          if (args.activity_id) await recordRequirementReply(c, actor, args.activity_id, same.rows[0].id, deal.id);
+          return { ok: true, attachment_id: same.rows[0].id, existing: true };
+        }
         const saved = (await c.query(
           "insert into attachment (subject_type, subject_id, r2_key, filename, mime, sha256, bytes, created_by) values ('deal',$1,$2,$3,$4,$5,$6,$7) returning id",
           [deal.id, args.r2_key, args.filename.trim(), args.mime, args.sha256, args.bytes, actor.id])).rows[0];
+        if (args.activity_id) await recordRequirementReply(c, actor, args.activity_id, saved.id, deal.id);
         await writeEvent(c, actor, "attach-deal-file", "deal", deal.id, {
           field: "attachment", new: { attachment_id: saved.id, sha256: args.sha256, bytes: args.bytes },
           cause: "ingest_email", ...(args.source ? { agent_rationale: `email attachment ${args.source}` } : {}), idempotency_key: args.idempotency_key });
