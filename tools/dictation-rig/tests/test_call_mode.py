@@ -250,6 +250,37 @@ class SpeakerLabelTests(unittest.TestCase):
             {"mic": "Dell", "system": "Other participant"},
         )
 
+    def test_missing_or_failed_audio_side_is_recorded_in_transcript(self) -> None:
+        (self.session / "meta.json").write_text("{}")
+        model = self.session / "model.bin"
+        model.write_bytes(b"synthetic model")
+        for label in ("mic", "system"):
+            for failed in (False, True):
+                with self.subTest(label=label, failed=failed):
+                    for side in ("mic", "system"):
+                        (self.session / f"{side}.caf").write_bytes(b"synthetic audio")
+                    if not failed:
+                        (self.session / f"{label}.caf").unlink()
+
+                    def convert(path, *_args):
+                        if failed and path.stem == label:
+                            raise transcribe_session.TranscribeError("synthetic conversion failure")
+                        return path
+
+                    with (
+                        patch.object(transcribe_session, "resolve_model", return_value=model),
+                        patch.object(transcribe_session, "verify_model_pin"),
+                        patch.object(transcribe_session, "load_prompt", return_value=""),
+                        patch.object(transcribe_session, "convert_caf_to_wav", side_effect=convert),
+                        patch.object(transcribe_session, "run_whisper", return_value=[transcribe_session.RawSegment(0, 100, "Hello")]),
+                        patch.object(transcribe_session.speaker_split, "run_diarizer", return_value=[]),
+                        patch.object(transcribe_session.post_call, "run_session", return_value={"state": "ready_review"}),
+                    ):
+                        transcribe_session.process_session(self.session, lambda _line: None)
+                    transcript = json.loads((self.session / "transcript.json").read_text())
+                    self.assertEqual(transcript.get("missing_tracks"), [label])
+                    self.assertEqual(len(transcript["segments"]), 1)
+
     def test_transcript_outputs_are_private_to_the_local_user(self) -> None:
         transcript = {
             "session": "test",
