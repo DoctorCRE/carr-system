@@ -17,7 +17,7 @@ import tempfile
 import threading
 import wave
 from typing import BinaryIO
-from datetime import datetime
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import post_call
@@ -212,6 +212,21 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
     """One bounded sweep. The processor lock also excludes another invocation."""
     counts = {'ready': 0, 'pending': 0}
     bridge = bridge_module()
+    request = bridge.http_request
+
+    class TransientNetworkError(Exception):
+        pass
+
+    def checked_request(*args, **kwargs):
+        try:
+            code, body = request(*args, **kwargs)
+        except bridge.BridgeNetworkError as exc:
+            raise TransientNetworkError('connection unavailable') from exc
+        if code == 429 or 500 <= code < 600:
+            raise TransientNetworkError(f'HTTP {code}')
+        return code, body
+
+    bridge.http_request = checked_request
     try:
         with exclusive(root / f'.phone-processor-{slot}.lock', blocking=False):
             for session in sorted(root.glob('phone-*')):
@@ -223,6 +238,15 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                     if (session / 'ingested.json').exists():
                         continue
                     previous = post_call.read_json(session / post_call.STATUS_FILE) or {}
+                    if previous.get('transient_since'):
+                        if previous.get('state') == 'needs_attention':
+                            counts['pending'] += 1
+                            continue
+                        if previous.get('next_attempt_at') and post_call.now() < previous['next_attempt_at']:
+                            counts['pending'] += 1
+                            continue
+                        previous['next_attempt_at'] = None
+                        post_call.write_private(session / post_call.STATUS_FILE, previous)
                     if (previous.get('state') == 'needs_attention'
                             and previous.get('extraction_attempts', 0) >= config_limit('CALL_EXTRACTION_ATTEMPTS', 3)):
                         counts['pending'] += 1
@@ -250,9 +274,33 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                         counts['pending'] += 1
                         continue
                     bridge.poll_cmd(cfg, session)
+                    previous = post_call.read_json(session / post_call.STATUS_FILE) or {}
+                    if previous.get('transient_since'):
+                        previous.pop('transient_since', None)
+                        previous.pop('transient_count', None)
+                        previous['next_attempt_at'] = None
+                        post_call.write_private(session / post_call.STATUS_FILE, previous)
                     counts['ready'] += 1
+                except (TransientNetworkError, bridge.BridgeNetworkError, ConnectionError, TimeoutError) as exc:
+                    previous = post_call.read_json(session / post_call.STATUS_FILE) or {}
+                    timestamp = post_call.now()
+                    current = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    since = previous.get('transient_since', timestamp)
+                    elapsed = current - datetime.fromisoformat(since.replace('Z', '+00:00'))
+                    count = previous.get('transient_count', 0) + 1
+                    expired = elapsed >= timedelta(hours=24)
+                    delay = min(30 * 2 ** min(count - 1, 5), 900)
+                    previous.update({'schema_version': post_call.SCHEMA_VERSION, 'session': session.name,
+                                     'state': 'needs_attention' if expired else 'blocked', 'updated_at': timestamp,
+                                     'transient_since': since, 'transient_count': count,
+                                     'next_attempt_at': None if expired else (current + timedelta(seconds=delay)).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                                     'reason': f'Transient network error{" for 24 hours" if expired else ""}: {exc}'})
+                    post_call.write_private(session / post_call.STATUS_FILE, previous)
+                    counts['pending'] += 1
                 except Exception as exc:
                     previous = post_call.read_json(session / post_call.STATUS_FILE) or {}
+                    previous.pop('transient_since', None)
+                    previous.pop('transient_count', None)
                     attempts = previous.get('extraction_attempts', 0) + 1
                     previous.update({'schema_version': post_call.SCHEMA_VERSION, 'session': session.name,
                                      'state': 'needs_attention' if attempts >= config_limit('CALL_EXTRACTION_ATTEMPTS', 3) else 'blocked',
@@ -262,6 +310,8 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                     counts['pending'] += 1
     except BlockingIOError:
         return {'busy': True}
+    finally:
+        bridge.http_request = request
     return counts
 
 
