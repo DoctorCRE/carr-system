@@ -1994,7 +1994,8 @@ def main() -> int:
                   decode=_decoder(home), now=lambda: datetime.now(timezone.utc),
                   read_unresolved=lambda mail, today, deals, parties: unresolved_email.ask(
                       mail, today, deals, parties, settings.model))
-    if sys.argv[1:] == ['--reconcile-only']:
+    # The installed FDA helper already forwards its environment, but refuses extra arguments.
+    if sys.argv[1:] == ['--reconcile-only'] or os.environ.get('CARR_OUTLOOK_RECONCILE_ONLY') == '1':
         outcome = reconcile_only(repo, home, ports)
         print(status_line(outcome))
         return EXIT[outcome.state]

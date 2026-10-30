@@ -95,9 +95,12 @@ fi
 # Before the decoder is replaced, one reconcile-only intake pass over the installed decoder's rows
 # saves each held message's Message-ID, so intake state follows the new decoder's identities.
 # It files nothing, is skipped once state has them, and a failure stops the install.
+# Use the granted helper before install_helper can replace it. The environment
+# selects reconciliation in Python without requiring a new mode in the old binary.
 STATE="$REPO/out/outlook-intake/state.json"
 if [ -x "$VENDOR/hxprobe/target/release/hxprobe" ] && [ -f "$STATE" ] && ! grep -q '"mail_ids"' "$STATE"; then
-  "$PY" -c 'from lib.outlook_intake import main; raise SystemExit(main())' --reconcile-only
+  COPY_HELPER="$("$PY" -m lib.outlook_settings field copy_helper)"
+  CARR_OUTLOOK_RECONCILE_ONLY=1 "$COPY_HELPER" --run-intake
 fi
 "$PY" "$REPO/ops/hxprobe-source-digest.py" --build-into "$VENDOR"
 rm -f "$PIN"
