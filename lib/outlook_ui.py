@@ -185,7 +185,9 @@ def _windows(pid: int) -> list[dict]:
 def _readable(pid: int, window: dict) -> bool:
     state = cua('get_window_state', {'pid': pid, 'window_id': window['window_id'],
                                      'include_screenshot': False, 'max_elements': LIST_WALK})
-    controls = {(e.get('role'), e.get('label')) for e in state.get('elements') or []}
+    # Outlook appends toggle state to some labels ("New Mail, pressed"); match the name.
+    controls = {(e.get('role'), str(e.get('label') or '').split(', ')[0])
+                for e in state.get('elements') or []}
     return (not str(state.get('degraded_reason') or '').startswith('ax_window_unresolved')
             and {('AXButton', 'New Mail'), ('AXTable', 'Message List')} <= controls)
 
