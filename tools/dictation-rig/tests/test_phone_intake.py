@@ -10,7 +10,7 @@ import threading
 import unittest
 import wave
 from unittest.mock import patch
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'bin'))
 import phone_intake
@@ -46,24 +46,52 @@ class PhoneIntakeTests(unittest.TestCase):
             phone_intake.receive(self.root, self.metadata, io.BytesIO(b'x' * len(self.audio)))
         self.assertFalse(list(self.root.glob('phone-*/transfer.json')))
 
-    def test_http_transfer_requires_studio_identity_and_matching_content(self):
-        server = ThreadingHTTPServer(('127.0.0.1', 0), phone_intake.handler_for(self.root, 'synthetic-service-secret'))
+    def test_outbound_download_is_acknowledged_only_after_durable_hash_verification(self):
+        received = []
+        listed = [True]
+        ack_status = [503]
+        fixture = self
+
+        class Server(BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def do_GET(self):
+                if self.headers.get('Authorization') != 'Bearer synthetic-service-secret':
+                    self.send_error(401)
+                    return
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                if self.path.endswith('/audio'):
+                    self.wfile.write(fixture.audio)
+                else:
+                    self.wfile.write(json.dumps({'sessions': [fixture.metadata] if listed[0] else []}).encode())
+
+            def do_POST(self):
+                received.append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
+                session = fixture.root / f"phone-{fixture.metadata['session_id']}"
+                fixture.assertEqual((session / 'imported.audio').read_bytes(), fixture.audio)
+                self.send_response(ack_status[0])
+                self.end_headers()
+                self.wfile.write(b'{"ok":true}')
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Server)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            def send(auth):
-                client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=5)
-                client.request('PUT', f"/v1/call-sessions/{self.metadata['session_id']}/transfer", self.audio,
-                    {'Authorization': auth, 'Content-Type': 'audio/wav', 'X-Carr-Call': json.dumps(self.metadata)})
-                response = client.getresponse()
-                status, body = response.status, json.loads(response.read())
-                client.close()
-                return status, body
-            self.assertEqual(send('Bearer outsider')[0], 401)
-            self.assertFalse(list(self.root.glob('phone-*')))
-            status, receipt = send('Bearer synthetic-service-secret')
-            self.assertEqual(status, 200)
-            self.assertEqual(receipt['sha256'], self.metadata['sha256'])
+            cfg = {'base_url': f'http://127.0.0.1:{server.server_port}'}
+            self.assertEqual(phone_intake.pull_pending(self.root, cfg, 'synthetic-service-secret')['received'], 0)
+            listed[0] = False
+            ack_status[0] = 200
+            received.clear()
+            self.assertEqual(phone_intake.pull_pending(self.root, cfg, 'synthetic-service-secret')['received'], 1)
+            self.assertEqual(received, [{'sha256': self.metadata['sha256']}])
+            received.clear()
+            listed[0] = True
+            self.metadata['sha256'] = 'f' * 64
+            self.assertEqual(phone_intake.pull_pending(self.root, cfg, 'synthetic-service-secret')['received'], 0)
+            self.assertEqual(received, [])
         finally:
             server.shutdown()
             server.server_close()
