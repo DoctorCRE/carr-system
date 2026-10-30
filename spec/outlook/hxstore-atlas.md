@@ -668,7 +668,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 
 - [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::links`.
 
-## View membership (object.class.004f)
+## Folder view row (object.class.004f)
 
 ```json
 {
@@ -678,10 +678,10 @@ Null means the first Outlook version is unknown. The pinned source revision esta
     "value": 79
   },
   "wire_type": "serialized-object",
-  "decoder": "folder::Index::links",
+  "decoder": null,
   "confidence": "inferred",
   "first_seen_version": null,
-  "notes": "Class starts at object +0, ten bytes after envelope start."
+  "notes": "Display copies of a message's fields beside an IPM.Note run; never a message. The anchor scan exported these as extra rows."
 }
 ```
 
@@ -724,7 +724,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 
 - [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::links`.
 
-## Compact message (object.class.00ca)
+## Message body object (object.class.00ca)
 
 ```json
 {
@@ -734,14 +734,19 @@ Null means the first Outlook version is unknown. The pinned source revision esta
     "value": 202
   },
   "wire_type": "serialized-object",
-  "decoder": "folder::Index::links",
-  "confidence": "inferred",
+  "decoder": "message::body",
+  "confidence": "proven",
   "first_seen_version": null,
-  "notes": "Class starts at object +0, ten bytes after envelope start."
+  "notes": "Fixed part 1860 bytes. Key at +10, +30 and +38 is the message key.",
+  "observations": [
+    "Every 00ca object resolves to a 00c9 key (Oct 29).",
+    "Known values: Joe's three 2026-10-29 test emails (6 copies, snap-20261029T140022) and CARRTEST-CC1..3 of 2026-10-30 (6 copies, snap-20261030T120735); stable across the later snap-20261030T114406 copy."
+  ]
 }
 ```
 
 - [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::links`.
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
 
 ## Message metadata envelope (envelope.tag.02c8)
 
@@ -1450,24 +1455,6 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 
 - [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `parent`.
 
-## Expanded folder reference (object.class.00ca.offset.408)
-
-```json
-{
-  "parent": "object.class.00ca",
-  "identifier": {
-    "kind": "byte_offset",
-    "value": 408
-  },
-  "wire_type": "serialized-object",
-  "decoder": "folder::Index::links",
-  "confidence": "inferred",
-  "first_seen_version": null
-}
-```
-
-- [`vendor/hxprobe/src/folder.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/folder.rs), `Index::links`.
-
 ## Folder name (folder.name)
 
 ```json
@@ -1725,252 +1712,6 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 ```
 
 - [`vendor/hxprobe/src/calendar.rs` at `a636d9e680227346781ebf0b5b473901b2cb5314`](https://github.com/DoctorCRE/carr-system/blob/a636d9e680227346781ebf0b5b473901b2cb5314/vendor/hxprobe/src/calendar.rs), `CANCELED`.
-
-## Mail anchor region (mail)
-
-```json
-{
-  "parent": null,
-  "identifier": {
-    "kind": "record_anchor",
-    "value": "IPM.Note"
-  },
-  "wire_type": "utf16le-anchor",
-  "decoder": "record::anchor_needle",
-  "confidence": "inferred",
-  "first_seen_version": null,
-  "notes": "A heuristic region bounded by neighboring anchors. Not a numeric serialized class or object envelope."
-}
-```
-
-- [`vendor/hxprobe/src/record.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/record.rs), `anchor_needle`.
-
-## SenderAddress (mail.selector.SenderAddress)
-
-```json
-{
-  "parent": "mail",
-  "identifier": {
-    "kind": "string_run_selector",
-    "value": "nearest email-shaped run near anchor"
-  },
-  "wire_type": "utf16le-run",
-  "decoder": "schema::build_bounded",
-  "confidence": "inferred",
-  "first_seen_version": null,
-  "decoder_key": "SenderAddress"
-}
-```
-
-- [`vendor/hxprobe/src/schema.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/schema.rs), `build_bounded`.
-
-## SenderName (mail.selector.SenderName)
-
-```json
-{
-  "parent": "mail",
-  "identifier": {
-    "kind": "string_run_selector",
-    "value": "person-like neighbor of selected sender address"
-  },
-  "wire_type": "utf16le-run",
-  "decoder": "schema::build_bounded",
-  "confidence": "inferred",
-  "first_seen_version": null,
-  "decoder_key": "SenderName"
-}
-```
-
-- [`vendor/hxprobe/src/schema.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/schema.rs), `build_bounded`.
-
-## ItemClass (mail.selector.ItemClass)
-
-```json
-{
-  "parent": "mail",
-  "identifier": {
-    "kind": "string_run_selector",
-    "value": "anchor at relative offset 0"
-  },
-  "wire_type": "utf16le-run",
-  "decoder": "schema::build_bounded",
-  "confidence": "inferred",
-  "first_seen_version": null,
-  "decoder_key": "ItemClass"
-}
-```
-
-- [`vendor/hxprobe/src/schema.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/schema.rs), `build_bounded`.
-
-## InternetMessageId (mail.selector.InternetMessageId)
-
-```json
-{
-  "parent": "mail",
-  "identifier": {
-    "kind": "string_run_selector",
-    "value": "angle-bracketed message ID after anchor"
-  },
-  "wire_type": "utf16le-run",
-  "decoder": "schema::build_bounded",
-  "confidence": "inferred",
-  "first_seen_version": null,
-  "decoder_key": "InternetMessageId"
-}
-```
-
-- [`vendor/hxprobe/src/schema.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/schema.rs), `build_bounded`.
-
-## Preview (mail.selector.Preview)
-
-```json
-{
-  "parent": "mail",
-  "identifier": {
-    "kind": "string_run_selector",
-    "value": "longest unclaimed non-markup run after anchor"
-  },
-  "wire_type": "utf16le-run",
-  "decoder": "schema::build_bounded",
-  "confidence": "inferred",
-  "first_seen_version": null,
-  "decoder_key": "Preview"
-}
-```
-
-- [`vendor/hxprobe/src/schema.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/schema.rs), `build_bounded`.
-
-## NormalizedSubject (mail.selector.NormalizedSubject)
-
-```json
-{
-  "parent": "mail",
-  "identifier": {
-    "kind": "string_run_selector",
-    "value": "duplicate normalized subject or bounded solo fallback"
-  },
-  "wire_type": "utf16le-run",
-  "decoder": "schema::build_bounded",
-  "confidence": "inferred",
-  "first_seen_version": null,
-  "decoder_key": "NormalizedSubject"
-}
-```
-
-- [`vendor/hxprobe/src/schema.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/schema.rs), `build_bounded`.
-
-## Recipient (mail.selector.Recipient)
-
-```json
-{
-  "parent": "mail",
-  "identifier": {
-    "kind": "string_run_selector",
-    "value": "email-shaped runs after anchor"
-  },
-  "wire_type": "utf16le-run",
-  "decoder": "schema::build_bounded",
-  "confidence": "inferred",
-  "first_seen_version": null,
-  "decoder_key": "Recipient",
-  "notes": "Heuristic, unordered and without Cc. Superseded by object.class.0055 recipients."
-}
-```
-
-- [`vendor/hxprobe/src/schema.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/schema.rs), `build_bounded`.
-
-## ConversationId (mail.selector.ConversationId)
-
-```json
-{
-  "parent": "mail",
-  "identifier": {
-    "kind": "string_run_selector",
-    "value": "hex or GUID-shaped run"
-  },
-  "wire_type": "utf16le-run",
-  "decoder": "schema::build_bounded",
-  "confidence": "inferred",
-  "first_seen_version": null,
-  "decoder_key": "ConversationId",
-  "notes": "Heuristic string-run selector used only for the legacy subject back-fill. Superseded for thread identity by object.class.00c9.offset.1166."
-}
-```
-
-- [`vendor/hxprobe/src/schema.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/schema.rs), `build_bounded`.
-
-## Send time (mail.sent)
-
-```json
-{
-  "parent": "mail",
-  "identifier": {
-    "kind": "string_run_selector",
-    "value": "earliest plausible tick in anchor region"
-  },
-  "wire_type": "u64le-dotnet-ticks",
-  "decoder": "record::read_time",
-  "confidence": "inferred",
-  "first_seen_version": null
-}
-```
-
-- [`vendor/hxprobe/src/record.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/record.rs), `read_time`.
-
-## Message body (mail.body)
-
-```json
-{
-  "parent": "mail",
-  "identifier": {
-    "kind": "string_run_selector",
-    "value": "inline markup or text after anchor"
-  },
-  "wire_type": "utf16le-run",
-  "decoder": "record::parse",
-  "confidence": "inferred",
-  "first_seen_version": null
-}
-```
-
-- [`vendor/hxprobe/src/record.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/record.rs), `parse`.
-
-## Sidecar reference (mail.sidecar)
-
-```json
-{
-  "parent": "mail",
-  "identifier": {
-    "kind": "string_run_selector",
-    "value": "EFMData/ basename run"
-  },
-  "wire_type": "utf16le-run",
-  "decoder": "body::sidecar_names",
-  "confidence": "inferred",
-  "first_seen_version": null
-}
-```
-
-- [`vendor/hxprobe/src/body.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/body.rs), `sidecar_names`.
-
-## Unknown property IDs (mail.wire-fields.unknown)
-
-```json
-{
-  "parent": "mail",
-  "identifier": {
-    "kind": "wire_field_id",
-    "value": null
-  },
-  "wire_type": "unknown",
-  "decoder": null,
-  "confidence": "unknown",
-  "first_seen_version": null,
-  "notes": "No numeric property-ID framing established by the pinned reader. Offsets and selectors above are not property IDs."
-}
-```
-
-- [`vendor/hxprobe/src/schema.rs` at `b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d`](https://github.com/DoctorCRE/carr-system/blob/b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d/vendor/hxprobe/src/schema.rs), `build_bounded`.
 
 ## Unknown property IDs (object.class.004d.wire-fields.unknown)
 
@@ -2477,13 +2218,19 @@ Null means the first Outlook version is unknown. The pinned source revision esta
   },
   "wire_type": "serialized-object",
   "decoder": "message::Index::observe",
-  "confidence": "inferred",
+  "confidence": "proven",
   "first_seen_version": null,
-  "notes": "Envelope tag 060f. Key at +10 repeated at +30. Fixed part holds (offset, length | 0x80000000) descriptor pairs; values follow a variable-length identity string, so the value base is found from the ItemClass descriptor, whose value begins IPM. Store-only study, 2026-10-28, on Studio research copies; counts in spec/outlook/recipients-threads-research.md."
+  "notes": "Envelope tag 060f. Identity header at +0: class, eight zero bytes, key +10, kind +18 (212), owner +22 (the account), key and owner repeated at +30 and +38. The fixed part is the envelope tag minus 10 bytes (1541); u16 +94 is the inline region length; descriptors (u32 offset, u32 word) are relative to fixed part + inline length. Word bit 31 = set, bit 25 = the value is an external file path, bits 0-23 = length. The store is a log: one key has many revisions; each field is read from the newest revision by +366 that sets it.",
+  "observations": [
+    "Heap rule holds for 2,298 of 2,298 00c9 objects and for every object of eleven other classes (Oct 29 store).",
+    "Known values: Joe's three 2026-10-29 test emails (6 copies, snap-20261029T140022) and CARRTEST-CC1..3 of 2026-10-30 (6 copies, snap-20261030T120735); stable across the later snap-20261030T114406 copy.",
+    "One row per key: 559 IPM.Note keys (Oct 29) versus 1,054 anchor rows before; every 004f view row and 00ca body resolves to a 00c9 key."
+  ]
 }
 ```
 
 - [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `Index::observe`.
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
 
 ## ConversationIndex descriptor (object.class.00c9.offset.1166)
 
@@ -2496,13 +2243,17 @@ Null means the first Outlook version is unknown. The pinned source revision esta
   },
   "wire_type": "descriptor-u32le-pair",
   "decoder": "message::revision",
-  "confidence": "inferred",
+  "confidence": "proven",
   "first_seen_version": null,
-  "notes": "Binary PidTagConversationIndex: 0x01, five time bytes, 16-byte GUID, then five bytes per reply level. Present on every decoded message object. The GUID is exported as message_objects.conversation_id."
+  "observations": [
+    "Known values: Joe's three 2026-10-29 test emails (6 copies, snap-20261029T140022) and CARRTEST-CC1..3 of 2026-10-30 (6 copies, snap-20261030T120735); stable across the later snap-20261030T114406 copy."
+  ]
 }
 ```
 
 - [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `revision`.
+- [`spec/outlook/recipients-threads-research.md` at `578ced0753e446fe832a585e6932d2e60033cf0e`](https://github.com/DoctorCRE/carr-system/blob/578ced0753e446fe832a585e6932d2e60033cf0e/spec/outlook/recipients-threads-research.md), `Layout`.
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
 
 ## In-Reply-To descriptor (object.class.00c9.offset.1202)
 
@@ -2515,13 +2266,17 @@ Null means the first Outlook version is unknown. The pinned source revision esta
   },
   "wire_type": "descriptor-u32le-pair",
   "decoder": "message::revision",
-  "confidence": "inferred",
+  "confidence": "proven",
   "first_seen_version": null,
-  "notes": "UTF-16 Message-ID of the parent, angle brackets stripped on export."
+  "observations": [
+    "Known values: Joe's three 2026-10-29 test emails (6 copies, snap-20261029T140022) and CARRTEST-CC1..3 of 2026-10-30 (6 copies, snap-20261030T120735); stable across the later snap-20261030T114406 copy."
+  ]
 }
 ```
 
 - [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `revision`.
+- [`spec/outlook/recipients-threads-research.md` at `578ced0753e446fe832a585e6932d2e60033cf0e`](https://github.com/DoctorCRE/carr-system/blob/578ced0753e446fe832a585e6932d2e60033cf0e/spec/outlook/recipients-threads-research.md), `Layout`.
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
 
 ## InternetMessageId descriptor (object.class.00c9.offset.1218)
 
@@ -2533,14 +2288,19 @@ Null means the first Outlook version is unknown. The pinned source revision esta
     "value": 1218
   },
   "wire_type": "descriptor-u32le-pair",
-  "decoder": null,
-  "confidence": "inferred",
+  "decoder": "message::revision",
+  "confidence": "proven",
   "first_seen_version": null,
-  "notes": "Located, not exported by this slice."
+  "observations": [
+    "Known values: Joe's three 2026-10-29 test emails (6 copies, snap-20261029T140022) and CARRTEST-CC1..3 of 2026-10-30 (6 copies, snap-20261030T120735); stable across the later snap-20261030T114406 copy.",
+    "Sent and Inbox copies share the Message-ID (3 of 3 known pairs); angle brackets are trimmed."
+  ]
 }
 ```
 
 - [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `revision`.
+- [`spec/outlook/recipients-threads-research.md` at `578ced0753e446fe832a585e6932d2e60033cf0e`](https://github.com/DoctorCRE/carr-system/blob/578ced0753e446fe832a585e6932d2e60033cf0e/spec/outlook/recipients-threads-research.md), `Layout`.
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
 
 ## ItemClass descriptor (object.class.00c9.offset.1226)
 
@@ -2552,14 +2312,18 @@ Null means the first Outlook version is unknown. The pinned source revision esta
     "value": 1226
   },
   "wire_type": "descriptor-u32le-pair",
-  "decoder": "message::base",
-  "confidence": "inferred",
+  "decoder": "message::revision",
+  "confidence": "proven",
   "first_seen_version": null,
-  "notes": "Anchors the value base."
+  "observations": [
+    "Known values: Joe's three 2026-10-29 test emails (6 copies, snap-20261029T140022) and CARRTEST-CC1..3 of 2026-10-30 (6 copies, snap-20261030T120735); stable across the later snap-20261030T114406 copy."
+  ]
 }
 ```
 
 - [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `base`.
+- [`spec/outlook/recipients-threads-research.md` at `578ced0753e446fe832a585e6932d2e60033cf0e`](https://github.com/DoctorCRE/carr-system/blob/578ced0753e446fe832a585e6932d2e60033cf0e/spec/outlook/recipients-threads-research.md), `Layout`.
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
 
 ## Topic descriptor (object.class.00c9.offset.1250)
 
@@ -2574,7 +2338,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
   "decoder": null,
   "confidence": "inferred",
   "first_seen_version": null,
-  "notes": "Subject without reply prefixes. Located, not exported."
+  "notes": "Located; not exported."
 }
 ```
 
@@ -2590,14 +2354,19 @@ Null means the first Outlook version is unknown. The pinned source revision esta
     "value": 1386
   },
   "wire_type": "descriptor-u32le-pair",
-  "decoder": null,
-  "confidence": "inferred",
+  "decoder": "message::revision",
+  "confidence": "proven",
   "first_seen_version": null,
-  "notes": "Located, not exported by this slice."
+  "observations": [
+    "Known values: Joe's three 2026-10-29 test emails (6 copies, snap-20261029T140022) and CARRTEST-CC1..3 of 2026-10-30 (6 copies, snap-20261030T120735); stable across the later snap-20261030T114406 copy.",
+    "Sender on 558 of 559 keys (Oct 29)."
+  ]
 }
 ```
 
 - [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `revision`.
+- [`spec/outlook/recipients-threads-research.md` at `578ced0753e446fe832a585e6932d2e60033cf0e`](https://github.com/DoctorCRE/carr-system/blob/578ced0753e446fe832a585e6932d2e60033cf0e/spec/outlook/recipients-threads-research.md), `Layout`.
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
 
 ## Subject descriptor (object.class.00c9.offset.1422)
 
@@ -2610,13 +2379,18 @@ Null means the first Outlook version is unknown. The pinned source revision esta
   },
   "wire_type": "descriptor-u32le-pair",
   "decoder": "message::revision",
-  "confidence": "inferred",
+  "confidence": "proven",
   "first_seen_version": null,
-  "notes": "Exported as message_objects.subject; an empty stored subject stays an empty string."
+  "observations": [
+    "Known values: Joe's three 2026-10-29 test emails (6 copies, snap-20261029T140022) and CARRTEST-CC1..3 of 2026-10-30 (6 copies, snap-20261030T120735); stable across the later snap-20261030T114406 copy.",
+    "Set on 552 of 559 keys; the other 7 never set it and export NULL rather than a guess (Oct 29). CARRTEST subjects of 18, 45 and 97 characters read exactly."
+  ]
 }
 ```
 
 - [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `revision`.
+- [`spec/outlook/recipients-threads-research.md` at `578ced0753e446fe832a585e6932d2e60033cf0e`](https://github.com/DoctorCRE/carr-system/blob/578ced0753e446fe832a585e6932d2e60033cf0e/spec/outlook/recipients-threads-research.md), `Layout`.
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
 
 ## Conversation object reference (object.class.00c9.offset.178)
 
@@ -2648,13 +2422,18 @@ Null means the first Outlook version is unknown. The pinned source revision esta
   },
   "wire_type": "serialized-object",
   "decoder": "message::Index::observe",
-  "confidence": "inferred",
+  "confidence": "proven",
   "first_seen_version": null,
-  "notes": "Envelope tag 015e. Typed reference: own key at +10 and +30, kind at +18, owning message key at +22 and +38. Display name descriptor at +282, address descriptor at +290, sort key descriptor at +298, values from +340. Store-only study, 2026-10-28, on Studio research copies; counts in spec/outlook/recipients-threads-research.md."
+  "notes": "Envelope tag 015e. Typed reference: own key at +10 and +30, kind at +18, owning message key at +22 and +38. Display name descriptor at +282, address descriptor at +290, sort key descriptor at +298, values from +340. Store-only study, 2026-10-28, on Studio research copies; counts in spec/outlook/recipients-threads-research.md.",
+  "observations": [
+    "Owner +22 = the message key on every recipient of the 12 known copies.",
+    "Known values: Joe's three 2026-10-29 test emails (6 copies, snap-20261029T140022) and CARRTEST-CC1..3 of 2026-10-30 (6 copies, snap-20261030T120735); stable across the later snap-20261030T114406 copy."
+  ]
 }
 ```
 
 - [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `recipient`.
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
 
 ## Recipient kind (object.class.0055.offset.18)
 
@@ -2667,13 +2446,18 @@ Null means the first Outlook version is unknown. The pinned source revision esta
   },
   "wire_type": "u32le",
   "decoder": "message::kind_name",
-  "confidence": "inferred",
+  "confidence": "proven",
   "first_seen_version": null,
-  "notes": "204 = To, 205 = Cc, inferred from Outlook-quoted reply headers. 413 seen on 16 messages, often differing from the sender; role unproven (Reply-To candidate), exported with a NULL kind. No Bcc kind was observed in any copy."
+  "notes": "413 appears on 16 messages; its role is unproven and it is exported with a NULL kind. The recipients column lists To, Cc and Bcc.",
+  "observations": [
+    "204 To and 205 Cc on all 12 known copies; 206 Bcc on the three CARRTEST Sent copies only, absent from their Inbox copies, so Sent Items keeps the Bcc."
+  ]
 }
 ```
 
 - [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `kind_name`.
+- [`spec/outlook/recipients-threads-research.md` at `578ced0753e446fe832a585e6932d2e60033cf0e`](https://github.com/DoctorCRE/carr-system/blob/578ced0753e446fe832a585e6932d2e60033cf0e/spec/outlook/recipients-threads-research.md), `Layout`.
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
 
 ## Recipient object key (object.class.0055.offset.10)
 
@@ -2693,6 +2477,287 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 ```
 
 - [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `recipient`.
+
+## Message reference kind and account owner (object.class.00c9.offset.18)
+
+```json
+{
+  "parent": "object.class.00c9",
+  "identifier": {
+    "kind": "byte_offset",
+    "value": 18
+  },
+  "wire_type": "u32le, u64le",
+  "decoder": "message::revision",
+  "confidence": "proven",
+  "first_seen_version": null,
+  "observations": [
+    "Kind 212 on every 00c9 identity header; owner +22 is the account key (work 336495, TEST 520243 on the known copies).",
+    "Known values: Joe's three 2026-10-29 test emails (6 copies, snap-20261029T140022) and CARRTEST-CC1..3 of 2026-10-30 (6 copies, snap-20261030T120735); stable across the later snap-20261030T114406 copy."
+  ]
+}
+```
+
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
+
+## Inline region length (object.class.00c9.offset.94)
+
+```json
+{
+  "parent": "object.class.00c9",
+  "identifier": {
+    "kind": "byte_offset",
+    "value": 94
+  },
+  "wire_type": "u16le",
+  "decoder": "object::Object::new",
+  "confidence": "proven",
+  "first_seen_version": null,
+  "observations": [
+    "Heap base = 1541 + u16 +94 for 2,298 of 2,298 00c9 objects; a set descriptor that does not fit rejects the revision."
+  ]
+}
+```
+
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
+
+## Received time (object.class.00c9.offset.278)
+
+```json
+{
+  "parent": "object.class.00c9",
+  "identifier": {
+    "kind": "byte_offset",
+    "value": 278
+  },
+  "wire_type": "u64le-dotnet-ticks",
+  "decoder": "message::revision",
+  "confidence": "proven",
+  "first_seen_version": null,
+  "observations": [
+    "+278 >= +718 for 559 of 559 keys (Oct 29). Inbox copies: +278 is delivery (known emails 13:45:44, 13:46:44, 13:47:35 UTC); Sent copies: about the send time.",
+    "Known values: Joe's three 2026-10-29 test emails (6 copies, snap-20261029T140022) and CARRTEST-CC1..3 of 2026-10-30 (6 copies, snap-20261030T120735); stable across the later snap-20261030T114406 copy."
+  ]
+}
+```
+
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
+
+## Last-modified time (object.class.00c9.offset.366)
+
+```json
+{
+  "parent": "object.class.00c9",
+  "identifier": {
+    "kind": "byte_offset",
+    "value": 366
+  },
+  "wire_type": "u64le-dotnet-ticks",
+  "decoder": "message::revision",
+  "confidence": "proven",
+  "first_seen_version": null,
+  "observations": [
+    "Orders revisions: the newest revision carries the current folder on every known copy.",
+    "DateTime.MaxValue while an outgoing message sits in the Outbox (CARRTEST-CC1..3: 7, 28 and 15 such revisions); those rank below every dated revision."
+  ]
+}
+```
+
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
+
+## Send time (Date) (object.class.00c9.offset.718)
+
+```json
+{
+  "parent": "object.class.00c9",
+  "identifier": {
+    "kind": "byte_offset",
+    "value": 718
+  },
+  "wire_type": "u64le-dotnet-ticks",
+  "decoder": "message::revision",
+  "confidence": "proven",
+  "first_seen_version": null,
+  "observations": [
+    "Equal on the Sent and Inbox copy of each 2026-10-29 known email (3 of 3 pairs, to the second).",
+    "With a delayed send the Sent copy holds the submit time and the Inbox copy the transmitted Date (CARRTEST-CC1..3, about two minutes apart).",
+    "The anchor scan it replaces differed by more than a minute on 520 of 559 keys and by more than a day on 145 (Oct 29)."
+  ]
+}
+```
+
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
+
+## Folder reference (object.class.00c9.offset.888)
+
+```json
+{
+  "parent": "object.class.00c9",
+  "identifier": {
+    "kind": "byte_offset",
+    "value": 888
+  },
+  "wire_type": "typed-reference",
+  "decoder": "message::revision",
+  "confidence": "proven",
+  "first_seen_version": null,
+  "observations": [
+    "Class 004d, kind 2, owner = the message account. A sent message keeps one key from Drafts through the Outbox (an uncatalogued folder) to Sent Items (CARRTEST-CC1..3; 2026-10-29 known emails Drafts then Sent Items).",
+    "4 of 559 keys name no catalogued folder of their account (Oct 29)."
+  ]
+}
+```
+
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
+
+## Preview descriptor (object.class.00c9.offset.1294)
+
+```json
+{
+  "parent": "object.class.00c9",
+  "identifier": {
+    "kind": "byte_offset",
+    "value": 1294
+  },
+  "wire_type": "descriptor-u32le-pair",
+  "decoder": "message::revision",
+  "confidence": "proven",
+  "first_seen_version": null,
+  "observations": [
+    "Set on every preview-only key (81 of 81, Oct 29); the body text falls back to it when no body object exists."
+  ]
+}
+```
+
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
+
+## Sender name descriptor (object.class.00c9.offset.1378)
+
+```json
+{
+  "parent": "object.class.00c9",
+  "identifier": {
+    "kind": "byte_offset",
+    "value": 1378
+  },
+  "wire_type": "descriptor-u32le-pair",
+  "decoder": "message::revision",
+  "confidence": "proven",
+  "first_seen_version": null,
+  "observations": [
+    "Known values: Joe's three 2026-10-29 test emails (6 copies, snap-20261029T140022) and CARRTEST-CC1..3 of 2026-10-30 (6 copies, snap-20261030T120735); stable across the later snap-20261030T114406 copy.",
+    "Fills the sender name on 110 keys the anchor scan left empty (Oct 29)."
+  ]
+}
+```
+
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
+
+## Recipient display name descriptor (object.class.0055.offset.282)
+
+```json
+{
+  "parent": "object.class.0055",
+  "identifier": {
+    "kind": "byte_offset",
+    "value": 282
+  },
+  "wire_type": "descriptor-u32le-pair",
+  "decoder": "message::recipient",
+  "confidence": "proven",
+  "first_seen_version": null,
+  "observations": [
+    "Unset on early revisions until Outlook resolves the address; revisions must agree only where it is set (CARRTEST Sent copies)."
+  ]
+}
+```
+
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
+
+## Recipient address descriptor (object.class.0055.offset.290)
+
+```json
+{
+  "parent": "object.class.0055",
+  "identifier": {
+    "kind": "byte_offset",
+    "value": 290
+  },
+  "wire_type": "descriptor-u32le-pair",
+  "decoder": "message::recipient",
+  "confidence": "proven",
+  "first_seen_version": null,
+  "observations": [
+    "Known values: Joe's three 2026-10-29 test emails (6 copies, snap-20261029T140022) and CARRTEST-CC1..3 of 2026-10-30 (6 copies, snap-20261030T120735); stable across the later snap-20261030T114406 copy."
+  ]
+}
+```
+
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
+
+## Owning message reference (object.class.00ca.offset.48)
+
+```json
+{
+  "parent": "object.class.00ca",
+  "identifier": {
+    "kind": "byte_offset",
+    "value": 48
+  },
+  "wire_type": "typed-reference",
+  "decoder": "message::body",
+  "confidence": "proven",
+  "first_seen_version": null,
+  "observations": [
+    "Class 00c9, kind 212, key = this object's key, on every body object (Oct 29)."
+  ]
+}
+```
+
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
+
+## Body (object.class.00ca.offset.1650)
+
+```json
+{
+  "parent": "object.class.00ca",
+  "identifier": {
+    "kind": "byte_offset",
+    "value": 1650
+  },
+  "wire_type": "descriptor-u32le-pair",
+  "decoder": "message::body",
+  "confidence": "proven",
+  "first_seen_version": null,
+  "observations": [
+    "Inline UTF-8 HTML, or (descriptor bit 25 set) a UTF-16 ~/Files/S0/<n>/EFMData/<id>.dat gzip sidecar path: bit 25 on 97 of 97 path values and 0 HTML values.",
+    "Full bodies on 478 of 559 keys (410 inline, 68 sidecar, 68 of 68 sidecars linked; Oct 29). The 20,014-character CARRTEST-CC3 body is inline, so length alone does not choose a sidecar."
+  ]
+}
+```
+
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
+
+## Viewed message reference (object.class.004f.offset.272)
+
+```json
+{
+  "parent": "object.class.004f",
+  "identifier": {
+    "kind": "byte_offset",
+    "value": 272
+  },
+  "wire_type": "typed-reference",
+  "decoder": null,
+  "confidence": "proven",
+  "first_seen_version": null,
+  "observations": [
+    "1,475 of 1,475 view rows reference a real 00c9 key (Oct 29); the 2026-10-29 known emails each had view-row ghost rows under the anchor scan."
+  ]
+}
+```
+
+- [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
 
 ## Source bindings
 
@@ -2714,14 +2779,6 @@ Null means the first Outlook version is unknown. The pinned source revision esta
     "revision": "a636d9e680227346781ebf0b5b473901b2cb5314",
     "sha256": "d2f3c52c428ff2e8bd471b848c15f26af1725d620392048078d1b81b3f781c3c"
   },
-  "vendor/hxprobe/src/record.rs": {
-    "revision": "b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d",
-    "sha256": "327cfc0658b26279fc33385e72f01e3f65ae036a35e2822f34a87f30f5968d41"
-  },
-  "vendor/hxprobe/src/schema.rs": {
-    "revision": "b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d",
-    "sha256": "a76bd8449dd21c14f987f5d303ec0932e70dcc084c4e672c76721ecc4d963102"
-  },
   "vendor/hxprobe/src/body.rs": {
     "revision": "b901f049e28cd3ff57bf4221ee1c0737f3f1cd7d",
     "sha256": "ac7130b31bc06e000598c5acfe019942316900010d8ccb4f95a9be4a651bc499"
@@ -2741,6 +2798,14 @@ Null means the first Outlook version is unknown. The pinned source revision esta
   "vendor/hxprobe/src/message.rs": {
     "revision": "f160135d4e5d38613ecf05643e64d8ba4975920d",
     "sha256": "8f5ae1e61d55cc02d385f0cda01ff1513f84d803095c841c8c38497dc86b94e7"
+  },
+  "spec/outlook/hxstore-harness.json": {
+    "revision": "f03be8931e4be950b68a034987eef062949e56bb",
+    "sha256": "d67e3a0eb38c7ae727fccfeb18a5389b9a21d1285122deded7e620734a217bb7"
+  },
+  "spec/outlook/recipients-threads-research.md": {
+    "revision": "578ced0753e446fe832a585e6932d2e60033cf0e",
+    "sha256": "b2f00f918474cd190f4dbcc1a049e8d298d04d61139c3727043c172c550bf62e"
   }
 }
 ```

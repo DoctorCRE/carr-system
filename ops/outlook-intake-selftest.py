@@ -836,16 +836,9 @@ class IntakeTest(unittest.TestCase):
         helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
         crate = ROOT / 'vendor/hxprobe'
         REAL_RUN(['cargo', 'build', '--locked'], cwd=crate, check=True, capture_output=True)
-        envelopes = []
-        for folder_id, label in ((50, folder_name), (51, 'Sent Items')):
-            folder = bytearray(840)
-            struct.pack_into('<H', folder, 0, 0x004d)
-            struct.pack_into('<QIQQQ', folder, 10, folder_id, 2, 7, folder_id, 7)
-            folder.extend(b'\1\1\1\1\0' + helpers['utf16'](label))
-            envelopes.append(struct.pack('<HHIH', 5, 0x04d8, len(folder) + 10, 0) + folder)
-        binding = bytearray(helpers['message'](0x9999, sender=OWNER, sent=ts(-timedelta(days=60))))
-        struct.pack_into('<QIQQQ', binding, 418, 51, 2, 7, 51, 7)
-        self.store.write_bytes(helpers['STORE'](b''.join(envelopes) + b''.join(records) + binding))
+        folders = helpers['folder'](50, folder_name) + helpers['folder'](51, 'Sent Items')
+        binding = helpers['message'](0x9999, sender=OWNER, sent=ts(-timedelta(days=60)), folder=51)
+        self.store.write_bytes(helpers['STORE'](folders + b''.join(records) + binding))
 
         def decode(source, files, target):
             result = REAL_RUN([str(crate / 'target/debug/hxprobe'), 'db', str(source), str(target)],
@@ -858,10 +851,7 @@ class IntakeTest(unittest.TestCase):
     def test_cli_historical_drafts_link_never_drops_short_sent_revision(self):
         helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
         draft = helpers['message'](71, sender='', sent=0, preview='')
-        draft = draft.replace(struct.pack('<Q', helpers['EPOCH_TICKS']), b'\0' * 8)
-        sent = bytearray(helpers['message'](71, sender=OWNER,
-                                          sent=ts(-timedelta(hours=1)), preview='Pending'))
-        struct.pack_into('<QIQQQ', sent, 418, 51, 2, 7, 51, 7)
+        sent = helpers['message'](71, sender=OWNER, sent=ts(-timedelta(hours=1)), preview='Pending', folder=51)
         for records in ([draft, sent], [sent, draft]):
             with self.subTest(draft_first=records[0] is draft):
                 shutil.rmtree(self.out(), ignore_errors=True)
@@ -875,7 +865,6 @@ class IntakeTest(unittest.TestCase):
     def test_cli_blank_draft_stays_unresolved_without_recount_on_redecode(self):
         helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
         draft = helpers['message'](71, sender='', sent=0, preview='')
-        draft = draft.replace(struct.pack('<Q', helpers['EPOCH_TICKS']), b'\0' * 8)
         ports = self.cli_mail_fixture([draft])
         result = intake.run(self.repo, self.home, ports)
         self.assertEqual(result.state, 'succeeded')
@@ -892,7 +881,6 @@ class IntakeTest(unittest.TestCase):
     def test_cli_revisions_count_once_and_clear_incomplete_identity(self):
         helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
         incomplete = helpers['message'](71, sender='', sent=0)
-        incomplete = incomplete.replace(struct.pack('<Q', helpers['EPOCH_TICKS']), b'\0' * 8)
         complete = helpers['message'](71, sent=ts(-timedelta(hours=1)))
         ports = self.cli_mail_fixture([incomplete, complete], folder_name='Inbox')
         result = intake.run(self.repo, self.home, ports)
@@ -925,11 +913,12 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(retry.counts['unresolved_messages'], 0)
         self.assertEqual(len(self.fake.writes('log-activity')), 1)
 
-    def test_cli_incomplete_revision_preserves_ownership_uncertainty(self):
+    def test_cli_message_in_an_uncatalogued_folder_is_not_admitted(self):
+        # An Outbox revision: undated and in a folder the store does not catalogue.
         helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
-        incomplete = bytearray(helpers['message'](71, sender='', sent=0))
-        struct.pack_into('<QIQQQ', incomplete, 418, 999, 2, 7, 999, 7)
         complete = helpers['message'](71, sent=ts(-timedelta(hours=1)))
+        incomplete = helpers['message'](71, sent=ts(-timedelta(hours=1)), folder=999,
+                                        modified=ts(-timedelta(minutes=5)))
         ports = self.cli_mail_fixture([incomplete, complete], folder_name='Inbox')
         result = intake.run(self.repo, self.home, ports)
         self.assertEqual(result.state, 'succeeded')
@@ -940,7 +929,6 @@ class IntakeTest(unittest.TestCase):
     def test_cli_complete_revision_settles_a_prior_incomplete_message(self):
         helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
         incomplete = helpers['message'](71, sender='', sent=0)
-        incomplete = incomplete.replace(struct.pack('<Q', helpers['EPOCH_TICKS']), b'\0' * 8)
         ports = self.cli_mail_fixture([incomplete], folder_name='Inbox')
         first = intake.run(self.repo, self.home, ports)
         self.assertEqual(first.counts['unresolved_messages'], 1)
@@ -1023,6 +1011,15 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(result.counts['logged'], 1)
         [(_, activity)] = self.fake.writes('log-activity')
         self.assertEqual((activity['ref'], activity['kind']), ('C-901', 'email_out'))
+
+    def test_keyed_mail_settles_when_its_decoded_send_time_moves(self):
+        # hxprobe moved send times from the anchor scan to the Date slot, up to days earlier (WR-000589):
+        # mail filed from its preview still gets its full text, and is filed once.
+        first = self.run_intake([mail('pat@example.test', -timedelta(hours=1), kind='preview', local_keys='77')])
+        self.assertEqual((first.counts['logged'], first.counts['preview_only']), (1, 1))
+        moved = self.run_intake([mail('pat@example.test', -timedelta(days=3), local_keys='77')])
+        self.assertEqual((moved.counts['emails'], moved.counts['full_text_notes']), (0, 1))
+        self.assertEqual([a['kind'] for _, a in self.fake.writes('log-activity')], ['email_in', 'note'])
 
     def test_nested_folder_move_preserves_one_message(self):
         message = mail('pat@example.test', -timedelta(hours=1), local_keys='77')

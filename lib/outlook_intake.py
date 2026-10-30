@@ -679,6 +679,15 @@ def _parties(m: dict, domain: str) -> list[tuple[str, str | None]]:
     return [(m['sender'].lower(), _clean_name(m['sender_name'], m['subject']))]
 
 
+def _same_mail(m: dict, sent: int, at: int) -> bool:
+    """Whether state recorded at `sent` under this row's ck is about this row, read at `at`.
+
+    A store key names one message whatever time a decoder reads for it (hxprobe moved send times
+    to the Date slot, up to days earlier than the old anchor scan), so keyed rows match on ck alone;
+    keyless rows sharing a content ck must also fall within COPY_WINDOW."""
+    return bool(m['local_keys']) or abs(sent - at) <= COPY_WINDOW
+
+
 def _best_copies(mails: list[dict], state: dict | None = None) -> list[dict]:
     """Preserve keyed decoder rows; collapse only rows without store-item identity."""
     rows = []
@@ -885,15 +894,14 @@ class Run:
                         unresolved.pop(ident)
                         keys.pop(ident, None)
             prior = next(((ident, sent) for ident, sent in retries.get(m['ck'], [])
-                          if sent is not None and abs(sent - m['first_sent']) <= COPY_WINDOW), None)
+                          if sent is not None and _same_mail(m, sent, m['first_sent'])), None)
             if prior:
                 m['ident'], m['sent_unix'] = prior
             if (m['sent_unix'] < since and m['ident'] not in unresolved) or m['sent_unix'] > self.now.timestamp() + 300:
                 continue
             outbound = _internal(m['sender'], self.settings.internal_domain)
             recipients_unknown = outbound and not (_addresses(m['recipients']) or _addresses(m.get('cc')))
-            if m['ident'] not in unresolved and any(
-                    abs(t - m['sent_unix']) <= COPY_WINDOW for t in done.get(m['ck'], [])):
+            if m['ident'] not in unresolved and any(_same_mail(m, t, m['sent_unix']) for t in done.get(m['ck'], [])):
                 continue
             if m['local_keys']:
                 keys[m['ident']] = sorted(set(keys.get(m['ident'], [])) | set(m['local_keys']))
@@ -1278,7 +1286,7 @@ class Run:
             if m['full']:
                 full.setdefault(m['ck'], []).append(m)
         for ident, p in list(pending.items()):
-            match = [m for m in full.get(p['ck'], []) if abs(m['first_sent'] - p['sent']) <= COPY_WINDOW]
+            match = [m for m in full.get(p['ck'], []) if _same_mail(m, p['sent'], m['first_sent'])]
             if not match:
                 if p['sent'] < self.now.timestamp() - REFRESH_DAYS.total_seconds():
                     p['expired'] = True

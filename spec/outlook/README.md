@@ -73,8 +73,8 @@ for XML and binary plists. Declaration meanings follow Apple's
 | Command | Result |
 | --- | --- |
 | `python3 ops/hxstore-atlas.py render spec/outlook/hxstore-atlas.json` | Generated Markdown reference on stdout. |
-| `python3 ops/hxstore-atlas.py rust spec/outlook/hxstore-atlas.json` | Generated Rust decoder keys and display names on stdout. |
-| `python3 ops/hxstore-atlas-selftest.py` | Seven synthetic contract and CLI tests, including rebuild after an atlas rename. |
+| `python3 ops/hxstore-atlas.py rust spec/outlook/hxstore-atlas.json` | Generated Rust confirmed spans for `hxprobe observe` on stdout. |
+| `python3 ops/hxstore-atlas-selftest.py` | Seven contract tests, including source pins reachable from main. |
 | `./ops/ci.sh --only hxprobe` | Existing synthetic Rust tests and locked release build. |
 
 `outlook-hxstore-atlas/v1` stores stable entry IDs with typed identifiers, names, wire types,
@@ -86,20 +86,14 @@ Containers, anchor regions, block types, serialized object classes, envelope tag
 and string selectors are separate identifier kinds. No numeric property-ID framing is established
 by the pinned reader. Each relevant record type retains an explicit unknown wire-field entry.
 Calendar offsets 574 and 582 are relative to the object body, ten bytes after the envelope starts.
-Inferred confidence describes implemented interpretations and heuristics. Unknown means unresolved.
-No entry claims empirical proof from a store observation performed by this desk.
+Proven entries are fixed object slots confirmed on labelled TEST-account mail and whole-store
+cross-object rates; their `observations` name the cases. Inferred confidence describes implemented
+interpretations without that confirmation. Unknown means unresolved.
 
 Cargo invokes the Python 3 standard-library generator at build time. It tracks the atlas and
-generator as build inputs. The generated enum, label mapping, and tally iteration replace their
-handwritten definitions in `schema.rs`. `decoder_key` is a stable extraction identity;
-`name` is the label shown by `hxprobe map` and `find`. Editing `name` requires rebuilding hxprobe.
-There is no runtime override or fallback name table. Invalid atlas input fails the build.
-Existing SQLite table and column names are separate derived outputs and retain their contracts.
-
-The synthetic CLI test creates its store bytes in a temporary directory. It does not read an
-Outlook app, profile, store, sidecar, or preference. It proves that an atlas rename changes both
-the real hxprobe field map and tally. It does not measure decoded-byte or wire-field-ID coverage.
-The count-only observation command below supplies the next criterion.
+generator as build inputs and emits the confirmed spans `hxprobe observe` counts. Mail fields are
+read from the slots the atlas records (`vendor/hxprobe/src/message.rs`), one row per message key;
+there are no string-run selectors or display-name keys. Invalid atlas input fails the build.
 
 ## Count-only store observation
 
