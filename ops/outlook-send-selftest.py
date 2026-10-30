@@ -434,11 +434,11 @@ class SendTests(unittest.TestCase):
 
 
 
-    def test_bulk_external_recipients_are_refused(self):
+    def test_several_external_recipients_send(self):
         h = Harness(self.out)
-        result = h.send(to=['person-a@example.test', 'other@example.test'])
-        self.assertEqual(result.reason, 'one_to_one_required')
-        self.assertEqual(h.fake.press_count, 0)
+        result = h.send(to=['person-a@example.test', 'other@example.test'], cc=['third@example.test'])
+        self.assertEqual(result.state, State.DONE)
+        self.assertEqual(h.fake.press_count, 1)
 
     def test_unreadable_suppression_fails_closed_for_mail_and_invites(self):
         replies = [None, {}, {'recipients': []}, {'recipients': [{'email': 'person-a@example.test'}]},
