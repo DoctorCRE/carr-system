@@ -78,10 +78,12 @@ test('PECOS corrections use publication dates and unchanged later releases dedup
   assert.equal((await ingest('pecos',[later],{published_on:'2026-10-22'})).inserted,0);
   assert.equal((await ingest('pecos',[{...later,facts:{...row.facts,provider_type:'Group Practice'}}],
     {published_on:'2026-10-22'})).inserted,1);
+  assert.equal((await ingest('pecos',[{...row,evidence_date:'2026-10-23'}],
+    {published_on:'2026-10-23'})).inserted,1);
   const card=(await read()).cards.find(x=>x.source==='pecos');
   assert.equal(card.kind,'pecos_correction');
   assert.equal(card.date_basis,'publication');
-  assert.equal(card.evidence_date,'2026-10-22');
+  assert.equal(card.evidence_date,'2026-10-23');
   assert.equal((await read({limit:1})).next_cursor,card.id);
   assert.equal((await read({before_id:card.id})).cards.length,1);
 });

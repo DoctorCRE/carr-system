@@ -76,11 +76,12 @@ export function practiceOriginationTools({withEnvelope}: {withEnvelope:WithEnvel
             ...(args.source === 'pecos' ? {evidence_date:null} : {})}));
           const previous = (await c.query(`select fingerprint from practice_origination_event
             where source=$1 and record_key=$2 order by id desc limit 1`,[args.source,row.record_key])).rows[0];
+          if (previous?.fingerprint === fingerprint) continue;
           const kind = args.source === 'nppes' ? row.date_basis : previous ? 'pecos_correction' : 'pecos_observation';
           const result = await c.query(`insert into practice_origination_event
             (source,record_key,fingerprint,npi,name,city,state,kind,evidence_date,date_basis,source_url,facts,published_on,recorded_by)
             values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14)
-            on conflict(source,record_key,fingerprint) do nothing returning id`,
+            on conflict(source,record_key,published_on,fingerprint) do nothing returning id`,
             [args.source,row.record_key,fingerprint,row.npi,row.name,row.city,row.state,kind,row.evidence_date,
               row.date_basis,source_url,JSON.stringify(row.facts),args.published_on,actor.id]);
           inserted += result.rows.length;

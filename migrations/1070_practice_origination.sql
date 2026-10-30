@@ -26,7 +26,7 @@ create table practice_origination_event (
   published_on date not null,
   recorded_at timestamptz not null default now(),
   recorded_by uuid not null references actor(id),
-  unique (source,record_key,fingerprint)
+  unique (source,record_key,published_on,fingerprint)
 );
 create index practice_origination_record on practice_origination_event(source,record_key,id desc);
 create view v_practice_origination_party_address as
