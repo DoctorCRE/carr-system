@@ -51,7 +51,7 @@ class ExtractionTests(unittest.TestCase):
         replies = iter([output('29'), output()])
         def model(*args, **kwargs):
             return {'output': next(replies), 'cost_usd': '0.01', 'model': 'synthetic-model'}
-        job = ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'lease', 'synthetic-model')
+        job = ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'lease', 'haiku')
         result = run_job(job, call=store, read_bytes=lambda doc: TEXT,
                          text_pages=lambda data: [TEXT.decode()], model=model)
         self.assertFalse(result['canonical'])
@@ -68,7 +68,7 @@ class ExtractionTests(unittest.TestCase):
     def test_all_document_types_have_schema_valid_bound_observations(self):
         for kind in ('loi', 'lease', 'counter', 'amendment'):
             store = Source()
-            run_job(ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), kind, 'synthetic-model'),
+            run_job(ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), kind, 'haiku'),
                     call=store, read_bytes=lambda doc: TEXT, text_pages=lambda data: [TEXT.decode()],
                     model=lambda *a, **k: {'output': output(), 'cost_usd': '0.01', 'model': 'synthetic-model'})
             receipt = store.submissions[0]
@@ -80,14 +80,14 @@ class ExtractionTests(unittest.TestCase):
     def test_source_hash_mismatch_never_calls_model_or_records(self):
         store = Source()
         with self.assertRaisesRegex(ValueError, 'hash mismatch'):
-            run_job(ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'loi', 'synthetic-model'),
+            run_job(ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'loi', 'haiku'),
                     call=store, read_bytes=lambda doc: b'changed', text_pages=lambda data: [],
                     model=lambda *a, **k: self.fail('model called for unbound source'))
         self.assertEqual(store.submissions, [])
 
     def test_no_text_layer_is_unreadable_instead_of_not_present(self):
         store = Source()
-        run_job(ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'amendment', 'synthetic-model'),
+        run_job(ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'amendment', 'haiku'),
                 call=store, read_bytes=lambda doc: TEXT, text_pages=lambda data: ['', ''],
                 model=lambda *a, **k: self.fail('model called for image only source'))
         receipt = store.submissions[0]
@@ -100,7 +100,7 @@ class ExtractionTests(unittest.TestCase):
             (output('99'), [TEXT.decode()], 'ungrounded'),
         ]:
             store = Source()
-            run_job(ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'counter', 'synthetic-model'),
+            run_job(ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'counter', 'haiku'),
                     call=store, read_bytes=lambda doc: TEXT, text_pages=lambda data: pages,
                     model=lambda *a, **k: {'output': reply, 'cost_usd': '0', 'model': 'synthetic-model'})
             abstention = next(a for a in store.submissions[0]['receipt']['abstentions'] if a['fact_key'] == 'base_rent_per_sf')
@@ -110,7 +110,7 @@ class ExtractionTests(unittest.TestCase):
         for reply, cost in [(dict(fields=output()['fields'][:3]), '0'), (output(), 'NaN')]:
             store = Source()
             with self.assertRaises(ValueError):
-                run_job(ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'lease', 'synthetic-model'),
+                run_job(ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'lease', 'haiku'),
                         call=store, read_bytes=lambda doc: TEXT, text_pages=lambda data: [TEXT.decode()],
                         model=lambda *a, **k: {'output': reply, 'cost_usd': cost, 'model': 'synthetic-model'})
             self.assertEqual(store.submissions, [])
@@ -148,6 +148,7 @@ class ExtractionTests(unittest.TestCase):
             self.assertEqual(ask_with_usage('synthetic', model='synthetic', schema={}, system_prompt='proposals')['cost_usd'], '0.02')
             command = run.call_args.args[0]
             self.assertEqual(command[command.index('--tools') + 1], '')
+            self.assertEqual(command[command.index('--max-budget-usd') + 1], '0.50')
             self.assertIn('--strict-mcp-config', command)
             self.assertIn('--no-session-persistence', command)
 
@@ -164,20 +165,62 @@ class ExtractionTests(unittest.TestCase):
         self.assertLess(scorer['score'](predictions)['precision'], 0.99)
         self.assertEqual(scorer['score']([])['abstention_rate'], 1)
 
-    def test_transient_model_retry_retains_unknown_failed_cost(self):
+    def test_over_budget_abstains_without_another_call(self):
         store = Source()
-        replies = iter([RuntimeError('synthetic transient'), output(), output()])
+        caps = []
         def model(*args, **kwargs):
-            result = next(replies)
-            if isinstance(result, RuntimeError):
-                raise result
-            return {'output': result, 'cost_usd': '0.01', 'model': 'synthetic-model'}
-        run_job(ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'lease', 'synthetic-model'),
+            caps.append(kwargs['max_budget_usd'])
+            return {'output': output(), 'cost_usd': '0.51', 'model': 'haiku'}
+        run_job(ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'lease', 'haiku'),
                 call=store, read_bytes=lambda doc: TEXT, text_pages=lambda data: [TEXT.decode()], model=model)
-        receipt = store.submissions[0]['receipt']
-        self.assertEqual(len(receipt['attempts']), 3)
-        self.assertIsNone(receipt['attempts'][0]['cost_usd'])
-        self.assertFalse(receipt['cost_complete'])
+        self.assertEqual(len(caps), 1)
+        self.assertLessEqual(float(caps[0]), 0.50)
+        self.assertEqual(store.submissions[0]['observations'], [])
+        self.assertEqual({a['reason'] for a in store.submissions[0]['receipt']['abstentions']}, {'over_budget'})
+
+    def test_budget_can_only_be_lowered_and_model_is_allowlisted(self):
+        from decimal import Decimal
+        for model, budget in [('opus', '0.50'), ('haiku', '0.51'), ('haiku', '0'), ('haiku', 'NaN')]:
+            with self.assertRaises(ValueError):
+                ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'lease', model, Decimal(budget)).contract()
+        store = Source()
+        caps = []
+        def model(*args, **kwargs):
+            caps.append(Decimal(kwargs['max_budget_usd']))
+            return {'output': output(), 'cost_usd': '0.01', 'model': 'haiku'}
+        run_job(ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'lease', 'haiku', Decimal('0.10')),
+                call=store, read_bytes=lambda doc: TEXT, text_pages=lambda data: [TEXT.decode()], model=model)
+        self.assertEqual(caps, [Decimal('0.05'), Decimal('0.09')])
+
+    def test_cli_budget_exhaustion_records_abstention(self):
+        from unittest.mock import patch
+        from subprocess import CompletedProcess
+        from lib.model_call import ask_with_usage
+        store = Source()
+        with patch('subprocess.run', return_value=CompletedProcess([], 1,
+                json.dumps({'subtype': 'error_max_budget_usd', 'is_error': True})) ) as call:
+            run_job(ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'lease', 'haiku'),
+                    call=store, read_bytes=lambda doc: TEXT, text_pages=lambda data: [TEXT.decode()], model=ask_with_usage)
+        self.assertEqual(call.call_count, 1)
+        self.assertEqual({a['reason'] for a in store.submissions[0]['receipt']['abstentions']}, {'over_budget'})
+
+    def test_exhibit_reference_does_not_hide_scalar_values(self):
+        store = Source()
+        run_job(ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'lease', 'haiku'),
+                call=store, read_bytes=lambda doc: TEXT,
+                text_pages=lambda data: [TEXT.decode() + ' See Exhibit B for premises.'],
+                model=lambda *a, **k: {'output': output(), 'cost_usd': '0.01', 'model': 'haiku'})
+        self.assertEqual(len(store.submissions[0]['observations']), 2)
+
+    def test_unknown_failed_cost_abstains_without_retry(self):
+        from unittest.mock import Mock
+        store = Source()
+        model = Mock(side_effect=RuntimeError('synthetic failure'))
+        run_job(ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'lease', 'haiku'),
+                call=store, read_bytes=lambda doc: TEXT, text_pages=lambda data: [TEXT.decode()], model=model)
+        self.assertEqual(model.call_count, 1)
+        self.assertFalse(store.submissions[0]['receipt']['cost_complete'])
+        self.assertEqual(store.submissions[0]['observations'], [])
 
 
 if __name__ == '__main__':
