@@ -119,7 +119,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "add-loop": {
     "ingress_key": "mcp-tool:add-loop",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "54c7ab9b14c77a8d6bcb4989dbf33e96358a632d7eba11d9c7a4bdf93843f7f1",
+    "schema_digest": "63aa16a75cef37e0be66bc0549596127c975f3809eeb4060ed7b3f4919f1c366",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

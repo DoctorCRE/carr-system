@@ -96,6 +96,8 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["invalid_idempotency_key", "Supply a UUID as idempotency_key and reuse it only for the same action."],
   ["invalid_slice_plan", "Supply one through one hundred non-empty slice titles, each at most 200 characters."],
   ["slice_plan_conflict", "Keep the recorded titles in order and append new titles after them."],
+  ["joint_ownership_refused", "A loop has one owner: pass joe, dell or claude, and name the blocker for what it waits on."],
+  ["unknown_owner", "Owner is one of joe, dell or claude."],
   ["invalid_slice_outcome", "Choose done or retired with the evidence for that outcome."],
   ["slice_outcome_already_recorded", "The recorded outcome and its evidence are final. Plan a new slice for further work."],
   ["slice_reason_required", "Explain why the slice is retired."],

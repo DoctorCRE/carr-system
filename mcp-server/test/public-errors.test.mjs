@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { dispatch } from "./helpers/budgeted-dispatch.mjs";
 import { ToolError, coerceArgsToSchema, pgConstraintError, TOOLS } from "../src/tools.js";
+import { publicError } from "../src/public-errors.ts";
 import { Pool } from "@neondatabase/serverless";
 
 const correlationId = "d170d000-0000-4000-8000-000000000031";
@@ -410,4 +411,20 @@ for (const recorded_titles of [[privateText, {}], ["x".repeat(201)], Array(101).
 test("MCP omits recorded slice titles on unrelated refusals", async t => {
   const payload = await failure(t, new ToolError({ error: "not_found", recorded_titles: [privateText] }));
   assert.equal(Object.hasOwn(payload, "recorded_titles"), false);
+});
+
+test("loop owner refusals reach callers with a single-owner hint", t => {
+  t.mock.method(console, "error", () => {});
+  for (const code of ["joint_ownership_refused", "unknown_owner"]) {
+    const payload = publicError(new ToolError({ error: code, got: "Joe/Claude" }));
+    assert.equal(payload.error, code);
+    assert.match(payload.hint, /joe, dell or claude/);
+    assert.doesNotMatch(JSON.stringify(payload), /Joe\/Claude/);
+  }
+});
+
+test("add-loop advertises single owners only", () => {
+  const owner = TOOLS["add-loop"].inputSchema.properties.owner;
+  assert.doesNotMatch(owner.description, /\/|→/);
+  assert.match(owner.description, /joe, dell or claude/);
 });
