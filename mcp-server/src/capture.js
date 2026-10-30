@@ -1,4 +1,5 @@
 // Handle capture sessions and their recorded outcomes.
+import { resolveContact } from "./email-proposals.js";
 import { randomString } from "./google-oidc.js";
 import { publicError } from "./public-errors.ts";
 import { isCalendarDate } from "./calendar-date.ts";
@@ -259,8 +260,13 @@ function validatePostCallCandidates(body) {
       return { error: "invalid_post_call_candidate" };
     if (item.evidence_quote.length > 500 || wordCount(item.evidence_quote) > 15)
       return { error: "evidence_quote_too_long", max_words: 15 };
+    if (item.counterpart != null && (!item.counterpart || typeof item.counterpart !== "object" ||
+        Array.isArray(item.counterpart) || !Object.keys(item.counterpart).length ||
+        Object.entries(item.counterpart).some(([key, value]) => !["email", "phone", "name"].includes(key) ||
+          typeof value !== "string" || !value.trim() || value.length > 200)))
+      return { error: "invalid_counterpart" };
     if (item.kind === "assigned_action") {
-      if (Object.keys(item).some(key => !["kind", "deal_id", "assignee", "action", "due_on", "evidence_quote", "confidence"].includes(key)))
+      if (Object.keys(item).some(key => !["kind", "deal_id", "assignee", "action", "due_on", "evidence_quote", "confidence", "counterpart"].includes(key)))
         return { error: "invalid_assigned_action" };
       if (!['joe', 'dell'].includes(item.assignee) || typeof item.action !== "string" ||
           !item.action.trim() || item.action.length > 500 ||
@@ -268,7 +274,7 @@ function validatePostCallCandidates(body) {
         return { error: "invalid_assigned_action" };
     }
     if (item.kind === "email_draft") {
-      if (Object.keys(item).some(key => !["kind", "deal_id", "recipient_party_id", "recipient_ref", "subject", "body_sha256", "evidence_quote", "confidence"].includes(key)))
+      if (Object.keys(item).some(key => !["kind", "deal_id", "recipient_party_id", "recipient_ref", "subject", "body_sha256", "evidence_quote", "confidence", "counterpart"].includes(key)))
         return { error: "invalid_email_draft_metadata" };
       if (!isUuid(item.recipient_party_id) || typeof item.recipient_ref !== "string" ||
           !/^P-\d+$/iu.test(item.recipient_ref) || typeof item.subject !== "string" ||
@@ -282,10 +288,10 @@ function validatePostCallCandidates(body) {
 function postCallPayload(item) {
   if (item.kind === "assigned_action") return {
     deal_id: item.deal_id, assignee: item.assignee, action: item.action.trim(),
-    due_on: item.due_on || null,
+    due_on: item.due_on || null, ...(item.counterpart ? { counterpart: item.counterpart } : {}),
   };
   return { deal_id: item.deal_id, recipient_party_id: item.recipient_party_id,
-    recipient_ref: item.recipient_ref, subject: item.subject.trim(), body_sha256: item.body_sha256 };
+    recipient_ref: item.recipient_ref, subject: item.subject.trim(), body_sha256: item.body_sha256, ...(item.counterpart ? { counterpart: item.counterpart } : {}) };
 }
 
 async function candidates(request, dependencies) {
@@ -400,17 +406,25 @@ async function postCallCandidates(request, dependencies) {
           /* capture:post-call-candidates-prior */`, [session.id, body.idempotency_key]);
       if (prior.rows.length && prior.rows[0].batch_hash !== batchHash)
         refuse(409, { error: "key_reuse" });
+      if (!prior.rows.length && items.some(item => item.payload.counterpart)) {
+        const people = (await client.query(`select id as party_id,name,email,phone,cell from party
+          where merged_into is null and deleted_at is null /* capture:contact-resolution */`)).rows;
+        for (const item of items) {
+          item.payload.contact_party_id = item.payload.counterpart
+            ? resolveContact(item.payload.counterpart, people, { call: true }).party_id : null;
+        }
+      }
       await client.query(
         `insert into capture_post_call_candidate
            (session_id,idempotency_key,batch_hash,item_index,kind,deal_id,assignee_slug,
             action_description,due_on,recipient_party_id,recipient_ref,email_subject,body_sha256,
-            evidence_quote,confidence)
+            evidence_quote,confidence,contact_party_id)
          select $1,$2,$3,item.ordinality - 1,item.value->>'kind',(item.value->'payload'->>'deal_id')::uuid,
                 item.value->'payload'->>'assignee',item.value->'payload'->>'action',
                 (item.value->'payload'->>'due_on')::date,(item.value->'payload'->>'recipient_party_id')::uuid,
                 item.value->'payload'->>'recipient_ref',item.value->'payload'->>'subject',
                 item.value->'payload'->>'body_sha256',item.value->>'evidence_quote',
-                (item.value->>'confidence')::numeric
+                (item.value->>'confidence')::numeric,(item.value->'payload'->>'contact_party_id')::uuid
            from jsonb_array_elements($4::jsonb) with ordinality as item(value, ordinality)
          on conflict (session_id,idempotency_key,item_index) do nothing
          /* capture:post-call-candidates-insert */`,

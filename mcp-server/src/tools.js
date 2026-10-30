@@ -3957,7 +3957,7 @@ export const TOOLS = {
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c) => {
       const { rows } = await c.query(`
-        select c.id, c.session_id, c.kind, c.deal_id, b.name as deal_name,
+        select c.id, c.session_id, c.kind, c.deal_id, b.name as deal_name, p.name as contact_name,
                case c.kind when 'assigned_action' then jsonb_build_object(
                  'deal_id', c.deal_id, 'assignee', c.assignee_slug,
                  'action', c.action_description, 'due_on', to_jsonb(c.due_on)#>>'{}')
@@ -3968,6 +3968,8 @@ export const TOOLS = {
           from capture_post_call_candidate c
           join capture_session s on s.id=c.session_id
           join v_deal_room_board b on b.id=c.deal_id
+          left join party p on p.id=coalesce(c.contact_party_id,c.recipient_party_id)
+            and p.merged_into is null and p.deleted_at is null
          where c.status='pending' and s.post_call and s.state='distilling' and s.expires_at > now()
            and b.operating_state='active' and b.phase not in ('closed', 'invoiced')
            and b.outcome is null and b.closed_on is null and b.invoiced_on is null
