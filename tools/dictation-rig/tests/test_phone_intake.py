@@ -87,6 +87,12 @@ class PhoneIntakeTests(unittest.TestCase):
             report = {'report': {'summary': 'private summary'}, 'review_questions': [
                 {'question': 'private question', 'resolved': False}, {'question': 'resolved question', 'resolved': True}]}
             post_call.write_private(session / post_call.REPORT_FILE, report)
+            report['checks_hold'] = 'Jev daily dollar budget is exhausted.'
+            post_call.write_private(session / post_call.REPORT_FILE, report)
+            phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
+            self.assertEqual(updates[-1], {'state': 'held_review', 'reason': 'budget', 'open_questions': 1})
+            del report['checks_hold']
+            post_call.write_private(session / post_call.REPORT_FILE, report)
             fail[0] = True
             phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
             fail[0] = False

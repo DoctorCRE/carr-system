@@ -30,6 +30,11 @@ class PhoneStore {
       this.sessions.push(s);
       return { rows: [s] };
     }
+    if (sql.includes('phone:status')) {
+      const session = this.sessions.find(s => s.id === p[0]);
+      session.studio_status = JSON.parse(p[1]);
+      return { rows: [session] };
+    }
     if (sql.includes('phone:read')) return { rows: this.sessions.filter(s => s.id === p[0] && (!p[1] || s.owner_id === p[1])) };
     if (sql.includes('phone:transferred')) {
       this.sessions.find(s => s.id === p[0]).transferred_at = '2026-01-01T12:01:00Z';
@@ -59,6 +64,21 @@ test('phone sessions refuse anonymous and machine actors before reading input or
     const response = await handler.fetch(new Request(root, { method: 'POST', body: 'invalid' }), {}, actor);
     assert.equal(response.status, 401);
   }
+});
+
+test('budget hold appears on session read and clears on resume', async () => {
+  const { handler, send } = rig();
+  const session = (await send('', 'POST', recording)).body;
+  const path = `/${session.session_id}`;
+  const publish = body => handler.studioFetch(new Request(`https://api.example.test/capture/phone/v1/call-sessions${path}/status`, {
+    method: 'POST', headers: { authorization: `Bearer ${environment.CALL_STUDIO_TOKEN}` }, body: JSON.stringify(body),
+  }), environment);
+  const hold = { state: 'held_review', reason: 'budget', open_questions: 0 };
+  assert.equal((await publish(hold)).status, 200);
+  assert.deepEqual((( { state, reason, open_questions }) => ({ state, reason, open_questions }))((await send(path)).body), hold);
+  assert.equal((await publish({ state: null, reason: null, open_questions: 0 })).status, 200);
+  assert.equal((await send(path)).body.reason, null);
+  assert.equal((await send(path)).body.state, 'pending');
 });
 
 test('Studio status refuses content and oversized bodies without logging them', async t => {

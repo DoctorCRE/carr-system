@@ -70,7 +70,7 @@ function validStudioStatus(value) {
       !Number.isSafeInteger(value.open_questions) || value.open_questions < 0) return false;
   if (value.state === null) return value.reason === null && value.open_questions === 0;
   if (value.state === 'needs_attention') return ['extraction_failed', 'transcript_unavailable', 'transient_ceiling'].includes(value.reason);
-  return value.state === 'held_review' && (['summary_repeats_transcript', 'transcript_unavailable'].includes(value.reason) ||
+  return value.state === 'held_review' && (['summary_repeats_transcript', 'transcript_unavailable', 'budget'].includes(value.reason) ||
     (value.reason === 'open_review_questions' && value.open_questions > 0));
 }
 
