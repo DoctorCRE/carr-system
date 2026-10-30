@@ -3,13 +3,15 @@ import json
 import runpy
 from pathlib import Path
 import subprocess
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 from unittest import TestCase, main, mock
 
 CLI = Path(__file__).resolve().parents[1] / 'bin/review-pr'
 
 
 class ReviewPR(TestCase):
-    def run_review(self, verdict='APPROVE', moved=False, malformed=False):
+    def run_review(self, verdict='APPROVE', moved=False, malformed=False, missing=()):
         calls, comments = [], []
 
         def run(*command, **options):
@@ -31,7 +33,7 @@ class ReviewPR(TestCase):
             return output
 
         main_fn = runpy.run_path(str(CLI))['main']
-        with mock.patch('sys.argv', [str(CLI), 'owner/repo', '42']), mock.patch.dict(main_fn.__globals__, run=run):
+        with mock.patch('sys.argv', [str(CLI), 'owner/repo', '42']), mock.patch.dict(main_fn.__globals__, run=run, skill_findings=lambda body: list(missing)):
             try: main_fn()
             except (ValueError, subprocess.CalledProcessError) as failure: return str(failure), calls, ''.join(comments)
         return None, calls, ''.join(comments)
@@ -56,6 +58,13 @@ class ReviewPR(TestCase):
                 self.assertEqual(error is None, options.get('verdict') == 'CHANGES', error)
                 self.assertEqual(bool(comment), options.get('verdict') == 'CHANGES' or options.get('moved') == 'after-comment')
                 self.assertEqual(any(args[1:2] == ['merge'] for name, args, _ in calls if name == 'gh'), options.get('moved') == 'after-comment')
+
+    def test_missing_skill_is_posted_and_prevents_auto_merge(self):
+        error, calls, comment = self.run_review(missing=['Required skill did not run: example'])
+        self.assertIsNone(error)
+        self.assertIn('VERDICT: CHANGES', comment)
+        self.assertIn('Required skill did not run: example', comment)
+        self.assertFalse(any(args[1:2] == ['merge'] for name, args, _ in calls if name == 'gh'))
 
     def test_dot_polls_thread_on_paid_run_schedule(self):
         error, calls, _ = self.run_review()
