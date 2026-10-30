@@ -94,8 +94,8 @@
   },
   "assurance_slice": {
     "schema_version": "assurance-slice-contract.v1",
-    "contract_digest": "sha256:99985e871a85e3326609abe121ba42a6e628c80b1116f4636f5b5b12746f9c3e",
-    "ownership_contract_digest": "sha256:79386ba4f0d3ea517704af191a61bee3ca039405a3315c974c088e55b70d134a",
+    "contract_digest": "sha256:b22533d0b548fb004cbdffe6d459b1e515e63c4572544ded73407d13ec7f9981",
+    "ownership_contract_digest": "sha256:fd9550564595ae00f685cc4d9f77c718c31aa8dd09e195ee4e105655b5a0b4a2",
     "work_request": {
       "id": "wr:assurance-kernel",
       "state_version": 3,
@@ -167,7 +167,7 @@
         "runner": "python_pytest",
         "test_artifact": {
           "path": "tools/test-assurance-slice-compiler.py",
-          "digest": "sha256:dc8951bd37e2c26e6771ef801e3ae0793096782b032b967754954e82d59636c2"
+          "digest": "sha256:33e3b8ee6edb10ede322c6fb75229ebd4e50750fa7328fab74c990a7ac71fbd9"
         },
         "environment": {
           "environment_ref": "environment:repository-python-lock",

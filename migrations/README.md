@@ -37,7 +37,9 @@ filename/checksum ledger with the source. A regression in either side fails CI.
 ## Rules
 
 - **Forward-only, numbered.** `NNNN_name.sql`, applied in filename order by
-  `tools/migrate.py` (`run.sh migrate`). A bad migration is fixed by a NEW
+  `tools/migrate.py` (`run.sh migrate`) for the pending files in each run.
+  The applied ledger is a set of full filenames and SHA-256 checksums. A lower
+  filename may arrive after a higher filename has applied. A bad migration is fixed by a NEW
   migration; the runner sha-checks applied files and refuses drift.
 - **Rehearse on a Neon branch first.** Risky changes run against a branch of
   production data before production (blueprint §4). Build sessions get
@@ -76,14 +78,27 @@ filename/checksum ledger with the source. A regression in either side fails CI.
 
 ## Resync a migration PR with main
 
-`tools/migrate.py` treats the applied ledger as a prefix, so a new migration must
-sort above every migration on main. When main moves under an open migration PR, all steps are required:
+Allocate the next free number above main and every open PR when creating a
+migration. The slot stays with that filename when unrelated higher numbers
+merge first. Gates reject occupied slots, changed checksums, missing applied
+files, and incomplete atomic groups. They do not require an applied filename
+prefix. The immutable baseline still forbids adding unregistered historical
+files at or below its cutoff.
+
+When main moves under an open migration PR, all steps are required:
 
 1. Merge `origin/main` and keep its `db/schema.sql`.
-2. If the migration-open-pr check names a new slot, rename the migration and update its references.
-3. Run `python ops/migration-shadow.py --base origin/main` to verify the pending migrations on PostgreSQL 18. Keep the snapshot from main; the scheduled refresh updates it separately.
+2. Resolve any actual slot collision and update the renamed migration's references.
+3. Run `python ops/migration-shadow.py --base origin/main` on PostgreSQL 18. Keep the snapshot from main.
 
-Briefs give the rule ("next number above main"), never a fixed number.
+The shadow applies the base branch's pending migrations before the PR's additions.
+SQL dependencies still matter. A migration that needs another PR must name that
+dependency and land after it. Embedded `$current_grants$` contracts must describe
+the combined grants; set membership cannot make stale SQL compatible.
+Applied rows cannot be updated, deleted, or truncated. Each successful migration
+and its checksum commit in the same runner-owned transaction.
+
+Briefs give the allocation rule, never a fixed number.
 
 ## Files
 
@@ -139,8 +154,8 @@ or an applied-file SHA mismatch.
 
 `tools/migration_number_contract.py` freezes the exact filename sets for every
 historical duplicate prefix, and `tools/migrate.py` refuses any new or altered
-collision. A new migration takes the next number above `origin/main`, and the
-migration-open-pr check names the slot when main moves (see the resync steps above).
+collision. A new migration takes the next free number above `origin/main` and all open PRs.
+The migration-open-pr check names a replacement only for a real slot collision.
 The rule going forward is therefore simple: preserve the frozen history and take the
 next number immediately before creating every new migration.
 

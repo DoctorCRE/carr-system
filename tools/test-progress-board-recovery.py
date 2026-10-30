@@ -1,6 +1,7 @@
 """Synthetic record replies exercise ambiguous board writes without a service."""
 import copy
 import unittest
+import uuid
 from unittest.mock import patch
 
 import progress_board as board
@@ -50,7 +51,7 @@ class BoardRecoveryTests(unittest.TestCase):
             self.assertEqual(board.publish_immutable_page("synthetic-page", {"notes": ["fixture"]}), 1)
         self.assertEqual(len(fixture.writes), 2)
         self.assertEqual(fixture.writes[0], fixture.writes[1])
-        self.assertTrue(fixture.writes[0]["idempotency_key"].startswith("board-"))
+        self.assertEqual(str(uuid.UUID(fixture.writes[0]["idempotency_key"])), fixture.writes[0]["idempotency_key"])
 
     def test_conflicting_or_unreadable_readback_never_resends(self):
         for mode in ("conflict", "unreadable"):
@@ -69,7 +70,7 @@ class BoardRecoveryTests(unittest.TestCase):
                 "default_answer": "one", "asker_ref": "orchestrator:synthetic"}
         args["idempotency_key"] = board.stable_key("ask-board-question", args)
         with patch.object(board.repo_lib("record_call"), "call_verb", side_effect=fixture):
-            self.assertTrue(board.call_verb("ask-board-question", args)["ok"])
+            self.assertTrue(board.board_reply("ask-board-question", args)["ok"])
         self.assertEqual(len(fixture.writes), 1)
 
     def test_transport_diagnostics_exclude_reply_payload(self):
@@ -77,7 +78,7 @@ class BoardRecoveryTests(unittest.TestCase):
         result = record.VerbResult("read-progress-board", record.TRANSIENT, detail="synthetic-private-payload")
         with patch.object(record, "call_verb", return_value=result):
             with self.assertRaises(RuntimeError) as raised:
-                board.call_verb("read-progress-board", {"board_id": "synthetic"})
+                board.board_reply("read-progress-board", {"board_id": "synthetic"})
         self.assertNotIn("synthetic-private-payload", str(raised.exception))
         self.assertIn("elapsed=", str(raised.exception))
 

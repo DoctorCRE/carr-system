@@ -615,12 +615,6 @@
       "map-architecture"
      ],
      "bash_patterns": []
-    },
-    {
-     "kind": "path_rule",
-     "path_globs": [
-      "*control-room/public/*"
-     ]
     }
    ]
   },
@@ -816,7 +810,7 @@
    "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "4a9188f3": {
-   "moment": "a proposed guidance-file PR at a partner-correction/decision trigger",
+   "moment": "a team-memory convention proposal at a partner-correction/decision trigger",
    "routes": [
     {
      "kind": "trigger",
@@ -832,7 +826,7 @@
      ]
     }
    ],
-   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
+   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
   },
   "4c21d86b": {
    "moment": "merge_survivor verb check (confirm-merge)",
@@ -1175,7 +1169,7 @@
      ]
     }
    ],
-   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
+   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
   },
   "5f8c661d": {
    "moment": "vendor introduction work (intro_politics scope)",
@@ -1314,10 +1308,8 @@
      "path_globs": [
       "*.html",
       "*dealroom/*",
-      "*control-room/public/*",
       "*design/*",
-      "*.css",
-      "*workspace/public/*"
+      "*.css"
      ]
     }
    ]
@@ -1420,7 +1412,7 @@
      ]
     }
    ],
-   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
+   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
   },
   "7105955b": {
    "moment": "loop_successor schema (close-loop verb)",
@@ -1646,9 +1638,7 @@
      "kind": "path_rule",
      "path_globs": [
       "*dealroom/*",
-      "*workspace/public/*",
       "*.css",
-      "*control-room/public/*",
       "*design/*",
       "*.html"
      ]
@@ -1775,7 +1765,7 @@
      ]
     }
    ],
-   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
+   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
   },
   "88e9b5eb": {
    "moment": "blocker_decider gate",
@@ -1885,8 +1875,6 @@
      "kind": "path_rule",
      "read_only": true,
      "path_globs": [
-      "*control-room/public/*",
-      "*workspace/public/*",
       "*dealroom/*",
       "*design/*",
       "*.css",
@@ -1932,7 +1920,7 @@
      ]
     }
    ],
-   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
+   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
   },
   "9530fb1c": {
    "moment": "the moment a session says 'the right fix is X'",
@@ -1981,7 +1969,7 @@
      ]
     }
    ],
-   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
+   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
   },
   "9873a0d2": {
    "moment": "a partner re-explains the same how-to twice",
@@ -2006,7 +1994,7 @@
      ]
     }
    ],
-   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
+   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
   },
   "98e74e7c": {
    "moment": "reviewing a fed link or source",
@@ -2231,7 +2219,7 @@
      ]
     }
    ],
-   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
+   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
   },
   "af7de070": {
    "moment": "a tool call blocked by a permission classifier",
@@ -2347,11 +2335,9 @@
      "kind": "path_rule",
      "read_only": true,
      "path_globs": [
-      "*control-room/public/*",
       "*.html",
       "*.css",
       "*design/*",
-      "*workspace/public/*",
       "*dealroom/*"
      ]
     }
@@ -2544,7 +2530,7 @@
      ]
     }
    ],
-   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
+   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
   },
   "c66dc739": {
    "moment": "reading/capturing Joe's mail",
@@ -2998,9 +2984,7 @@
       "*dealroom/*",
       "*design/*",
       "*.css",
-      "*control-room/public/*",
-      "*.html",
-      "*workspace/public/*"
+      "*.html"
      ]
     }
    ]
@@ -3224,7 +3208,7 @@
      ]
     }
    ],
-   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
+   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
   },
   "fc4d7753": {
    "moment": "any turn - evaluating whether to add structure or ideas",
@@ -3282,7 +3266,7 @@
      ]
     }
    ],
-   "note": "Guidance changes use CLAUDE.md, AGENTS.md or skills in a PR; proposals bind nobody until merged."
+   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
   },
   "76fcbed6": {
    "moment": "Joe sends a link, article, repo, video or other source",
@@ -3429,8 +3413,6 @@
      "read_only": true,
      "path_globs": [
       "*dealroom/*",
-      "*workspace/public/*",
-      "*control-room/public/*",
       "*design/*",
       "*.html",
       "*share*"

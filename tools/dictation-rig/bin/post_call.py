@@ -29,6 +29,8 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from lib.fence import DATA_SENTENCE  # noqa: E402
+from lib.record_call import call_command  # noqa: E402
 
 SCHEMA_VERSION = 1
 CONTEXT_FILE = "call-context.json"
@@ -593,7 +595,7 @@ def command_distiller(request: dict[str, Any], command: str | None = None, runne
 def _distiller_instruction() -> str:
     """Require exact context IDs and transcript-supported proposals."""
     return (
-        "You distill a Joe-and-Dell weekly commercial-real-estate call. "
+        "You distill a Joe-and-Dell weekly commercial-real-estate call. " + DATA_SENTENCE + " "
         "Use only exact deal_id and party_id values present in CONTEXT; never copy display names into ID fields. "
         "Extract each distinct action once, with exactly one accountable owner in joe_tasks or dell_tasks. "
         "Assign it to the partner who explicitly commits to doing it, even if the other partner owns the deal. "
@@ -625,9 +627,10 @@ def _distiller_instruction() -> str:
         "Use the exact agreed step text. Apply the task date rules to next_date, using null for missing or ambiguous dates. "
         "Do not turn every assigned task into a replacement next step. "
         "Next steps and phase moves are applied to the cards automatically unless needs_review is set. "
-        "Set needs_review to null only when Joe and Dell plainly stated the change for that exact deal and nobody "
+        "Set needs_review to null only when Joe or Dell plainly stated the change for that exact deal and nobody "
         "disputed it. Otherwise set needs_review to one short sentence saying what a partner must decide; it then "
-        "waits as an approval card. When they disagree or it is unclear which deal they mean, also add a review question. "
+        "waits as an approval card. A change stated only by another speaker must wait for partner review. "
+        "When they disagree or it is unclear which deal they mean, also add a review question. "
         "A deal update's evidence must be the exact words that name the deal and state its change; when the phase and "
         "the next step were said in different sentences, give them as two deal_updates for the same deal. "
         "A request to tell, update, email, or draft a message to an exact attached participant creates a draft_proposals item. "
@@ -682,29 +685,15 @@ def default_distiller(request: dict[str, Any]) -> dict[str, Any]:
     return reply["structured_output"]
 
 
-def call_verb(verb: str, args: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+def call_record_command(verb: str, args: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
     """Use the partner's existing local identity; rehearsals inject an offline route."""
     command = os.environ.get("CARR_POST_CALL_VERB_COMMAND")
     argv = shlex.split(command) if command else [sys.executable, str(Path(__file__).resolve().parents[3] / "tools" / "call-verb.py")]
-    try:
-        done = subprocess.run(argv + [verb, json.dumps(args)], capture_output=True, text=True,
-                              timeout=60, check=False)
-    except (OSError, subprocess.SubprocessError) as exc:
-        return False, {"error": type(exc).__name__}
-    reply: dict[str, Any] = {}
-    for line in reversed(done.stdout.strip().splitlines()):
-        try:
-            parsed = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            reply = parsed
-            break
-    return done.returncode == 0 and reply.get("ok") is True, reply
+    return call_command(argv, verb, args, timeout=60)
 
 
 def fetch_context(session_dir: Path) -> dict[str, Any]:
-    ok, board = call_verb("deal-room-board", {"workspace": "all"})
+    ok, board = call_record_command("deal-room-board", {"workspace": "all"})
     if not ok or not isinstance(board.get("deals"), list):
         raise ContractError("deal-room-board unavailable while fetching call context")
     if any(not isinstance(deal, dict) or not isinstance(deal.get("id"), str) or not deal["id"]
@@ -716,7 +705,7 @@ def fetch_context(session_dir: Path) -> dict[str, Any]:
            and deal.get("phase") not in {"closed", "invoiced"}]
     deals: list[dict[str, Any]] = []
     for start in range(0, len(ids), 50):
-        ok, reply = call_verb("get-call-context", {"deal_ids": ids[start:start + 50]})
+        ok, reply = call_record_command("get-call-context", {"deal_ids": ids[start:start + 50]})
         if not ok or not isinstance(reply.get("deals"), list):
             raise ContractError("get-call-context unavailable while fetching call context")
         deals.extend(reply["deals"])
@@ -826,13 +815,13 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
                        "next_attempt_at": next_attempt_at, "reason": str(exc)})
         write_private(session_dir / STATUS_FILE, status)
         return status
+    stored_context = read_json(session_dir / CONTEXT_FILE) or {}
+    speaker_context = {**context, "speaker_labels": stored_context.get("speaker_labels"),
+                       "local_partner": stored_context.get("recorder")}
     try:
         import post_call_jev
 
-        stored_context = read_json(session_dir / CONTEXT_FILE) or {}
-        jev_context = {**context, "speaker_labels": stored_context.get("speaker_labels"),
-                       "local_partner": stored_context.get("recorder")}
-        result = post_call_jev.check_distillation(result, jev_context, transcript, client=_jev_fixture_client())
+        result = post_call_jev.check_distillation(result, speaker_context, transcript, client=_jev_fixture_client())
     except Exception as exc:
         exception_class = type(exc).__name__
         deal_check_status = {"status": "unavailable", "exception_class": exception_class}
@@ -844,7 +833,7 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
                              f"exception={exception_class}\n")
         except OSError:
             pass
-    result = mark_automatic(result, transcript, context)
+    result = mark_automatic(result, transcript, speaker_context)
     write_private(session_dir / REPORT_FILE, result)
     return _complete_session(session_dir, result)
 
@@ -937,8 +926,67 @@ def _supports(evidence: str, field: str, value: dict[str, Any], deal_name: str) 
     return None
 
 
-def _automatic_hold(update: dict[str, Any], field: str, report: dict[str, Any], spoken: str,
-                    deal_name: str) -> str | None:
+PARTNERS = ("Joe", "Dell")
+
+
+def _one_system_voice(transcript: dict[str, Any]) -> bool:
+    """transcribe_session.py ran the diarizer on system audio and heard exactly one voice."""
+    tracks = transcript.get("speaker_tracks")
+    system = tracks.get("system") if isinstance(tracks, dict) else None
+    return (isinstance(system, dict) and system.get("diarized") is True
+            and type(system.get("speakers")) is int and system["speakers"] == 1)
+
+
+def _speaker_partner(speaker: str, labels: dict[str, Any], local_partner: Any, one_system_voice: bool) -> str | None:
+    if speaker == labels.get("system"):
+        # The weekly-call system label assumes the other partner. It names Dell
+        # (or Joe) only when the diarizer heard that one voice and nobody else.
+        remote = local_partner in PARTNERS and speaker in PARTNERS and speaker != local_partner
+        return speaker.lower() if remote and one_system_voice else None
+    if speaker in PARTNERS:
+        return speaker.lower()
+    if speaker == "Me" and labels.get("mic", "Me") == "Me" and local_partner in PARTNERS:
+        return str(local_partner).lower()
+    if speaker == "mic" and labels.get("mic") in PARTNERS:
+        return str(labels["mic"]).lower()
+    return None
+
+
+def _partner_evidence(quote: str, transcript: Any, context: dict[str, Any]) -> str | None:
+    """The partner whose own consecutive words contain the quote, or None.
+
+    Whisper splits one sentence across segments, so a speaker's consecutive
+    segments are read as one run; the quote must sit inside one run on word
+    boundaries, ignoring case and punctuation.
+    """
+    wanted = _words(quote)
+    if not wanted or not isinstance(transcript, dict) or not isinstance(transcript.get("segments"), list):
+        return None
+    labels = context.get("speaker_labels")
+    if not isinstance(labels, dict):
+        labels = {}
+    one_system_voice = _one_system_voice(transcript)
+    runs: list[tuple[str, list[str]]] = []
+    for segment in transcript["segments"]:
+        if not isinstance(segment, dict) or not isinstance(segment.get("text"), str):
+            continue
+        speaker = segment.get("speaker")
+        if not isinstance(speaker, str):
+            runs.append(("", []))
+        elif runs and runs[-1][0] == speaker:
+            runs[-1][1].append(segment["text"])
+        else:
+            runs.append((speaker, [segment["text"]]))
+    for speaker, texts in runs:
+        if speaker and f" {wanted} " in f" {_words(' '.join(texts))} ":
+            partner = _speaker_partner(speaker, labels, context.get("local_partner"), one_system_voice)
+            if partner:
+                return partner
+    return None
+
+
+def _automatic_hold(update: dict[str, Any], field: str, report: dict[str, Any],
+                    deal_name: str, transcript: Any, context: dict[str, Any]) -> str | None:
     """Why one stated change must stay a card for Joe or Dell, or None to apply it.
 
     Joe's 2026-10-26 ruling: confident changes apply themselves; anything the
@@ -954,8 +1002,8 @@ def _automatic_hold(update: dict[str, Any], field: str, report: dict[str, Any], 
     if field == "next_step" and not value.get("next_date"):
         return "No date was stated for this next step."
     evidence = _words(update.get("evidence"))
-    if not evidence or f" {evidence} " not in f" {spoken} ":
-        return "The quoted evidence was not found word for word in the transcript."
+    if not _partner_evidence(str(update.get("evidence") or ""), transcript, context):
+        return "The quoted change was not stated by an identified partner."
     unsupported = _supports(evidence, field, value, deal_name)
     if unsupported:
         return unsupported
@@ -977,17 +1025,36 @@ def _automatic_hold(update: dict[str, Any], field: str, report: dict[str, Any], 
 
 def mark_automatic(result: dict[str, Any], transcript: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """Label each stated next step and phase move automatic or for review."""
-    segments = transcript.get("segments") if isinstance(transcript, dict) else None
-    spoken = _words(" ".join(str(seg.get("text", "")) for seg in segments or [] if isinstance(seg, dict)))
     names = {deal.get("id"): str(deal.get("name") or "") for deal in context.get("deals", []) if isinstance(deal, dict)}
     for update in result.get("deal_updates", []):
         for field in AUTOMATIC_FIELDS:
             value = update.get(field)
             if isinstance(value, dict):
-                hold = _automatic_hold(update, field, result, spoken, names.get(update.get("deal_id"), ""))
+                hold = _automatic_hold(update, field, result, names.get(update.get("deal_id"), ""),
+                                       transcript, context)
                 value["apply"] = "review" if hold else "automatic"
                 value["review_reason"] = hold
     return result
+
+
+def automatic_evidence(session_dir: Path) -> list[dict[str, str] | None]:
+    """Attest candidate quotes against the private recorded transcript, never model attribution."""
+    items = sanitized_candidates(session_dir)["legacy_items"]
+    try:
+        raw = (session_dir / "transcript.json").read_bytes()
+        transcript = json.loads(raw)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return [None] * len(items)
+    stored = read_json(session_dir / CONTEXT_FILE) or {}
+    context = {"speaker_labels": stored.get("speaker_labels"), "local_partner": stored.get("recorder")}
+    source_sha256 = hashlib.sha256(raw).hexdigest()
+    sources = []
+    for item in items:
+        quote = str(item.get("evidence_quote") or "")
+        speaker = _partner_evidence(quote, transcript, context)
+        sources.append({"speaker": speaker, "quote_sha256": hashlib.sha256(quote.encode("utf-8")).hexdigest(),
+                        "source_sha256": source_sha256} if speaker else None)
+    return sources
 
 
 def automatic_candidates(session_dir: Path) -> list[dict[str, Any]]:

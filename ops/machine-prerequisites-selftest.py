@@ -28,10 +28,9 @@ from lib.machine_prerequisites import (
 failed: list[str] = []
 
 
-def check(label: str, passed: bool) -> None:
-    print(("  ok  " if passed else "  FAIL ") + label)
-    if not passed:
-        failed.append(label)
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(ok="  ok  {label}", fail="  FAIL {label}", detail=None, failures=failed)
 
 
 def fake_runner(returncode: int, version: str = "OpenSSL fixture"):

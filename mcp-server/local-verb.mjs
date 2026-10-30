@@ -5,7 +5,7 @@
 // the production database and ran the verb's handler code locally — entirely
 // bypassing the deployed Worker's identity derivation (mcp-server/src/
 // identity.js), its profile gate (mcp.js's callTool), and its read-call
-// instrumentation (migration 0108's tool_read_call). Proven live 2026-08-13:
+// instrumentation (migration 0108's tool_read_call, tool_read_count since 1041). Proven live 2026-08-13:
 // a standing-context call through this path left no tool_read_call row; the
 // same verb through the real /mcp endpoint does.
 //
@@ -269,6 +269,8 @@ async function runViaWorker(verbName, verbArgs) {
   let out;
   try { out = JSON.parse(text); } catch { out = text; }
   console.log(JSON.stringify(out, null, 2));
+  // The data-not-instructions notice goes to stderr: stdout stays one JSON value for scripts.
+  for (const item of (result.content || []).slice(1)) if (item?.type === "text") console.error(item.text);
 }
 
 // ---------------------------------------------------------------------------

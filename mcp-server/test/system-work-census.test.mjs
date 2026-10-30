@@ -1,6 +1,8 @@
 // Test system work census counts and pagination.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {canonicalJson} from '../src/artifact-trust.js';
 import {readSystemWorkCensus,SYSTEM_WORK_LEGS,SYSTEM_WORK_KINDS,systemWorkActions,systemWorkTools} from '../src/system-work-census.v5.js';
 const actor={slug:'joe',human:true,id:'00000000-0000-4000-8000-000000000001'};
 const now=()=>new Date('2026-10-01T12:00:00Z');
@@ -128,28 +130,32 @@ test('cursor binds exact identity and decoded values always refuse with typed er
  for(const bad of ['null','[]','1','"text"','{}'])
   await assert.rejects(()=>read(externalFixture(rows),{cursor:Buffer.from(bad).toString('base64url')}),e=>e.code==='AUTHORIZATION_REFUSED');
 });
-test('paged external history is searchable beyond the first snapshot and gaps stay partial',async()=>{
- const pages=[{board_id:'carr-v5-external-synthetic-0',version:1,count:1},{board_id:'carr-v5-external-synthetic-1',version:1,count:1}];
- const client=externalFixture([], {schema:'system-work-external.v2',pages,item_count:2});
+const inventoryHash=payload=>createHash('sha256').update(canonicalJson(payload)).digest('hex');
+function inventoryFixture(payload, manifest={}) {
+ const client=externalFixture([], {schema:'system-work-external.v3',item_count:payload.items.length,digest:inventoryHash(payload),...manifest});
  const query=client.query;
- client.query=async(sql,params)=>sql.includes('board_id=any')?{rows:pages.map((p,i)=>({board_id:p.board_id,version:'1',snapshot_json:{items:[{...row('pull_request',i),title:i?'Ancient merged feature':'Recent merged feature',kind:'pull_request',completed:true}]}}))}:query(sql,params);
- const result=await read(client,{live_library:true,kinds:'pull_request',text:'Ancient'});
+ client.query=async(sql,params)=>sql.includes('system_work_census_inventory')?{rows:[{payload}]}:query(sql,params);
+ return client;
+}
+test('external history is read from the inventory row and checked against the manifest',async()=>{
+ const payload={items:[{...row('pull_request',0),title:'Recent merged feature',kind:'pull_request',completed:true},{...row('pull_request',1),title:'Ancient merged feature',kind:'pull_request',completed:true}]};
+ const result=await read(inventoryFixture(payload),{live_library:true,kinds:'pull_request',text:'Ancient'});
  assert.equal(result.items.length,1);assert.equal(result.items[0].id,'pull_request-1');assert.equal(result.census_complete,true);
- const completeQuery=client.query;
- client.query=async(sql,params)=>{const r=await completeQuery(sql,params);return sql.includes('board_id=any')?{rows:r.rows.slice(0,1)}:r;};
- const gap=await read(client,{live_library:true,kinds:'pull_request'});
- assert.equal(gap.census_complete,false);assert.equal(gap.items.length,1);assert.equal(gap.coverage[0].state,'partial');
+ for(const manifest of [{digest:'0'.repeat(64)},{item_count:3}]) {
+  const gap=await read(inventoryFixture(payload,manifest),{live_library:true,kinds:'pull_request'});
+  assert.equal(gap.census_complete,false);assert.equal(gap.items.length,0);
+  assert.equal(gap.coverage.find(item=>item.kind==='pull_request').state,'partial');
+ }
 });
-test('invalid stored external page versions leave coverage partial and preserve healthy sources',async()=>{
- const page={board_id:'carr-v5-external-synthetic-0',version:1,count:1};
- for(const version of ['1e0','01',true,'9007199254740993',9007199254740992,null]){
-  const client=externalFixture([], {schema:'system-work-external.v2',pages:[page],item_count:1});
-  const query=client.query;
-  client.query=async(sql,params)=>sql.includes('board_id=any')?{rows:[{board_id:page.board_id,version,snapshot_json:{items:[{...row('pull_request'),kind:'pull_request'}]}}]}:query(sql,params);
-  const result=await read(client,{kinds:'loop,pull_request'});
-  assert.deepEqual(result.items.map(item=>item.kind),['loop']);
+test('a leftover paged manifest or an unreadable inventory table is never complete',async()=>{
+ const legacy=externalFixture([], {schema:'system-work-external.v2',pages:[{board_id:'carr-v5-external-x',version:1,count:1}],item_count:1});
+ const noRow=inventoryFixture({items:[]});
+ const query=noRow.query;
+ noRow.query=async(sql,params)=>{if(sql.includes('system_work_census_inventory'))throw new Error('missing');return query(sql,params);};
+ for(const client of [legacy,noRow]) {
+  const result=await read(client,{live_library:true,kinds:'pull_request'});
   assert.equal(result.census_complete,false);
-  assert.equal(result.coverage.find(item=>item.kind==='pull_request').state,'partial');
+  assert.notEqual(result.coverage.find(item=>item.kind==='pull_request').state,'complete');
  }
 });
 test('actions obey owning workflow states rather than advertising illegal writes',()=>{
@@ -206,6 +212,7 @@ test('a listed in_progress Work Request opens through work-request-card', async 
  client.query=async(sql,params)=>{
   if(sql.includes('work-request-intake:card')) return {rows:[]};
   if(sql.includes('work-request-intake:readable-card')) return {rows:[request]};
+  if(sql.includes('work-request-intake:slices')) return {rows:[]};
   if(sql.includes('work-request-intake:acting-identity')) return {rows:[]};
   const result=await query(sql,params);
   if(sql.includes('ops.work_request w')&&!sql.includes('count(*) as count'))

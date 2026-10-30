@@ -136,6 +136,26 @@ test('a truncated window suppresses stale on a long-idle draft too', () => {
   assert.deepEqual(view.jobs.map(job => [job.stage, job.stale]), [['build', false]]);
 });
 
+for (const incomplete of [
+  { state: 'unavailable', reason: 'github_http_403', prs: [] },
+  { state: 'ok', truncated: true, prs: Array.from({ length: 100 }, (_, i) => livePr(1000 + i, [])) },
+]) {
+  test(`incomplete ${incomplete.state === 'unavailable' ? 'unavailable' : 'truncated'} repository does not save a paired job finish`, () => {
+    const merged = livePr(21, ['WR557.S1.J1'], { state: 'merged' });
+    const carr = { repo: 'DoctorCRE/carr-system', state: 'ok', prs: [merged] };
+    const app = { repo: 'jbookout/doctorcre-app', ...incomplete };
+    const partial = queueView([jobRow(1)], [carr, app], at);
+    assert.deepEqual(partial.finishes, []);
+
+    const draft = livePr(22, ['WR557.S1.J1'], { repo: app.repo, draft: true });
+    const full = queueView([jobRow(1)], [carr, { repo: app.repo, state: 'ok', prs: [draft] }], at);
+    assert.deepEqual(full.jobs.map(job => [job.stage, job.stale]), [['build', true]]);
+    assert.deepEqual(full.finishes, []);
+    const done = queueView([jobRow(1)], [carr, { repo: app.repo, state: 'ok', prs: [{ ...draft, draft: false, state: 'merged' }] }], at);
+    assert.deepEqual(done.finishes.map(({ finished }) => [finished.stage, finished.prs.length]), [['merged', 2]]);
+  });
+}
+
 test('a job whose saved finish has left the search window keeps its merged stage and PR links', () => {
   const saved = { stage: 'merged', prs: [{ repo: 'DoctorCRE/carr-system', number: 9, state: 'merged', card_id: 'WR557.S1.J1.carr#9' }] };
   const view = queueView([jobRow(1, { finished: saved })], [{ repo: 'DoctorCRE/carr-system', state: 'ok', truncated: true, prs: [] }], at);
@@ -158,7 +178,7 @@ test('only a job first seen merged or closed is saved, once, as its finish', () 
     [['w1', 1, 1], 'merged', ['WR557.S1.J1.carr#21']], [['w1', 1, 2], 'closed', ['WR557.S1.J2.carr#22']]]);
 });
 
-const readQueue = (rows, pullRequests) => workQueueTools({})['work-queue'].handler({ query: async () => ({ rows }), pullRequests }, 'joe', {});
+const readQueue = (rows, pullRequests) => workQueueTools({})['work-queue'].handler({ query: async sql => ({ rows: sql.includes('select s.*') ? [] : rows }), pullRequests }, 'joe', {});
 
 test('queued Codex jobs without a runner start do not widen the search window', async () => {
   const bounds = [];
@@ -197,4 +217,22 @@ test('a merged job is found before its first board read despite 100 newer Card P
   const view = await readQueue([jobRow(1, { started_at: '2026-10-20T12:00:00Z' })], createPullRequestSource({ token: 'synthetic', fetchImpl }));
   assert.equal(view.jobs[0].stage, 'merged');
   assert.equal(view.jobs[0].prs[0].number, 101);
+});
+
+test('a search GitHub flags incomplete_results saves no finish and no stale verdict, and a later complete read still works', async () => {
+  let clock = 0, incomplete = true;
+  const merged = item(21, 'Card: WR557.S1.J1', { state: 'closed', pull_request: { merged_at: '2026-10-27T13:00:00Z' } });
+  const fetchImpl = async () => new Response(JSON.stringify({ total_count: 1, incomplete_results: incomplete, items: [merged] }));
+  const read = createPullRequestSource({ token: 'synthetic', fetchImpl, now: () => clock });
+  const [partial] = await read(REPOS.slice(0, 1));
+  assert.equal(partial.truncated, true);
+  const partialView = queueView([jobRow(1), jobRow(2)], [{ ...partial, prs: [...partial.prs, livePr(22, ['WR557.S1.J2'], { draft: true })] }], at);
+  assert.deepEqual(partialView.finishes, []);
+  assert.deepEqual(partialView.jobs.map(job => job.stale), [false, false]);
+
+  incomplete = false;
+  clock = PULL_REQUEST_TTL_MS;
+  const [full] = await read(REPOS.slice(0, 1));
+  assert.equal(full.truncated, false);
+  assert.deepEqual(queueView([jobRow(1)], [full], at).finishes.map(({ finished }) => finished.stage), ['merged']);
 });

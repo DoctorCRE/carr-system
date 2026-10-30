@@ -25,7 +25,7 @@
 /// own, so a wrong start still decodes into something; only the length
 /// agreement (plus the container's two CRC-32s) rules that out.
 pub fn decode_exact(src: &[u8], expected: usize) -> Option<Vec<u8>> {
-    let mut out: Vec<u8> = Vec::with_capacity(expected);
+    let mut out: Vec<u8> = Vec::new();
     let mut i = 0usize;
 
     while i < src.len() && out.len() < expected {
@@ -36,9 +36,10 @@ pub fn decode_exact(src: &[u8], expected: usize) -> Option<Vec<u8>> {
         if lit == 15 {
             lit = varint(src, &mut i, lit)?;
         }
-        if i + lit > src.len() || lit > expected - out.len() {
+        if lit > src.len() - i || lit > expected - out.len() {
             return None;
         }
+        out.try_reserve(lit).ok()?;
         out.extend_from_slice(&src[i..i + lit]);
         i += lit;
 
@@ -63,6 +64,7 @@ pub fn decode_exact(src: &[u8], expected: usize) -> Option<Vec<u8>> {
         if len > expected - out.len() {
             return None;
         }
+        out.try_reserve(len).ok()?;
         let start = out.len() - dist;
         for k in 0..len {
             let b = out[start + k];
@@ -79,7 +81,7 @@ fn varint(src: &[u8], i: &mut usize, base: usize) -> Option<usize> {
     loop {
         let b = *src.get(*i)?;
         *i += 1;
-        n += b as usize;
+        n = n.checked_add(b as usize)?;
         if b != 0xFF {
             return Some(n);
         }

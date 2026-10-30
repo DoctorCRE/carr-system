@@ -41,10 +41,11 @@ PY = _VENV if _VENV.exists() else Path(sys.executable)
 PROBE = "from exporters.common import VAULT; print(VAULT)"
 
 
-def check(label: str, ok: bool) -> None:
-    print(("  ok   " if ok else "  FAIL ") + label)
-    if not ok:
-        raise AssertionError(label)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(ok="  ok   {label}", fail="  FAIL {label}", detail=None, raises="{label}")
 
 
 def vault_root(carr_vault: str | None) -> str:

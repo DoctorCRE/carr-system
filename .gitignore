@@ -7,6 +7,9 @@ out/
 # canonical out/, and a trailing-slash pattern matches directories only —
 # so the link itself showed up as untracked in every worktree (2026-08-10).
 out
+# Job transcripts, audits and scratch work: client text, never source (audit 3, finding 14).
+/scratchpad/
+/scratchpad
 mcp-server/.neon
 # ...and the ROOT one, which the Neon CLI writes beside it. 37 bytes, one
 # field, `orgId` — the Neon organisation this checkout talks to, not a

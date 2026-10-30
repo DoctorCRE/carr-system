@@ -14,6 +14,18 @@
 //!       name, a length-prefixed address and 12 status bytes, to the end
 //! ```
 //!
+//! The 12 status bytes are three little-endian u32 words: attendee kind,
+//! response, and a word always seen as zero. A TEST-account invitation
+//! (2026-10-28) pins kind 0 = required, 1 = optional and response 4 = no
+//! response yet. Other response codes (0, 1 and 2 are seen) have no ground
+//! truth: they are exported raw and unlabelled. An attendee's own copy of a
+//! meeting does not track the other attendees' replies.
+//!
+//! An occurrence of a recurring series also carries its start at +2.
+//! Outlook writes "Canceled: " before the subject of a meeting its organizer
+//! cancelled; that stored copy is exported as `canceled`, the only lifecycle
+//! the bytes carry. Every other candidate stays unsupported.
+//!
 //! The same class also serializes working-hours blocks. Those carry no Global
 //! Object ID, which is what separates them from meetings.
 //!
@@ -32,6 +44,8 @@ use std::collections::{BTreeMap, BTreeSet};
 const TAG: u16 = 0x0455;
 const CLASS: u16 = 0x006b;
 const START: usize = 574;
+const OCCURRENCE: usize = 2;
+const CANCELED: [&str; 2] = ["Canceled: ", "Cancelled: "];
 const END: usize = 582;
 const MIN_OBJECT: usize = 600;
 const MAX_ATTENDEES: u32 = 500;
@@ -47,6 +61,23 @@ const TICK_HI: u64 = 643_446_720_000_000_000;
 pub struct Attendee {
     pub name: String,
     pub email: String,
+    pub kind_code: u32,
+    pub response_code: u32,
+}
+
+impl Attendee {
+    /// Only codes with TEST-account ground truth get a label.
+    pub fn kind(&self) -> Option<&'static str> {
+        match self.kind_code {
+            0 => Some("required"),
+            1 => Some("optional"),
+            _ => None,
+        }
+    }
+
+    pub fn response(&self) -> Option<&'static str> {
+        (self.response_code == 4).then_some("no_response")
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -60,6 +91,8 @@ pub struct Event {
     pub organizer_email: Option<String>,
     pub body: Option<String>,
     pub attendees: Vec<Attendee>,
+    pub canceled: bool,
+    pub occurrence: bool,
 }
 
 /// Distinct serialized candidates, never combined into an invented revision.
@@ -144,9 +177,12 @@ fn attendees_at(obj: &[u8], p: usize) -> Option<Vec<Attendee>> {
             *slot = String::from_utf16(&utf16(obj.get(q + 1..q + 1 + len)?)).ok()?;
             q += 1 + len;
         }
+        let status = obj.get(q..q + STATUS_BYTES)?;
+        let word = |i: usize| u32::from_le_bytes([status[4 * i], status[4 * i + 1], status[4 * i + 2], status[4 * i + 3]]);
+        let (kind_code, response_code) = (word(0), word(1));
         q += STATUS_BYTES;
         let [name, email] = pair;
-        out.push(Attendee { name, email });
+        out.push(Attendee { name, email, kind_code, response_code });
     }
     (q == obj.len()).then_some(out)
 }
@@ -240,6 +276,9 @@ fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
         .max_by_key(|x| width(x))
         .cloned();
 
+    // The first copy's run can start with the tail of the time-zone tables.
+    let canceled = raw.iter().any(|r| CANCELED.iter().any(|p| r.ends_with(&format!("{p}{subject}"))));
+    let occurrence = obj.get(OCCURRENCE..OCCURRENCE + 8) == obj.get(START..START + 8);
     Some(Event {
         goid,
         start_unix: start,
@@ -250,6 +289,8 @@ fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
         organizer_email,
         body,
         attendees,
+        canceled,
+        occurrence,
     })
 }
 
@@ -274,6 +315,15 @@ mod tests {
 
     /// A synthetic class-0x006b object in the observed layout.
     fn object(with_goid: bool, attendees: &[(&str, &str)]) -> Vec<u8> {
+        object_with(with_goid, "Quarterly Site Review", attendees)
+    }
+
+    fn object_with(with_goid: bool, first_subject: &str, attendees: &[(&str, &str)]) -> Vec<u8> {
+        let status: Vec<_> = attendees.iter().map(|(n, e)| (*n, *e, [0u32; 3])).collect();
+        object_status(with_goid, first_subject, &status)
+    }
+
+    fn object_status(with_goid: bool, first_subject: &str, attendees: &[(&str, &str, [u32; 3])]) -> Vec<u8> {
         let mut obj = vec![0u8; START];
         obj[..2].copy_from_slice(&CLASS.to_le_bytes());
         obj.extend(ticks(1_793_000_000));
@@ -285,16 +335,16 @@ mod tests {
         }
         obj.extend(lp("America/Chicago"));
         obj.extend(lp("US/Central"));
-        for field in ["Quarterly Site Review", "Example Room", "Ada Example", "ada@example.test",
+        for field in [first_subject, "Example Room", "Ada Example", "ada@example.test",
                       "Owner Example", "Agenda line one\r\nline two", "Quarterly Site Review"] {
             obj.extend(u16le(field));
             obj.extend([0, 0]);
         }
         obj.extend((attendees.len() as u32).to_le_bytes());
-        for (name, email) in attendees {
+        for (name, email, status) in attendees {
             obj.extend(lp(name));
             obj.extend(lp(email));
-            obj.extend([0u8; STATUS_BYTES]);
+            obj.extend(status.iter().flat_map(|w| w.to_le_bytes()));
         }
         obj
     }
@@ -322,7 +372,9 @@ mod tests {
         assert_eq!(ev.organizer_email.as_deref(), Some("ada@example.test"), "organizer address");
         assert_eq!(ev.organizer_name.as_deref(), Some("Ada Example"), "organizer name precedes the address");
         assert_eq!(ev.body.as_deref(), Some("Agenda line one\r\nline two"), "notes");
-        assert_eq!(ev.attendees, vec![Attendee { name: "Bo Example".into(), email: "bo@example.test".into() }]);
+        assert_eq!(ev.attendees, vec![Attendee { name: "Bo Example".into(), email: "bo@example.test".into(), ..Default::default() }]);
+        assert!(!ev.canceled, "no cancellation subject");
+        assert!(!ev.occurrence, "no occurrence start at +2");
     }
 
     #[test]
@@ -407,4 +459,60 @@ mod tests {
         assert_eq!(idx.events.len(), 3, "unknown bytes cannot establish equivalent current state");
     }
 
+
+    #[test]
+    fn attendee_kind_and_response_codes_decode() {
+        // TEST-account invitation 2026-10-28: one required and one optional
+        // attendee, neither had answered; Outlook wrote (0, 4, 0) and (1, 4, 0).
+        let obj = object_status(true, "Quarterly Site Review", &[
+            ("Req Example", "req@example.test", [0, 4, 0]),
+            ("Opt Example", "opt@example.test", [1, 4, 0]),
+        ]);
+        let mut idx = Index::default();
+        idx.observe(&envelope(&obj));
+        let ev = idx.events.values().next().expect("decoded");
+        let got: Vec<_> = ev.attendees.iter().map(|a| (a.kind(), a.response(), a.kind_code, a.response_code)).collect();
+        assert_eq!(got, vec![
+            (Some("required"), Some("no_response"), 0, 4),
+            (Some("optional"), Some("no_response"), 1, 4),
+        ]);
+    }
+
+    #[test]
+    fn unverified_response_codes_stay_unlabelled() {
+        let obj = object_status(true, "Quarterly Site Review", &[("Bo Example", "bo@example.test", [7, 1, 0])]);
+        let mut idx = Index::default();
+        idx.observe(&envelope(&obj));
+        let a = &idx.events.values().next().expect("decoded").attendees[0];
+        assert_eq!((a.kind(), a.response(), a.kind_code, a.response_code), (None, None, 7, 1),
+                   "codes without ground truth keep their raw value and no label");
+    }
+
+    #[test]
+    fn a_canceled_subject_marks_the_candidate_canceled() {
+        let obj = object_with(true, "Canceled: Quarterly Site Review", &[("Bo Example", "bo@example.test")]);
+        let mut idx = Index::default();
+        idx.observe(&envelope(&obj));
+        let ev = idx.events.values().next().expect("decoded");
+        assert_eq!(ev.subject.as_deref(), Some("Quarterly Site Review"), "subject keeps its current meaning");
+        assert!(ev.canceled, "Outlook's stored cancellation prefix is exported");
+    }
+
+    #[test]
+    fn a_prefix_on_another_subject_is_not_a_cancellation() {
+        let obj = object_with(true, "Canceled: Something Else Quarterly Site Review", &[]);
+        let mut idx = Index::default();
+        idx.observe(&envelope(&obj));
+        assert!(idx.events.values().all(|e| !e.canceled), "only the exact prefixed copy of the subject counts");
+    }
+
+    #[test]
+    fn an_occurrence_start_at_offset_two_marks_an_occurrence() {
+        let mut obj = object(true, &[]);
+        let start: [u8; 8] = obj[START..START + 8].try_into().unwrap();
+        obj[OCCURRENCE..OCCURRENCE + 8].copy_from_slice(&start);
+        let mut idx = Index::default();
+        idx.observe(&envelope(&obj));
+        assert!(idx.events.values().next().expect("decoded").occurrence);
+    }
 }

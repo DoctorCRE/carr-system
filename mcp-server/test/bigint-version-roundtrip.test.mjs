@@ -34,22 +34,21 @@ test("a published board version can be read and passed straight back to publish"
   });
   const read = await TOOLS["read-progress-board"].handler(fake, joe, { board_id: "project" });
   const args = {
-    idempotency_key: "board-round-trip", board_id: "project",
+    idempotency_key: "00000571-0000-4000-8000-000000000024", board_id: "project",
     base_version: read.snapshot.version, snapshot: read.snapshot.snapshot_json,
   };
   const out = await TOOLS["publish-board-snapshot"].handler(fake, joe, args);
   fake.receipts.get(args.idempotency_key).response.snapshot.version = "3";
   const replay = await TOOLS["publish-board-snapshot"].handler(fake, joe, args);
   const next = await TOOLS["publish-board-snapshot"].handler(fake, joe, {
-    ...args, idempotency_key: "board-after-replay", base_version: replay.snapshot.version,
+    ...args, idempotency_key: "00000571-0000-4000-8000-000000000025", base_version: replay.version,
   });
   assert.equal(read.snapshot.version, 2);
   assert.equal(read.snapshot.snapshot_json.version, "display-value");
-  assert.equal(out.snapshot.version, 3);
-  assert.equal(out.snapshot.id, "9007199254740993");
+  assert.equal(out.version, 3);
   assert.equal(replay.replayed, true);
-  assert.equal(replay.snapshot.version, 3);
-  assert.equal(next.snapshot.version, 4);
+  assert.equal(replay.version, 3);
+  assert.equal(next.version, 4);
 });
 
 
@@ -57,7 +56,7 @@ test("a published board version can be read and passed straight back to publish"
 test("a question revision at MAX_SAFE_INTEGER refuses an unsafe increment before database use", async () => {
   const fake = { query: async () => { throw new Error("database must not be queried"); } };
   await assert.rejects(() => TOOLS["revise-board-question"].handler(fake, joe, {
-    idempotency_key: "revision-exhausted", board_id: "project", question_id: "q1",
+    idempotency_key: "00000571-0000-4000-8000-000000000026", board_id: "project", question_id: "q1",
     base_version: 9007199254740991, prompt: "Updated?", asker_ref: "orchestrator:project",
   }), error => error instanceof ToolError && error.payload.error === "board_base_version_invalid");
 });

@@ -41,7 +41,7 @@ class Fake {
  throw new Error(`unhandled synthetic query: ${s}`);
  }
 }
-const args=(extra={})=>({idempotency_key:'synthetic-key',lead:'L-1',base_version:1,expected_actor:'joe',...extra});
+const args=(extra={})=>({idempotency_key:'00000571-0000-4000-8000-000000000147',lead:'L-1',base_version:1,expected_actor:'joe',...extra});
 test('workspace projection is optional/versioned, exact lifecycle flags, current evidence, no invented search time',async()=>{
  const db=new Fake(),result=await TOOLS['lead-board'].handler(db,human,{workspace:'leads',lead_id:id(1)});
  assert.equal(result.schema_version,'lead-workspace.v1');assert.equal(result.last_search_at,null);assert.equal(result.search_run_coverage,'unavailable');assert.equal(result.detail.correspondence[0].id,id(10));assert.equal(result.detail.correspondence_coverage,'captured_entries_only');assert.equal(result.detail.notes,'Synthetic original entry');
@@ -83,7 +83,7 @@ test('legacy lead-board uses only granted views and preserves lifecycle response
 });
 test('new-lead stores nullable score and reason, resolves owner, and retains calling actor audit',async()=>{
  for(const [state,owner,expected] of [['AL',undefined,'dell'],['FL',undefined,'joe'],['AL','joe','joe'],['FL','dell','dell']]){
-  const db=new Fake();db.state=state;const a={idempotency_key:'create-key',party_id:id(2),stage:'new',score:0,score_reason:'Expansion evidence',...(owner?{owner}:{})};
+  const db=new Fake();db.state=state;const a={idempotency_key:'00000571-0000-4000-8000-000000000148',party_id:id(2),stage:'new',score:0,score_reason:'Expansion evidence',...(owner?{owner}:{})};
   await TOOLS['new-lead'].handler(db,human,a);
   const cols=db.inserted.s.match(/lead \(([^)]+)\)/)[1].split(',').map(x=>x.trim());
   const values=db.inserted.s.match(/values \(([^)]+)\)/)[1].split(',').map(x=>db.inserted.p[Number(x.trim().slice(1))-1]);
@@ -91,11 +91,11 @@ test('new-lead stores nullable score and reason, resolves owner, and retains cal
   assert.equal(row.score,0);assert.equal(row.score_reason,'Expansion evidence');assert.equal(row.owner_id,expected==='dell'?id(901):human.id);assert.equal(row.owner_label,expected==='dell'?'Dell Example':human.display);assert.equal(row.created_by,human.id);assert.equal(row.updated_by,human.id);
   assert.equal(db.events[0].new.owner,expected);assert.equal(db.events[0].new.score,0);
  }
- const db=new Fake();await TOOLS['new-lead'].handler(db,human,{idempotency_key:'null-key',party_id:id(2),stage:'new',score:null,score_reason:null});assert.equal(db.events[0].new.score,null);assert.equal(db.events[0].new.score_reason,null);
+ const db=new Fake();await TOOLS['new-lead'].handler(db,human,{idempotency_key:'00000571-0000-4000-8000-000000000149',party_id:id(2),stage:'new',score:null,score_reason:null});assert.equal(db.events[0].new.score,null);assert.equal(db.events[0].new.score_reason,null);
 });
 test('new and update leads reject invalid scores reasons and owners before mutation',async()=>{
  for(const verb of ['new-lead','update-lead'])for(const [field,bad,code] of [['score',-1,'invalid_score'],['score',101,'invalid_score'],['score',0.5,'invalid_score'],['score','75','invalid_score'],['score',true,'invalid_score'],['score',NaN,'invalid_score'],['score_reason',3,'invalid_score_reason'],['score_reason',{},'invalid_score_reason'],['owner','other','invalid_owner'],['owner',null,'invalid_owner']]){
-  const db=new Fake(),a=verb==='new-lead'?{idempotency_key:'invalid-key',party_id:id(2),stage:'new',[field]:bad}:args({fields:{[field]:bad}});
+  const db=new Fake(),a=verb==='new-lead'?{idempotency_key:'00000571-0000-4000-8000-000000000150',party_id:id(2),stage:'new',[field]:bad}:args({fields:{[field]:bad}});
   await assert.rejects(()=>TOOLS[verb].handler(db,human,a),e=>e.payload?.error===code);assert.equal(db.updated,undefined);assert.equal(db.inserted,undefined);assert.equal(db.events.length,0);
  }
 });
@@ -111,7 +111,7 @@ test('update scores reasons and semantic owner are versioned audited replayable 
 
 test('non-Alabama omitted owner retains the calling executor and omitted score fields default to null',async()=>{
  const db=new Fake(),executor={...human,id:id(902),slug:'codex',display:'Synthetic executor',human:false};
- await TOOLS['new-lead'].handler(db,executor,{idempotency_key:'executor-key',party_id:id(2),stage:'new'});
+ await TOOLS['new-lead'].handler(db,executor,{idempotency_key:'00000571-0000-4000-8000-000000000151',party_id:id(2),stage:'new'});
  assert.equal(db.events[0].new.owner_id,executor.id);assert.equal(db.events[0].new.owner,executor.slug);assert.equal(db.events[0].new.score,null);assert.equal(db.events[0].new.score_reason,null);
 });
 

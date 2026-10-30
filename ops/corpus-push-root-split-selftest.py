@@ -44,12 +44,11 @@ failures: list[str] = []
 checked = 0
 
 
-def check(label: str, ok: bool, detail: str = "") -> None:
-    global checked
-    checked += 1
-    print(("  ok    " if ok else "  FAIL  ") + label + (f"  {detail}" if not ok and detail else ""))
-    if not ok:
-        failures.append(label)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(detail="  {detail}", failures=failures, counters={"checked": "all"}, ns=globals())
 
 
 def main() -> int:

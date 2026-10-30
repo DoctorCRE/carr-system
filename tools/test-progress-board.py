@@ -10,6 +10,7 @@ import copy
 import functools
 import itertools
 import io
+import hashlib
 import json
 import importlib.util
 import os
@@ -153,7 +154,7 @@ class BoardCase(unittest.TestCase):
         self.env["PROGRESS_BOARD_LOCAL_ONLY"] = "1"
         self.fixture = self.root / "gh.json"
         self.gh_log = self.root / "gh.log"
-        door = patch.object(BOARD, "call_verb", side_effect=AssertionError("unit test reached the live verb door"))
+        door = patch.object(BOARD, "board_reply", side_effect=AssertionError("unit test reached the live verb door"))
         self.live_door = door.start()
         self.addCleanup(door.stop)
         self.addCleanup(self.live_door.assert_not_called)
@@ -238,11 +239,13 @@ class ProgressBoardCLI(BoardCase):
         refreshed = {**stale, 'observed_at': iso()}
         remote = {}
         def call(verb, args):
+            if verb == 'publish-census-inventory':
+                return {'ok': True}
             name = args['board_id']
             if verb == 'publish-board-snapshot':
                 remote[name] = {'version': 1, 'snapshot_json': copy.deepcopy(args['snapshot'])}
             return {'ok': True, 'snapshot': copy.deepcopy(remote.get(name)), 'questions': []}
-        with patch.dict(os.environ, self.env), patch.object(BOARD, 'call_verb', call), \
+        with patch.dict(os.environ, self.env), patch.object(BOARD, 'board_reply', call), \
              patch.object(Path, 'home', return_value=self.root), \
              patch.object(cache, 'collect_github', return_value={**refreshed, 'pr_heads': []}) as collect, \
              patch.object(cache, 'unfinished_briefs', return_value=[]):
@@ -261,11 +264,13 @@ class ProgressBoardCLI(BoardCase):
         (self.root / 'boards/system-work-github-cache.json').write_text(json.dumps(external))
         remote = {}
         def call(verb, args):
+            if verb == 'publish-census-inventory':
+                return {'ok': True}
             board = args['board_id']
             if verb == 'publish-board-snapshot':
                 remote[board] = {'version': 1, 'snapshot_json': args['snapshot']}
             return {'ok': True, 'snapshot': remote.get(board), 'questions': []}
-        with patch.dict(os.environ, self.env), patch.object(BOARD, 'call_verb', call):
+        with patch.dict(os.environ, self.env), patch.object(BOARD, 'board_reply', call):
             BOARD.publish_board('carr-v5', costs={})
         self.assertEqual(self.gh_calls(), [])
         self.assertEqual(remote['carr-v5']['snapshot_json']['external_inventory']['observed_at'], external['observed_at'])
@@ -275,7 +280,7 @@ class ProgressBoardCLI(BoardCase):
         self.update_legacy_task('demo','repair','--title','Synthetic repair','--status','running','--executor','codex')
         self.assertEqual(self.read_state('demo')['tasks']['repair'].get('domain'),'system')
 
-    def test_large_history_publishes_bounded_pages_without_losing_rows(self):
+    def test_large_history_is_stored_whole_and_named_by_digest(self):
         self.run_board('init', 'carr-v5', '--title', 'Synthetic board')
         items=[{'id':f'repo:pr:{i}', 'kind':'pull_request', 'title':'Synthetic title '*12,
                 'completed':True,'opened_at':'2026-09-01T00:00:00Z',
@@ -283,19 +288,27 @@ class ProgressBoardCLI(BoardCase):
         external={'schema':'system-work-external.v1','items':items,'complete':True,
                   'observed_at':iso(),'coverage':[],'completed_pr_history':True,'pr_work_refs':[]}
         remote={}
+        stored=[]
         def call(verb,args):
+            if verb=='publish-census-inventory':
+                self.assertEqual(set(args['payload']),{'items'})
+                stored.append(args['payload'])
+                return {'ok':True}
             board=args['board_id']
             if verb=='publish-board-snapshot':
                 self.assertLessEqual(len(json.dumps(args['snapshot'],separators=(',',':'),ensure_ascii=False)),262144)
                 remote[board]={'version':1,'snapshot_json':args['snapshot']}
             return {'ok':True,'snapshot':remote.get(board),'questions':[]}
         (self.root / 'boards/system-work-github-cache.json').write_text(json.dumps(external))
-        with patch.dict(os.environ,self.env), patch.object(BOARD,'call_verb',call):
+        with patch.dict(os.environ,self.env), patch.object(BOARD,'board_reply',call):
             BOARD.publish_board('carr-v5')
         manifest=remote['carr-v5']['snapshot_json']['external_inventory']
-        restored=[row for page in manifest['pages'] for row in remote[page['board_id']]['snapshot_json']['items']]
-        self.assertEqual(restored,items)
+        self.assertEqual(stored[-1]['items'],items)
+        self.assertEqual((manifest['schema'],manifest['item_count']),('system-work-external.v3',len(items)))
+        self.assertEqual(manifest['digest'],hashlib.sha256(json.dumps(stored[-1],sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest())
         self.assertNotIn('items',manifest)
+        self.assertNotIn('pages',manifest)
+        self.assertFalse([name for name in remote if name.startswith('carr-v5-external-')])
 
 
 
@@ -1259,7 +1272,7 @@ class PublishAndAnswers(BoardCase):
                 return {"ok": True, "question": remote["questions"][0]}
             raise AssertionError(verb)
 
-        with patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": str(self.root)}), patch.object(BOARD, "call_verb", caller):
+        with patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": str(self.root)}), patch.object(BOARD, "board_reply", caller):
             result = BOARD.publish_board("demo")
         self.assertEqual(result["snapshot_version"], 1)
         self.assertEqual([verb for verb, _ in calls], ["read-progress-board", "publish-board-snapshot",
@@ -1306,7 +1319,7 @@ class PublishAndAnswers(BoardCase):
                 return {"ok": True, "question": remote["questions"][0]}
             raise AssertionError(verb)
 
-        with patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": str(self.root)}), patch.object(BOARD, "call_verb", caller):
+        with patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": str(self.root)}), patch.object(BOARD, "board_reply", caller):
             BOARD.publish_board("demo")
             BOARD.publish_board("demo")
         self.assertEqual(writes, ["publish-board-snapshot", "ask-board-question"])
@@ -1330,7 +1343,7 @@ class PublishAndAnswers(BoardCase):
                 raise AssertionError(verb)
 
             with self.subTest(mismatch=mismatch), patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": str(self.root)}), \
-                 patch.object(BOARD, "call_verb", caller):
+                 patch.object(BOARD, "board_reply", caller):
                 with self.assertRaisesRegex(RuntimeError, "does not match"):
                     BOARD.poll_board_answers("demo")
                 self.assertFalse((self.root / "boards" / "demo-answers.jsonl").exists())
@@ -1360,7 +1373,7 @@ class PublishAndAnswers(BoardCase):
                 return {"ok": True, "answer": {**answer, "version": 2, "status": "Received"}}
             raise AssertionError(verb)
 
-        with patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": str(self.root)}), patch.object(BOARD, "call_verb", caller):
+        with patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": str(self.root)}), patch.object(BOARD, "board_reply", caller):
             with self.assertRaises(RuntimeError):
                 BOARD.poll_board_answers("demo")
             BOARD.poll_board_answers("demo")
@@ -1385,7 +1398,7 @@ class PublishAndAnswers(BoardCase):
                 raise RuntimeError("board_version_conflict")
             raise AssertionError(verb)
 
-        with patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": str(self.root)}), patch.object(BOARD, "call_verb", caller):
+        with patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": str(self.root)}), patch.object(BOARD, "board_reply", caller):
             BOARD.append_answer_event("demo", {"kind": "answer", "answer": answer})
             BOARD.poll_board_answers("demo")
         events = [json.loads(line) for line in (self.root / "boards" / "demo-answers.jsonl").read_text().splitlines()]
@@ -1515,18 +1528,18 @@ class NeedsJoePublication(unittest.TestCase):
         failures = [RuntimeError("verb unavailable"), subprocess.TimeoutExpired("run.sh", 30),
                     OSError("filesystem unavailable"), FileNotFoundError("zsh"),
                     UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid"), KeyError("version")]
-        for location in ("read_source", "call_verb"):
+        for location in ("read_source", "board_reply"):
             for failure in failures:
                 with self.subTest(location=location, failure=type(failure).__name__):
                     events = []
                     read_effect = failure if location == "read_source" else None
-                    call_effect = failure if location == "call_verb" else None
+                    call_effect = failure if location == "board_reply" else None
                     with patch.object(BOARD, "render", lambda p, **_: events.append(("render", p))), \
                          patch.object(BOARD, "publish_board", lambda p: events.append(("publish", p))), \
                          patch.object(BOARD, "poll_board_answers", lambda p: events.append(("poll", p))), \
                          patch.object(BOARD, "build_all_repos", lambda: events.append(("build", "all-repos"))), \
                          patch.object(needs_joe_local, "read_source", return_value="", side_effect=read_effect), \
-                         patch.object(BOARD, "call_verb", side_effect=call_effect) as call, \
+                         patch.object(BOARD, "board_reply", side_effect=call_effect) as call, \
                          patch("sys.stderr", new_callable=io.StringIO) as err:
                         with self.assertRaises(type(failure)) as raised:
                             BOARD.command_render(Namespace(project=BOARD.LAUNCHD_BOARD, publish=False))
@@ -1554,7 +1567,7 @@ class NeedsJoePublication(unittest.TestCase):
              patch.object(BOARD, "poll_board_answers", lambda p: events.append(("poll", p))), \
              patch.object(BOARD, "build_all_repos", lambda: events.append(("build", "all-repos"))), \
              patch.object(needs_joe_local, "read_source", return_value=""), \
-             patch.object(BOARD, "call_verb", call), patch("sys.stderr", new_callable=io.StringIO):
+             patch.object(BOARD, "board_reply", call), patch("sys.stderr", new_callable=io.StringIO):
             BOARD.command_render(Namespace(project=BOARD.LAUNCHD_BOARD, publish=False))
         self.assertEqual(events, [("render", "carr-v5"), ("build", "all-repos"), ("publish", "carr-v5"), ("poll", "carr-v5"),
             ("read-progress-board", "needs-joe-local"), ("publish-board-snapshot", "needs-joe-local"),
@@ -1823,7 +1836,7 @@ class ReviewRound1420(BoardCase):
         state["tasks"] = tasks
         self.write_state("demo", state)
         calls, _, caller = self.spy()
-        with self.in_process(), patch.object(BOARD, "call_verb", caller):
+        with self.in_process(), patch.object(BOARD, "board_reply", caller):
             with self.assertRaises(BOARD.SnapshotTooLarge):
                 BOARD.publish_board("demo")
         self.assertNotIn("publish-board-snapshot", calls)
@@ -2336,7 +2349,7 @@ class DeliveryTargetRelease(BoardCase):
                         self.assertEqual(args["base_version"], 0)
                         remote["snapshot"] = {"version": 1, "snapshot_json": args["snapshot"]}
                     return {"ok": True, "questions": [], **remote}
-                with patch.dict(os.environ, self.env), patch.object(BOARD, "call_verb", call):
+                with patch.dict(os.environ, self.env), patch.object(BOARD, "board_reply", call):
                     BOARD.publish_board(project)
                 published = remote["snapshot"]["snapshot_json"]["tasks"]
                 self.assertEqual(published["deployed"]["stage"], "merged")

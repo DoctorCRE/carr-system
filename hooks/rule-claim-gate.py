@@ -20,9 +20,17 @@ CLAIM = re.compile(
 ACTIVE_CLAIM = re.compile(r"\b(?:saved|added|created)\b[^.!?\n]*$", re.I)
 PASSIVE_CLAIM = re.compile(
     r"\s+(?:is|was|has been)\s+(?:now\s+)?(?:saved|added|created|in place)\b", re.I)
-MAIL_RULE_PREFIX = re.compile(
-    r"\b(?:outlook|gmail|mail|e-?mail|inbox|forwarding)"
+CONFIG_RULE_PREFIX = re.compile(
+    r"\b(?:outlook|gmail|mail|e-?mail|inbox|forwarding|firewall|waf|"
+    r"rate[ -]limit(?:ing)?|ruleset|route|dns)"
     r"(?:\s+(?:mail|e-?mail|inbox|forwarding))*[\s-]+$", re.I)
+
+CONFIG_RULE_SUFFIX = re.compile(
+    r"\s+(?:to|in)\s+the\s+(?:Cloudflare\s+)?"
+    r"(?:firewall|waf|rate[ -]limit(?:ing)?|ruleset|route|dns)\b", re.I)
+GUIDANCE_CONTEXT = re.compile(
+    r"\b(?:CLAUDE\.md|AGENTS\.md|guidance|behaviou?ral|skills?|doctrine|taught|memory|standing instructions?|policy)\b", re.I)
+CLAUSE_BREAK = re.compile(r"\b(?:and|but|or)\b|[,;]", re.I)
 
 
 def text_of(record):
@@ -65,7 +73,9 @@ def prose(text):
             continue
         lines.append(line)
     text = '\n'.join(lines)
-    text = re.sub(r'(`+).*?\1', '', text, flags=re.S)
+    text = re.sub(r'(`+)(.*?)\1', lambda match: match[2] if re.fullmatch(
+        r'(?:[\w./-]+/)?(?:CLAUDE|AGENTS|SKILL|MEMORY)\.md', match[2], re.I) else '',
+        text, flags=re.S)
     text = re.sub(r'"[^"]*"|“[^”]*”|‘(?:[^’]|(?<=\w)’(?=\w))*’', '', text)
     text = re.sub(r"(?<!\w)'(?:[^']|(?<=\w)'(?=\w))*'(?!\w)", '', text)
     return text
@@ -81,8 +91,17 @@ def asserted_claim(sentence):
             passive = PASSIVE_CLAIM.match(sentence[end:])
             if not ACTIVE_CLAIM.search(prefix) and not passive:
                 continue
-            if match.group('subject').lower() == 'rule' and MAIL_RULE_PREFIX.search(prefix):
-                continue
+            if match.group('subject').lower() == 'rule':
+                local_prefix = CLAUSE_BREAK.split(prefix)[-1]
+                local_suffix = CLAUSE_BREAK.split(sentence[end:])[0]
+                if not GUIDANCE_CONTEXT.search(sentence) and not re.search(
+                    r':|\b(?:I|we|always|never|ask|check|run|remember|ensure|must|should)\b',
+                    sentence[end:], re.I
+                ) and (
+                    CONFIG_RULE_PREFIX.search(local_prefix)
+                    or CONFIG_RULE_SUFFIX.match(local_suffix)
+                ):
+                    continue
             if passive:
                 end += passive.end()
         context = sentence[:end]

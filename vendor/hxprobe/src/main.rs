@@ -31,11 +31,14 @@ mod attachment;
 mod block;
 mod body;
 mod calendar;
+mod category;
+mod detail;
 mod folder;
 mod header;
 mod identity;
 mod lz;
 mod locate;
+mod message;
 mod study;
 mod observe;
 mod record;
@@ -222,14 +225,22 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     let mut folders = folder::Index::default();
     let mut events = calendar::Index::default();
     let mut attachments = attachment::Index::default();
+    let mut objects = message::Index::default();
+    let mut categories = category::Index::default();
+    let mut details = detail::Index::default();
     let mut sidecars = files_dir.map(|d| body::Sidecars::open(std::path::Path::new(d))).unwrap_or_default();
     for &o in &offs {
         if let Some(b) = block::parse(&mm, o) {
             folders.observe(o, &b.data);
             events.observe(&b.data);
             attachments.observe(&b.data);
+            objects.observe(&b.data);
+            categories.observe(&b.data);
+            details.observe(&b.data);
         }
     }
+
+    let message_objects = objects.messages();
 
     for suffix in ["", "-wal", "-shm"] {
         let _ = std::fs::remove_file(format!("{db_path}{suffix}"));
@@ -278,7 +289,16 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              -- store-local keys of the message objects merged into this row,
              -- decimal, comma-separated and ascending; NULL when none linked.
              -- More than one means this row joined distinct store items.
-             local_keys   TEXT
+             local_keys   TEXT,
+             -- From the message detail object (class 00c9, tag 060f) joined by
+             -- local key; NULL when no detail, several keyed details, or
+             -- disagreeing newest revisions.
+             flag_status  TEXT,      -- 'none', 'flagged' or 'complete'
+             flag_due_unix INTEGER,  -- NULL also when the flag has no due date
+             flag_completed_unix INTEGER,
+             moved_to_other INTEGER, -- 1 after a one-time move to Other
+             pinned       INTEGER,
+             folder_links_unresolved INTEGER NOT NULL
          );
          CREATE TABLE message_folders (
              message_id INTEGER NOT NULL REFERENCES messages(id),
@@ -306,6 +326,19 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              path          TEXT                 -- NULL if revisions disagree
          );
          CREATE INDEX attachments_message ON attachments(message_key);
+         -- Categories assigned to a message, limited to defined category names.
+         CREATE TABLE message_categories (
+             message_id INTEGER NOT NULL REFERENCES messages(id),
+             category   TEXT NOT NULL,
+             PRIMARY KEY (message_id, category)
+         );
+         -- Category definitions.
+         CREATE TABLE categories (
+             id       INTEGER PRIMARY KEY, -- local store key
+             owner_id INTEGER NOT NULL,    -- owning list object, not folders.account_id
+             name     TEXT,                -- NULL if revisions disagree
+             color    INTEGER              -- OlCategoryColor; NULL if revisions disagree
+         );
          CREATE INDEX messages_sent ON messages(sent_unix);
          CREATE INDEX messages_sender ON messages(sender);
          CREATE TABLE events (
@@ -320,14 +353,56 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              organizer_name  TEXT,
              organizer_email TEXT,
              body            TEXT,
+             -- 'canceled' (Outlook stored its cancellation subject) or
+             -- 'unsupported' (no lifecycle is proven by the bytes).
              lifecycle_status TEXT NOT NULL,
-             lifecycle_reason TEXT NOT NULL
+             lifecycle_reason TEXT NOT NULL,
+             -- 'occurrence' (one instance of a recurring series) or 'item'.
+             recurrence       TEXT NOT NULL
          );
          CREATE TABLE event_attendees (
-             event_id INTEGER NOT NULL REFERENCES events(id),
-             name     TEXT,
-             email    TEXT
+             event_id      INTEGER NOT NULL REFERENCES events(id),
+             name          TEXT,
+             email         TEXT,
+             kind          TEXT,              -- 'required' / 'optional'; NULL if unverified
+             kind_code     INTEGER NOT NULL,
+             response      TEXT,              -- 'no_response'; NULL if unverified
+             response_code INTEGER NOT NULL
          );
+         -- One row per message object key, from what its cached revisions agree on.
+         CREATE TABLE message_objects (
+             local_key          INTEGER PRIMARY KEY, -- message_keys.local_key
+             conversation_id    TEXT,    -- 32 hex: ConversationIndex GUID, the thread
+             conversation_depth INTEGER, -- 0 for a thread start, +1 per reply level
+             in_reply_to        TEXT,    -- parent Message-ID without angle brackets
+             subject            TEXT,    -- '' when the store holds an empty subject
+             sender             TEXT,
+             -- 'listed' (rows in recipients), 'none' (no recipient objects) or
+             -- 'conflict' (cached revisions of a recipient disagree; none exported).
+             recipients_status  TEXT NOT NULL
+         );
+         CREATE TABLE recipients (
+             local_key INTEGER NOT NULL REFERENCES message_objects(local_key),
+             kind      TEXT,              -- 'to', 'cc', or NULL for an unmapped kind_code
+             kind_code INTEGER NOT NULL,
+             position  INTEGER NOT NULL,  -- 1-based order within kind_code
+             address   TEXT NOT NULL,
+             name      TEXT NOT NULL,
+             PRIMARY KEY (local_key, kind_code, position)
+         );
+         -- Each conversation with its message count and latest message.
+         CREATE VIEW threads AS
+           SELECT o.conversation_id,
+                  count(*) AS messages,
+                  (SELECT l.local_key FROM message_objects l
+                     LEFT JOIN message_keys lk ON lk.local_key = l.local_key
+                     LEFT JOIN messages lm ON lm.id = lk.message_id
+                    WHERE l.conversation_id = o.conversation_id
+                    ORDER BY lm.sent_unix DESC, l.conversation_depth DESC, l.local_key DESC
+                    LIMIT 1) AS latest_local_key
+             FROM message_objects o
+            WHERE o.conversation_id IS NOT NULL
+            GROUP BY o.conversation_id;
          -- Counts a caller checks before trusting the export.
          CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
          CREATE VIRTUAL TABLE messages_fts USING fts5(
@@ -352,8 +427,9 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         let key_links = folders.keys(&b.data, &needle);
 
         for loc in records(&b.data, &needle) {
-            let mut r = record::parse(o, &b.data, loc.anchor);
+            let Some(mut r) = record::parse(o, &b.data, loc.anchor) else { continue };
             r.folder_ids = folder_links.get(&loc.anchor).cloned().unwrap_or_default();
+            r.folder_links_unresolved = r.folder_ids.is_empty();
             r.local_keys = key_links.get(&loc.anchor).into_iter().copied().collect();
             let m = schema::build_bounded(&b.data, loc.anchor, loc.end, loc.back);
 
@@ -387,6 +463,27 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 .filter(|t| Some(**t) != r.sender.as_deref())
                 .map(|t| t.to_string())
                 .collect();
+            if r.local_keys.len() == 1 {
+                if let Some(object) = r.local_keys.first().and_then(|key| message_objects.get(key)) {
+                    if let Some(subject) = object.subject.as_ref().filter(|s| !s.trim().is_empty()) {
+                        r.subject = Some(subject.clone());
+                    }
+                    if let Some(sender) = object.sender.as_ref().filter(|s| !s.trim().is_empty()) {
+                        if r.sender.as_deref() != Some(sender) {
+                            r.sender_name = None;
+                        }
+                        r.sender = Some(sender.clone());
+                    }
+                    if let Some(recipients) = &object.recipients {
+                        let listed: Vec<String> = recipients.iter()
+                            .filter(|r| matches!(r.kind, message::TO | message::CC))
+                            .map(|r| r.address.clone()).collect();
+                        if !listed.is_empty() {
+                            r.recipients = listed;
+                        }
+                    }
+                }
+            }
             r.preview = m.get(schema::Key::Preview).map(str::to_string);
             if r.html.is_some() {
                 r.body_source = Some("inline");
@@ -407,8 +504,9 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             let convo_ids: Vec<String> =
                 m.all(schema::Key::ConversationId).iter().map(|s| s.to_string()).collect();
 
-            // A record with neither a sender nor readable text is a stub.
-            if r.sender.is_none() && r.body.split_whitespace().count() < 5 {
+            // A local identity or folder link is evidence even without readable text.
+            if r.local_keys.is_empty() && r.folder_ids.is_empty()
+                && r.sender.is_none() && r.body.split_whitespace().count() < 5 {
                 continue;
             }
 
@@ -419,7 +517,11 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             // excluded -- the store reuses one across a conversation, so keying
             // on it merges distinct messages, and pairing it with anything else
             // splits the revisions of one. See SPEC.md 4.7.
-            let key = format!("{:?}|{:?}|{:?}", r.local_keys, r.sender, r.sent_unix);
+            let key = if r.local_keys.is_empty() {
+                format!("{:?}|{:?}|{:?}", r.local_keys, r.sender, r.sent_unix)
+            } else {
+                format!("{:?}", r.local_keys)
+            };
             for id in &convo_ids {
                 if let Some(sub) = &r.subject {
                     convo_subject.entry(id.clone()).or_insert_with(|| sub.clone());
@@ -473,8 +575,11 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     }
 
     // Collapse the copies `sender + send time` could not join. See body.rs.
-    let mut by_time: Vec<record::Record> = best.into_values().collect();
-    by_time.sort_by_key(|r| r.sent_unix);
+    // Ties on send time are broken by merge key, not hash order, so the same
+    // store always collapses and numbers its rows the same way.
+    let mut keyed: Vec<(String, record::Record)> = best.into_iter().collect();
+    keyed.sort_by(|(a, x), (b, y)| (x.sent_unix, a).cmp(&(y.sent_unix, b)));
+    let by_time = keyed.into_iter().map(|(_, r)| r);
     let mut best: Vec<record::Record> = Vec::with_capacity(by_time.len());
     let mut first_copy: std::collections::HashMap<(std::collections::BTreeSet<u64>, String), Vec<usize>> = Default::default();
     let mut collapsed = 0usize;
@@ -547,6 +652,12 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     let with_folder = best.iter().filter(|r| !r.folder_ids.is_empty()).count();
     let multi_folder = best.iter().filter(|r| r.folder_ids.len() > 1).count();
     println!("  {} folders; {with_folder}/{stored} messages linked ({multi_folder} with multiple observed folders)", folders.folders.len());
+    println!(
+        "  {} message objects; {} with a conversation, {} with recipients",
+        message_objects.len(),
+        message_objects.values().filter(|m| m.conversation_id.is_some()).count(),
+        message_objects.values().filter(|m| m.recipients.as_ref().is_some_and(|r| !r.is_empty())).count()
+    );
     let tx = db.transaction().expect("tx");
     {
         let mut ins_folder = tx
@@ -579,24 +690,71 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8)"
             )
             .expect("prepare attachments");
+        let mut ins_category = tx
+            .prepare("INSERT INTO categories(id,owner_id,name,color) VALUES (?1,?2,?3,?4)")
+            .expect("prepare categories");
+        for c in categories.categories.values() {
+            ins_category
+                .execute(rusqlite::params![c.id as i64, c.owner_id as i64, c.name, c.color])
+                .expect("insert category");
+        }
         for a in attachments.attachments.values() {
             ins_attachment
                 .execute(rusqlite::params![a.id as i64, a.message_key as i64, a.name, a.name_verified as i64,
                                            a.content_type, a.size as i64, a.path, a.content_id])
                 .expect("insert attachment");
         }
+        let mut ins_object = tx
+            .prepare(
+                "INSERT INTO message_objects(local_key,conversation_id,conversation_depth,in_reply_to,subject,sender,
+                                             recipients_status) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            )
+            .expect("prepare message objects");
+        let mut ins_recipient = tx
+            .prepare(
+                "INSERT INTO recipients(local_key,kind,kind_code,position,address,name) VALUES (?1,?2,?3,?4,?5,?6)",
+            )
+            .expect("prepare recipients");
+        for (key, m) in &message_objects {
+            let status = match &m.recipients {
+                None => "conflict",
+                Some(r) if r.is_empty() => "none",
+                Some(_) => "listed",
+            };
+            let conversation = m.conversation_id.map(|g| g.iter().map(|b| format!("{b:02x}")).collect::<String>());
+            ins_object
+                .execute(rusqlite::params![*key as i64, conversation, m.conversation_depth.map(|d| d as i64),
+                                           m.in_reply_to, m.subject, m.sender, status])
+                .expect("insert message object");
+            let mut positions: BTreeMap<u32, i64> = BTreeMap::new();
+            for r in m.recipients.iter().flatten() {
+                let position = positions.entry(r.kind).or_default();
+                *position += 1;
+                ins_recipient
+                    .execute(rusqlite::params![*key as i64, message::kind_name(r.kind), r.kind, *position,
+                                               r.address, r.name])
+                    .expect("insert recipient");
+            }
+        }
         let mut ins = tx
             .prepare(
                 "INSERT INTO messages
                    (block,sender,sender_name,recipients,subject,message_id,body,
                     html,body_words,html_bytes,body_kind,sent_unix,sent_utc,
-                    subject_inherited,preview,body_source,copies,copy_key,local_keys)
+                    subject_inherited,preview,body_source,copies,copy_key,local_keys,
+                    flag_status,flag_due_unix,flag_completed_unix,moved_to_other,pinned,folder_links_unresolved)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,
-                         datetime(?12,'unixepoch'),?13,?14,?15,?16,?17,?18)",
+                         datetime(?12,'unixepoch'),?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)",
             )
             .expect("prepare");
 
+        let defined: std::collections::BTreeSet<&str> =
+            categories.categories.values().filter_map(|c| c.name.as_deref()).collect();
+        let mut ins_message_category = tx
+            .prepare("INSERT OR IGNORE INTO message_categories(message_id,category) VALUES (?1,?2)")
+            .expect("prepare message categories");
         for r in &best {
+            let d = details.for_keys(&r.local_keys);
             ins.execute(rusqlite::params![
                 r.offset as i64,
                 r.sender,
@@ -616,9 +774,21 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 r.copies as i64,
                 body::copy_key(r),
                 local_keys(r),
+                d.and_then(|d| d.flag).map(detail::Flag::as_str),
+                d.and_then(|d| d.due_unix).flatten(),
+                d.and_then(|d| d.completed_unix).flatten(),
+                d.and_then(|d| d.moved_to_other),
+                d.and_then(|d| d.pinned),
+                r.folder_links_unresolved as i64,
             ])
             .expect("insert");
             let message_id = tx.last_insert_rowid();
+            for name in d.and_then(|d| d.categories.as_ref()).into_iter().flatten() {
+                if defined.contains(name.as_str()) {
+                    ins_message_category.execute(rusqlite::params![message_id, name])
+                        .expect("insert message category");
+                }
+            }
             for folder_id in &r.folder_ids {
                 ins_link.execute(rusqlite::params![message_id, *folder_id as i64])
                     .expect("insert folder link");
@@ -633,24 +803,37 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         let mut ins_event = tx
             .prepare(
                 "INSERT INTO events(goid,start_unix,end_unix,start_utc,end_utc,subject,location,
-                                    organizer_name,organizer_email,body,lifecycle_status,lifecycle_reason)
-                 VALUES (?1,?2,?3,datetime(?2,'unixepoch'),datetime(?3,'unixepoch'),?4,?5,?6,?7,?8,
-                         'unsupported','hxstore_lifecycle_unverified')",
+                                    organizer_name,organizer_email,body,lifecycle_status,lifecycle_reason,
+                                    recurrence)
+                 VALUES (?1,?2,?3,datetime(?2,'unixepoch'),datetime(?3,'unixepoch'),?4,?5,?6,?7,?8,?9,?10,?11)",
             )
             .expect("prepare events");
         let mut ins_attendee = tx
-            .prepare("INSERT INTO event_attendees(event_id,name,email) VALUES (?1,?2,?3)")
+            .prepare(
+                "INSERT INTO event_attendees(event_id,name,email,kind,kind_code,response,response_code)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            )
             .expect("prepare attendees");
         for ev in events.events.values() {
+            let (status, reason) = if ev.canceled {
+                ("canceled", "outlook_canceled_subject")
+            } else {
+                ("unsupported", "hxstore_lifecycle_unverified")
+            };
+            let recurrence = if ev.occurrence { "occurrence" } else { "item" };
             ins_event
                 .execute(rusqlite::params![
                     ev.goid, ev.start_unix, ev.end_unix, ev.subject, ev.location,
-                    ev.organizer_name, ev.organizer_email, ev.body,
+                    ev.organizer_name, ev.organizer_email, ev.body, status, reason, recurrence,
                 ])
                 .expect("insert event");
             let event_id = tx.last_insert_rowid();
             for a in &ev.attendees {
-                ins_attendee.execute(rusqlite::params![event_id, a.name, a.email]).expect("insert attendee");
+                ins_attendee
+                    .execute(rusqlite::params![
+                        event_id, a.name, a.email, a.kind(), a.kind_code, a.response(), a.response_code,
+                    ])
+                    .expect("insert attendee");
             }
         }
         let mut ins_meta = tx.prepare("INSERT INTO meta(key,value) VALUES (?1,?2)").expect("prepare meta");
@@ -667,20 +850,34 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             ("event_objects", events.objects),
             ("event_identities", events.identities.len()),
             ("events_decoded", events.events.len()),
-            ("calendar_lifecycle_unsupported", events.events.len()),
+            ("calendar_lifecycle_unsupported", events.events.values().filter(|e| !e.canceled).count()),
+            ("calendar_lifecycle_canceled", events.events.values().filter(|e| e.canceled).count()),
+            ("event_occurrences", events.events.values().filter(|e| e.occurrence).count()),
             ("folders", folders.folders.len()),
             ("messages_with_folder", with_folder),
             ("attachment_objects", attachments.objects),
             ("attachments", attachments.attachments.len()),
+            ("category_objects", categories.objects),
+            ("categories", categories.categories.len()),
+            ("detail_objects", details.objects),
+            ("messages_with_detail", best.iter().filter(|r| details.for_keys(&r.local_keys).is_some()).count()),
             ("messages_with_key", best.iter().filter(|r| !r.local_keys.is_empty()).count()),
+            ("message_objects", message_objects.len()),
+            ("message_objects_with_conversation",
+             message_objects.values().filter(|m| m.conversation_id.is_some()).count()),
+            ("message_objects_with_recipients",
+             message_objects.values().filter(|m| m.recipients.as_ref().is_some_and(|r| !r.is_empty())).count()),
+            ("recipients", message_objects.values().flat_map(|m| m.recipients.iter().flatten()).count()),
+            ("recipient_conflicts", message_objects.values().filter(|m| m.recipients.is_none()).count()),
         ] {
             ins_meta.execute(rusqlite::params![key, value as i64]).expect("insert meta");
         }
     }
     println!(
-        "  {} calendar objects; {} unsupported candidates across {} GOID/start groups",
+        "  {} calendar objects; {} canceled and {} unsupported candidates across {} GOID/start groups",
         events.objects,
-        events.events.len(),
+        events.events.values().filter(|e| e.canceled).count(),
+        events.events.values().filter(|e| !e.canceled).count(),
         events.identities.len()
     );
     tx.commit().expect("commit");
@@ -718,9 +915,17 @@ fn local_keys(r: &record::Record) -> Option<String> {
 
 /// Combine a later revision of a message into the copy already held.
 fn merge(prev: &mut record::Record, r: record::Record) {
+    prev.folder_links_unresolved |= r.folder_links_unresolved;
     prev.folder_ids.extend(r.folder_ids);
     prev.local_keys.extend(r.local_keys);
     prev.copies += r.copies;
+    if prev.sender.is_none() {
+        prev.sender = r.sender;
+    }
+    prev.sent_unix = match (prev.sent_unix, r.sent_unix) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    };
     if prev.preview.is_none() {
         prev.preview = r.preview;
     }

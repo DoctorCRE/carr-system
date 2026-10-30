@@ -61,22 +61,16 @@ failures: list[str] = []
 checked = 0
 
 
-def check(label: str, ok: bool, detail: str = "") -> None:
-    global checked
-    checked += 1
-    if ok:
-        print(f"  ok    {label}")
-    else:
-        print(f"  FAIL  {label}" + (f"  {detail}" if detail else ""))
-        failures.append(label)
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(detail="  {detail}", failures=failures, counters={"checked": "all"}, ns=globals())
 
 
 def main() -> int:
     duplicates = [str(path.relative_to(REPO))
-                  for directory in (REPO / "tools/dictation-rig/launchd", REPO / "tools/doc-convo/launchd")
-                  for path in sorted(directory.glob("*.plist"))
-                  if path.name != "com.carr.call-mode.plist" and (PLIST_DIR / path.name).exists()]
-    check("tool-local templates do not compete with installed sources except the Call Mode override",
+                  for path in sorted((REPO / "tools").glob("*/launchd/*.plist"))
+                  if (PLIST_DIR / path.name).exists()]
+    check("tool-local templates do not compete with installed sources",
           not duplicates, ", ".join(duplicates))
 
     plists = sorted(PLIST_DIR.glob("*.plist"))

@@ -24,7 +24,7 @@ import {
   unattendedActorForToken,
 } from "../src/identity.js";
 import { partnerAuthoritySlugForActor } from "../src/partner-authority.js";
-import { PROFILES, allowedIn, authorityDsnForActor, profileForActor, readCallInsertSQL } from "../src/mcp.js";
+import { PROFILES, allowedIn, authorityDsnForActor, profileForActor, readCallCountSQL } from "../src/mcp.js";
 import { LOCAL_CLIENT_PROFILE_NAMES, selectLocalClientCredential } from "../local-client-auth.mjs";
 import { mcpInventory } from "../../ops/scac-mutation-inventory.mjs";
 
@@ -106,12 +106,11 @@ test("each runner holds its own token, and the ledger names the runner that acte
   const revoked = JSON.stringify({ joe: { "model-room": "model-room-secret" } });
   assert.equal(unattendedActorForToken(BEARER, revoked), null);
   assert.equal(unattendedActorForToken("Bearer model-room-secret", revoked)?.slug, "joe-local");
-  // The runner label rides into the read and write ledgers beside via.
-  const { text, params } = readCallInsertSQL(unattended(), "standing-context", true, null);
-  assert.match(text, /\bvia, client_id\b/);
-  const via = params.indexOf("unattended-token");
-  assert.ok(via > 0, "via missing from the ledger row");
-  assert.equal(params[via + 1], "unattended-runner:nightly-mac");
+  // The door rides into the daily read counter; the runner label stays on the
+  // write ledger (tool_call) only, since 1041 counts reads per door.
+  const { text, params } = readCallCountSQL(unattended(), "standing-context", true);
+  assert.match(text, /\bactor_slug, sponsoring_human_slug, via, ok\b/);
+  assert.equal(params[3], "unattended-token", "via missing from the read counter");
 });
 
 test("a runner name outside the server's vocabulary resolves to nothing", () => {
@@ -185,12 +184,12 @@ test("identity merges, retrieval, board answers, partner-only deal acts and huma
   assert.equal(TOOLS["confirm-merge"].humanCallerOnly, true);
   assert.equal(TOOLS["confirm-merge"].humanOnly, true);
   const flagged = Object.keys(TOOLS).filter(name => TOOLS[name].humanCallerOnly === true);
-  assert.deepEqual(flagged.sort(), ["answer-board-question", "answer-work-request-for-joe",
+  assert.deepEqual(flagged.sort(), ["adopt-rule", "answer-board-question", "answer-work-request-for-joe",
     "append-tour-entrance-verification-receipt", "approve-retrieval-proposals", "cancel-pending-deal", "commit-winning-property",
     "confirm-email-deal-progress", "confirm-email-filing", "confirm-email-next-step", "confirm-merge", "dismiss-email-proposal",
     "record-artifact-preservation-hold", "record-deal-closing", "record-evidence-subject-link", "record-lifecycle-correction",
     "record-partner-lifecycle-fact", "record-tour-map-promotion-receipt", "record-tour-pdf-human-review",
-    "register-record-source-authority-policy", "retire-retrieval-curation", "submit-email-draft"]);
+    "register-record-source-authority-policy", "retire-retrieval-curation", "submit-email-draft", "undo-email-thread-filing"]);
 });
 
 test("confirm-merge refuses the unattended actor before database access", async () => {

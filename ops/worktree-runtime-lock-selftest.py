@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A worktree never links a shared npm runtime from a different lock."""
+"""Plumbing never symlinks mcp-server/node_modules into a worktree (WR579.S1.J1)."""
 
 import json
 import os
@@ -81,25 +81,40 @@ with tempfile.TemporaryDirectory() as td:
 
     worktree = Path(td) / "worktree"
     run("git", "worktree", "add", "-q", "-b", "fixture-worktree", str(worktree), cwd=canonical)
-
-    first = run(ZSH, str(canonical / "bin" / "worktree.sh"), "--plumb", str(worktree), cwd=worktree)
     link_path = worktree / "mcp-server" / "node_modules"
-    assert "does not match this worktree's package-lock.json" in first.stdout
-    assert not link_path.exists() and not link_path.is_symlink()
+    marker = runtime / "fixture-pkg-marker"
+    plumb = [ZSH, str(canonical / "bin" / "worktree.sh"), "--plumb", str(worktree)]
 
+    def check_not_linked(label):
+        assert not link_path.is_symlink(), (
+            f"{label}: node_modules is a symlink (npm ci through it empties the canonical folder)")
+
+    # WR579.S1.J1: even when the shared runtime matches this worktree's lock
+    # exactly, plumbing must NOT link it. On 2026-10-28 `npm ci` through such a
+    # link emptied the canonical mcp-server/node_modules.
     good = lock("1.0.0")
     good["packages"].pop("")
     installed.write_text(json.dumps(good))
-    second = run(ZSH, str(canonical / "bin" / "worktree.sh"), "--plumb", str(worktree), cwd=worktree)
-    assert link_path.is_symlink()
-    assert os.path.realpath(link_path) == os.path.realpath(runtime)
-    assert "ok  node_modules" in second.stdout
+    marker.write_text("x")
+    run(*plumb, cwd=worktree)
+    check_not_linked("matching lock")
 
-    # A cache can drift after a worktree was plumbed. Re-running the same path
-    # must remove the now-unsafe untracked symlink, not leave it trusted.
-    installed.write_text(json.dumps(bad))
-    third = run(ZSH, str(canonical / "bin" / "worktree.sh"), "--plumb", str(worktree), cwd=worktree)
-    assert "does not match this worktree's package-lock.json" in third.stdout
-    assert not link_path.exists() and not link_path.is_symlink()
+    # A pre-fix worktree carries a symlink into the canonical folder. Plumbing
+    # drops the link (never its target).
+    link_path.symlink_to(runtime)
+    third = run(*plumb, cwd=worktree)
+    check_not_linked("pre-fix symlink")
+    assert marker.exists() and installed.exists(), "canonical runtime must survive plumbing"
+    assert "dropped shared node_modules symlink" in third.stdout
 
-print("worktree-runtime-lock-selftest: stale shared npm cache refused")
+    # A real directory in the worktree is somebody's own install: left alone.
+    link_path.mkdir()
+    (link_path / "own").write_text("mine")
+    run(*plumb, cwd=worktree)
+    assert (link_path / "own").exists() and not link_path.is_symlink()
+
+    # Simulate npm ci wiping the worktree's node_modules: canonical stays intact.
+    shutil.rmtree(link_path)
+    assert marker.exists() and installed.exists()
+
+print("worktree-runtime-lock-selftest: node_modules is never linked into a worktree")

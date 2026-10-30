@@ -296,7 +296,7 @@ def execute(ctx, plan):
         else:
             proposed.append(proposal)
         ctx.write("add-loop", {"kind": "team_loop", "owner": "claude", "domain": "prospecting",
-                  "title": "NPPES proposal: " + row["name"], "body": json.dumps(proposal),
+                  "title": "NPPES proposal: " + row["name"], "body": json.dumps({"source": "nppes", "data": proposal}),
                   "marker": "none", "source_note": "NPPES " + row["npi"] + " " + " ".join(row["sources"])},
                   "lead-signals:proposal:" + row["source_key"])
         consumed.add(row["source_key"])
@@ -311,6 +311,6 @@ def execute(ctx, plan):
               "ranked": [], "ranking_status": "PENDING npi-sweep-weekly research and radar rubric"}
     ctx.write("add-loop", {"kind": "team_loop", "owner": "claude", "domain": "prospecting",
               "title": "NPPES preparation " + ctx.now.date().isoformat(),
-              "body": json.dumps(output), "marker": "none", "source_note": INDEX_URL},
+              "body": json.dumps({"source": "nppes", "data": output}), "marker": "none", "source_note": INDEX_URL},
               "lead-signals:run:" + ctx.now.date().isoformat())
     return output

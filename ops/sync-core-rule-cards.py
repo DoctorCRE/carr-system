@@ -1,13 +1,48 @@
 #!/usr/bin/env python3
-"""Render core cards and validate repository paths in CLAUDE.md and AGENTS.md."""
+"""Render the attach line and core cards, and validate repository paths in CLAUDE.md and AGENTS.md.
+
+--from-store first rewrites ops/config/rule-cards.v1.json from the adopted
+rule cards in the record layer (the rule-cards verb, WR-000562 D16), so the
+always-on block renders from the store. --check stays offline for CI: it fails
+when CLAUDE.md or AGENTS.md drifts from the cards file.
+"""
 import argparse
+import json
 import re
 from pathlib import Path
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib.rule_cards import load_cards
+
+
+ATTACH_SOURCE = ROOT / 'mcp-server/src/doctrine.js'
+CARDS = ROOT / 'ops/config/rule-cards.v1.json'
+
+
+def store_cards():
+    out = subprocess.run([str(ROOT / 'run.sh'), 'call', 'rule-cards', '{}'], cwd=ROOT,
+                         capture_output=True, text=True, check=True, timeout=120).stdout
+    result = json.loads(out[out.index('{'):])
+    return result.get('result', result)['cards']
+
+
+def cards_from_store(document, adopted):
+    """The cards file with its cards replaced by the adopted ones, in file order."""
+    if not adopted:
+        raise SystemExit('The store holds no adopted rule cards yet; the cards file stays the source '
+                         'until a partner adopts the staged card proposals.')
+    order = {card['id']: index for index, card in enumerate(document['cards'])}
+    cards = [{k: v for k, v in card.items() if k != 'rule_id'} for card in adopted]
+    cards.sort(key=lambda card: (order.get(card['id'], len(order)), card['id']))
+    return {**document, 'cards': cards}
+
+
+def attach_line():
+    source = ATTACH_SOURCE.read_text()
+    return json.loads(re.search(r'^export const MEMORY_ATTACH_LINE = (".+");$', source, re.M)[1])
 
 
 def render(text):
@@ -16,8 +51,9 @@ def render(text):
     cards = sorted((c for c in load_cards() if c['placement'] == 'CORE'),
                    key=lambda c: c['core_rank'])
     block = ('## Always-on rules\n\n'
-             '<!-- Generated from ops/config/rule-cards.v1.json by ops/sync-core-rule-cards.py. -->\n'
-             'These twelve core cards are loaded natively with this file. No boot fetch is required.\n'
+             '<!-- Generated from mcp-server/src/doctrine.js and ops/config/rule-cards.v1.json by ops/sync-core-rule-cards.py. -->\n'
+             f'{attach_line()}\n\n'
+             'These twelve core cards are loaded natively with this file.\n'
              'Before acting when a card applies, answer one line with applies yes/no and the action or reason.\n\n')
     block += '\n\n'.join(f"[{c['id']}] {c['title']}: {c['wording']}" for c in cards) + '\n'
     return text[:start] + block + text[end:]
@@ -55,8 +91,13 @@ def missing_paths(text):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--check', action='store_true')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--check', action='store_true')
+    mode.add_argument('--from-store', action='store_true')
     args = parser.parse_args()
+    if args.from_store:
+        document = cards_from_store(json.loads(CARDS.read_text()), store_cards())
+        CARDS.write_text(json.dumps(document, indent=2, ensure_ascii=False) + '\n')
     stale = []
     broken = []
     for name in ('CLAUDE.md', 'AGENTS.md'):

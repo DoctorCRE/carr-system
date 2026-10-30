@@ -7,6 +7,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -19,10 +20,17 @@ spec.loader.exec_module(gate)
 failed: list[str] = []
 
 
-def check(name: str, condition: bool, detail: str = "") -> None:
-    print(("  ok   " if condition else "  FAIL ") + name + (f" {detail}" if detail else ""))
-    if not condition:
-        failed.append(name)
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(
+    ok="  ok   {label}",
+    fail="  FAIL {label}",
+    detail=" {detail}",
+    detail_on_ok=True,
+    failures=failed,
+)
 
 
 proposals = {"unknown": [{"email": "new@example.com"}]}
@@ -99,6 +107,15 @@ with tempfile.TemporaryDirectory() as raw:
                "--aggregate-only", "--defer-unmatched", "--dispatch"]
     p = subprocess.run(command, cwd=root, capture_output=True, text=True)
     check("unknown attendee is durably queued and dispatched", p.returncode == 0 and queue.exists() and (root / "dispatch.json").exists())
+    sent = json.loads((root / "dispatch.json").read_text())
+    check("dispatch sends a UUID idempotency_key", str(uuid.UUID(sent["idempotency_key"])) == sent["idempotency_key"])
+    queue.unlink()
+    (root / "dispatch.json").unlink()
+    p = subprocess.run(command, cwd=root, capture_output=True, text=True)
+    retried = json.loads((root / "dispatch.json").read_text())
+    check("retry after lost acknowledgement reuses dispatch identity",
+          p.returncode == 0 and retried["idempotency_key"] == sent["idempotency_key"]
+          and retried["msg_id"] == sent["msg_id"])
     proposal_path.write_text(json.dumps({"unknown": []}))  # eight days later, outside rolling window
     p = subprocess.run(command, cwd=root, capture_output=True, text=True)
     check("rolled-out attendee remains pending until all receipts exist", p.returncode == 0 and queue.exists() and "new@example.com" in queue.read_text())

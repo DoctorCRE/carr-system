@@ -322,6 +322,7 @@ class CardFake {
     const sql = text.replace(/\s+/g, " ").trim(); this.calls.push(sql);
     if (sql.includes("work_request_card")) return { rows: this.row ? [this.row] : [] };
     if (sql.includes("work-request-intake:readable-card")) return { rows: [] };
+    if (sql.includes("work-request-intake:slices")) return { rows: [] };
     if (sql.includes("acting-identity")) return { rows: [] };
     throw new Error(`unexpected query: ${sql}`);
   }

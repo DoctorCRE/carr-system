@@ -312,6 +312,14 @@ class McpDoor(unittest.TestCase):
         body = json.loads(request.data)
         self.assertEqual((body["method"], body["params"]["name"]), ("tools/call", "deal-board"))
 
+    def test_the_untrusted_text_notice_item_does_not_fail_a_read(self):
+        notice = {"type": "text", "text": json.dumps({"untrusted_text": {"fields": ["$.deals[0].detail"]}})}
+
+        def opener(request, timeout):
+            return FakeResponse({"jsonrpc": "2.0", "id": 1, "result": {
+                "content": [{"type": "text", "text": json.dumps({"ok": True, "deals": []})}, notice]}})
+        self.assertEqual(rs.McpProbe(API, TOKEN, opener=opener)("deal-board", {}), (True, {"ok": True, "deals": []}))
+
     def test_an_error_answer_is_a_failure_and_never_echoes_the_token(self):
         def opener(request, timeout):
             return FakeResponse({"jsonrpc": "2.0", "id": 1, "result": {

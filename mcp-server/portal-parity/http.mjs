@@ -40,7 +40,7 @@ export async function signIn(base, password) {
     body: new URLSearchParams({ password }).toString(),
   });
   const cookie = response.headers.getSetCookie().map(line => line.split(';')[0]).find(Boolean);
-  if (response.status >= 400 || !cookie) throw new Error(`sign-in refused with status ${response.status}`);
+  if (response.status >= 400 || !cookie) throw Object.assign(new Error(`sign-in refused with status ${response.status}`), { status: response.status });
   return cookie;
 }
 

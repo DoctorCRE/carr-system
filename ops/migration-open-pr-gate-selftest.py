@@ -27,6 +27,15 @@ class CollisionTests(unittest.TestCase):
     def test_earlier_pr_keeps_its_number(self):
         self.assertEqual(gate.findings({'0890_main.sql'}, {'0891_feature.sql'}, Claims(set(), {891}, {891: 11})), [])
 
+    def test_lower_free_number_survives_reverse_merge_order(self):
+        self.assertEqual(gate.findings({'0890_base.sql', '0892_later.sql'},
+                                       {'0891_feature.sql'}, Claims(set(), set(), {})), [])
+
+    def test_occupied_lower_main_slot_still_refuses(self):
+        errors = gate.findings({'0890_main.sql', '0892_later.sql'},
+                               {'0890_feature.sql'}, Claims(set(), set(), {}))
+        self.assertIn('slot 0890 belongs to main', errors[0])
+
     def test_main_always_owns_its_number(self):
         errors = gate.findings({'0891_main.sql'}, {'0891_feature.sql'}, Claims(set(), set(), {}))
         self.assertIn('rename to 0892_feature.sql', errors[0])

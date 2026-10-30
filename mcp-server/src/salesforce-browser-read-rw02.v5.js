@@ -54,6 +54,7 @@
 // repeat run replays. A loop filed for a finding and since CLOSED, whose
 // finding is true again, is filed under the next episode key: a new action.
 
+import { derivedIdempotencyKey } from "./derived-key.ts";
 import { randomUUID } from "node:crypto";
 
 import { digest } from "./artifact-trust.js";
@@ -932,7 +933,7 @@ export async function runSalesforceBrowserReadReconciliation(options = {}) {
   let outcomeRecorded = false;
   const recordOutcome = async (outcome, stop) => {
     await recorder.record("record-salesforce-run-outcome", {
-      idempotency_key: `rw02-run-outcome:${run_ref}`, run_ref, action_kind: V5_RW02_READ_RUN_KIND, outcome,
+      idempotency_key: derivedIdempotencyKey("rw02-run-outcome", run_ref), run_ref, action_kind: V5_RW02_READ_RUN_KIND, outcome,
       ...(stop ? { stop_class: V5_RW02_SAFE_STOP_REASONS[stop], reason_id: stop } : {}) });
     outcomeRecorded = true;
   };
@@ -1118,7 +1119,8 @@ export async function runSalesforceBrowserReadReconciliation(options = {}) {
     for (const f of result.absent_from_salesforce) {
       // record-finding keeps no value when found is false, so the reason rides
       // in `kind` and `source`, both of which the row keeps. Keyed per deal and
-      // reason: a repeat run replays the first row instead of adding one.
+      // reason in a durable shape (replay-receipt.ts): a repeat run replays the
+      // first row instead of adding one, however long after.
       plan.push({ finding: "absent", verb: "record-finding", args: {
         idempotency_key: key("absent", f.deal_id, f.reason_id), subject: f.deal_id,
         kind: `salesforce_presence:${f.reason_id}`, found: false, internal: true, epistemic_status: "observed",

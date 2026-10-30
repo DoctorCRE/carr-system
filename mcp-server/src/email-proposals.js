@@ -1,7 +1,11 @@
 // Expose and resolve email-derived proposals.
 import { sha256 } from './sha256.ts';
-import { partnerAuthoritySlugForActor } from './partner-authority.js';
+import { mailboxOwnerForActor, partnerAuthoritySlugForActor } from './partner-authority.js';
+import { suspected } from './untrusted-text.js';
 const LIMIT = 200;
+const RESUBMITTABLE_FAILURES = new Set([
+  'aborted_before_dispatch', // The sender recorded that dispatch was aborted before pressing Send.
+]);
 const MATCHING = new Set(['file_to_deal', 'possible_new_deal']);
 const ROLES = ['client', 'landlord_side', 'lender', 'attorney', 'other_vendor'];
 const KINDS = {
@@ -13,14 +17,6 @@ const KINDS = {
     args: row => ({ text: row.task_text, next_date: row.next_date, owner: row.owner }) },
   reply_draft: { confirm: 'submit-email-draft' },
 };
-const SUSPECT = [
-  [/\b(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+|the\s+|your\s+|my\s+)?(?:previous\s+|prior\s+|above\s+|earlier\s+|other\s+)?(?:instructions|rules|prompts?)\b/i,
-    'asks to ignore instructions'],
-  [/\byou\s+are\s+(?:now\s+)?(?:an?\s+)?(?:AI|assistant|language model|LLM|chatbot|[a-z]*\s?bot)\b/i, 'tells the reader it is an AI'],
-  [/\b(?:note to|dear|hey|attention)\s+(?:the\s+)?(?:AI|LLM|chatbot|language model)\b/i, 'addresses an AI'],
-  [/\bsystem\s+prompt\b/i, 'mentions a system prompt'],
-];
-const suspected = quote => SUSPECT.find(([pattern]) => pattern.test(quote))?.[1] ?? null;
 const sender = summary => /^Email from (.+?): (.*)$/s.exec(summary ?? '');
 
 export function emailProposalTools({ ToolError, withEnvelope, writeEvent, preview }) {
@@ -61,7 +57,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           (select party_id from client where id=a.client_id),(select party_id from vendor where id=a.vendor_id),
           (select party_id from lead where id=a.lead_id))) as recorded_sender from activity a where id=$1`,
       [row.activity_id])).rows[0];
-    if (!activity || activity.kind !== 'email_in' || !row.evidence_quote?.length ||
+    if (!activity || !['email_in','email_out'].includes(activity.kind) || !row.evidence_quote?.length ||
         !(activity.detail?.includes(row.evidence_quote) || activity.email_context?.subject?.includes(row.evidence_quote)))
       fail('email_proposal_evidence_invalid');
     if (row.kind === 'file_to_deal') {
@@ -81,12 +77,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
   }
   const show = (c, actor, row) => MATCHING.has(row.kind)
     ? matchingPreview(c, row) : preview(c, actor, KINDS[row.kind].preview, previewArgs(row));
-  const senderOwner = actor => {
-    const owner = partnerAuthoritySlugForActor(actor);
-    if (!owner || (actor.human !== true && actor.slug !== `${owner}-local`))
-      fail('email_sender_identity_required');
-    return owner;
-  };
+  const senderOwner = actor => mailboxOwnerForActor(actor) ?? fail('email_sender_identity_required');
   const draftRow = async (c, id, owner) => {
     const row = (await c.query('select * from email_proposal where id=$1 for update', [id])).rows[0];
     if (!row || row.kind !== 'reply_draft') fail('email_draft_not_found');
@@ -148,6 +139,58 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         return { ok: true, status: 'confirmed', deal: target.id, activity_id: row.activity_id };
       }),
     },
+    'list-email-thread-filings': {
+      write: false,
+      description: 'List the authenticated partner’s automatic email thread filings with source subject, sender name, email time, event ID and recorded activity version (null for legacy events). Undo uses event_id and an idempotency key.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      handler: async (c, actor) => {
+        if (actor.human !== true || !['joe','dell'].includes(actor.slug)) fail('partner_confirmation_required');
+        const { rows } = await c.query(`select e.id as event_id,e.subject_id as deal,
+          e.new_value->>'activity_id' as activity_id,e.recorded_at,a.summary,
+          a.email_context->>'subject' as subject,a.email_context->'sender'->>'name' as sender_name,
+          a.occurred_at,(e.new_value->>'activity_version')::integer as activity_version
+          from v_email_thread_filing_event e join activity a on a.id::text=e.new_value->>'activity_id'
+          where e.verb='inherit-email-thread' and (a.email_source->>'mailbox_owner'=$1 or
+            (a.email_source->>'mailbox_owner' is null and exists
+              (select 1 from deal d where d.id=e.subject_id and d.owner=$1)))
+          and not exists (select 1 from v_email_thread_filing_event u where u.verb='undo-email-thread-filing'
+            and u.new_value->>'event_id'=e.id::text)
+          order by e.mutation_order desc`, [actor.slug]);
+        return { filings: rows };
+      },
+    },
+    'undo-email-thread-filing': {
+      write: true, humanOnly: true, humanCallerOnly: true,
+      description: 'Undo one automatic thread filing and suppress automatic re-filing of the email.',
+      inputSchema: { type: 'object', additionalProperties: false, required: ['idempotency_key','event_id'],
+        properties: { idempotency_key: { type: 'string', minLength: 1, maxLength: 200 },
+          event_id: { type: 'string', format: 'uuid' } } },
+      handler: (c, actor, args) => withEnvelope(c, actor, 'undo-email-thread-filing', args, async () => {
+        if (actor.human !== true || !['joe','dell'].includes(actor.slug)) fail('partner_confirmation_required');
+        const filing = (await c.query(`select e.id,e.subject_id,e.new_value,e.mutation_order,
+          a.email_source->>'mailbox_owner' as mailbox_owner,
+          (select d.owner from deal d where d.id=e.subject_id) as deal_owner
+          from v_email_thread_filing_event e join activity a on a.id::text=e.new_value->>'activity_id'
+          where e.id=$1 and e.verb='inherit-email-thread' for update of a`, [args.event_id])).rows[0];
+        if (!filing) fail('email_thread_filing_not_found');
+        const owner = filing.mailbox_owner ?? filing.deal_owner;
+        if (!owner) fail('email_thread_filing_owner_unknown');
+        if (owner !== actor.slug) fail('email_thread_filing_not_found');
+        const activity = (await c.query('select deal_id,version from activity where id=$1', [filing.new_value.activity_id])).rows[0];
+        const later = (await c.query(`select 1 from v_email_thread_filing_event where mutation_order>$1 and
+          verb in ('inherit-email-thread','confirm-email-filing','undo-email-thread-filing')
+          and new_value->>'activity_id'=$2 limit 1`, [filing.mutation_order,filing.new_value.activity_id])).rows.length;
+        if (later || activity.deal_id !== filing.subject_id ||
+            (filing.new_value.activity_version != null && activity.version !== filing.new_value.activity_version))
+          fail('email_thread_filing_changed');
+        await c.query('update activity set deal_id=null,version=version+1,updated_by=$2,updated_at=now() where id=$1',
+          [filing.new_value.activity_id,actor.id]);
+        await writeEvent(c, actor, 'undo-email-thread-filing', 'deal', filing.subject_id,
+          { new: { event_id: filing.id, activity_id: filing.new_value.activity_id }, cause: 'human_correction',
+            idempotency_key: args.idempotency_key, recorded_at_after_lock: true });
+        return { ok: true, activity_id: filing.new_value.activity_id };
+      }),
+    },
     'inherit-email-thread': {
       write: true,
       description: 'File a reply only when server-revalidated filed thread continuity and recipient safety hold. Deal participation and client deal counts never authorize filing.',
@@ -159,9 +202,10 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const rows = (await c.query(`select id as activity_id,deal_id as deal,summary,email_context,occurred_at,kind
           from activity where id=any($1::uuid[]) order by id for update`, [[args.activity_id,args.thread_activity_id]])).rows;
         const people = await contacts(c);
+        if ((await c.query("select 1 from v_email_thread_filing_event where verb='undo-email-thread-filing' and new_value->>'activity_id'=$1 limit 1", [args.activity_id.toLowerCase()])).rows.length) fail('email_thread_filing_suppressed');
         const current = rows.find(r => r.activity_id === args.activity_id.toLowerCase());
         const prior = rows.find(r => r.activity_id === args.thread_activity_id.toLowerCase());
-        if (!current || !prior || !prior.deal || current.kind !== 'email_in' ||
+        if (!current || !prior || !prior.deal || !['email_in','email_out'].includes(current.kind) ||
             !['email_in','email_out'].includes(prior.kind) || !current.email_context || !prior.email_context ||
             new Date(prior.occurred_at) >= new Date(current.occurred_at) ||
             (current.deal && current.deal !== prior.deal)) fail('email_thread_not_continuous');
@@ -186,10 +230,11 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const deal = (await c.query(`select id,client_id from deal where id=$1 and phase<>'closed' and invoiced_on is null for share`, [prior.deal])).rows[0];
         if (!deal || [a.sender,...a.recipients].some(p => !p.internal && !previous.has(p.email)))
           fail('email_thread_recipient_changed');
-        await c.query(`update activity set deal_id=$2,version=version+1,updated_by=$3,updated_at=now() where id=$1 and deal_id is null`,
-          [current.activity_id,prior.deal,actor.id]);
+        const updated = (await c.query(`update activity set deal_id=$2,version=version+1,updated_by=$3,updated_at=now() where id=$1 and deal_id is null returning version`,
+          [current.activity_id,prior.deal,actor.id])).rows[0];
+        if (!updated) fail('email_thread_not_continuous');
         await writeEvent(c, actor, 'inherit-email-thread', 'deal', prior.deal,
-          { new: { activity_id: current.activity_id, thread_activity_id: prior.activity_id },
+          { new: { activity_id: current.activity_id, thread_activity_id: prior.activity_id, activity_version: updated.version },
             cause: 'observed', idempotency_key: args.idempotency_key });
         return { ok: true, deal: prior.deal, activity_id: current.activity_id };
       }),
@@ -207,7 +252,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
         return withEnvelope(c, actor, 'submit-email-draft', args, async () => {
           const row = await draftRow(c, args.proposal_id, actor.slug);
-          if (row.status !== 'pending') fail('email_draft_already_submitted');
+          if (row.status === 'failed' && !RESUBMITTABLE_FAILURES.has(row.send_result?.reason))
+            fail('email_draft_failure_not_resubmittable', { reason: row.send_result?.reason ?? null });
+          if (row.status !== 'pending' && row.status !== 'failed') fail('email_draft_already_submitted');
           checkVersion(row, args.base_version);
           if (!args.body.trim()) fail('email_draft_empty_body');
           if (!args.subject.trim() || /[\r\n]/.test(args.subject)) fail('email_draft_subject_invalid');
@@ -217,7 +264,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           const submitted = { subject: args.subject, body: args.body,
             sha256: sha256(JSON.stringify({ subject: args.subject, body: args.body })), ...recipients };
           await c.query(`update email_proposal set status='approved_to_send',version=version+1,
-            submitted_email=$2::jsonb,submitted_at=now(),resolved_by=$3,resolved_at=now() where id=$1`,
+            submitted_email=$2::jsonb,submitted_at=now(),resolved_by=$3,resolved_at=now(),
+            send_result=null,result_recorded_at=null where id=$1`,
           [row.id, JSON.stringify(submitted), actor.id]);
           await writeEvent(c, actor, 'submit-email-draft', 'deal', row.deal_id, {
             new: { proposal_id: row.id, sha256: submitted.sha256, to: submitted.to, cc: submitted.cc },
@@ -261,7 +309,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           if (args.status === 'sent' && !args.sent_item_id?.trim()) fail('email_draft_sent_confirmation_required');
           const result = args.status === 'sent' ? { status: 'sent', sent_item_id: args.sent_item_id }
             : { status: 'failed', reason: args.reason };
-          await c.query(`update email_proposal set status=$2,version=version+1,send_result=$3::jsonb
+          await c.query(`update email_proposal set status=$2,version=version+1,send_result=$3::jsonb,result_recorded_at=now()
             where id=$1`, [row.id, args.status, JSON.stringify(result)]);
           await writeEvent(c, actor, 'record-email-sent', 'deal', row.deal_id, {
             new: { proposal_id: row.id, sha256: args.sha256, ...result },
@@ -333,6 +381,12 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           evidence_quote: args.evidence_quote, task_text: step || args.kind === 'possible_new_deal' ? args.text?.trim() ?? null : null,
           sender_role: matching ? args.sender_role : null, next_date: step ? args.next_date : null,
           owner: draft ? source.email_source.mailbox_owner : step ? args.owner || 'joe' : null };
+        if (row.kind === 'file_to_deal') {
+          await c.query('select id from activity where id=$1 for update', [row.activity_id]);
+          if ((await c.query(`select 1 from v_email_thread_filing_event where verb='undo-email-thread-filing'
+            and subject_id=$1 and new_value->>'activity_id'=$2 limit 1`, [row.deal_id,row.activity_id])).rows.length)
+            fail('email_thread_filing_suppressed');
+        }
         const existing = (await c.query(`select 1 from email_proposal where kind=$1 and deal_id is not distinct from $2::uuid
           and activity_id=$3 for update`, [row.kind,row.deal_id,row.activity_id])).rows.length > 0;
         if (!existing && !draft) await show(c, actor, row);
@@ -353,13 +407,63 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'list-email-proposals': {
       write: false,
-      description: 'List email proposals for Home across deals, or only the optional deal UUID, oldest first. Status defaults to pending; select confirmed, dismissed, approved_to_send, sent or failed to read resolved proposals. Reply drafts include subject, body and owner in reply_draft. Pending drafts also include exact to/cc arrays for verified human Joe or Dell. Missing source/copy addresses set preview_error and disable confirm_verb; machine callers receive no pending recipient addresses. Submit must echo the displayed arrays through submit-email-draft. Every item includes its status, kind, deal, confidence, source email sender, subject, quote, activity_id and suspected_instruction warning. Pending items have a fresh preview and confirm_verb; confirm with the preview fields or dismiss with dismiss-email-proposal and the version. A stale pending item has preview null and preview_error. Resolved items have resolution (resolved_at, resolved_by actor ID, reason), the stored proposed_next_step when applicable, and null confirm_verb, preview and preview_error. Phase history retains the quote; exact phase changes remain in deal history. Without limit, refuses above 200 matching proposals. For pagination, pass limit and then next_cursor until more is false; a cursor remains valid after resolution, but must belong to the selected deal when deal is supplied.',
+      description: 'With mode=lead_proposals, return pending outlook-intake lead candidates only for the authenticated partner mailbox, with sender name, domain and address, stored structured reading, current deal/contact names, pool and party versions, and evidence_quote_untrusted=true. limit defaults to 25; cursor pages oldest first and remains valid after resolution. Rejects status/deal arguments. not_business rows never appear; not_business_count counts distinct recorded exclusions over the mailbox recorded lifetime, without reconstructing older local-only exclusions. Ownerless legacy candidates are excluded. With mode=recent_outcomes, return partner-scoped recorded reply outcomes newest first, without body or addresses; limit defaults to 20 and max 50, cursor pages by result time and ID. Historical outcomes with no result time are excluded. Otherwise list email proposals for Home across deals, or only the optional deal UUID, oldest first. Status defaults to pending; select confirmed, dismissed, approved_to_send, sent or failed to read resolved proposals. Reply drafts include subject, body and owner in reply_draft, send_result with the outcome, and nullable result_recorded_at when the outcome was recorded. Pending drafts also include exact to/cc arrays for verified human Joe or Dell. Missing source/copy addresses set preview_error and disable confirm_verb; machine callers receive no pending recipient addresses. Submit must echo the displayed arrays through submit-email-draft. Every item includes its status, kind, deal, confidence, source email sender, subject, quote, activity_id and suspected_instruction warning. Pending items have a fresh preview and confirm_verb; confirm with the preview fields or dismiss with dismiss-email-proposal and the version. A stale pending item has preview null and preview_error. Resolved items have resolution (resolved_at, resolved_by actor ID, reason), the stored proposed_next_step when applicable, and null confirm_verb, preview and preview_error. Phase history retains the quote; exact phase changes remain in deal history. Without limit, refuses above 200 matching proposals. For pagination, pass limit and then next_cursor until more is false; a cursor remains valid after resolution, but must belong to the selected deal when deal is supplied.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         deal: { type: 'string', format: 'uuid' },
+        mode: { type: 'string', enum: ['recent_outcomes', 'lead_proposals'] },
         status: { type: 'string', enum: ['pending', 'confirmed', 'dismissed', 'approved_to_send', 'sent', 'failed'], default: 'pending' },
         limit: { type: 'integer', minimum: 1, maximum: LIMIT },
         cursor: { type: 'string', format: 'uuid' } } },
       handler: async (c, actor, args) => {
+        if (args.mode === 'lead_proposals') {
+          const owner = senderOwner(actor);
+          if (args.deal !== undefined || args.status !== undefined) fail('email_leads_arguments_invalid');
+          const limit = args.limit ?? 25;
+          if (args.cursor && !(await c.query(`select 1 from v_email_lead_proposal
+            where pool_id=$1 and mailbox_owner=$2`, [args.cursor, owner])).rows.length)
+            fail('email_proposals_cursor_invalid');
+          const { rows } = await c.query(`select * from v_email_lead_proposal
+            where mailbox_owner=$1 and status='pool' and ($2::uuid is null or (created_at,pool_id) >
+              (select created_at,pool_id from v_email_lead_proposal where pool_id=$2 and mailbox_owner=$1))
+            order by created_at,pool_id limit $3`, [owner, args.cursor ?? null, limit + 1]);
+          const more = rows.length > limit;
+          const proposals = rows.slice(0, limit).map(row => ({ pool_id: row.pool_id, base_version: row.base_version,
+            sender: { display_name: row.display_name, domain: row.sender_domain }, sender_email: row.sender_email,
+            reading: row.reading, evidence_quote_untrusted: true,
+            deal: row.deal_id ? { id: row.deal_id, name: row.deal_name } : null,
+            contact: row.party_id ? { ref: row.party_ref, party_id: row.party_id, name: row.party_name,
+              base_version: row.party_version } : null }));
+          const count = (await c.query(`select not_business_count from v_email_lead_exclusion_count
+            where mailbox_owner=$1`, [owner])).rows[0]?.not_business_count ?? 0;
+          return { schema_version: 'email-lead-proposals.v1', proposals, more,
+            next_cursor: more ? proposals.at(-1).pool_id : null, not_business_count: count,
+            not_business_count_scope: 'recorded_lifetime', historical_exclusions_available: false, send: false };
+        }
+        if (args.mode === 'recent_outcomes') {
+          const owner = senderOwner(actor);
+          if (args.status !== undefined || (args.limit !== undefined && args.limit > 50)) fail('email_outcomes_arguments_invalid');
+          const limit = args.limit ?? 20;
+          if (args.cursor && !(await c.query(`select 1 from email_proposal p join activity a on a.id=p.activity_id
+            where p.id=$1 and p.kind='reply_draft' and p.status in ('sent','failed') and p.result_recorded_at is not null
+              and p.owner=$2 and a.email_source->>'mailbox_owner'=$2 and ($3::uuid is null or p.deal_id=$3)`,
+          [args.cursor, owner, args.deal ?? null])).rows.length) fail('email_proposals_cursor_invalid');
+          const { rows } = await c.query(`select p.id,p.deal_id,p.draft_subject,p.submitted_email->>'subject' as submitted_subject,
+              p.status,p.result_recorded_at,p.send_result->>'reason' as failure_reason from email_proposal p join activity a on a.id=p.activity_id
+            where p.kind='reply_draft' and p.status in ('sent','failed') and p.result_recorded_at is not null
+              and p.owner=$1 and a.email_source->>'mailbox_owner'=$1 and ($2::uuid is null or p.deal_id=$2)
+              and ($3::uuid is null or (p.result_recorded_at,p.id) <
+                (select result_recorded_at,id from email_proposal where id=$3))
+            order by p.result_recorded_at desc,p.id desc limit $4`, [owner, args.deal ?? null, args.cursor ?? null, limit + 1]);
+          const more = rows.length > limit;
+          const proposals = rows.slice(0, limit).map(row => ({ id: row.id, deal: row.deal_id,
+            subject: row.submitted_subject ?? row.draft_subject, outcome: row.status,
+            result_recorded_at: new Date(row.result_recorded_at).toISOString(),
+            failure_reason_code: row.status !== 'failed' ? null
+              : ['invalid_submission', 'submission_hash_mismatch', 'submission_recipients_invalid', 'aborted_before_dispatch'].includes(row.failure_reason)
+                ? row.failure_reason : /^unconfirmed_after_[0-9]+$/.test(row.failure_reason ?? '') ? 'unconfirmed_after_dispatch' : 'delivery_failed' }));
+          return { schema_version: 'email-reply-outcomes.v1', proposals, more,
+            next_cursor: more ? proposals.at(-1).id : null, send: false };
+        }
         if (args.cursor && !args.limit) fail('email_proposals_cursor_requires_limit');
         if (args.cursor && !(await c.query(`select 1 from email_proposal
           where id=$1 and ($2::uuid is null or deal_id=$2)`, [args.cursor, args.deal ?? null])).rows.length)
@@ -368,7 +472,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const { rows } = await c.query(`select p.id,p.version,p.kind,p.status,p.resolved_at,p.resolved_by,
             p.resolution_reason,p.deal_id,d.name as deal_name,
             p.activity_id,p.evidence_quote,p.task_text,p.sender_role,p.next_date::text as next_date,p.owner,
-            p.confidence::float8 as confidence,p.draft_subject,p.draft_body,p.submitted_email,p.send_result,a.summary,a.occurred_at
+            p.confidence::float8 as confidence,p.draft_subject,p.draft_body,p.submitted_email,p.send_result,p.result_recorded_at,a.summary,a.occurred_at
           from email_proposal p left join deal d on d.id=p.deal_id join activity a on a.id=p.activity_id
           where p.status=$4 and ($3::uuid is null or p.deal_id=$3) and ($1::uuid is null or (p.created_at,p.id) >
             (select created_at,id from email_proposal where id=$1))
@@ -393,7 +497,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             proposed_matter: row.kind === 'possible_new_deal' ? row.task_text : null,
             resolution: pending ? null : { resolved_at: new Date(row.resolved_at).toISOString(),
               resolved_by: row.resolved_by, reason: row.resolution_reason },
-            ...(row.kind === 'reply_draft' ? { reply_draft: { subject: row.draft_subject, body: row.draft_body, owner: row.owner, ...recipients }, submitted_email: row.submitted_email, send_result: row.send_result } : {}),
+            ...(row.kind === 'reply_draft' ? { reply_draft: { subject: row.draft_subject, body: row.draft_body, owner: row.owner, ...recipients }, submitted_email: row.submitted_email, send_result: row.send_result, result_recorded_at: row.result_recorded_at ? new Date(row.result_recorded_at).toISOString() : null } : {}),
             proposed_next_step: row.kind === 'next_step'
               ? { text: row.task_text, next_date: row.next_date, owner: row.owner } : null,
             suspected_instruction: suspected(row.evidence_quote),
@@ -407,25 +511,52 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'email-router-queue': {
       write: false,
-      description: 'Router input for WR-000441: captured inbound emails from the last 1-7 days (default 3), oldest first, including unfiled mail, with resolved participants, filed history and all open deals, and not in exclude (the activity ids the router already handled). An email with some proposals stored stays queued until the router excludes it, so a partly written email is retried; record-email-proposal upserts per kind, deal and email. Returns at most limit emails (1-200, default 25) and more=true when others wait, so a long queue drains over runs. Returns the email body as untrusted data for classification into record-email-proposal.',
+      description: 'Router input for WR-000441: captured inbound and outbound emails from the last 1-7 days (default 3), oldest first, including unfiled mail, with resolved participants, filed history and all open deals, and not in exclude (the activity ids the router already handled). An email with some proposals stored stays queued until the router excludes it, so a partly written email is retried; record-email-proposal upserts per kind, deal and email. Returns at most limit emails (1-200, default 25) and more=true when others wait, so a long queue drains over runs. Returns the email body as untrusted data for classification into record-email-proposal. purpose=links instead pages already-filed inbound and outbound email by activity UUID without an age window, returning its latest associated hydrated text and confirmed deal. Pass next_cursor as after until more=false.',
       inputSchema: { type: 'object', additionalProperties: false,
         properties: { days: { type: 'integer', minimum: 1, maximum: 7 },
+          purpose: { enum: ['links'] }, after: { type: 'string', format: 'uuid' },
           limit: { type: 'integer', minimum: 1, maximum: LIMIT },
           exclude: { type: 'array', maxItems: 5000, items: { type: 'string', format: 'uuid' } } } },
       handler: async (c, _actor, args) => {
         const limit = args.limit ?? 25;
-        const { rows } = await c.query(`select a.id as activity_id,a.summary,a.detail as body,a.occurred_at,
-            a.email_context,a.email_source->>'mailbox_owner' as mailbox_owner,(select jsonb_build_object('party_id',p.id,'name',p.name,'email',null,
+        if (args.purpose === 'links') {
+          const { rows } = await c.query(`select a.id as activity_id,a.deal_id as deal,
+              coalesce(hydrated.detail,a.detail) as body,a.occurred_at
+            from activity a left join lateral (
+              select h.detail from activity h where h.kind='note' and h.detail is not null
+                and h.email_context->>'source_activity_id'=a.id::text and h.actor_id=a.actor_id
+                and ((h.client_id is not null and h.client_id=a.client_id)
+                  or (h.vendor_id is not null and h.vendor_id=a.vendor_id)
+                  or (h.lead_id is not null and h.lead_id=a.lead_id)
+                  or (h.deal_id is not null and h.deal_id=a.deal_id))
+              order by h.recorded_at desc,h.id desc limit 1
+            ) hydrated on true
+            where a.kind in ('email_in','email_out') and a.deal_id is not null
+              and a.occurred_at<=now() and ($1::uuid is null or a.id>$1::uuid)
+              and (a.email_source->>'mailbox_owner'=$3 or (a.email_source is null and a.actor_id=$4::uuid))
+              and (a.kind <> 'email_out' or a.actor_id=$4::uuid)
+            order by a.id limit $2`, [args.after ?? null, limit + 1, partnerAuthoritySlugForActor(_actor), _actor.id]);
+          const emails = rows.slice(0, limit);
+          const more = rows.length > limit;
+          return { schema_version: 'email-link-sources.v1', emails, more,
+            next_cursor: more ? emails.at(-1).activity_id : null };
+        }
+        const { rows } = await c.query(`select a.id as activity_id,a.kind,a.summary,a.detail as body,a.occurred_at,
+            a.email_context,coalesce(a.email_source->>'mailbox_owner',$4) as mailbox_owner,
+            coalesce((select jsonb_agg(distinct e.subject_id) from v_email_thread_filing_event e
+              where e.verb='undo-email-thread-filing' and e.new_value->>'activity_id'=a.id::text), '[]'::jsonb) as suppressed_deals,
+            (select jsonb_build_object('party_id',p.id,'name',p.name,'email',null,
               'address_unavailable',true,'unknown',false,'internal',false) from party p where p.id=coalesce(
               (select party_id from client where id=a.client_id),(select party_id from vendor where id=a.vendor_id),
               (select party_id from lead where id=a.lead_id))) as recorded_sender,d.id as deal,d.name as deal_name,d.phase,d.deal_type
           from activity a left join deal d on d.id=a.deal_id
-          where a.kind='email_in' and a.detail is not null and a.occurred_at<=now()
+          where a.kind in ('email_in','email_out') and a.detail is not null and a.occurred_at<=now()
             and a.occurred_at>now()-make_interval(days=>$1) and a.id<>all($2::uuid[]) and (a.email_source is null or a.email_source->>'mailbox_owner'=$4)
-          order by a.occurred_at,a.id limit $3`, [args.days ?? 3, args.exclude ?? [], limit + 1, partnerAuthoritySlugForActor(_actor)]);
+            and (a.kind <> 'email_out' or a.actor_id=$5::uuid)
+          order by a.occurred_at,a.id limit $3`, [args.days ?? 3, args.exclude ?? [], limit + 1, partnerAuthoritySlugForActor(_actor), _actor.id]);
         const people = await contacts(c);
         const openDeals = (await c.query(`select d.id,d.name,d.city,d.source_row->>'property' as property,
-            d.client_id,p.name as client,d.phase,
+            d.client_id,p.name as client,d.phase,d.deal_type,
             coalesce((select jsonb_agg(jsonb_build_object('party_id',dp.party_id,'name',pp.name,'role',dp.role))
               from deal_participant dp join party pp on pp.id=dp.party_id
               where dp.deal_id=d.id and dp.to_at is null),'[]'::jsonb) as participants
@@ -449,7 +580,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'email-proposal-quality': {
       write: false,
-      description: 'WR-000441 QUALITY report: email proposals created in the last 1-90 days (default 7), by kind: how many were proposed, are still pending, were confirmed by Joe or dismissed, the dismissal rate among resolved ones, and the average router confidence of each outcome. over_threshold is true when at least 10 are resolved and more than 5% were dismissed, the point where that kind should stay propose-only until the router is fixed. corrections lists up to 20 dismissals made in the requested period with the reason given, regardless of when the proposal was created. Proposal counts use the creation date. Counts only; changes nothing.',
+      description: 'WR-000441 QUALITY report: email proposals created in the last 1-90 days (default 7), by kind: how many were proposed, are still pending, were confirmed by Joe or dismissed, the dismissal rate among resolved ones, and the average router confidence of each outcome. over_threshold is true when at least 10 are resolved and more than 5% were dismissed, the point where that kind should stay propose-only until the router is fixed. corrections lists up to 20 dismissals made in the requested period with the reason given, regardless of when the proposal was created. Proposal counts use the creation date. automatic_filings counts automatic thread filings recorded in the requested period, how many have a linked undo receipt at read time, and their undo_rate (null when empty). Its over_threshold is true with at least 10 filings and more than 5% undone. This is a separate filing cohort, not a proposal dismissal rate. Counts only; changes nothing and does not enforce a policy change.',
       inputSchema: { type: 'object', additionalProperties: false,
         properties: { days: { type: 'integer', minimum: 1, maximum: 90 } } },
       handler: async (c, _actor, args) => {
@@ -475,7 +606,16 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           where p.status='dismissed' and p.resolved_at>now()-make_interval(days=>$1)
           order by p.resolved_at desc,p.id limit 20`, [days])).rows
           .map(row => ({ ...row, resolved_at: new Date(row.resolved_at).toISOString() }));
-        return { schema_version: 'email-proposal-quality.v1', days, kinds, corrections, send: false };
+        const filingCounts = (await c.query(`select count(*)::int as filed,
+            count(*) filter (where exists (select 1 from v_email_thread_filing_event u
+              where u.verb='undo-email-thread-filing' and u.new_value->>'event_id'=f.id::text))::int as undone
+          from v_email_thread_filing_event f where f.verb='inherit-email-thread'
+            and f.recorded_at>now()-make_interval(days=>$1)`, [days])).rows[0];
+        const undoRate = filingCounts.filed ? filingCounts.undone / filingCounts.filed : null;
+        const automaticFilings = { ...filingCounts, undo_rate: undoRate,
+          over_threshold: filingCounts.filed >= 10 && undoRate > 0.05 };
+        return { schema_version: 'email-proposal-quality.v1', days, kinds, corrections,
+          automatic_filings: automaticFilings, send: false };
       },
     },
     'dismiss-email-proposal': {

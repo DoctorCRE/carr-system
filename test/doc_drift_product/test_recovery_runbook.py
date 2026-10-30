@@ -29,7 +29,7 @@ class RecoveryRunbookTest(unittest.TestCase):
         for claim in ("Nothing important is only on the Mac", "no unique data", "no failure point",
                       "covers the first six hours", "off-Mac liveness check on"):
             self.assertNotIn(claim, text)
-        for item in ("out/outlook-intake/state.json", "out/outlook-intake/needs-refresh.json",
+        for item in ("out/outlook-intake/state.json",
                      "out/outlook-send/ledger.jsonl", "out/calendar-archive/", "out/boards/",
                      "exporters/templates/", "exporters/dossier-roster.local.json",
                      "tools/dictation-rig/vocab-local.txt", "machine-role marker",

@@ -112,7 +112,7 @@ usage() {
   print -r -- "                                                a path reaches trees anywhere"
   print -r -- "       run.sh worktree --sweep [--dry-run]      reap merged+clean+idle(48h) trees"
   print -r -- "                                                through the same code as --remove"
-  print -r -- "       run.sh worktree --plumb [path]           link .venv/out/node_modules into a"
+  print -r -- "       run.sh worktree --plumb [path]           link .venv and out into a"
   print -r -- "                                                worktree THIS script did not create"
   print -r -- "                                                (default: the worktree at \$PWD)"
   print -r -- "       run.sh worktree --install [--dry-run] [path]"
@@ -131,59 +131,42 @@ link() {                                # link <target> <linkname>
   print -r -- "  ok  $(basename "$name") -> $target"
 }
 
-# runtime_matches_lock <worker-dir> <node_modules-dir>
+# link_node_runtime <worktree> -- NEVER LINKS mcp-server/node_modules ANY MORE.
 #
-# A canonical checkout can be cleanly *present* yet many commits behind the
-# worktree consuming its shared npm cache. Directory existence therefore proves
-# nothing. npm writes node_modules/.package-lock.json from the exact resolution
-# it installed; compare that installed resolution with the consuming
-# worktree's lock before linking. Platform-inapplicable optional packages are
-# legitimately absent, but every required package must be present and every
-# installed entry must be byte-for-byte the lock entry the worktree expects.
-runtime_matches_lock() {
-  "$PY" - "$1/package-lock.json" "$2/.package-lock.json" <<'PYEOF'
-import json, sys
-try:
-    expected = json.load(open(sys.argv[1]))["packages"]
-    installed = json.load(open(sys.argv[2]))["packages"]
-except Exception:
-    raise SystemExit(1)
-expected.pop("", None)
-if any(key not in expected or installed[key] != expected[key] for key in installed):
-    raise SystemExit(1)
-if any(key not in installed and not row.get("optional")
-       for key, row in expected.items()):
-    raise SystemExit(1)
-PYEOF
-}
-
-# link_node_runtime <worktree> — one shared decision for create-time plumbing
-# and SessionStart --plumb. A stale shared cache is worse than no cache: the
-# latter prints a missing-dependency error, while the former runs an arbitrary
-# older dependency graph and can make unrelated current tests fail. On a
-# mismatch, remove only this script's untracked symlink and leave the worktree
-# dependency-empty; ordinary STORE calls still boot zero-install, and code work
-# can run `npm --prefix mcp-server ci` locally from its own lock.
+# LIVE INCIDENT 2026-10-28 (WR579.S1.J1): ~/carr-system/mcp-server/node_modules
+# was emptied at 18:05Z, which broke com.carr.partner-ping and put the Outlook
+# runtime (it links that folder) at risk. Cause, reproduced: an agent ran
+# `npm ci` inside a worktree whose mcp-server/node_modules was a symlink into
+# $CANON. npm ci deletes node_modules first, and it deleted THROUGH the link,
+# emptying the canonical folder every other worktree and launchd job reads.
+# There is no safe way to share a directory that the standard install command
+# wipes, so a worktree that needs dependencies runs
+# `npm --prefix mcp-server ci` (or `./run.sh worktree --install`) into its own
+# real directory. A worktree with no node_modules still boots: ordinary STORE
+# calls run zero-install.
+#
+# What this still does: if a PRE-FIX untracked symlink into $CANON is found
+# (a worktree plumbed before this change), drop that symlink (never its
+# target) so `npm ci` there can no longer reach the canonical tree. A real
+# directory, or a tracked path, is somebody's work and is left alone.
 link_node_runtime() {
   local wt="$1"
-  local runtime="$CANON/mcp-server/node_modules"
   local name="$wt/mcp-server/node_modules"
-  [ -d "$runtime" ] || return 0
-  if runtime_matches_lock "$wt/mcp-server" "$runtime"; then
-    link "$runtime" "$name"
-    return 0
-  fi
   if [ -L "$name" ] && ! git -C "$wt" ls-files --error-unmatch \
        "mcp-server/node_modules" >/dev/null 2>&1; then
-    rm "$name"
+    local resolved="${name:A}" canon_nm="${CANON:A}/mcp-server/node_modules"
+    if [ "$resolved" = "$canon_nm" ]; then
+      rm "$name"
+      print -r -- "  ok  dropped shared node_modules symlink (npm ci through it empties the canonical folder)"
+    fi
   fi
-  print -r -- "  !! shared node_modules does not match this worktree's package-lock.json — left unlinked"
-  print -r -- "     run npm --prefix mcp-server ci in the worktree when local Node tooling is needed"
+  print -r -- "  note node_modules is not linked -- run npm --prefix mcp-server ci in this worktree when Node tooling is needed"
 }
 
 # venv_matches_lock <worktree> <venv>
 #
-# THE SAME TRUST BOUNDARY AS runtime_matches_lock, ON THE OTHER RUNTIME. PR #834
+# THE SAME TRUST BOUNDARY PR #834 DREW FOR NPM (since removed: node_modules is no
+# longer linked), ON THE OTHER RUNTIME. PR #834
 # closed it for npm and stopped there, which left the larger of the two surfaces
 # open: every worktree links the canonical .venv, and NOTHING compared what is
 # installed in that venv with the requirements.lock the consuming worktree
@@ -366,8 +349,7 @@ drift_override_allowed() {
 }
 
 # link_python_runtime <worktree> — the .venv half of the plumbing decision, and
-# the exact shape link_node_runtime already has, so the two runtimes are judged
-# by one rule rather than two (rule a8c55a47).
+# (the npm half is no longer linked at all; see link_node_runtime).
 #
 # IT JUDGES THE RUNTIME THAT WILL ACTUALLY BE USED. The first cut always
 # validated $CANON/.venv and then called link(), which REFUSES to replace a real
@@ -698,7 +680,7 @@ case "$1" in
     ;;
   --install)
     shift
-    # THE ONE FROZEN DOOR. link_python_runtime and link_node_runtime both refuse a
+    # THE ONE FROZEN DOOR. link_python_runtime refuses a
     # shared runtime that does not match this worktree's lock, and a refusal that
     # names no command is just a broken worktree with a nicer message. This is
     # that command, and it is deliberately the ONLY install path this script
@@ -1057,14 +1039,8 @@ fi
 
 link_python_runtime "$wt"; create_py_rc=$?
 link "$CANON/out"   "$wt/out"
-# The THIRD gitignored dependency, and it hides the same way the first two did.
-# `npm test` in a fresh worktree dies on ERR_MODULE_NOT_FOUND for
-# @neondatabase/serverless — which reads as a code failure, not a missing
-# checkout artifact, so a session can spend real time chasing a bug that is not
-# there. Hit live 2026-08-11 deploying the vendor-stage fix: the suite reported
-# 1 fail on a test that had nothing to do with the change. Linked, not
-# installed, because a per-worktree npm install would drift from the canonical
-# lockfile — the same reasoning as .venv.
+# node_modules is deliberately NOT linked (see link_node_runtime: npm ci through
+# a link emptied the canonical folder, 2026-10-28). It only drops a pre-fix link.
 link_node_runtime "$wt"
 
 print -r -- ""

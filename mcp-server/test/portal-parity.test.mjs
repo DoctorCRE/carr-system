@@ -1,8 +1,9 @@
 // Tests the parity harness's row selection, probe file, Stage 1 and Stage 0 without a browser.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, mkdir, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parityLaunchOptions } from '../portal-parity/browser.mjs';
@@ -275,6 +276,67 @@ test('an allowed difference excuses only the aspects it declares: a 500 sign-in 
   assert.match(failed.lines[0], /^A-G04 FAIL .*r0\.status/);
   const cookieOnly = await run(renamed.base);
   assert.deepEqual([cookieOnly.results[0].verdict, cookieOnly.results[0].allowed], ['ALLOWED', ['AD2']]);
+});
+
+// A candidate that answers 500 to everything, the sign-in included.
+async function brokenSite() {
+  const server = createServer((request, response) => { response.writeHead(500).end('boom'); });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  return { server, base: `http://127.0.0.1:${server.address().port}/portal/` };
+}
+
+test('with a password, a side that refuses sign-in fails its session rows instead of leaving them UNRUN', async t => {
+  const reference = await gatedSite({ 'index.html': 'home' });
+  const broken = await brokenSite();
+  t.after(() => { reference.server.close(); broken.server.close(); });
+  const run = (ref, candidate, password) => runParity({ stage: 2, site: 'REF-V', probesFile: PROBES, reference: ref, candidate, password, rows: 'V-G08' });
+  const candidateRefused = await run(reference.base, broken.base, 'example-health');
+  assert.deepEqual(candidateRefused.results, [{ id: 'V-G08', verdict: 'FAIL', reason: 'candidate-sign-in-refused', aspects: ['candidate-sign-in-status-500'] }]);
+  assert.match(candidateRefused.lines[0], /^V-G08 FAIL candidate-sign-in-refused candidate-sign-in-status-500$/);
+  assert.equal(candidateRefused.ok, false, 'a slice with a refused sign-in fails');
+  const referenceRefused = await run(broken.base, reference.base, 'example-health');
+  assert.equal(referenceRefused.results[0].verdict, 'FAIL');
+  assert.equal(referenceRefused.results[0].reason, 'reference-sign-in-refused');
+  assert.equal(referenceRefused.ok, false);
+  const noPassword = await run(reference.base, broken.base, undefined);
+  assert.deepEqual(noPassword.results, [{ id: 'V-G08', verdict: 'UNRUN', reason: 'needs-session' }]);
+  assert.equal(noPassword.ok, true, 'without a password, session rows stay UNRUN and a slice passes');
+});
+
+const CLI = new URL('../portal-parity/cli.mjs', import.meta.url).pathname;
+
+test('the CLI refuses run-data paths inside the repository, through a symlink too, and names the flag', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'parity-cli-'));
+  const link = path.join(dir, 'repo-link');
+  await symlink(new URL('.', ROOT).pathname, link);
+  const cli = (...args) => spawnSync(process.execPath, [CLI, '--stage', '1', '--probes', PROBES, '--package', FIXTURE, '--rows', 'V-S06', ...args], { encoding: 'utf8' });
+  const viaLink = cli('--report', path.join(link, 'out', 'report.json'));
+  assert.equal(viaLink.status, 2);
+  assert.match(viaLink.stderr, /--report must point outside the repository/);
+  const outside = cli('--report', path.join(dir, 'report.json'));
+  assert.equal(outside.status, 0, outside.stderr);
+  const aliases = cli('--candidate-aliases', path.join(link, 'aliases.json'));
+  assert.match(aliases.stderr, /--candidate-aliases must point outside the repository/);
+});
+
+// Each bypass, unfixed, would write the report into the repository: the test
+// removes any such file so a failure leaves the checkout clean.
+test('the CLI refuses a dangling symlink into the repository and a .. taken after a symlink', async t => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'parity-cli-'));
+  const repo = new URL('.', ROOT).pathname;
+  const tag = path.basename(dir);
+  const intoFile = path.join(repo, 'mcp-server', `${tag}-dangling.json`), parentFile = path.join(repo, `${tag}-dotdot.json`);
+  t.after(() => Promise.all([rm(intoFile, { force: true }), rm(parentFile, { force: true })]));
+  const cli = (...args) => spawnSync(process.execPath, [CLI, '--stage', '1', '--probes', PROBES, '--package', FIXTURE, '--rows', 'V-S06', ...args], { encoding: 'utf8' });
+  await symlink(intoFile, path.join(dir, 'dangling.json'));
+  const dangling = cli('--report', path.join(dir, 'dangling.json'));
+  assert.match(dangling.stderr, /--report must point outside the repository/);
+  assert.equal(dangling.status, 2);
+  await mkdir(path.join(dir, 'x'));
+  await symlink(path.join(repo, 'mcp-server'), path.join(dir, 'x', 'sub'));
+  const dotdot = cli('--report', `${path.join(dir, 'x', 'sub')}/../${tag}-dotdot.json`);
+  assert.match(dotdot.stderr, /--report must point outside the repository/);
+  assert.equal(dotdot.status, 2);
 });
 
 // A two-row probe file, so the full-run rule can be shown without 456 rows.

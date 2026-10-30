@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const LAUNCH_REGRESSIONS = "chrome-launch.test.mjs";
 const PRIVATE_POSTGRES_SUITES = new Set([
+  "census-inventory-postgres.test.mjs",
   "work-queue-postgres.test.mjs",
   "whole-call-undo-postgres.test.mjs", "client-portal-postgres.test.mjs", "fact-store-postgres.test.mjs",
   "deal-items-postgres.test.mjs", "vendor-meetings.test.mjs", "email-deal-progress-postgres.test.mjs", "email-lead-proposal-postgres.test.mjs",
@@ -15,7 +16,7 @@ const PRIVATE_POSTGRES_SUITES = new Set([
   "a02-rule-enforcement-postgres.test.mjs", "confirm-merge-schema.test.mjs",
   "journey-one-clock-input-store.v5.test.mjs", "journey-one-clock-store.v5.test.mjs",
   "lease-radar-postgres.test.mjs", "local-deals-ci-fixture.test.mjs", "local-deals-store.test.mjs", "whats-new-store.test.mjs",
-  "self-closing-records-sql.test.mjs",
+  "self-closing-records-sql.test.mjs", "tool-call-retention-postgres.test.mjs", "unused-index-drop-postgres.test.mjs",
 ]);
 
 export function suiteBatches(files, browserFiles = []) {

@@ -47,6 +47,7 @@ class IntakeFake {
       doctrine_source_label: "control-room#evidence", replayed: false,
       source_provenance: { policy_id: "lexical-dominant-v1" },
     }] };
+    if (sql.includes("work-request-intake:slices")) return { rows: [] };
     if (sql.includes("acting-identity")) return { rows: [] };
     if (sql.includes("work_request_card")) return { rows: [{
       ref: "WR-0001", state: "captured", version: 1, title: REQUEST.title,
@@ -350,7 +351,7 @@ test("report-problem never calls optional Jev from its write envelope", async ()
 
 for (const [args, noHits, code, fields, hint] of [
   [{ ...REQUEST, title: "x".repeat(201) }, false, "invalid_report_problem", ["title"], /UUID.*1000.*200.*2000.*1.*12/],
-  [{ ...REQUEST, unexpected: "private input" }, false, "unregistered_operation_fields", [], /Remove.*documented input/i],
+  [{ ...REQUEST, unexpected: "private input" }, false, "unregistered_operation_fields", ["unexpected"], /Remove.*documented input/i],
   [{ ...REQUEST, acceptance_criteria: [{ id: "bad", text: "a" }] }, false, "invalid_acceptance_criteria", ["acceptance_criteria"], /unique uppercase.*500/],
   [REQUEST, true, "current_situation_source_not_found", ["situation"], /current shared doctrine source.*retry/i],
 ]) test(`report-problem publicly preserves actionable ${code}`, async t => {
@@ -362,7 +363,7 @@ for (const [args, noHits, code, fields, hint] of [
     assert.equal(payload.error, code);
     assert.deepEqual(payload.fields, fields);
     assert.match(payload.hint, hint);
-    assert.doesNotMatch(JSON.stringify(payload), /private input|unexpected/);
+    assert.doesNotMatch(JSON.stringify(payload), /private input/);
     return true;
   });
 });

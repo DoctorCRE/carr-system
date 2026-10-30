@@ -13,6 +13,7 @@ import traceback
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
+import plistlib
 import importlib.util
 import os
 from pathlib import Path
@@ -74,6 +75,7 @@ class FakeOutlook:
         self.front = False
         self.background = False
         self.press_count = 0
+        self.unresolved: set[int] = set()
 
     def open_url(self, url: str) -> None:
         parts = urlsplit(url)
@@ -94,7 +96,8 @@ class FakeOutlook:
         if wid == 1:
             return [{'element_index': 0, 'role': 'AXWindow', 'label': MAIN['title'], 'depth': 0},
                     {'element_index': 1, 'role': 'AXButton', 'label': 'New Mail', 'depth': 1,
-                     'element_token': '1:1'}]
+                     'element_token': '1:1'},
+                    {'role': 'AXTable', 'label': 'Message List', 'depth': 4}]
         form = self.forms[wid]
         out: list[dict] = []
 
@@ -126,6 +129,8 @@ class FakeOutlook:
         if tool == 'list_windows':
             return {'windows': list(self.windows.values())}
         if tool == 'get_window_state':
+            if args['window_id'] in self.unresolved:
+                return {'elements': [], 'degraded_reason': 'ax_window_unresolved'}
             return {'elements': self.elements(args['window_id'])}
         if tool == 'click':
             wid, index = map(int, args['element_token'].split(':'))
@@ -786,6 +791,40 @@ class SendTests(unittest.TestCase):
         self.assertTrue(any(tool == 'click' and args.get('element_token') == '1:1'
                             for tool, args in h.fake.calls))
 
+    def test_mailbox_with_twelve_toolbar_strips_allows_send(self):
+        h = Harness(self.out)
+        for wid in range(20, 32):
+            h.fake.windows[wid] = {'window_id': wid, 'title': '', 'is_on_screen': False,
+                                   'bounds': {'width': 1920, 'height': 30}}
+        self.assertEqual(h.send().state, State.DONE)
+        self.assertEqual(h.fake.presses(), 1)
+
+    def test_mailbox_requires_both_controls(self):
+        for missing in ('New Mail', 'Message List'):
+            with self.subTest(missing=missing):
+                h = Harness(self.out / missing)
+                elements = h.fake.elements
+                with patch.object(h.fake, 'elements', side_effect=lambda wid: [
+                        e for e in elements(wid) if e.get('label') != missing]):
+                    self.assertEqual(h.send().state, State.FAILED)
+                self.assertEqual(h.fake.presses(), 0)
+
+    def test_lone_draft_is_refused_without_quit_or_send(self):
+        for kind in ('mail', 'event'):
+            with self.subTest(kind=kind):
+                h = Harness(self.out / kind)
+                if kind == 'mail':
+                    h.fake.open_url('mailto:person-z@example.test?subject=leave-alone')
+                else:
+                    h.fake('invoke_menu', {'path': ['File', 'New', 'Event']})
+                del h.fake.windows[1]
+                before = json.dumps(h.fake.forms, sort_keys=True)
+                self.assertEqual(h.send().state, State.FAILED)
+                self.assertEqual(h.fake.presses(), 0)
+                self.assertEqual(json.dumps(h.fake.forms, sort_keys=True), before)
+                self.assertFalse(any(tool == 'invoke_menu' and args.get('path') == ui.QUIT
+                                     for tool, args in h.fake.calls))
+
     def test_existing_compose_is_left_untouched(self):
         h = Harness(self.out)
         h.fake.open_url('mailto:person-z@example.test?subject=other-draft&body=leave-alone')
@@ -793,6 +832,28 @@ class SendTests(unittest.TestCase):
         self.assertEqual((result.state, result.reason), (State.FAILED, 'compose_window_open'))
         self.assertEqual(h.fake.presses(), 0)
         self.assertEqual(len(h.fake.forms), 1)
+
+    def test_unreadable_unassigned_window_does_not_hold_send(self):
+        h = Harness(self.out)
+        h.fake.windows[15] = {'window_id': 15, 'title': '', 'is_on_screen': False, 'on_current_space': None,
+                              'bounds': {'x': 0, 'y': 580, 'width': 500, 'height': 500}}
+        h.fake.unresolved.add(15)
+        self.assertEqual(h.send().state, State.DONE)
+        self.assertEqual(h.fake.presses(), 1)
+
+    def test_untitled_compose_and_unassigned_shape_with_draft_controls_hold_send(self):
+        for title, bounds, on_screen, space in (
+                ('', {'x': 298, 'y': 52, 'width': 917, 'height': 911}, True, True),
+                ('', {'x': 0, 'y': 580, 'width': 500, 'height': 500}, False, None)):
+            with self.subTest(bounds=bounds):
+                h = Harness(self.out / str(bounds['width']))
+                h.fake.open_url('mailto:person-z@example.test?subject=&body=leave-alone')
+                h.fake.windows[100].update(title=title, bounds=bounds, is_on_screen=on_screen,
+                                           on_current_space=space)
+                result = h.send()
+                self.assertEqual((result.state, result.reason), (State.FAILED, 'compose_window_open'))
+                self.assertEqual(h.fake.presses(), 0)
+                self.assertEqual(len(h.fake.forms), 1)
 
     def test_failed_discard_is_reported(self):
         h = Harness(self.out, corrupt=('subject', 'changed'))
@@ -1012,6 +1073,31 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual(receipts[0]['base_version'], 2)
         self.assertEqual(receipts[0]['sha256'], self.draft['sha256'])
 
+    def test_open_partner_draft_defers_without_quit_relaunch_or_failure_receipt(self):
+        for title in (f'Partner draft • {ACCOUNT}', '', None):
+            for recovery in (False, True):
+                with self.subTest(title=title, recovery=recovery):
+                    fake = FakeOutlook(self.clock, self.mailbox)
+                    fake.open_url('mailto:other@example.test?subject=Partner%20draft&body=keep')
+                    fake.windows[100]['title'] = title
+                    fake.windows[1]['is_on_screen'] = not recovery
+                    fake.windows[100]['is_on_screen'] = not recovery
+                    self.calls.clear()
+                    self.ports.open_form = lambda item: send_mod.open_form(item, ui.Waits(
+                        quit_seconds=0, sync_seconds=0, new_window_seconds=0))
+                    with patch.object(ui, 'cua', fake), \
+                            patch.object(ui, 'outlook_pid', return_value=42), \
+                            patch.object(ui.subprocess, 'run') as command:
+                        counts = self.worker.run(self.settings, self.ports)
+                    self.assertEqual(counts['deferred'], 1)
+                    self.assertEqual(counts['compose_window_open'], 1)
+                    self.assertEqual((counts['failed'], counts['sent']), (0, 0))
+                    self.assertEqual([v for v, _ in self.calls if v == 'record-email-sent'], [])
+                    self.assertEqual(fake.presses(), 0)
+                    self.assertEqual(len(fake.forms), 1)
+                    self.assertFalse(any(tool == 'invoke_menu' for tool, _ in fake.calls))
+                    command.assert_not_called()
+
     def test_invalid_rows_record_failure_and_do_not_block_later_draft(self):
         bad = dict(self.draft, cc=['wrong@example.test'])
         good = dict(self.draft, proposal_id='22222222-2222-4222-8222-222222222222')
@@ -1049,6 +1135,26 @@ class OutboxTests(unittest.TestCase):
         [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
         self.assertEqual(receipt['reason'], 'aborted_before_dispatch')
         self.assertEqual(self.sent, [])
+
+    def test_aborted_reply_resubmission_sends_once_and_blocks_another(self):
+        original = self.ports.open_form
+        def abort_form(item):
+            form = original(item)
+            def abort(**kwargs):
+                raise send_mod.UserActive('user_active')
+            form.press = abort
+            return form
+        self.ports.open_form = abort_form
+        self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
+        self.assertEqual(self.calls[-1][1]['reason'], 'aborted_before_dispatch')
+        self.ports.open_form = original
+        self.draft['version'] = 4
+        counts = self.worker.run(self.settings, self.ports)
+        self.assertEqual(counts['sent'], 1, self.calls[-1][1].get('reason'))
+        self.draft['version'] = 6
+        self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.calls[-1][1]['reason'], 'duplicate_key:key_already_pressed')
 
     def test_ambiguous_latch_expires_without_resending(self):
         self.settings.send_state.mkdir(parents=True)
@@ -1239,6 +1345,221 @@ class OutboxTests(unittest.TestCase):
             self.assertEqual(self.worker.run(self.settings, self.ports)['deferred'], 1)
         self.assertEqual(self.sent, [])
         self.assertEqual(self.calls, [])
+
+
+class AttachmentTests(unittest.TestCase):
+    """Attachments ride only on submitted mail and go out through one fake AppleScript run."""
+
+    def setUp(self):
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.home, self.root = self.tmp / 'home', self.tmp / 'deals'
+        (self.root / 'deal-001').mkdir(parents=True)
+        self.file = self.root / 'deal-001' / 'packet-001.pdf'
+        self.file.write_bytes(b'%PDF-synthetic')
+        self.settings_for(attachment_root=str(self.root), attachment_max_bytes=1000)
+        self.enterContext(patch.object(send_mod, 'account', lambda: ACCOUNT))
+        self.default, self.real_default_sender = f'{ACCOUNT}_ActiveSyncExchange_HxS', send_mod.default_sender
+        self.enterContext(patch.object(send_mod, 'default_sender', lambda: self.default))
+        self.mailbox, self.clock, self.scripts, self.forms = FakeMailbox(), Clock(), [], []
+        self.reply = 'sent'
+        self.ports = Ports(lambda item: self.forms.append(item), self.mailbox, lambda: 600,
+                           lambda verb, args: {'recipients': [{'email': e, 'blocked': False} for e in args['emails']]},
+                           now=self.clock.now, sleep=self.clock.sleep, out=self.tmp / 'send',
+                           script_send=self.script_send)
+
+    def settings_for(self, **overrides):
+        write_settings(self.home, ROOT, account=ACCOUNT, internal_domain='example.test',
+                       partner_cc='partner@example.test', **overrides)
+        self.settings = load_settings(self.home)
+        self.enterContext(patch.object(send_mod, 'load_settings', lambda: self.settings))
+
+    def script_send(self, mail):
+        self.scripts.append(mail)
+        if self.reply == 'sent':
+            self.mailbox.sent.append(SentRow(ACCOUNT, '; '.join(mail.recipients), mail.subject,
+                                             int(self.clock.t) + 30, 'sent-7'))
+        if isinstance(self.reply, Exception):
+            raise self.reply
+        return self.reply
+
+    def mail(self, *paths):
+        return send_mod.Mail(('person-a@example.test',), ('partner@example.test',), (), 'subject-001',
+                             'Body text.', send_mod.attachments(paths or [str(self.file)]))
+
+    def ledger_text(self):
+        return (self.tmp / 'send' / send_mod.LEDGER).read_text()
+
+    def dispatch(self, mail, key):
+        """The submitted transport, reached directly: drafts refuse attachments until the record carries them."""
+        return send_mod._write_transport(mail, key, self.ports, send_requested=True, submitted=True)
+
+    def test_submitted_mail_sends_through_one_script_and_confirms(self):
+        result = self.dispatch(self.mail(), 'k1')
+        self.assertEqual((result.state, result.mode, result.sent_item_id), (State.DONE, 'script', 'sent-7'))
+        self.assertEqual(len(self.scripts), 1)
+        self.assertEqual(self.forms, [])
+        self.assertNotIn('packet-001', self.ledger_text())
+        self.assertNotIn('deal-001', self.ledger_text())
+        rows = [json.loads(line) for line in self.ledger_text().splitlines()]
+        self.assertEqual([r['attachments'] for r in rows],
+                         [{'count': 1, 'sha256': [send_mod._digest(self.file)]}] * 2)
+        again = self.dispatch(self.mail(), 'k1')
+        self.assertEqual(again.state, State.DONE)
+        self.assertEqual(len(self.scripts), 1)
+
+    def test_plain_send_and_cli_refuse_attachments_before_anything_runs(self):
+        result = send_mod.send(['person-a@example.test'], [], [], 'subject-001', 'Body.',
+                               idempotency_key='k2', ports=self.ports, send_requested=True,
+                               attachments=[str(self.file)])
+        self.assertEqual((result.state, result.reason), (State.REFUSED, 'attachments_require_submission'))
+        direct = send_mod._write_transport(self.mail(), 'k3', self.ports, send_requested=True)
+        self.assertEqual(direct.reason, 'attachments_require_submission')
+        self.assertEqual((self.scripts, self.forms), ([], []))
+        self.assertFalse((self.tmp / 'send' / send_mod.LEDGER).exists())
+
+    def test_partial_attachment_set_aborts_without_sending(self):
+        self.reply = 'aborted'
+        result = self.dispatch(self.mail(), 'k4')
+        self.assertEqual((result.state, result.reason), (State.FAILED, 'aborted_before_dispatch'))
+        self.assertEqual(self.mailbox.sent, [])
+        self.assertIn('aborted_before_dispatch', self.ledger_text())
+
+    def test_only_a_validated_submission_reaches_the_transport(self):
+        from lib.outlook_outbox import SubmittedDraft
+        mail = self.mail()
+        self.assertTrue(send_mod.partner_copied(mail, self.settings))
+        result = send_mod.send_submitted(mail, ports=self.ports)
+        self.assertEqual((result.state, result.reason), (State.REFUSED, 'submission_required'))
+        with self.assertRaisesRegex(ValueError, '^attachments_not_wired$'):
+            SubmittedDraft('00000000-0000-0000-0000-000000000001', 1, 'a' * 64, mail)
+        self.assertEqual((self.scripts, self.forms), ([], []))
+        self.assertFalse((self.tmp / 'send' / send_mod.LEDGER).exists())
+
+    def test_partner_copy_rule(self):
+        for cc in ((), ('someone@example.test',), ('partner@example.test', 'someone@example.test')):
+            with self.subTest(cc=cc):
+                self.assertFalse(send_mod.partner_copied(replace(self.mail(), cc=cc), self.settings))
+        self.assertFalse(send_mod.partner_copied(replace(self.mail(), bcc=('x@example.test',)), self.settings))
+
+    def test_another_default_sender_is_refused_before_dispatch(self):
+        for default in ('someone@example.test_ActiveSyncMicrosoft_HxS', None, ACCOUNT):
+            with self.subTest(default=default):
+                self.default = default
+                result = self.dispatch(self.mail(), 'k10')
+                self.assertEqual((result.state, result.reason), (State.FAILED, 'default_sender_mismatch'))
+        self.assertEqual(self.scripts, [])
+        self.assertFalse((self.tmp / 'send' / send_mod.LEDGER).exists())
+
+    def test_default_sender_reads_the_profile_preference(self):
+        profile = self.tmp / 'profile-a'
+        self.assertIsNone(self.real_default_sender(profile))
+        profile.mkdir()
+        prefs = profile / 'ProfilePreferences.plist'
+        prefs.write_bytes(plistlib.dumps({'DefaultAccountIdentifier': 'a@example.test_ActiveSyncExchange_HxS'}))
+        self.assertEqual(self.real_default_sender(profile), 'a@example.test_ActiveSyncExchange_HxS')
+        prefs.write_bytes(b'not a plist')
+        self.assertIsNone(self.real_default_sender(profile))
+
+    def test_configured_profile_controls_the_sender_check(self):
+        main, alternate = self.tmp / 'Main Identity', self.tmp / 'Alternate Identity'
+        for profile, default in ((main, 'someone@example.test_ActiveSyncMicrosoft_HxS'),
+                                 (alternate, f'{ACCOUNT}_ActiveSyncExchange_HxS')):
+            profile.mkdir()
+            (profile / 'ProfilePreferences.plist').write_bytes(
+                plistlib.dumps({'DefaultAccountIdentifier': default}))
+        self.enterContext(patch.object(send_mod, 'default_sender', self.real_default_sender))
+        for profile, state, k in ((main, State.FAILED, 'k12'), (alternate, State.DONE, 'k11')):
+            with self.subTest(profile=profile.name):
+                self.settings_for(attachment_root=str(self.root), attachment_max_bytes=1000, profile=str(profile))
+                self.assertEqual(self.dispatch(self.mail(), k).state, state)
+        self.assertEqual(len(self.scripts), 1)
+
+    def test_failed_cleanup_is_its_own_failure_and_never_resends(self):
+        self.ports.script_send = None
+        with patch.object(send_mod.subprocess, 'run',
+                          return_value=subprocess.CompletedProcess([], 0, 'cleanup_failed\n', '')) as run:
+            first = self.dispatch(self.mail(), 'k9')
+            second = self.dispatch(self.mail(), 'k9')
+        self.assertEqual((first.state, first.reason), (State.FAILED, 'abort_cleanup_failed'))
+        self.assertEqual((second.state, second.reason), (State.FAILED, 'abort_cleanup_failed'))
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(self.mailbox.sent, [])
+        script = run.call_args.kwargs['input']
+        self.assertIn('delete m\non error\nreturn "cleanup_failed"', script)
+
+    def test_transport_failure_is_unconfirmed_and_never_retried(self):
+        self.reply = send_mod.UiFailure('transport_TimeoutExpired_000000000000')
+        first = self.dispatch(self.mail(), 'k5')
+        self.assertEqual(first.state, State.PRESSED_UNCONFIRMED)
+        second = self.dispatch(self.mail(), 'k5')
+        self.assertEqual(second.state, State.PRESSED_UNCONFIRMED)
+        self.assertEqual(len(self.scripts), 1)
+
+    def test_file_changed_after_admission_is_refused_before_dispatch(self):
+        mail = self.mail()
+        self.file.write_bytes(b'%PDF-changed!!')
+        result = self.dispatch(mail, 'k6')
+        self.assertEqual((result.state, result.reason), (State.FAILED, 'attachment_changed'))
+        self.assertEqual(self.scripts, [])
+
+    def test_admission_resolves_links_and_dots_before_the_root_check(self):
+        outside = self.tmp / 'outside.pdf'
+        outside.write_bytes(b'x')
+        (self.root / 'deal-001' / 'link.pdf').symlink_to(outside)
+        for path, reason in ((str(self.root / 'deal-001' / '..' / '..' / 'outside.pdf'), 'attachment_outside_root'),
+                             (str(self.root / 'deal-001' / 'link.pdf'), 'attachment_outside_root'),
+                             (str(self.root / 'deal-001' / 'missing.pdf'), 'attachment_missing'),
+                             (str(self.root / 'deal-001'), 'attachment_not_regular_file'),
+                             ('deal-001/packet-001.pdf', 'attachment_path_not_absolute')):
+            with self.subTest(reason=reason), self.assertRaisesRegex(ValueError, f'^{reason}$'):
+                send_mod.attachments([path])
+
+    def test_size_cap_and_missing_settings_fail_closed(self):
+        self.file.write_bytes(b'x' * 1001)
+        with self.assertRaisesRegex(ValueError, '^attachments_too_large$'):
+            send_mod.attachments([str(self.file)])
+        self.settings_for()
+        with self.assertRaisesRegex(ValueError, '^attachment_settings_missing$'):
+            send_mod.attachments([str(self.file)])
+        self.settings_for(attachment_root=str(self.tmp / 'gone'), attachment_max_bytes=1000)
+        with self.assertRaisesRegex(ValueError, '^attachment_root_missing$'):
+            send_mod.attachments([str(self.file)])
+
+    def test_settings_reject_relative_root_and_nonpositive_cap(self):
+        for overrides in (dict(attachment_root='deals'), dict(attachment_root=str(self.root) + '/../x'),
+                          dict(attachment_max_bytes=0), dict(attachment_max_bytes='10')):
+            with self.subTest(overrides=overrides):
+                write_settings(self.home, ROOT, **overrides)
+                with self.assertRaises(ValueError):
+                    load_settings(self.home)
+
+    def test_fingerprint_binds_content_and_leaves_plain_mail_unchanged(self):
+        with_file = self.mail()
+        plain = replace(with_file, attachments=())
+        self.assertNotEqual(send_mod.fingerprint(with_file), send_mod.fingerprint(plain))
+        identity = ['send', ACCOUNT, 'subject-001', sorted(plain.recipients)]
+        self.assertEqual(send_mod.fingerprint(plain),
+                         __import__('hashlib').sha256(json.dumps(identity).encode()).hexdigest())
+
+    def test_script_attaches_every_file_verifies_count_and_keeps_paths_off_argv(self):
+        mail = replace(self.mail(), subject='Quote " and \\ slash')
+        script = send_mod.applescript(mail)
+        self.assertIn('set f0 to POSIX file "' + str(self.file.resolve()) + '"', script)
+        self.assertIn('subject:"Quote \\" and \\\\ slash"', script)
+        self.assertLess(script.index('is not 1 then error'), script.index('send m'))
+        self.assertLess(script.index('delete m'), script.index('send m'))
+        self.assertIn('make new cc recipient at m', script)
+        with patch.object(send_mod.subprocess, 'run',
+                          return_value=subprocess.CompletedProcess([], 0, 'sent\n', '')) as run:
+            self.assertEqual(send_mod.applescript_send(mail), 'sent')
+        self.assertEqual(run.call_args.args[0], ['osascript', '-'])
+        self.assertIn(str(self.file.resolve()), run.call_args.kwargs['input'])
+
+    def test_control_characters_are_refused_before_dispatch(self):
+        mail = replace(self.mail(), body='Bad \x07 bell')
+        result = self.dispatch(mail, 'k7')
+        self.assertEqual((result.state, result.reason), (State.FAILED, 'unscriptable_text'))
+        self.assertEqual(self.scripts, [])
 
 
 if __name__ == '__main__':

@@ -4,6 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createCaptureHandler } from "../src/capture.js";
 import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const ids = {
   device: "10000000-0000-0000-0000-000000000001",
@@ -357,18 +358,18 @@ test("status transitions move forward, reject every backward edge, and stop at t
 test("candidate batches are atomic at validation, idempotent, and never auto-write", async () => {
   const { db, r, token } = await claimed();
   const tooLong = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen";
-  let response = await post(r.handler, "/capture/candidates", { session_token: token, idempotency_key: "batch-bad",
+  let response = await post(r.handler, "/capture/candidates", { session_token: token, idempotency_key: "00000571-0000-4000-8000-000000000035",
     items: [{ kind: "activity", payload: { ref: "Deal Alpha", summary: "Call" }, evidence_quote: "fine", confidence: 0.5 },
       { kind: "activity", payload: { ref: "Deal Alpha", summary: "Call" }, evidence_quote: tooLong, confidence: 0.5 }] });
   assert.equal(response.status, 400);
   assert.equal(db.candidates.length, 0);
-  response = await post(r.handler, "/capture/candidates", { session_token: token, idempotency_key: "batch-transcript",
+  response = await post(r.handler, "/capture/candidates", { session_token: token, idempotency_key: "00000571-0000-4000-8000-000000000036",
     items: [{ kind: "activity", payload: { ref: "Deal Alpha", transcript: "must never land" },
       evidence_quote: "fine", confidence: 0.5 }] });
   assert.equal(response.status, 400);
   assert.equal(db.candidates.length, 0);
 
-  const batch = { session_token: token, idempotency_key: "batch-1", items: [{ kind: "activity",
+  const batch = { session_token: token, idempotency_key: "00000571-0000-4000-8000-000000000037", items: [{ kind: "activity",
     payload: { ref: "Deal Alpha", summary: "Discussed lease", kind: "call" },
     evidence_quote: "Please call me next week", confidence: 0.99 }] };
   response = await post(r.handler, "/capture/candidates", batch);
@@ -388,6 +389,55 @@ test("candidate batches are atomic at validation, idempotent, and never auto-wri
   assert.equal(typeof queue.candidates[0].created_at, "string");
 });
 
+test("post-call evidence receipts persist independently of model payload and bind retries", async () => {
+  const db = new CaptureFake();
+  const r = rig(db);
+  const claimedResponse = await r.handler.fetch(claimRequest(validPostCallClaim),
+    { CAPTURE_TOKENS: '{"mac-studio":"device-secret"}' });
+  const token = (await claimedResponse.json()).session_token;
+  const source = { quote_sha256: "a".repeat(64), source_sha256: "b".repeat(64), speaker: "joe" };
+  const item = { kind: "phase_move", payload: { deal: ids.deal, field: "phase", value: "legal" },
+    evidence_quote: "Move Deal Alpha into legal", confidence: 1 };
+  const batch = { session_token: token, idempotency_key: "00000571-0000-4000-8000-000000000101",
+    items: [item], evidence_sources: [source] };
+  const response = await post(r.handler, "/capture/candidates", batch);
+  assert.equal(response.status, 200);
+  assert.deepEqual(db.candidates[0].payload.evidence_source, source);
+  const replay = await post(r.handler, "/capture/candidates", batch);
+  assert.equal(replay.status, 200);
+  assert.equal(db.candidates.length, 1);
+  const changed = await post(r.handler, "/capture/candidates", {
+    ...batch, evidence_sources: [{ ...source, speaker: "dell" }],
+  });
+  assert.equal(changed.status, 409);
+  assert.equal((await changed.json()).error, "key_reuse");
+  const injected = await post(r.handler, "/capture/candidates", {
+    ...batch, idempotency_key: "00000571-0000-4000-8000-000000000102",
+    items: [{ ...item, payload: { ...item.payload, evidence_source: source } }],
+  });
+  assert.equal(injected.status, 400);
+  assert.equal(db.candidates.length, 1);
+});
+
+test("capture refuses malformed evidence receipts and ordinary-session attestations", async () => {
+  const { db, r, token } = await claimed();
+  const item = { kind: "phase_move", payload: { deal: ids.deal, field: "phase", value: "legal" },
+    evidence_quote: "Move Deal Alpha into legal", confidence: 1 };
+  const source = { quote_sha256: "a".repeat(64), source_sha256: "b".repeat(64), speaker: "joe" };
+  const batch = { session_token: token, idempotency_key: "00000571-0000-4000-8000-000000000103", items: [item] };
+  for (const evidence_sources of [{}, [], [source, source], [false],
+    [{ ...source, speaker: "client" }], [{ ...source, quote_sha256: "invalid" }],
+    [{ ...source, source_sha256: null }], [{ ...source, text: "raw call text" }]]) {
+    const response = await post(r.handler, "/capture/candidates", { ...batch, evidence_sources });
+    assert.equal(response.status, 400, JSON.stringify(evidence_sources));
+    assert.equal((await response.json()).error, "invalid_evidence_sources");
+  }
+  const response = await post(r.handler, "/capture/candidates", { ...batch, evidence_sources: [source] });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error, "not_post_call_session");
+  assert.equal(db.candidates.length, 0);
+});
+
 test("post-call note activities require exact active deal UUIDs and reject malformed phase moves", async () => {
   const db = new CaptureFake();
   const r = rig(db);
@@ -399,18 +449,18 @@ test("post-call note activities require exact active deal UUIDs and reject malfo
     evidence_quote: "Landlord requested revised timing", confidence: 0.9, ...overrides });
 
   let response = await post(r.handler, "/capture/candidates", { session_token: token,
-    idempotency_key: "post-legacy-phase", items: [{ ...candidate(), kind: "phase_move" }] });
+    idempotency_key: "00000571-0000-4000-8000-000000000038", items: [{ ...candidate(), kind: "phase_move" }] });
   assert.equal(response.status, 400);
   response = await post(r.handler, "/capture/candidates", { session_token: token,
-    idempotency_key: "post-legacy-name", items: [candidate({ payload: {
+    idempotency_key: "00000571-0000-4000-8000-000000000039", items: [candidate({ payload: {
       ref: "Deal Alpha", kind: "note", summary: "Reviewed landlord follow-up" } })] });
   assert.equal(response.status, 400);
   response = await post(r.handler, "/capture/candidates", { session_token: token,
-    idempotency_key: "post-legacy-unknown", items: [candidate({ payload: {
+    idempotency_key: "00000571-0000-4000-8000-000000000040", items: [candidate({ payload: {
       ref: "20000000-0000-0000-0000-000000000099", kind: "note", summary: "Reviewed landlord follow-up" } })] });
   assert.equal(response.status, 400);
   response = await post(r.handler, "/capture/candidates", { session_token: token,
-    idempotency_key: "post-legacy-activity", items: [candidate()] });
+    idempotency_key: "00000571-0000-4000-8000-000000000041", items: [candidate()] });
   assert.equal(response.status, 200);
   assert.equal(db.candidates.length, 1);
   assert.equal(db.candidates[0].payload.ref, ids.deal);
@@ -426,7 +476,7 @@ test("post-call next-step proposals stay pending, validate exact deals, and repl
   const item = { kind: "next_step", payload: {
     deal: ids.deal, text: "Call landlord", next_date: "2028-02-29",
   }, evidence_quote: "Call landlord on February 29, 2028", confidence: 0.5 };
-  const batch = { session_token: token, idempotency_key: "next-step", items: [item] };
+  const batch = { session_token: token, idempotency_key: "00000571-0000-4000-8000-000000000042", items: [item] };
   const submitted = await post(r.handler, "/capture/candidates", batch);
   assert.equal(submitted.status, 200);
   const receipt = await submitted.json();
@@ -458,12 +508,12 @@ test("post-call next-step proposals stay pending, validate exact deals, and repl
   ];
   for (const [index, payload] of invalid.entries()) {
     const denied = await post(r.handler, "/capture/candidates", {
-      ...batch, idempotency_key: `invalid-${index}`, items: [{ ...item, payload }],
+      ...batch, idempotency_key: derivedIdempotencyKey("test", `invalid-${index}`), items: [{ ...item, payload }],
     });
     assert.equal(denied.status, 400, JSON.stringify(payload));
   }
   const undated = await post(r.handler, "/capture/candidates", {
-    ...batch, idempotency_key: "undated", items: [{ ...item, payload: { ...item.payload, next_date: null } }],
+    ...batch, idempotency_key: "00000571-0000-4000-8000-000000000043", items: [{ ...item, payload: { ...item.payload, next_date: null } }],
   });
   assert.equal(undated.status, 200);
   assert.equal(db.candidates.length, 2);
@@ -477,7 +527,7 @@ test("post-call phase proposals pin the server phase base and preserve it on rep
   const token = (await response.json()).session_token;
   const item = { kind: "phase_move", payload: { deal: ids.deal, field: "phase", value: "legal" },
     evidence_quote: "Move the deal to legal", confidence: 0.5 };
-  const batch = { session_token: token, idempotency_key: "phase-move", items: [item] };
+  const batch = { session_token: token, idempotency_key: "00000571-0000-4000-8000-000000000044", items: [item] };
   const submitted = await post(r.handler, "/capture/candidates", batch);
   assert.equal(submitted.status, 200);
   const receipt = await submitted.json();
@@ -494,7 +544,7 @@ test("post-call phase proposals pin the server phase base and preserve it on rep
   assert.equal((await session.json()).candidate_statuses[0].status, "pending");
   assert.equal(db.events.length, 0);
   await assert.rejects(() => TOOLS["resolve-candidate"].handler(db, joe, {
-    idempotency_key: "phase-stale-resolution", candidate_id: receipt.candidate_ids[0], accept: true,
+    idempotency_key: "00000571-0000-4000-8000-000000000045", candidate_id: receipt.candidate_ids[0], accept: true,
   }), error => error instanceof ToolError && error.payload.conflict?.value_a === "closing");
   assert.equal((await TOOLS["capture-queue"].handler(db, joe, {})).candidates[0].id,
     receipt.candidate_ids[0]);
@@ -515,25 +565,25 @@ test("post-call phase proposals pin the server phase base and preserve it on rep
   ];
   for (const [index, payload] of invalid.entries()) {
     const denied = await post(r.handler, "/capture/candidates", {
-      ...batch, idempotency_key: `invalid-phase-${index}`, items: [{ ...item, payload }],
+      ...batch, idempotency_key: derivedIdempotencyKey("test", `invalid-phase-${index}`), items: [{ ...item, payload }],
     });
     assert.equal(denied.status, 400, JSON.stringify(payload));
   }
   db.phaseBase = null;
   const noHistory = await post(r.handler, "/capture/candidates", {
-    ...batch, idempotency_key: "phase-no-history", items: [item],
+    ...batch, idempotency_key: "00000571-0000-4000-8000-000000000046", items: [item],
   });
   assert.equal(noHistory.status, 200);
   assert.equal(db.candidates[1].payload.base_event_id, null);
   const dated = await post(r.handler, "/capture/candidates", {
-    ...batch, idempotency_key: "phase-started-on",
+    ...batch, idempotency_key: "00000571-0000-4000-8000-000000000047",
     items: [{ ...item, payload: { ...item.payload, started_on: "2026-10-20" } }],
   });
   assert.equal(dated.status, 200);
   assert.equal(db.candidates[2].payload.started_on, "2026-10-20");
   // Only a partner's own post-call session may apply a change automatically.
   await assert.rejects(() => TOOLS["resolve-candidate"].handler(db, joe, {
-    idempotency_key: "phase-automatic-refused", candidate_id: db.candidates[2].id, accept: true, automatic: true,
+    idempotency_key: "00000571-0000-4000-8000-000000000048", candidate_id: db.candidates[2].id, accept: true, automatic: true,
   }), error => error instanceof ToolError && error.payload.error === "automatic_apply_not_allowed");
 });
 
@@ -542,7 +592,7 @@ test("a call change below the confidence bar stays a pending card when auto-appl
   db.candidates.push({ id: "60000000-0000-0000-0000-000000000009", kind: "phase_move", status: "pending",
     post_call: true, evidence_quote: "move it", payload: { deal: ids.deal, field: "phase", value: "legal" } });
   await assert.rejects(() => TOOLS["resolve-candidate"].handler(db, joe, {
-    idempotency_key: "below-bar", candidate_id: db.candidates[0].id, accept: true, automatic: true,
+    idempotency_key: "00000571-0000-4000-8000-000000000049", candidate_id: db.candidates[0].id, accept: true, automatic: true,
   }), error => error instanceof ToolError && error.payload.error === "below_confidence_bar");
   assert.equal(db.candidates[0].status, "pending");
   assert.equal(db.events.length, 0);
@@ -550,13 +600,13 @@ test("a call change below the confidence bar stays a pending card when auto-appl
 
 test("resolve accept executes once as confirmer; reject only skips; double resolve is inert", async () => {
   const { db, r, token } = await claimed();
-  await post(r.handler, "/capture/candidates", { session_token: token, idempotency_key: "batch-resolve", items: [
+  await post(r.handler, "/capture/candidates", { session_token: token, idempotency_key: "00000571-0000-4000-8000-000000000050", items: [
     { kind: "activity", payload: { ref: "Deal Alpha", kind: "call", summary: "Called client" }, evidence_quote: "Call went well", confidence: 0.99 },
     { kind: "activity", payload: { ref: "Deal Alpha", kind: "call", summary: "Ignore" }, evidence_quote: "Not relevant", confidence: 0.2 },
   ] });
   const [accepted, rejected] = db.candidates;
   const result = await TOOLS["resolve-candidate"].handler(db, joe,
-    { idempotency_key: "resolve-1", candidate_id: accepted.id, accept: true });
+    { idempotency_key: "00000571-0000-4000-8000-000000000051", candidate_id: accepted.id, accept: true });
   assert.equal(result.status, "confirmed");
   assert.equal(result.ref, db.activities[0].id);
   assert.equal(db.activities.length, 1);
@@ -565,18 +615,18 @@ test("resolve accept executes once as confirmer; reject only skips; double resol
   assert.equal(accepted.resulting_ref, db.activities[0].id);
 
   const skipped = await TOOLS["resolve-candidate"].handler(db, joe,
-    { idempotency_key: "resolve-2", candidate_id: rejected.id, accept: false });
+    { idempotency_key: "00000571-0000-4000-8000-000000000052", candidate_id: rejected.id, accept: false });
   assert.equal(skipped.status, "skipped");
   assert.equal(db.activities.length, 1);
   const again = await TOOLS["resolve-candidate"].handler(db, joe,
-    { idempotency_key: "resolve-3", candidate_id: accepted.id, accept: false });
+    { idempotency_key: "00000571-0000-4000-8000-000000000053", candidate_id: accepted.id, accept: false });
   assert.equal(again.already, "confirmed");
   assert.equal(db.activities.length, 1);
 });
 
 test("inner failure remains pending and meeting record appears only after a real write", async () => {
   const { db, r, token } = await claimed();
-  await post(r.handler, "/capture/candidates", { session_token: token, idempotency_key: "batch-meeting", items: [
+  await post(r.handler, "/capture/candidates", { session_token: token, idempotency_key: "00000571-0000-4000-8000-000000000054", items: [
     { kind: "meeting_record", payload: { ref: "Deal Alpha", summary: "Lease strategy meeting", detail: "Agreed to review options." },
       evidence_quote: "Review both lease options", confidence: 0.8 },
   ] });
@@ -590,7 +640,7 @@ test("inner failure remains pending and meeting record appears only after a real
 
   db.failActivity = true;
   await assert.rejects(TOOLS["resolve-candidate"].handler(db, joe,
-    { idempotency_key: "resolve-fail", candidate_id: candidate.id, accept: true }),
+    { idempotency_key: "00000571-0000-4000-8000-000000000055", candidate_id: candidate.id, accept: true }),
   error => error instanceof ToolError && error.payload.error === "inner_write_failed");
   assert.equal(candidate.status, "pending");
   assert.equal(candidate.resulting_ref, null);
@@ -598,7 +648,7 @@ test("inner failure remains pending and meeting record appears only after a real
 
   db.failActivity = false;
   const landed = await TOOLS["resolve-candidate"].handler(db, joe,
-    { idempotency_key: "resolve-success", candidate_id: candidate.id, accept: true });
+    { idempotency_key: "00000571-0000-4000-8000-000000000056", candidate_id: candidate.id, accept: true });
   assert.equal(db.activities[0].kind, "meeting");
   assert.equal(landed.ref, db.activities[0].id);
   const final = await (await poll()).json();
@@ -660,12 +710,12 @@ test("post-call lifecycle cannot finalize after one acceptance and stores only s
     recipient_ref: "P-0001", subject: "Next steps", body_sha256: "a".repeat(64),
     evidence_quote: "Please send the revised terms", confidence: 0.8 };
   const badBody = await post(r.handler, "/capture/post-call/candidates", { session_token: token,
-    idempotency_key: "post-bad", items: [{ ...draft, email_body: "must stay local" }] });
+    idempotency_key: "00000571-0000-4000-8000-000000000057", items: [{ ...draft, email_body: "must stay local" }] });
   assert.equal(badBody.status, 400);
   const mismatched = await post(r.handler, "/capture/post-call/candidates", { session_token: token,
-    idempotency_key: "post-mismatch", items: [{ ...draft, recipient_ref: "P-9999" }] });
+    idempotency_key: "00000571-0000-4000-8000-000000000058", items: [{ ...draft, recipient_ref: "P-9999" }] });
   assert.equal(mismatched.status, 400);
-  const batch = { session_token: token, idempotency_key: "post-batch", items: [action, draft] };
+  const batch = { session_token: token, idempotency_key: "00000571-0000-4000-8000-000000000059", items: [action, draft] };
   let response = await post(r.handler, "/capture/post-call/candidates", batch);
   assert.equal(response.status, 200);
   await post(r.handler, "/capture/post-call/candidates", batch);
@@ -678,10 +728,10 @@ test("post-call lifecycle cannot finalize after one acceptance and stores only s
   db.nextActions.push({ id: "existing-action", subject_id: ids.deal, owner_id: "10000000-0000-0000-0000-000000000003",
     description: "Unrelated Dell task", status: "open" });
   await assert.rejects(executeRegisteredTool(db, { ...joe, human: false }, "resolve-post-call-candidate",
-    { idempotency_key: "machine-no", candidate_id: first.id, accept: true }),
+    { idempotency_key: "00000571-0000-4000-8000-000000000060", candidate_id: first.id, accept: true }),
   error => error instanceof ToolError && error.payload.error === "human_only_verb_requires_verified_partner");
   const acceptedAction = await TOOLS["resolve-post-call-candidate"].handler(db, joe,
-    { idempotency_key: "accept-action", candidate_id: first.id, accept: true });
+    { idempotency_key: "00000571-0000-4000-8000-000000000061", candidate_id: first.id, accept: true });
   assert.equal(acceptedAction.assignee, "dell");
   assert.equal(db.nextActions.some(action => action.id === "existing-action" && action.status === "open"), true);
   assert.equal(db.postCallActions.length, 1);
@@ -692,17 +742,17 @@ test("post-call lifecycle cannot finalize after one acceptance and stores only s
     at: "2026-08-08T16:00:00.000Z" });
   assert.equal(tooSoon.status, 409);
   const earlyReport = await post(r.handler, "/capture/post-call/report", { session_token: token,
-    idempotency_key: "report-early", report_sha256: "b".repeat(64), candidate_count: 2 });
+    idempotency_key: "00000571-0000-4000-8000-000000000062", report_sha256: "b".repeat(64), candidate_count: 2 });
   assert.equal(earlyReport.status, 409);
   const acceptedDraft = await TOOLS["resolve-post-call-candidate"].handler(db, joe,
-    { idempotency_key: "accept-draft", candidate_id: second.id, accept: true });
+    { idempotency_key: "00000571-0000-4000-8000-000000000063", candidate_id: second.id, accept: true });
   assert.deepEqual({ local_only: acceptedDraft.local_only, send: acceptedDraft.send, ref: acceptedDraft.ref },
     { local_only: true, send: false, ref: null });
   const report = await post(r.handler, "/capture/post-call/report", { session_token: token,
-    idempotency_key: "report-final", report_sha256: "b".repeat(64), candidate_count: 2 });
+    idempotency_key: "00000571-0000-4000-8000-000000000064", report_sha256: "b".repeat(64), candidate_count: 2 });
   assert.equal(report.status, 200);
   const reportAgain = await post(r.handler, "/capture/post-call/report", { session_token: token,
-    idempotency_key: "report-final", report_sha256: "b".repeat(64), candidate_count: 2 });
+    idempotency_key: "00000571-0000-4000-8000-000000000064", report_sha256: "b".repeat(64), candidate_count: 2 });
   assert.equal((await reportAgain.json()).already, true);
   const done = await post(r.handler, "/capture/status", { session_token: token, state: "done",
     at: "2026-08-08T16:01:00.000Z" });
@@ -722,7 +772,7 @@ test("log-outreach completes only the caller's post-call action on the deal", as
   );
 
   const result = await TOOLS["log-outreach"].handler(db, joe, {
-    idempotency_key: "outreach-completes-joe-post-call",
+    idempotency_key: "00000571-0000-4000-8000-000000000065",
     ref: ids.deal,
     channel: "call",
     outcome: "connected",

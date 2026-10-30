@@ -240,15 +240,11 @@ def allocate_registry_successor(main_versions: Iterable[int]) -> tuple[int, int]
 
 
 def validate_integration_union(main: dict[str, str] | dict[str, bytes], candidate: dict[str, str] | dict[str, bytes]) -> None:
-    """Compare immutable main hashes/bytes before checking the union's ordering."""
+    """Require immutable main identities and a collision-free candidate union."""
     for name, content in main.items():
         if candidate.get(name) != content:
             raise MigrationNumberError(f"current-main migration missing or edited: {name}")
     validate_migration_names(candidate, allow_approved_interstitial_base=True)
-    highest = max((int(match.group(1)) for n in main if (match := SLOT_RE.fullmatch(n))), default=0)
     for name in candidate.keys() - main.keys():
-        match = SLOT_RE.fullmatch(name)
-        if not match:
+        if not SLOT_RE.fullmatch(name):
             raise MigrationNumberError(f"invalid pending migration: {name}")
-        if int(match.group(1)) <= highest:
-            raise MigrationNumberError(f"pending migration is not a forward successor: {name}")

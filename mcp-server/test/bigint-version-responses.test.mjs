@@ -2,6 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError } from "../src/tools.js";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const actor = { id: "10000000-0000-4000-8000-000000000002", slug: "joe", human: true };
 const id = "20000000-0000-4000-8000-000000000001";
@@ -13,8 +14,6 @@ const cases = [
 
   ["read-progress-board", board, ["snapshot"], "board"],
   ["read-board-answers", { after_cursor: 0, asker_ref: "desk" }, ["answers", 0], "board"],
-  ["publish-board-snapshot", { ...board, base_version: 2,
-    snapshot: { version: "display-version", id: opaqueId } }, ["snapshot"], "board"],
   ["ask-board-question", { ...question, base_version: 0 }, ["question"], "board"],
   ["revise-board-question", { ...question, base_version: 2 }, ["question"], "board"],
   ["answer-board-question", { ...board, question_id: "question", base_version: 2, answer_text: "Yes" }, ["answer"], "board"],
@@ -50,7 +49,7 @@ class Database {
 }
 
 for (const [verb, input, path, family] of cases) {
-  const args = { ...input, ...(TOOLS[verb].write ? { idempotency_key: `safe-version-${verb}` } : {}) };
+  const args = { ...input, ...(TOOLS[verb].write ? { idempotency_key: derivedIdempotencyKey("test", `safe-version-${verb}`) } : {}) };
   const run = db => TOOLS[verb].handler(db, actor, args);
   test(`${verb} returns safe numeric versions and preserves opaque IDs`, async () => {
     for (const version of ["2", "9007199254740991"]) {

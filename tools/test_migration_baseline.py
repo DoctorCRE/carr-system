@@ -1,14 +1,17 @@
 """Contracts for filename-keyed migration baseline coverage."""
 import hashlib
 import copy
+import shutil
 from pathlib import Path
 import tempfile
 import runpy
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 from migration_baseline import MigrationBaseline, repository_ledger
+from migrate import validate_ledger_identities
 
 
 def digest(text):
@@ -92,14 +95,48 @@ class BaselineTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'cannot read'):
                 MigrationBaseline.load(Path(directory))
 
-    def test_committed_snapshot_is_a_checksummed_source_prefix(self):
+    def test_committed_snapshot_is_a_checksummed_applied_set(self):
         root = Path(__file__).resolve().parents[1]
         baseline = MigrationBaseline.load(root)
         ledger = repository_ledger(root, baseline)
         parse = runpy.run_path(str(root / 'ops/migration-safety-gate.py'))['ledger_rows']
         rows = parse((root / 'db/schema.sql').read_text())
         self.assertTrue(rows)
-        self.assertEqual(rows, dict(list(ledger.items())[:len(rows)]))
+        baseline.validate_coverage(rows)
+        validate_ledger_identities(ledger, rows)
+
+    def test_snapshot_check_accepts_lower_pending_and_refuses_identity_drift(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            shutil.copytree(root / 'migrations', repo / 'migrations')
+            shutil.copytree(root / 'db', repo / 'db')
+            (repo / 'ops').symlink_to(root / 'ops', target_is_directory=True)
+            higher = repo / 'migrations/9999_review_higher.sql'
+            higher.write_text('select 9999;\n')
+            snapshot = (repo / 'db/schema.sql').read_text()
+            start = snapshot.index('COPY public.schema_migrations ')
+            end = snapshot.index('\\.\n', start)
+            snapshot = (snapshot[:end] + higher.name + '\t' + digest(higher.read_text())
+                        + '\t2026-01-01 00:00:00+00\n' + snapshot[end:])
+            (repo / 'db/schema.sql').write_text(snapshot)
+            (repo / 'migrations/9998_review_lower.sql').write_text('select 9998;\n')
+            with mock.patch.dict(globals(), __file__=str(repo / 'tools/test_migration_baseline.py')):
+                self.test_committed_snapshot_is_a_checksummed_applied_set()
+                for invalid in ('checksum', 'missing', 'baseline'):
+                    with self.subTest(invalid=invalid):
+                        if invalid == 'checksum':
+                            higher.write_text('select changed;\n')
+                        elif invalid == 'missing':
+                            higher.unlink()
+                        else:
+                            higher.write_text('select 9999;\n')
+                            lines = snapshot.splitlines(keepends=True)
+                            name = MigrationBaseline.load(repo).migrations[0][0]
+                            (repo / 'db/schema.sql').write_text(''.join(
+                                line for line in lines if not line.startswith(name + '\t')))
+                        with self.assertRaises((AssertionError, ValueError)):
+                            self.test_committed_snapshot_is_a_checksummed_applied_set()
 
     def test_generator_reads_exact_source_instead_of_working_tree(self):
         root = Path(__file__).resolve().parents[1]

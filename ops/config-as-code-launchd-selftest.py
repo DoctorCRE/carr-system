@@ -40,10 +40,11 @@ def plist(label: str, program: str = "/usr/bin/true") -> str:
     }).decode("utf-8")
 
 
-def check(label: str, condition: bool, detail: object = "") -> bool:
-    print(f"{'PASS' if condition else 'FAIL'}  {label}"
-          + ("" if condition or not detail else f": {detail}"))
-    return condition
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(ok="PASS  {label}", fail="FAIL  {label}", detail=": {detail}")
 
 
 def _fake_launchctl(root: Path, fail_bootstrap_times: int,
@@ -736,7 +737,7 @@ def outlook_render_cases() -> list[bool]:
         with patch.object(mod, "HOME", str(home)), patch.object(mod, "REPO", str(repo)), \
                 patch.object(mod, "TOKENS", [("{{REPO}}", str(repo)), ("{{HOME}}", str(home))]), \
                 patch("pathlib.Path.home", return_value=home):
-            for name in ("intake", "refresh", "triage"):
+            for name in ("intake", "triage"):
                 template = (REPO / f"ops/launchd/com.carr.outlook-{name}.plist").read_text()
                 rendered = mod.concrete(template)
                 definition = plistlib.loads(rendered.encode())
@@ -774,7 +775,7 @@ def outlook_render_cases() -> list[bool]:
         with patch.object(mod, "HOME", str(home)), patch.object(mod, "REPO", str(canonical)), \
                 patch.object(mod, "TOKENS", [("{{REPO}}", str(canonical)), ("{{HOME}}", str(home))]), \
                 patch("pathlib.Path.home", return_value=home):
-            for name in ("intake", "refresh", "triage"):
+            for name in ("intake", "triage"):
                 template = (REPO / f"ops/launchd/com.carr.outlook-{name}.plist").read_text()
                 installed = settings.render_plist(template.encode()).decode()
                 try:

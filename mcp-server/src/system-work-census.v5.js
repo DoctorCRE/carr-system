@@ -195,30 +195,17 @@ export async function readSystemWorkCensus({client,actor,correlationId,now=()=>n
    where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id='carr-v5'`,[tenant,sponsor]).catch(()=>({rows:[]}));
  let cache=cacheRead.rows[0]?.cache;
  let pagesMissing=false;
- if(cache?.schema==='system-work-external.v2') {
-  const pages=cache.pages;
-  const validManifest=Array.isArray(pages) && pages.length<=10000 && pages.every(p=>p &&
-   typeof p.board_id==='string' && /^carr-v5-external-[a-zA-Z0-9-]+$/.test(p.board_id) && Number.isSafeInteger(p.version) && p.version>0 && Number.isSafeInteger(p.count) && p.count>=0);
-  const loaded=[];
-  if(validManifest) {
-   const response=await client.query(`select board_id,version,snapshot_json from public.board_snapshot
-    where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=any($3::text[])`,[tenant,sponsor,pages.map(p=>p.board_id)]).catch(()=>({rows:[]}));
-   for(const page of pages) {
-    const stored=response.rows.find(r=>r.board_id===page.board_id);
-    const rows=stored?.snapshot_json?.items;
-    let storedVersion;
-    try { storedVersion=safeInteger(stored?.version,'board_version_invalid'); }
-    catch { pagesMissing=true;continue; }
-    if(storedVersion!==page.version || !Array.isArray(rows) || rows.length!==page.count ||
-       (page.digest && createHash('sha256').update(canonicalJson(stored.snapshot_json)).digest('hex')!==page.digest)) {pagesMissing=true;continue;}
-    loaded.push(...rows);
-   }
-  } else pagesMissing=true;
-  if(loaded.length!==cache.item_count)pagesMissing=true;
-  cache={...cache,items:loaded};
+ if(cache?.schema==='system-work-external.v3') {
+  // The inventory row is replaced whole; the manifest's digest and count prove it is the one this manifest describes.
+  const stored=await client.query(`select payload from public.system_work_census_inventory
+   where organization_tenant_id=$1 and sponsoring_human_slug=$2`,[tenant,sponsor]).catch(()=>({rows:[]}));
+  const payload=stored.rows[0]?.payload;
+  if(Array.isArray(payload?.items) && payload.items.length===cache.item_count &&
+     createHash('sha256').update(canonicalJson(payload)).digest('hex')===cache.digest) cache={...cache,items:payload.items};
+  else {pagesMissing=true;cache={...cache,items:[]};}
  }
  const cacheShape=cache && typeof cache==='object' && Array.isArray(cache.items) && cache.items.every(r=>r && typeof r==='object' && !Array.isArray(r));
- const cacheFresh=cacheShape&&['system-work-external.v1','system-work-external.v2'].includes(cache?.schema)&&iso(cache.observed_at)&&(+at-Date.parse(cache.observed_at)<3600000)&&cache.complete===true&&+at>=Date.parse(cache.observed_at);
+ const cacheFresh=cacheShape&&['system-work-external.v1','system-work-external.v3'].includes(cache?.schema)&&iso(cache.observed_at)&&(+at-Date.parse(cache.observed_at)<3600000)&&cache.complete===true&&+at>=Date.parse(cache.observed_at);
  for(const leg of SYSTEM_WORK_LEGS.filter(l=>kinds.includes(l.kind)&&(!sources||sources.includes(l.source)))){
   try{
    if(leg.kind==='slice_plan') {

@@ -1,5 +1,6 @@
 // Apply next steps and actions proposed from email.
 import { sha256 } from './sha256.ts';
+import { derivedIdempotencyKey } from './derived-key.ts';
 import { isCalendarDate } from './calendar-date.ts';
 import { ToolError } from './tool-error.ts';
 import type { Actor, Db, DelegatedHandler, LockDealField, ResolveEmailProposal, VerbInputs, WithEnvelope, WriteEvent } from './verb-contract.ts';
@@ -30,7 +31,7 @@ export function emailNextStepTools({ withEnvelope, writeEvent, lockDealField, se
       from deal d join v_deal_room_board b on b.id=d.id join client cl on cl.id=d.client_id join party p on p.id=cl.party_id
       join activity a on a.id=$2 and (a.deal_id=d.id or (a.deal_id is null and a.client_id=d.client_id))
       where d.id=$1 and d.phase<>'closed' and cl.merged_into is null and p.merged_into is null and p.deleted_at is null
-        and a.kind='email_in' and a.occurred_at<=now()
+        and a.kind in ('email_in','email_out') and a.occurred_at<=now()
       ${lock ? 'for update of d for share of a,cl,p' : ''}`, [args.deal,args.activity_id])).rows[0];
     if (!row) fail('email_next_step_evidence_not_found');
     if (!args.evidence_quote.trim() || !row.detail?.includes(args.evidence_quote)) fail('email_next_step_quote_invalid');
@@ -53,7 +54,7 @@ export function emailNextStepTools({ withEnvelope, writeEvent, lockDealField, se
   return {
     'preview-email-next-step': {
       write: false,
-      description: 'Preview a Joe or Dell action for a nonterminal deal on the current Deal Room board from a selected captured inbound email, literal evidence quote, caller-chosen task text and explicit due date. Select the exact deal first. Does not extract or verify commitments, infer dates, execute email instructions or change records. Captured text may be a preview. Shows Joe’s plan or the selected owner’s open actions that confirmation will replace. For Dell, the Deal Room due date follows the confirmed action. Joe must review the task, date, owner and evidence before confirmation.',
+      description: 'Preview a Joe or Dell action for a nonterminal deal on the current Deal Room board from a selected captured inbound or outbound email, literal evidence quote, caller-chosen task text and explicit due date. Select the exact deal first. Does not extract or verify commitments, infer dates, execute email instructions or change records. Captured text may be a preview. Shows Joe’s plan or the selected owner’s open actions that confirmation will replace. For Dell, the Deal Room due date follows the confirmed action. Joe must review the task, date, owner and evidence before confirmation.',
       inputSchema: schema({}),
       handler: (c: Db, _actor: Actor, args: VerbInputs['preview-email-next-step']) => proposal(c, args),
     },
@@ -71,9 +72,9 @@ export function emailNextStepTools({ withEnvelope, writeEvent, lockDealField, se
           const current = await proposal(c, args, true);
           if (current.proposal_digest !== args.proposal_digest) fail('email_next_step_proposal_stale');
           const result = current.owner === 'joe'
-            ? await setNextStep(c, actor, { idempotency_key: `${args.idempotency_key}:next-step`,
+            ? await setNextStep(c, actor, { idempotency_key: derivedIdempotencyKey("email-next-step", args.idempotency_key),
               deal: current.deal, base_version: current.base_version, text: current.text, next_date: current.next_date })
-            : await setNextAction(c, actor, { idempotency_key: `${args.idempotency_key}:next-action`,
+            : await setNextAction(c, actor, { idempotency_key: derivedIdempotencyKey("email-next-action", args.idempotency_key),
               ref: current.deal, description: current.text, due_on: current.next_date, owner: current.owner });
           await writeEvent(c, actor, 'confirm-email-next-step', 'deal', current.deal,
             { new: { ...(current.owner === 'joe' ? { next_step: current.text } : {}),

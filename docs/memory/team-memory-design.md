@@ -403,7 +403,7 @@ out: { attach_id,
            propose_with: "write-doctrine-section document=team-memory section_key=conventions/proposed/<slug>" },
          { name: "team-memory", access: "read_write" | "read_only",
            document: "team-memory", generation,
-           index: [ { section_key, title, version, content_hash,
+           index: [ { section_id, section_key, title, version, content_hash,
                       review_after, last_writer_surface } ],
            instructions: "Check the index before starting. Read with doctrine-sections.
              Write lessons as you learn them with write-doctrine-section
@@ -514,7 +514,7 @@ in S1.
 | `ops.context_activation_compiler_items` (0303 L81; reads `public.memory_item` at L141) and `ops.render_context_activation_for_brief` (0303 L837; reads it at L864) | A migration in S10, **before** the drop, uses `create or replace` to remove the memory branch from both functions. Attach now delivers memory. These were PL/pgSQL bodies, so Postgres records no dependency and `drop table` alone would leave them failing at runtime |
 | `mcp-server/src/evidence-activation.js` (calls the second function, L87) and `ops/evidence-activation-db-gate.py` (L212, L240) | Re-run their tests against the replaced functions; drop any memory-row expectations |
 | `mcp-server/src/memory.js` (`memoryTools`) and its import in `mcp-server/src/tools.js` | Delete |
-| `mcp-server/src/doc-profile.js` verb list; `mcp-server/src/mcp.js` mentions | Remove `recall-memory` |
+| `mcp-server/src/doc-profile.ts` verb list; `mcp-server/src/mcp.js` mentions | Remove `recall-memory` |
 | `mcp-server/test/memory-kernel.test.mjs`, `mcp-server/test/memory-rls-connection.test.mjs` | Delete |
 | `mcp-server/test/situation-retrieval-integration.test.mjs`, `mcp-server/test/doc-profile.test.mjs`, `mcp-server/test/tool-advertisement.test.mjs`, `mcp-server/test/bigint-version-responses.test.mjs`, `mcp-server/test/dot-security-definers-postgres.sql` | Remove their memory cases |
 | `control-room/contracts/memory-evaluation-s0.v1.schema.json`, `control-room/contracts/fixtures/memory-evaluation-s0.synthetic.v1.json`, and `control-room/test/contracts.test.mjs` (L240–258) | Retire the contract, its fixture and its assertions together |

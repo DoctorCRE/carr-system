@@ -74,6 +74,8 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
 
     "accept-ready-plan",
     "accept-ready-plan-amendment",
+    // WR-000562 S4: the one door from a convention proposal to an active rule.
+    "adopt-rule",
 
     "answer-board-question",
     "answer-work-request-for-joe",
@@ -86,6 +88,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "backfill-deal-items",
     "cancel-pending-deal",
     "claim-lead",
+    "clear-the-deck-apply",
     "commit-winning-property",
 
     "complete-deal-item",
@@ -127,6 +130,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "set-prospect-engagement-status",
     "submit-email-draft",
     "undo-call",
+    "undo-email-thread-filing",
     "undo-invoice-close",
     "undo-lead-move",
   ]);

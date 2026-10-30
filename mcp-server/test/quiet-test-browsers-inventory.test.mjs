@@ -11,7 +11,7 @@ const inventory = new URL("./quiet-test-browsers.test.mjs", import.meta.url);
 async function check(t, name, source) {
   const root = await mkdtemp(path.join(tmpdir(), "browser-inventory-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  for (const directory of ["mcp-server/test", "dealroom/test", "practice-plugin/test", "control-room/test", "workspace/test", path.dirname(name)]) {
+  for (const directory of ["mcp-server/test", "dealroom/test", "practice-plugin/test", path.dirname(name)]) {
     await mkdir(path.join(root, directory), { recursive: true });
   }
   await cp(inventory, path.join(root, "mcp-server/test/quiet-test-browsers.test.mjs"));

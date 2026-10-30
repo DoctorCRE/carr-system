@@ -36,14 +36,14 @@ def run_job(call, *, dry_run=False, evidence=None, time_zone="America/Chicago"):
             raise ValueError("derived evidence is incomplete")
         verb = "record-deal-invoice" if invoice else "record-lead-contact"
         identity = [verb, item["native_ref"]] if invoice else [item["lead"], item["native_ref"], item["kind"]]
-        key = ("deal-invoice:" if invoice else "lead-contact:") + hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+        key = str(uuid.uuid5(uuid.NAMESPACE_URL, ("deal-invoice:" if invoice else "lead-contact:") + hashlib.sha256(json.dumps(identity).encode()).hexdigest()))
         captures.append((verb, {**item, "idempotency_key": key}))
     for verb, args in captures:
         call(verb, args)
-    return call("advance-leads", {"idempotency_key": "lead-stage-job:" + str(uuid.uuid4()), "time_zone": time_zone})
+    return call("advance-leads", {"idempotency_key": str(uuid.uuid4()), "time_zone": time_zone})
 
 
-def call_verb(verb, args):
+def require_record_reply(verb, args):
     result = record_call.call_verb(verb, args, timeout=120)
     if not result.ok:
         # Errors may contain source identifiers. Console carries only operation
@@ -61,7 +61,7 @@ def main():
     evidence = json.loads(args.evidence_file.read_text()) if args.evidence_file else None
     if evidence is not None and not isinstance(evidence, list):
         parser.error("derived evidence must be an array")
-    result = run_job(call_verb, dry_run=args.dry_run, evidence=evidence, time_zone=args.time_zone)
+    result = run_job(require_record_reply, dry_run=args.dry_run, evidence=evidence, time_zone=args.time_zone)
     print(json.dumps(result))
 
 

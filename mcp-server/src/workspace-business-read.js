@@ -1,4 +1,5 @@
 // Read paginated client and vendor workspace data.
+import { vendorDirectoryPayload } from './vendor-people.js';
 import { networkStatement, projectNetwork } from './relationship-network.ts';
 import { vendorRelationshipJoin, enrichRelationship } from "./vendor-relationship.ts";
 // Journey 1 business workspace: the Clients and Vendors READ model.
@@ -185,13 +186,16 @@ function boundedTerritory(params) {
   return value || null;
 }
 
+const DIRECTORY_CONTRACTS = ["vendor-directory.v1", "vendor-directory.v2"];
+
 export function parseBusinessQuery(dataset, searchParams, viewerSlug) {
   if (!DATASETS.includes(dataset)) throw businessError("QUERY_INVALID", { parameter: "dataset" });
   const params = searchParams instanceof URLSearchParams ? searchParams : new URLSearchParams(searchParams || "");
   requireExactKeys(params, LIST_KEYS[dataset], viewerSlug);
+  const contract = oneOf(params, "contract", DIRECTORY_CONTRACTS, null);
   const base = {
     dataset,
-    ...(oneOf(params,"contract",["vendor-directory.v1"],null) ? {contract:"vendor-directory.v1"} : {}),
+    ...(contract ? {contract} : {}),
     scope: oneOf(params, "scope", SCOPES, DEFAULT_SCOPE),
     q: searchTerm(params),
     owner: oneOf(params, "owner", ["all", "joe", "dell"], "all"),
@@ -208,7 +212,7 @@ export function parseBusinessQuery(dataset, searchParams, viewerSlug) {
 export function parseBusinessRecordQuery(searchParams, viewerSlug) {
   const params = searchParams instanceof URLSearchParams ? searchParams : new URLSearchParams(searchParams || "");
   requireExactKeys(params, RECORD_KEYS, viewerSlug);
-  const contract=oneOf(params,"contract",["vendor-directory.v1"],null);
+  const contract=oneOf(params,"contract",DIRECTORY_CONTRACTS,null);
   return contract ? {contract} : {};
 }
 
@@ -250,7 +254,7 @@ function bind(values, value) {
  * is evaluated once; the count reads it whole and `ordered` reads its page, so
  * an out-of-range page still reports the real total rather than looking empty.
  */
-function pageStatement({ columns, from, where, values, sort, page }) {
+function pageStatement({ columns, from, where, values, sort, page, people = false }) {
   const limitIndex = values.length + 1;
   const text = `with filtered as (
     select ${columns}
@@ -264,11 +268,11 @@ function pageStatement({ columns, from, where, values, sort, page }) {
   )
   select (select count(*) from filtered)::int as total_count,
          ${VIEWER_OWNER} is not null as viewer_owner_resolved,
-         coalesce((select json_agg(o.row_payload order by o.rn) from ordered o), '[]'::json) as rows`;
+         coalesce((select json_agg(${people ? vendorDirectoryPayload('o') : 'o.row_payload'} order by o.rn) from ordered o), '[]'::json) as rows`;
   return { text, values: [...values, PAGE_SIZE, (page - 1) * PAGE_SIZE] };
 }
 
-function recordStatement({ columns, from, where, values }) {
+function recordStatement({ columns, from, where, values, people = false }) {
   return {
     text: `with filtered as (
     select ${columns}
@@ -278,7 +282,7 @@ function recordStatement({ columns, from, where, values }) {
   )
   select (select count(*) from filtered)::int as match_count,
          ${VIEWER_OWNER} is not null as viewer_owner_resolved,
-         (select f.row_payload from filtered f limit 1) as record`,
+         (select ${people ? vendorDirectoryPayload('f') : 'f.row_payload'} from filtered f limit 1) as record`,
     values,
   };
 }
@@ -620,6 +624,7 @@ export async function readBusinessList({ client, actor, tenant = organizationTen
     values: [actor.slug, ...values],
     sort: query.sort,
     page: query.page,
+    people: !clients && query.contract === 'vendor-directory.v2',
   });
 
   let pageResult;
@@ -671,7 +676,7 @@ export async function readBusinessList({ client, actor, tenant = organizationTen
 // exact payload shape while DoctorCRE pins the expanded contract revision.
 function directoryProjection(row, dataset, contract, observedAt) {
   const result = {...row};
-  if (contract === 'vendor-directory.v1') {
+  if (DIRECTORY_CONTRACTS.includes(contract)) {
     if (dataset === 'vendors') result.relationship = enrichRelationship(row.relationship, observedAt);
     return result;
   }
@@ -693,10 +698,11 @@ export async function readBusinessRecord({ client, actor, tenant = organizationT
   const clients = dataset === "clients";
   const where = [...(clients ? CLIENT_LIVE : VENDOR_LIVE), `${clients ? "c.id" : "v.id"} = $2::uuid`];
   const statement = recordStatement({
-    columns: `${clients ? CLIENT_RECORD_PAYLOAD : VENDOR_RECORD_PAYLOAD} as row_payload`,
+    columns: `${clients ? "c.id" : "v.id"} as id, ${clients ? CLIENT_RECORD_PAYLOAD : VENDOR_RECORD_PAYLOAD} as row_payload`,
     from: clients ? CLIENT_FROM : VENDOR_FROM,
     where,
     values: [actor.slug, id],
+    people: !clients && contract === 'vendor-directory.v2',
   });
 
   let result;

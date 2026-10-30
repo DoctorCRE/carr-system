@@ -25,7 +25,7 @@ git call this test drives lands in the scratch repo, never in carr-system.
 
 Five cases:
   1. --plumb on a BARE worktree (raw `git worktree add`, bypassing this
-     script's own create path entirely) adds exactly the three links.
+     script's own create path entirely) adds exactly the two links.
   2. Already-plumbed: running --plumb again is a no-op (same three links,
      unchanged targets) and still exits 0.
   3. Canonical tree: --plumb refuses, exit non-zero, nothing written.
@@ -59,9 +59,14 @@ from git_env import fixture_env  # noqa: E402
 results: list[tuple[str, bool, str]] = []
 
 
-def check(label, ok, detail=""):
-    results.append((label, ok, detail))
-    print(f"  {'ok  ' if ok else 'FAIL'}  {label}" + (f"  — {detail}" if (not ok and detail) else ""))
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(
+    detail="  — {detail}",
+    record=lambda label, ok, detail: results.append((label, ok, detail)),
+)
 
 
 def run(cmd, cwd, **kw):
@@ -194,7 +199,8 @@ def with_scratch(fn):
         s.cleanup()
 
 
-LINKS = (".venv", "out", os.path.join("mcp-server", "node_modules"))
+LINKS = (".venv", "out")
+NODE = os.path.join("mcp-server", "node_modules")  # WR579.S1.J1: never linked
 
 
 def assert_all_linked(wt, repo):
@@ -204,9 +210,9 @@ def assert_all_linked(wt, repo):
         check(f"{rel} is a symlink into the canonical tree", ok, p)
 
 
-# ── 1. --plumb on a bare worktree adds exactly the three links ──────────
+# ── 1. --plumb on a bare worktree adds exactly the two links ──────────
 def test_plumb_bare_worktree():
-    print("\n[1] --plumb on a bare (non-script-created) worktree adds exactly the three links")
+    print("\n[1] --plumb on a bare (non-script-created) worktree adds exactly the two links")
 
     def body(s):
         wt = s.make_bare_worktree("wt-bare")
@@ -216,9 +222,11 @@ def test_plumb_bare_worktree():
         p = s.worktree_sh("--plumb", wt)
         check("--plumb exits 0", p.returncode == 0, p.stdout + p.stderr)
         assert_all_linked(wt, s.repo)
-        # exactly three "ok" lines — nothing extra, nothing skipped
+        check("mcp-server/node_modules is NOT a symlink (npm ci through it emptied the canonical folder)",
+              not os.path.islink(os.path.join(wt, NODE)), p.stdout)
+        # exactly two "ok" lines — nothing extra, nothing skipped
         ok_lines = [ln for ln in p.stdout.splitlines() if ln.strip().startswith("ok")]
-        check("prints exactly one line per link made", len(ok_lines) == 3, p.stdout)
+        check("prints exactly one line per link made", len(ok_lines) == 2, p.stdout)
 
     with_scratch(body)
 
@@ -311,7 +319,8 @@ def test_plumb_leaves_tracked_real_dir_alone():
         check("the tracked file survives untouched",
               os.path.isfile(os.path.join(venv_dir, "real.txt")))
         # the other two targets, never made real/tracked, still get linked
-        for rel in ("out", os.path.join("mcp-server", "node_modules")):
+        check("mcp-server/node_modules is not linked", not os.path.islink(os.path.join(wt, NODE)))
+        for rel in ("out",):
             p_rel = os.path.join(wt, rel)
             ok = os.path.islink(p_rel) and os.path.realpath(p_rel) == os.path.realpath(
                 os.path.join(s.repo, rel))

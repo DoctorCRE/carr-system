@@ -1,21 +1,11 @@
 #!/usr/bin/env python3
-"""Fixtures for ops/migration-order-gate.py.
+"""Exercise free migration slots, reverse merge order, and collision refusals.
 
-The gate refuses a change whose ADDED migration numbers are not strictly above
-the highest migration number already on the base branch. These cases pin the
-shapes that broke the worker release three times on 2026-10-02/03 (0757, the
-0769/0770 pair, then 0783): a branch minted its number, main moved past it, and
-the branch merged anyway. The staging candidate and production had already
-applied the higher numbers, so the source ledger stopped being an exact prefix
-of what was applied and staging-prepare refused every release after it.
-
-They also pin the two ways a check like this gets switched off: firing on files
-the branch did not add (a stale branch carrying main's own files), and passing
-silently when it cannot read the base.
-
-Run: .venv/bin/python ops/migration-order-gate-selftest.py
+Real Git fixtures cover stale branches and merge-group bases. Unreadable refs
+and incomplete events must fail closed before database work.
 """
 import importlib.util
+import json
 import os
 import pathlib
 import re
@@ -41,14 +31,11 @@ passed: int = 0
 failures: list[str] = []
 
 
-def check(name: str, cond: object, detail: str = "") -> None:
-    global passed
-    if cond:
-        passed += 1
-        print(f"  ok    {name}")
-    else:
-        failures.append(name)
-        print(f"  FAIL  {name}" + (f" — {detail}" if detail else ""))
+import pathlib, sys  # noqa: E401
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.gate_check import Check  # noqa: E402
+
+check = Check(failures=failures, counters={"passed": "pass"}, ns=globals())
 
 
 # ── the pure decision ──────────────────────────────────────────────────────
@@ -60,11 +47,11 @@ v = mog.violations(base, base, base | {"migrations/0788_new.sql"})
 check("an addition above the base maximum passes", v == [], repr(v))
 
 v = mog.violations(base, base, base | {"migrations/0783_deal_timeline_lease_read.sql"})
-check("the 2026-10-03 incident (0783 under 0787) is refused",
-      v == ["migrations/0783_deal_timeline_lease_read.sql"], repr(v))
+check("a free number below the base maximum passes",
+      v == [], repr(v))
 
 v = mog.violations(base, base, base | {"migrations/0787_other.sql"})
-check("an addition EQUAL to the base maximum is refused (strictly greater)",
+check("an addition that reuses the base maximum slot is refused",
       v == ["migrations/0787_other.sql"], repr(v))
 
 renamed = (base - {"migrations/0787_c.sql"}) | {"migrations/0787_c.sql"}
@@ -72,12 +59,12 @@ v = mog.violations(base, base, renamed | {"migrations/0790_x.sql", "migrations/0
 check("several additions all above the maximum pass", v == [], repr(v))
 
 v = mog.violations(base, base, base | {"migrations/0786a_interstitial.sql"})
-check("a lettered interstitial slot below the maximum is refused",
+check("a lettered addition that reuses an occupied slot is refused",
       v == ["migrations/0786a_interstitial.sql"], repr(v))
 
 v = mog.violations(base | {"migrations/0790a_x.sql"}, base | {"migrations/0790a_x.sql"},
                    base | {"migrations/0790a_x.sql", "migrations/0790_y.sql"})
-check("a lettered slot on the base raises the maximum to its number",
+check("a lettered base migration owns its numeric slot",
       v == ["migrations/0790_y.sql"], repr(v))
 
 v = mog.violations(base, base, base)
@@ -108,11 +95,10 @@ v = mog.violations(base - {"migrations/0786_b.sql"}, base, base)
 check("main deleting a migration after the fork does not fire on a stale branch",
       v == [], repr(v))
 v = mog.violations(moved, fork, fork | {"migrations/0788_mine.sql"})
-check("a stale branch's own addition is still judged against the base maximum",
-      v == ["migrations/0788_mine.sql"], repr(v))
+check("a stale branch keeps its unoccupied number below the base maximum",
+      v == [], repr(v))
 
-check("the reported maximum is the base maximum",
-      mog.highest_number(base) == 787, repr(mog.highest_number(base)))
+
 
 
 # ── real git trees, including the merge-ref shape a pull_request run builds ──
@@ -135,11 +121,18 @@ def add(repo: pathlib.Path, name: str, message: str) -> None:
     git(repo, "commit", "-q", "-m", message)
 
 
-def run_gate(repo: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
+def run_gate(repo: pathlib.Path, *args: str,
+             event: dict | None = None) -> subprocess.CompletedProcess:
     gate_env = dict(env)
-    gate_env.pop("GITHUB_BASE_REF", None)
-    return subprocess.run([sys.executable, str(GATE), "--repo", str(repo), *args],
-                          env=gate_env, capture_output=True, text=True)
+    for key in ("GITHUB_BASE_REF", "GITHUB_EVENT_NAME", "GITHUB_EVENT_PATH"):
+        gate_env.pop(key, None)
+    with tempfile.TemporaryDirectory() as tmp:
+        if event is not None:
+            path = pathlib.Path(tmp) / "event.json"
+            path.write_text(json.dumps(event["payload"]))
+            gate_env.update(GITHUB_EVENT_NAME=event["name"], GITHUB_EVENT_PATH=str(path))
+        return subprocess.run([sys.executable, str(GATE), "--repo", str(repo), *args],
+                              env=gate_env, capture_output=True, text=True)
 
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -149,40 +142,26 @@ with tempfile.TemporaryDirectory() as tmp:
     add(repo, "migrations/0785_a.sql", "a")
     add(repo, "migrations/0786_b.sql", "b")
 
-    # A branch mints 0787 while main is at 0786 — correct at mint time.
     git(repo, "checkout", "-q", "-b", "feature")
     add(repo, "migrations/0787_feature.sql", "feature")
     r = run_gate(repo, "--base", "main", "--head", "feature")
     check("a branch ahead of main passes", r.returncode == 0, r.stdout + r.stderr)
 
-    # Main moves past it: another PR lands 0788 and 0789.
     git(repo, "checkout", "-q", "main")
     add(repo, "migrations/0788_other.sql", "other")
     add(repo, "migrations/0789_other.sql", "other2")
 
     r = run_gate(repo, "--base", "main", "--head", "feature")
-    check("the same branch, now behind main, fails", r.returncode == 1, r.stdout + r.stderr)
-    check("the refusal names the offending file",
-          "0787_feature.sql" in r.stdout + r.stderr, r.stdout + r.stderr)
-    check("the refusal names the base maximum", "0789" in r.stdout + r.stderr, r.stdout + r.stderr)
-    check("the refusal names the move (git mv)",
-          "git mv" in r.stdout + r.stderr, r.stdout + r.stderr)
-
+    check("the same branch, now behind main, passes", r.returncode == 0, r.stdout + r.stderr)
     # The update-branch path: main merged INTO the branch, exactly what the
     # merge queue's update-branch call and the pull_request merge ref build.
     git(repo, "checkout", "-q", "feature")
     git(repo, "merge", "-q", "--no-edit", "main")
     r = run_gate(repo, "--base", "main", "--head", "HEAD")
-    check("after update-branch the stale number still fails", r.returncode == 1,
+    check("after update-branch the unoccupied number still passes", r.returncode == 0,
           r.stdout + r.stderr)
     r = run_gate(repo, "--base", "main")
-    check("--head defaults to HEAD", r.returncode == 1, r.stdout + r.stderr)
-
-    # The fix forward: renumber above the new maximum.
-    git(repo, "mv", "migrations/0787_feature.sql", "migrations/0790_feature.sql")
-    git(repo, "commit", "-q", "-m", "renumber")
-    r = run_gate(repo, "--base", "main")
-    check("the renumbered branch passes", r.returncode == 0, r.stdout + r.stderr)
+    check("--head defaults to HEAD", r.returncode == 0, r.stdout + r.stderr)
 
     # A run on main itself (the scheduled run) adds nothing.
     git(repo, "checkout", "-q", "main")
@@ -207,9 +186,8 @@ with tempfile.TemporaryDirectory() as tmp:
     git(repo, "checkout", "-q", "stale")
     add(repo, "migrations/0790_mine.sql", "stale branch mints under main's 0791")
     r = run_gate(repo, "--base", "main", "--head", "stale")
-    check("the stale branch's own number under main's maximum still fails",
-          r.returncode == 1 and "0790_mine.sql" in r.stderr
-          and "0788_other.sql" not in r.stderr, r.stdout + r.stderr)
+    check("the stale branch keeps its free number under main's maximum",
+          r.returncode == 0, r.stdout + r.stderr)
     git(repo, "checkout", "-q", "main")
 
     # A base that cannot be read is NOT a pass.
@@ -223,6 +201,56 @@ with tempfile.TemporaryDirectory() as tmp:
           mog.default_base({}) == "origin/main")
     check("an empty GITHUB_BASE_REF defaults to origin/main",
           mog.default_base({"GITHUB_BASE_REF": ""}) == "origin/main")
+    check("a merge_group run takes the group's base_sha, not origin/main",
+          mog.default_base({"GITHUB_EVENT_NAME": "merge_group"},
+                           {"merge_group": {"base_sha": "abc123"}}) == "abc123")
+
+
+# The lower migration enters the queue after a higher-numbered group. The
+# origin/main ref still lags both groups.
+print("merge-queue replay (#2560/#2503)")
+with tempfile.TemporaryDirectory() as tmp:
+    repo = pathlib.Path(tmp) / "queue"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    for name in ("1015_team_memory_store", "1016_list_client_portals", "1017_work_request_queue"):
+        add(repo, f"migrations/{name}.sql", name)
+    git(repo, "update-ref", "refs/remotes/origin/main", "main")
+
+    git(repo, "checkout", "-q", "-b", "pr-2503", "main")
+    for name in ("1020_email_deal_matching", "1022_email_send_result_time",
+                 "1023_email_thread_filing_events"):
+        add(repo, f"migrations/{name}.sql", name)
+    git(repo, "checkout", "-q", "-b", "pr-2560", "main")
+    add(repo, "migrations/1018_work_request_job_start.sql", "#2560")
+
+    # The queue: group 1 = main + #2503, group 2 = group 1 + #2560.
+    git(repo, "checkout", "-q", "--detach", "main")
+    git(repo, "merge", "-q", "--no-ff", "--no-edit", "pr-2503")
+    group1 = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "merge", "-q", "--no-ff", "--no-edit", "pr-2560")
+    group2 = git(repo, "rev-parse", "HEAD").strip()
+
+    def queue_event(base_sha: str, head_sha: str) -> dict:
+        return {"name": "merge_group", "payload": {"merge_group": {
+            "base_sha": base_sha, "head_sha": head_sha, "base_ref": "refs/heads/main"}}}
+
+    r = run_gate(repo, event=queue_event(group1, group2))
+    out = r.stdout + r.stderr
+    check("merge group: lower number merged after higher number passes", r.returncode == 0, out)
+    r = run_gate(repo, event=queue_event(git(repo, "rev-parse", "main").strip(), group1))
+    check("merge group: #2503's own group (1020..1023 over 1017) passes",
+          r.returncode == 0, r.stdout + r.stderr)
+
+    git(repo, "checkout", "-q", "-b", "collision", "main")
+    add(repo, "migrations/1020_conflict.sql", "collides with group one")
+    r = run_gate(repo, "--head", "collision", event=queue_event(group1, group2))
+    check("merge group: a slot held by an earlier group refuses",
+          r.returncode == 1 and "1020_conflict.sql" in r.stderr, r.stdout + r.stderr)
+
+    r = run_gate(repo, event={"name": "merge_group", "payload": {}})
+    check("merge group: an event without base_sha exits 2, never 0",
+          r.returncode == 2, r.stdout + r.stderr)
 
 
 # ── the wiring: a gate nothing runs is decoration ──────────────────────────
@@ -236,6 +264,8 @@ ci_yml = (REPO / ".github" / "workflows" / "ci.yml").read_text()
 pr_types = ci_yml.split("pull_request:", 1)[1].split("\n", 3)[1] if "pull_request:" in ci_yml else ""
 check("CI re-runs on synchronize (the update-branch re-check path)",
       "synchronize" in pr_types, pr_types)
+check("CI runs on merge_group (the merge-queue re-check path)",
+      re.search(r"^  merge_group:", ci_yml, re.MULTILINE) is not None)
 check("the gates class runs in a CI matrix group",
       re.search(r'-\s*"[^"\n]*\bgates\b[^"\n]*"', ci_yml) is not None)
 

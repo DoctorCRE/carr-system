@@ -29,6 +29,7 @@ pub struct Record {
     pub recipients: Vec<String>,
     /// Folder keys observed across cached revisions; this is not a live view.
     pub folder_ids: std::collections::BTreeSet<u64>,
+    pub folder_links_unresolved: bool,
     /// Local message keys of the message objects this record was read from.
     pub local_keys: std::collections::BTreeSet<u64>,
     pub subject: Option<String>,
@@ -121,8 +122,11 @@ pub fn anchor_needle() -> Vec<u8> {
 
 /// Extract UTF-16LE string runs in `[anchor-before, anchor+after)`.
 pub fn fields(blob: &[u8], anchor: usize, before: usize, after: usize) -> Vec<Field> {
+    if anchor > blob.len() {
+        return Vec::new();
+    }
     let lo = anchor.saturating_sub(before);
-    let hi = (anchor + after).min(blob.len());
+    let hi = anchor.saturating_add(after).min(blob.len());
     let mut out = Vec::new();
     let mut i = lo;
 
@@ -521,15 +525,17 @@ fn undouble(t: &str) -> String {
 /// protocol field order rather than matching on their shape. Those two paths
 /// used to be duplicated; this one is kept because the body is not a UTF-16LE
 /// run and so is not part of the named map.
-pub fn parse(offset: usize, blob: &[u8], anchor: usize) -> Record {
+pub fn parse(offset: usize, blob: &[u8], anchor: usize) -> Option<Record> {
     let mut rec = Record { offset, copies: 1, ..Default::default() };
 
     // A block holds records back to back, so bound this one at the next
     // ItemClass anchor. Without that the HTML scan runs into the following
     // record and stores a body that is part one message and part another.
-    let end = memchr::memmem::find(&blob[anchor + 2..], &anchor_needle())
-        .map_or(blob.len(), |p| anchor + 2 + p);
-    let tail = fields(blob, anchor + 18, 0, end.saturating_sub(anchor + 18));
+    let search_start = anchor.checked_add(2).filter(|&start| start <= blob.len())?;
+    let end = memchr::memmem::find(&blob[search_start..], &anchor_needle())
+        .map_or(blob.len(), |p| search_start + p);
+    let tail_start = anchor.saturating_add(18);
+    let tail = fields(blob, tail_start, 0, end.saturating_sub(tail_start));
 
     // Sender pair, as a fallback only. `schema.rs` resolves these by field
     // order and wins wherever it produces a value, but its type checks are
@@ -636,7 +642,7 @@ pub fn parse(offset: usize, blob: &[u8], anchor: usize) -> Record {
         }
     }
 
-    rec
+    Some(rec)
 }
 
 // -- Classifiers shared with the schema layer --------------------------------

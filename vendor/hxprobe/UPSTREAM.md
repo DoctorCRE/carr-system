@@ -34,8 +34,10 @@ WHAT CARR ADDS to `hxprobe db <file> [out.db] [files-dir]`:
 - Calendar events (`src/calendar.rs`) in `events` and `event_attendees`: GOID,
   start and end, subject, location, organizer and attendees. Byte-distinct
   candidates remain separate; only exact serialized copies collapse. GOID and
-  start are observed grouping fields. Every row exports unsupported lifecycle
-  status. Current occurrence state and attendance remain unverified. An item
+  start are observed grouping fields. A row is `canceled` when Outlook stored
+  its cancellation subject and `unsupported` otherwise; `recurrence` marks
+  occurrences, and attendees carry raw kind and response codes. Current
+  occurrence state and attendance remain unverified. An item
   with no attendee block (an own appointment, some recurring series) decodes
   with no attendees; on the 2026-10-21 study copies that took decoded GOID/start
   groups from 169 to all 191, including the TEST account's new appointment. See
@@ -48,6 +50,10 @@ WHAT CARR ADDS to `hxprobe db <file> [out.db] [files-dir]`:
   subject and preview opening within a day. A preview-only copy then joins the
   one full copy with the same sender and opening. The full body always wins,
   and `copy_key` is stored as the identity the copies share.
+- Folder ownership uncertainty. `messages.folder_links_unresolved` is true when
+  any merged revision lacks a resolved folder link. Copy collapse preserves this
+  flag alongside the union of known folder IDs. Intake excludes these messages
+  even when another copy links to the selected account.
 - Store-local message keys (WR-000502). `messages.local_keys` lists, comma-separated,
   the key of every message object merged into the row; more than one means the
   copy join merged distinct store items. `messages_with_key` and
@@ -95,8 +101,11 @@ the repository as editable source. Transitive dependencies stay on crates.io;
 this is not a `cargo vendor` directory or an offline build.
 All maintained test and release build commands use `--locked`.
 The compiler is pinned in `rust-toolchain.toml` for rustup installations.
-[BUILD-SHA256](BUILD-SHA256) identifies the local release binary and toolchain.
-The hash is a build receipt, not a cross-platform reproducibility guarantee.
+No binary hash or source digest is committed: every decoder PR would rewrite
+it, so any two in flight would conflict (WR-000440). The installer computes the
+source digest at install time and records it with the local binary hash and
+toolchain; that receipt is a local build record, not a cross-platform
+reproducibility guarantee.
 
 `cargo-audit 0.22.2 audit --file vendor/hxprobe/Cargo.lock --json` returned
 zero vulnerabilities and zero warnings across 32 packages. The RustSec database
@@ -113,17 +122,18 @@ The crate's 34 tests use synthetic data. Every example email address uses
 `@example.test`. No private Outlook store or profile is needed.
 
 For updates, retain a separate upstream import and CARR change commit, review
-the lockfile changes and license, rerun the CI class and cargo-audit, and
-refresh BUILD-SHA256 for the recorded target and toolchain.
+the lockfile changes and license, and rerun the CI class and cargo-audit.
 
 `bin/install-outlook-intake.sh` builds the installed decoder from this tree with
-the same `cargo build --release --locked`, using a target directory under the
-settings `vendor` path. It installs the binary only when its SHA-256 equals
-line 1 of BUILD-SHA256, so every change under this directory must refresh that
-line from a build on the Studio toolchain. `.carr-pin` records the git object
-IDs of this directory and the two atlas files; an unchanged pin skips the build.
-`ops/hxprobe-install-selftest.py` runs the installer and checks that its binary
-equals the in-tree build.
+the same locked tests and `cargo build --release --locked`, using a target
+directory under the settings `vendor` path, and only from committed source.
+`ops/hxprobe-source-digest.py` digests this crate and the two atlas files and
+keeps the digest, binary SHA-256 and toolchain in the vendor directory's
+`.carr-build.json`. The installer skips the build only when that receipt names
+this source digest and the installed binary's hash. A binary that does not
+match its receipt is removed before the rebuild; one from older source stays
+until a new build passes. `ops/hxprobe-install-selftest.py` runs the installer
+and checks that its binary equals a second clean build of the same tree.
 
 ## Source study
 
@@ -167,11 +177,26 @@ candidates instead of merging the longest body and largest attendee list.
 Exact byte copies collapse only inside this decode. GOID and start remain
 observed schedule grouping fields, not an authoritative occurrence identity.
 
-Every exported candidate has `lifecycle_status=unsupported` and
-`lifecycle_reason=hxstore_lifecycle_unverified`. The meta field
-`calendar_lifecycle_unsupported` counts those candidates. The decoder does not
-establish cancellation, deletion, revision order, recurrence exception identity,
-attendee response semantics, current schedule state, or attendance. Candidate
+A candidate whose first subject copy is the subject prefixed `Canceled: ` or
+`Cancelled: ` exports `lifecycle_status=canceled` and
+`lifecycle_reason=outlook_canceled_subject` (WR-000440). Every other candidate
+has `lifecycle_status=unsupported` and
+`lifecycle_reason=hxstore_lifecycle_unverified`. The meta fields
+`calendar_lifecycle_canceled` and `calendar_lifecycle_unsupported` count them.
+`events.recurrence` is `occurrence` when the start is repeated at +2, the
+layout of a recurring series' occurrences, and `item` otherwise.
+
+Attendee status words export raw as `kind_code` and `response_code`. One
+TEST-account invitation labels kind 0 `required`, kind 1 `optional` and
+response 4 `no_response`; codes 0, 1 and 2 have no ground truth and stay
+unlabelled. An attendee's own copy of a meeting does not track the others'
+replies, and it does not record its owner's own reply there either: after
+Joe's 23 sent replies (21 accepted, 2 declined) in the 2026-10-28 copy, his
+attendee entry on the 65 matching candidates read code 0 on 63 and code 4 on 2.
+
+The decoder does not establish deletion, revision order, recurrence exception
+identity, accepted, tentative, declined or proposed-time responses, current
+schedule state, or attendance. Candidate
 bytes stay in decoder memory and are not exported to SQLite.
 
 Synthetic tests prove candidate separation and fail-closed labeling only.
