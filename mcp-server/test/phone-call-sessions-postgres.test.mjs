@@ -9,6 +9,7 @@ import { createPhoneCallHandler } from '../src/phone-call-sessions.js';
 import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.current.generated.js';
 
 let fixture, pool, actor, handler;
+const clients = new Map();
 before(async () => {
   const bin = ['/opt/homebrew/opt/postgresql@18/bin', '/usr/lib/postgresql/18/bin',
     '/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin'].find(p => existsSync(`${p}/initdb`));
@@ -18,6 +19,12 @@ before(async () => {
   await fixture.run(`${bin}/pg_ctl`, ['-D', `${fixture.root}/data`, '-l', `${fixture.root}/server.log`, '-o', `-k ${fixture.root} -h ''`, '-w', 'start']);
   await fixture.run(`${bin}/createdb`, ['-h', fixture.root, '-U', 'carr_ci', 'carr_ci']);
   pool = new pg.Pool({ host: fixture.root, user: 'carr_ci', database: 'carr_ci' });
+  pool.on('connect', client => {
+    let closed;
+    const done = new Promise(resolve => { closed = resolve; });
+    clients.set(client, { done, closed });
+  });
+  pool.on('remove', client => { clients.get(client).closed(); clients.delete(client); });
   await pool.query('create role neondb_owner');
   await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-f', new URL('../../db/schema.sql', import.meta.url).pathname]);
   const python = new URL('../../.venv/bin/python', import.meta.url).pathname;
@@ -41,7 +48,14 @@ before(async () => {
     return Response.json({ session_id: metadata.session_id, sha256: metadata.sha256, transferred: true });
   } });
 });
-after(async () => { try { await pool?.end(); } finally { await fixture?.close(); } });
+after(async () => {
+  try {
+    const closing = [...clients.values()].map(client => client.done);
+    await pool?.end();
+    await Promise.all(closing);
+    assert.equal(clients.size, 0, 'all clients closed before PostgreSQL stops');
+  } finally { await fixture?.close(); }
+});
 
 const env = { CALL_STUDIO_TOKEN: 'synthetic-service-secret', CALL_STUDIO_URL: 'https://studio.example.test' };
 const url = 'https://app.example.test/api/v1/call-sessions';
