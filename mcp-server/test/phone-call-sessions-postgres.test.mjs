@@ -18,7 +18,7 @@ before(async () => {
   pool = new pg.Pool({ host: fixture.root, user: 'carr_ci', database: 'carr_ci' });
   await pool.query('create role neondb_owner');
   await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-f', new URL('../../db/schema.sql', import.meta.url).pathname]);
-  await pool.query(readFileSync(new URL('../../migrations/1065_phone_call_sessions.sql', import.meta.url), 'utf8'));
+  await pool.query(readFileSync(new URL('../../migrations/1066_phone_call_sessions.sql', import.meta.url), 'utf8'));
   actor = { ...(await pool.query("select id,slug from actor where slug='joe'")).rows[0], human: true };
   assert.ok(actor.id);
   handler = createPhoneCallHandler({ withWriter: async fn => {
