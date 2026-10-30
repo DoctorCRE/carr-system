@@ -23,6 +23,7 @@ class CloseTests(unittest.TestCase):
         self.gh_error = False
         self.extra_repos = {}
         self.close_error = False
+        self.evidence_error = False
         self.calls = self.root / 'calls.jsonl'
         self.card = dict(ok=True, human_ref='WR-000557', version=3, state='captured',
                          slices=[dict(slice_id='WR557.S5', version=2, outcome='open')],
@@ -47,6 +48,9 @@ else:
     assert sys.argv[1] == 'call'
     if {self.close_error!r} and sys.argv[2] == 'close-work-request-slice':
         print('synthetic version conflict', file=sys.stderr)
+        sys.exit(1)
+    if {self.evidence_error!r} and sys.argv[2] == 'complete-work-request':
+        print('missing_user_journey_ref', file=sys.stderr)
         sys.exit(1)
     print(json.dumps({self.card!r} if sys.argv[2] == 'work-request-card' else {{'ok': True}}))
 '''
@@ -121,7 +125,7 @@ else:
         result, calls = self.run_close('WR-000557', '--completion-evidence', str(evidence), '--apply')
         self.assertEqual(result.returncode, 0, result.stderr)
         writes = [c for c in calls if c[0] == 'call' and c[1] != 'work-request-card']
-        self.assertEqual([c[1] for c in writes], ['close-work-request-slice', 'complete-work-request'])
+        self.assertEqual([c[1] for c in writes], ['complete-work-request', 'close-work-request-slice', 'complete-work-request'])
         completion = json.loads(writes[-1][2])
         self.assertEqual(completion['base_version'], 3)
         self.assertIn(prior, completion['change_refs'])
@@ -133,6 +137,11 @@ else:
         plan = json.loads(result.stdout)
         self.assertEqual([c['verb'] for c in plan['calls']], ['close-work-request-slice'])
         self.assertIn('--completion-evidence', plan['blocked'][-1]['reason'])
+
+    def test_apply_missing_completion_evidence_does_not_close_slices(self):
+        result, calls = self.run_close('WR557', '--apply')
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual([c[1] for c in calls if c[0] == 'call'], ['work-request-card'])
 
     def test_cross_repository_merges_keep_their_urls(self):
         app = dict(body='Card: WR557.S5.J2', state='MERGED',
@@ -159,16 +168,18 @@ else:
         self.assertEqual(result.returncode, 1)
         self.assertIn('version conflict', result.stderr)
         self.assertEqual([c[1] for c in calls if c[0] == 'call'],
-                         ['work-request-card', 'close-work-request-slice'])
+                         ['work-request-card', 'complete-work-request', 'close-work-request-slice'])
 
     def test_invalid_completion_evidence_refuses_before_slice_writes(self):
+        self.evidence_error = True
         evidence = self.root / 'evidence.json'
         evidence.write_text(json.dumps(dict(user_facing=True,
             criterion_evidence=[dict(id='S5-CLOSE', evidence='Synthetic check')])))
         result, calls = self.run_close('WR557', '--completion-evidence', str(evidence), '--apply')
         self.assertEqual(result.returncode, 1)
         self.assertIn('user_journey_ref', result.stderr)
-        self.assertEqual([c[1] for c in calls if c[0] == 'call'], ['work-request-card'])
+        self.assertEqual([c[1] for c in calls if c[0] == 'call'], ['work-request-card', 'complete-work-request'])
+        self.assertTrue(json.loads(calls[-1][2])['dry_run'])
 
     def test_confirmed_closed_is_an_idempotent_noop(self):
         self.card['state'] = 'confirmed_closed'

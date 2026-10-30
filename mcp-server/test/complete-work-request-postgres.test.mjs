@@ -72,6 +72,17 @@ function completion(ref) {
     change_refs: [{ pr_url: 'https://github.com/DoctorCRE/carr-system/pull/123', merge_commit_sha: 'a'.repeat(40) }],
     criterion_evidence: [{ id: 'AC-1', evidence: 'Synthetic passing check' }], user_facing: false };
 }
+test('completion preflight rejects malformed evidence and leaves the request open', async () => {
+  await request('WR-999080');
+  const args = { ...completion('WR-999080'), user_facing: true, dry_run: true };
+  await assert.rejects(command('complete-work-request', args, actor, 'carr_writer'),
+    error => error.payload?.error === 'missing_user_journey_ref');
+  assert.equal((await c.query("select state from ops.work_request where ref='WR-999080'")).rows[0].state, 'captured');
+  args.user_journey_ref = 'EXERCISED synthetic journey';
+  assert.equal((await command('complete-work-request', args, actor, 'carr_writer')).dry_run, true);
+  assert.equal((await c.query("select state from ops.work_request where ref='WR-999080'")).rows[0].state, 'captured');
+});
+
 test('complete-work-request closes built work and replays without a second event', async () => {
   await request('WR-999001');
   const args = completion('WR-999001');
@@ -251,9 +262,16 @@ print(pathlib.Path(${JSON.stringify(root)}, 'prs.json').read_text() if sys.argv[
     assert.deepEqual(preview.calls.map(call => call.verb), ['close-work-request-slice', 'close-work-request-slice', 'complete-work-request']);
     assert.deepEqual(seen(), ['work-request-card']);
     assert.ok((await command('work-request-card', { work_request: ref })).slices.every(slice => slice.outcome === 'open'));
+    await writeFile(path.join(root, 'evidence.json'), JSON.stringify({ user_facing: true,
+      criterion_evidence: [{ id: 'AC-1', evidence: 'Synthetic check' }] }));
+    await assert.rejects(cli('--apply'), error => error.stderr.includes('missing_user_journey_ref'));
+    assert.ok((await command('work-request-card', { work_request: ref })).slices.every(slice => slice.outcome === 'open'));
+    await writeFile(path.join(root, 'evidence.json'), JSON.stringify({ user_facing: false,
+      criterion_evidence: [{ id: 'AC-1', evidence: 'Synthetic closure exercised through the command and real registered verbs' }] }));
     const applied = (await cli('--apply')).stdout;
     assert.equal(JSON.parse(applied.trim().split('\n').at(-1)).result.state, 'confirmed_closed');
-    assert.deepEqual(seen().slice(1), ['work-request-card', 'close-work-request-slice', 'close-work-request-slice', 'complete-work-request']);
+    assert.deepEqual(seen().slice(1), ['work-request-card', 'complete-work-request', 'work-request-card',
+      'complete-work-request', 'close-work-request-slice', 'close-work-request-slice', 'complete-work-request']);
     const card = await command('work-request-card', { work_request: ref });
     assert.equal(card.state, 'confirmed_closed');
     assert.ok(card.slices.every(slice => slice.outcome === 'done'));

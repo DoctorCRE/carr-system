@@ -21,7 +21,7 @@ def read_json(command):
 def call(verb, args):
     reply = read_json([str(ROOT / 'run.sh'), 'call', verb, json.dumps(args)])
     if reply.get('ok') is not True:
-        raise ValueError(f'{verb} refused the request')
+        raise ValueError(f'{verb} refused the request: {json.dumps(reply)}')
     return reply
 
 
@@ -102,27 +102,16 @@ def main():
             plan['blocked'].append(dict(work_request=ref, reason='completion requires --completion-evidence'))
         else:
             evidence = json.loads(args.completion_evidence.read_text())
-            fields = {'criterion_evidence', 'user_facing', 'user_journey_ref'}
-            if (not isinstance(evidence, dict) or set(evidence) - fields
-                    or type(evidence.get('user_facing')) is not bool
-                    or not isinstance(evidence.get('criterion_evidence'), list)):
-                raise ValueError('completion evidence requires criterion_evidence and explicit user_facing')
-            lines = evidence['criterion_evidence']
-            if (len(lines) != len(card['acceptance_criteria']) or
-                    any(not isinstance(line, dict) or set(line) != {'id', 'evidence'}
-                        or not isinstance(line['evidence'], str) or not line['evidence'].strip() for line in lines)
-                    or sorted(line['id'] for line in lines) != sorted(c['id'] for c in card['acceptance_criteria'])):
-                raise ValueError('supply evidence for each acceptance criterion exactly once')
-            if evidence['user_facing'] and (not isinstance(evidence.get('user_journey_ref'), str)
-                                           or not evidence['user_journey_ref'].strip()):
-                raise ValueError('user-facing completion requires user_journey_ref')
-            if not plan['change_refs']:
-                raise ValueError('completion requires merged change references')
-            plan['calls'].append(dict(verb='complete-work-request', args=dict(
-                human_ref=ref, base_version=card['version'], change_refs=plan['change_refs'],
-                idempotency_key=str(uuid4()), **evidence)))
+            plan['calls'].append(dict(verb='complete-work-request', args={**evidence,
+                'human_ref': ref, 'base_version': card['version'], 'change_refs': plan['change_refs'],
+                'idempotency_key': str(uuid4())}))
     print(json.dumps(dict(apply=args.apply, **plan), indent=2), flush=True)
     if args.apply:
+        if plan['all_closed']:
+            completion = next((c for c in plan['calls'] if c['verb'] == 'complete-work-request'), None)
+            if completion is None:
+                return 1
+            call('complete-work-request', {**completion['args'], 'dry_run': True})
         for command in plan['calls']:
             result = call(command['verb'], command['args'])
             print(json.dumps(dict(verb=command['verb'], result=result)), flush=True)

@@ -766,19 +766,20 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
             merge_commit_sha: { type: "string", pattern: "^[0-9a-fA-F]{40}$" } }, required: ["pr_url", "merge_commit_sha"] } },
         criterion_evidence: { type: "array", items: { type: "object", additionalProperties: false,
           properties: { id: { type: "string", minLength: 1 }, evidence: { type: "string", minLength: 1 } }, required: ["id", "evidence"] } },
-        user_facing: { type: "boolean" }, user_journey_ref: { type: "string", minLength: 1 },
+        user_facing: { type: "boolean" }, user_journey_ref: { type: "string", minLength: 1 }, dry_run: { type: "boolean" },
       }, required: ["idempotency_key", "human_ref", "base_version", "change_refs", "criterion_evidence", "user_facing"] },
       handler: async (c, actor, args) => {
-        const fields = new Set(["idempotency_key", "human_ref", "base_version", "change_refs", "criterion_evidence", "user_facing", "user_journey_ref"]);
+        const fields = new Set(["idempotency_key", "human_ref", "base_version", "change_refs", "criterion_evidence", "user_facing", "user_journey_ref", "dry_run"]);
         if (Object.keys(args).some(key => !fields.has(key)) || !UUID.test(args.idempotency_key || "") ||
             !/^WR-[0-9]{1,12}$/.test(args.human_ref || "") || !Number.isInteger(args.base_version) || args.base_version < 1 ||
             typeof args.user_facing !== "boolean" ||
-            (args.user_journey_ref !== undefined && typeof args.user_journey_ref !== "string"))
+            (args.user_journey_ref !== undefined && typeof args.user_journey_ref !== "string") ||
+            (args.dry_run !== undefined && typeof args.dry_run !== "boolean"))
           throw new ToolError({ error: "invalid_completion", hint: "Supply only the declared completion inputs with a UUID key and current base_version." });
         const authorizationClass = authorizationClassForActor(actor);
         if (!["verified_partner", "sponsored_agent"].includes(authorizationClass))
           throw new ToolError({ error: "sponsored_actor_required", authorization_class: authorizationClass });
-        return withEnvelope(c, actor, "complete-work-request", { ...args, _server_actor_id: actor.id }, async () => {
+        const complete = async () => {
           await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', ['work-queue:' + organizationTenantForActor(actor)]);
           const current = (await c.query('select id, state, version, acceptance_criteria from ops.work_request where ref=$1 for update', [args.human_ref])).rows[0];
           if (!current) throw new ToolError({ error: "work_request_not_found" });
@@ -788,7 +789,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
           if (!["captured", "triaged", "ready", "verification"].includes(current.state))
             throw new ToolError({ error: "work_request_not_completable" });
           const slices = (await c.query('select outcome from ops.work_request_slice where work_request_id=$1', [current.id])).rows;
-          if (slices.some(slice => slice.outcome.outcome === 'open')) throw new ToolError({ error: 'work_request_open_slices' });
+          if (!args.dry_run && slices.some(slice => slice.outcome.outcome === 'open')) throw new ToolError({ error: 'work_request_open_slices' });
           const capsule = {
             acceptance_predicates: current.acceptance_criteria.map(criterion => {
               const lines = Array.isArray(args.criterion_evidence) ? args.criterion_evidence.filter(line => line?.id === criterion.id) : [];
@@ -805,6 +806,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
           if (capsule.acceptance_predicates.some(line => !line) || args.criterion_evidence?.length !== current.acceptance_criteria.length)
             capsule.acceptance_predicates = [];
           let row;
+          if (args.dry_run) await c.query("savepoint completion_preview");
           try {
             row = (await c.query(`update ops.work_request set state='confirmed_closed', completion_kind='built',
               completion_evidence=$3::jsonb, verification_accepted_at=now(), closed_at=now(), version=version+1, updated_at=now()
@@ -812,6 +814,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
               returning id as work_request_id, ref, state, version, closed_at /* work-request-intake:complete */`,
               [current.id, args.base_version, JSON.stringify(capsule)])).rows[0];
           } catch (error) {
+            if (args.dry_run) await c.query("rollback to savepoint completion_preview");
             if (error?.code !== "23514") throw error;
             const detail = String(error.message);
             const name = detail.includes("no acceptance predicates") ? "missing_criterion_evidence"
@@ -819,13 +822,18 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
               : detail.includes("EXERCISED user") ? "missing_user_journey_ref" : "completion_capsule_refused";
             throw new ToolError({ error: name, human_ref: args.human_ref });
           }
+          if (args.dry_run) {
+            await c.query("rollback to savepoint completion_preview");
+            return { ok: true, dry_run: true };
+          }
           if (!row) throw new ToolError({ error: "version_conflict" });
           await writeEvent(c, actor, "complete-work-request", "ops_work_request", row.work_request_id, {
             field: "state", old: { state: current.state, version: args.base_version },
             new: { state: row.state, version: Number(row.version), completion_kind: "built" }, idempotency_key: args.idempotency_key,
           });
           return { ok: true, human_ref: row.ref, state: row.state, version: Number(row.version), completion_kind: "built", closed_at: row.closed_at };
-        });
+        };
+        return args.dry_run ? complete() : withEnvelope(c, actor, "complete-work-request", { ...args, _server_actor_id: actor.id }, complete);
       },
     },
     // WITHDRAWING A REQUEST CAPTURED IN ERROR — TWO VERBS, NEVER ONE.
