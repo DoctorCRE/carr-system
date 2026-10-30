@@ -669,6 +669,16 @@ pub fn subject_like(s: &str) -> bool {
     is_subject_like(s) && !is_enum_value(s) && !is_opaque_blob(s)
 }
 
+/// Could this run be a subject when its position already says so? Only the value checks apply:
+/// one value, not an address, link, enum or identifier.
+pub fn subject_value(s: &str) -> bool {
+    split_packed(s).len() == 1
+        && (3..=400).contains(&s.chars().count())
+        && !s.contains('@')
+        && !s.contains("http")
+        && !is_enum_value(s)
+}
+
 /// Collapse a value the store writes twice with no separator.
 pub fn undouble_pub(s: &str) -> String {
     undouble(s)
