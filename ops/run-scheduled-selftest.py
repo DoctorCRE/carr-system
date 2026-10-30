@@ -71,6 +71,13 @@ class ScheduledRunTests(unittest.TestCase):
         self.assertNotIn("SYNTHETIC_PRIVATE", observed)
         self.assertFalse(list((self.root / "out").glob("outlook-intake-receipt.*")))
 
+    def test_reconciled_intake_receipt_is_recorded_as_expected(self):
+        receipt = {'state': 'succeeded', 'reason': 'reconciled', 'counts': {'mail_ids': 2}}
+        result = self.invoke_intake(receipt, code=0)
+        self.assertEqual(result.returncode, 0)
+        args = json.loads(self.rows()[0][3])
+        self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
+
     def test_runtime_fields_reach_ops_detail(self):
         for behind in (3, None):
             receipt = {"state": "succeeded", "reason": "processed", "counts": {},

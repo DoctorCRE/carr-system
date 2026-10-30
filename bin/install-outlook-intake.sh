@@ -95,12 +95,21 @@ fi
 # Before the decoder is replaced, one reconcile-only intake pass over the installed decoder's rows
 # saves each held message's Message-ID, so intake state follows the new decoder's identities.
 # It files nothing, is skipped once state has them, and a failure stops the install.
-# Use the granted helper before install_helper can replace it. The environment
-# selects reconciliation in Python without requiring a new mode in the old binary.
+# launchd must start the granted helper so TCC attributes access to that helper.
 STATE="$REPO/out/outlook-intake/state.json"
 if [ -x "$VENDOR/hxprobe/target/release/hxprobe" ] && [ -f "$STATE" ] && ! grep -q '"mail_ids"' "$STATE"; then
-  COPY_HELPER="$("$PY" -m lib.outlook_settings field copy_helper)"
-  CARR_OUTLOOK_RECONCILE_ONLY=1 "$COPY_HELPER" --run-intake
+  if ! launchctl kickstart "gui/$(id -u)/$LABEL"; then
+    print -u2 -- "install-outlook-intake: intake job is not loaded or launchd refused to start it; load the existing job before retrying. See $REPO/out/run-scheduled.log"
+    exit 1
+  fi
+  for attempt in {1..60}; do
+    grep -q '"mail_ids"' "$STATE" && break
+    sleep 2
+  done
+  if ! grep -q '"mail_ids"' "$STATE"; then
+    print -u2 -- "install-outlook-intake: reconciliation did not save mail_ids within 120 seconds; decoder left unchanged. See $REPO/out/run-scheduled.log"
+    exit 1
+  fi
 fi
 "$PY" "$REPO/ops/hxprobe-source-digest.py" --build-into "$VENDOR"
 rm -f "$PIN"

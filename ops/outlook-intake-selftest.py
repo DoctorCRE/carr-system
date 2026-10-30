@@ -1107,69 +1107,50 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.run_intake([old]).counts['legacy_unmatched'], 1)
         self.assertEqual(self.run_intake([old], touch=False).counts['legacy_unmatched'], 1)
 
-    def test_reconcile_only_pass_saves_message_ids_from_the_old_decoder_and_files_nothing(self):
-        old = mail('pat@example.test', -timedelta(hours=1), kind='preview', message_id='<a@example.test>')
-        self.run_intake([old])
-        path = self.out() / intake.STATE
-        state = json.loads(path.read_text())
-        del state['mail_ids']
-        path.write_text(json.dumps(state))
-        first = intake.reconcile_only(self.repo, self.home, self.fake.ports())
-        again = intake.reconcile_only(self.repo, self.home, self.fake.ports())
-        self.assertEqual((first.reason, first.counts['mail_ids'], again.reason), ('reconciled', 1, 'already_reconciled'))
-        self.assertEqual(len(self.fake.writes('log-activity')), 1)
-        new = mail('pat@example.test', -timedelta(hours=9), local_keys='77', message_id='<a@example.test>')
-        result = self.run_intake([new], rejected=0)
-        self.assertEqual((result.counts['logged'], result.counts['full_text_notes']), (0, 1))
-
-    def test_helper_environment_selects_reconcile_only_without_filing_or_routing(self):
+    def test_run_reconciles_saved_rows_outside_window_without_filing(self):
         old = mail('pat@example.test', -timedelta(hours=1), kind='preview', message_id='<a@example.test>')
         self.run_intake([old])
         path = self.out() / intake.STATE
         saved = json.loads(path.read_text())
         del saved['mail_ids']
+        path.write_text(json.dumps(saved))
+        decoder = load_settings(self.home).decoder
+        decoder.parent.mkdir(parents=True)
+        decoder.touch(mode=0o700)
         self.fake.calls.clear()
-        for args, selection in (([], '1'), (['--reconcile-only'], '0')):
-            with self.subTest(args=args, selection=selection):
-                path.write_text(json.dumps(saved))
-                with patch.object(intake, '__file__', str(self.repo / 'lib/outlook_intake.py')), \
-                        patch.object(Path, 'home', return_value=self.home), \
-                        patch.object(intake, '_carr', return_value=self.fake.carr), \
-                        patch.object(intake, '_decoder', return_value=self.fake.decode), \
-                        patch.object(intake, 'run', side_effect=AssertionError('normal intake ran')), \
-                        patch.object(email_router, 'step', side_effect=AssertionError('router ran')), \
-                        patch.dict(os.environ, {'CARR_OUTLOOK_RECONCILE_ONLY': selection}), \
-                        patch.object(sys, 'argv', ['-c', *args]), patch('sys.stdout'):
-                    self.assertEqual(intake.main(), 0)
-                self.assertEqual(len(json.loads(path.read_text())['mail_ids']), 1)
-                self.assertEqual(self.fake.calls, [])
+        self.fake.now = NOW.replace(hour=3)
+        result = intake.run(self.repo, self.home, self.fake.ports())
+        self.assertEqual((result.state, result.reason, result.counts.get('mail_ids')), ('succeeded', 'reconciled', 1))
+        self.assertEqual(len(json.loads(path.read_text())['mail_ids']), 1)
+        self.assertEqual(self.fake.calls, [])
+        self.assertEqual(intake.run(self.repo, self.home, self.fake.ports()).reason, 'outside_window')
+        self.fake.now = NOW
+        new = mail('pat@example.test', -timedelta(hours=9), local_keys='77', message_id='<a@example.test>')
+        result = self.run_intake([new], rejected=0)
+        self.assertEqual((result.counts['logged'], result.counts['full_text_notes']), (0, 1))
 
-    def test_reconcile_only_pass_never_overwrites_state_a_concurrent_run_saved(self):
-        first = mail('pat@example.test', -timedelta(hours=2), message_id='<a@example.test>')
-        self.run_intake([first])
+    def test_main_reconciliation_emits_receipt_and_does_not_route(self):
+        from io import StringIO
+        old = mail('pat@example.test', -timedelta(hours=1), message_id='<a@example.test>')
+        self.run_intake([old])
         path = self.out() / intake.STATE
-        state = json.loads(path.read_text())
-        del state['mail_ids']
-        path.write_text(json.dumps(state))
-        later = mail('lee@example.test', -timedelta(hours=1), subject='Later', message_id='<b@example.test>')
-        write_db(self.fake.fixture.with_name('later.db'), [first, later])
-        real_flock, interleaved = intake.fcntl.flock, []
-
-        def flock(fd, op):
-            # A scheduled intake run lands just before the reconcile pass takes the lock.
-            if not interleaved:
-                interleaved.append(True)
-                self.fake.fixture.unlink()
-                self.fake.fixture.with_name('later.db').rename(self.fake.fixture)
-                self.store.write_bytes(self.store.read_bytes() + b'.')
-                self.assertEqual(intake.run(self.repo, self.home, self.fake.ports()).counts['logged'], 1)
-            return real_flock(fd, op)
-        with patch.object(intake.fcntl, 'flock', flock):
-            intake.reconcile_only(self.repo, self.home, self.fake.ports())
-        self.store.write_bytes(self.store.read_bytes() + b'.')
-        intake.run(self.repo, self.home, self.fake.ports())
-        self.assertEqual([a['email_context']['subject'] for _, a in self.fake.writes('log-activity')],
-                         ['Suite question', 'Later'])
+        saved = json.loads(path.read_text())
+        del saved['mail_ids']
+        path.write_text(json.dumps(saved))
+        decoder = load_settings(self.home).decoder
+        decoder.parent.mkdir(parents=True)
+        decoder.touch(mode=0o700)
+        self.fake.calls.clear()
+        with patch.object(intake, '__file__', str(self.repo / 'lib/outlook_intake.py')), \
+                patch.object(Path, 'home', return_value=self.home), \
+                patch.object(intake, '_carr', return_value=self.fake.carr), \
+                patch.object(intake, '_decoder', return_value=self.fake.decode), \
+                patch.object(email_router, 'step', side_effect=AssertionError('router ran')), \
+                patch('sys.stdout', new_callable=StringIO) as output:
+            self.assertEqual(intake.main(), 0)
+        receipt = json.loads(output.getvalue().split('outlook-intake-receipt ', 1)[1].splitlines()[0])
+        self.assertEqual(receipt['reason'], 'reconciled')
+        self.assertEqual(self.fake.calls, [])
 
     def test_message_layout_alarm_clears_and_rearms_on_the_rejection_count(self):
         rows = [mail('pat@example.test', -timedelta(hours=1), local_keys='77')]
