@@ -2740,7 +2740,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
   },
   "vendor/hxprobe/src/message.rs": {
     "revision": "c05046af59640733739fc653e47ba1ff866a19a3",
-    "sha256": "b7d0cd8793bd028222add3a8b6ea2cf1d2637ba15f6c2e1e200fe4a0bd5d7663"
+    "sha256": "8f5ae1e61d55cc02d385f0cda01ff1513f84d803095c841c8c38497dc86b94e7"
   }
 }
 ```
