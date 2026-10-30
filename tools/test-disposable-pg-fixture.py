@@ -135,7 +135,7 @@ m 15 0 --rw {owner} staff {owner} staff 0 56 900005 0
         with patch('lib.disposable_pg_fixture.subprocess.run', side_effect=system), \
              patch('lib.disposable_pg_fixture.os.kill', side_effect=alive), \
              patch('lib.disposable_pg_fixture.sys.platform', 'darwin'):
-            with DisposablePostgres('shm-test-', '/fake/pg_ctl', runner=system) as fixture:
+            with DisposablePostgres('shm-test-', '/fake/pg_ctl') as fixture:
                 for ident in (11, 12, 13, 14):
                     data = fixture.root / f'data-{ident}'
                     data.mkdir()
@@ -171,7 +171,7 @@ m 15 0 --rw {owner} staff {owner} staff 0 56 900005 0
         with patch('lib.disposable_pg_fixture.subprocess.run', side_effect=system), \
              patch('lib.disposable_pg_fixture.os.kill', side_effect=ProcessLookupError()), \
              patch('lib.disposable_pg_fixture.sys.platform', 'linux'):
-            with DisposablePostgres('shm-test-', '/fake/pg_ctl', runner=system) as fixture:
+            with DisposablePostgres('shm-test-', '/fake/pg_ctl') as fixture:
                 data = fixture.root / 'data'
                 data.mkdir()
                 (data / 'postmaster.pid').write_text('1\ndata\n0\n5432\n/tmp\nlocalhost\n0 21\n')

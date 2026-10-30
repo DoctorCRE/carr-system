@@ -174,10 +174,10 @@ class DisposablePostgres:
         self.runner = runner
         # Real launches run in the same stdin-held supervisor the Node fixture
         # uses: it owns the root before initdb and stops every cluster it
-        # started when this process closes it or dies. A custom runner owns
-        # its own processes, so it keeps the in-process path.
+        # started when this process closes it or dies. A custom runner or a
+        # stub pg_ctl path (selftest seams) keeps the in-process path.
         self._supervisor = None
-        if runner is None and not _supervising:
+        if runner is None and not _supervising and os.access(pg_ctl, os.X_OK):
             self._supervisor = subprocess.Popen(
                 [sys.executable, '-u', __file__, '--supervise', '--prefix', prefix,
                  '--pg-ctl', str(pg_ctl), '--directory', str(directory)],
