@@ -41,7 +41,7 @@ def load_module(name: str, filename: str):
 
 
 call_mode = load_module("call_mode_under_test", "call-mode.py")
-transcribe_session = load_module("transcribe_session_under_test", "transcribe_session.py")
+transcribe_session = call_mode.transcribe_session
 post_call = load_module("post_call_under_test", "post_call.py")
 capture_bridge = load_module("capture_bridge_under_test", "capture-bridge.py")
 post_call_jev = load_module("post_call_jev_under_test", "post_call_jev.py")
@@ -97,6 +97,91 @@ class CallModeTests(unittest.TestCase):
     def state(self) -> dict[str, object]:
         with patch.object(call_mode, "partner_from_device", return_value="Joe"):
             return call_mode.current_state(self.recordings)
+
+    def test_fatal_transcription_stays_visible_after_age_cutoff(self) -> None:
+        session = self.session("failed-model")
+        (session / "meta.json").write_text("{}")
+        with patch.object(transcribe_session, "resolve_model", side_effect=transcribe_session.TranscribeError("model unavailable")):
+            self.assertEqual(transcribe_session.main(["transcribe", str(session)]), 1)
+        stale = time.time() - call_mode.TERMINAL_AGE_SECONDS - 60
+        os.utime(session, (stale, stale))
+        result = self.state()
+        self.assertEqual(result["state"], "needs_attention")
+        self.assertEqual(result["status_text"], "Transcription failed. The local recording is saved.")
+        self.assertEqual(result["transcription_attempts"], 1)
+        self.assertNotIn("model unavailable", json.dumps(result))
+        self.assertEqual(stat.S_IMODE((session / transcribe_session.STATUS_FILE).stat().st_mode), 0o600)
+        self.assertFalse((session / "transcript.json").exists())
+
+    def test_poll_retries_failed_transcription_only_three_total_attempts(self) -> None:
+        session = self.session("retry-model")
+        (session / "meta.json").write_text("{}")
+        (session / ".capture.json").write_text(json.dumps({"session_token": "fixture"}))
+        with (
+            patch.object(transcribe_session, "resolve_model", side_effect=transcribe_session.TranscribeError("model unavailable")) as model,
+            patch.object(capture_bridge, "http_request", return_value=(200, {"state": "transcribing", "meeting_record": None})) as network,
+        ):
+            self.assertEqual(transcribe_session.main(["transcribe", str(session)]), 1)
+            for _ in range(5):
+                self.assertEqual(capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session), capture_bridge.Outcome.UNAVAILABLE)
+            self.assertEqual(model.call_count, 3)
+            network.assert_not_called()
+        self.assertEqual(self.state()["transcription_attempts"], 3)
+        self.assertFalse((session / "ingested.json").exists())
+
+    def test_unfiled_sessions_keep_real_status_newest_first(self) -> None:
+        for index, state in enumerate(("needs_attention", "awaiting_context", "blocked", "ready_review")):
+            session = self.session(state)
+            (session / "transcript.json").write_text("{}")
+            post_call.write_private(session / post_call.STATUS_FILE, {"state": state})
+            stamp = time.time() - 100 + index
+            os.utime(session, (stamp, stamp))
+        filed = self.session("filed")
+        (filed / "ingested.json").write_text("{}")
+        os.utime(filed, (time.time() - 200, time.time() - 200))
+        result = self.state()
+        self.assertEqual(result["state"], "ready_review")
+        self.assertEqual([item["state"] for item in result["sessions"]],
+                         ["ready_review", "blocked", "awaiting_context", "needs_attention"])
+        self.assertTrue(all(item["status_text"] for item in result["sessions"]))
+
+    def test_successful_poll_retry_clears_failure_and_shows_post_call_state(self) -> None:
+        session = self.session("recovered-model")
+        (session / "meta.json").write_text("{}")
+        (session / ".capture.json").write_text(json.dumps({"session_token": "fixture"}))
+        with patch.object(transcribe_session, "resolve_model", side_effect=transcribe_session.TranscribeError("model unavailable")):
+            self.assertEqual(transcribe_session.main(["transcribe", str(session)]), 1)
+        model = self.recordings / "fixture-model"
+        model.write_bytes(b"synthetic model")
+
+        def finish_post_call(_session):
+            post_call.write_private(session / post_call.STATUS_FILE, {"state": "awaiting_context"})
+            return {"state": "awaiting_context"}
+
+        with (
+            patch.object(transcribe_session, "resolve_model", return_value=model),
+            patch.object(transcribe_session, "verify_model_pin"),
+            patch.object(transcribe_session.post_call, "run_session", side_effect=finish_post_call),
+            patch.object(capture_bridge, "http_request", return_value=(200, {"state": "transcribing", "meeting_record": None})),
+        ):
+            self.assertEqual(capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session), 0)
+        self.assertFalse((session / transcribe_session.STATUS_FILE).exists())
+        self.assertTrue((session / "transcript.json").exists())
+        self.assertEqual(self.state()["state"], "awaiting_context")
+
+    def test_recording_or_filed_newest_does_not_hide_older_unfiled_calls(self) -> None:
+        older = self.session("older-failure")
+        post_call.write_private(older / post_call.STATUS_FILE, {"state": "needs_attention"})
+        os.utime(older, (time.time() - 100, time.time() - 100))
+        newer = self.session("new-call")
+        (newer / "mic.caf").touch()
+        self.assertEqual(self.state()["state"], "recording")
+        self.assertEqual([row["session"] for row in self.state()["sessions"]], ["new-call", "older-failure"])
+        (newer / "ingested.json").write_text("{}")
+        (newer / "meta.json").write_text("{}")
+        result = self.state()
+        self.assertEqual(result["state"], "filed")
+        self.assertEqual([row["session"] for row in result["sessions"]], ["older-failure"])
 
     def test_weekly_deal_labels_pair_joe_and_dell(self) -> None:
         self.assertEqual(call_mode.labels_for("weekly_deal_call", "Joe"), ("Joe", "Dell"))
@@ -200,8 +285,8 @@ class CallModeTests(unittest.TestCase):
         os.utime(track, (stale, stale))
         self.assertEqual(self.state()["state"], "state_unknown")
 
-    def test_current_state_is_idle_without_sessions_or_when_newest_session_is_stale(self) -> None:
-        self.assertEqual(self.state(), {"state": "idle", "local_partner": "Joe"})
+    def test_old_unfinished_transcription_remains_visible(self) -> None:
+        self.assertEqual(self.state(), {"state": "idle", "local_partner": "Joe", "sessions": []})
 
         session = self.session("old-terminal")
         (session / "meta.json").write_text("{}")
@@ -210,7 +295,11 @@ class CallModeTests(unittest.TestCase):
         import os
 
         os.utime(session, (stale, stale))
-        self.assertEqual(self.state(), {"state": "idle", "local_partner": "Joe"})
+        os.utime(session / "meta.json", (stale, stale))
+        result = self.state()
+        self.assertEqual(result["state"], "needs_attention")
+        self.assertEqual(result["status_text"], "Transcription has not finished. The local recording is saved.")
+        self.assertEqual(result["sessions"][0]["session"], "old-terminal")
 
 
 class SpeakerLabelTests(unittest.TestCase):

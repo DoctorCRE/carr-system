@@ -41,6 +41,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 import post_call
+import transcribe_session
 
 
 HOST = "127.0.0.1"
@@ -190,6 +191,9 @@ def write_call_context(path: Path, mode: str, local_partner: str | None) -> dict
 def current_state(recordings: Path = RECORDINGS) -> dict[str, Any]:
     local_partner = partner_from_device()
     directories = session_dirs(recordings)
+    sessions = [status for path in directories
+                if not (path / "ingested.json").exists()
+                if (status := session_status(path)) is not None]
     active = next((path for path in directories if is_recording(path)), None)
     if active:
         context = read_json(active / CONTEXT_FILE) or {}
@@ -198,6 +202,7 @@ def current_state(recordings: Path = RECORDINGS) -> dict[str, Any]:
             "system": "Other participant",
         }
         return {
+            "sessions": sessions,
             "state": "recording",
             "started_at": started_at(active),
             "session": active.name,
@@ -208,32 +213,54 @@ def current_state(recordings: Path = RECORDINGS) -> dict[str, Any]:
 
     newest = directories[0] if directories else None
     if newest:
-        try:
-            age = time.time() - newest.stat().st_mtime
-        except OSError:
-            age = TERMINAL_AGE_SECONDS + 1
-        post_call_status = read_json(newest / post_call.STATUS_FILE) or {}
-        needs_attention = post_call_status.get("state") == "needs_attention"
-        if needs_attention or age <= TERMINAL_AGE_SECONDS:
-            context = read_json(newest / CONTEXT_FILE) or {}
-            base = {
-                "session": newest.name,
-                "mode": context.get("mode") or "other_call",
-                "speaker_labels": context.get("speaker_labels") or {},
-                "local_partner": local_partner,
-            }
-            if needs_attention:
-                return {"state": "needs_attention", "extraction_attempts": post_call_status.get("extraction_attempts", 0), **base}
-            if (newest / "ingested.json").exists():
-                return {"state": "filed", **base}
-            if (newest / "transcript.json").exists():
-                return {"state": "ready_to_extract", **base}
-            if (newest / "meta.json").exists():
-                return {"state": "transcribing", **base}
-            if partial_session_age(newest) is not None:
-                return {"state": "state_unknown", **base}
+        status = session_status(newest)
+        if status:
+            return {**status, "local_partner": local_partner, "sessions": sessions}
+    return {"state": "idle", "local_partner": local_partner, "sessions": sessions}
 
-    return {"state": "idle", "local_partner": local_partner}
+
+def session_status(path: Path) -> dict[str, Any] | None:
+    context = read_json(path / CONTEXT_FILE) or {}
+    base = {
+        "session": path.name,
+        "mode": context.get("mode") or "other_call",
+        "speaker_labels": context.get("speaker_labels") or {},
+    }
+    transcription = read_json(path / transcribe_session.STATUS_FILE) or {}
+    post_status = read_json(path / post_call.STATUS_FILE) or {}
+    if transcription.get("state") == "needs_attention":
+        return {**base, "state": "needs_attention",
+                "transcription_attempts": transcription.get("transcription_attempts", 0),
+                "status_text": "Transcription failed. The local recording is saved."}
+    messages = {
+        "needs_attention": "Post-call extraction stopped after three attempts. The local transcript is saved for investigation.",
+        "awaiting_context": "Waiting for call context before extraction.",
+        "blocked": "Post-call extraction is blocked. The local transcript is saved for retry.",
+        "ready_review": "The call summary is ready for review.",
+        "filed": "The confirmed meeting summary has been saved.",
+        "ready_to_extract": "The local transcript is ready for extraction.",
+        "transcribing": "Quill is transcribing both audio tracks locally.",
+        "state_unknown": "A partial session was found. Call Mode cannot verify that Quill is still recording.",
+        "recording": "Recording is live.",
+    }
+    state = post_status.get("state")
+    if state == "needs_attention":
+        base["extraction_attempts"] = post_status.get("extraction_attempts", 0)
+    elif (path / "ingested.json").exists():
+        state = "filed"
+    elif state not in messages:
+        if (path / "transcript.json").exists():
+            state = "ready_to_extract"
+        elif (path / "meta.json").exists():
+            if time.time() - (path / "meta.json").stat().st_mtime > TERMINAL_AGE_SECONDS:
+                return {**base, "state": "needs_attention",
+                        "status_text": "Transcription has not finished. The local recording is saved."}
+            state = "transcribing"
+        elif partial_session_age(path) is not None:
+            state = "recording" if is_recording(path) else "state_unknown"
+        else:
+            return None
+    return {**base, "state": state, "status_text": messages[state]}
 
 
 def run_quill_menu_item(title: str) -> None:
@@ -368,13 +395,15 @@ header{background:var(--deep);color:white;padding:18px 22px;display:flex;align-i
 </style></head><body><main><header><span class="brand">CARR Call Mode</span><span class="bridge">Quill local recorder</span></header>
 <section class="stage" id="stage"><div class="orb">●</div><div class="timer" id="timer">Ready</div><div class="status" id="status">Quill is ready on this Mac.</div><div class="speakers" id="speakers">Separate tracks identify the local partner and the other side without a third-party voiceprint.</div></section>
 <section class="actions"><label id="consentRow" style="display:flex;gap:10px;align-items:flex-start;font-size:12px;color:var(--muted);line-height:1.4"><input id="consent" type="checkbox" style="margin-top:2px">I have told everyone on this call that it will be recorded.</label><div class="row" id="startRow"><button class="primary" data-start="weekly_deal_call">Start weekly deal call</button><button data-start="other_call">Start another call</button></div><button class="danger" id="stop" hidden>Stop and process</button></section>
+<section class="actions" aria-label="Unfiled calls"><h2>Unfiled calls</h2><ul id="sessions"></ul></section>
 <p class="note">The audible recording announcement remains part of Quill. Stopping the call starts local transcription. Next steps and phases stated plainly update the cards, each listed with Undo; anything unsettled waits for Joe or Dell. Emails stay drafts.</p></main>
 <script>
 const $=(s)=>document.querySelector(s);let snapshot={state:'idle'};
 const elapsed=(iso)=>{if(!iso)return'0:00';const n=Math.max(0,Math.floor((Date.now()-Date.parse(iso))/1000));return Math.floor(n/60)+':'+String(n%60).padStart(2,'0')};
 function paint(s){snapshot=s;const rec=s.state==='recording';$('#stage').classList.toggle('recording',rec);$('#startRow').hidden=rec;$('#consentRow').hidden=rec;$('#stop').hidden=!rec;
-  $('#timer').textContent=rec?elapsed(s.started_at):({idle:'Ready',transcribing:'Processing',ready_to_extract:'Transcript ready',filed:'Summary saved',state_unknown:'Check Quill',needs_attention:'Needs attention'}[s.state]||s.state);
-  $('#status').textContent=rec?'Recording is live.':s.state==='needs_attention'?'Post-call extraction stopped after three attempts. The local transcript is saved for investigation.':s.state==='transcribing'?'Quill is transcribing both audio tracks locally.':s.state==='ready_to_extract'?'The local transcript is ready for extraction.':s.state==='filed'?'The confirmed meeting summary has been saved.':s.state==='state_unknown'?'A partial session was found, but Call Mode cannot verify that Quill is still recording.':'Quill is ready on this Mac.';
+  $('#timer').textContent=rec?elapsed(s.started_at):({idle:'Ready',transcribing:'Processing',ready_to_extract:'Transcript ready',filed:'Summary saved',state_unknown:'Check Quill',needs_attention:'Needs attention'}[s.state]||s.state.replaceAll('_',' '));
+  $('#status').textContent=rec?'Recording is live.':s.status_text||'Quill is ready on this Mac.';
+  $('#sessions').replaceChildren(...(s.sessions||[]).map(item=>{const row=document.createElement('li');row.textContent=item.session+' · '+item.status_text;return row}));
   const l=s.speaker_labels||{};$('#speakers').innerHTML=l.mic?'<b>'+l.mic+'</b> on the microphone · <b>'+l.system+'</b> on system audio':'Separate tracks identify the local partner and the other side without a third-party voiceprint.'}
 async function api(path,body){const r=await fetch('/api/'+path,{method:body?'POST':'GET',headers:body?{'content-type':'application/json','X-CARR-Call-Mode':'deal-room-v1'}:{},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw new Error(d.error||'Call Mode failed');return d}
 async function refresh(){try{paint(await api('state'))}catch(e){$('#status').textContent=e.message}}
