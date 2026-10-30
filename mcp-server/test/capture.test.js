@@ -214,6 +214,16 @@ class CaptureFake {
     if (sql.includes("capture:resolve-post-call-assignee"))
       return { rows: params[0] === "joe" ? [{ id: ids.joe }] : params[0] === "dell" ? [{ id: "10000000-0000-0000-0000-000000000003" }] : [] };
     if (sql.includes("capture:resolve-post-call-drop-prior")) return { rows: [] };
+    if (/^select id from (?:next_action|capture_post_call_action) where id=\$1 for update$/u.test(sql)) return { rows: [{ id: params[0] }] };
+    if (sql.includes("capture:followup-deal-lock")) return { rows: [{ id: params[0] }] };
+    if (sql.includes("capture:followup-existing")) return { rows: [...this.postCallActions.map(row => ({ ...row, source: "capture_post_call_action" })),
+      ...this.nextActions.map(row => ({ ...row, deal_id: row.subject_id, source: "next_action" }))].filter(row =>
+      row.deal_id === params[0] && row.status === "open" && row.description.trim().replace(/\s+/gu, ' ').toLowerCase() === params[1]).slice(0, 1) };
+    if (sql.includes("capture:followup-merge")) {
+      const row = [...this.postCallActions, ...this.nextActions].find(row => row.id === params[0]);
+      Object.assign(row, { due_on: params[1], owner_id: params[2], item_bullets: JSON.parse(params[3]) });
+      return { rows: [{ id: row.id }] };
+    }
     if (sql.includes("capture:resolve-post-call-action")) {
       const action = { id: this.uuid("7"), candidate_id: params[0], deal_id: params[1], owner_id: params[2],
         due_on: params[3], description: params[4], accepted_by: params[5], status: "open",
@@ -696,6 +706,23 @@ test("post-call context is authenticated, bounded, exact, and never searches by 
   assert.equal(toolContext.deals.length, 2);
   await assert.rejects(TOOLS["get-call-context"].handler(db, joe, { deal_ids: ["Deal Alpha"] }),
     error => error instanceof ToolError && error.payload.error === "invalid_call_context_deals");
+});
+
+test("accepting the same open deal follow-up twice merges its evidence and date", async () => {
+  const db = new CaptureFake();
+  const candidates = ["first", "second"].map((id, index) => ({
+    id, kind: "assigned_action", deal_id: ids.deal, assignee_slug: "joe",
+    action_description: index ? "  CALL   vendor  " : "Call vendor", due_on: index ? "2026-11-03" : "2026-11-02",
+    evidence_quote: index ? "Joe will call again." : "Joe will call vendor.", status: "pending",
+  }));
+  db.postCallCandidates.push(...candidates);
+  const results = [];
+  for (const candidate of candidates) results.push(await TOOLS["resolve-post-call-candidate"].handler(db, joe,
+    { idempotency_key: candidate.id === "first" ? "00000571-0000-4000-8000-000000000071" : "00000571-0000-4000-8000-000000000072", candidate_id: candidate.id, accept: true }));
+  assert.equal(db.postCallActions.length, 1);
+  assert.equal(results[1].ref, results[0].ref);
+  assert.equal(db.postCallActions[0].due_on, "2026-11-03");
+  assert.equal(db.postCallActions[0].item_bullets.some(b => b.text === "Joe will call again."), true);
 });
 
 test("post-call lifecycle cannot finalize after one acceptance and stores only safe metadata", async () => {

@@ -480,6 +480,9 @@ class CallModeHttpTests(unittest.TestCase):
 
 class PostCallTests(unittest.TestCase):
     def setUp(self) -> None:
+        clock = patch.object(post_call, "now", return_value="2026-10-26T12:00:00Z")
+        clock.start()
+        self.addCleanup(clock.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.session = Path(self.tmp.name) / "2026.08.10-1234"
         self.session.mkdir()
@@ -513,6 +516,16 @@ class PostCallTests(unittest.TestCase):
         }
         result.update(overrides)
         return result
+
+    def test_undated_actions_default_to_next_business_day_and_show_the_reason(self) -> None:
+        result = post_call.normalize_distillation(self.output(), self.context, self.session.name,
+                                                  call_date="2026-10-30")
+        task = result["joe_tasks"][0]
+        self.assertEqual(task["due_on"], "2026-11-02")
+        self.assertTrue(task["due_defaulted"])
+        self.assertTrue(any("default" in q["question"].lower() for q in result["review_questions"]))
+        post_call.write_private(self.session / post_call.REPORT_FILE, result)
+        self.assertEqual(post_call.sanitized_candidates(self.session)["post_call_items"][0]["due_on"], "2026-11-02")
 
     def test_weekly_transcript_without_app_fetches_context_and_processes_once(self) -> None:
         call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
@@ -554,6 +567,7 @@ class PostCallTests(unittest.TestCase):
         ]
         with (patch.object(capture_bridge.post_call, "run_session", side_effect=worker) as run,
               patch.object(post_call.subprocess, "run", side_effect=replies),
+              patch.object(post_call, "now", return_value="2099-01-01T12:00:00Z"),
               patch.object(capture_bridge, "publish_cmd", return_value=0),
               patch.object(capture_bridge, "http_request", return_value=(200, {"state": "distilling", "meeting_record": None}))):
             self.assertEqual(capture_bridge.poll_cmd(cfg, self.session), capture_bridge.Outcome.VERIFIED)
@@ -634,6 +648,30 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual([len(args["deal_ids"]) for verb, args in requests if verb == "get-call-context"], [50, 1])
         self.assertEqual(len(distiller.call_args.args[0]["context"]["deals"]), 51)
 
+    def test_deal_closing_during_context_read_is_recorded_and_other_deals_finish(self) -> None:
+        call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
+        replies = [
+            {"ok": True, "deals": [{"id": "deal-a", "operating_state": "active"},
+                                     {"id": "deal-b", "operating_state": "active"}]},
+            {"error": "invalid_call_context_deals", "invalid_deal_ids": ["deal-a"]},
+            {"ok": True, "deals": [self.context["deals"][1]]},
+        ]
+        completed = [SimpleNamespace(returncode=0, stdout=json.dumps(reply)) for reply in replies]
+        with patch.object(post_call.subprocess, "run", side_effect=completed):
+            status = post_call.process_session(self.session, distiller=lambda request: self.output(
+                joe_tasks=[], deal_updates=[{"deal_id": "deal-b", "summary": "Continue", "participant_ids": [], "evidence": "Continue Beta."}], draft_proposals=[]))
+        self.assertEqual(status["state"], "ready_review")
+        report = post_call.report_for_deal_room(self.session)["report"]
+        self.assertEqual(report["deal_updates"][0]["deal_id"], "deal-b")
+        self.assertTrue(any("deal-a" in q["question"] and "skip" in q["question"].lower() for q in report["review_questions"]))
+
+    def test_stored_terminal_deal_is_skipped_before_context_validation(self) -> None:
+        context = json.loads(json.dumps(self.context))
+        context["deals"][0].update(operating_state="closed", participants=None)
+        stored = post_call.store_context(self.session, context)
+        self.assertEqual([deal["id"] for deal in stored["deals"]], ["deal-b"])
+        self.assertEqual(stored["skipped_deals"][0]["id"], "deal-a")
+
     def test_weekly_context_refusal_and_malformed_board_remain_retryable(self) -> None:
         call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
         cases = [
@@ -643,6 +681,7 @@ class PostCallTests(unittest.TestCase):
         ]
         for replies in cases:
             with self.subTest(replies=replies):
+                (self.session / post_call.STATUS_FILE).unlink(missing_ok=True)
                 completed = [SimpleNamespace(returncode=0, stdout=json.dumps(reply)) for reply in replies]
                 with patch.object(post_call.subprocess, "run", side_effect=completed):
                     status = post_call.process_session(self.session, distiller=Mock())
@@ -650,6 +689,41 @@ class PostCallTests(unittest.TestCase):
                 self.assertTrue(status["reason"])
                 self.assertIsNone(post_call.context_from_session(self.session))
                 self.assertFalse((self.session / post_call.REPORT_FILE).exists())
+
+    def test_network_failures_back_off_and_end_in_visible_needs_attention(self) -> None:
+        call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
+        failure = SimpleNamespace(returncode=1, stdout='{"error":"unavailable"}')
+        clock = ["2026-10-26T12:00:00Z", "2026-10-26T12:00:01Z", "2026-10-26T12:05:00Z",
+                 "2026-10-26T12:20:00Z", "2026-10-26T13:00:00Z"]
+        with patch.object(post_call.subprocess, "run", return_value=failure) as route:
+            for stamp in clock:
+                with patch.object(post_call, "now", return_value=stamp):
+                    status = post_call.process_session(self.session, distiller=Mock())
+            self.assertEqual(route.call_count, 3)
+        self.assertEqual(status["state"], "needs_attention")
+        self.assertTrue(status["reason"])
+        (self.session / "transcript.json").unlink()
+        (self.session / ".capture.json").write_text(json.dumps({"session_token": "synthetic"}))
+        with patch.object(capture_bridge, "http_request", side_effect=capture_bridge.BridgeNetworkError("offline")) as http:
+            for stamp in clock:
+                with patch.object(capture_bridge, "iso_now_utc", return_value=stamp):
+                    capture_bridge.poll_cmd({"base_url": "https://synthetic.invalid"}, self.session)
+            self.assertEqual(http.call_count, 3)
+        self.assertEqual(post_call.report_for_deal_room(self.session)["status"]["state"], "needs_attention")
+
+    def test_sync_recovery_clears_the_visible_failure_after_backoff(self) -> None:
+        (self.session / ".capture.json").write_text(json.dumps({"session_token": "synthetic"}))
+        post_call.write_private(self.session / post_call.REPORT_FILE, self.output())
+        post_call.write_private(self.session / post_call.STATUS_FILE, {"state": "ready_review"})
+        with patch.object(capture_bridge, "publish_cmd", return_value=0), patch.object(capture_bridge, "http_request") as http:
+            http.side_effect = capture_bridge.BridgeNetworkError("offline")
+            with patch.object(capture_bridge, "iso_now_utc", return_value="2026-10-26T12:00:00Z"):
+                capture_bridge.poll_cmd({"base_url": "https://synthetic.invalid"}, self.session)
+            http.side_effect = None
+            http.return_value = (200, {"state": "distilling", "meeting_record": None})
+            with patch.object(capture_bridge, "iso_now_utc", return_value="2026-10-26T12:05:00Z"):
+                capture_bridge.poll_cmd({"base_url": "https://synthetic.invalid"}, self.session)
+        self.assertEqual(post_call.report_for_deal_room(self.session)["status"]["state"], "ready_review")
 
     def test_extraction_retries_back_off_and_stop_after_three_attempts(self) -> None:
         post_call.store_context(self.session, self.context)
@@ -713,7 +787,7 @@ class PostCallTests(unittest.TestCase):
         bad = self.output(joe_tasks=[{"title": "Wrong", "deal_id": "deal-a", "participant_ids": ["missing"], "evidence": "One two."}])
         normalized = post_call.normalize_distillation(bad, self.context, self.session.name)
         self.assertEqual(normalized["joe_tasks"], [])
-        self.assertIn("unknown or ambiguous participant_ids", normalized["review_questions"][0]["question"])
+        self.assertIn("unknown or ambiguous participant_ids", " ".join(q["question"] for q in normalized["review_questions"]))
 
     def test_record_layer_context_is_stored_instead_of_stalling_in_awaiting_context(self) -> None:
         # The 2026-08-17 stall, reproduced with the shapes get-call-context
@@ -791,7 +865,7 @@ class PostCallTests(unittest.TestCase):
         }])
         normalized = post_call.normalize_distillation(oversized, self.context, self.session.name)
         self.assertEqual(normalized["draft_proposals"], [])
-        self.assertIn("Outlook draft size limit", normalized["review_questions"][0]["question"])
+        self.assertIn("Outlook draft size limit", " ".join(q["question"] for q in normalized["review_questions"]))
 
     def test_sanitized_candidates_never_include_email_body_or_recipient_email(self) -> None:
         post_call.store_context(self.session, self.context)
@@ -806,7 +880,7 @@ class PostCallTests(unittest.TestCase):
         )
         self.assertEqual([item["kind"] for item in shaped["legacy_items"]], ["activity"])
         self.assertEqual(shaped["legacy_items"][0]["payload"]["ref"], "deal-a")
-        self.assertIsNone(shaped["post_call_items"][0]["due_on"])
+        self.assertRegex(shaped["post_call_items"][0]["due_on"], r"^\d{4}-\d{2}-\d{2}$")
         remote_items = shaped["post_call_items"] + shaped["legacy_items"]
         self.assertLessEqual(max(len(item["evidence_quote"].split()) for item in remote_items), 15)
 
@@ -969,12 +1043,12 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(status["state"], "ready_review")
         report = post_call.report_for_deal_room(self.session)["report"]
         self.assertEqual(report["joe_tasks"][0]["due_on"], "2028-02-29")
-        self.assertIsNone(report["dell_tasks"][0]["due_on"])
+        self.assertTrue(report["dell_tasks"][0]["due_defaulted"])
         self.assertEqual(report["joe_tasks"][0]["candidate_status"], "unfiled")
         actions = [item for item in post_call.sanitized_candidates(self.session)["post_call_items"]
                    if item["kind"] == "assigned_action"]
         self.assertEqual([(item["assignee"], item["due_on"]) for item in actions],
-                         [("joe", "2028-02-29"), ("dell", None)])
+                         [("joe", "2028-02-29"), ("dell", "2026-10-27")])
 
     def test_relative_dates_use_recorded_chicago_day_in_report_and_candidates(self) -> None:
         cases = (
@@ -1027,7 +1101,7 @@ class PostCallTests(unittest.TestCase):
                 self.assertEqual(report["joe_tasks"][0]["due_on"], expected)
                 self.assertEqual(report["deal_updates"][0]["next_step"]["next_date"], expected)
                 self.assertEqual(report["joe_tasks"][0]["evidence"], quote)
-                self.assertIsNone(report["dell_tasks"][0]["due_on"])
+                self.assertTrue(report["dell_tasks"][0]["due_defaulted"])
                 self.assertEqual(requests[0]["call_date"], call_date)
                 candidates = post_call.sanitized_candidates(self.session)
                 self.assertEqual(candidates["post_call_items"][0]["due_on"], expected)
@@ -1108,7 +1182,7 @@ class PostCallTests(unittest.TestCase):
                     status = post_call.process_session(self.session, distiller=lambda _request: output)
                     self.assertEqual(status["state"], "ready_review")
                     report = post_call.report_for_deal_room(self.session)["report"]
-                    self.assertIsNone(report["joe_tasks"][0]["due_on"])
+                    self.assertTrue(report["joe_tasks"][0]["due_defaulted"])
                     self.assertEqual(report["dell_tasks"][0]["due_on"], "2026-11-06")
                     self.assertEqual(len(report["draft_proposals"]), 1)
                     self.assertTrue(report["review_questions"])
@@ -1120,7 +1194,7 @@ class PostCallTests(unittest.TestCase):
                     self.assertEqual(step["apply"], "review")
                     candidates = post_call.sanitized_candidates(self.session)
                     actions = [item for item in candidates["post_call_items"] if item["kind"] == "assigned_action"]
-                    self.assertEqual([item["due_on"] for item in actions], [None, "2026-11-06"])
+                    self.assertEqual([item["due_on"] for item in actions], ["2026-11-02" if started_at == "2026-10-30T18:00:00Z" else "2026-10-27", "2026-11-06"])
                     self.assertIsNone(candidates["legacy_items"][1]["payload"]["next_date"])
 
     def test_relative_date_validation_preserves_explicit_and_unmatched_evidence_dates(self) -> None:
@@ -1128,9 +1202,9 @@ class PostCallTests(unittest.TestCase):
             ("I will call Friday, November 6, 2026.", "2026-11-06", "2026-11-06"),
             ("I will call before the lunch call on November 6, 2026.", "2026-11-06", "2026-11-06"),
             ("I will call two weeks from Friday.", "2026-11-13", "2026-11-13"),
-            ("Review last Friday's proposal.", None, None),
-            ("I will review Friday's proposal.", None, None),
-            ("I will call Vendor A tomorrow.", None, None),
+            ("Review last Friday's proposal.", None, "2026-10-27"),
+            ("I will review Friday's proposal.", None, "2026-10-27"),
+            ("I will call Vendor A tomorrow.", None, "2026-10-27"),
         )
         for quote, supplied, expected in cases:
             with self.subTest(quote=quote):
@@ -1187,7 +1261,7 @@ class PostCallTests(unittest.TestCase):
         report = post_call.report_for_deal_room(self.session)["report"]
         self.assertTrue(report["review_questions"])
         action = post_call.sanitized_candidates(self.session)["post_call_items"][0]
-        self.assertIsNone(action["due_on"])
+        self.assertRegex(action["due_on"], r"^\d{4}-\d{2}-\d{2}$")
 
     def test_long_relative_evidence_retains_the_spoken_deadline(self) -> None:
         post_call.write_private(self.session / post_call.CONTEXT_FILE, {"started_at": "2026-10-27T00:30:00Z"})
@@ -2107,7 +2181,7 @@ class PostCallJevChecksTests(unittest.TestCase):
                  {"title": "Good", "deal_id": "deal-a", "evidence": "I will call the Acme Clinic vendor"}]
         result = post_call_jev.check_distillation(self.result(joe_tasks=tasks), self.context,
                                                   self.transcript, client=Mock(system_one=flaky))
-        self.assertEqual(result["joe_tasks"][0]["checks"], {"unavailable": True})
+        self.assertTrue(result["joe_tasks"][0]["checks"]["unavailable"])
         self.assertFalse(result["joe_tasks"][1]["checks"]["flagged"])
         self.assertEqual(len(result["review_questions"]), 1)
 
@@ -2158,6 +2232,17 @@ class PostCallJevChecksTests(unittest.TestCase):
         self.assertFalse(checks["details"]["pass"])
         self.assertTrue(any("Right details" in reason for reason in checks["reasons"]))
 
+    def test_jev_failure_records_an_item_reason_visible_in_the_review_pack(self) -> None:
+        for error in (TypeSafeError("no key"), RuntimeError("budget exhausted"), TimeoutError("offline")):
+            with self.subTest(error=type(error).__name__):
+                result = post_call_jev.check_distillation(self.result(), self.context, self.transcript,
+                                                        client=Mock(system_one=Mock(side_effect=error)))
+                checks = result["joe_tasks"][0]["checks"]
+                self.assertTrue(checks["unavailable"])
+                self.assertTrue(checks["flagged"])
+                self.assertIn(type(error).__name__, checks["reasons"][0])
+                self.assertIn(type(error).__name__, result["review_questions"][0]["question"])
+
     def test_jev_unavailable_never_fails_the_pack_and_flags_every_item_unavailable(self) -> None:
         def raising_ask(**_kwargs) -> dict[str, object]:
             raise TypeSafeError("network unreachable")
@@ -2170,8 +2255,8 @@ class PostCallJevChecksTests(unittest.TestCase):
             }]),
             self.context, self.transcript, client=Mock(system_one=raising_ask),
         )
-        self.assertEqual(result["joe_tasks"][0]["checks"], {"unavailable": True})
-        self.assertEqual(result["dell_tasks"][0]["checks"], {"unavailable": True})
+        self.assertTrue(result["joe_tasks"][0]["checks"]["unavailable"])
+        self.assertTrue(result["dell_tasks"][0]["checks"]["unavailable"])
         self.assertEqual(len(result["review_questions"]), 1)
         self.assertIn("Jev", result["review_questions"][0]["question"])
         self.assertFalse(result["review_questions"][0]["resolved"])

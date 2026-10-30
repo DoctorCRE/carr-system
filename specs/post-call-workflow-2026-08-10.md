@@ -75,7 +75,13 @@ The pack has these top-level sections:
 `read-post-call-followups` accepts `{}` and returns `post-call-followups.v1`
 with `candidates` and `send: false`. Each candidate has `id`, `session_id`,
 `deal_id`, `deal_name`, `kind`, `payload`, `evidence_quote`, and `created_at`.
-Task payloads contain `deal_id`, `assignee`, `action`, and nullable `due_on`.
+Task payloads contain `deal_id`, `assignee`, `action`, and `due_on`.
+When no usable deadline is stated, default to the next Monday through Friday
+after the recorded call date in America/Chicago. If the recording has no date,
+use the processing date in that timezone. The private task carries
+`due_defaulted: true` and a visible review question names the default. An
+ambiguous spoken deadline still retains its review question. Defaulted tasks
+remain proposals, just like explicitly dated tasks.
 Email payloads contain `deal_id`, `recipient_party_id`, `recipient_ref`,
 `subject`, and `body_sha256`. Email bodies and session tokens are excluded.
 
@@ -172,3 +178,22 @@ with all item questions in one request. The local process supplies
 - storing raw transcript or full draft bodies in the capture Worker;
 - automatic external sending;
 - a second audio recorder or transcription engine.
+
+### Post-call reliability
+
+Accepting the same step for the same deal merges into its oldest open action,
+including actions entered outside Call Mode. Matching ignores case and repeated
+whitespace; it does not infer paraphrases. Confirmation updates the due date and
+assignee and combines evidence bullets. Closed actions remain history.
+
+Extraction, context-fetch failures, and bridge synchronization each stop after
+three failed attempts, with five and fifteen minutes between attempts. The local
+session then shows `needs_attention`; recordings remain retained. Successful
+synchronization before exhaustion clears its temporary failure state. Pending
+human proposals do not consume synchronization attempts.
+
+Deals excluded from active context, including IDs refused after the board read,
+produce review questions naming the skipped deal and the reason. Other deals
+continue. Jev failures retain proposals with item-level flags and a review
+question. Exception classes and safe cause categories are visible; raw provider
+errors are not copied into the pack.

@@ -10027,7 +10027,27 @@ registerTools({
         ...proposed.flatMap(i => i.bullets),
         ...shortFacts(candidate.evidence_quote).map(text => ({ date: null, kind: 'call', text })),
       ] });
-      const action = await c.query(
+      await c.query("select id from deal where id=$1 for update /* capture:followup-deal-lock */", [candidate.deal_id]);
+      const stepKey = candidate.action_description.trim().replace(/\s+/gu, ' ').toLowerCase();
+      const existing = (await c.query(
+        `select id,item_bullets,source from (
+           select id,item_bullets,'next_action' as source,created_at as ordered_at from next_action
+             where subject_type='deal' and subject_id=$1 and status='open'
+               and lower(regexp_replace(btrim(description), '\\s+', ' ', 'g'))=$2
+           union all
+           select id,item_bullets,'capture_post_call_action' as source,accepted_at as ordered_at from capture_post_call_action
+             where deal_id=$1 and status='open'
+               and lower(regexp_replace(btrim(description), '\\s+', ' ', 'g'))=$2
+         ) actions order by ordered_at,id limit 1 /* capture:followup-existing */`,
+        [candidate.deal_id, stepKey])).rows[0];
+      const actionTable = existing?.source === 'next_action' ? 'next_action' : 'capture_post_call_action';
+      if (existing) await c.query(`select id from ${actionTable} where id=$1 for update`, [existing.id]);
+      const bullets = [...(existing?.item_bullets || []), ...item.bullets]
+        .filter((bullet, index, all) => all.findIndex(other => JSON.stringify(other) === JSON.stringify(bullet)) === index);
+      const action = existing ? await c.query(
+        `update ${actionTable} set due_on=$2,owner_id=$3,item_bullets=$4::jsonb,updated_at=clock_timestamp()
+          where id=$1 returning id /* capture:followup-merge */`,
+        [existing.id, candidate.due_on, assignee.rows[0].id, JSON.stringify(bullets)]) : await c.query(
         `insert into capture_post_call_action (candidate_id,deal_id,owner_id,due_on,description,accepted_by,item_title,item_bullets,source_ref)
          values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9) returning id
          /* capture:resolve-post-call-action */`,

@@ -28,7 +28,7 @@ from contextlib import nullcontext
 import re
 from typing import Any
 
-from typesafe_sdk import Choice, Noul, TypeSafeClient, TypeSafeError
+from typesafe_sdk import Choice, Noul, TypeSafeClient
 
 CHECKS_SCHEMA = "post-call-jev-checks/v1"
 
@@ -248,8 +248,11 @@ def _item_checks(item, answers):
     }
 
 
-def _unavailable() -> dict[str, Any]:
-    return {"unavailable": True}
+def _unavailable(exc: Exception) -> dict[str, Any]:
+    message = str(exc).lower()
+    cause = "missing key" if "key" in message else "budget exhausted" if "budget" in message else "request failed"
+    return {"unavailable": True, "flagged": True,
+            "reasons": [f"Jev deal check unavailable ({type(exc).__name__}, {cause}); review this proposal manually."]}
 
 
 def _review_id(session: str, tag: str) -> str:
@@ -271,8 +274,8 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
 
     Mutates and returns `result`. A missing Jev key or SDK request failure never blocks the
     review pack. Every affected item instead gets
-    `checks: {"unavailable": True}` and one review_questions entry records
-    that the automatic checks did not run.
+    `checks` with an unavailable flag and a safe exception-class reason.
+    A review question records that the automatic checks did not run.
     """
     deals = context.get("deals") if isinstance(context, dict) else None
     deals = deals if isinstance(deals, list) else []
@@ -302,23 +305,25 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
                 response = sdk.system_one(state=local_state, questions=local_questions)
                 item["checks"] = _item_checks(item, {name: response.answers[name]
                                                     for name in local_questions})
-            except TypeSafeError:
-                item["checks"] = _unavailable()
+            except Exception as exc:
+                item["checks"] = _unavailable(exc)
 
         # One call per item: unrelated items sharing a state hurt accuracy.
         try:
             with nullcontext(client) if client is not None else TypeSafeClient(model="jev-latest") as sdk:
                 with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CALLS) as pool:
                     list(pool.map(judge, pending))
-        except TypeSafeError:  # no key, or the client could not open
+        except Exception as exc:  # no key, or the client could not open
             for item, _, _ in pending:
-                item["checks"] = _unavailable()
+                item["checks"] = _unavailable(exc)
         any_unavailable = any(item["checks"].get("unavailable") for item, _, _ in pending)
 
     if any_unavailable:
         result.setdefault("review_questions", []).append({
             "id": _review_id(session, "jev_partial_unavailable"),
-            "question": "Automatic Jev checks did not run for one or more items in this pack.",
+            "question": " ".join(sorted({reason for item, _, _ in pending
+                                          for reason in item["checks"].get("reasons", [])
+                                          if item["checks"].get("unavailable")})),
             "resolved": False,
         })
     return result

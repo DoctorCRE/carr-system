@@ -474,3 +474,33 @@ test('Home discovers pending call follow-ups through existing grants without exe
     await assert.rejects(read,e=>e.payload.error==='post_call_followups_limit_exceeded' && e.payload.limit===1000);
   });
 });
+
+test('post-call follow-ups merge into existing open steps through the writer role', async () => {
+  await c.query('begin');
+  try {
+    const prior = await executeRegisteredTool(c, actor, 'record-deal-item', {
+      deal, ...item('Call synthetic duplicate vendor'), idempotency_key: randomUUID(),
+    });
+    const nonce = randomUUID();
+    const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,
+      consent_announced_at,session_token_hash,expires_at,state_at)
+      values($1,'synthetic-device',$2,'meeting',now(),now(),$1,now()+interval '1 hour',now()) returning id`, [nonce, actor.id])).rows[0].id;
+    await c.query("select set_config('carr.acting_actor_slug','joe',true), set_config('carr.verified_human_actor_slug','joe',true)");
+    for (const [index, description] of ['Call synthetic duplicate vendor', 'Call another synthetic vendor', '  CALL   another synthetic vendor  '].entries()) {
+      const candidate = (await c.query(`insert into capture_post_call_candidate(session_id,idempotency_key,batch_hash,
+        item_index,kind,deal_id,assignee_slug,action_description,due_on,evidence_quote,confidence)
+        values($1,$2,'synthetic',0,'assigned_action',$3,'joe',$4,'2026-11-02','Joe will call this vendor',0.9) returning id`,
+      [session, randomUUID(), deal, description])).rows[0].id;
+      await c.query('set local role carr_writer');
+      const result = await executeRegisteredTool(c, actor, 'resolve-post-call-candidate', {
+        candidate_id: candidate, accept: true, idempotency_key: randomUUID(),
+      });
+      await c.query('reset role');
+      if (index === 0) assert.equal(result.ref, prior.item.id);
+    }
+    const actions = (await c.query("select * from capture_post_call_action where deal_id=$1 and description='Call another synthetic vendor'", [deal])).rows;
+    assert.equal(actions.length, 1);
+    assert.equal((await c.query("select due_on::text from next_action where id=$1", [prior.item.id])).rows[0].due_on, '2026-11-02');
+    assert.equal((await c.query("select count(*)::int as n from capture_post_call_candidate where session_id=$1 and status='confirmed'", [session])).rows[0].n, 3);
+  } finally { await c.query('rollback'); }
+});
