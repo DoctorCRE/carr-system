@@ -1792,6 +1792,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "prepare-terms-comparison": {
+    "ingress_key": "mcp-tool:prepare-terms-comparison",
+    "source_locator": "mcp-server/src/fact-generation.ts",
+    "schema_digest": "a4a685b6cbd90a9e378441a59fe51b319c9c55f8465300d85247502dc84bd774",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "prepare-tour-route-version": {
     "ingress_key": "mcp-tool:prepare-tour-route-version",
     "source_locator": "mcp-server/src/tour-domain.js",
@@ -3559,6 +3569,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "validate-terms-comparison": {
+    "ingress_key": "mcp-tool:validate-terms-comparison",
+    "source_locator": "mcp-server/src/fact-generation.ts",
+    "schema_digest": "b6fadbaee48596a2ed5696e9abec887f2547c662dabd967b15af7d3e92331e3a",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "vendor-assignment-context": {
     "ingress_key": "mcp-tool:vendor-assignment-context",
     "source_locator": "mcp-server/src/tools.js",
@@ -4050,6 +4070,21 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.record_deal_extraction(p_tenant text, p_actor_id uuid, p_args jsonb)",
       "volatility": "v",
       "ingress_key": "db-function-acl:ops.record_deal_extraction(p_tenant text, p_actor_id uuid, p_args jsonb):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.list_fact_review(p_tenant text, p_entity_ref text, p_limit integer, p_cursor jsonb, p_include_resolved boolean)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.list_fact_review(p_tenant text, p_entity_ref text, p_limit integer, p_cursor jsonb, p_include_resolved boolean):carr_writer:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true

@@ -85,12 +85,13 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from typing import Any
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "fill-engine"))
 sys.path.insert(0, os.path.join(REPO, "lib"))
-from fill_document import (fill, to_pdf, FillError, colored_runs, scrub_docx,  # noqa: E402
+from fill_document import (fill_comparison_xlsx, fill, to_pdf, FillError, colored_runs, scrub_docx,  # noqa: E402
                            finish_colors, resolve_unresolved_options, document_pipes,
                            drop_rows, parse_row_address, table_row_texts)
 import r2_archive as r2  # noqa: E402
@@ -432,6 +433,18 @@ def build_client_copy(working: str, plan: dict, fmap: dict, prior_drops: list[st
     return out
 
 
+def validate_comparison(plan: dict) -> dict:
+    """Fetch canonical edits again so a local plan cannot substitute client text."""
+    result = subprocess.run(
+        [os.path.join(REPO, "run.sh"), "call", "validate-terms-comparison",
+         json.dumps({"document_id": plan["document_id"]})],
+        capture_output=True, text=True, timeout=60, check=True)
+    receipt = json.loads(result.stdout)
+    if receipt.get("ok") is not True or receipt.get("schema_version") != "terms-comparison-validation.v1":
+        raise FillError("comparison snapshot validation refused")
+    return receipt
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("plan", help="the prepare-document plan JSON ('-' for stdin)")
@@ -456,6 +469,16 @@ def main() -> int:
         return 2
 
     plan = json.load(sys.stdin if a.plan == "-" else open(a.plan))
+    comparison = plan.get("schema_version") == "terms-comparison.v1"
+    if comparison:
+        try:
+            verified = validate_comparison(plan)
+        except (FillError, subprocess.SubprocessError, ValueError) as exc:
+            print(f"STOP: comparison validation: {exc}", file=sys.stderr)
+            return 2
+        plan["edits"] = verified["edits"]
+        plan["template"].update(verified["template"])
+        plan["basename"] = verified["basename"]
     tmpl_rel = plan["template"]["source_path"]
     tmpl = os.path.join(vault, tmpl_rel)
     if not os.path.exists(tmpl):
@@ -463,8 +486,9 @@ def main() -> int:
         return 2
     ext = os.path.splitext(tmpl)[1].lower()
     os.makedirs(STAGING, exist_ok=True)
-    working = os.path.join(STAGING, plan["basename"] + ext)
-    pdf = os.path.join(STAGING, plan["basename"] + ".pdf")
+    directory = tempfile.mkdtemp(prefix="comparison-", dir=STAGING) if comparison else STAGING
+    working = os.path.join(directory, plan["basename"] + ext)
+    pdf = os.path.join(directory, plan["basename"] + ".pdf")
 
     # ---- fill. The template is opened read-only and copied; nothing writes to it.
     before_sha, _ = sha256_of(tmpl)
@@ -480,7 +504,10 @@ def main() -> int:
     options, color_finish, row_drops = None, None, None
     prior_drops: list[str] = []
     try:
-        fill(tmpl, working, edits)
+        if comparison:
+            fill_comparison_xlsx(tmpl, working, edits)
+        else:
+            fill(tmpl, working, edits)
         if ext == ".docx":
             options = resolve_unresolved_options(working, slot_labels(plan))
             color_finish = finish_colors(working)
@@ -515,6 +542,16 @@ def main() -> int:
     if sendable_role == "working" and ext == ".docx":
         scrub = scrub_docx(working)
         to_pdf(working, pdf)          # re-render so the record copy matches the scrubbed file
+
+    if comparison:
+        try:
+            verified_after = validate_comparison(plan)
+            if verified_after != verified:
+                raise FillError("comparison changed during export")
+        except (FillError, subprocess.SubprocessError, ValueError) as exc:
+            shutil.rmtree(directory)
+            print(f"STOP: comparison validation: {exc}", file=sys.stderr)
+            return 2
 
     text = doc_text(working)
     leaks = leak_guard(text, plan.get("listing_side_names", []))
