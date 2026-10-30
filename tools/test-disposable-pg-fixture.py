@@ -10,9 +10,11 @@ import unittest
 from unittest.mock import patch
 import ctypes
 import pwd
+import shutil
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.disposable_pg_fixture import DisposablePostgres
+from lib.disposable_pg_fixture import DisposablePostgres, postgres_bin_dir
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -61,6 +63,53 @@ with fixture.postgres_fixture_group():
                         stream.close()
 
 
+class KilledParent(unittest.TestCase):
+    def test_server_stops_when_python_parent_is_killed(self):
+        for during_start in (False, True):
+            with self.subTest(during_start=during_start):
+                self.kill_parent(during_start)
+
+    def kill_parent(self, during_start):
+        bins = postgres_bin_dir()
+        script = """
+import sys
+from pathlib import Path
+from lib.disposable_pg_fixture import DisposablePostgres
+bins, during_start = Path(sys.argv[1]), sys.argv[2] == 'True'
+f = DisposablePostgres('killed-parent-', bins / 'pg_ctl')
+data = f.root / 'data'
+f.run([bins / 'initdb', '-D', data, '-A', 'trust'], check=True, capture_output=True)
+if during_start:
+    print(f.root, flush=True)
+f.run([bins / 'pg_ctl', '-D', data, '-l', f.root / 'log', '-o', f"-k {f.root} -h ''", '-w', 'start'], check=True, capture_output=True)
+print(f.root, flush=True)
+sys.stdin.read()
+"""
+        child = subprocess.Popen([sys.executable, '-u', '-c', script, str(bins), str(during_start)], cwd=ROOT,
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        root = None
+        try:
+            root = Path(child.stdout.readline().strip())
+            if not during_start:
+                self.assertTrue((root / 'data' / 'postmaster.pid').exists())
+            child.kill()  # mid-start, the supervisor finishes the launch, then stops it
+            child.wait(timeout=5)
+            deadline = time.monotonic() + 15
+            while root.exists() and time.monotonic() < deadline:
+                time.sleep(0.1)
+            self.assertFalse(root.exists(), 'server or root survived killed parent')
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+            if root and (root / 'data' / 'postmaster.pid').exists():
+                subprocess.run([bins / 'pg_ctl', '-D', root / 'data', '-m', 'immediate', '-w', 'stop'], capture_output=True)
+            if root and root.exists():
+                shutil.rmtree(root)
+            for stream in (child.stdin, child.stdout, child.stderr):
+                stream.close()
+
+
 class SharedMemoryPreflight(unittest.TestCase):
     def test_start_reclaims_only_owned_unattached_segments_with_dead_creators(self):
         owner = pwd.getpwuid(os.getuid()).pw_name
@@ -86,7 +135,7 @@ m 15 0 --rw {owner} staff {owner} staff 0 56 900005 0
         with patch('lib.disposable_pg_fixture.subprocess.run', side_effect=system), \
              patch('lib.disposable_pg_fixture.os.kill', side_effect=alive), \
              patch('lib.disposable_pg_fixture.sys.platform', 'darwin'):
-            with DisposablePostgres('shm-test-', '/fake/pg_ctl') as fixture:
+            with DisposablePostgres('shm-test-', '/fake/pg_ctl', runner=system) as fixture:
                 for ident in (11, 12, 13, 14):
                     data = fixture.root / f'data-{ident}'
                     data.mkdir()
@@ -122,7 +171,7 @@ m 15 0 --rw {owner} staff {owner} staff 0 56 900005 0
         with patch('lib.disposable_pg_fixture.subprocess.run', side_effect=system), \
              patch('lib.disposable_pg_fixture.os.kill', side_effect=ProcessLookupError()), \
              patch('lib.disposable_pg_fixture.sys.platform', 'linux'):
-            with DisposablePostgres('shm-test-', '/fake/pg_ctl') as fixture:
+            with DisposablePostgres('shm-test-', '/fake/pg_ctl', runner=system) as fixture:
                 data = fixture.root / 'data'
                 data.mkdir()
                 (data / 'postmaster.pid').write_text('1\ndata\n0\n5432\n/tmp\nlocalhost\n0 21\n')
