@@ -1,4 +1,5 @@
 // Store lean Work Request slice and job facts with stable IDs and priority order.
+import cardVerbs from './job-card-verbs.v1.json' with { type: 'json' };
 import addressFormat from './progress-address.v1.json' with { type: 'json' };
 import { organizationTenantForActor } from './identity.js';
 import { readableWorkRequestSql } from './work-request-read.ts';
@@ -113,6 +114,15 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
     if (args.work_request && !new RegExp(addressFormat.work_request_pattern).test(args.work_request)) refuse('invalid_work_request');
     if (args.idempotency_key && !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(args.idempotency_key)) refuse('invalid_idempotency_key');
   };
+  const validateCopy = async (c, wr, args, current) => {
+    if (!/^[A-Za-z']+( [A-Za-z']+){1,2}$/.test(args.card_title)) refuse('invalid_card_title');
+    if (!cardVerbs.includes(args.card_title.split(' ')[0])) refuse('card_title_verb');
+    if (args.description != null && (args.description.trim().split(/[.!?](?:\s|$)/u).filter(Boolean).length !== 1
+      || !cardVerbs.includes(args.description.split(/\s/u)[0]))) refuse('invalid_job_description');
+    if ((await c.query(`select 1 from ops.work_request_job where work_request_id=$1
+      and lower(card_title)=lower($2) and not (slice_ordinal=$3 and j_number=$4)`,
+    [wr.id, args.card_title, current?.slice ?? 0, current?.job ?? 0])).rows.length) refuse('card_title_duplicate');
+  };
   const request = async (c, actor, ref) => {
     const row = (await c.query(`select w.id,w.ref,w.title,w.state from ops.work_request w
       where w.ref=$1 and w.organization_tenant_id=$2 and ${readableWorkRequestSql('w')}`, [ref, organizationTenantForActor(actor)])).rows[0];
@@ -123,7 +133,9 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
     join ops.work_request w on w.id=j.work_request_id where w.organization_tenant_id=$1
     and ${readableWorkRequestSql('w')} order by j.priority,w.ref,j.slice_ordinal,j.j_number`, [organizationTenantForActor(actor)])).rows;
   const command = (name, description, extra, required, run, schema = {}) => {
-    const properties = { ...base, ...extra }, needed = ['idempotency_key', 'work_request', ...required];
+    const byCard = Object.hasOwn(extra, 'card_id');
+    const properties = { ...(byCard ? { idempotency_key: base.idempotency_key } : base), ...extra };
+    const needed = ['idempotency_key', ...(byCard ? [] : ['work_request']), ...required];
     return { write: true, description,
       inputSchema: { type: 'object', additionalProperties: false, properties, required: needed, ...schema },
       handler: async (c, actor, args) => {
@@ -131,9 +143,11 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
         return withEnvelope(c, actor, name, args, async () => {
           await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', ['work-queue:' + organizationTenantForActor(actor)]);
-          const wr = await request(c, actor, args.work_request);
+          const card = byCard && /^WR([1-9]\d*)[.]S([1-9]\d*)[.]J([1-9]\d*)$/.exec(args.card_id);
+          if (byCard && (!card || card.slice(2).some(n => !Number.isSafeInteger(Number(n)) || Number(n) > positive.maximum))) refuse('job_not_found');
+          const wr = await request(c, actor, byCard ? `WR-${card[1].padStart(6, '0')}` : args.work_request);
           if (['confirmed_closed', 'declined', 'superseded', 'failed'].includes(wr.state)) refuse('work_request_terminal_state');
-          const result = await run(c, actor, args, wr);
+          const result = await run(c, actor, byCard ? { ...args, slice: Number(card[2]), job: Number(card[3]) } : args, wr);
           await writeEvent(c, actor, name, 'ops_work_request', wr.id, { field: 'work_queue', new: result, idempotency_key: args.idempotency_key });
           return { ok: true, ...result };
         });
@@ -186,6 +200,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         if ((starting ? jobStart : jobFacts).some(key => args[key] == null)
           || (jobFacts.some(key => Object.hasOwn(args, key)) && jobFacts.some(key => args[key] == null))) refuse('invalid_work_queue_fields');
         if ((starting || Object.hasOwn(args, 'repository')) && !repositories.includes(args.repository)) refuse('invalid_work_queue_fields');
+        if (args.card_title != null) await validateCopy(c, wr, args, starting ? { slice: args.slice || 1, job: args.job } : undefined);
         if (starting) {
           const row = (await c.query(`select runner_job_id,repository from ops.work_request_job
             where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`, [wr.id, args.slice || 1, args.job])).rows[0];
@@ -200,8 +215,6 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
             return { card_id: queueCardId(wr.ref, args.slice || 1, args.job), runner_job_id: args.runner_job_id };
           }
         }
-        if (!/^[A-Za-z']+( [A-Za-z']+){1,2}$/.test(args.card_title)) refuse('invalid_card_title');
-        if (args.description.trim().split(/[.!?](?:\s|$)/u).filter(Boolean).length !== 1) refuse('invalid_job_description');
         const ordinal = args.slice || 1;
         if (!starting) await c.query(`insert into ops.work_request_slice (work_request_id,ordinal,title) select $1,1,$2
           where not exists (select 1 from ops.work_request_slice where work_request_id=$1)`, [wr.id, wr.title]);
@@ -219,6 +232,17 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         { required: jobFacts },
         { required: [...jobStart, 'repository'] },
       ] }),
+    'retitle-job': command('retitle-job', 'Rename one job card and optionally replace its one-sentence description. Preserve all other job facts.',
+      { card_id: text(), card_title: text(80), description: text(500) }, ['card_id', 'card_title'], async (c, actor, args, wr) => {
+        const current = (await c.query(`select card_title,description from ops.work_request_job
+          where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`, [wr.id, args.slice, args.job])).rows[0];
+        if (!current) refuse('job_not_found');
+        await validateCopy(c, wr, args, args);
+        const description = args.description ?? current.description;
+        await c.query(`update ops.work_request_job set card_title=$4,description=$5
+          where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`, [wr.id, args.slice, args.job, args.card_title, description]);
+        return { card_id: args.card_id, card_title: args.card_title, description };
+      }),
     'prioritize-job': command('prioritize-job', 'Move one visible job to a one-based queue position, preserving the relative order of its siblings.',
       { slice, job: positive, position: positive }, ['job', 'position'], async (c, actor, args, wr) => {
         const rows = await ordered(c, actor), slots = rows.map(row => row.priority);

@@ -39,7 +39,7 @@ _clone = _sys.argv[_sys.argv.index('-C') + 1]
 _git.run(['git', '-C', _clone, '-c', 'user.name=Fixture', 'commit', '-q', '--allow-empty', '-m', 'job'], check=True)
 _git.run(['git', '-C', _clone, 'push', '-qf', 'origin', 'HEAD'], check=True)
 """
-CARD = 'Card: WR557.S2.J2\n'
+CARD = 'Card: WR557.S2.J2\nTitle: Require readable titles\nDescription: Require readable titles for job cards.\n'
 PR_BRIEF = CARD + 'Fix it and deliver through a ready pull request.'
 
 
@@ -116,8 +116,8 @@ print(json.dumps({{'ok': True, 'card_id': 'WR557.S2.J2', 'runner_job_id': args['
         marker = self.root / 'launched'
         for brief, registered, card in (('brief', True, '<missing>'),
                                         ('Card: V2 cleanup', True, 'V2 cleanup'),
-                                        ('Card: WR999999.S2.J2', False, 'WR999999.S2.J2'),
-                                        ('Card: WR557.S99.J2', False, 'WR557.S99.J2')):
+                                        ('Card: WR999999.S2.J2\nTitle: Build cards\nDescription: Build cards.', False, 'WR999999.S2.J2'),
+                                        ('Card: WR557.S99.J2\nTitle: Build cards\nDescription: Build cards.', False, 'WR557.S99.J2')):
             with self.subTest(card=card):
                 if not registered:
                     self.refusal.touch()

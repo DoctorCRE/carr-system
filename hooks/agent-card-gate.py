@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.hook_runtime import Verdict, decision, run
 
 MINT = """Mint the job first, then put the returned card_id on its own Card: line in the prompt:
-./run.sh call dispatch-job '{"idempotency_key":"<fresh UUID>","work_request":"<work request ref>","slice":1,"executor":"claude","model":"<model>","effort":"<effort>","card_title":"Agent review","description":"Review the assigned change."}'"""
+./run.sh call dispatch-job '{"idempotency_key":"<fresh UUID>","work_request":"<work request ref>","slice":1,"executor":"claude","model":"<model>","effort":"<effort>","card_title":"Review assigned change","description":"Review the assigned change."}'"""
 
 
 def refuse(reason):

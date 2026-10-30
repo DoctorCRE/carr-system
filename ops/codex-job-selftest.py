@@ -21,7 +21,7 @@ DELIVERED = ("Delivery: ok missing=none branch=test-job start=start head=pushed 
 
 class CodexJobTests(unittest.TestCase):
     def launch(self, *, status=0, repo="DoctorCRE/carr-system", configs=(), result=True,
-               brief="Card: WR557.S2.J2\noriginal brief",
+               brief="Card: WR557.S2.J2\nTitle: Require readable titles\nDescription: Require readable titles for job cards.\noriginal brief",
                dispatch_ok=True, settings=""):
         picker = types.ModuleType("skill_picker")
         picker.prepare = Mock(return_value=("prepared brief", []))
@@ -88,7 +88,7 @@ class CodexJobTests(unittest.TestCase):
                                       calls[-1][0][-1]])
         self.assertTrue(calls[-1][0][-1].endswith("\n\nprepared brief"))
         self.assertEqual(calls[-1][1]["stdin"], subprocess.DEVNULL)
-        prepare.assert_called_once_with("Card: WR557.S2.J2\noriginal brief", Path(clone))
+        prepare.assert_called_once_with("Card: WR557.S2.J2\nTitle: Require readable titles\nDescription: Require readable titles for job cards.\noriginal brief", Path(clone))
         self.assertEqual((code, output), (0, "job result\n" + DELIVERED))
         self.assertFalse(Path(clone).parent.exists(), "temporary clone must be cleaned up")
 
@@ -102,6 +102,19 @@ class CodexJobTests(unittest.TestCase):
         self.assertLess(self.calls.index(next(call for call in self.calls if 'dispatch-job' in call[0])),
                         self.calls.index(next(call for call in self.calls if call[0][:2] == ['codex', 'exec'])))
 
+    def test_title_and_description_headers_are_required_and_passed_through(self):
+        brief = "Card: WR557.S2.J2\nTitle: Require readable titles\nDescription: Require readable titles for job cards.\nTask body"
+        self.launch(brief=brief)
+        facts = json.loads(next(argv[-1] for argv, _ in self.calls if 'dispatch-job' in argv))
+        self.assertEqual(facts['card_title'], 'Require readable titles')
+        self.assertEqual(facts['description'], 'Require readable titles for job cards.')
+        for header in ('Title: Require readable titles\n', 'Description: Require readable titles for job cards.\n'):
+            with self.subTest(header=header):
+                code, errors, calls, _ = self.launch(brief=brief.replace(header, ''))
+                self.assertEqual(code, 1)
+                self.assertIn(header.split(':')[0] + ':', errors)
+                self.assertEqual(calls, [])
+
     def test_execution_facts_use_config_defaults_and_cli_overrides(self):
         self.launch(settings='model = "configured-model"\nmodel_reasoning_effort = "medium"\n',
                     configs=('model_reasoning_effort="high"',))
@@ -111,7 +124,7 @@ class CodexJobTests(unittest.TestCase):
     def test_invalid_or_unregistered_cards_never_launch(self):
         for brief, allowed, card in (('no card', True, '<missing>'),
                                      ('Card: V2 cleanup', True, 'V2 cleanup'),
-                                     ('Card: WR557.S2.J2', False, 'WR557.S2.J2')):
+                                     ('Card: WR557.S2.J2\nTitle: Build cards\nDescription: Build cards.', False, 'WR557.S2.J2')):
             with self.subTest(brief=brief):
                 code, errors, calls, _ = self.launch(brief=brief, dispatch_ok=allowed)
                 self.assertEqual(code, 1)

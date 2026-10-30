@@ -2977,6 +2977,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "retitle-job": {
+    "ingress_key": "mcp-tool:retitle-job",
+    "source_locator": "mcp-server/src/work-queue.js",
+    "schema_digest": "ee731084193cdc9a041baa6aa9af703217cca1c065e9e905f4dc2337f28d6b91",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "revert-deal-field": {
     "ingress_key": "mcp-tool:revert-deal-field",
     "source_locator": "mcp-server/src/tools.js",
