@@ -1299,6 +1299,26 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual(receipt['reason'], 'aborted_before_dispatch')
         self.assertEqual(self.sent, [])
 
+    def test_freshness_stamp_failure_does_not_change_completed_outbox_outcome(self):
+        with patch.object(self.worker, 'load_settings', return_value=self.settings), \
+                patch.object(type(self.settings), 'require_repo'), \
+                patch.object(self.worker.send, 'default_ports', return_value=self.ports), \
+                patch('lib.outlook_runtime.stamp', side_effect=RuntimeError('synthetic stamp failure')):
+            self.assertEqual(self.worker.main(), 0)
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual([args['status'] for verb, args in self.calls if verb == 'record-email-sent'], ['sent'])
+
+    def test_main_reports_real_failure_reason(self):
+        import io
+        output = io.StringIO()
+        with patch.object(self.worker, 'load_settings', return_value=self.settings), \
+                patch.object(type(self.settings), 'require_repo'), \
+                patch.object(self.worker, 'run', return_value=dict(sent=1, failed=1, deferred=0, receipt_failed=0)), \
+                patch('sys.stdout', output):
+            self.assertEqual(self.worker.main(), 1)
+        receipt = json.loads(output.getvalue().split('outlook-outbox-receipt ', 1)[1])
+        self.assertEqual((receipt['state'], receipt['reason']), ('failed', 'send_failed'))
+
     def test_main_reports_deferred(self):
         with patch.object(self.worker, 'load_settings', return_value=self.settings), patch.object(self.settings.__class__, 'require_repo'), patch.object(self.worker, 'run', return_value=dict(sent=0, failed=0, deferred=1, receipt_failed=0)):
             self.assertEqual(self.worker.main(), 1)
