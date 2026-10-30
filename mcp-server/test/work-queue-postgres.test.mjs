@@ -53,10 +53,10 @@ before(async () => {
     await c.query(readFileSync(new URL('../../migrations/1025_work_request_job_finished.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select 1 from schema_migrations where filename='1060_work_request_slice_outcome.sql'")).rows.length)
     await c.query(readFileSync(new URL('../../migrations/1060_work_request_slice_outcome.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select 1 from schema_migrations where filename='1061_work_request_job_version.sql'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1061_work_request_job_version.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select 1 from schema_migrations where filename='1062_validate_work_request_job_version.sql'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1062_validate_work_request_job_version.sql', import.meta.url), 'utf8'));
+  if (!(await c.query("select 1 from schema_migrations where filename='1062_work_request_job_version.sql'")).rows.length)
+    await c.query(readFileSync(new URL('../../migrations/1062_work_request_job_version.sql', import.meta.url), 'utf8'));
+  if (!(await c.query("select 1 from schema_migrations where filename='1063_validate_work_request_job_version.sql'")).rows.length)
+    await c.query(readFileSync(new URL('../../migrations/1063_validate_work_request_job_version.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => {
