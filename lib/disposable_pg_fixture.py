@@ -8,6 +8,7 @@ The primary CI database is outside this lease because its child proofs need it.
 from contextlib import contextmanager
 import atexit
 import fcntl
+import json
 import os
 import pwd
 from pathlib import Path
@@ -46,6 +47,7 @@ _depth = 0
 _fixtures: list['DisposablePostgres'] = []
 _main_launches = 0
 _pending_signal = None
+_supervising = False
 
 
 def _fixture_segment_ids(directory, prefix):
@@ -166,12 +168,30 @@ if threading.current_thread() is threading.main_thread():
 
 class DisposablePostgres:
     def __init__(self, prefix, pg_ctl, env=None, runner=None, directory='/tmp'):
-        self.root = Path(tempfile.mkdtemp(prefix=prefix, dir=directory)).resolve()
         self._prefix = prefix
-        self._identity = self.root.stat().st_ino
         self.pg_ctl = Path(pg_ctl)
         self.env = dict(env or os.environ, LC_ALL='C')
         self.runner = runner
+        # Real launches run in the same stdin-held supervisor the Node fixture
+        # uses: it owns the root before initdb and stops every cluster it
+        # started when this process closes it or dies. A custom runner or a
+        # stub pg_ctl path (selftest seams) keeps the in-process path.
+        self._supervisor = None
+        if runner is None and not _supervising and os.access(pg_ctl, os.X_OK):
+            self._supervisor = subprocess.Popen(
+                [sys.executable, '-u', __file__, '--supervise', '--prefix', prefix,
+                 '--pg-ctl', str(pg_ctl), '--directory', str(directory)],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=self.env,
+                start_new_session=True)  # terminal signals reach only this process
+            line = self._supervisor.stdout.readline().strip()
+            if not line.startswith('/'):
+                self._supervisor.stdin.close()
+                self._supervisor.wait()
+                raise RuntimeError('disposable PostgreSQL supervisor failed to start')
+            self.root = Path(line)
+        else:
+            self.root = Path(tempfile.mkdtemp(prefix=prefix, dir=directory)).resolve()
+        self._identity = self.root.stat().st_ino
         self._data = []
         self._lock = threading.RLock()
         self._closed = False
@@ -196,6 +216,31 @@ class DisposablePostgres:
             pass
         return output
 
+    def _supervised(self, args, kwargs):
+        cwd = kwargs.get('cwd')
+        request = {'command': args, 'env': kwargs['env'], 'cwd': cwd and str(cwd),
+                   'timeout': kwargs.get('timeout')}
+        self._supervisor.stdin.write(json.dumps(request) + '\n')
+        self._supervisor.stdin.flush()
+        line = self._supervisor.stdout.readline()
+        if not line:
+            raise RuntimeError('disposable PostgreSQL supervisor exited during a launch')
+        reply = json.loads(line)
+        out, err = reply['stdout'], reply['stderr']
+        if not any(kwargs.get(key) for key in ('text', 'universal_newlines', 'encoding')):
+            out, err = out.encode(), err.encode()
+        if kwargs.get('capture_output') or kwargs.get('stdout') == subprocess.PIPE:
+            result = subprocess.CompletedProcess(args, reply['returncode'], out, err)
+        else:
+            if kwargs.get('stdout') != subprocess.DEVNULL:
+                sys.stdout.write(reply['stdout'])
+            if kwargs.get('stderr') != subprocess.DEVNULL:
+                sys.stderr.write(reply['stderr'])
+            result = subprocess.CompletedProcess(args, reply['returncode'])
+        if kwargs.get('check'):
+            result.check_returncode()
+        return result
+
     def run(self, command, **kwargs):
         global _main_launches, _pending_signal
         args = [str(arg) for arg in command]
@@ -217,6 +262,12 @@ class DisposablePostgres:
                 # not drop LC_ALL: PostgreSQL 17 on recent macOS refuses to start
                 # ("postmaster became multithreaded") without a valid locale.
                 kwargs['env'] = {**(kwargs.get('env') or self.env), 'LC_ALL': 'C'}
+                if launch and self._supervisor:
+                    result = self._supervised(args, kwargs)
+                    if result.returncode:
+                        _diagnose_shared_memory_failure(f'{result.stdout} {result.stderr}',
+                                                        self.root.parent, self._prefix)
+                    return result
                 if launch:
                     _reclaim_orphan_segments(self.root.parent, self._prefix)
                 try:
@@ -248,7 +299,9 @@ class DisposablePostgres:
             if self._closed:
                 return
             try:
-                for data in reversed(self._data):
+                if self._supervisor:
+                    self._close_supervisor(remove_root)
+                for data in reversed(self._data if not self._supervisor else []):
                     kwargs = {'env': self.env, 'capture_output': True, 'timeout': 60}
                     if self.runner:
                         kwargs = {'env': self.env, 'capture': True}
@@ -258,7 +311,7 @@ class DisposablePostgres:
                         status = run([str(self.pg_ctl), '-D', str(data), 'status'], **kwargs)
                         if status.returncode != 3 and (data / 'PG_VERSION').exists():
                             raise RuntimeError('postmaster shutdown not verified')
-                if remove_root and self.root.exists():
+                if remove_root and self.root.exists() and not self._supervisor:
                     if self.root.is_symlink() or self.root.stat().st_ino != self._identity:
                         raise RuntimeError('temporary root identity changed')
                     shutil.rmtree(self.root)
@@ -271,6 +324,19 @@ class DisposablePostgres:
             self._closed = True
             if self in _fixtures:
                 _fixtures.remove(self)
+
+    def _close_supervisor(self, remove_root):
+        supervisor = self._supervisor
+        if supervisor.poll() is None and not supervisor.stdin.closed:
+            try:
+                supervisor.stdin.write(json.dumps({'close': {'remove_root': remove_root}}) + '\n')
+                supervisor.stdin.close()
+            except BrokenPipeError:
+                pass
+        code = supervisor.wait(timeout=180)
+        supervisor.stdout.close()
+        if code:
+            raise RuntimeError(f'supervisor exited {code}')
 
     def __enter__(self):
         return self
@@ -308,21 +374,34 @@ if __name__ == '__main__':
     parser.add_argument('--supervise', action='store_true')
     parser.add_argument('--prefix', default='carr-local-pg-ci.node-')
     parser.add_argument('--pg-ctl')
-    parser.add_argument('--data-name', default='data')
+    parser.add_argument('--data-name')
+    parser.add_argument('--directory', default='/tmp')
     args = parser.parse_args()
     if args.supervise:
-        import json
-        with DisposablePostgres(args.prefix, args.pg_ctl) as fixture:
-            fixture.register(fixture.root / args.data_name)
+        # Callers hold stdin open. EOF (caller closed or died) stops every
+        # cluster this process launched; a close request lets the caller retain
+        # the root as evidence.
+        _supervising = True
+        with DisposablePostgres(args.prefix, args.pg_ctl, directory=args.directory) as fixture:
+            if args.data_name:
+                fixture.register(fixture.root / args.data_name)
             print(fixture.root, flush=True)
             for line in sys.stdin:
                 request = json.loads(line)
+                if 'close' in request:
+                    fixture.close(remove_root=request['close'].get('remove_root', True))
+                    break
+                options = {key: request[key] for key in ('env', 'cwd') if request.get(key)}
                 try:
-                    result = fixture.run(request['command'], capture_output=True, text=True, timeout=120)
+                    result = fixture.run(request['command'], capture_output=True, text=True,
+                                         timeout=request.get('timeout') or 120, **options)
                     response = {'returncode': result.returncode, 'stdout': result.stdout, 'stderr': result.stderr}
                 except Exception as exc:
                     response = {'returncode': 1, 'stdout': '', 'stderr': str(exc)}
-                print(json.dumps(response), flush=True)
+                try:
+                    print(json.dumps(response), flush=True)
+                except BrokenPipeError:
+                    break  # caller died mid-launch; stop what it started
         sys.exit(0)
     # Node fixtures hold this subprocess's stdin open until their PostgreSQL
     # teardown completes. EOF also releases the lease if the caller exits.

@@ -216,7 +216,9 @@ elif tool == 'get_window_state':
     if not state.get('account_button_missing'):
         add('AXButton', 'All Accounts', 1, top, ['account'])
     for label in ('New Mail', 'Delete', 'Archive', 'Move', 'Flag', 'Mark Unread'):
-        add('AXButton', label, 1, top, ['button', label])
+        # Live Outlook can append a toggle state to the label (read 2026-10-29).
+        shown = state.get('new_mail_label', label) if label == 'New Mail' else label
+        add('AXButton', shown, 1, top, ['button', label])
     for depth in (1, 2, 3):
         add('AXTextField', 'Search', depth, top, ['search_field'])
     if state['sidebar']:
@@ -702,6 +704,40 @@ class PreflightQuitTest(FakeOutlookCase):
         self.assertIn('"width":1230', outcome.detail)
         self.assertNotIn(ACCOUNT, outcome.detail)
         self.assert_no_restart()
+
+    def test_different_new_mail_button_name_prevents_restart(self):
+        for label in ('New Mail Rule', 'New Mail Rule, pressed'):
+            with self.subTest(label=label):
+                self.given(windows=[ORDINARY], new_mail_label=label)
+                outcome = self.prepare()
+                self.assertEqual((outcome.state, outcome.reason),
+                                 ('skipped', 'no_usable_main_window'))
+                self.assert_no_restart()
+
+    def test_state_suffix_on_message_list_does_not_match_the_table(self):
+        from lib.outlook_ui import cua
+        self.given(windows=[ORDINARY])
+        def suffixed_table(tool, arguments):
+            result = cua(tool, arguments)
+            if tool == 'get_window_state':
+                for element in result.get('elements', []):
+                    if element.get('role') == 'AXTable':
+                        element['label'] = 'Message List, pressed'
+            return result
+        with patch('lib.outlook_ui.cua', side_effect=suffixed_table):
+            outcome = self.prepare()
+        self.assertEqual((outcome.state, outcome.reason),
+                         ('skipped', 'no_usable_main_window'))
+        self.assert_no_restart()
+
+    def test_mailbox_whose_new_mail_button_reads_pressed_allows_restart(self):
+        # Shape read on the Studio 2026-10-29: mailbox, twelve toolbar strips,
+        # the unassigned offscreen window, and "New Mail, pressed".
+        strips = [window(wid, '', 1920, 30, False) for wid in range(20, 32)]
+        windows = [strips[0], ORDINARY, UNTITLED_OFFSCREEN] + strips[1:]
+        self.given(windows=windows, after_launch=windows, new_mail_label='New Mail, pressed')
+        self.assertIsNone(self.prepare())
+        self.assertEqual(len(self.called('open')), 1)
 
     def test_unresolved_window_after_launch_reports_phase_and_shape(self):
         self.given(windows=[], after_launch=[ORDINARY], unresolved_window_ids=[13])

@@ -15,7 +15,8 @@ sys.path.insert(0, str(ROOT / 'ops'))
 from git_env import fixture_env
 NOW = 2000000000
 WRAPPER = f"""
-import os, runpy, sys, tempfile, time, types
+import os, runpy, sys, tempfile, time
+from pathlib import Path
 from unittest.mock import Mock
 sys.argv.pop(0)
 sys.prefix = sys.argv.pop(1)
@@ -30,7 +31,10 @@ def run(argv, **kwargs):
         return subprocess.CompletedProcess(argv, 0, stdout='https://github.com/DoctorCRE/carr-system.git')
     return real_run(argv, **kwargs)
 subprocess.run = run
-sys.modules['skill_picker'] = types.SimpleNamespace(prepare=Mock(side_effect=lambda b, c: (b, [])))
+sys.path.insert(0, str(Path(sys.argv[0]).parent))
+import skill_picker
+real_prepare = skill_picker.prepare
+skill_picker.prepare = lambda b, c: real_prepare(b, c, home=Path(os.environ['TMPDIR']) / 'home')
 runpy.run_path(sys.argv[0], run_name='__main__')
 """
 # Subtests rerun on one fixture remote, so each fresh job replaces the branch.
@@ -39,7 +43,7 @@ _clone = _sys.argv[_sys.argv.index('-C') + 1]
 _git.run(['git', '-C', _clone, '-c', 'user.name=Fixture', 'commit', '-q', '--allow-empty', '-m', 'job'], check=True)
 _git.run(['git', '-C', _clone, 'push', '-qf', 'origin', 'HEAD'], check=True)
 """
-CARD = 'Card: WR557.S2.J2\n'
+CARD = 'Type: feature-backend\nCard: WR557.S2.J2\n'
 PR_BRIEF = CARD + 'Fix it and deliver through a ready pull request.'
 
 
@@ -63,6 +67,13 @@ rows[args['idempotency_key']] = args
 path.write_text(json.dumps(rows))
 print(json.dumps({{'ok': True, 'card_id': 'WR557.S2.J2', 'runner_job_id': args['runner_job_id']}}))
 """)
+        for name in ('pstack:poteto-mode', 'pstack:principle-prove-it-works',
+                     'mattpocock-skills:grill-with-docs', 'mattpocock-skills:tdd',
+                     'mattpocock-skills:pr', 'mattpocock-skills:code-review',
+                     'file-pr', 'babysit-pr', 'modernize'):
+            path = self.root / 'home/.agents/skills' / name / 'SKILL.md'
+            path.parent.mkdir(parents=True)
+            path.write_text(f'---\nname: {name}\ndescription: Fixture skill\n---\nInstructions\n')
         self.processes = self.root / 'processes'
         self.processes.write_text('')
         ps = self.root / 'ps'
@@ -122,13 +133,47 @@ print(json.dumps({{'ok': True, 'card_id': 'WR557.S2.J2', 'runner_job_id': args['
                 if not registered:
                     self.refusal.touch()
                 job = self.launch(f'import pathlib; pathlib.Path({str(marker)!r}).touch()',
-                                  brief=brief, push=False)
+                                  brief='Type: feature-backend\n' + brief, push=False)
                 output, errors = job.communicate(timeout=10)
                 self.assertEqual(job.returncode, 1)
                 self.assertEqual(output, b'')
                 self.assertEqual(errors.decode(), f'codex-job: {card}: job registration refused\n')
                 self.assertFalse(marker.exists())
                 self.assertFalse(self.dispatches.exists())
+
+    def test_missing_unknown_type_and_missing_skill_launch_nothing(self):
+        marker = self.root / 'launched'
+        for brief, expected in (('Card: WR557.S2.J2', 'Type:'),
+                                ('Card: WR557.S2.J2\nType: unknown', 'Type:'),
+                                (CARD, 'modernize')):
+            with self.subTest(brief=brief):
+                if brief == CARD:
+                    (self.root / 'home/.agents/skills/modernize/SKILL.md').unlink()
+                job = self.launch(f'import pathlib; pathlib.Path({str(marker)!r}).touch()',
+                                  brief=brief, push=False)
+                output, errors = job.communicate(timeout=10)
+                self.assertEqual(job.returncode, 1)
+                self.assertEqual(output, b'')
+                self.assertIn(expected, errors.decode())
+                if 'Type:' == expected:
+                    for name in ('feature-backend', 'feature-ui', 'bug-fix', 'removal-refactor',
+                                 'data-migration', 'review', 'research-audit'):
+                        self.assertIn(name, errors.decode())
+                self.assertFalse(marker.exists())
+                self.assertFalse(self.dispatches.exists())
+                self.assertEqual(list(self.root.glob('codex-job-*')), [])
+
+    def test_child_receives_table_stages_and_required_skill_bodies(self):
+        receipt = self.root / 'brief.txt'
+        job = self.launch(f'import pathlib, sys\npathlib.Path({str(receipt)!r}).write_text(sys.argv[-1])')
+        _, errors, _ = self.finish(job)
+        self.assertEqual(job.returncode, 0, errors)
+        brief = receipt.read_text()
+        self.assertIn('### Workflow stages', brief)
+        self.assertIn('pin_head: true', brief)
+        self.assertIn('### modernize', brief)
+        self.assertIn('Instructions', brief)
+        self.assertNotIn('Skills:', brief)
 
     def test_relaunch_records_once_at_the_verb_door(self):
         for _ in range(2):

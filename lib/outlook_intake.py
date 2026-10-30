@@ -86,6 +86,7 @@ import uuid
 
 from lib import email_links, unresolved_email
 from lib.outlook_settings import load_settings, OutlookSettings
+from lib.outlook_runtime import stamp
 OUT = Path('out/outlook-intake')
 STATE = 'state.json'
 WORK_PREFIX = 'work-'
@@ -206,14 +207,17 @@ class Outcome:
     detail: str = ''
 
 
-SUBJECT_FOLDER_CLASSES = {
+FOLDER_CLASSES = {
     'sent': ('sent', 'sent items', 'sent mail'), 'inbox': ('inbox',), 'archive': ('archive',),
     'deleted': ('deleted items', 'deleted', 'trash'), 'junk': ('junk email', 'junk', 'spam'),
     'drafts': ('drafts',), 'user': (), 'unknown': (),
 }
 MAIL_STORE_COUNTERS = ('mail_outside_selected_account', 'mail_account_ambiguous', 'mail_account_unresolved',
-                       'admitted', 'subject_decoded', 'subject_missing',
-                       *('subject_missing_' + kind for kind in SUBJECT_FOLDER_CLASSES))
+                       'stored', 'admitted', 'stored_not_admitted_account_ambiguous',
+                       'stored_not_admitted_account_unresolved',
+                       *(prefix + kind for prefix in ('stored_', 'admitted_') for kind in FOLDER_CLASSES),
+                       'subject_decoded', 'subject_missing',
+                       *('subject_missing_' + kind for kind in FOLDER_CLASSES))
 
 # Standing totals recomputed from state or the store every run; every other count is this run's.
 BACKLOG_COUNTS = frozenset((
@@ -230,7 +234,13 @@ LEAD_OUTCOMES = {'proposed': 'lead_proposed', 'known_party': 'lead_known_party',
 
 
 def receipt_counts(counts: dict) -> dict:
-    """Split the flat counts into this run's deltas and the standing backlog totals."""
+    """Split run deltas from standing totals, including the current mail snapshot.
+
+    stored/admitted count decoder message rows, never folder links. The per-class
+    totals count a message once in each observed class, so cached move links can
+    overlap classes. stored_not_admitted_* explains gaps within the selected
+    account; mail_account_* also includes rows without selected-account evidence.
+    """
     split: dict[str, dict] = {'run': {}, 'backlog': {}}
     for name, value in counts.items():
         standing = name in BACKLOG_COUNTS or name.startswith(BACKLOG_PREFIXES)
@@ -238,10 +248,11 @@ def receipt_counts(counts: dict) -> dict:
     return split
 
 
-def receipt_line(outcome: Outcome) -> str:
+def receipt_line(outcome: Outcome, repo: Path | None = None) -> str:
     """The machine receipt bin/run-scheduled.sh validates and records."""
     reason = 'full_disk_access_required' if outcome.reason.startswith('grant Full Disk Access') else outcome.reason
-    receipt = {'state': outcome.state, 'reason': reason, 'counts': receipt_counts(outcome.counts)}
+    receipt = {'state': outcome.state, 'reason': reason, 'counts': receipt_counts(outcome.counts),
+               **stamp(repo or Path(__file__).resolve().parents[1])}
     if outcome.detail:
         receipt['detail'] = outcome.detail
     return 'outlook-intake-receipt ' + json.dumps(receipt)
@@ -429,7 +440,7 @@ def _message_object_fields(con: sqlite3.Connection) -> dict[int, dict]:
 
 def _subject_counts(mails: list[dict]) -> dict:
     counts = dict.fromkeys(('subject_decoded', 'subject_missing',
-                            *('subject_missing_' + kind for kind in SUBJECT_FOLDER_CLASSES)), 0)
+                            *('subject_missing_' + kind for kind in FOLDER_CLASSES)), 0)
     counts['admitted'] = len(mails)
     for mail in mails:
         if (mail['subject'] or '').strip():
@@ -437,7 +448,7 @@ def _subject_counts(mails: list[dict]) -> dict:
             continue
         counts['subject_missing'] += 1
         folders = {path.rsplit('/', 1)[-1].strip().lower() for path in mail['folders']}
-        kind = next((kind for kind, names in SUBJECT_FOLDER_CLASSES.items() if folders.intersection(names)),
+        kind = next((kind for kind, names in FOLDER_CLASSES.items() if folders.intersection(names)),
                     'user' if folders else 'unknown')
         counts['subject_missing_' + kind] += 1
     return counts
@@ -467,11 +478,16 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
             m.update(fields)
         meta['health_store_mails'] = list(mails)
         ownership: dict[int, set[int | None]] = {}
+        folder_classes: dict[int, set[str]] = {}
         if account_id is not None:
-            for message, owner in con.execute(
-                    'SELECT mf.message_id, CASE WHEN f.name IS NOT NULL THEN f.account_id END FROM message_folders mf '
+            for message, owner, name in con.execute(
+                    'SELECT mf.message_id, f.account_id, f.name FROM message_folders mf '
                     'LEFT JOIN folders f ON f.id = mf.folder_id'):
-                ownership.setdefault(message, set()).add(owner)
+                ownership.setdefault(message, set()).add(owner if name is not None else None)
+                if owner == account_id:
+                    kind = next((kind for kind, names in FOLDER_CLASSES.items()
+                                 if (name or '').strip().lower() in names), 'user' if name else 'unknown')
+                    folder_classes.setdefault(message, set()).add(kind)
         if account_address is not None:
             if 'folder_links_unresolved' not in columns:
                 raise DecodeError('folder_ownership_evidence_required')
@@ -486,14 +502,22 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
                        if m['id'] in sent_messages and m['sender'] and not m['folder_links_unresolved']}
             if account_address.strip().lower() not in senders:
                 raise DecodeError('folder_account_mailbox_unverified')
-        meta.update(mail_outside_selected_account=0, mail_account_ambiguous=0,
-                    mail_account_unresolved=0)
+        meta.update(dict.fromkeys(MAIL_STORE_COUNTERS, 0))
         admitted = []
         for m in mails:
             owners = ownership.get(m['id'], {None})
             reason = ('mail_account_unresolved' if None in owners or m['folder_links_unresolved'] else
                       'mail_account_ambiguous' if len(owners) > 1 else
                       'mail_outside_selected_account' if owners != {account_id} else None)
+            kinds = folder_classes.get(m['id'], set())
+            if kinds:
+                meta['stored'] += 1
+                for kind in kinds:
+                    meta['stored_' + kind] += 1
+                    if reason is None:
+                        meta['admitted_' + kind] += 1
+                if reason and reason != 'mail_outside_selected_account':
+                    meta['stored_not_admitted_' + reason.removeprefix('mail_')] += 1
             if account_id is not None and reason:
                 meta[reason] += 1
             else:
@@ -1814,7 +1838,7 @@ def main() -> int:
                       mail, today, deals, parties, settings.model))
     outcome = run(repo, home, ports)
     print(status_line(outcome))
-    print(receipt_line(outcome))
+    print(receipt_line(outcome, settings.repo))
     if outcome.reason not in ('outside_window', 'previous_run_active'):
         try:
             from lib import email_router

@@ -49,6 +49,8 @@ before(async () => {
     await c.query(readFileSync(new URL('../../migrations/1024_work_request_job_start.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select 1 from schema_migrations where filename='1025_work_request_job_finished.sql'")).rows.length)
     await c.query(readFileSync(new URL('../../migrations/1025_work_request_job_finished.sql', import.meta.url), 'utf8'));
+  if (!(await c.query("select 1 from information_schema.columns where table_schema='ops' and table_name='work_request_job' and column_name='job_type'")).rows.length)
+    await c.query(readFileSync(new URL('../../migrations/1061_work_request_job_type.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select 1 from schema_migrations where filename='1060_work_request_slice_outcome.sql'")).rows.length)
     await c.query(readFileSync(new URL('../../migrations/1060_work_request_slice_outcome.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
@@ -78,7 +80,7 @@ async function request(ref = 'WR-000014') {
   return ref;
 }
 const job = (work_request, extra = {}) => ({ idempotency_key: randomUUID(), work_request,
-  executor: 'codex', model: 'synthetic-model', effort: 'high', card_title: 'Queue work',
+  job_type: 'bug-fix', executor: 'codex', model: 'synthetic-model', effort: 'high', card_title: 'Queue work',
   description: 'Implement the synthetic queue behavior.', ...extra });
 
 test('dispatch mints a stable ID under implicit S1 and retries without another job', async () => {
@@ -270,9 +272,10 @@ test('queue grants preserve the current catalog seal and reject wider grants', a
 
 test('the read saves a finish once on the side connection, and later reads keep it after the PR leaves the window', async () => {
   const work_request = await request('WR-000061');
-  const done = (await command('dispatch-job', job(work_request))).card_id;
+  const done = (await command('dispatch-job', job(work_request, { executor: 'claude' }))).card_id;
   await c.query("update ops.work_request_job set created_at=now()-interval '20 days' where work_request_id=(select id from ops.work_request where ref=$1)", [work_request]);
   const pending = (await command('dispatch-job', job(work_request))).card_id;
+  await c.query("update ops.work_request_job set runner_job_id='pending-runner', started_at=now() where work_request_id=(select id from ops.work_request where ref=$1) and j_number=2", [work_request]);
   const bounds = [], writes = [];
   const merged = { repo: 'DoctorCRE/carr-system', number: 77, url: 'u77', title: 'PR 77', draft: false, state: 'merged', updated_at: '2026-10-27T12:00:00Z', cards: [done] };
   const reader = sources => ({ query: (text, params) => c.query(text, params),
@@ -288,10 +291,10 @@ test('the read saves a finish once on the side connection, and later reads keep 
   assert.deepEqual([saved.stage, saved.stale, saved.prs.map(pr => pr.card_id)], ['merged', false, [`${done}.carr#77`]]);
   const open = later.jobs.find(row => row.card_id === pending);
   assert.equal(open.stage, 'queued');
-  assert.equal(bounds[0], first.jobs.find(row => row.card_id === done).created_at, 'before the finish is saved, the old job bounds the window');
-  const unfinished = later.jobs.filter(row => row.card_id !== done).map(row => row.created_at).sort();
+  assert.equal(bounds[0], new Date(first.jobs.find(row => row.card_id === done).created_at).toISOString(), 'before the finish is saved, the old job bounds the window');
+  const unfinished = later.jobs.filter(row => row.card_id !== done && !row.finished && row.started_at).map(row => new Date(row.started_at).toISOString()).sort();
   assert.equal(bounds.at(-1), unfinished[0], 'once saved, the window starts at the oldest unfinished job');
-  assert.ok(bounds.at(-1) > bounds[0] && bounds.at(-1) <= open.created_at);
+  assert.ok(bounds.at(-1) > bounds[0] && bounds.at(-1) <= new Date(open.started_at).toISOString());
 });
 
 test('launcher registers an exact card and start atomically, with registered slices only', async () => {
@@ -319,6 +322,46 @@ test('launcher starts a queued card with actual execution settings and preserves
   assert.equal(row.model, 'selected-model');
   assert.equal(row.effort, 'medium');
   assert.equal(row.card_title, 'Queue work');
+});
+
+
+test('enqueue refuses missing and unknown workflow types without minting a job', async () => {
+  const work_request = await request('WR-000027');
+  for (const job_type of [undefined, 'unknown-workflow']) {
+    const args = job(work_request, { job_type });
+    if (job_type === undefined) delete args.job_type;
+    await assert.rejects(command('dispatch-job', args), { message: job_type === undefined ? 'invalid_job_type' : 'value_not_in_declared_vocabulary' });
+  }
+  assert.equal((await command('work-queue')).jobs.filter(row => row.work_request === work_request).length, 0);
+  await command('dispatch-job', job(work_request));
+  assert.equal((await command('work-queue')).jobs.find(row => row.work_request === work_request).job_type, 'bug-fix');
+});
+
+test('a runner cannot change the queued workflow type', async () => {
+  const work_request = await request('WR-000028');
+  const repository = 'DoctorCRE/carr-system';
+  await command('dispatch-job', job(work_request, { repository }));
+  const start = { work_request, slice: 1, job: 1, runner_job_id: 'typed-runner', repository, idempotency_key: randomUUID() };
+  await assert.rejects(command('dispatch-job', { ...start, job_type: 'review' }), { message: 'job_type_mismatch' });
+  await command('dispatch-job', { ...start, job_type: 'bug-fix' });
+  assert.equal((await command('work-queue')).jobs.find(row => row.work_request === work_request).job_type, 'bug-fix');
+});
+
+test('a typed runner starts an untyped job and stores its workflow type exactly once', async () => {
+  const work_request = await request('WR-000029');
+  const repository = 'DoctorCRE/carr-system';
+  await command('dispatch-job', job(work_request, { repository }));
+  await c.query('update ops.work_request_job set job_type=null where work_request_id=(select id from ops.work_request where ref=$1)', [work_request]);
+  const start = { work_request, job: 1, repository, job_type: 'bug-fix', runner_job_id: 'legacy-runner', idempotency_key: randomUUID() };
+  assert.equal((await command('dispatch-job', start)).card_id, 'WR29.S1.J1');
+  const queued = (await command('work-queue')).jobs.filter(row => row.work_request === work_request);
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].job_type, 'bug-fix');
+  assert.equal(queued[0].runner_job_id, 'legacy-runner');
+  assert.ok(queued[0].started_at);
+  await assert.rejects(command('dispatch-job', { ...start, runner_job_id: 'second-runner', idempotency_key: randomUUID() }),
+    { message: 'job_already_started' });
+
 });
 
 test('slice retirement requires a reason and replays one outcome event', async () => {
