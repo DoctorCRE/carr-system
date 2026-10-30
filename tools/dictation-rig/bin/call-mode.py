@@ -390,7 +390,19 @@ setInterval(()=>{if(snapshot.state==='recording')$('#timer').textContent=elapsed
 
 
 class CallModeHandler(BaseHTTPRequestHandler):
+    server: ThreadingHTTPServer
     server_version = "CARRCallMode/1.0"
+
+    def parse_request(self) -> bool:
+        if not super().parse_request():
+            return False
+        port = self.server.server_port
+        hosts = self.headers.get_all("Host", [])
+        if len(hosts) != 1 or hosts[0] not in {f"127.0.0.1:{port}", f"localhost:{port}"}:
+            self.send_json({"error": "host_not_allowed"}, 403)
+            self.close_connection = True
+            return False
+        return True
 
     def log_message(self, fmt: str, *args: Any) -> None:
         log("HTTP " + (fmt % args))

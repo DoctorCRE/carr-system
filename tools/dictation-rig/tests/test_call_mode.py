@@ -7,6 +7,7 @@ macOS accessibility are intentionally never invoked here.
 from __future__ import annotations
 
 import importlib.util
+import http.client
 import io
 import json
 import os
@@ -15,6 +16,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import urllib.error
@@ -298,6 +300,78 @@ class SpeakerLabelTests(unittest.TestCase):
             stat.S_IMODE((self.session / "transcript.json").stat().st_mode), 0o600
         )
         self.assertFalse((self.session / "transcript.md").exists())
+
+
+class CallModeHostTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.session = Path(self.tmp.name) / "synthetic"
+        self.session.mkdir()
+        post_call.write_private(self.session / post_call.REPORT_FILE, {
+            "review_questions": [{"id": "q1", "question": "Which deal?", "resolved": False}],
+        })
+        recordings = patch.object(call_mode, "RECORDINGS", self.session.parent)
+        recordings.start()
+        self.addCleanup(recordings.stop)
+        self.server = call_mode.ThreadingHTTPServer(("127.0.0.1", 0), call_mode.CallModeHandler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.thread.join, 5)
+        self.addCleanup(self.server.shutdown)
+
+    def request(self, method, path, host, body=None):
+        client = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
+        try:
+            client.putrequest(method, path, skip_host=True)
+            for value in host:
+                client.putheader("Host", value)
+            if method != "GET":
+                client.putheader("Origin", "https://app.doctorcre.com")
+            client.putheader("Sec-Fetch-Site", "same-origin")
+            client.putheader(call_mode.POST_HEADER, call_mode.POST_HEADER_VALUE)
+            payload = json.dumps(body).encode() if body is not None else b""
+            client.putheader("Content-Length", str(len(payload)))
+            client.endheaders(payload)
+            response = client.getresponse()
+            return response.status, response.read()
+        finally:
+            client.close()
+
+    def test_every_route_rejects_nonlocal_host_before_dispatch(self) -> None:
+        port = self.server.server_port
+        for method, path in (
+            ("GET", "/api/post-call?session=synthetic"), ("GET", "/api/state"),
+            ("GET", "/"), ("POST", "/api/post-call/questions/q1/resolve"),
+            ("OPTIONS", "/api/state"), ("GET", "/unknown"),
+        ):
+            for hosts in (
+                [f"foreign.example:{port}"], ["localhost"], [f"localhost:{port + 1}"],
+                [], [f"localhost:{port}", f"foreign.example:{port}"],
+            ):
+                with self.subTest(method=method, path=path, hosts=hosts):
+                    status, body = self.request(method, path, hosts)
+                    self.assertEqual(status, 403)
+                    self.assertEqual(json.loads(body), {"error": "host_not_allowed"})
+
+    def test_local_hosts_can_load_page_read_report_and_resolve(self) -> None:
+        for name in ("127.0.0.1", "localhost"):
+            with self.subTest(host=name):
+                hosts = [f"{name}:{self.server.server_port}"]
+                for path in ("/", "/index.html", "/api/state", "/api/post-call?session=synthetic"):
+                    status, body = self.request("GET", path, hosts)
+                    self.assertEqual(status, 200)
+                    if path.startswith("/api/post-call"):
+                        self.assertEqual(json.loads(body)["report"]["review_questions"][0]["id"], "q1")
+                post_call.write_private(self.session / post_call.REPORT_FILE, {
+                    "review_questions": [{"id": "q1", "question": "Which deal?", "resolved": False}],
+                })
+                with patch.object(call_mode, "sync_post_call", side_effect=call_mode.post_call.report_for_deal_room):
+                    status, body = self.request("POST", "/api/post-call/questions/q1/resolve", hosts,
+                                                {"session": "synthetic", "resolution": "Deal A"})
+                self.assertEqual(status, 200)
+                self.assertEqual(json.loads(body)["report"]["review_questions"][0]["resolution"], "Deal A")
 
 
 class CallModeHttpTests(unittest.TestCase):
