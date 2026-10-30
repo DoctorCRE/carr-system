@@ -68,13 +68,22 @@ def degraded_receipt(lines):
     alone would clear the finding while the degradation continues.
     """
     latest = {}
+    reconcile_failures = 0
     for line in lines:
         match = RECEIPT.match(line)
         if match:
             try:
-                latest[match.group(1)] = json.loads(match.group(2))
+                receipt = json.loads(match.group(2))
+                latest[match.group(1)] = receipt
+                if match.group(1) == "outlook-intake-receipt":
+                    if isinstance(receipt, dict) and receipt.get("state") == "failed" and receipt.get("reason") == "reconcile_failed":
+                        reconcile_failures += 1
+                    else:
+                        reconcile_failures = 0
             except ValueError:
                 continue
+    if reconcile_failures >= 3:
+        return "reconciliation failed three consecutive times; mail is not being filed"
     for receipt in latest.values():
         if isinstance(receipt, dict) and receipt.get("state") == "degraded":
             counts = receipt.get("counts") if isinstance(receipt.get("counts"), dict) else {}
