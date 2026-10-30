@@ -2152,6 +2152,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-market-terms": {
+    "ingress_key": "mcp-tool:read-market-terms",
+    "source_locator": "mcp-server/src/market-terms.ts",
+    "schema_digest": "6a271f2f2d87a5457274108e3fdb7ea11b5820985b6286d6a1198972e4b9abcd",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-meeting": {
     "ingress_key": "mcp-tool:read-meeting",
     "source_locator": "mcp-server/src/meeting-mode.js",
@@ -4000,6 +4010,21 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.resolve_fact_review(p_tenant text, p_actor_id uuid, p_args jsonb)",
       "volatility": "v",
       "ingress_key": "db-function-acl:ops.resolve_fact_review(p_tenant text, p_actor_id uuid, p_args jsonb):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.market_terms_snapshot(p_tenant text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.market_terms_snapshot(p_tenant text):carr_reader:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true

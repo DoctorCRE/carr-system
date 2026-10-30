@@ -52,8 +52,9 @@ const ACTION_CHALLENGE_TTL = 5 * 60;
 const SYSTEM_WORK_MAX_BODY = 16 * 1024;
 const SYSTEM_WORK_PREFIX = "/api/system-work";
 const COMMAND_CENTER_API_PREFIX = "/api/v1/";
-export const FACT_REVIEW_ROUTES = new Map([
+export const APP_FACT_ROUTES = new Map([
   ["/api/v1/fact-review/list", "list-fact-review"],
+  ["/api/v1/market-terms/read", "read-market-terms"],
   ["/api/v1/fact-review/record", "record-human-fact"],
   ["/api/v1/fact-review/resolve", "resolve-fact-review"],
 ]);
@@ -905,15 +906,15 @@ async function jevDealReadingResponse(request, env, session, dependencies) {
   }
 }
 
-async function factReviewResponse(request, env, session, dependencies) {
+async function appFactResponse(request, env, session, dependencies) {
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   const guarded = await guardSystemWorkPost(request, env, session, { readBody: true, maxBytes: 16384 });
   if (guarded.error) return guarded.error;
   const refusal = await verbRequestBudgetRefusal(env, session.actor, session.key);
   if (refusal) return refusal;
   try {
-    const invoke = dependencies.factReviewCaller || callTool;
-    return json(await invoke(env, session.actor, FACT_REVIEW_ROUTES.get(new URL(request.url).pathname), guarded.value));
+    const invoke = dependencies.appFactCaller || callTool;
+    return json(await invoke(env, session.actor, APP_FACT_ROUTES.get(new URL(request.url).pathname), guarded.value));
   } catch (error) {
     const code = error?.payload?.error;
     return json({ error: typeof code === "string" ? code : "DEPENDENCY_UNAVAILABLE",
@@ -1088,12 +1089,12 @@ async function handleRequest(request, env, ctx, dependencies) {
       // The business read is the ONLY addition to that surface, and it is
       // admitted by an exact path parser rather than a prefix.
       if (url.pathname.startsWith("/api/v1/") && url.pathname !== COMMAND_CENTER_PATH &&
-          url.pathname !== JEV_DEAL_READING_PATH && !FACT_REVIEW_ROUTES.has(url.pathname) &&
+          url.pathname !== JEV_DEAL_READING_PATH && !APP_FACT_ROUTES.has(url.pathname) &&
           url.pathname !== WORK_INVENTORY_PATH && url.pathname !== ATLAS_GRAPH_PATH &&
           !isBusinessApiPath(url.pathname)) return json({ error: "not_found" }, 404);
       // Home, Clients and Vendors are one workspace surface and share its flag.
       if ((url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
-           url.pathname === ATLAS_GRAPH_PATH || FACT_REVIEW_ROUTES.has(url.pathname) ||
+           url.pathname === ATLAS_GRAPH_PATH || APP_FACT_ROUTES.has(url.pathname) ||
            isBusinessApiPath(url.pathname) ||
            BUSINESS_VIEW_PATHS.has(url.pathname) || url.pathname === BUSINESS_ASSET_PATH ||
            APP_DOCUMENT_PATHS.has(url.pathname)) &&
@@ -1117,7 +1118,7 @@ async function handleRequest(request, env, ctx, dependencies) {
       if (!session) {
         if (url.pathname === "/auth/session") return json({ error: "unauthorized", state: "sign_in_required" }, 401);
         if (url.pathname === JEV_DEAL_READING_PATH || url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
-            url.pathname === ATLAS_GRAPH_PATH || FACT_REVIEW_ROUTES.has(url.pathname) ||
+            url.pathname === ATLAS_GRAPH_PATH || APP_FACT_ROUTES.has(url.pathname) ||
             isBusinessApiPath(url.pathname)) {
           return json({ error: "AUTHENTICATION_REQUIRED" }, 401);
         }
@@ -1166,8 +1167,8 @@ async function handleRequest(request, env, ctx, dependencies) {
         response = await dependencies.mcpHandler(request, env, ctx, session.actor, session.key);
       }
       else if (url.pathname === "/pipeline/changes") response = await dependencies.pipelineHandler(request, env, ctx, session.actor);
-      else if (FACT_REVIEW_ROUTES.has(url.pathname)) {
-        response = await factReviewResponse(request, env, session, dependencies);
+      else if (APP_FACT_ROUTES.has(url.pathname)) {
+        response = await appFactResponse(request, env, session, dependencies);
       } else if (url.pathname === JEV_DEAL_READING_PATH) {
         response = await jevDealReadingResponse(request, env, session, dependencies);
       } else if (url.pathname === COMMAND_CENTER_PATH) {
