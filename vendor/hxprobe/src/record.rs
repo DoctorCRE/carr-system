@@ -26,6 +26,8 @@ pub struct Record {
     pub offset: usize,
     pub sender: Option<String>,
     pub sender_name: Option<String>,
+    /// The sender address sat after ItemClass, where recipients also sit.
+    pub sender_after_anchor: bool,
     pub recipients: Vec<String>,
     /// Folder keys observed across cached revisions; this is not a live view.
     pub folder_ids: std::collections::BTreeSet<u64>,
@@ -537,15 +539,26 @@ pub fn parse(offset: usize, blob: &[u8], anchor: usize) -> Option<Record> {
     let tail_start = anchor.saturating_add(18);
     let tail = fields(blob, tail_start, 0, end.saturating_sub(tail_start));
 
-    // Only the pre-anchor sender slot is safe to infer from text. Addresses
-    // after ItemClass may be recipients; keyed rows resolve senders by descriptor.
+    // Sender pair, as a fallback only. `schema.rs` resolves these by field
+    // order and wins wherever it produces a value, but its type checks are
+    // stricter and reject roughly 1,200 display names that this shape-based
+    // scan recovers. Two record layouts occur: the sender sits just before the
+    // anchor, or the whole field group sits after it with the preceding bytes
+    // belonging to the previous record. Prefer an address just before the
+    // anchor, else take the first inside this record's own span; that one may
+    // be a recipient, so it is marked for the caller to confirm.
     let before = fields(blob, anchor, 320, 0);
-    let picked: Option<(String, Vec<Field>)> = before
+    let picked: Option<(String, Vec<Field>, bool)> = before
         .iter()
         .rposition(|f| is_email(f.text.trim()))
-        .map(|i| (before[i].text.trim().to_lowercase(), before[i + 1..].to_vec()));
+        .map(|i| (before[i].text.trim().to_lowercase(), before[i + 1..].to_vec(), false))
+        .or_else(|| {
+            tail.iter()
+                .position(|f| is_email(f.text.trim()))
+                .map(|i| (tail[i].text.trim().to_lowercase(), tail[i + 1..].to_vec(), true))
+        });
     // A run of glued addresses is a list, so this fallback has no sender either.
-    if let Some((addr, rest)) = picked.filter(|(a, _)| undouble(a).matches('@').count() == 1) {
+    if let Some((addr, rest, after)) = picked.filter(|(a, _, _)| undouble(a).matches('@').count() == 1) {
         // The display name is the first plausible run after the address, not
         // the longest: the longest pulls in the subject or the body preview,
         // which sit in the same group. Values are often stored doubled
@@ -555,6 +568,7 @@ pub fn parse(offset: usize, blob: &[u8], anchor: usize) -> Option<Record> {
             .map(|f| undouble(f.text.trim()))
             .find(|t| is_person_name(t));
         rec.sender = Some(undouble(&addr));
+        rec.sender_after_anchor = after;
     }
 
     let region = &blob[anchor..end];

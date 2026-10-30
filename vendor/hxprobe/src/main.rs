@@ -78,27 +78,34 @@ fn map(path: &str) -> Mmap {
 
 /// One message record, located and bounded inside a decompressed block.
 struct Located<'a> {
-    /// Bytes bounded by neighbouring anchors and checked object envelopes.
+    /// Bytes of the record: from the previous anchor to the next, and inside
+    /// its list-view row when it has one.
     span: &'a [u8],
+    /// Bytes field scans may read: the list-view row, else the whole block.
+    scope: &'a [u8],
+    /// Offset of `scope` within the block payload.
+    scope_start: usize,
     /// Offset of the anchor within the block payload.
     anchor: usize,
     /// Distance from the anchor back to the start of the span.
     back: usize,
     /// Offset of the anchor's record end within the block payload.
     end: usize,
+    /// A list-view row restates a message its own object also stores.
+    view_row: bool,
 }
 
 /// Split a decompressed block into its records.
 ///
-/// Anchors bound unframed records; checked envelopes additionally keep the
-/// next object's pre-anchor text out of this record.
+/// Records sit back to back with no length field, so each one is bounded by the
+/// neighbouring `IPM.Note` anchors. Without that bound fields bleed between
+/// messages and pair one message's sender with another's subject. A list-view
+/// row (class 004f) keeps its own fields inside its envelope, and the text
+/// after that envelope is the next row's, so its record stops there. Other
+/// objects are not bounded this way: message objects store their preview and
+/// subject after the envelope's declared end.
 fn records<'a>(data: &'a [u8], needle: &[u8]) -> Vec<Located<'a>> {
-    let envelopes: Vec<_> = [folder::FOLDER, folder::VIEW, folder::MESSAGE, folder::METADATA,
-                            message::OBJECT, message::RECIPIENT, attachment::ATTACHMENT, category::CATEGORY]
-        .into_iter()
-        .flat_map(|kind| folder::envelopes(data, kind))
-        .map(|(start, object)| (start - 10, start, start + object.len()))
-        .collect();
+    let rows = folder::envelopes(data, folder::VIEW);
     memchr::memmem::find_iter(data, needle)
         .map(|anchor| {
             let mut end = memchr::memmem::find(&data[anchor + 2..], needle)
@@ -106,17 +113,22 @@ fn records<'a>(data: &'a [u8], needle: &[u8]) -> Vec<Located<'a>> {
             let back = memchr::memmem::rfind(&data[..anchor], needle)
                 .map_or(anchor.min(2048), |p| anchor - p);
             let mut start = anchor - back;
-            for &(envelope, object, object_end) in &envelopes {
-                if object <= anchor && anchor < object_end {
-                    start = start.max(object);
-                    end = end.min(object_end);
-                } else if object_end <= anchor {
-                    start = start.max(object_end);
-                } else if envelope > anchor {
-                    end = end.min(envelope);
-                }
+            let (mut scope_start, mut scope_end) = (0, data.len());
+            let row = rows.iter().find(|(row, object)| (*row..row + object.len()).contains(&anchor));
+            if let Some((row, object)) = row {
+                (scope_start, scope_end) = (*row, row + object.len());
+                start = start.max(scope_start);
+                end = end.min(scope_end);
             }
-            Located { span: &data[start..end], anchor, back: anchor - start, end }
+            Located {
+                span: &data[start..end],
+                scope: &data[scope_start..scope_end],
+                scope_start,
+                anchor,
+                back: anchor - start,
+                end,
+                view_row: row.is_some(),
+            }
         })
         .collect()
 }
@@ -430,6 +442,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
 
     let mut blocks_ok = 0usize;
     let mut best: std::collections::HashMap<String, record::Record> = Default::default();
+    let mut view_rows: Vec<(String, record::Record)> = Vec::new();
     // `Topic` is a conversation-level field, so a record can legitimately hold
     // no subject of its own while its thread has one. These map each thread to
     // its known subject, and each message identity to its threads.
@@ -444,7 +457,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         let object_keys = message::keys(&b.data);
 
         for loc in records(&b.data, &needle) {
-            let Some(mut r) = record::parse(o, loc.span, loc.back) else { continue };
+            let Some(mut r) = record::parse(o, loc.scope, loc.anchor - loc.scope_start) else { continue };
             r.folder_ids = folder_links.get(&loc.anchor).cloned().unwrap_or_default();
             r.folder_links_unresolved = r.folder_ids.is_empty();
             r.local_keys = object_keys.get(&loc.anchor).or_else(|| key_links.get(&loc.anchor))
@@ -461,8 +474,9 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             // `record::parse` found otherwise -- the two paths locate fields
             // differently, and the shape-based path still covers records the
             // map's stricter type checks reject.
-            if let Some(v) = m.get(schema::Key::SenderAddress) {
-                r.sender = Some(v.to_string());
+            if let Some(slot) = m.slots.iter().find(|s| s.key == schema::Key::SenderAddress) {
+                r.sender = Some(slot.value.clone());
+                r.sender_after_anchor = slot.rel > 0;
             }
             if let Some(v) = m.get(schema::Key::SenderName) {
                 r.sender_name = Some(v.to_string());
@@ -475,30 +489,38 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             // shape-based fallback supplies attachment paths instead of
             // subjects, so an empty map result must win.
             r.subject = m.get(schema::Key::NormalizedSubject).map(str::to_string);
-            r.recipients = m
-                .all(schema::Key::Recipient)
-                .iter()
-                .filter(|t| Some(**t) != r.sender.as_deref())
-                .map(|t| t.to_string())
-                .collect();
-            if r.local_keys.len() == 1 {
-                if let Some(object) = r.local_keys.first().and_then(|key| message_objects.get(key)) {
-                    if let Some(subject) = object.subject.as_ref().filter(|s| !s.trim().is_empty()) {
-                        r.subject = Some(subject.clone());
+            let object = r.local_keys.first().filter(|_| r.local_keys.len() == 1)
+                .and_then(|key| message_objects.get(key));
+            // An address after ItemClass may be the first recipient. It stays
+            // the sender only when the message object's sender confirms it.
+            let unconfirmed = r.sender_after_anchor && !r.sender.as_deref()
+                .zip(object.and_then(|o| o.sender.as_deref()))
+                .is_some_and(|(text, stored)| text.eq_ignore_ascii_case(stored.trim()));
+            let mut recipients = Vec::new();
+            if unconfirmed {
+                recipients.extend(r.sender.take());
+                r.sender_name = None;
+            }
+            recipients.extend(m.all(schema::Key::Recipient).iter()
+                .filter(|t| Some(**t) != r.sender.as_deref() && !recipients.iter().any(|x| x == *t))
+                .map(|t| t.to_string()).collect::<Vec<_>>());
+            r.recipients = recipients;
+            if let Some(object) = object {
+                if let Some(subject) = object.subject.as_ref().filter(|s| !s.trim().is_empty()) {
+                    r.subject = Some(subject.clone());
+                }
+                if let Some(sender) = object.sender.as_ref().filter(|s| !s.trim().is_empty()) {
+                    if r.sender.as_deref() != Some(sender) {
+                        r.sender_name = None;
                     }
-                    if let Some(sender) = object.sender.as_ref().filter(|s| !s.trim().is_empty()) {
-                        if r.sender.as_deref() != Some(sender) {
-                            r.sender_name = None;
-                        }
-                        r.sender = Some(sender.clone());
-                    }
-                    if let Some(recipients) = &object.recipients {
-                        let listed: Vec<String> = recipients.iter()
-                            .filter(|r| matches!(r.kind, message::TO | message::CC))
-                            .map(|r| r.address.clone()).collect();
-                        if !listed.is_empty() {
-                            r.recipients = listed;
-                        }
+                    r.sender = Some(sender.clone());
+                }
+                if let Some(recipients) = &object.recipients {
+                    let listed: Vec<String> = recipients.iter()
+                        .filter(|r| matches!(r.kind, message::TO | message::CC))
+                        .map(|r| r.address.clone()).collect();
+                    if !listed.is_empty() {
+                        r.recipients = listed;
                     }
                 }
             }
@@ -552,6 +574,10 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 }
             }
 
+            if loc.view_row {
+                view_rows.push((key, r));
+                continue;
+            }
             match best.get_mut(&key) {
                 None => {
                     best.insert(key, r);
@@ -562,6 +588,16 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 // "best" record discards fields recovered from a sibling.
                 Some(prev) => merge(prev, r),
             }
+        }
+    }
+    // A list-view row is a summary of a message whose own object is merged
+    // above. It fills only the fields those revisions left empty.
+    for (key, r) in view_rows {
+        match best.get_mut(&key) {
+            None => {
+                best.insert(key, r);
+            }
+            Some(prev) => fill(prev, r),
         }
     }
 
@@ -589,6 +625,13 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     for r in best.values_mut() {
         if r.sender_name.is_some() && r.sender_name == r.subject {
             r.sender_name = None;
+        }
+        // The longest HTML can hold no text, and the revision that carried it
+        // may have had no preview of its own to fall back on.
+        if r.body.trim().is_empty() {
+            if let Some(preview) = &r.preview {
+                r.body = preview.clone();
+            }
         }
     }
 
@@ -973,6 +1016,27 @@ fn merge(prev: &mut record::Record, r: record::Record) {
         prev.body = r.body;
     } else if prev.html.is_none() && r.body.len() > prev.body.len() {
         prev.body = r.body;
+    }
+}
+
+/// Merge a list-view row into its message, taking only fields still empty.
+fn fill(prev: &mut record::Record, r: record::Record) {
+    prev.folder_links_unresolved |= r.folder_links_unresolved;
+    prev.folder_ids.extend(r.folder_ids);
+    prev.local_keys.extend(r.local_keys);
+    prev.copies += r.copies;
+    if prev.sender.is_none() {
+        (prev.sender, prev.sender_name) = (r.sender, r.sender_name);
+    }
+    prev.sent_unix = prev.sent_unix.or(r.sent_unix);
+    prev.preview = prev.preview.take().or(r.preview);
+    prev.subject = prev.subject.take().or(r.subject);
+    prev.message_id = prev.message_id.take().or(r.message_id);
+    if prev.recipients.is_empty() {
+        prev.recipients = r.recipients;
+    }
+    if prev.html.is_none() && prev.body.trim().is_empty() {
+        (prev.html, prev.body_source, prev.body) = (r.html, r.body_source, r.body);
     }
 }
 

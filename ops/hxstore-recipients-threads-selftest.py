@@ -38,7 +38,9 @@ def index(guid, replies=0):
 
 def message(key, guid=b'\x11' * 16, replies=0, subject='Synthetic thread', sender='pat@example.test',
             in_reply_to=None, conversation_index=None, inline=False, row_sender='wrong@example.test', runs=(),
-            header=True, sent=1_793_000_000):
+            header=True, sent=1_793_000_000,
+            html=b'<html><body>Synthetic inline message body with enough words.</body></html>',
+            preview='Synthetic preview text for one message object'):
     """A class 00c9 message object with its expanded 00ca header at +480.
 
     `None` leaves the sender or subject slot unset, as a draft revision does. Inline rows carry `runs`
@@ -61,7 +63,7 @@ def message(key, guid=b'\x11' * 16, replies=0, subject='Synthetic thread', sende
         values = {'row_sender': utf16(row_sender), 'item_class': values.pop('item_class'),
                   'sent': struct.pack('<Q', sent * 10_000_000 + 621_355_968_000_000_000),
                   'message_id': values.pop('message_id'), 'duplicate_id': utf16(f'<{key}@example.test>'),
-                  'html': b'<html><body>Synthetic inline message body with enough words.</body></html>',
+                  'html': html,
                   **{f'run{i}': utf16(run) for i, run in enumerate(runs)}, **values}
     if in_reply_to:
         values['in_reply_to'] = utf16(f'<{in_reply_to}@example.test>')
@@ -72,7 +74,20 @@ def message(key, guid=b'\x11' * 16, replies=0, subject='Synthetic thread', sende
         data += value
     if not header:
         obj[480:934] = bytes(454)
-    return envelope(0x060f, bytes(obj) + data + utf16('Synthetic preview text for one message object'))
+    return envelope(0x060f, bytes(obj) + data + (utf16(preview) if preview else b''))
+
+
+def view_row(key, own=0xf000, sender='owner@example.test', subject='Synthetic thread',
+             preview='List view preview with enough synthetic words'):
+    """A class 004f list-view row: no message key of its own, a typed 00c9 reference at +272."""
+    obj = bytearray(400)
+    struct.pack_into('<H', obj, 0, 0x004f)
+    struct.pack_into('<QIQQQ', obj, 10, own, 4, own + 1, own, own + 1)
+    struct.pack_into('<H', obj, 272, 0x00c9)
+    struct.pack_into('<QIQQQ', obj, 282, key, 212, own + 2, key, own + 2)
+    obj += utf16(sender) + utf16('IPM.Note') + utf16(subject) * 2 + utf16(preview)
+    obj += struct.pack('<Q', 1_793_000_000 * 10_000_000 + 621_355_968_000_000_000)
+    return envelope(0x0430, bytes(obj))
 
 
 def recipient(owner, rid, kind, address, name=None):
@@ -116,6 +131,7 @@ class RecipientThreadExportTests(unittest.TestCase):
                     'keyed_recipients': db.execute('SELECT k.local_key, m.recipients FROM message_keys k '
                                                    'JOIN messages m ON m.id = k.message_id ORDER BY k.local_key').fetchall(),
                     'contents': db.execute('SELECT message_id, body, local_keys FROM messages ORDER BY id').fetchall(),
+                    'names': db.execute('SELECT sender, sender_name FROM messages ORDER BY id').fetchall(),
                     'sent': tuple(send.SentRow(*r) for r in db.execute(
                         'SELECT sender, recipients, subject, sent_unix, message_id FROM messages')),
                     'threads': db.execute('SELECT conversation_id, messages, latest_local_key '
@@ -169,6 +185,36 @@ class RecipientThreadExportTests(unittest.TestCase):
             row_sender='Neighbour preview must never bleed into the preceding keyless row ' * 3))
         row = next(row for row in out['contents'] if row[0] == 'keyless@example.test')
         self.assertEqual(row[1:], ('Own preview has enough synthetic words here', None))
+
+    # WR589.S2.J3: each test below reproduces a failure seen on the real store at 0fa7c22.
+    def test_text_after_the_object_envelope_stays_in_its_record(self):
+        # Message objects store their body after the envelope's declared end, past other envelopes.
+        body = b'<html><body>Body stored after the object envelope and its recipients.</body></html>'
+        out = self.export(message(0xd300, inline=True, html=b'', preview=None),
+                          recipient(0xd300, 0xe300, TO, 'target@example.test'), body)
+        self.assertEqual([row[1] for row in out['contents']],
+                         ['Body stored after the object envelope and its recipients.'])
+
+    def test_list_view_rows_join_the_message_they_reference(self):
+        out = self.export(message(0xd400, subject='First synthetic topic'),
+                          message(0xd401, subject='Second synthetic topic'),
+                          view_row(0xd400, own=0xf000, subject='First synthetic topic'),
+                          view_row(0xd401, own=0xf010, subject='Second synthetic topic'))
+        self.assertEqual([row[2] for row in out['contents']], [str(0xd400), str(0xd401)])
+        self.assertEqual([row[1] for row in out['messages']], ['First synthetic topic', 'Second synthetic topic'])
+        self.assertEqual([row[3] for row in out['messages']], [2, 2])
+
+    def test_sender_after_anchor_keeps_its_name_when_the_object_confirms_it(self):
+        out = self.export(message(0xd500, inline=True, row_sender='', sender='owner@example.test',
+                                  runs=('owner@example.test', 'Pat Owner')))
+        self.assertEqual(out['names'], [('owner@example.test', 'Pat Owner')])
+
+    def test_textless_html_falls_back_to_the_message_preview(self):
+        # The revision with the longest HTML can carry no preview of its own.
+        empty = b'<html><head><style>p { margin: 0 }</style></head><body><img src="cid:x"></body></html>'
+        out = self.export(message(0xd600, inline=True, row_sender='', html=b''),
+                          message(0xd600, inline=True, row_sender='', html=empty, preview=None, subject=None, sender=None))
+        self.assertEqual([row[1] for row in out['contents']], ['Synthetic preview text for one message object'])
 
     def test_to_and_cc_keep_their_stored_order(self):
         out = self.export(

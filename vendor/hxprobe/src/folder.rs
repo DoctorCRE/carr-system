@@ -25,6 +25,9 @@ pub struct Folder {
     pub block: usize,
 }
 
+/// Offset of a list-view row's message reference (2026-10 Studio build).
+const VIEW_MESSAGE_AT: usize = 272;
+
 /// Offset of the parent reference in a folder object (2026-10 Studio build).
 const PARENT_AT: usize = 792;
 
@@ -270,6 +273,17 @@ impl Index {
             let mut anchors = memchr::memmem::find_iter(object, needle);
             if let (Some(anchor), None) = (anchors.next(), anchors.next()) {
                 keys.insert(start + anchor, key);
+            }
+        }
+        // A list-view row (class 004f) has no message key of its own; its
+        // typed reference at +272 (class 00c9, kind 212) names the message.
+        for (start, object) in envelopes(data, VIEW) {
+            let Some((key, _)) = object.get(VIEW_MESSAGE_AT..).and_then(|r| reference(r, 0x00c9, &[212])) else {
+                continue;
+            };
+            let mut anchors = memchr::memmem::find_iter(object, needle);
+            if let (Some(anchor), None) = (anchors.next(), anchors.next()) {
+                keys.entry(start + anchor).or_insert(key);
             }
         }
         for (start, object) in expanded(data) {

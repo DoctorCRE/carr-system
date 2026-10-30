@@ -499,12 +499,12 @@ Null means the first Outlook version is unknown. The pinned source revision esta
   "decoder": "folder::envelopes",
   "confidence": "unknown",
   "first_seen_version": null,
-  "notes": "The checked length includes the ten-byte envelope. WR589.S2.J1 uses these bounds in addition to neighbouring ItemClass anchors, preventing the next object's pre-anchor text from entering a row. Unframed rows retain anchor bounds; no adjacency-based ownership is inferred."
+  "notes": "The checked length includes the ten-byte envelope. WR589.S2.J3: records() bounds a list-view row (class 004f) to its own envelope, because the text after it is the next row's (real-store A/B, counts only: unbounded, 522 of 1139 rows' text subject matched the next row's message and not their own). Message objects (00c9, 00ca) are not bounded this way: their preview and subject sit after the declared end, and in an otherwise identical build the J1 bounds that cut them raised rows without a body from 12 to 347 and without recipients from 37 to 431."
 }
 ```
 
 - [`vendor/hxprobe/src/folder.rs` at `ffc3506dee4e8164d194c4b7f04323b4d0a7822c`](https://github.com/DoctorCRE/carr-system/blob/ffc3506dee4e8164d194c4b7f04323b4d0a7822c/vendor/hxprobe/src/folder.rs), `envelopes`.
-- [`vendor/hxprobe/src/main.rs` at `ffc3506dee4e8164d194c4b7f04323b4d0a7822c`](https://github.com/DoctorCRE/carr-system/blob/ffc3506dee4e8164d194c4b7f04323b4d0a7822c/vendor/hxprobe/src/main.rs), `records (prior anchor-only bounds)`.
+- [`vendor/hxprobe/src/main.rs` at `ffc3506dee4e8164d194c4b7f04323b4d0a7822c`](https://github.com/DoctorCRE/carr-system/blob/ffc3506dee4e8164d194c4b7f04323b4d0a7822c/vendor/hxprobe/src/main.rs), `records`.
 
 ## Envelope marker 5 (envelope.offset.0)
 
@@ -1144,6 +1144,25 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 
 - [`vendor/hxprobe/src/folder.rs` at `ffc3506dee4e8164d194c4b7f04323b4d0a7822c`](https://github.com/DoctorCRE/carr-system/blob/ffc3506dee4e8164d194c4b7f04323b4d0a7822c/vendor/hxprobe/src/folder.rs), `reference`.
 
+## Message reference (object.class.004f.offset.272)
+
+```json
+{
+  "parent": "object.class.004f",
+  "identifier": {
+    "kind": "byte_offset",
+    "value": 272
+  },
+  "wire_type": "bytes[46]",
+  "decoder": "folder::Index::keys",
+  "confidence": "inferred",
+  "first_seen_version": null,
+  "notes": "A typed reference: class 00c9 signature, message key at +282 repeated at +302, kind 212 at +290, owner at +294 repeated at +310. It links a list-view row, which has no message key of its own, to its message object. WR589.S2.J3 observed it in all 1139 list-view rows of the 2026-10-29 snapshot (counts only); every one named one of the 559 IPM.Note objects already exported, so these rows are summaries, not extra messages."
+}
+```
+
+- [`vendor/hxprobe/src/folder.rs` at `ffc3506dee4e8164d194c4b7f04323b4d0a7822c`](https://github.com/DoctorCRE/carr-system/blob/ffc3506dee4e8164d194c4b7f04323b4d0a7822c/vendor/hxprobe/src/folder.rs), `Index::keys`.
+
 ## Object class (object.class.00ca.offset.0)
 
 ```json
@@ -1754,14 +1773,14 @@ Null means the first Outlook version is unknown. The pinned source revision esta
   "parent": "mail",
   "identifier": {
     "kind": "string_run_selector",
-    "value": "nearest single address in the 320 bytes before ItemClass"
+    "value": "nearest single address in the 320 bytes before ItemClass, else the first after it"
   },
   "wire_type": "utf16le-run",
   "decoder": "schema::build_bounded",
   "confidence": "inferred",
   "first_seen_version": null,
   "decoder_key": "SenderAddress",
-  "notes": "WR589.S2.J1 restricts text inference to the pre-anchor window. Post-anchor addresses can be recipients. No inferred or object sender leaves messages.sender NULL and increments meta.messages_without_sender. The pinned source records the earlier heuristic; this policy is verified with synthetic fixtures."
+  "notes": "An address after ItemClass may be the first recipient. WR589.S2.J3 keeps it as the sender only when the message object's sender (00c9 +1386) confirms it; otherwise it moves to recipients and messages.sender stays NULL, counted in meta.messages_without_sender. On the 2026-10-29 snapshot the text rule picked a recipient for 36 of 558 keyed rows; the object sender overrides all of them."
 }
 ```
 
