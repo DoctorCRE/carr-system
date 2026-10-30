@@ -31,12 +31,12 @@ def approved(pr, files, comments):
     if SKIP_CI.search(pr.get("title") or ""):
         return False
     sha_line = f'Reviewed-SHA: {pr["head"]["sha"]}'
-    # The newest verdict naming the current head wins across both sources.
+    # A changes verdict vetoes the current head until a new push.
     verdicts = [lines[0] for lines in ((c.get("body") or "").splitlines() for c in comments)
                 if len(lines) >= 3 and lines[0] in ("VERDICT: APPROVE", "VERDICT: CHANGES")
                 and lines[1] == sha_line and lines[2].startswith("Reviewer: ")
                 and lines[2][10:].strip()]
-    if verdicts[-1:] == ["VERDICT: CHANGES"]:
+    if "VERDICT: CHANGES" in verdicts:
         return False
     # Markdown-only PRs carry no runtime behaviour, so they merge on green CI at any size (Joe 2026-10-27).
     if docs_only(pr, files):

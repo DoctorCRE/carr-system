@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import fcntl
 import hashlib
 import json
+import logging
 import os
 import re
 from pathlib import Path
@@ -10,6 +11,7 @@ import uuid
 
 from lib import outlook_send as send
 from lib.outlook_settings import OutlookSettings, load_settings
+from lib.outlook_runtime import receipt_line
 
 
 @dataclass(frozen=True)
@@ -33,9 +35,17 @@ class SubmittedDraft:
         if row['sha256'] != text_hash:
             raise ValueError('submission_hash_mismatch')
         to, cc = send._addresses(row['to']), send._addresses(row['cc'])
-        if len(to) != 1 or cc != (settings.partner_cc,):
+        approved = row.get('attachments', [])
+        if not isinstance(approved, list) or any(not isinstance(a, dict) or set(a) != {'path', 'sha256'} for a in approved):
+            raise ValueError('invalid_submission')
+        attached = send.attachments([a['path'] for a in approved])
+        if any(a.sha256 != expected['sha256'] or str(a.path) != expected['path']
+               for a, expected in zip(attached, approved)):
+            raise ValueError('submission_attachment_mismatch')
+        mail = send.Mail(to, cc, (), subject, body, attached)
+        if not send.partner_copied(mail, settings):
             raise ValueError('submission_recipients_invalid')
-        return cls(ident, version, text_hash, send.Mail(to, cc, (), subject, body))
+        return cls(ident, version, text_hash, mail)
 
     @property
     def key(self):
@@ -44,8 +54,9 @@ class SubmittedDraft:
     def receipt(self, result: send.Result):
         args = dict(idempotency_key=self.key, proposal_id=self.proposal_id,
                     base_version=self.version, sha256=self.sha256)
-        if result.state is send.State.DONE and result.sent_item_id:
-            return dict(args, status='sent', sent_item_id=result.sent_item_id)
+        if result.state is send.State.DONE and result.sent_item_id and result.sent_at:
+            return dict(args, status='sent', sent_item_id=result.sent_item_id,
+                        sent_at=result.sent_at, sender_account=send.account())
         reason = result.reason if (result.reason == 'aborted_before_dispatch' or result.reason.startswith('unconfirmed_after_')) else f'{result.state.value}:{result.reason}'
         return dict(args, status='failed', reason=reason)
 
@@ -72,7 +83,7 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
     if (send._addresses([settings.partner_cc]) != (settings.partner_cc,)
             or not settings.partner_cc or settings.partner_cc == settings.account):
         raise ValueError('partner_copy_required')
-    counts = dict(sent=0, failed=0, deferred=0, receipt_failed=0, compose_window_open=0)
+    counts = dict(sent=0, failed=0, deferred=0, receipt_failed=0, compose_window_open=0, sent_unrecorded=0)
     ports.out.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(ports.out, 0o700)
     root = ports.out / 'outbox'
@@ -90,6 +101,13 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
             receipt = json.loads(path.read_text())
             pending.add(receipt['proposal_id'])
             try:
+                if receipt.get('status') == 'sent' and not receipt.get('sent_at'):
+                    snapshot = ports.mailbox.snapshot()
+                    item = next(r for r in snapshot.sent if r.item_id == receipt['sent_item_id']
+                                and r.sender.lower() == settings.account)
+                    receipt = dict(receipt, sent_at=item.sent_at,
+                                   sender_account=settings.account)
+                    _save(path, receipt)
                 reply = ports.carr('record-email-sent', receipt)
                 if reply.get('ok') is not True:
                     raise ValueError('receipt_refused')
@@ -116,15 +134,22 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
                 except (ValueError, KeyError, TypeError, AttributeError):
                     continue
                 key = str(uuid.uuid5(uuid.NAMESPACE_URL, f'outlook-outbox|{ident}|{version}'))
-                reason = str(exc) if str(exc) in ('invalid_submission', 'submission_hash_mismatch', 'submission_recipients_invalid') else 'invalid_submission'
+                reason = str(exc) if str(exc) in (
+                    'invalid_submission', 'submission_hash_mismatch', 'submission_recipients_invalid',
+                    'submission_attachment_mismatch', 'attachment_settings_missing', 'attachment_root_missing',
+                    'attachment_path_not_absolute', 'attachment_missing', 'attachment_outside_root',
+                    'attachment_not_regular_file', 'attachment_unreadable', 'attachments_too_large') else 'invalid_submission'
                 receipt = dict(idempotency_key=key, proposal_id=ident, base_version=version,
                                sha256=digest, status='failed', reason=reason)
             else:
-                result = send.send_submitted(draft.mail, idempotency_key=draft.key, ports=ports)
+                result = send.send_submitted(draft, ports=ports)
                 if (result.state in (send.State.NOT_IDLE, send.State.PRESSED_UNCONFIRMED,
                                      send.State.WINDOW_NOT_CLOSED)
                         or result.reason in ('daily_cap', 'another_write_running', 'compose_window_open')):
                     counts['deferred'] += 1
+                    if result.reason == 'sent_time_unavailable':
+                        counts['sent_unrecorded'] += 1
+                        logging.getLogger(__name__).warning('outlook-outbox sent_time_unavailable')
                     if result.reason == 'compose_window_open':
                         counts['compose_window_open'] += 1
                     continue
@@ -145,15 +170,25 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
 
 
 def main() -> int:
+    repo = Path(__file__).resolve().parents[1]
+    counts = {}
+    failed, reason = True, 'setup_failed'
     try:
         settings = load_settings()
-        settings.require_repo(Path(__file__).resolve().parents[1])
+        settings.require_repo(repo)
+        repo = settings.repo
         counts = run(settings, send.default_ports())
         print('outlook-outbox ' + ' '.join(f'{key}={value}' for key, value in counts.items()))
-        return 1 if counts['failed'] or counts['receipt_failed'] or counts['deferred'] else 0
+        failed = bool(counts['failed'] or counts['receipt_failed'] or counts['deferred'])
+        reason = 'send_failed' if counts['failed'] else ('receipt_failed' if counts['receipt_failed']
+                  else ('deferred' if counts['deferred'] else 'processed'))
     except Exception as exc:
         print(f'outlook-outbox failed {type(exc).__name__}')
-        return 1
+    try:
+        print(receipt_line('outlook-outbox', 'failed' if failed else 'succeeded', reason, counts, repo))
+    except Exception:
+        pass
+    return int(failed)
 
 
 if __name__ == '__main__':

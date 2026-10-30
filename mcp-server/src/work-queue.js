@@ -1,4 +1,5 @@
 // Store lean Work Request slice and job facts with stable IDs and priority order.
+import jobTypes from './job-types.v1.json' with { type: 'json' };
 import addressFormat from './progress-address.v1.json' with { type: 'json' };
 import { organizationTenantForActor } from './identity.js';
 import { readableWorkRequestSql } from './work-request-read.ts';
@@ -18,18 +19,22 @@ export function queueCardId(ref, ordinal, number) {
 
 // A PR belongs to a job through a "Card: WRn.Sm.Jk" line in its body, and stage is derived from those PRs live.
 // The one stored fact is a job's first observed merged or closed state (`finished`), so the search only has to
-// span unfinished jobs and a finished job keeps its stage after its PR leaves GitHub's 100-result window.
+// span unfinished jobs and a finished job keeps its stage after its PR leaves GitHub's search window.
 export const PULL_REQUEST_TTL_MS = 60_000;
 // Building is the only stage a job can stall in without anyone else holding it. Codex jobs run in hours, so a day
 // with no push to the open draft means stalled. Queued jobs wait their priority turn (dispatch-job starts nothing),
 // and review and merge wait on others, so none of those is ever stale.
 export const STALE_AFTER_MS = 24 * 3_600_000;
 const CARD_LINE = /^Card:[ \t]*(WR\d+\.S\d+\.J\d+)\b/gmu;
+const validSliceChange = change => change && typeof change === 'object' && Object.keys(change).length === 2
+  && typeof change.pr_url === 'string' && typeof change.merge_commit_sha === 'string'
+  && /^https:\/\/github[.]com\/(DoctorCRE\/carr-system|jbookout\/(doctorcre-app|software-factory))\/pull\/[1-9][0-9]*$/.test(change.pr_url)
+  && /^[0-9a-fA-F]{40}$/.test(change.merge_commit_sha);
 const unavailablePullRequests = async repos => repos.map(repo => ({ repo, state: 'unavailable', reason: 'no_github_reader', prs: [] }));
 
 // One GitHub search per repository per TTL, shared by every caller in this isolate; failures are cached too.
-// `since` bounds it to PRs updated on or after the oldest unfinished job's day: a card ID does not exist until
-// dispatch-job mints it, so any PR carrying one was created or edited after that, and older PRs cannot fill the window.
+// `since` bounds it to PRs updated on or after the oldest started, unfinished job's day.
+// Search all available pages so a first read can find a PR behind newer results.
 // The cache is keyed by repository and bound day, so no caller receives a narrower window than it asked for.
 export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...a), now = Date.now, ttlMs = PULL_REQUEST_TTL_MS }) {
   const memo = new Map();
@@ -38,16 +43,25 @@ export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...
     const bound = since ? ` updated:>=${since.slice(0, 10)}` : '';
     const query = new URLSearchParams({ q: `repo:${repo} is:pr in:body "Card: WR"${bound}`, sort: 'updated', order: 'desc', per_page: '100' });
     try {
-      const response = await fetchImpl(`https://api.github.com/search/issues?${query}`, { headers: {
-        accept: 'application/vnd.github+json', authorization: `Bearer ${token}`, 'user-agent': 'carr-mcp-work-queue', 'x-github-api-version': '2022-11-28' } });
-      if (!response.ok) return { repo, state: 'unavailable', reason: `github_http_${response.status}`, prs: [] };
-      const body = await response.json();
-      const prs = body.items.flatMap(item => {
+      const items = [];
+      let total = 0, incomplete = false;
+      for (let page = 1; page <= 10; page++) {
+        query.set('page', String(page));
+        const response = await fetchImpl(`https://api.github.com/search/issues?${query}`, { headers: {
+          accept: 'application/vnd.github+json', authorization: `Bearer ${token}`, 'user-agent': 'carr-mcp-work-queue', 'x-github-api-version': '2022-11-28' } });
+        if (!response.ok) return { repo, state: 'unavailable', reason: `github_http_${response.status}`, prs: [] };
+        const body = await response.json();
+        total = body.total_count;
+        incomplete ||= body.incomplete_results === true;
+        items.push(...body.items);
+        if (items.length >= total || body.items.length < 100) break;
+      }
+      const prs = items.flatMap(item => {
         const cards = [...new Set([...String(item.body ?? '').matchAll(CARD_LINE)].map(match => match[1]))];
         return cards.length ? [{ repo, number: item.number, url: item.html_url, title: item.title, draft: item.draft === true, updated_at: item.updated_at,
           state: item.pull_request?.merged_at ? 'merged' : item.state === 'open' ? 'open' : 'closed', cards }] : [];
       });
-      return { repo, state: 'ok', observed_at: new Date(now()).toISOString(), truncated: body.incomplete_results === true || body.total_count > body.items.length, prs };
+      return { repo, state: 'ok', observed_at: new Date(now()).toISOString(), truncated: incomplete || total > items.length, prs };
     } catch { return { repo, state: 'unavailable', reason: 'github_unreachable', prs: [] }; }
   }
   return (repos, since) => Promise.all(repos.map(repo => {
@@ -110,7 +124,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
     if (args.idempotency_key && !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(args.idempotency_key)) refuse('invalid_idempotency_key');
   };
   const request = async (c, actor, ref) => {
-    const row = (await c.query(`select w.id,w.ref,w.title from ops.work_request w
+    const row = (await c.query(`select w.id,w.ref,w.title,w.state from ops.work_request w
       where w.ref=$1 and w.organization_tenant_id=$2 and ${readableWorkRequestSql('w')}`, [ref, organizationTenantForActor(actor)])).rows[0];
     if (!row) refuse('work_request_not_found');
     return row;
@@ -128,6 +142,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         return withEnvelope(c, actor, name, args, async () => {
           await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', ['work-queue:' + organizationTenantForActor(actor)]);
           const wr = await request(c, actor, args.work_request);
+          if (['confirmed_closed', 'declined', 'superseded', 'failed'].includes(wr.state)) refuse('work_request_terminal_state');
           const result = await run(c, actor, args, wr);
           await writeEvent(c, actor, name, 'ops_work_request', wr.id, { field: 'work_queue', new: result, idempotency_key: args.idempotency_key });
           return { ok: true, ...result };
@@ -135,47 +150,84 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
       } };
   };
   return {
-    'plan-work-request-slices': command('plan-work-request-slices', 'Record ordered slice titles once. Omit slices for implicit S1. Repeating the same plan preserves identities.',
+    'plan-work-request-slices': command('plan-work-request-slices', 'Record or append ordered slice titles. Existing titles must remain an exact prefix. Omit slices for implicit S1. Repeating the same plan preserves identities.',
       { slices: { type: 'array', minItems: 1, maxItems: 100, items: text(200) } }, [], async (c, actor, args, wr) => {
         const titles = Object.hasOwn(args, 'slices') ? args.slices : [wr.title];
-        if (!Array.isArray(titles) || !titles.length || titles.length > 100 || titles.some(title => typeof title !== 'string' || !title.trim() || title.length > 200)) refuse('invalid_slice_plan');
+        if (!Array.isArray(titles) || titles.length > 100 || titles.some(title => typeof title !== 'string' || !title.trim() || title.length > 200)) refuse('invalid_slice_plan');
         const prior = (await c.query('select title from ops.work_request_slice where work_request_id=$1 order by ordinal', [wr.id])).rows;
-        if (prior.length && JSON.stringify(prior.map(row => row.title)) !== JSON.stringify(titles)) refuse('slice_plan_conflict');
-        if (!prior.length) await c.query(`insert into ops.work_request_slice
-          select $1,ordinality,title from unnest($2::text[]) with ordinality as s(title,ordinality)`, [wr.id, titles]);
+        if (prior.some((row, index) => row.title !== titles[index]))
+          throw new ToolError({ error: 'slice_plan_conflict', recorded_titles: prior.map(row => row.title) });
+        if (!titles.length) refuse('invalid_slice_plan');
+        if (titles.length > prior.length) await c.query(`insert into ops.work_request_slice (work_request_id,ordinal,title)
+          select $1,$3::integer+ordinality,title from unnest($2::text[]) with ordinality as s(title,ordinality)`, [wr.id, titles.slice(prior.length), prior.length]);
         return { slices: titles.map((title, index) => ({ slice_id: queueCardId(wr.ref, index + 1), title })) };
       }),
-    'dispatch-job': command('dispatch-job', 'Mint a queued job from facts, or record a runner start for an existing job exactly once.',
-      { slice, job: positive, runner_job_id: text(), repository: { ...text(), enum: repositories }, executor: text(), model: text(), effort: text(), card_title: text(80), description: text(500) },
+    'close-work-request-slice': command('close-work-request-slice', 'Record an open slice as done or retired exactly once, using the current slice version as base_version. Done requires merged change evidence.',
+      { slice, base_version: positive, outcome: { ...text(), enum: ['done', 'retired'] }, reason: text(2000), superseded_by: positive,
+        change_refs: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false,
+          properties: { pr_url: text(300), merge_commit_sha: text(40) }, required: ['pr_url', 'merge_commit_sha'] } } },
+      ['slice', 'outcome', 'base_version'], async (c, actor, args, wr) => {
+        const current = (await c.query('select outcome,version from ops.work_request_slice where work_request_id=$1 and ordinal=$2 for update', [wr.id, args.slice])).rows[0];
+        if (!current) refuse('slice_not_found');
+        if (current.version !== args.base_version) refuse('version_conflict');
+        if (current.outcome.outcome !== 'open') refuse('slice_outcome_already_recorded');
+        if (!['done', 'retired'].includes(args.outcome)) refuse('invalid_slice_outcome');
+        if (args.outcome !== 'done' && !args.reason?.trim()) refuse('slice_reason_required');
+        if (args.superseded_by != null && (args.outcome !== 'retired' || args.superseded_by === args.slice)) refuse('invalid_slice_successor');
+        if (args.superseded_by != null && !(await c.query('select 1 from ops.work_request_slice where work_request_id=$1 and ordinal=$2',
+          [wr.id, args.superseded_by])).rows.length) refuse('slice_not_found');
+        const changes = args.change_refs;
+        if (args.outcome === 'done') {
+          if (!Array.isArray(changes) || !changes.length || changes.some(change => !validSliceChange(change))) refuse('slice_merged_change_required');
+        } else if (changes != null) refuse('invalid_slice_outcome');
+        const record = { outcome: args.outcome, outcome_by: actor.slug, outcome_at: new Date().toISOString(),
+          ...(args.reason ? { reason: args.reason.trim() } : {}),
+          ...(args.outcome === 'done' ? { change_refs: changes } : {}),
+          ...(args.superseded_by ? { superseded_by: queueCardId(wr.ref, args.superseded_by) } : {}) };
+        const saved = (await c.query(`update ops.work_request_slice set outcome=$3::jsonb,version=version+1
+          where work_request_id=$1 and ordinal=$2 and outcome->>'outcome'='open' returning ordinal,version`, [wr.id, args.slice, JSON.stringify(record)])).rows[0];
+        if (!saved) refuse('slice_not_found');
+        return { slice_id: queueCardId(wr.ref, saved.ordinal), version: saved.version, ...record };
+      }),
+    'dispatch-job': command('dispatch-job', 'Mint a queued job with a caller-supplied job_type from job-workflows.v1.yaml, or record a runner start for an existing job exactly once.',
+      { slice, job: positive, runner_job_id: text(), repository: { ...text(), enum: repositories }, job_type: { ...text(), enum: jobTypes }, executor: text(), model: text(), effort: text(), card_title: text(80), description: text(500) },
       [], async (c, actor, args, wr) => {
         const starting = jobStart.some(key => Object.hasOwn(args, key));
+        if ((!starting || Object.hasOwn(args, 'job_type')) && !jobTypes.includes(args.job_type)) refuse('invalid_job_type');
         if ((starting ? jobStart : jobFacts).some(key => args[key] == null)
-          || (starting ? jobFacts : jobStart).some(key => Object.hasOwn(args, key))) refuse('invalid_work_queue_fields');
+          || (jobFacts.some(key => Object.hasOwn(args, key)) && jobFacts.some(key => args[key] == null))) refuse('invalid_work_queue_fields');
         if ((starting || Object.hasOwn(args, 'repository')) && !repositories.includes(args.repository)) refuse('invalid_work_queue_fields');
         if (starting) {
-          const row = (await c.query(`select runner_job_id,repository from ops.work_request_job
+          const row = (await c.query(`select runner_job_id,repository,job_type from ops.work_request_job
             where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`, [wr.id, args.slice || 1, args.job])).rows[0];
-          if (!row) refuse('job_not_found');
-          if (row.repository !== args.repository) refuse('job_repository_mismatch');
-          if (row.runner_job_id != null) refuse('job_already_started');
-          await c.query(`update ops.work_request_job set runner_job_id=$4,started_at=now()
-            where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`, [wr.id, args.slice || 1, args.job, args.runner_job_id]);
-          return { card_id: queueCardId(wr.ref, args.slice || 1, args.job), runner_job_id: args.runner_job_id };
+          if (!row && jobFacts.some(key => args[key] == null)) refuse('job_not_found');
+          if (row) {
+            if (args.job_type != null && row.job_type != null && row.job_type !== args.job_type) refuse('job_type_mismatch');
+            if (row.repository != null && row.repository !== args.repository) refuse('job_repository_mismatch');
+            if (row.runner_job_id != null) refuse('job_already_started');
+            await c.query(`update ops.work_request_job set runner_job_id=$4,started_at=now(),
+              executor=coalesce($5,executor),model=coalesce($6,model),effort=coalesce($7,effort),repository=coalesce(repository,$8),job_type=coalesce(job_type,$9)
+              where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`, [wr.id, args.slice || 1, args.job, args.runner_job_id,
+              args.executor ?? null, args.model ?? null, args.effort ?? null, args.repository, args.job_type ?? null]);
+            return { card_id: queueCardId(wr.ref, args.slice || 1, args.job), runner_job_id: args.runner_job_id };
+          }
         }
+        if (!jobTypes.includes(args.job_type)) refuse('invalid_job_type');
         if (!/^[A-Za-z']+( [A-Za-z']+){1,2}$/.test(args.card_title)) refuse('invalid_card_title');
         if (args.description.trim().split(/[.!?](?:\s|$)/u).filter(Boolean).length !== 1) refuse('invalid_job_description');
         const ordinal = args.slice || 1;
-        await c.query(`insert into ops.work_request_slice select $1,1,$2
+        if (!starting) await c.query(`insert into ops.work_request_slice (work_request_id,ordinal,title) select $1,1,$2
           where not exists (select 1 from ops.work_request_slice where work_request_id=$1)`, [wr.id, wr.title]);
         if (!(await c.query('select 1 from ops.work_request_slice where work_request_id=$1 and ordinal=$2', [wr.id, ordinal])).rows.length) refuse('slice_not_found');
         const priority = Number((await c.query(`select coalesce(max(j.priority),0)+1 as next from ops.work_request_job j
           join ops.work_request w on w.id=j.work_request_id where w.organization_tenant_id=$1`, [organizationTenantForActor(actor)])).rows[0].next);
         const number = (await c.query(`insert into ops.work_request_job
-          (work_request_id,slice_ordinal,j_number,priority,executor,model,effort,card_title,description,repository)
-          select $1,$2,coalesce(max(j_number),0)+1,$3,$4,$5,$6,$7,$8,$9 from ops.work_request_job
+          (work_request_id,slice_ordinal,j_number,priority,executor,model,effort,card_title,description,repository,runner_job_id,started_at,job_type)
+          select $1,$2,coalesce($10,max(j_number)+1,1),$3,$4,$5,$6,$7,$8,$9,$11,case when $11::text is not null then now() end,$12 from ops.work_request_job
           where work_request_id=$1 and slice_ordinal=$2 returning j_number`,
-        [wr.id, ordinal, priority, args.executor, args.model, args.effort, args.card_title, args.description, args.repository ?? null])).rows[0].j_number;
-        return { card_id: queueCardId(wr.ref, ordinal, number), priority };
+        [wr.id, ordinal, priority, args.executor, args.model, args.effort, args.card_title, args.description, args.repository ?? null, args.job ?? null, args.runner_job_id ?? null, args.job_type])).rows[0].j_number;
+        return { card_id: queueCardId(wr.ref, ordinal, number), priority,
+          ...(starting ? { runner_job_id: args.runner_job_id } : {}) };
       }, { anyOf: [
         { required: jobFacts },
         { required: [...jobStart, 'repository'] },
@@ -198,7 +250,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
       handler: async (c, actor, args) => {
         validate(args, {}, []);
         const rows = await ordered(c, actor);
-        const oldest = rows.filter(row => !row.finished).reduce((min, row) => Math.min(min, new Date(row.created_at).getTime()), Infinity);
+        const oldest = rows.filter(row => !row.finished && (row.executor !== 'codex' || row.started_at)).reduce((min, row) => Math.min(min, new Date(row.started_at ?? row.created_at).getTime()), Infinity);
         const sources = await (c.pullRequests ?? unavailablePullRequests)(Object.keys(addressFormat.repositories),
           Number.isFinite(oldest) ? new Date(oldest).toISOString() : undefined);
         const { finishes, ...view } = queueView(rows, sources, Date.now());
@@ -206,7 +258,12 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         // it runs only on the first observation, writes no audit row, and a lost write is redone by the next read.
         for (const { key, finished } of finishes) c.sideWrite?.(`update ops.work_request_job set finished=$4::jsonb
           where work_request_id=$1 and slice_ordinal=$2 and j_number=$3 and finished is null`, [...key, JSON.stringify(finished)]);
-        return { ok: true, stale_after_hours: STALE_AFTER_MS / 3_600_000, ...view };
+        const slices = (await c.query(`select s.*,w.ref as work_request from ops.work_request_slice s
+          join ops.work_request w on w.id=s.work_request_id where w.id=any($1::uuid[])
+          order by w.ref,s.ordinal`, [[...new Set(rows.map(row => row.work_request_id))]])).rows;
+        const projected = slices.map(row => ({ slice_id: queueCardId(row.work_request, row.ordinal),
+          work_request: row.work_request, title: row.title, version: row.version, ...row.outcome }));
+        return { ok: true, slices: projected, stale_after_hours: STALE_AFTER_MS / 3_600_000, ...view };
       } },
   };
 }

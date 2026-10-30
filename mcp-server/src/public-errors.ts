@@ -6,7 +6,7 @@ import { isValidCorrelationId, logLine } from "./correlation.js";
 type PublicError = {
   error: string; correlation_id: string; hint: string;
   candidates?: Record<string, string | null>[]; retired_aliases?: Record<string, string | null>[];
-  current_version?: number; fields?: unknown[]; invalid_deal_ids?: string[];
+  current_version?: number; fields?: unknown[]; invalid_deal_ids?: string[]; recorded_titles?: string[];
 };
 type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSchema };
 
@@ -95,7 +95,39 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["invalid_work_request", "Supply a numeric Work Request reference such as WR-000014."],
   ["invalid_idempotency_key", "Supply a UUID as idempotency_key and reuse it only for the same action."],
   ["invalid_slice_plan", "Supply one through one hundred non-empty slice titles, each at most 200 characters."],
-  ["slice_plan_conflict", "Use the existing ordered slices; replacing their identities is refused."],
+  ["slice_plan_conflict", "Keep the recorded titles in order and append new titles after them."],
+  ["joint_ownership_refused", "A loop has one owner: pass joe, dell or claude, and name the blocker for what it waits on."],
+  ["unknown_owner", "Owner is one of joe, dell or claude."],
+  ["blocker_detail_required", "Provide blocker_detail of at least 12 characters naming the specific person, ruling, date or prerequisite."],
+  ["blocker_detail_vague", "Make blocker_detail specific about who or what must happen first."],
+  ["blocker_not_carried_by_kind", "Use kind open_loop for blocker, blocker_detail, residue_kind and residue_host, or omit those fields."],
+  ["blocker_required", "For kind open_loop, provide blocker as human_only, counterparty, ruling, external_event, other_lane or capability."],
+  ["dated_marker_needs_date", "Provide due_on as YYYY-MM-DD when marker is dated."],
+  ["due_date_needs_dated_marker", "Use marker dated with due_on, omit marker on add-loop to infer it, or omit due_on."],
+  ["empty_loop", "Provide body or title with the loop text."],
+  ["missing_kind", "Provide kind as open_loop, team_loop, action_required or idea."],
+  ["unknown_blocker_class", "Use blocker human_only, counterparty, ruling, external_event, other_lane or capability."],
+  ["unknown_domain", "Use domain deals, prospecting, networking, marketing, business or system, or omit it."],
+  ["unknown_kind", "For loops use kind open_loop, team_loop, action_required or idea; for party links use the documented link kind vocabulary."],
+  ["unknown_marker", "Use marker bell, dated, decision or none."],
+  ["residue_not_carried_by_class", "Omit residue_kind and residue_host unless blocker is human_only, ruling or capability."],
+  ["residue_required", "Provide residue_kind and residue_host for blocker human_only, ruling or capability."],
+  ["unknown_residue_kind", "Use residue_kind provider_login, os_password, physical_act, money_movement, external_send or joe_only_fact."],
+  ["residue_host_required", "Provide residue_host with at least two characters naming the provider or host."],
+  ["bad_number", "Use digits only for number."],
+  ["bad_last_surfaced", "Use YYYY-MM-DD for last_surfaced."],
+  ["need_block_id_or_file_and_section", "Provide block_id or both file and section."],
+  ["empty_prose", "Provide a non-empty replacement paragraph in prose_md."],
+  ["outcome_required", "Provide a non-empty outcome describing what happened, and use resolution dropped if abandoning the work."],
+  ["bookkeeping_close_is_dropped", "Use resolution dropped and name successor_loop when work continues in another loop."],
+  ["bookkeeping_outcome_prefix", "Start outcome with renumbered or superseded when naming successor_loop."],
+  ["successor_loop_required", "Provide successor_loop as the open loop number or loop_id carrying the work forward."],
+  ["invalid_slice_outcome", "Choose done or retired with the evidence for that outcome."],
+  ["slice_outcome_already_recorded", "The recorded outcome and its evidence are final. Plan a new slice for further work."],
+  ["slice_reason_required", "Explain why the slice is retired."],
+  ["slice_merged_change_required", "Supply at least one merged PR URL and its full merge commit SHA."],
+  ["invalid_slice_successor", "Only a retired slice may name a different recorded slice as its replacement."],
+  ["work_request_open_slices", "Finish or retire every open slice before completing the Work Request."],
   ["slice_not_found", "Choose a slice from the recorded plan."],
   ["invalid_card_title", "Supply a card title of two or three plain words."],
   ["invalid_job_description", "Describe the job in one sentence."],
@@ -221,6 +253,10 @@ export function publicError(error: unknown, { env, inputSchema, fallback = "unha
   if (code === "invalid_call_context_deals")
     result.invalid_deal_ids = [...new Set((Array.isArray(payload?.invalid_deal_ids) ? payload.invalid_deal_ids : [])
       .filter(id => typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(id)))].slice(0, 50);
+  if (code === "slice_plan_conflict" && Array.isArray(payload?.recorded_titles)
+      && payload.recorded_titles.length <= 100
+      && payload.recorded_titles.every(title => typeof title === "string" && title.trim() && title.length <= 200))
+    result.recorded_titles = payload.recorded_titles;
   if (code === "version_conflict" && Number.isSafeInteger(payload?.current_version) && (payload!.current_version as number) >= 0)
     result.current_version = payload!.current_version as number;
   if (["invalid_idempotency_key", "invalid_report_problem", "invalid_report_problem_fields", "caller_authority_field_forbidden", "invalid_acceptance_criteria", "current_situation_source_not_found", "invalid_field_value", "validation_error", "value_not_in_declared_vocabulary", "unregistered_operation_fields", "missing_required", "invalid_boolean", "invalid_number", "tool_call_markup_in_value"].includes(code)) {

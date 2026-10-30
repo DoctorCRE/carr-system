@@ -35,17 +35,23 @@ PY="$REPO/.venv/bin/python"
 
 receipt_file=""
 degraded_repeat=0
-if [ "$SERVICE" = "outlook-intake" ]; then
+if [[ "$SERVICE" = outlook-(intake|triage|outbox) ]]; then
   mkdir -p "$REPO/out" 2>/dev/null
-  receipt_file="$(mktemp "$REPO/out/outlook-intake-receipt.XXXXXX")" || exit 1
+  receipt_file="$(mktemp "$REPO/out/outlook-intake-receipt.XXXXXX")" || receipt_file=""
   trap 'rm -f "$receipt_file"' EXIT
 fi
 
 STARTED="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
 if [ -n "$receipt_file" ]; then
-  "$@" > "$receipt_file" 2>> "$LOG"
-  rc=$?
+  if [ "$SERVICE" = "outlook-intake" ]; then
+    "$@" > "$receipt_file" 2>> "$LOG"
+    rc=$?
+  else
+    "$@" > "$receipt_file"
+    rc=$?
+    cat "$receipt_file"
+  fi
 else
   "$@"
   rc=$?
@@ -68,27 +74,36 @@ esac
 
 detail="$RUN_KEY exited $rc"
 if [ -n "$receipt_file" ]; then
-  receipt="$("$PY" - "$receipt_file" "$state" <<'PY_RECEIPT'
+  receipt="$("$PY" - "$receipt_file" "$state" "$SERVICE" <<'PY_RECEIPT'
 import json
 import re
 import sys
 
 reasons = frozenset("outside_window previous_run_active cleanup_failed store_missing carr_unreachable "
-                    "decode_failed store_verification_low decoder_degraded calendar_decode_empty store_unchanged "
+                    "decode_failed coverage_failed store_verification_low decoder_degraded calendar_decode_empty store_unchanged "
                     "writes_failed model_failed processed nothing_new writes_deferred "
                     "request_blocked full_disk_access_required contacts_empty contacts_read_failed timeout auth_refused "
                     "key_reuse transport_oversized no_acknowledgement reply_unreadable transport_error "
                     "invalid_request subject_unresolved database_refused setup_failed calendar_lifecycle_unsupported "
                     "email_links_read_failed email_links_pending".split())
+if sys.argv[3] != "outlook-intake":
+    reasons = frozenset("processed setup_failed send_failed receipt_failed deferred outside_window previous_run_active nothing_pending user_active "
+        "filed window_closed idle_time_unreadable no_usable_main_window "
+        "ui_error cua_error os_error wrong_account carr_find_failed cua_driver_failed folder_guide_invalid "
+        "folder_guide_missing folder_guide_not_0600 folder_pane_restore_failed move_failed move_failed_twice "
+        "unread_row_selected unread_set_changed unread_set_unverified cua_driver_unavailable "
+        "outlook_launch_failed outlook_not_running_after_launch outlook_quit_timeout preflight_command_timeout "
+        "compose_window_open".split())
+prefix = sys.argv[3] + "-receipt "
 # Count keys are code-built names; values carry the meaning. A snake_case name with a
 # bounded non-negative integer value cannot carry mail content, so no key list drifts.
 count_key = re.compile(r"[a-z][a-z0-9_]{0,63}")
 receipt = None
 with open(sys.argv[1]) as output:
     for line in output:
-        if line.startswith("outlook-intake-receipt "):
+        if line.startswith(prefix):
             try:
-                receipt = json.loads(line[len("outlook-intake-receipt "):])
+                receipt = json.loads(line[len(prefix):])
             except ValueError:
                 receipt = None
 # Counts are {"run": {...}, "backlog": {...}}; a flat dict from an older runtime is still read.
@@ -108,6 +123,13 @@ if (isinstance(receipt, dict) and isinstance(counts, dict)
         and all(count_key.fullmatch(k) and type(v) is int and 0 <= v <= 1_000_000_000
                 for group in groups for k, v in group.items())):
     safe = {k: receipt[k] for k in ("state", "reason", "counts")}
+    if (isinstance(receipt.get("runtime_sha"), str)
+            and re.fullmatch(r"[0-9a-f]{7,40}", receipt["runtime_sha"])
+            and (receipt.get("runtime_behind") is None
+                 or (type(receipt["runtime_behind"]) is int and 0 <= receipt["runtime_behind"] <= 1_000_000_000))):
+        safe.update({k: receipt[k] for k in ("runtime_sha", "runtime_behind") if k in receipt})
+    if receipt.get("runtime_note") in ("main_unknown_locally", "history_incomplete"):
+        safe["runtime_note"] = receipt["runtime_note"]
     if (isinstance(receipt.get("detail"), str) and re.fullmatch(
             r"(?:outlook-intake-copy|hxprobe) exit=(?:None|-?[0-9]{1,10}) "
             r"code=(?:exit_nonzero|permission_denied|timeout|launch_failed)", receipt["detail"])):
@@ -118,13 +140,13 @@ PY_RECEIPT
 )"
   if [ -n "$receipt" ]; then
     detail="${receipt%%$'\n'*}"
-    if [ "$state" = failed ] || [ "$state" = timed_out ]; then
+    if [[ "$SERVICE" != outlook-outbox && ( "$state" = failed || "$state" = timed_out ) ]]; then
       fclass=(--failure-class "${receipt##*$'\n'}")
     fi
     if [ "$state" = succeeded ] && [[ "$detail" == *'"state": "degraded"'* ]]; then
       degraded_repeat=1
     fi
-    print -r -- "outlook-intake-receipt $detail"
+    print -r -- "$SERVICE-receipt $detail"
   fi
   "$PY" - "$receipt_file" <<'PY_ROUTER_RECEIPT'
 import json

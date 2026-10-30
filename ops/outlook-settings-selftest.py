@@ -36,14 +36,16 @@ class SettingsTest(unittest.TestCase):
         self.assertFalse(settings.mcp_credentials.exists())
         self.assertFalse(settings.database_credentials.exists())
 
-    def test_optional_signing_identity_is_validated(self):
-        self.assertEqual(load_settings(self.home).signing_identity, '')
-        write_settings(self.home, self.repo, signing_identity='Fixture Code Signing')
-        self.assertEqual(load_settings(self.home).signing_identity, 'Fixture Code Signing')
-        for value in ('', '-', ' surrounding ', 'bad\nname', None, 42):
+    def test_folder_account_key_is_validated_without_guessing_from_address(self):
+        self.assertEqual(load_settings(self.home).folder_account_id, 7)
+        values = json.loads(self.path.read_text())
+        values.pop('folder_account_id')
+        self.path.write_text(json.dumps(values))
+        self.assertIsNone(load_settings(self.home).folder_account_id)
+        for value in (None, True, 0, -1, '7', 7.5, 2**63):
             with self.subTest(value=value):
-                write_settings(self.home, self.repo, signing_identity=value)
-                with self.assertRaisesRegex(SettingsError, 'signing_identity'):
+                write_settings(self.home, self.repo, folder_account_id=value)
+                with self.assertRaisesRegex(SettingsError, 'folder_account_id'):
                     load_settings(self.home)
 
     def test_second_person_changes_the_returned_identity_and_profile(self):
@@ -57,12 +59,12 @@ class SettingsTest(unittest.TestCase):
     def test_dell_shaped_settings_render_jobs_without_studio_paths(self):
         profile = self.home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Profile'
         write_settings(self.home, self.repo, owner='dell', account='second.partner@example.test',
-                       profile=str(profile), services=['intake', 'refresh'], full_screen_height=956,
+                       profile=str(profile), services=['intake'], full_screen_height=956,
                        executable_path=f'{self.home}/.cargo/bin:{self.home}/.local/bin:/usr/bin:/bin')
         settings = load_settings(self.home)
         self.assertEqual((settings.owner, settings.account, settings.profile, settings.full_screen_height),
                          ('dell', 'second.partner@example.test', profile, 956))
-        for service in ('intake', 'refresh'):
+        for service in ('intake',):
             settings.require_service(service)
             rendered = plistlib.loads(settings.render_plist(ROOT / f'ops/launchd/com.carr.outlook-{service}.plist'))
             self.assertEqual(rendered['WorkingDirectory'], str(self.repo))
@@ -193,7 +195,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(values[5], 'joe')
         owners = [call.args[1][5] for call in cursor.execute.call_args_list
                   if 'insert into ops.service\n' in call.args[0]]
-        self.assertEqual(owners, ['joe', 'joe', 'joe', 'joe'])
+        self.assertEqual(owners, ['joe', 'joe', 'joe'])
 
     def test_configured_exporter_file_wins_over_an_unrelated_shell_export(self):
         from exporters import common

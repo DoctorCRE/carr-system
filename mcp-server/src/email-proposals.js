@@ -241,12 +241,16 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'submit-email-draft': {
       write: true, humanOnly: true, humanCallerOnly: true,
-      description: 'The owning partner submits the exact final subject, body and displayed to/cc arrays from a review card. Missing or changed recipients refuse email_draft_recipients_mismatch. Approval freezes the original sender as recipient and the other partner actor.email as cc. Missing copy address refuses. Enqueues for that partner’s Mac; does not send mail.',
+      description: 'The owning partner submits the exact final subject, body and displayed to/cc arrays from a review card. Missing or changed recipients refuse email_draft_recipients_mismatch. Approval freezes the original sender as recipient, the other partner actor.email as cc, and the supplied attachment paths and sha256. Paths must be canonical absolute paths under the local attachment root. Missing copy address refuses. Enqueues for that partner’s Mac; does not send mail.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: [...Object.keys(draftProperties), 'subject', 'body'], properties: { ...draftProperties,
           subject: { type: 'string', minLength: 1, maxLength: 998 }, body: { type: 'string', maxLength: 20000 },
           to: { type: 'array', minItems: 1, maxItems: 1, items: { type: 'string', format: 'email' } },
-          cc: { type: 'array', minItems: 1, maxItems: 1, items: { type: 'string', format: 'email' } } } },
+          cc: { type: 'array', minItems: 1, maxItems: 1, items: { type: 'string', format: 'email' } },
+          attachments: { type: 'array', maxItems: 50, items: { type: 'object', additionalProperties: false,
+            required: ['path', 'sha256'], properties: {
+              path: { type: 'string', minLength: 2, maxLength: 4096, pattern: '^/(?:[^/\\u0000]+/)*[^/\\u0000]+$' },
+              sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' } } } } } },
       handler: async (c, actor, args) => {
         if (actor.human !== true || !['joe', 'dell'].includes(actor.slug)) fail('email_draft_not_owner');
         await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
@@ -261,8 +265,11 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           const recipients = await draftRecipients(c, row, true);
           if (['to', 'cc'].some(field => !Array.isArray(args[field]) || args[field].length !== 1 ||
               args[field][0] !== recipients[field][0])) fail('email_draft_recipients_mismatch');
+          if ((args.attachments ?? []).some(a => a.path.split('/').some(part => part === '.' || part === '..')))
+            fail('email_draft_attachment_path_invalid');
           const submitted = { subject: args.subject, body: args.body,
-            sha256: sha256(JSON.stringify({ subject: args.subject, body: args.body })), ...recipients };
+            sha256: sha256(JSON.stringify({ subject: args.subject, body: args.body })), ...recipients,
+            attachments: args.attachments ?? [] };
           await c.query(`update email_proposal set status='approved_to_send',version=version+1,
             submitted_email=$2::jsonb,submitted_at=now(),resolved_by=$3,resolved_at=now(),
             send_result=null,result_recorded_at=null where id=$1`,
@@ -270,7 +277,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           await writeEvent(c, actor, 'submit-email-draft', 'deal', row.deal_id, {
             new: { proposal_id: row.id, sha256: submitted.sha256, to: submitted.to, cc: submitted.cc },
             cause: 'human_stated', idempotency_key: args.idempotency_key });
-          return { ok: true, proposal_id: row.id, status: 'approved_to_send', version: row.version + 1, ...submitted };
+          const { attachments, ...shown } = submitted;
+          return { ok: true, proposal_id: row.id, status: 'approved_to_send', version: row.version + 1, ...shown,
+            attachment_count: attachments.length, attachment_sha256: attachments.map(a => a.sha256) };
         });
       },
     },
@@ -289,12 +298,14 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'record-email-sent': {
       write: true,
-      description: 'The owning partner’s Mac records sent only after Sent Items confirms, or failed with a reason. Requires submitted text sha256 and base_version. A failed result leaves the outbox to prevent ambiguous automatic resend. Never sends mail.',
+      description: 'The owning partner’s Mac records sent only after Sent Items confirms, or failed with a reason. Requires submitted text sha256 and base_version. Sent results also require the observed sent_at and sender_account matching the owning partner. Atomically appends email_out correspondence with frozen recipients and attachment names and hashes; retries of that send identity do not duplicate it. A failed result leaves the outbox to prevent ambiguous automatic resend. Never sends mail.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: [...Object.keys(draftProperties), 'status', 'sha256'], properties: { ...draftProperties,
           status: { type: 'string', enum: ['sent', 'failed'] },
           sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
           sent_item_id: { type: 'string', minLength: 1, maxLength: 500 },
+          sender_account: { type: 'string', format: 'email' },
+          sent_at: { type: 'string', format: 'date-time' },
           reason: { type: 'string', maxLength: 500 } } },
       handler: async (c, actor, args) => {
         if (actor.human === true) fail('email_sender_identity_required');
@@ -302,12 +313,36 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
         return withEnvelope(c, actor, 'record-email-sent', args, async () => {
           const row = await draftRow(c, args.proposal_id, owner);
+          if (row.status === 'sent' && args.status === 'sent' && row.version === args.base_version + 1
+              && args.sha256 === row.submitted_email.sha256
+              && args.sent_item_id === row.send_result.sent_item_id
+              && args.sender_account === row.send_result.sender_account
+              && args.sent_at === row.send_result.sent_at)
+            return { ok: true, replayed: true, proposal_id: row.id, version: row.version, ...row.send_result };
           if (row.status !== 'approved_to_send') fail('email_draft_not_approved');
           checkVersion(row, args.base_version);
           if (args.sha256 !== row.submitted_email.sha256) fail('email_draft_submission_mismatch');
           if (args.status === 'failed' && !args.reason?.trim()) fail('email_draft_failure_reason_required');
           if (args.status === 'sent' && !args.sent_item_id?.trim()) fail('email_draft_sent_confirmation_required');
-          const result = args.status === 'sent' ? { status: 'sent', sent_item_id: args.sent_item_id }
+          if (args.status === 'sent') {
+            const partner = (await c.query('select id,email from actor where slug=$1', [owner])).rows[0];
+            const account = partner?.email;
+            if (!args.sender_account || args.sender_account !== account) fail('email_draft_sender_mismatch');
+            if (!args.sent_at || !Number.isFinite(Date.parse(args.sent_at))) fail('email_draft_sent_time_required');
+            const source = (await c.query('select email_context from activity where id=$1', [row.activity_id])).rows[0]?.email_context;
+            const context = { subject: row.submitted_email.subject, conversation_id: source?.conversation_id ?? null,
+              sender: { email: args.sender_account, internal: true },
+              recipients: [
+                ...row.submitted_email.to.map(email => ({ email, kind: 'to', internal: source?.sender?.internal === true })),
+                ...row.submitted_email.cc.map(email => ({ email, kind: 'cc', internal: true })),
+              ], send_id: row.id, sent_item_id: args.sent_item_id,
+              sent_at: args.sent_at, attachments: (row.submitted_email.attachments ?? []).map(a => ({
+                file_name: a.path.split('/').at(-1), sha256: a.sha256 })) };
+            await c.query(`insert into activity(occurred_at,actor_id,kind,summary,deal_id,source,email_context)
+              values($1,$2,'email_out','Partner-submitted email sent',$3,'outlook',$4::jsonb)`,
+            [args.sent_at, partner.id, row.deal_id, JSON.stringify(context)]);
+          }
+          const result = args.status === 'sent' ? { status: 'sent', sent_item_id: args.sent_item_id, sender_account: args.sender_account, sent_at: args.sent_at }
             : { status: 'failed', reason: args.reason };
           await c.query(`update email_proposal set status=$2,version=version+1,send_result=$3::jsonb,result_recorded_at=now()
             where id=$1`, [row.id, args.status, JSON.stringify(result)]);
@@ -519,6 +554,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           exclude: { type: 'array', maxItems: 5000, items: { type: 'string', format: 'uuid' } } } },
       handler: async (c, _actor, args) => {
         const limit = args.limit ?? 25;
+        // The age window's start follows the server clock, so tests on a fixed clock stay in range.
+        const clock = new Date().toISOString();
         if (args.purpose === 'links') {
           const { rows } = await c.query(`select a.id as activity_id,a.deal_id as deal,
               coalesce(hydrated.detail,a.detail) as body,a.occurred_at
@@ -551,9 +588,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
               (select party_id from lead where id=a.lead_id))) as recorded_sender,d.id as deal,d.name as deal_name,d.phase,d.deal_type
           from activity a left join deal d on d.id=a.deal_id
           where a.kind in ('email_in','email_out') and a.detail is not null and a.occurred_at<=now()
-            and a.occurred_at>now()-make_interval(days=>$1) and a.id<>all($2::uuid[]) and (a.email_source is null or a.email_source->>'mailbox_owner'=$4)
+            and a.occurred_at>$6::timestamptz-make_interval(days=>$1) and a.id<>all($2::uuid[]) and (a.email_source is null or a.email_source->>'mailbox_owner'=$4)
             and (a.kind <> 'email_out' or a.actor_id=$5::uuid)
-          order by a.occurred_at,a.id limit $3`, [args.days ?? 3, args.exclude ?? [], limit + 1, partnerAuthoritySlugForActor(_actor), _actor.id]);
+          order by a.occurred_at,a.id limit $3`, [args.days ?? 3, args.exclude ?? [], limit + 1, partnerAuthoritySlugForActor(_actor), _actor.id, clock]);
         const people = await contacts(c);
         const openDeals = (await c.query(`select d.id,d.name,d.city,d.source_row->>'property' as property,
             d.client_id,p.name as client,d.phase,d.deal_type,
@@ -567,8 +604,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const history = (await c.query(`select id as activity_id,deal_id as deal,summary,email_context,occurred_at
           from activity where kind in ('email_in','email_out') and deal_id is not null
             and email_context is not null and occurred_at<=now()
-            and (occurred_at >= now()-make_interval(days=>$1) or email_context->>'conversation_id'=any($2::text[]))`,
-          [(args.days ?? 3) + 30, conversations])).rows.map(row => evidence(row, people));
+            and (occurred_at >= $3::timestamptz-make_interval(days=>$1) or email_context->>'conversation_id'=any($2::text[]))`,
+          [(args.days ?? 3) + 30, conversations, clock])).rows.map(row => evidence(row, people));
         return { schema_version: 'email-router-queue.v2', more: rows.length > limit, open_deals: openDeals,
           emails: queued.map(row => ({ ...evidence(row, people),
             thread_history: history.filter(prior => {
@@ -576,46 +613,6 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
               return age > 0 && (age <= 30*86400000 ||
                 (row.email_context?.conversation_id && row.email_context.conversation_id === prior.conversation_id));
             }) })) };
-      },
-    },
-    'email-proposal-quality': {
-      write: false,
-      description: 'WR-000441 QUALITY report: email proposals created in the last 1-90 days (default 7), by kind: how many were proposed, are still pending, were confirmed by Joe or dismissed, the dismissal rate among resolved ones, and the average router confidence of each outcome. over_threshold is true when at least 10 are resolved and more than 5% were dismissed, the point where that kind should stay propose-only until the router is fixed. corrections lists up to 20 dismissals made in the requested period with the reason given, regardless of when the proposal was created. Proposal counts use the creation date. automatic_filings counts automatic thread filings recorded in the requested period, how many have a linked undo receipt at read time, and their undo_rate (null when empty). Its over_threshold is true with at least 10 filings and more than 5% undone. This is a separate filing cohort, not a proposal dismissal rate. Counts only; changes nothing and does not enforce a policy change.',
-      inputSchema: { type: 'object', additionalProperties: false,
-        properties: { days: { type: 'integer', minimum: 1, maximum: 90 } } },
-      handler: async (c, _actor, args) => {
-        const days = args.days ?? 7;
-        const { rows } = await c.query(`select kind,count(*)::int as proposed,
-            count(*) filter (where status='pending')::int as pending,
-            count(*) filter (where status='confirmed')::int as confirmed,
-            count(*) filter (where status='dismissed')::int as dismissed,
-            avg(confidence) filter (where status='confirmed')::float8 as confirmed_confidence,
-            avg(confidence) filter (where status='dismissed')::float8 as dismissed_confidence
-          from email_proposal where created_at>now()-make_interval(days=>$1) group by kind`, [days]);
-        const kinds = Object.keys(KINDS).map(kind => {
-          const row = rows.find(r => r.kind === kind) ?? { proposed: 0, pending: 0, confirmed: 0, dismissed: 0 };
-          const resolved = row.confirmed + row.dismissed;
-          const dismissRate = resolved ? row.dismissed / resolved : null;
-          return { kind, proposed: row.proposed, pending: row.pending, confirmed: row.confirmed,
-            dismissed: row.dismissed, dismiss_rate: dismissRate,
-            confirmed_confidence: row.confirmed_confidence ?? null, dismissed_confidence: row.dismissed_confidence ?? null,
-            over_threshold: resolved >= 10 && dismissRate > 0.05 };
-        });
-        const corrections = (await c.query(`select p.id,p.kind,d.name as deal_name,p.resolution_reason as reason,
-            p.resolved_at from email_proposal p join deal d on d.id=p.deal_id
-          where p.status='dismissed' and p.resolved_at>now()-make_interval(days=>$1)
-          order by p.resolved_at desc,p.id limit 20`, [days])).rows
-          .map(row => ({ ...row, resolved_at: new Date(row.resolved_at).toISOString() }));
-        const filingCounts = (await c.query(`select count(*)::int as filed,
-            count(*) filter (where exists (select 1 from v_email_thread_filing_event u
-              where u.verb='undo-email-thread-filing' and u.new_value->>'event_id'=f.id::text))::int as undone
-          from v_email_thread_filing_event f where f.verb='inherit-email-thread'
-            and f.recorded_at>now()-make_interval(days=>$1)`, [days])).rows[0];
-        const undoRate = filingCounts.filed ? filingCounts.undone / filingCounts.filed : null;
-        const automaticFilings = { ...filingCounts, undo_rate: undoRate,
-          over_threshold: filingCounts.filed >= 10 && undoRate > 0.05 };
-        return { schema_version: 'email-proposal-quality.v1', days, kinds, corrections,
-          automatic_filings: automaticFilings, send: false };
       },
     },
     'dismiss-email-proposal': {

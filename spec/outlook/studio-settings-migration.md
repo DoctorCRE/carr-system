@@ -54,12 +54,20 @@ No installer runs as part of this source change. The later installation for anot
 
 Every field in the command is required. Unknown or duplicate fields are rejected.
 There are no owner, address, profile or credential fallbacks.
-Optional `signing_identity` names this Mac's code-signing certificate. Omit it for ad-hoc signing.
+Before deploying the folder-based intake, add the independently verified `folder_account_id` to the private machine settings.
+An absent key fails intake before copying or decoding. Changing the selected key forces a decode even for an unchanged store.
+Intake refuses a key absent from the decoded folder catalog. Before admitting mail, it requires the configured mailbox as a sender
+in an unambiguously owned Sent, Sent Items, or Sent Mail folder. Missing or mismatched evidence fails with
+`folder_account_mailbox_unverified`. Localized or undecoded Sent folders therefore fail closed.
+The decoder must export `folder_links_unresolved`, which preserves uncertainty across merged copies.
+Conflicting owners and unresolved links are excluded under `mail_account_ambiguous` and `mail_account_unresolved`.
+Changing the mailbox address also forces fresh binding verification.
 
 | Fields | Type and meaning |
 | --- | --- |
 | `owner` | Lowercase record-layer owner principal. It does not assert authenticated identity. |
 | `account` | Lowercase mailbox address used for window and Sent Items checks. |
+| `folder_account_id` | Positive signed 64-bit local account key from the decoded `folders.account_id`. Required for intake, optional for other services. Establish the key independently on a research copy. Intake verifies the configured mailbox against decoded Sent-folder evidence before admission. |
 | `internal_domain` | Lowercase domain used for internal email matching. |
 | `timezone` | IANA timezone used for local windows, reports and the daily send limit. |
 | `repo` | Absolute path of the checkout the Outlook jobs run from, canonicalized when loaded. Only `bin/install-outlook-intake.sh` creates or moves it, so pulling the canonical checkout ships no Outlook code. |
@@ -78,50 +86,6 @@ The shared services catalog retains its declared owner. Outlook jobs use the pri
 
 ## Keep Full Disk Access across helper rebuilds
 
-Complete all steps on each Mac. Keep the same certificate and helper path for later rebuilds.
-The certificate is local to that Mac. Do not commit its name or export its private key.
-Without `signing_identity`, the installer uses ad-hoc signing and warns that rebuilds need a Full Disk Access re-grant.
-The installer rejects a configured identity that cannot sign or produces a cdhash designated requirement.
-Apple's [requirement language](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/RequirementLang/RequirementLang.html)
-defines a certificate hash anchor as a certificate requirement; the installer accepts that form too.
-
-The first installer run after this PR merges rebuilds the helper on every Mac because the pin format changed.
-This includes Macs without `signing_identity`. The rebuild requires a fresh Full Disk Access grant.
-Run steps 5 and 6 together, back to back. Do not run the installer alone first.
-All numbered steps are required. The final step checks that the grant survives a rebuild.
-
-1. In Finder, select **Go > Go to Folder**.
-   Paste `/System/Library/CoreServices/Applications/Keychain Access.app`.
-   Press **Return** to open Keychain Access.
-2. Select **Keychain Access > Certificate Assistant > Create a Certificate**.
-3. Enter a unique certificate name for this Mac.
-   Select **Self Signed Root** for **Identity Type**.
-   Select **Code Signing** for **Certificate Type**.
-   Click **Create**.
-4. Set `signing_identity` in `~/.config/carr/outlook.json` to that certificate's exact name.
-   Run `.venv/bin/python -m lib.outlook_settings validate` from the source checkout.
-5. You MUST run this step in Terminal on the Mac itself, never over SSH.
-   `codesign` raises a keychain prompt. Over SSH, there is no prompt and `codesign` fails.
-   Run `./bin/install-outlook-intake.sh` from the source checkout.
-   At the `codesign` keychain prompt, enter the Mac login password.
-   Click **Always Allow**.
-6. Open **System Settings > Privacy & Security > Full Disk Access** immediately after step 5.
-   Select the old **outlook-intake-copy** row.
-   Click the minus button.
-   Click the plus button.
-   Press **Cmd-Shift-G**.
-   Paste the configured `copy_helper` path, default `~/carr-local/bin/outlook-intake-copy`.
-   Click **Open**.
-   Turn the helper's switch on.
-7. Delete the configured helper's `.pin` file to request one deliberate rebuild.
-8. You MUST run this step in Terminal on the Mac itself, never over SSH.
-   `codesign` can raise another keychain prompt. Over SSH, there is no prompt and `codesign` fails.
-   Run `./bin/install-outlook-intake.sh` again from the source checkout.
-   If `codesign` prompts, enter the Mac login password.
-   Click **Always Allow** if prompted.
-   Inspect the configured helper's designated requirement with `codesign -d -r- ~/carr-local/bin/outlook-intake-copy` for the default path.
-   Confirm the requirement contains `certificate root = H"..."` or `anchor H"..."`, rather than `cdhash`.
-9. Confirm the next scheduled intake copy succeeds without another Full Disk Access grant.
-
-For step 7, `.pin` replaces the helper's filename suffix. For `outlook-intake-copy`, the pin is `outlook-intake-copy.pin`.
-Do not create another certificate for the rebuild check. Certificate replacement changes the helper's identity.
+Follow [the README steps](README.md#keep-full-disk-access-across-helper-rebuilds).
+They create the `CARR Local Helpers` identity once, which both helper installers
+detect without any setting.

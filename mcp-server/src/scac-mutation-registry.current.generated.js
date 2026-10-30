@@ -119,7 +119,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "add-loop": {
     "ingress_key": "mcp-tool:add-loop",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "54c7ab9b14c77a8d6bcb4989dbf33e96358a632d7eba11d9c7a4bdf93843f7f1",
+    "schema_digest": "63aa16a75cef37e0be66bc0549596127c975f3809eeb4060ed7b3f4919f1c366",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -628,6 +628,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "close-work-request-slice": {
+    "ingress_key": "mcp-tool:close-work-request-slice",
+    "source_locator": "mcp-server/src/work-queue.js",
+    "schema_digest": "d05688430d13bfb77b2ffbcdad6627c23585cf9496b3238a6e6183985974b841",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "commit-winning-property": {
     "ingress_key": "mcp-tool:commit-winning-property",
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
@@ -941,7 +951,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "dispatch-job": {
     "ingress_key": "mcp-tool:dispatch-job",
     "source_locator": "mcp-server/src/work-queue.js",
-    "schema_digest": "cf4eb6feedff876ac1d8786a1c59236389ef9d4e23e636d7c91915c45f87b2a3",
+    "schema_digest": "64fb13bd07030c4bd940be0f43e1bd7dcae37d25230bf203d999ec12d7b54906",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -1012,16 +1022,6 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:email-match-contacts",
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
-    "write": false,
-    "human_only": false,
-    "human_caller_only": false,
-    "authority_only": false,
-    "delegates_to": []
-  },
-  "email-proposal-quality": {
-    "ingress_key": "mcp-tool:email-proposal-quality",
-    "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "fd7d13ec59351dd593298bb122ccd833ac052d25e0682365f31cb9d282e5cf2a",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -2535,7 +2535,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-email-sent": {
     "ingress_key": "mcp-tool:record-email-sent",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "493d000661838396e6f053f7b7e13e24d1adb4a5e3157cfb9e07dedbb6487c46",
+    "schema_digest": "ea8b7dd6cfec4367a8cad32c67819c75bee819fec10f22f9620a1de2e5ea3f26",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -3312,7 +3312,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "submit-email-draft": {
     "ingress_key": "mcp-tool:submit-email-draft",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "0502bfe1836ed7abefa06e0441e114e41a21855f0ecbc8abf904d66ca91c8ce5",
+    "schema_digest": "fd4aaaa359f7c9ac9f63a4422b47447804e4bc64d55b479ea5eaf141e779e3d7",
     "write": true,
     "human_only": true,
     "human_caller_only": true,
@@ -3707,6 +3707,15 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "ingress_key": "db-relation-acl:public.system_work_census_inventory:carr_writer:update",
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "ops.work_request_slice",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:ops.work_request_slice:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
     }
   ],
   "secdef_execute": [
@@ -3901,6 +3910,21 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.adopt_rule(p_section_id uuid, p_base_version bigint, p_idempotency_key text, p_reason text)",
       "volatility": "v",
       "ingress_key": "db-function-acl:ops.adopt_rule(p_section_id uuid, p_base_version bigint, p_idempotency_key text, p_reason text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.reap_expired_runs(p_service_id uuid, p_environment text, p_run_key text, p_limit integer)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.reap_expired_runs(p_service_id uuid, p_environment text, p_run_key text, p_limit integer):carr_jobs:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true

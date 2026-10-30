@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rebuild the checked-in snapshot through the exact source migration prefix."""
+"""Rebuild the checked-in snapshot through the exact source migration ledger."""
 import json
 import os
 from pathlib import Path
@@ -25,7 +25,8 @@ class ReconstructionTests(unittest.TestCase):
     def test_snapshot_only_rebuild_contract(self):
         import psycopg
         bins = postgres_bin_dir()
-        expected = repository_ledger(ROOT, MigrationBaseline.load(ROOT))
+        baseline = MigrationBaseline.load(ROOT)
+        expected = repository_ledger(ROOT, baseline)
         highest = next(reversed(expected))
         with postgres_fixture_group(), DisposablePostgres('carr-reconstruct-', bins / 'pg_ctl') as fixture:
             with socket.socket() as listener:
@@ -110,19 +111,36 @@ class ReconstructionTests(unittest.TestCase):
                         sql = re.sub(r'\$\d+', '%s', query['sql'])
                         conn.execute(sql, [query['params'][int(n) - 1] for n in positions]).fetchall()
 
-            # Replay only the correction: later DDL is already in this snapshot.
+            with psycopg.connect(dsn, autocommit=True) as conn:
+                conn.execute('create database correction_predecessor template template0')
+            maintenance_dsn = dsn
+            predecessor_dsn = dsn.rsplit('/', 1)[0] + '/correction_predecessor'
+            source = subprocess.check_output(['git', 'show',
+                f'{baseline.source_revision}:db/schema.sql'], cwd=ROOT, text=True)
+            loaded = subprocess.run([str(bins / 'psql'), '-X', '--single-transaction',
+                '-v', 'ON_ERROR_STOP=1', '-q', '-d', predecessor_dsn], input=source,
+                capture_output=True, text=True, timeout=180)
+            self.assertEqual(loaded.returncode, 0, loaded.stderr)
             correction = '0897_national_account_classification_correction.sql'
             correction_ledger = {name: digest for name, digest in expected.items() if name <= correction}
+            predecessor = max(name for name in expected if name < correction)
+            prepared = subprocess.run([sys.executable, str(ROOT / 'tools/migrate.py'),
+                '--apply', '--yes', '--through', predecessor], cwd=ROOT,
+                env={**os.environ, 'DATABASE_URL': predecessor_dsn},
+                capture_output=True, text=True, timeout=600)
+            self.assertEqual(prepared.returncode, 0, prepared.stdout + prepared.stderr)
+            dsn = predecessor_dsn
             with psycopg.connect(dsn) as conn:
                 conn.execute("""insert into party (id,kind,name,created_by,updated_by)
                     select '00000000-0000-0000-0000-000000000011','org',
                         'Synthetic reconstruction account',id,id from actor where slug='system'""")
                 conn.execute("""insert into client (id,roster_ref,party_id,client_type,created_by,updated_by)
                     select '00000000-0000-0000-0000-000000000012','SYNTHETIC-ACCOUNT',
-                        '00000000-0000-0000-0000-000000000011','national_account',id,id
+                        '00000000-0000-0000-0000-000000000011',null,id,id
                     from actor where slug='system'""")
-                conn.execute("delete from schema_migrations where filename >= %s",
-                    (correction,))
+            with psycopg.connect(maintenance_dsn, autocommit=True) as conn:
+                conn.execute('create database correction_success template correction_predecessor strategy file_copy')
+            dsn = maintenance_dsn.rsplit('/', 1)[0] + '/correction_success'
             resumed = subprocess.run([sys.executable, str(ROOT / 'tools/migrate.py'),
                 '--apply', '--yes', '--through', correction], cwd=ROOT,
                 env={**os.environ, 'DATABASE_URL': dsn}, capture_output=True, text=True, timeout=600)
@@ -131,19 +149,20 @@ class ReconstructionTests(unittest.TestCase):
                 self.assertEqual(dict(conn.execute(
                     'select filename, sha256 from schema_migrations').fetchall()), correction_ledger)
                 self.assertEqual(conn.execute("select roster_ref,client_type from client").fetchall(),
-                    [('SYNTHETIC-ACCOUNT', 'national_account')])
+                    [('SYNTHETIC-ACCOUNT', None)])
 
             historical_ids = ('9c323aa5-b9c0-45e7-b958-ef1ee3738660',
                 '8550b702-e6fb-4bea-8b3e-1fec5b9499bd',
                 '2f7364a7-8167-421d-8492-79815307fba3')
-            for roster_ref, client_id, client_type, merged in [
+            for case, (roster_ref, client_id, client_type, merged) in enumerate([
                 (ref, '00000000-0000-0000-0000-000000000012', None, True)
                 for ref in ('C-161', 'C-204', 'C-205')
-            ] + [('SYNTHETIC-ACCOUNT', identity, 'national_account', False) for identity in historical_ids]:
+            ] + [('SYNTHETIC-ACCOUNT', identity, 'national_account', False) for identity in historical_ids]):
                 with self.subTest(roster_ref=roster_ref, client_id=client_id):
+                    with psycopg.connect(maintenance_dsn, autocommit=True) as conn:
+                        conn.execute(f'create database correction_refusal_{case} template correction_predecessor strategy file_copy')
+                    dsn = maintenance_dsn.rsplit('/', 1)[0] + f'/correction_refusal_{case}'
                     with psycopg.connect(dsn) as conn:
-                        conn.execute("delete from schema_migrations where filename >= %s",
-                            (correction,))
                         conn.execute('update client set id=%s,roster_ref=%s,client_type=%s,merged_into=%s',
                             (client_id, roster_ref, client_type, client_id if merged else None))
                     refused = subprocess.run([sys.executable, str(ROOT / 'tools/migrate.py'),

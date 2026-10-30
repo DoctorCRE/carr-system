@@ -3853,6 +3853,22 @@ export const TOOLS = {
                   'due_on',to_jsonb(i.due_on)#>>'{}','status',i.status,'bullets',i.item_bullets,'source_ref',i.source_ref)
                   order by i.created_order,i.id) from v_deal_room_action i where i.deal_id=b.id
                   and i.item_title is not null and i.status not in ('dropped', 'expired')),'[]'::jsonb) as items,
+                coalesce((select jsonb_agg(jsonb_build_object('id', n.id, 'owner', n.owner,
+                  'description', n.description, 'due_on', to_jsonb(n.due_on)#>>'{}')
+                  order by n.due_on nulls last, n.id)
+                  from (select id, owner, description, due_on from v_deal_room_action
+                         where deal_id=b.id and status='open' and item_title is null
+                         order by due_on nulls last, id limit 3) n), '[]'::jsonb) as open_actions,
+                (select jsonb_build_object('kind', step.kind, 'summary', step.summary,
+                                           'occurred_at', to_jsonb(step.occurred_at)#>>'{}')
+                   from (select a.kind, a.summary, a.occurred_at, a.id
+                           from v_deal_room_activity a where a.deal_id=b.id
+                         union all
+                         select 'completed_action', coalesce(nullif(e.new_value->>'outcome', ''),
+                           e.new_value->>'next_action', e.new_value->>'post_call_action'), e.recorded_at, e.id
+                           from v_deal_room_event e where e.subject_id=b.id and e.verb='complete-action'
+                             and e.new_value->>'status'='done') step
+                  order by step.occurred_at desc, step.id desc limit 1) as last_step,
                 (b.next_step is null or b.next_date is null) as next_step_required, b.market, b.segment,
                 b.client_id, b.client_ref, b.client_name, ce.client_status, ce.client_version,
                 ce.prospect_engagement_status, b.account_client_id, b.account_client_ref,
@@ -3919,7 +3935,7 @@ export const TOOLS = {
             and ($3::uuid is null or account_client_id=$3::uuid)
           order by started_at desc limit 1`,
         [actor.slug, workspace, args.account_client_id || null]);
-      return { schema_version: 'local-deals-board.v1', actor: actor.slug, deals: deals.rows.map(d => ({ ...d, short_name: shortDealHeading(d) })), closed_deals: closedDeals.rows.filter(d => d.outcome !== 'lost'), lost_deals: closedDeals.rows.filter(d => d.outcome === 'lost'), accounts: accounts.rows,
+      return { schema_version: 'local-deals-board.v2', actor: actor.slug, deals: deals.rows.map(d => ({ ...d, short_name: shortDealHeading(d) })), closed_deals: closedDeals.rows.filter(d => d.outcome !== 'lost'), lost_deals: closedDeals.rows.filter(d => d.outcome === 'lost'), accounts: accounts.rows,
         open_session: session.rows[0] || null };
     },
   },
@@ -7337,7 +7353,7 @@ export const TOOLS = {
         description: "deals | prospecting | networking | marketing | business | system. Classify by WHAT THE WORK IS, not who appears in it: a vendor introducing a PROSPECT normally means real intent and is DEALS (prospecting only while no deal has formed); a vendor introducing a VENDOR is networking; connecting a prospect to a vendor is networking; connecting a client to a vendor on a LIVE deal is deals. Omit only when genuinely unclear — an unclassified loop renders in its own unsorted section, which is honest, but a loop nobody can find is a loop nobody does." },
       title: { type: "string", description: "team_loop 'Ask' / action_required 'Action needed'. Not used by open_loop, whose text is `body`." },
       body: { type: "string", description: "open_loop 'Item' / team_loop 'Notes / links'" },
-      owner: { type: "string", description: "the label the file uses: 'Joe', 'Joe/Claude', 'Dell', 'Joe→Dell'" },
+      owner: { type: "string", description: "one owner: joe, dell or claude. Use claude when the system can finish it without a human." },
       unblocks: { type: "string", description: "what it unblocks / why it matters" },
       source_note: { type: "string", description: "source / detail / links" },
       marker: { type: "string", enum: LOOP_MARKERS },
@@ -9138,7 +9154,7 @@ registerTools(invoiceTrackerTools({ ToolError, withEnvelope, writeEvent }), "inv
 // the rest of this registry; the one explicit exception is the ephemeral lease.
 registerTools({
   "get-deal-room": {
-    description: "Read one complete Deal Room work record, including closed and invoiced deals: board/workspace and active/parked fields, next actions, notes, critical dates, activity, parties, premises, current economics, documents, and attributed history. Includes salesforce_id and base_version only so a reconciler can make one guarded follow-on write. Placeholder Salesforce fields are structurally excluded.",
+    description: "Read one complete Deal Room work record, including closed and invoiced deals: board/workspace and active/parked fields, next actions, notes, critical dates, activity, parties, premises, current economics, documents, and attributed history. email_threads contains conversation_id, subject and latest_message_at from the latest filed message, newest first; messages without a conversation ID appear individually. Includes salesforce_id and base_version only so a reconciler can make one guarded follow-on write. Placeholder Salesforce fields are structurally excluded.",
     inputSchema: { type: "object", properties: { deal: { type: "string" } }, required: ["deal"] },
     handler: async (c, _actor, args) => {
       const s = await resolveSubject(c, args.deal);
@@ -9205,9 +9221,21 @@ registerTools({
           order by n.created_order, n.id`, [s.id]);
       const activities = await c.query(
         `select a.id, to_jsonb(a.occurred_at)#>>'{}' as occurred_at, a.actor,
-                a.kind, a.summary, a.detail, a.source
+                a.kind, a.summary, a.detail, a.source, a.email_context
            from v_deal_room_activity a
           where a.deal_id=$1 order by a.occurred_at desc, a.id desc limit 50`, [s.id]);
+      const emailThreads = await c.query(
+        `select conversation_id, subject, latest_message_at from (
+           select distinct on (email_context->>'conversation_id',
+                               case when nullif(email_context->>'conversation_id','') is null then id end)
+             nullif(email_context->>'conversation_id','') as conversation_id,
+             email_context->>'subject' as subject,
+             to_jsonb(occurred_at)#>>'{}' as latest_message_at, occurred_at, id
+           from v_deal_room_activity where deal_id=$1 and kind in ('email_in','email_out') and email_context is not null
+           order by email_context->>'conversation_id',
+                    case when nullif(email_context->>'conversation_id','') is null then id end,
+                    occurred_at desc, id desc
+         ) latest order by occurred_at desc, id desc`, [s.id]);
       const participants = await c.query(
         `select dp.role, dp.name, dp.actor, dp.party_id
            from v_deal_room_participant dp
@@ -9242,7 +9270,7 @@ registerTools({
         critical_dates: criticalDates.rows, next_actions: actions.rows,
         item_schema_version: DEAL_ITEMS_SCHEMA, items: actions.rows.filter(i => i.title && !['dropped', 'expired'].includes(i.status))
           .map(({ id,title,due_on,status,bullets,source_ref }) => ({ id,title,due_on,status,bullets,source_ref })),
-        activities: activities.rows, participants: participants.rows,
+        activities: activities.rows, email_threads: emailThreads.rows, participants: participants.rows,
         premises: premises.rows, negotiation_rounds: negotiation.rows,
         documents: documents.rows, events: history.rows });
     },

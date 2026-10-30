@@ -4,6 +4,9 @@ import argparse
 import contextlib
 import fcntl
 import os
+import json
+import tomllib
+from uuid import NAMESPACE_URL, uuid5
 from pathlib import Path
 import re
 import signal
@@ -20,7 +23,7 @@ python = Path(__file__).resolve().parents[1] / '.venv/bin/python'
 if python.is_file() and Path(sys.prefix) != python.parent.parent:
     os.execv(str(python), [str(python), __file__, *sys.argv[1:]])
 
-from skill_picker import prepare
+from skill_picker import prepare, header_type
 
 
 def job_log():
@@ -73,6 +76,40 @@ def delivery(clone, branch, start):
                      f'start={start} head={head or "unchecked"} pr={pr}')
 
 
+def register_job(args):
+    line = next((line for line in args.brief.splitlines() if line.startswith('Card:')), '')
+    card = line.removeprefix('Card:').strip() or '<missing>'
+    try:
+        match = re.fullmatch(r'WR([1-9]\d*)\.S([1-9]\d*)\.J([1-9]\d*)', card)
+        if not match or any(int(number) > 0x7fffffff for number in match.groups()[1:]):
+            raise ValueError('requires Card: WRn.Sm.Jk')
+        repository = args.repo
+        if Path(repository).exists():
+            repository = output(['git', '-C', repository, 'remote', 'get-url', 'origin']) or ''
+        repository = re.sub(r'^(?:https://github.com/|git@github[.]com:)', '', repository.strip()).removesuffix('.git')
+        settings_path = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))) / 'config.toml'
+        settings = tomllib.loads(settings_path.read_text()) if settings_path.exists() else {}
+        for config in args.config:
+            key, separator, value = config.partition('=')
+            if separator and key in ('model', 'model_reasoning_effort'):
+                settings[key] = value.strip('"\'')
+        runner = 'codex-' + str(uuid5(NAMESPACE_URL, repository + '/' + args.branch))
+        facts = dict(idempotency_key=str(uuid5(NAMESPACE_URL, card + '/' + runner)),
+                     work_request=f'WR-{int(match[1]):06d}', slice=int(match[2]), job=int(match[3]),
+                     runner_job_id=runner, repository=repository, executor='codex', job_type=header_type(args.brief),
+                     model=settings.get('model', 'default'), effort=settings.get('model_reasoning_effort', 'default'),
+                     card_title='Codex job', description='Execute the supplied job brief.')
+        reply = output([sys.executable, str(Path(__file__).resolve().parents[1] / 'tools/call-verb.py'),
+                        'dispatch-job', json.dumps(facts)])
+        receipt = json.loads(reply or '{}')
+        if not isinstance(receipt, dict) or receipt.get('ok') is not True or receipt.get('card_id') != card or receipt.get('runner_job_id') != runner:
+            raise ValueError('dispatch-job refused registration')
+    except (OSError, ValueError, TypeError):
+        print(f'codex-job: {card}: job registration refused', file=sys.stderr)
+        return False
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('repo', help='owner/repo, Git URL, or local Git repository')
@@ -83,6 +120,13 @@ def main():
     args = parser.parse_args()
     if args.timeout_seconds <= 0:
         parser.error("--timeout-seconds must be positive")
+    try:
+        brief, _ = prepare(args.brief, Path(__file__).resolve().parents[1])
+    except (OSError, ValueError) as error:
+        print(f'codex-job: {error}', file=sys.stderr)
+        return 1
+    if not register_job(args):
+        return 1
     timeout = runpy.run_path(str(Path(__file__).with_name("with-timeout.py")))
     repo = args.repo
     if not Path(repo).exists() and re.fullmatch(r'[\w.-]+/[\w.-]+', repo):
@@ -132,7 +176,6 @@ def main():
                                capture_output=True, text=True).stdout.strip()
         subprocess.run(['git', '-C', str(clone), 'config', 'user.email',
                         'jbookout@users.noreply.github.com'], check=True)
-        brief, _ = prepare(args.brief, clone)
         log = job_log()
         brief = (f'Job log: {log} (pass it to attach-memory as transcript_ref).' if log
                  else 'Job log: none (stderr is not a file).') + '\n\n' + brief

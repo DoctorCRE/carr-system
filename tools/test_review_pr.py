@@ -3,13 +3,15 @@ import json
 import runpy
 from pathlib import Path
 import subprocess
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 from unittest import TestCase, main, mock
 
 CLI = Path(__file__).resolve().parents[1] / 'bin/review-pr'
 
 
 class ReviewPR(TestCase):
-    def run_review(self, verdict='APPROVE', moved=False, malformed=False):
+    def run_review(self, verdict='APPROVE', moved=False, malformed=False, missing=()):
         calls, comments = [], []
 
         def run(*command, **options):
@@ -24,6 +26,7 @@ class ReviewPR(TestCase):
                 elif args[1] == 'comment': comments.append(Path(args[args.index('--body-file')+1]).read_text())
                 elif args[1] == 'merge' and moved == 'after-comment':
                     raise subprocess.CalledProcessError(1, command, stderr='head does not match')
+            elif name == 'git' and args[0] == 'rev-parse': output = 'a'*40
             elif name == 'claude':
                 if 'mcp__claude_ai_Slack__slack_send_message' in args: output = '123.456'
                 else: output = ('VERDICT: '+verdict+'\nReviewed-SHA: '+('b' if malformed else 'a')*40+'\nFinding') if any(n == 'sleep' and a == ['900'] for n, a, _ in calls) else 'WAIT'
@@ -31,7 +34,7 @@ class ReviewPR(TestCase):
             return output
 
         main_fn = runpy.run_path(str(CLI))['main']
-        with mock.patch('sys.argv', [str(CLI), 'owner/repo', '42']), mock.patch.dict(main_fn.__globals__, run=run):
+        with mock.patch('sys.argv', [str(CLI), 'owner/repo', '42']), mock.patch.dict(main_fn.__globals__, run=run, skill_findings=lambda body: list(missing)):
             try: main_fn()
             except (ValueError, subprocess.CalledProcessError) as failure: return str(failure), calls, ''.join(comments)
         return None, calls, ''.join(comments)
@@ -40,10 +43,12 @@ class ReviewPR(TestCase):
         help_text = ' '.join(subprocess.check_output(['python3', str(CLI), '--help'], text=True).split())
         self.assertIn('Have Dot review a PR', help_text)
         self.assertNotIn('--reviewer', help_text)
+        self.assertIn('authoring job must never review its own PR', help_text)
 
     def test_approve_posts_pinned_review_and_arms_auto_merge(self):
         error, calls, comment = self.run_review()
         self.assertIsNone(error)
+        self.assertTrue(any(name == 'git' and args == ['fetch', 'origin', 'pull/42/head'] for name, args, _ in calls))
         self.assertTrue(comment.startswith('VERDICT: APPROVE\nReviewed-SHA: '+'a'*40+'\nReviewer: the Dot\n'))
         self.assertTrue(any('--auto' in args and '--squash' in args and args[-2:] == ['--match-head-commit', 'a'*40] for name, args, _ in calls if name == 'gh'))
         self.assertIn('<@U0C5R40MBPE>', next(request for name, _, request in calls if name == 'claude'))
@@ -55,7 +60,25 @@ class ReviewPR(TestCase):
                 error, calls, comment = self.run_review(**options)
                 self.assertEqual(error is None, options.get('verdict') == 'CHANGES', error)
                 self.assertEqual(bool(comment), options.get('verdict') == 'CHANGES' or options.get('moved') == 'after-comment')
-                self.assertEqual(any(args[1:2] == ['merge'] for name, args, _ in calls if name == 'gh'), options.get('moved') == 'after-comment')
+                self.assertFalse(any(args[1:2] == ['merge'] for name, args, _ in calls if name == 'gh'))
+
+    def test_missing_skill_is_posted_and_prevents_auto_merge(self):
+        error, calls, comment = self.run_review(missing=['Required skill did not run: example'])
+        self.assertIsNone(error)
+        self.assertIn('VERDICT: CHANGES', comment)
+        self.assertIn('Required skill did not run: example', comment)
+        self.assertFalse(any(args[1:2] == ['merge'] for name, args, _ in calls if name == 'gh'))
+
+    def test_inconclusive_skill_findings_preserve_reviewer_verdict(self):
+        for finding in ('Build session log missing for Card WR1.S1.J1',
+                        'Multiple build session logs found for Card WR1.S1.J1; skill use cannot be determined',
+                        'Unknown job type: future'):
+            for verdict in ('APPROVE', 'CHANGES'):
+                with self.subTest(finding=finding, verdict=verdict):
+                    error, _, comment = self.run_review(verdict=verdict, missing=[finding])
+                    self.assertIsNone(error)
+                    self.assertTrue(comment.startswith('VERDICT: ' + verdict))
+                    self.assertIn(finding, comment)
 
     def test_dot_polls_thread_on_paid_run_schedule(self):
         error, calls, _ = self.run_review()

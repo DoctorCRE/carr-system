@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parent.parent
 TOOL = REPO / "tools" / "release-manifest.py"
@@ -77,13 +78,13 @@ def main() -> int:
     # filename/content pair.  A numeric-prefix comparison would incorrectly
     # accept this renamed migration; the release-manifest gate must refuse it.
     try:
-        RELEASE_MANIFEST.ensure_exact_schema_prefix(
-            [("0301a_schema.sql", "a" * 64)],
-            [("0301_schema.sql", "b" * 64)],
+        RELEASE_MANIFEST.validate_ledger_identities(
+            {"0301_schema.sql": "b" * 64},
+            {"0301a_schema.sql": "a" * 64},
         )
-    except SystemExit as exc:
+    except (ValueError, SystemExit) as exc:
         check("0e. an exact filename/content ledger mismatch is refused",
-              "exact migration ledger" in str(exc))
+              "missing from the tree" in str(exc))
     else:
         check("0e. an exact filename/content ledger mismatch is refused", False,
               "same-number migration rename was accepted")
@@ -91,8 +92,8 @@ def main() -> int:
     exact_prefix = [("0300_schema.sql", "a" * 64)]
     expected_tree = exact_prefix + [("0301_schema.sql", "b" * 64)]
     try:
-        RELEASE_MANIFEST.ensure_exact_schema_prefix(exact_prefix, expected_tree)
-    except SystemExit as exc:
+        RELEASE_MANIFEST.validate_ledger_identities(dict(expected_tree), dict(exact_prefix))
+    except (ValueError, SystemExit) as exc:
         check("0f. an exact pending migration suffix is accepted", False, str(exc))
     else:
         count, highest, digest = RELEASE_MANIFEST.schema_ledger_identity(expected_tree)
@@ -101,16 +102,49 @@ def main() -> int:
               and digest.startswith("sha256:") and len(digest) == 71)
 
     try:
-        RELEASE_MANIFEST.ensure_exact_schema_prefix(
-            [("0300_schema.sql", "a" * 64), ("0302_schema.sql", "c" * 64)],
-            expected_tree + [("0302_schema.sql", "c" * 64)],
+        RELEASE_MANIFEST.validate_ledger_identities(
+            dict(expected_tree + [("0302_schema.sql", "c" * 64)]),
+            {"0300_schema.sql": "a" * 64, "0302_schema.sql": "c" * 64},
         )
-    except SystemExit as exc:
-        check("0h. a hole inside the applied ledger is refused",
-              "exact migration ledger" in str(exc))
+    except (ValueError, SystemExit) as exc:
+        check("0h. a lower arrival after an applied higher file is accepted", False, str(exc))
     else:
-        check("0h. a hole inside the applied ledger is refused", False,
-              "non-prefix snapshot ledger was accepted")
+        check("0h. a lower arrival after an applied higher file is accepted", True)
+
+    baseline_document = json.loads((REPO / RELEASE_MANIFEST.MANIFEST).read_text())
+    baseline_rows = [(row["filename"], row["sha256"]) for row in baseline_document["migrations"]]
+    higher = ("9999_manifest_higher.sql", "e" * 64)
+    lower = ("9998_manifest_lower.sql", "d" * 64)
+    tree_rows = baseline_rows + [lower, higher]
+    applied_rows = baseline_rows + [higher]
+
+    def snapshot_git(*args):
+        if args[0] == "ls-tree":
+            return RELEASE_MANIFEST.MANIFEST
+        if args[-1].endswith(":" + RELEASE_MANIFEST.MANIFEST):
+            return json.dumps(baseline_document)
+        return RELEASE_MANIFEST.SCHEMA_LEDGER_COPY + "\n" + "".join(
+            f"{name}\t{digest}\t1970-01-01 00:00:00+00\n" for name, digest in applied_rows) + "\\.\n"
+
+    with patch.object(RELEASE_MANIFEST, "git", side_effect=snapshot_git), \
+            patch.object(RELEASE_MANIFEST, "migration_tree_ledger", return_value=tree_rows):
+        check("0j. manifest accepts a lower arrival and binds the complete post-rollout ledger",
+              RELEASE_MANIFEST.applied_schema_ledger("fixture") ==
+              RELEASE_MANIFEST.schema_ledger_identity(tree_rows))
+        for label, changed in (
+            ("missing baseline coverage", applied_rows[1:]),
+            ("edited checksum", baseline_rows + [(higher[0], "f" * 64)]),
+            ("missing applied file", applied_rows + [("9997_absent.sql", "a" * 64)]),
+        ):
+            original_rows = applied_rows
+            applied_rows = changed
+            try:
+                RELEASE_MANIFEST.applied_schema_ledger("fixture")
+            except SystemExit:
+                check(f"0k. manifest refuses {label}", True)
+            else:
+                check(f"0k. manifest refuses {label}", False)
+            applied_rows = original_rows
 
     # 1. determinism
     check("1. two builds of one SHA are identical",

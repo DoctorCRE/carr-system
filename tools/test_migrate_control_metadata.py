@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from urllib.parse import quote
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,14 +63,13 @@ class ApprovedControlMigrationTests(unittest.TestCase):
         cls.child = shadow.local_pg.scrub_cloud_environment(os.environ)
         cls.fixture = shadow.local_pg.DisposablePostgres('approved-control.', cls.bins / 'pg_ctl', cls.child)
         cls.addClassCleanup(cls.fixture.close)
-        cls.port = shadow.free_port(55800)
-        cls.dsn = f'postgres://carr_ci@127.0.0.1:{cls.port}/carr_ci'
+        cls.dsn = f'postgres://carr_ci@{quote(str(cls.fixture.root), safe="")}/carr_ci'
         cls.fixture.run([cls.bins / 'initdb', '-D', cls.fixture.root / 'data', '-U', 'carr_ci',
                          '--auth=trust', '--encoding=UTF8', '--no-locale'], check=True, capture_output=True)
         cls.fixture.run([cls.bins / 'pg_ctl', '-D', cls.fixture.root / 'data', '-l', cls.fixture.root / 'postgres.log',
-                         '-o', f'-h 127.0.0.1 -p {cls.port} -k {cls.fixture.root}', '-w', 'start'],
+                         '-o', f'-c listen_addresses= -k {cls.fixture.root}', '-w', 'start'],
                         check=True, capture_output=True)
-        cls.fixture.run([cls.bins / 'createdb', '-h', '127.0.0.1', '-p', str(cls.port), '-U', 'carr_ci', 'carr_ci'],
+        cls.fixture.run([cls.bins / 'createdb', '-h', str(cls.fixture.root), '-U', 'carr_ci', 'carr_ci'],
                         check=True, capture_output=True)
         with psycopg.connect(cls.dsn, autocommit=True) as conn:
             conn.execute('create role neondb_owner')
@@ -124,8 +124,8 @@ class ApprovedControlMigrationTests(unittest.TestCase):
         with self.psycopg.connect(self.dsn, autocommit=True) as conn:
             conn.execute('update doctrine_meta set generation=generation+1 where id=1')
             for statement, message in (
-                ("update schema_migrations set sha256=repeat('f',64) where filename=(select min(filename) from schema_migrations)", 'schema ledger prefix rewrite refused'),
-                ("delete from schema_migrations where filename=(select max(filename) from schema_migrations)", 'schema ledger rollback refused'),
+                ("update schema_migrations set sha256=repeat('f',64) where filename=(select min(filename) from schema_migrations)", 'applied schema migration rows are immutable'),
+                ("delete from schema_migrations where filename=(select max(filename) from schema_migrations)", 'applied schema migration rows are immutable'),
                 ('update doctrine_meta set generation=generation-1 where id=1', 'doctrine generation rollback refused'),
                 ('delete from ops.rule_load_layer where rule_id=(select rule_id from ops.rule_load_layer limit 1)', 'rule delivery projection is not activation-safe'),
             ):

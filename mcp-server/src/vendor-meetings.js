@@ -1,4 +1,5 @@
 // Expose vendor meeting records.
+import { vendorPeopleJoin, vendorPersonFields } from './vendor-people.js';
 import { ToolError } from './tool-error.ts';
 import { organizationTenantForActor } from './identity.js';
 import { CALENDAR_AGENDA_BOARD, calendarSection } from './brief-calendar.js';
@@ -9,20 +10,12 @@ const ZERO = '00000000-0000-0000-0000-000000000000';
 
 const statement = `with candidates as (
   select a.id as vendor_id,a.ref,a.party_id,a.company,
-    p.id as contact_id,p.name,p.email,p.phone,p.cell,p.city,p.state,
+    person.contact_id,person.name,person.email,person.phone,person.cell,person.city,person.state,
     vc.slug as category,vc.label as category_label,v.territory,v.offers as reason,
     coalesce(vd.workable,false) as workable,v.out_of_market,
-    f.flag_id,f.value,f.source,f.observed_at,f.expires_on,
-    coalesce(f.value->'found'='true'::jsonb and not f.proposes_correction
-      and f.value->>'epistemic_status'='source_backed'
-      and coalesce(f.value->>'internal','false')='false'
-      and f.value->>'location_type'='office'
-      and jsonb_typeof(f.value->'street_address')='string' and btrim(f.value->>'street_address')<>''
-      and jsonb_typeof(f.value->'city')='string' and btrim(f.value->>'city')<>''
-      and jsonb_typeof(f.value->'state')='string' and btrim(f.value->>'state')<>''
-      and btrim(f.source)<>'' and f.observed_at<=statement_timestamp()
-      and (f.expires_on is null or f.expires_on>=current_date),false) as office_verified,
-    exists(select 1 from public.party held where held.id in (a.party_id,p.id,(a.company->>'id')::uuid)
+    person.flag_id,person.value,person.source,person.observed_at,person.expires_on,
+    coalesce(person.office_verified,false) as office_verified,
+    exists(select 1 from public.party held where held.id in (a.party_id,person.contact_id,(a.company->>'id')::uuid)
       and ((held.contact_state<>'active' and (held.contact_state_until is null or held.contact_state_until>=current_date))
         or exists(select 1 from public.vendor avoided where avoided.party_id=held.id and avoided.merged_into is null and avoided.disposition='avoid')
         or exists(select 1 from public.lead suppressed where suppressed.party_id=held.id and (coalesce(suppressed.suppressed,false) or suppressed.stage='do_not_contact')))) as restricted
@@ -30,14 +23,7 @@ const statement = `with candidates as (
   join public.vendor v on v.id=a.id
   left join public.vendor_category vc on vc.slug=coalesce(v.category_slug,v.category)
   left join public.vendor_disposition vd on vd.slug=v.disposition
-  left join lateral jsonb_array_elements(a.contacts) contact on true
-  left join public.party p on p.id=(contact->>'id')::uuid
-  left join lateral (
-    select flag_id,value,source,observed_at,expires_on,proposes_correction
-    from public.v_record_flag_subject
-    where subject_type='party' and subject_id=p.id and kind='address'
-    order by observed_at desc,flag_id desc limit 1
-  ) f on true
+  ${vendorPeopleJoin}
 ), assessed as (
   select *,array_remove(array[
     case when nullif(btrim(name),'') is null then 'named_contact' end,
@@ -62,12 +48,8 @@ const statement = `with candidates as (
 select (select count(*)::int from filtered) as total,
   coalesce(jsonb_agg(jsonb_build_object(
     'vendor_id',vendor_id,'ref',ref,'party_id',party_id,'company',company,
-    'contact',case when contact_id is not null then jsonb_build_object('id',contact_id,'name',name,'email',email,'phone',phone,'cell',cell) end,
-    'category',category,'category_label',category_label,'service_coverage',territory,'reason',reason,'missing',missing,
-    'office',case when office_verified then jsonb_build_object('street_address',value->>'street_address','city',value->>'city',
-      'state',value->>'state','finding_id',flag_id,'source',source,'observed_at',observed_at,'expires_on',expires_on) end,
-    'research',jsonb_build_object('status',case when flag_id is null then 'not_researched' when office_verified then 'office_verified' else 'needs_review' end,
-      'finding_id',flag_id,'observed_at',observed_at,'expires_on',expires_on)
+    ${vendorPersonFields},
+    'category',category,'category_label',category_label,'service_coverage',territory,'reason',reason,'missing',missing
   ) order by vendor_id,coalesce(contact_id,'${ZERO}'::uuid)),'[]'::jsonb) as items from page`;
 
 async function vendorCalendar(c, actor, items, now) {

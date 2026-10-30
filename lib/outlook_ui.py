@@ -182,12 +182,25 @@ def _windows(pid: int) -> list[dict]:
     return cua('list_windows', {'pid': pid}).get('windows') or []
 
 
+def button_matches(element: dict, name: str) -> bool:
+    """Match an AX button name before Outlook's comma-separated state suffixes."""
+    label = element.get('label') or ''
+    if element.get('role') != 'AXButton' or not label or not name:
+        return False
+    base, separator, state = str(label).partition(', ')
+    return base == name and (not separator or all(part in {
+        'pressed', 'selected', 'expanded', 'collapsed', 'checked', 'unchecked',
+    } for part in state.split(', ')))
+
+
 def _readable(pid: int, window: dict) -> bool:
     state = cua('get_window_state', {'pid': pid, 'window_id': window['window_id'],
                                      'include_screenshot': False, 'max_elements': LIST_WALK})
-    controls = {(e.get('role'), e.get('label')) for e in state.get('elements') or []}
+    elements = state.get('elements') or []
     return (not str(state.get('degraded_reason') or '').startswith('ax_window_unresolved')
-            and {('AXButton', 'New Mail'), ('AXTable', 'Message List')} <= controls)
+            and any(button_matches(e, 'New Mail') for e in elements)
+            and any(e.get('role') == 'AXTable' and e.get('label') == 'Message List'
+                    for e in elements))
 
 
 def usable_window(pid: int) -> dict | None:
@@ -208,7 +221,8 @@ def compose_window_open(pid: int, windows: list[dict]) -> bool:
         controls = {(element.get('role'), element.get('label'))
                     for element in state.get('elements') or []}
         if (not str(state.get('degraded_reason') or '').startswith('ax_window_unresolved')
-                and ({('AXButton', 'Send'), ('AXTextField', 'Subject')} & controls)):
+                and (any(button_matches(e, 'Send') for e in state.get('elements') or [])
+                     or ('AXTextField', 'Subject') in controls)):
             return True
     return False
 
@@ -352,7 +366,7 @@ class Window:
 
     def select_all_accounts(self) -> bool:
         buttons = [e for e in self._walk(**PANE_WALK)
-                   if e.get('role') == 'AXButton' and e.get('label') == 'All Accounts']
+                   if button_matches(e, 'All Accounts')]
         if len(buttons) != 1:
             return False
         cua('click', {'pid': self.pid, 'element_token': buttons[0]['element_token'],
@@ -552,7 +566,7 @@ class Window:
         if [r.label for r in selected] != [label]:
             return Moved.FAILED
         elements = self._walk(max_elements=LIST_WALK)
-        moves = [e for e in elements if e.get('role') == 'AXButton' and e.get('label') == 'Move'
+        moves = [e for e in elements if button_matches(e, 'Move')
                  and e.get('depth') == 1]
         if len(moves) != 1:
             return Moved.FAILED
