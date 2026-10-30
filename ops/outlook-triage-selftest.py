@@ -186,8 +186,9 @@ if name == 'ioreg':
         if state.get('ioreg_unreadable'):
             print(state.get('ioreg_output', 'unreadable'))
         else:
-            sys.stdout.buffer.write(plistlib.dumps([{'IOConsoleUsers': [
-                {'CGSSessionScreenIsLocked': state.get('screen_locked', False)}]}]))
+            users = state.get('console_users', [{'kCGSSessionUserIDKey': os.getuid(),
+                                                 'CGSSessionScreenIsLocked': state.get('screen_locked', False)}])
+            sys.stdout.buffer.write(plistlib.dumps([{'IOConsoleUsers': users}]))
         sys.exit(state.get('ioreg_exit', 0))
     print('    | |   "HIDIdleTime" = %d' % int(state['idle_seconds'] * 1e9))
     sys.exit(0)
@@ -513,8 +514,27 @@ class PreflightQuitTest(FakeOutlookCase):
         self.assert_no_restart()
         self.assertEqual(self.called('pgrep') + self.called('cua-driver'), [])
 
+    def test_lock_probe_only_uses_current_console_user(self):
+        for other_locked, current_locked in ((False, True), (True, False)):
+            with self.subTest(other_locked=other_locked, current_locked=current_locked):
+                self.calls.unlink(missing_ok=True)
+                self.given(console_users=[
+                    {'kCGSSessionUserIDKey': os.getuid() + 1, 'CGSSessionScreenIsLocked': other_locked},
+                    {'kCGSSessionUserIDKey': os.getuid(), 'CGSSessionScreenIsLocked': current_locked},
+                ])
+                outcome = self.prepare()
+                if current_locked:
+                    self.assertEqual(outcome, triage.Outcome('skipped', 'screen_locked'))
+                    self.assert_no_restart()
+                else:
+                    self.assertIsNone(outcome)
+                    self.assertTrue(self.called('open'))
+
     def test_unlocked_or_unreadable_lock_probe_follows_existing_preflight(self):
-        for options in ({'screen_locked': False}, {'ioreg_unreadable': True},
+        for options in ({'screen_locked': False},
+                        {'console_users': [{'kCGSSessionUserIDKey': os.getuid() + 1,
+                                            'CGSSessionScreenIsLocked': True}]},
+                        {'ioreg_unreadable': True},
                         {'ioreg_unreadable': True, 'ioreg_output': '<?xml version="1.0"?><plist><array>'},
                         {'screen_locked': True, 'ioreg_exit': 1}):
             with self.subTest(options=options):
