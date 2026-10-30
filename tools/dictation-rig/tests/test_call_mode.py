@@ -22,7 +22,7 @@ from email.message import Message
 from pathlib import Path
 from unittest.mock import Mock, patch
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, TypedDict
 from typesafe_sdk import TypeSafeError
 
 
@@ -81,6 +81,17 @@ def tearDownModule() -> None:
         client_patch.stop()
 
 
+class CallState(TypedDict, total=False):
+    sessions: list[dict[str, object]]
+    state: str
+    status_text: str
+    transcription_attempts: int
+    extraction_attempts: int
+    session: str
+    mode: str
+    speaker_labels: dict[str, str]
+
+
 class CallModeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -94,7 +105,7 @@ class CallModeTests(unittest.TestCase):
         path.mkdir()
         return path
 
-    def state(self) -> dict[str, object]:
+    def state(self) -> CallState:
         with patch.object(call_mode, "partner_from_device", return_value="Joe"):
             return call_mode.current_state(self.recordings)
 
