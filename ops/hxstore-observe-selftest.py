@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the real count-only CLI with synthetic bytes, never a private store."""
 import json
+import runpy
 from pathlib import Path
 import sqlite3
 import struct
@@ -73,11 +74,8 @@ class ObservationTests(unittest.TestCase):
             obj.extend(b'\1\1\1\1\0' + text(name))
             return wrapped(0x04d8, obj)
 
-        message = typed(0xca, 70, 70, 500)
-        message[408:454] = typed(0x4d, 51, 7, 46, 2)
-        message.extend(text('sender@example.test') + text('Synthetic Sender'))
-        message.extend(text('IPM.Note') + text('<message@example.test>'))
-        message.extend(b'<html><body>Synthetic message carries a document attachment.</body></html>')
+        fixture = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
+        message = fixture['message'](70, folder=51) + fixture['body'](70, html='<p>Synthetic attachment note.</p>')
         attachment = typed(0x16a, 80, 99, 600)
         attachment[360:406] = typed(0xca, 70, 70, 46)
         struct.pack_into('<Q', attachment, 558, 4096)
@@ -85,7 +83,7 @@ class ObservationTests(unittest.TestCase):
         attachment.extend(text('~/Files/S0/42/Attachments/0/Lease[123].pdf'))
         attachment.extend(b'\1\1\1\1\0' + text('Lease.pdf') + text('part-1@example.test'))
         data = store(folder(50, 'Active Deals') + folder(51, 'Deal A', 50)
-                     + wrapped(0x074e, message) + wrapped(0x0318, attachment))
+                     + message + wrapped(0x0318, attachment))
         with tempfile.TemporaryDirectory() as tmp:
             source, db = Path(tmp) / 'store.hxd', Path(tmp) / 'decoded.db'
             source.write_bytes(data)
@@ -106,18 +104,8 @@ class ObservationTests(unittest.TestCase):
                     [('Lease.pdf', 4096, 'application/pdf', 'part-1@example.test')])
 
     def test_messages_with_tied_send_times_export_in_the_same_order_every_run(self):
-        def text(value):
-            return value.encode('utf-16le') + b'\0\0'
-
-        def message(key, sender):
-            obj = bytearray(500)
-            struct.pack_into('<H', obj, 0, 0xca)
-            struct.pack_into('<QIQQQ', obj, 10, key, 0, key, key, key)
-            obj.extend(text(sender) + text('Synthetic Sender') + text('IPM.Note') + text(f'<{key}@example.test>'))
-            obj.extend(f'<html><body>Synthetic opening {key} about the suite tour.</body></html>'.encode())
-            return struct.pack('<HHIH', 5, 0x074e, len(obj) + 10, 0) + bytes(obj)
-
-        data = store(b''.join(message(70 + i, f'sender{i}@example.test') for i in range(8)))
+        message = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))['message']
+        data = store(b''.join(message(70 + i, f'sender{i}@example.test') for i in reversed(range(8))))
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / 'store.hxd'
             source.write_bytes(data)

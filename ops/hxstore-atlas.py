@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the store atlas and generate its reference or hxprobe key names."""
+"""Validate the store atlas and generate its reference or the confirmed spans hxprobe observes."""
 
 import argparse
 import json
@@ -55,7 +55,7 @@ def validate(atlas):
     for source in sources.values():
         if not re.fullmatch(r"[0-9a-f]{40}", source["revision"]) or not re.fullmatch(r"[0-9a-f]{64}", source["sha256"]):
             raise ValueError("unbound source")
-    ids, keys, names = set(), set(), set()
+    ids = set()
     for entry in atlas["entries"]:
         if not entry["id"] or entry["id"] in ids:
             raise ValueError("duplicate or empty entry ID")
@@ -85,31 +85,15 @@ def validate(atlas):
         for evidence in entry["evidence"]:
             if evidence["source"] not in sources or not evidence["symbol"]:
                 raise ValueError("unbound evidence")
-        key = entry.get("decoder_key")
-        if key is not None:
-            if entry["identifier"]["kind"] != "string_run_selector" or not re.fullmatch(r"[A-Z][A-Za-z0-9]*", key) or key in keys or entry["name"] in names:
-                raise ValueError("invalid or duplicate decoder key")
-            keys.add(key)
-            names.add(entry["name"])
     for entry in atlas["entries"]:
         if entry["parent"] is not None and entry["parent"] not in ids:
             raise ValueError("unknown parent")
-    if not keys:
-        raise ValueError("no decoder keys")
     return atlas
 
 
 def rust_names(atlas):
     validate(atlas)
-    fields = sorted((e["decoder_key"], e["name"]) for e in atlas["entries"] if "decoder_key" in e)
-    lines = ["// Generated from spec/outlook/hxstore-atlas.json. Do not edit.",
-             "#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]", "pub enum Key {"]
-    lines.extend(f"    {key}," for key, _ in fields)
-    lines.extend(["}", "impl Key {", "    pub const ALL: &'static [Key] = &["])
-    lines.extend(f"        Key::{key}," for key, _ in fields)
-    lines.extend(["    ];", "    pub fn as_str(self) -> &'static str {", "        match self {"])
-    lines.extend(f"            Key::{key} => {json.dumps(name, ensure_ascii=False)}," for key, name in fields)
-    lines.extend(["        }", "    }", "}", ""])
+    lines = ["// Generated from spec/outlook/hxstore-atlas.json. Do not edit."]
     lines.extend([
         "pub struct ConfirmedSpan {",
         "    pub field_id: &'static str, pub record_type: &'static str,",

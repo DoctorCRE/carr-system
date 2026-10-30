@@ -2,7 +2,7 @@
 
 #[path = "../fuzz/src/lib.rs"]
 mod parsers;
-use parsers::{block, lz, record};
+use parsers::{block, lz, message, object};
 
 #[test]
 fn block_offset_overflow_is_rejected() {
@@ -18,24 +18,15 @@ fn impossible_lz4_output_size_is_rejected_without_allocating() {
 }
 
 #[test]
-fn truncated_record_anchor_is_rejected() {
-    for anchor in [0, 1] {
-        assert!(record::parse(0, &[], anchor).is_none());
-    }
-}
-
-#[test]
-fn overflowing_record_anchor_is_rejected() {
-    assert!(record::parse(0, &[], usize::MAX).is_none());
-}
-
-#[test]
-fn overflowing_field_window_is_bounded_to_input() {
-    let bytes = b"x\0a\0b\0c\0\0\0";
-    let fields = record::fields(bytes, 2, 0, usize::MAX);
-    assert_eq!(fields.len(), 1);
-    assert_eq!(fields[0].text, "abc");
-    assert!(record::fields(bytes, usize::MAX, 0, 0).is_empty());
+fn overflowing_slot_offsets_and_lengths_are_rejected() {
+    let mut bytes = vec![0u8; 200];
+    bytes[120..124].copy_from_slice(&u32::MAX.to_le_bytes());
+    bytes[124..128].copy_from_slice(&u32::MAX.to_le_bytes());
+    let o = object::Object::new(&bytes, 100).unwrap();
+    assert_eq!(o.slot(120), None);
+    assert_eq!(o.slot(usize::MAX), None);
+    assert!(object::Object::new(&bytes, usize::MAX).is_none());
+    assert_eq!(o.reference(usize::MAX, 0x00c9, 212), None);
 }
 
 struct Random(u64);
@@ -103,12 +94,29 @@ fn literal_block(payload: &[u8]) -> Vec<u8> {
     bytes
 }
 
+fn utf16(text: &str) -> Vec<u8> {
+    text.encode_utf16().chain([0]).flat_map(u16::to_le_bytes).collect()
+}
+
+/// An enveloped class 00c9 message object: identity header, sender and ItemClass slots.
 fn synthetic_record() -> Vec<u8> {
-    let mut bytes: Vec<_> = "sender@example.test\0Synthetic Sender\0IPM.Note\0"
-        .encode_utf16()
-        .flat_map(u16::to_le_bytes)
-        .collect();
-    bytes.extend_from_slice(b"<html><body>hello world synthetic fixture body text</body></html>");
+    let mut obj = vec![0u8; 1541];
+    obj[0] = 0xc9;
+    for (at, v) in [(10, 70u64), (22, 7), (30, 70), (38, 7)] {
+        obj[at..at + 8].copy_from_slice(&v.to_le_bytes());
+    }
+    obj[18..22].copy_from_slice(&212u32.to_le_bytes());
+    let mut heap = Vec::new();
+    for (at, value) in [(1386, utf16("sender@example.test")), (1226, utf16("IPM.Note"))] {
+        obj[at..at + 4].copy_from_slice(&(heap.len() as u32).to_le_bytes());
+        obj[at + 4..at + 8].copy_from_slice(&(value.len() as u32 | 0x8000_0000).to_le_bytes());
+        heap.extend(value);
+    }
+    obj.extend(heap);
+    let mut bytes = vec![5, 0, 0x0f, 0x06];
+    bytes.extend(((obj.len() + 10) as u32).to_le_bytes());
+    bytes.extend([0, 0]);
+    bytes.extend(obj);
     bytes
 }
 
@@ -120,10 +128,11 @@ fn valid_synthetic_block_and_record_keep_decoded_output() {
     let decoded = block::parse(&block_bytes, 0).expect("synthetic block passes both CRCs");
     assert_eq!(decoded.kind, 8);
     assert_eq!(decoded.data, bytes);
-    let anchor = memchr::memmem::find(&bytes, &record::anchor_needle()).unwrap();
-    let message = record::parse(0, &bytes, anchor).expect("synthetic record has a valid anchor");
-    assert_eq!(message.sender.as_deref(), Some("sender@example.test"));
-    assert_eq!(message.body, "hello world synthetic fixture body text");
+    let mut index = message::Index::default();
+    index.observe(0, &decoded.data);
+    let messages = index.messages();
+    assert_eq!(messages[&70].sender.as_deref(), Some("sender@example.test"));
+    assert_eq!(messages[&70].item_class.as_deref(), Some("IPM.Note"));
 
     let mut bad_header = block_bytes.clone();
     bad_header[16] ^= 1;
@@ -165,7 +174,7 @@ fn run_cases(seed: u64, iterations: usize) {
         for bytes in [&arbitrary, &mutated_block, &mutated_record, &mutated_lz] {
             parsers::fuzz_block(bytes);
             parsers::fuzz_lz4(bytes);
-            parsers::fuzz_record(bytes);
+            parsers::fuzz_message(bytes);
         }
     }
     eprintln!("{} inputs per parser, seed {seed:#x}", iterations * 4);

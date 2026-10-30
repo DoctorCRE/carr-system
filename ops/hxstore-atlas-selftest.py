@@ -1,78 +1,17 @@
 #!/usr/bin/env python3
-"""Atlas contracts and hxprobe output, using generated synthetic bytes only."""
+"""Atlas contracts, checked against the committed atlas and its pinned sources."""
 
 import copy
 import hashlib
 import json
-import os
 from pathlib import Path
-import shutil
-import struct
 import subprocess
 import sys
 import tempfile
 import unittest
-import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "spec/outlook/hxstore-atlas.json"
-
-
-def synthetic_store():
-    text = "IPM.Note\0<fixture@example.test>\0Synthetic subject\0Synthetic subject\0"
-    data = b"\0" * 32 + text.encode("utf-16le")
-    extra = len(data) - 15
-    compressed = bytes([0xf0]) + bytes([255]) * (extra // 255) + bytes([extra % 255]) + data
-    block = bytearray(40) + compressed
-    struct.pack_into("<QIIII", block, 8, 0x5d0245643b706a05, 8, len(compressed), len(data), 4)
-    struct.pack_into("<I", block, 4, zlib.crc32(block[8:]))
-    struct.pack_into("<I", block, 0, zlib.crc32(block[4:32]))
-    header = bytearray(64)
-    header[:8] = b"Nostromo"
-    header[8] = ord("i")
-    struct.pack_into("<Q", header, 56, 4096)
-    return header + block
-
-
-class DecoderNameTests(unittest.TestCase):
-    def test_renaming_atlas_entry_changes_rebuilt_hxprobe_map_and_tally(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            crate = root / "vendor/hxprobe"
-            shutil.copytree(ROOT / "vendor/hxprobe", crate,
-                            ignore=shutil.ignore_patterns("target", ".git"))
-            (root / "ops").mkdir()
-            generator = ROOT / "ops/hxstore-atlas.py"
-            shutil.copyfile(generator, root / "ops/hxstore-atlas.py")
-            target = root / "spec/outlook/hxstore-atlas.json"
-            target.parent.mkdir(parents=True)
-            atlas = json.loads(ATLAS.read_text())
-            target.write_text(json.dumps(atlas))
-            fixture = root / "synthetic.hxd"
-            fixture.write_bytes(synthetic_store())
-            env = dict(os.environ, CARGO_TARGET_DIR=str(ROOT / "vendor/hxprobe/target/atlas-selftest"))
-
-            def output():
-                build = subprocess.run(["cargo", "build", "--locked"], cwd=crate, env=env,
-                                       capture_output=True, text=True, timeout=180)
-                self.assertEqual(build.returncode, 0, build.stderr)
-                binary = Path(env["CARGO_TARGET_DIR"]) / "debug/hxprobe"
-                result = subprocess.run([str(binary), "map", str(fixture), "1"],
-                                        capture_output=True, text=True, timeout=10)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                return result.stdout
-
-            before = output()
-            self.assertIn("ItemClass", before)
-            entry = next(e for e in atlas["entries"] if e.get("decoder_key") == "ItemClass")
-            entry["name"] = "RenamedClass"
-            target.write_text(json.dumps(atlas))
-            after = output()
-            self.assertNotIn("ItemClass", after)
-            self.assertEqual(after.count("RenamedClass"), 2, after)
-            self.assertEqual(
-                sorted(" ".join(line.split()) for line in before.replace("ItemClass", "RenamedClass").splitlines()),
-                sorted(" ".join(line.split()) for line in after.splitlines()))
 
 
 class AtlasContractTests(unittest.TestCase):
@@ -87,21 +26,13 @@ class AtlasContractTests(unittest.TestCase):
                                   capture_output=True, text=True, timeout=10)
 
     def test_reference_changes_when_atlas_name_changes(self):
-        field = next(e for e in self.atlas["entries"] if e.get("decoder_key") == "ItemClass")
-        field["name"] = "Example renamed class"
+        field = next(e for e in self.atlas["entries"] if e["id"] == "object.class.00c9.offset.718")
+        field["name"] = "Example renamed send time"
         result = self.run_cli(self.atlas)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("## Example renamed class (mail.selector.ItemClass)", result.stdout)
-        self.assertIn('"kind": "string_run_selector"', result.stdout)
+        self.assertIn("## Example renamed send time (object.class.00c9.offset.718)", result.stdout)
+        self.assertIn('"confidence": "proven"', result.stdout)
         self.assertIn('"first_seen_version": null', result.stdout)
-
-    def test_duplicate_display_names_cannot_collapse_tally_keys(self):
-        fields = [e for e in self.atlas["entries"] if "decoder_key" in e]
-        fields[1]["name"] = fields[0]["name"]
-        result = self.run_cli(self.atlas, "rust")
-        self.assertEqual(result.returncode, 2)
-        self.assertEqual(result.stdout, "")
-        self.assertEqual(result.stderr, "store atlas is invalid\n")
 
     def test_reference_matches_committed_atlas(self):
         result = self.run_cli(self.atlas)

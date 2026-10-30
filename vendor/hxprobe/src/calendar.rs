@@ -53,7 +53,7 @@ const STATUS_BYTES: usize = 12;
 const GOID_PREFIX: &str = "040000008200E00074C5B7101A82E008";
 const UNIX_EPOCH_TICKS: u64 = 621_355_968_000_000_000;
 // 2015-01-01 .. 2040-01-01: events are scheduled ahead, so the window reaches
-// further forward than the mail send-time window in record.rs.
+// further forward than any mail send time.
 const TICK_LO: u64 = 635_556_672_000_000_000;
 const TICK_HI: u64 = 643_446_720_000_000_000;
 
