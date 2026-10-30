@@ -505,7 +505,10 @@ class CallModeHandler(BaseHTTPRequestHandler):
                 return
             if len(parts) == 6 and parts[1:4] == ["api", "post-call", "drafts"] and parts[5] == "checked":
                 target = session_path(str(body.get("session") or ""))
-                self.send_json(post_call.resolve_outlook_intent(target, unquote(parts[4]), body.get("exists")))
+                exists = body.get("exists")
+                if not isinstance(exists, bool):
+                    raise post_call.ContractError("exists must be true or false")
+                self.send_json(post_call.resolve_outlook_intent(target, unquote(parts[4]), exists))
                 return
             self.send_json({"error": "not_found"}, 404)
         except post_call.ContractError as exc:

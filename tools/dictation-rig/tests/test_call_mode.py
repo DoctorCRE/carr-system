@@ -615,6 +615,16 @@ class CallModeHttpTests(unittest.TestCase):
                     post_call.create_outlook_draft(session, "draft", "approved", create)
                     create.assert_called_once()
 
+    def test_checked_outlook_rejects_non_boolean_before_resolving(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "s1").mkdir()
+            body = b'{"session":"s1","exists":"false"}'
+            handler = self.handler("/api/post-call/drafts/draft/checked", body, "https://dealroom.doctorcre.com")
+            with patch.object(call_mode, "RECORDINGS", Path(tmp)), patch.object(call_mode.post_call, "resolve_outlook_intent") as resolve:
+                handler.do_POST()
+            handler.send_json.assert_called_once_with({"error": "exists must be true or false"}, 400)
+            resolve.assert_not_called()
+
     def test_checked_outlook_refuses_without_intent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             session = Path(tmp) / "s1"
