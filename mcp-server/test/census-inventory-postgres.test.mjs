@@ -100,6 +100,8 @@ test('the migration removes every hash page, leaves real boards, and registers t
   assert.deepEqual(grants, ['insert', 'update']);
   assert.equal((await c.query('select ops.scac_mutation_catalog_v118_current() as valid')).rows[0].valid, true);
   const predecessor = { ...SCAC_MUTATION_CURRENT_DB_GRANTS,
+    relation_dml: SCAC_MUTATION_CURRENT_DB_GRANTS.relation_dml
+      .filter(g => g.ingress_key !== 'db-relation-acl:ops.work_request_slice:carr_writer:update'),
     secdef_execute: SCAC_MUTATION_CURRENT_DB_GRANTS.secdef_execute
       .filter(g => !g.signature.startsWith('ops.reap_expired_runs(')) };
   assert.deepEqual((await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract,

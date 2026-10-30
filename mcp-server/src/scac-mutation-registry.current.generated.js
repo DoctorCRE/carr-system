@@ -628,6 +628,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "close-work-request-slice": {
+    "ingress_key": "mcp-tool:close-work-request-slice",
+    "source_locator": "mcp-server/src/work-queue.js",
+    "schema_digest": "d05688430d13bfb77b2ffbcdad6627c23585cf9496b3238a6e6183985974b841",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "commit-winning-property": {
     "ingress_key": "mcp-tool:commit-winning-property",
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
@@ -3901,21 +3911,6 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.adopt_rule(p_section_id uuid, p_base_version bigint, p_idempotency_key text, p_reason text)",
       "volatility": "v",
       "ingress_key": "db-function-acl:ops.adopt_rule(p_section_id uuid, p_base_version bigint, p_idempotency_key text, p_reason text):carr_authority:execute",
-      "ingress_kind": "db_function_acl",
-      "function_kind": "f",
-      "security_definer": true
-    },
-    {
-      "config": [
-        "search_path=pg_catalog, pg_temp"
-      ],
-      "grantee": "carr_jobs",
-      "parallel": "u",
-      "grantable": false,
-      "privilege": "execute",
-      "signature": "ops.reap_expired_runs(p_service_id uuid, p_environment text, p_run_key text, p_limit integer)",
-      "volatility": "v",
-      "ingress_key": "db-function-acl:ops.reap_expired_runs(p_service_id uuid, p_environment text, p_run_key text, p_limit integer):carr_jobs:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true

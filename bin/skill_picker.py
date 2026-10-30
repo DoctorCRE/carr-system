@@ -82,7 +82,7 @@ def prepare(brief: str, repo: Path, *, home: Path | None = None):
     names = dict.fromkeys(name for stage in job['stages'].values()
                          for name in stage['skills'] + [item['skill'] for item in
                                                         stage.get('conditional_skills', [])])
-    available = {}
+    available: dict[str, Skill] = {}
     for skill in catalog(repo, home=home):
         available.setdefault(skill.name, skill)
     blocks = ['## Required skills', '### Workflow stages\n\n```yaml\n'

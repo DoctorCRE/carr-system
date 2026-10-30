@@ -2,7 +2,19 @@
   "autoCompactEnabled": true,
   "autoCompactWindow": 500000,
   "hooks": {
-    "PreToolUse": [],
+    "PreToolUse": [
+      {
+        "matcher": "Agent|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "r=\"${HOME}/carr-system\"; [ -f \"$r/hooks/agent-card-gate.py\" ] || r=\"${CLAUDE_PROJECT_DIR:-}\"; if [ ! -f \"$r/hooks/agent-card-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script $r/hooks/agent-card-gate.py; skipping\" >&2; exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/agent-card-gate.py\"",
+            "timeout": 10,
+            "onFailure": "block"
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [
