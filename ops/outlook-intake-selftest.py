@@ -629,7 +629,7 @@ class IntakeTest(unittest.TestCase):
         ports.copy_attachments, ports.put_object = copy, put
         return ports
 
-    def test_unresolved_attachment_deals_do_not_hold_the_run(self):
+    def test_attachment_routing_reasons_do_not_hold_the_run(self):
         for scenario in ('missing_folder', 'ambiguous_folder', 'no_deal', 'duplicate_deal'):
             with self.subTest(scenario=scenario):
                 self.fake.fixture.unlink(missing_ok=True)
@@ -643,16 +643,44 @@ class IntakeTest(unittest.TestCase):
                     self.deals.append({**self.deals[0], 'id': 'other'})
                 result = intake.run(self.repo, self.home, ports)
                 self.assertEqual(result.state, 'succeeded')
-                self.assertEqual(result.counts['attachments_unresolved'], 1)
+                reason = {'missing_folder': 'folder_missing', 'ambiguous_folder': 'folder_ambiguous',
+                          'no_deal': 'deal_missing', 'duplicate_deal': 'deal_ambiguous'}[scenario]
+                self.assertEqual(result.counts['attachments_' + reason], 1)
+                self.assertEqual(result.counts.get('attachments_unresolved', 0), 0)
                 state = json.loads((self.out() / intake.STATE).read_text())
                 self.assertFalse(state['attachments_pending'])
                 self.assertTrue(state['store'])
                 self.assertEqual(self.copied, [])
 
+    def test_ambiguous_attachment_clients_are_counted_without_copying(self):
+        ports = self.attachment_fixture(sender=OWNER)
+        with sqlite3.connect(self.fake.fixture) as con:
+            con.execute('UPDATE messages SET recipients = ? WHERE id = 1',
+                        ('pat@example.test; lee@example.test',))
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.counts.get('attachments_client_ambiguous', 0), 1)
+        self.assertEqual(result.counts.get('attachments_unresolved', 0), 0)
+        self.assertEqual((self.copied, self.uploads, self.filed), ([], {}, {}))
+
+    def test_attachment_routing_counts_files_and_ignores_completed_files(self):
+        ports = self.attachment_fixture(folders=('Inbox',))
+        with sqlite3.connect(self.fake.fixture) as con:
+            con.execute('INSERT INTO attachments SELECT 8, message_key, name, name_verified, content_type, size, path '
+                        'FROM attachments WHERE id = 7')
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.counts['attachments_folder_missing'], 2)
+        state_path = self.out() / intake.STATE
+        state = json.loads(state_path.read_text())
+        identity = ident(mail('pat@example.test', -timedelta(hours=1)))
+        state['attachments_done'] = {f'{identity}/7': int(NOW.timestamp())}
+        state_path.write_text(json.dumps(state))
+        self.store.write_bytes(b'changed')
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.counts['attachments_folder_missing'], 1)
+
     def test_uncached_attachment_retries_then_expires(self):
         ports = self.attachment_fixture()
-        with sqlite3.connect(self.fake.fixture) as con:
-            con.execute('UPDATE attachments SET path = NULL WHERE id = 7')
+        ports.copy_attachments = lambda files, paths: None
         for _ in range(2):
             result = intake.run(self.repo, self.home, ports)
             self.assertEqual(result.state, 'succeeded')
@@ -664,12 +692,11 @@ class IntakeTest(unittest.TestCase):
 
     def test_uncached_attachment_is_filed_when_cached(self):
         ports = self.attachment_fixture()
-        with sqlite3.connect(self.fake.fixture) as con:
-            con.execute('UPDATE attachments SET path = NULL WHERE id = 7')
+        copy = ports.copy_attachments
+        ports.copy_attachments = lambda files, paths: None
         result = intake.run(self.repo, self.home, ports)
         self.assertEqual(result.counts['attachments_uncached'], 1)
-        with sqlite3.connect(self.fake.fixture) as con:
-            con.execute('UPDATE attachments SET path = ? WHERE id = 7', (self.cache_path,))
+        ports.copy_attachments = copy
         result = intake.run(self.repo, self.home, ports)
         self.assertEqual(result.state, 'succeeded')
         self.assertEqual(len(self.filed), 1)
@@ -678,12 +705,34 @@ class IntakeTest(unittest.TestCase):
     def test_uncached_attachment_does_not_block_cached_sibling(self):
         ports = self.attachment_fixture()
         with sqlite3.connect(self.fake.fixture) as con:
-            con.execute('INSERT INTO attachments VALUES(8,100,?,1,?,?,NULL)',
-                        ('pending.pdf', 'application/pdf', 100))
+            con.execute('INSERT INTO attachments VALUES(8,100,?,1,?,?,?)',
+                        ('pending.pdf', 'application/pdf', 100, '~/Files/S0/845/Attachments/1/pending.pdf'))
+        copy = ports.copy_attachments
+        ports.copy_attachments = lambda files, paths: copy(files, [p for p in paths if p == self.cache_path])
         for _ in range(2):
             result = intake.run(self.repo, self.home, ports)
             self.assertEqual(result.state, 'succeeded')
             self.assertEqual(result.counts['attachments_uncached'], 1)
+        self.assertEqual(len(self.filed), 1)
+
+    def test_conflicting_attachment_paths_are_broken_and_retry_without_copying(self):
+        ports = self.attachment_fixture()
+        with sqlite3.connect(self.fake.fixture) as con:
+            con.execute('UPDATE attachments SET path = NULL WHERE id = 7')
+        for _ in range(2):
+            result = intake.run(self.repo, self.home, ports)
+            self.assertEqual(result.counts.get('attachments_path_conflict', 0), 1)
+            self.assertEqual(result.counts.get('attachments_unresolved', 0), 1)
+            self.assertEqual(result.counts.get('attachments_uncached', 0), 0)
+            self.assertEqual(result.state, 'failed')
+            self.assertEqual((self.copied, self.uploads, self.filed), ([], {}, {}))
+            state = json.loads((self.out() / intake.STATE).read_text())
+            self.assertTrue(state['attachments_pending'])
+            self.assertFalse(state['attachments_uncached'])
+        with sqlite3.connect(self.fake.fixture) as con:
+            con.execute('UPDATE attachments SET path = ? WHERE id = 7', (self.cache_path,))
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.state, 'succeeded')
         self.assertEqual(len(self.filed), 1)
 
     def test_missing_cached_file_is_retried(self):
@@ -694,9 +743,21 @@ class IntakeTest(unittest.TestCase):
             self.assertEqual(result.state, 'succeeded')
             self.assertEqual(result.counts['attachments_uncached'], 1)
 
+    def test_invalid_attachment_path_is_broken_without_copying_bytes(self):
+        ports = self.attachment_fixture()
+        with sqlite3.connect(self.fake.fixture) as con:
+            con.execute('UPDATE attachments SET path = ? WHERE id = 7', ('~/Files/../Lease.pdf',))
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.state, 'failed')
+        self.assertEqual(result.counts.get('attachments_path_refused', 0), 1)
+        self.assertEqual(result.counts.get('attachments_unresolved', 0), 1)
+        self.assertEqual(result.counts.get('attachments_uncached', 0), 0)
+        self.assertEqual((self.copied, self.uploads, self.filed), ([], {}, {}))
+
     def test_attachment_status_controls_run_outcome(self):
         from lib import outlook_attachments, outlook_deal_files
-        for status in ('too_large', 'empty', 'type_refused', 'batch_cap', 'error', 'quota_refused', 'verb_failed'):
+        for status in ('too_large', 'empty', 'type_refused', 'batch_cap', 'error', 'path_refused', 'unreadable', 'path_conflict',
+                       'quota_refused', 'verb_failed'):
             with self.subTest(status=status):
                 self.fake.fixture.unlink(missing_ok=True)
                 shutil.rmtree(self.out(), ignore_errors=True)
@@ -713,6 +774,8 @@ class IntakeTest(unittest.TestCase):
                 terminal = status in ('too_large', 'empty', 'type_refused')
                 self.assertEqual(result.state, 'succeeded' if terminal else 'failed')
                 self.assertEqual(result.counts['attachments_' + status], 1)
+                self.assertEqual(result.counts.get('attachments_unresolved', 0),
+                                 int(status in ('error', 'path_refused', 'unreadable', 'path_conflict')))
                 state = json.loads((self.out() / intake.STATE).read_text())
                 self.assertEqual(state['attachments_pending'], not terminal)
                 self.assertEqual(len(state['attachments_done']), int(terminal))
@@ -766,7 +829,7 @@ class IntakeTest(unittest.TestCase):
         ports = self.attachment_fixture()
         self.deals.append({**self.deals[0], 'id': 'other-deal'})
         result = intake.run(self.repo, self.home, ports)
-        self.assertEqual(result.counts['attachments_unresolved'], 1)
+        self.assertEqual(result.counts['attachments_deal_ambiguous'], 1)
         self.assertEqual((self.copied, self.uploads, self.filed), ([], {}, {}))
 
     def test_attachment_failure_stays_retryable_after_initial_mail_backfill_window(self):
@@ -778,18 +841,18 @@ class IntakeTest(unittest.TestCase):
         intake.run(self.repo, self.home, ports)
         self.assertEqual(len(self.filed), 1)
 
-    def test_attachment_upgrade_decodes_an_unchanged_pre_wiring_store(self):
+    def test_attachment_policy_upgrade_reclassifies_an_unchanged_store(self):
         ports = self.attachment_fixture()
         intake.run(self.repo, self.home, ports)
         state_path = self.out() / intake.STATE
         state = json.loads(state_path.read_text())
-        state.pop('attachment_policy')
-        state.pop('attachments_done')
+        state['attachment_policy'] = 1
         state_path.write_text(json.dumps(state))
         before = self.fake.decodes
         intake.run(self.repo, self.home, ports)
         self.assertEqual(self.fake.decodes, before + 1)
         self.assertEqual(len(self.filed), 1)
+        self.assertEqual(self.copied, [self.cache_path])
 
     def test_attachment_batch_caps_do_not_starve_remaining_files_on_retry(self):
         ports = self.attachment_fixture()
