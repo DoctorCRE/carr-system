@@ -73,8 +73,8 @@ for XML and binary plists. Declaration meanings follow Apple's
 | Command | Result |
 | --- | --- |
 | `python3 ops/hxstore-atlas.py render spec/outlook/hxstore-atlas.json` | Generated Markdown reference on stdout. |
-| `python3 ops/hxstore-atlas.py rust spec/outlook/hxstore-atlas.json` | Generated Rust decoder keys and display names on stdout. |
-| `python3 ops/hxstore-atlas-selftest.py` | Seven synthetic contract and CLI tests, including rebuild after an atlas rename. |
+| `python3 ops/hxstore-atlas.py rust spec/outlook/hxstore-atlas.json` | Generated Rust confirmed spans for `hxprobe observe` on stdout. |
+| `python3 ops/hxstore-atlas-selftest.py` | Seven contract tests, including source pins reachable from main. |
 | `./ops/ci.sh --only hxprobe` | Existing synthetic Rust tests and locked release build. |
 
 `outlook-hxstore-atlas/v1` stores stable entry IDs with typed identifiers, names, wire types,
@@ -86,20 +86,14 @@ Containers, anchor regions, block types, serialized object classes, envelope tag
 and string selectors are separate identifier kinds. No numeric property-ID framing is established
 by the pinned reader. Each relevant record type retains an explicit unknown wire-field entry.
 Calendar offsets 574 and 582 are relative to the object body, ten bytes after the envelope starts.
-Inferred confidence describes implemented interpretations and heuristics. Unknown means unresolved.
-No entry claims empirical proof from a store observation performed by this desk.
+Proven entries are fixed object slots confirmed on labelled TEST-account mail and whole-store
+cross-object rates; their `observations` name the cases. Inferred confidence describes implemented
+interpretations without that confirmation. Unknown means unresolved.
 
 Cargo invokes the Python 3 standard-library generator at build time. It tracks the atlas and
-generator as build inputs. The generated enum, label mapping, and tally iteration replace their
-handwritten definitions in `schema.rs`. `decoder_key` is a stable extraction identity;
-`name` is the label shown by `hxprobe map` and `find`. Editing `name` requires rebuilding hxprobe.
-There is no runtime override or fallback name table. Invalid atlas input fails the build.
-Existing SQLite table and column names are separate derived outputs and retain their contracts.
-
-The synthetic CLI test creates its store bytes in a temporary directory. It does not read an
-Outlook app, profile, store, sidecar, or preference. It proves that an atlas rename changes both
-the real hxprobe field map and tally. It does not measure decoded-byte or wire-field-ID coverage.
-The count-only observation command below supplies the next criterion.
+generator as build inputs and emits the confirmed spans `hxprobe observe` counts. Mail fields are
+read from the slots the atlas records (`vendor/hxprobe/src/message.rs`), one row per message key;
+there are no string-run selectors or display-name keys. Invalid atlas input fails the build.
 
 ## Count-only store observation
 
@@ -194,8 +188,9 @@ the two load commands. It does not load or run the helper.
 7. Run `launchctl kickstart gui/$(id -u)/com.carr.outlook-research-copy` for each snapshot.
 8. Check `launchctl print gui/$(id -u)/com.carr.outlook-research-copy` for exit code 0 and a new snapshot containing `<snapshot>/manifest.json`.
 
-The job has no schedule and no RunAtLoad. Rebuilding or replacing the binary
-requires re-granting Full Disk Access. An unchanged pinned build preserves the
+The job has no schedule and no RunAtLoad. Without the `CARR Local Helpers`
+identity, rebuilding or replacing the binary requires re-granting Full Disk
+Access; with it, see the next section. An unchanged pinned build preserves the
 existing executable. The helper publishes a snapshot only after copying succeeds.
 It never deletes completed snapshots. The operator removes old snapshots when
 space is needed and preserves required study baselines. Existing snapshots do
@@ -212,3 +207,52 @@ in [the harness contract](hxstore-harness.json). Compare consecutive copies afte
 one TEST-account action and capture an unchanged control. Store bytes and sidecars
 remain local; snapshot creation never writes into Outlook or produces production
 records.
+
+## Keep Full Disk Access across helper rebuilds
+
+macOS ties an ad-hoc signed helper's Full Disk Access grant to its exact binary
+hash, so every rebuild drops the grant. When `security find-identity -p codesigning -v`
+lists `CARR Local Helpers`, both installers sign their helper with that certificate
+under a fixed identifier and an explicit designated requirement:
+`designated => identifier "com.carr.outlook-intake-copy" and certificate leaf = H"<certificate SHA-1>"`
+(and `com.carr.outlook-research-copy` for the research helper), verify it, and print it.
+The grant then follows the identifier and certificate, so a rebuild needs no consent
+and no re-grant. Without the identity, each installer prints one line and keeps the
+pinned ad-hoc helper exactly as before. The installers only read the keychain.
+
+### Joe's steps
+
+All steps are required, once per Mac, at the Mac itself. Steps 8 to 10 apply only
+when the agent reports that `find-identity` does not list the certificate.
+
+1. Open Keychain Access from Spotlight.
+2. Choose **Keychain Access > Certificate Assistant > Create a Certificate**.
+3. Enter the name `CARR Local Helpers`.
+4. Set **Identity Type** to **Self Signed Root**.
+5. Set **Certificate Type** to **Code Signing**.
+6. Click **Create**; the certificate is saved in the login keychain.
+7. Click **Done**.
+8. Only if the agent reports it unlisted: double-click `CARR Local Helpers` under **My Certificates**.
+9. Only then: under **Trust**, set **Code Signing** to **Always Trust**.
+10. Only then: close the window and enter the Mac login password.
+11. At each `codesign` keychain prompt while the agent installs, enter the Mac login password.
+12. Click **Always Allow**.
+13. Open **System Settings > Privacy & Security > Full Disk Access**.
+14. Remove the old **outlook-intake-copy** and **outlook-research-copy** rows with the minus button.
+15. Click the plus button.
+16. Press **Cmd-Shift-G**, paste `~/carr-local/bin/`, and press **Return**.
+17. Command-click **outlook-intake-copy** and **outlook-research-copy**, then click **Open**.
+18. Turn both switches on.
+
+### Agent verifies
+
+Run these on the Mac in a local session, never over SSH, because `codesign` needs
+the keychain prompt in steps 11 and 12.
+
+1. After step 7, run `security find-identity -p codesigning -v`; if it omits `CARR Local Helpers`, ask for steps 8 to 10 and run it again.
+2. Run `./bin/install-outlook-intake.sh` and `./bin/install-outlook-research-copy.sh`; each prints its requirement, which must name its identifier and `certificate leaf`, not `cdhash`.
+3. After step 18, delete `~/carr-local/bin/outlook-intake-copy.pin` and `~/carr-local/bin/outlook-research-copy.pin`, then run both installers again; they rebuild without asking.
+4. Check the next scheduled intake run succeeds, with no `full_disk_access_required` failure.
+5. With Outlook quit, run `launchctl kickstart gui/$(id -u)/com.carr.outlook-research-copy` and check `launchctl print` shows last exit code 0.
+
+Do not create a second certificate later: replacing it changes the requirement and needs one more re-grant.

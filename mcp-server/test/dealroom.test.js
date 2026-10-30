@@ -63,6 +63,8 @@ class FakeClient {
   async query(text, params = []) {
     const sql = text.replace(/\s+/g, " ").trim();
 
+    if (sql.includes('select conversation_id, subject, latest_message_at from')) return { rows: [] };
+
     if (sql.startsWith("select request_hash, response")) {
       const prior = this.toolCalls.get(params[0]);
       return { rows: prior ? [{ request_hash: prior.request_hash, response: prior.response }] : [] };

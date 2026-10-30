@@ -92,6 +92,13 @@ if [ -e "$VENDOR/hxprobe/Cargo.toml" ] || { [ -n "$HAVE_PIN" ] && [ "${HAVE_PIN#
   print -u2 -- "install-outlook-intake: $VENDOR holds the old upstream decoder checkout; move it aside first"
   exit 1
 fi
+# Before the decoder is replaced, one reconcile-only intake pass over the installed decoder's rows
+# saves each held message's Message-ID, so intake state follows the new decoder's identities.
+# It files nothing, is skipped once state has them, and a failure stops the install.
+STATE="$REPO/out/outlook-intake/state.json"
+if [ -x "$VENDOR/hxprobe/target/release/hxprobe" ] && [ -f "$STATE" ] && ! grep -q '"mail_ids"' "$STATE"; then
+  "$PY" -c 'from lib.outlook_intake import main; raise SystemExit(main())' --reconcile-only
+fi
 "$PY" "$REPO/ops/hxprobe-source-digest.py" --build-into "$VENDOR"
 rm -f "$PIN"
 

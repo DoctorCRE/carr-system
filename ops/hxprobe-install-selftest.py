@@ -22,7 +22,7 @@ from outlook_test_support import write_settings
 CRATE = ROOT / 'vendor/hxprobe'
 SOURCES = ('vendor/hxprobe', 'spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py')
 INSTALLER_FILES = ('ops/hxprobe-source-digest.py', 'ops/config-as-code.py', 'ops/git_env.py', 'ops/config/services.json', 'bin/install-outlook-intake.sh', 'tools/outlook-intake-copy.c',
-                   'ops/launchd/com.carr.outlook-intake.plist')
+                   'ops/launchd/com.carr.outlook-intake.plist', 'tools/credential_env.py')
 
 
 def sha256(path: Path) -> str:
@@ -51,6 +51,16 @@ class InstalledDecoderTest(unittest.TestCase):
         codesign = self.repo / '.venv/bin/codesign'
         codesign.write_text(f'#!{sys.executable}\n')
         codesign.chmod(0o700)
+        security = self.repo / '.venv/bin/security'
+        security.write_text(f'#!{sys.executable}\nprint("     0 valid identities found")\n')
+        security.chmod(0o700)
+        launchctl = self.repo / '.venv/bin/launchctl'
+        launchctl.write_text(f'#!{sys.executable}\nimport sys\n'
+                             'if len(sys.argv) != 3 or sys.argv[1] != "print" or not sys.argv[2].endswith("/com.carr.outlook-refresh"):\n'
+                             '    sys.exit(1)\n'
+                             'sys.stderr.write(\'Could not find service "com.carr.outlook-refresh"\\n\')\n'
+                             'sys.exit(113)\n')
+        launchctl.chmod(0o700)
         (self.repo / '.gitignore').write_text('.venv/\nout\ntarget/\n')
         self.git('init', '--quiet')
         self.commit('fixture')
@@ -110,6 +120,25 @@ class InstalledDecoderTest(unittest.TestCase):
         self.assertIn('does not match .carr-build.json', result.stderr)
         self.assertEqual(sha256(self.decoder), self.ci_build)
         self.assertEqual(self.receipt()['binary_sha256'], self.ci_build)
+
+
+    def test_saved_intake_state_gets_one_reconcile_pass_on_the_old_decoder_before_it_is_replaced(self):
+        self.install()
+        with (self.repo / 'vendor/hxprobe/tests/parser_regressions.rs').open('a') as tests:
+            tests.write('\n// Fixture source change.\n')
+        self.commit('source change')
+        state = self.repo / 'out/outlook-intake/state.json'
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text(json.dumps({'mail_unresolved': {}}))
+        built = self.receipt()
+        # No copy helper exists in this fixture, so the pass fails, and the old decoder must stay.
+        failed = self.install(check=False)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn('outlook-intake failed reconcile_failed', failed.stdout)
+        self.assertEqual(self.receipt(), built)
+        state.write_text(json.dumps({'mail_unresolved': {}, 'mail_ids': {}}))
+        self.install()
+        self.assertNotEqual(self.receipt()['source_digest'], built['source_digest'])
 
 
 if __name__ == '__main__':

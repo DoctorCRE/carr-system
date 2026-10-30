@@ -170,6 +170,12 @@
       "verbs": [
         "cancel-capability-session"
       ]
+    },
+    {
+      "reference": "https://github.com/DoctorCRE/carr-system/pull/2692",
+      "verbs": [
+        "email-proposal-quality"
+      ]
     }
   ]
 }

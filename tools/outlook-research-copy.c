@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <mach-o/dyld.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,6 +29,15 @@ static int staging_root = -1;
 static int staging_work = -1;
 static char staging_name[72];
 static int remove_contents(int fd);
+static void fail(void);
+
+static void missing_access(void) {
+    char path[PATH_MAX], resolved[PATH_MAX];
+    uint32_t size = sizeof path;
+    if (_NSGetExecutablePath(path, &size) != 0 || !realpath(path, resolved)) fail();
+    fprintf(stderr, "full_disk_access_missing: %s\nGrant Full Disk Access to this helper in System Settings.\n", resolved);
+    exit(77);
+}
 
 static void fail(void) {
     int code = errno ? errno : EIO;
@@ -67,7 +77,10 @@ static int absolute_directory(const char *fixed, int create_last) {
         require(strcmp(part, ".") != 0 && strcmp(part, "..") != 0);
         if (!next_part && create_last && mkdirat(fd, part, 0700) != 0 && errno != EEXIST) fail();
         int next = directory(fd, part);
-        if (next < 0) fail();
+        if (next < 0) {
+            if (!create_last && errno == EPERM) missing_access();
+            fail();
+        }
         close(fd);
         fd = next;
         part = next_part;
