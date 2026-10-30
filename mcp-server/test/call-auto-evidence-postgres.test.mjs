@@ -353,3 +353,26 @@ test('an earlier completed step cannot hide a later call plan with a retained ac
     assert.equal(room.next_date, '2030-01-01');
   } finally { delete c.jevClient; }
 });
+
+for (const mode of ['whole-call', 'change']) for (const order of ['call-first', 'activity-first'])
+  test(`${mode} undo ${order} keeps a completed retained action off the board`, async () => {
+  const call = await filePhase('We discussed parking at the other property.', { kind: 'next_step', overdue: true });
+  c.jevClient = { systemOne: async request => completionAnswer(request, 'no') };
+  try {
+    await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: call.id, accept: true, automatic: true });
+    c.jevClient = { systemOne: async request => completionAnswer(request) };
+    const activity = await filePhase('The landlord sent the requested revised terms.', { kind: 'activity', existingDeal: call.deal });
+    await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: activity.id, accept: true });
+    const sequence = order === 'call-first' ? [call, activity] : [activity, call];
+    for (const item of sequence) {
+      if (item === call && mode === 'change') await command('undo-call-change', { idempotency_key: randomUUID(),
+        candidate_id: call.id, base_version: (await command('get-deal-room', { deal: call.deal })).base_version });
+      else await command('undo-call', { idempotency_key: randomUUID(), session_id: item.session });
+    }
+    const room = await command('get-deal-room', { deal: call.deal });
+    assert.equal(room.next_actions.find(a => a.id === call.prior.next_action_id).status, 'done');
+    assert.deepEqual([room.next_step, room.next_date, room.next_step_required], [null, null, true]);
+    const board = (await command('deal-room-board')).deals.find(d => d.id === call.deal);
+    assert.deepEqual([board.next_step, board.next_date, board.next_step_required], [null, null, true]);
+  } finally { delete c.jevClient; }
+});
