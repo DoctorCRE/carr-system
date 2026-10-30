@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Require a registered work queue Card before launching an independent job."""
+"""Require a registered work queue Card before launching any agent or Codex job."""
 import json
 import os
 import signal
@@ -28,8 +28,6 @@ def decide(event):
         return
     inputs = event.get('tool_input', {})
     if event.get('tool_name') == 'Agent':
-        if inputs.get('run_in_background') is not True:
-            return
         prompts = [inputs.get('prompt', '')]
     elif event.get('tool_name') == 'Bash':
         command = inputs.get('command', '')
