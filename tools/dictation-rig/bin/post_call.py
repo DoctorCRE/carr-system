@@ -734,7 +734,8 @@ def run_session(session_dir: Path, *, publish: bool = True) -> dict[str, Any]:
     return status
 
 
-def process_session(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]] = default_distiller) -> dict[str, Any]:
+def process_session(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]] = default_distiller, *,
+                    run_checks: bool = True, max_attempts: int = 3) -> dict[str, Any]:
     lock_path = session_dir / LOCK_FILE
     lock_path.touch(exist_ok=True)
     lock_path.chmod(0o600)
@@ -743,7 +744,7 @@ def process_session(session_dir: Path, distiller: Callable[[dict[str, Any]], dic
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise RuntimeError("post-call distillation already active for this session") from exc
-        return _process_session_locked(session_dir, distiller)
+        return _process_session_locked(session_dir, distiller, run_checks=run_checks, max_attempts=max_attempts)
 
 
 def _complete_session(session_dir: Path, report: dict[str, Any]) -> dict[str, Any]:
@@ -757,7 +758,8 @@ def _complete_session(session_dir: Path, report: dict[str, Any]) -> dict[str, An
     return status
 
 
-def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any]:
+def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]], *,
+                            run_checks: bool = True, max_attempts: int = 3) -> dict[str, Any]:
     if (session_dir / REPORT_FILE).exists():
         existing = read_json(session_dir / STATUS_FILE)
         if existing is not None and existing.get("state") in {"ready_review", "filed"}:
@@ -768,7 +770,7 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         return _complete_session(session_dir, report)
     existing = read_json(session_dir / STATUS_FILE) or {}
     attempts = existing.get("extraction_attempts", 0)
-    if attempts >= len(EXTRACTION_RETRY_DELAYS) + 1:
+    if attempts >= max_attempts:
         existing.update({"state": "needs_attention", "next_attempt_at": None})
         write_private(session_dir / STATUS_FILE, existing)
         return existing
@@ -797,9 +799,9 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
     request = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "context": context, "transcript": transcript, "call_date": call_date}
     attempts += 1
     next_attempt_at = None
-    if attempts <= len(EXTRACTION_RETRY_DELAYS):
+    if attempts < max_attempts:
         next_attempt_at = (datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                           + timedelta(seconds=EXTRACTION_RETRY_DELAYS[attempts - 1])).strftime("%Y-%m-%dT%H:%M:%SZ")
+                           + timedelta(seconds=EXTRACTION_RETRY_DELAYS[min(attempts - 1, len(EXTRACTION_RETRY_DELAYS) - 1)])).strftime("%Y-%m-%dT%H:%M:%SZ")
     status = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "state": "blocked", "updated_at": timestamp,
               "extraction_attempts": attempts, "next_attempt_at": next_attempt_at, "reason": "Extraction attempt did not finish."}
     write_private(session_dir / STATUS_FILE, status)
@@ -810,7 +812,7 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         failed_at = now()
         if next_attempt_at is not None:
             next_attempt_at = (datetime.fromisoformat(failed_at.replace("Z", "+00:00"))
-                               + timedelta(seconds=EXTRACTION_RETRY_DELAYS[attempts - 1])).strftime("%Y-%m-%dT%H:%M:%SZ")
+                               + timedelta(seconds=EXTRACTION_RETRY_DELAYS[min(attempts - 1, len(EXTRACTION_RETRY_DELAYS) - 1)])).strftime("%Y-%m-%dT%H:%M:%SZ")
         status.update({"state": "needs_attention" if next_attempt_at is None else "blocked", "updated_at": failed_at,
                        "next_attempt_at": next_attempt_at, "reason": str(exc)})
         write_private(session_dir / STATUS_FILE, status)
@@ -819,6 +821,8 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
     speaker_context = {**context, "speaker_labels": stored_context.get("speaker_labels"),
                        "local_partner": stored_context.get("recorder")}
     try:
+        if not run_checks:
+            raise RuntimeError("Phone checks require an admitted Jev budget")
         import post_call_jev
 
         result = post_call_jev.check_distillation(result, speaker_context, transcript, client=_jev_fixture_client())
