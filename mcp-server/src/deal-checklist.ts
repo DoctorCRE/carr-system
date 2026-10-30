@@ -136,9 +136,6 @@ export async function readDealChecklist(client: Db, record: ChecklistDeal, now =
     commissions = await client.query(
       `select commission_id, status, to_jsonb(received_on)#>>'{}' as received_on
          from v_deal_room_commission where deal_id=$1 order by commission_id /* checklist:commissions */`, [record.id]);
-    requests = await client.query(`select id,row_key,owner,to_char(due_on,'YYYY-MM-DD') as due_on,
-      document_type,satisfied,receipts from v_requirement_request
-      where organization_tenant_id='carr-internal' and deal_id=$1 order by row_key /* checklist:requests */`, [record.id]);
   } catch (error) {
     if ((error as { code?: string }).code !== '42P01') throw error;
     if (!storageUnavailableLogged) {
@@ -147,6 +144,11 @@ export async function readDealChecklist(client: Db, record: ChecklistDeal, now =
     }
     return { schema_version: 'deal-checklist.v1', template_state: 'unavailable', phases: [], due_items: [] };
   }
+  const available = await client.query("select to_regclass('v_requirement_request') as relation /* checklist:requests-available */");
+  requests = available.rows[0]?.relation ? await client.query(`select id,row_key,owner,to_char(due_on,'YYYY-MM-DD') as due_on,
+    document_type,satisfied,receipts from v_requirement_request
+    where organization_tenant_id='carr-internal' and deal_id=$1 order by row_key /* checklist:requests */`, [record.id]) : null;
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
-  return deriveDealChecklist({ ...record, commissions: commissions.rows, requests: requests.rows }, sources.rows, today);
+  return { ...deriveDealChecklist({ ...record, commissions: commissions.rows, requests: requests?.rows }, sources.rows, today),
+    requests_state: requests ? 'current' : 'unavailable' };
 }

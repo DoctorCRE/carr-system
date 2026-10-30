@@ -60,7 +60,12 @@ test('a requested checklist row receives a quarantined PDF without becoming sati
     });
     await t.test('missing requests view degrades the checklist', async () => {
       await c.query('alter view v_requirement_request rename to hidden_requests');
-      try { assert.equal((await readDealChecklist(c, { id: deal })).template_state, 'unavailable'); }
+      try {
+        const checklist = await readDealChecklist(c, { id: deal, type: 'purchase' });
+        assert.equal(checklist.template_state, 'current');
+        assert.ok(checklist.phases.flatMap(p => p.items).some(row => row.id === 'title_commitment'));
+        assert.equal(checklist.requests_state, 'unavailable');
+      }
       finally { await c.query('alter view hidden_requests rename to v_requirement_request'); }
     });
     const request_id = requested.request.id;
@@ -160,6 +165,29 @@ test('a requested checklist row receives a quarantined PDF without becoming sati
           assert.equal(Number((await c.query('select reserved_bytes from ops.requirement_upload_quota')).rows[0].reserved_bytes), quota);
         } finally { if (outcome === 'receipt') await c.query('drop trigger reject_receipt on ops.requirement_upload_receipt'); }
       }
+    });
+    await t.test('lost receipt confirmation preserves the uploaded object and quota', async () => {
+      const g = await grant();
+      const before = Number((await c.query('select reserved_bytes from ops.requirement_upload_quota')).rows[0].reserved_bytes);
+      let transactions = 0;
+      const lostConfirmation = createRequirementUploadHandler({ visitorSecret: 'synthetic-visitor-secret',
+        bucket: { put: async (key, bytes) => objects.set(key, Buffer.from(bytes)), delete: async key => objects.delete(key) },
+        transaction: async fn => {
+          await c.query('begin');
+          try {
+            const result = await fn(c);
+            await c.query('commit');
+            if (++transactions === 4) throw new Error('synthetic lost confirmation');
+            return result;
+          } catch (error) { await c.query('rollback'); throw error; }
+        },
+      });
+      const response = await lostConfirmation(new Request(`https://share.doctorcre.com${g.upload_path}`, { method: 'POST', body: pdf,
+        headers: { authorization: `Bearer ${g.token}`, 'content-type': 'application/pdf', 'content-length': String(pdf.length), 'cf-connecting-ip': '192.0.2.88' } }));
+      assert.equal(response.status, 503);
+      const receipt = (await c.query('select r2_key from ops.requirement_upload_receipt where grant_id=$1', [g.grant_id])).rows[0];
+      assert.ok(objects.has(receipt.r2_key));
+      assert.equal(Number((await c.query('select reserved_bytes from ops.requirement_upload_quota')).rows[0].reserved_bytes), before + pdf.length);
     });
     await t.test('per-visitor write reservations stop the third attempt and leave another visitor independent', async () => {
       const visitor = '192.0.2.20';
