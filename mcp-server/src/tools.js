@@ -2386,7 +2386,9 @@ async function appendDealNextStep(c, actor, dealId, text, nextDate, key, preserv
     "select id, text from deal_note where deal_id=$1 and kind='next_step' order by created_at desc, id desc limit 1 /* dealroom:current-step */",
     [dealId],
   );
-  const board = (await c.query("select next_step from v_deal_room_board where id=$1 /* dealroom:board-step */", [dealId])).rows[0];
+  const board = (await c.query(`select b.next_step, n.id as board_next_action_id from v_deal_room_board b
+    left join v_deal_current_action n on n.deal_id=b.id and n.status='open'
+    where b.id=$1 /* dealroom:board-step */`, [dealId])).rows[0];
   const note = await c.query(
     "insert into deal_note (deal_id, kind, text, actor_id, created_at) values ($1,'next_step',$2,$3,clock_timestamp()) returning id, to_jsonb(created_at)#>>'{}' as created_at /* dealroom:add-next-step */",
     [dealId, text, actor.id],
@@ -2412,7 +2414,7 @@ async function appendDealNextStep(c, actor, dealId, text, nextDate, key, preserv
     [dealId, actor.id, nextDate, text, actionStatus]);
   await writeEvent(c, actor, "set-next-step", "deal", dealId, {
     field: "next_step",
-    old: { next_step: prior.rows[0]?.text ?? null, ...(board ? { board_next_step: board.next_step ?? null } : {}) },
+    old: { next_step: prior.rows[0]?.text ?? null, ...(board ? { board_next_step: board.next_step ?? null, board_next_action_id: board.board_next_action_id ?? null } : {}) },
     new: { next_step: text, next_date: nextDate, next_action_id: action.rows[0].id,
       replaced_action_ids: replaced.map(row => row.id) },
     recorded_at_after_lock: true,
@@ -2508,18 +2510,19 @@ const callNextStepItems = Symbol('call next step items');
 const captureKey = id => derivedIdempotencyKey("capture-candidate", id);
 const captureKeys = id => [`capture:${id}`, captureKey(id)];
 
-// A call creates a replacement action. The preceding plan event retains the original action ID.
+// Match the action the board showed at apply time. Older events have only its text.
 async function completedRetainedStep(c, dealId, candidateIds, firstStepEventId) {
   return (await c.query(
-    `select 1 from event request join next_action n on n.subject_type='deal' and n.subject_id=$1
+    `select 1 from event first_step join event request on request.subject_type='deal' and request.subject_id=$1
+      join next_action n on n.subject_type='deal' and n.subject_id=$1
        and request.new_value->'actions' @> jsonb_build_array(jsonb_build_object('id',n.id::text,'source','next_action'))
-      where request.subject_type='deal' and request.subject_id=$1 and request.field='overdue_assessment_pending'
+      where first_step.id=$3 and request.field='overdue_assessment_pending'
         and request.new_value->>'candidate_id'=any($2::text[]) and n.status='done'
-        and n.id::text=(select prior.new_value->>'next_action_id' from event prior
-          where prior.subject_type='deal' and prior.subject_id=$1 and prior.field='next_step'
-            and prior.new_value ? 'next_action_id'
-            and (prior.recorded_at,prior.id) < (select first.recorded_at,first.id from event first where first.id=$3)
-          order by prior.recorded_at desc,prior.id desc limit 1)
+        and case when first_step.old_value ? 'board_next_action_id'
+          then n.id::text=first_step.old_value->>'board_next_action_id'
+          else n.description=case when first_step.old_value ? 'board_next_step'
+            then first_step.old_value->>'board_next_step' else first_step.old_value->>'next_step' end
+        end
       limit 1 /* call-outcome:undo-step-completed-prior */`, [dealId, candidateIds, firstStepEventId])).rows.length > 0;
 }
 
