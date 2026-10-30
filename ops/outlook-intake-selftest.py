@@ -984,6 +984,42 @@ class IntakeTest(unittest.TestCase):
                 self.assertEqual(result.counts['emails'], 0)
                 self.assertEqual(len(self.fake.writes('log-activity')), 1)
 
+    def test_receipt_measures_every_work_folder_without_recipient_filtering(self):
+        messages = [mail('pat@example.test', -timedelta(hours=1), subject=f'Synthetic {i}',
+                         recipients='alias@example.test', local_keys=str(100 + i)) for i in range(8)]
+        messages[-1]['folder_account'] = 8
+        write_db(self.fake.fixture, messages)
+        with sqlite3.connect(self.fake.fixture) as con:
+            con.executemany('INSERT INTO folders VALUES(?,?,?,?,?)', [
+                (10, 7, 'Sent Items', 'top', None), (11, 7, 'Drafts', 'top', None),
+                (12, 7, 'Archive', 'top', None), (13, 7, 'Projects', 'folder', 7),
+                (14, 7, 'Synthetic', 'folder', 13), (15, 7, 'Documents', 'folder', 14),
+                (16, 7, 'Deleted Items', 'top', None), (17, 7, 'Junk Email', 'top', None)])
+            for message_id, folder_id in enumerate((7, 10, 11, 12, 15, 16, 17), 1):
+                con.execute('UPDATE message_folders SET folder_id=? WHERE message_id=?',
+                            (folder_id, message_id))
+            con.execute('INSERT INTO message_folders VALUES(5,7)')
+            con.execute('INSERT INTO message_folders VALUES(5,14)')
+        first = intake.run(self.repo, self.home, self.fake.ports())
+        self.assertEqual(first.state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 7)
+        for result in (first, intake.run(self.repo, self.home, self.fake.ports())):
+            counts = json.loads(intake.receipt_line(result).split(' ', 1)[1])['counts']['backlog']
+            self.assertEqual((counts['stored'], counts['admitted']), (8, 8))
+            self.assertEqual(counts['mail_outside_selected_account'], 1)
+            for kind, expected in (('inbox', 2), ('sent', 2), ('drafts', 1), ('archive', 1),
+                                   ('user', 1), ('deleted', 1), ('junk', 1), ('unknown', 0)):
+                self.assertEqual((counts['stored_' + kind], counts['admitted_' + kind]),
+                                 (expected, expected), kind)
+        with sqlite3.connect(self.fake.fixture) as con:
+            con.execute('DELETE FROM message_folders WHERE message_id=5')
+            con.execute('INSERT INTO message_folders VALUES(5,12)')
+        self.store.write_bytes(self.store.read_bytes() + b'.')
+        moved = intake.run(self.repo, self.home, self.fake.ports())
+        self.assertEqual((moved.counts['stored'], moved.counts['admitted']), (8, 8))
+        self.assertEqual((moved.counts['stored_user'], moved.counts['stored_archive']), (0, 2))
+        self.assertEqual(len(self.fake.writes('log-activity')), 7)
+
     def test_unresolved_retries_do_not_count_as_new_emails(self):
         message = mail('unknown@example.test', -timedelta(hours=1))
         first = self.run_intake([message])
