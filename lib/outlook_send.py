@@ -405,7 +405,7 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
            submitted: bool = False) -> Result:
     if submitted and isinstance(item, Mail) and ledger.states(key):
         rows = [r for r in map(json.loads, ledger.path.read_text().splitlines()) if r.get('key') == key]
-        done = next((r for r in rows if r['state'] == State.DONE.value and r.get('sent_item_id')), None)
+        done = next((r for r in reversed(rows) if r['state'] == State.DONE.value and r.get('sent_item_id')), None)
         if done and done.get('sent_at'):
             return Result(State.DONE, 'confirmed_in_mailbox', sent_item_id=done['sent_item_id'], sent_at=done['sent_at'])
         if rows[-1]['state'] in NOT_DISPATCHED:

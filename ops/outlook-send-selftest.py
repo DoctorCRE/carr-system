@@ -1060,6 +1060,18 @@ class OutboxTests(unittest.TestCase):
             return {'recipients': [{'email': e, 'blocked': False} for e in args['emails']]}
         return dict(ok=True, proposal_id=self.draft['proposal_id'], status=args.get('status'))
 
+    def test_recovered_older_ledger_retains_the_observed_sent_time(self):
+        self.worker.run(self.settings, self.ports)
+        ledger = self.ports.out / send_mod.LEDGER
+        rows = [json.loads(line) for line in ledger.read_text().splitlines()]
+        for row in rows:
+            row.pop('sent_at', None)
+        ledger.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+        self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
+        self.mailbox.sent.clear()
+        self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
+        self.assertEqual(len(self.sent), 1)
+
     def test_pending_sent_receipt_recovers_observed_time_without_resending(self):
         draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
         root = self.ports.out / 'outbox'
