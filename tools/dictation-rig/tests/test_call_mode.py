@@ -875,6 +875,8 @@ class PostCallTests(unittest.TestCase):
         update = post_call.report_for_deal_room(self.session)["report"]["deal_updates"][0]
         self.assertEqual(update["candidate_status"], "confirmed")
         self.assertEqual(update["next_step"]["candidate_status"], "skipped")
+        for question in post_call.report_for_deal_room(self.session)["report"]["review_questions"]:
+            post_call.resolve_question(self.session, question["id"], "Reviewed the advisory check.")
         self.assertIsNotNone(post_call.retention_ready(self.session, "a" * 64))
 
     def test_explicit_phase_move_reaches_review_and_waits_for_its_own_disposition(self) -> None:
@@ -900,6 +902,8 @@ class PostCallTests(unittest.TestCase):
         self.assertIsNone(post_call.retention_ready(self.session, "a" * 64))
         post_call.apply_candidate_statuses(self.session, {"phase-candidate": "skipped"})
         self.assertEqual(post_call.report_for_deal_room(self.session)["report"]["deal_updates"][0]["phase_move"]["candidate_status"], "skipped")
+        for question in post_call.report_for_deal_room(self.session)["report"]["review_questions"]:
+            post_call.resolve_question(self.session, question["id"], "Reviewed the advisory check.")
         self.assertIsNotNone(post_call.retention_ready(self.session, "a" * 64))
 
     def test_phase_proposals_reject_unsupported_shapes_and_quarantine_unknown_deals(self) -> None:
@@ -1330,6 +1334,9 @@ class PostCallTests(unittest.TestCase):
                 item["candidate_id"] = f"{list_name}-{index}"
                 item["candidate_status"] = "confirmed"
         post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        self.assertIsNone(post_call.retention_ready(self.session, "b" * 64))
+        for question in report["review_questions"]:
+            post_call.resolve_question(self.session, question["id"], "Reviewed the advisory check.")
         receipt = post_call.retention_ready(self.session, "b" * 64)
         self.assertEqual(receipt["pending_items"], 0)
         self.assertTrue(receipt["aggregate_report_hash"])

@@ -633,6 +633,10 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         if not (session_dir / post_call.REPORT_FILE).exists():
             log_line(f"POLL session={name} post_call local report unavailable — holding recordings")
             return verified(session_dir, "poll")
+        local_report = post_call.read_json(session_dir / post_call.REPORT_FILE)
+        if local_report is None or not post_call.review_complete(local_report):
+            log_line(f"POLL session={name} unresolved review questions — holding recordings")
+            return verified(session_dir, "poll")
         sync_candidate_statuses(session_dir, resp)
         raw_candidates = resp.get("candidates")
         post_call_candidates: dict[str, Any] = raw_candidates if isinstance(raw_candidates, dict) else {}

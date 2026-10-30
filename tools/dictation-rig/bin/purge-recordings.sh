@@ -62,7 +62,7 @@ log_line() {
 # clock. Prints PURGE, or HOLD with the reason. Pure stdlib python3, same
 # dependency posture as transcribe_session.py.
 marker_verdict() {
-    python3 - "$1" "$GRACE_HOURS" <<'PY' 2>/dev/null || echo "HOLD unreadable-marker"
+    python3 - "$1" "$GRACE_HOURS" "$0" <<'PY' 2>/dev/null || echo "HOLD unreadable-marker"
 import datetime, json, sys
 path, grace_hours = sys.argv[1], float(sys.argv[2])
 try:
@@ -79,6 +79,14 @@ if marker.get("post_call") is True:
         print("HOLD pending-post-call-items"); raise SystemExit(0)
 elif not str(marker.get("meeting_record") or "").strip():
     print("HOLD no-meeting-record"); raise SystemExit(0)
+from pathlib import Path
+sys.path.insert(0, str(Path(sys.argv[3]).resolve().parent))
+import post_call
+report_path = Path(path).parent / post_call.REPORT_FILE
+if report_path.exists():
+    report = post_call.read_json(report_path)
+    if report is None or not post_call.review_complete(report):
+        print("HOLD unresolved-review-questions"); raise SystemExit(0)
 stamp = str(marker.get("ingested_at") or "").strip()
 if not stamp:
     print("HOLD no-ingested-at"); raise SystemExit(0)
