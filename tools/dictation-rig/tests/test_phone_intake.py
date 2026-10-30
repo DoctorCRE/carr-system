@@ -14,6 +14,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'bin'))
 import phone_intake
+import post_call
+
+
+def test_bridge_paths_are_isolated(tmp_path):
+    bridge = phone_intake.bridge_module()
+    assert bridge.LOG_PATH == tmp_path / 'capture-bridge.log'
+    assert bridge.CONFIG_PATH == tmp_path / 'capture-config.json'
 
 
 def test_bridge_paths_are_isolated(tmp_path):
@@ -27,6 +34,13 @@ class PhoneIntakeTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        isolated_env = patch.dict('os.environ', {'HOME': str(self.root),
+                                                   'CARR_CAPTURE_LOG': str(self.root / 'capture-bridge.log')})
+        isolated_env.start()
+        self.addCleanup(isolated_env.stop)
+        log_patch = patch.object(post_call, 'LOG_PATH', self.root / 'call-mode.log')
+        log_patch.start()
+        self.addCleanup(log_patch.stop)
         self.audio = b'synthetic fixture only'
         self.metadata = {
             'schema_version': 1, 'session_id': '10000000-0000-0000-0000-000000000001',

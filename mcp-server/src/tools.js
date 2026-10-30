@@ -9154,7 +9154,7 @@ registerTools(invoiceTrackerTools({ ToolError, withEnvelope, writeEvent }), "inv
 // the rest of this registry; the one explicit exception is the ephemeral lease.
 registerTools({
   "get-deal-room": {
-    description: "Read one complete Deal Room work record, including closed and invoiced deals: board/workspace and active/parked fields, next actions, notes, critical dates, activity, parties, premises, current economics, documents, and attributed history. email_threads contains conversation_id, subject and latest_message_at from the latest filed message, newest first; messages without a conversation ID appear individually. Includes salesforce_id and base_version only so a reconciler can make one guarded follow-on write. Placeholder Salesforce fields are structurally excluded.",
+    description: "Read one complete Deal Room work record, including closed and invoiced deals: board/workspace and active/parked fields, next actions, notes, critical dates, up to 500 newest activities, parties, premises, current economics, documents, and attributed history. activities_truncated indicates whether older activities were omitted. email_threads contains conversation_id, subject and latest_message_at from the latest filed message, newest first; messages without a conversation ID appear individually. Includes salesforce_id and base_version only so a reconciler can make one guarded follow-on write. Placeholder Salesforce fields are structurally excluded.",
     inputSchema: { type: "object", properties: { deal: { type: "string" } }, required: ["deal"] },
     handler: async (c, _actor, args) => {
       const s = await resolveSubject(c, args.deal);
@@ -9223,7 +9223,7 @@ registerTools({
         `select a.id, to_jsonb(a.occurred_at)#>>'{}' as occurred_at, a.actor,
                 a.kind, a.summary, a.detail, a.source, a.email_context
            from v_deal_room_activity a
-          where a.deal_id=$1 order by a.occurred_at desc, a.id desc limit 50`, [s.id]);
+          where a.deal_id=$1 order by a.occurred_at desc, a.id desc limit 501`, [s.id]);
       const emailThreads = await c.query(
         `select conversation_id, subject, latest_message_at from (
            select distinct on (email_context->>'conversation_id',
@@ -9270,7 +9270,7 @@ registerTools({
         critical_dates: criticalDates.rows, next_actions: actions.rows,
         item_schema_version: DEAL_ITEMS_SCHEMA, items: actions.rows.filter(i => i.title && !['dropped', 'expired'].includes(i.status))
           .map(({ id,title,due_on,status,bullets,source_ref }) => ({ id,title,due_on,status,bullets,source_ref })),
-        activities: activities.rows, email_threads: emailThreads.rows, participants: participants.rows,
+        activities: activities.rows.slice(0, 500), activities_truncated: activities.rows.length > 500, email_threads: emailThreads.rows, participants: participants.rows,
         premises: premises.rows, negotiation_rounds: negotiation.rows,
         documents: documents.rows, events: history.rows });
     },

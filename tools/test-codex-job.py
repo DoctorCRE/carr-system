@@ -43,7 +43,7 @@ _clone = _sys.argv[_sys.argv.index('-C') + 1]
 _git.run(['git', '-C', _clone, '-c', 'user.name=Fixture', 'commit', '-q', '--allow-empty', '-m', 'job'], check=True)
 _git.run(['git', '-C', _clone, 'push', '-qf', 'origin', 'HEAD'], check=True)
 """
-CARD = 'Type: feature-backend\nCard: WR557.S2.J2\n'
+CARD = 'Type: feature-backend\nCard: WR557.S2.J2\nTitle: Require readable titles\nDescription: Require readable titles for job cards.\n'
 PR_BRIEF = CARD + 'Fix it and deliver through a ready pull request.'
 
 
@@ -127,8 +127,8 @@ print(json.dumps({{'ok': True, 'card_id': 'WR557.S2.J2', 'runner_job_id': args['
         marker = self.root / 'launched'
         for brief, registered, card in (('brief', True, '<missing>'),
                                         ('Card: V2 cleanup', True, 'V2 cleanup'),
-                                        ('Card: WR999999.S2.J2', False, 'WR999999.S2.J2'),
-                                        ('Card: WR557.S99.J2', False, 'WR557.S99.J2')):
+                                        ('Card: WR999999.S2.J2\nTitle: Build cards\nDescription: Build cards.', False, 'WR999999.S2.J2'),
+                                        ('Card: WR557.S99.J2\nTitle: Build cards\nDescription: Build cards.', False, 'WR557.S99.J2')):
             with self.subTest(card=card):
                 if not registered:
                     self.refusal.touch()
@@ -226,6 +226,31 @@ print(json.dumps({{'ok': True, 'card_id': 'WR557.S2.J2', 'runner_job_id': args['
         line, _, _ = self.finish(job)
         self.assertEqual(job.returncode, 1)
         self.assertTrue(line.startswith('Delivery: failed missing=pr ') and line.endswith(' pr=unchecked'), line)
+
+    def test_failed_remote_listing_reports_error(self):
+        git = self.root / 'git'
+        marker = self.root / 'listing-failed'
+        real_git = shutil.which('git')
+        git.write_text(f'#!{sys.executable}\nimport os, pathlib, sys\n'
+                       f'marker = pathlib.Path({str(marker)!r})\n'
+                       "if 'ls-remote' in sys.argv and not marker.exists():\n"
+                       "    marker.touch()\n    print('fatal: unable to access https://user:secret@example.com/repo', file=sys.stderr)\n    sys.exit(7)\n"
+                       f'os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n')
+        git.chmod(0o755)
+        subprocess.run(['git', '-C', str(self.root / 'seed'), 'push', '-q', str(self.origin),
+                        'HEAD:refs/heads/stack/base'], env=self.git_env, check=True)
+        body = ("import subprocess, sys\n"
+                "clone = sys.argv[sys.argv.index('-C') + 1]\n"
+                "subprocess.run(['git', '-C', clone, 'fetch', '-q', 'origin', 'stack/base'], check=True)\n"
+                "subprocess.run(['git', '-C', clone, 'checkout', '-qB', 'test/job', 'FETCH_HEAD'], check=True)\n" + PUSH)
+        job = self.launch(body, brief=PR_BRIEF, push=False)
+        stdout, stderr = job.communicate(timeout=15)
+        line, errors = stdout.decode(), stderr.decode()
+        self.assertEqual(job.returncode, 1, line + errors)
+        self.assertIn('branch=unchecked', line, errors)
+        self.assertIn('exit=7', line)
+        self.assertIn('fatal: unable to access https://example.com/repo', line)
+        self.assertNotIn('user:secret', line)
 
     def test_pushed_job_with_its_pr_succeeds(self):
         self.pr_url.write_text('https://github.com/o/r/pull/2\n')
