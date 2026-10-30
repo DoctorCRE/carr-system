@@ -662,7 +662,7 @@ def _log(item: Mail | Event, key: str, record: str, ports: Ports,
         kind, summary = 'meeting', f'Calendar event: {item.subject}'
         detail, occurred = (f'Start: {item.start.isoformat()}\nEnd: {item.end.isoformat()}\n'
                             f'Location: {item.location}\nAttendees: {", ".join(item.attendees)}\n\n{item.body}'), item.start
-    args = {'idempotency_key': str(uuid.uuid5(uuid.NAMESPACE_URL, f'log-activity|{ref}|outlook-{_kind(item)}|{key}')),
+    args: dict[str, object] = {'idempotency_key': str(uuid.uuid5(uuid.NAMESPACE_URL, f'log-activity|{ref}|outlook-{_kind(item)}|{key}')),
             'ref': ref, 'kind': kind, 'summary': summary, 'detail': detail,
             'occurred_at': occurred.isoformat()}
     if isinstance(item, Mail) and sent_item_id:
