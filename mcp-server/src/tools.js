@@ -10065,9 +10065,8 @@ registerTools({
           from capture_session s join actor a on a.id=s.actor_id
          where s.post_call and s.outcome_reviewed_at is null
            and (exists (select 1 from capture_candidate c where c.session_id=s.id and c.applied_automatically)
-             or (s.expires_at > now() and (
-                 exists (select 1 from capture_candidate c where c.session_id=s.id and c.status='pending')
-              or exists (select 1 from capture_post_call_candidate c where c.session_id=s.id and c.status='pending'))))
+             or exists (select 1 from capture_candidate c where c.session_id=s.id and c.status='pending')
+             or exists (select 1 from capture_post_call_candidate c where c.session_id=s.id and c.status='pending'))
          order by s.started_at desc, s.id limit 50 /* call-outcome:sessions */`)).rows;
       if (!sessions.length) return { schema_version: "call-outcomes.v1", calls: [], send: false };
       const ids = sessions.map(row => row.session_id);
