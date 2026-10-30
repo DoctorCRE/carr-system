@@ -47,17 +47,17 @@ export function dealFileTools({ withEnvelope, writeEvent, resolveSubject }) {
         const other = same.rows.find(row => row.r2_key === args.r2_key && (row.subject_type !== "deal" || row.subject_id !== deal.id));
         if (other) refuse("r2_key_on_other_record");
         if (same.rows.length) {
-          if (args.activity_id) await recordRequirementReply(c, actor, args.activity_id, same.rows[0].id, deal.id);
-          return { ok: true, attachment_id: same.rows[0].id, existing: true };
+          const skipped = args.activity_id && await recordRequirementReply(c, actor, args.activity_id, same.rows[0].id, deal.id);
+          return { ok: true, attachment_id: same.rows[0].id, existing: true, ...(skipped ? { reply_proposal_skipped: skipped } : {}) };
         }
         const saved = (await c.query(
           "insert into attachment (subject_type, subject_id, r2_key, filename, mime, sha256, bytes, created_by) values ('deal',$1,$2,$3,$4,$5,$6,$7) returning id",
           [deal.id, args.r2_key, args.filename.trim(), args.mime, args.sha256, args.bytes, actor.id])).rows[0];
-        if (args.activity_id) await recordRequirementReply(c, actor, args.activity_id, saved.id, deal.id);
+        const skipped = args.activity_id && await recordRequirementReply(c, actor, args.activity_id, saved.id, deal.id);
         await writeEvent(c, actor, "attach-deal-file", "deal", deal.id, {
           field: "attachment", new: { attachment_id: saved.id, sha256: args.sha256, bytes: args.bytes },
           cause: "ingest_email", ...(args.source ? { agent_rationale: `email attachment ${args.source}` } : {}), idempotency_key: args.idempotency_key });
-        return { ok: true, attachment_id: saved.id, existing: false };
+        return { ok: true, attachment_id: saved.id, existing: false, ...(skipped ? { reply_proposal_skipped: skipped } : {}) };
       }),
     },
   };

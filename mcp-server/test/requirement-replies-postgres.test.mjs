@@ -44,7 +44,7 @@ test('a participant document reply proposes its open request without fulfilling 
     await c.query(`create table activity(id uuid primary key,client_id uuid,deal_id uuid,kind text,email_context jsonb,detail text,version integer default 1,occurred_at timestamptz default now());
       create table party(id uuid primary key,email text,deleted_at timestamptz,merged_into uuid);
       create table deal_participant(deal_id uuid,party_id uuid,to_at timestamptz);`);
-    await c.query(readFileSync(new URL('../../migrations/1081_requirement_document_replies.sql', import.meta.url),'utf8'));
+    await c.query(readFileSync(new URL('../../migrations/1089_requirement_document_replies.sql', import.meta.url),'utf8'));
     const requested = await call('request-checklist-document', { deal, row_key: 'title_commitment', owner: 'joe', due_on: '2026-11-15' });
     assert.equal(requested.request.document_type, 'title_commitment');
     assert.equal(requested.request.source.section_id, CHECKLIST_SOURCES[2].section_id);
@@ -122,10 +122,12 @@ test('a participant document reply proposes its open request without fulfilling 
         request_id:request.id,proposal_digest:proposal.proposal_digest}),/requirement_reply_stale/);
       await call('reject-requirement-reply',{proposal_id:proposal.id,base_version:proposal.version,reason:'Stale evidence'});
     });
-    await t.test('tenant claims cannot widen scope and cross-deal evidence is refused', async () => {
+    await t.test('tenant claims cannot widen scope and cross-deal attachments are filed', async () => {
       await assert.rejects(call('list-requirement-reply-proposals',{deal,organization_tenant_id:'other-tenant'}),/caller_authority_field_forbidden/);
-      await assert.rejects(call('attach-deal-file',{deal:other,activity_id:activity,filename:'Other.pdf',mime:'application/pdf',
-        sha256:sha,bytes:18,r2_key:`documents/C-2/${sha.slice(0,16)}/Other.pdf`}),/requirement_reply_source_invalid/);
+      const result = await call('attach-deal-file',{deal:other,activity_id:activity,filename:'Other.pdf',mime:'application/pdf',
+        sha256:sha,bytes:18,r2_key:`documents/C-2/${sha.slice(0,16)}/Other.pdf`});
+      assert.equal(result.existing,false);
+      assert.equal(result.reply_proposal_skipped.source_mismatch,1);
       await assert.rejects(c.query(`insert into ops.requirement_reply_proposal(organization_tenant_id,deal_id,activity_id,attachment_id,created_by)
         values('other-tenant',$1,$2,$3,$4)`,[deal,activity,attached.attachment_id,actor.id]),/check constraint/);
       assert.equal((await call('list-requirement-reply-proposals',{deal:other})).proposals.length,0);
@@ -133,6 +135,18 @@ test('a participant document reply proposes its open request without fulfilling 
       await assert.rejects(executeRegisteredTool(c,machine,'confirm-requirement-reply',{idempotency_key:randomUUID(),
         proposal_id:proposals.proposals[0].id,base_version:1,request_id:requested.request.id,
         proposal_digest:proposals.proposals[0].proposal_digest}),/human_only_verb_requires_verified_partner/);
+    });
+    await t.test('an email moved to another deal still files its attachment', async () => {
+      const id=randomUUID(), digest=hash(id);
+      await c.query("insert into activity(id,deal_id,kind,email_context,detail) values($1,$2,'email_in',$3,'Title commitment')",
+        [id,deal,JSON.stringify({sender:{email:'participant@example.test'},subject:'Title commitment'})]);
+      await c.query('update activity set deal_id=$2 where id=$1',[id,other]);
+      const result=await call('attach-deal-file',{deal,activity_id:id,filename:'Moved.pdf',mime:'application/pdf',sha256:digest,bytes:12,
+        r2_key:`documents/C-1/${digest.slice(0,16)}/Moved.pdf`});
+      assert.equal(result.existing,false);
+      assert.equal(result.reply_proposal_skipped.source_mismatch,1);
+      assert.equal((await c.query('select subject_id from attachment where id=$1',[result.attachment_id])).rows[0].subject_id,deal);
+      assert.equal((await c.query('select count(*)::int as n from ops.requirement_reply_proposal where activity_id=$1',[id])).rows[0].n,0);
     });
     await t.test('a participant reply in the requested thread selects only that request', async () => {
       const thread=randomUUID(),id=randomUUID(),sha=hash(id);

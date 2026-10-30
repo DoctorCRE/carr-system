@@ -11,7 +11,7 @@ export async function recordRequirementReply(c, actor, activityId, attachmentId,
   const source = (await c.query(`select a.id from activity a join deal d on d.id=$2
     where a.id=$1 and a.kind='email_in' and (a.deal_id=$2 or (a.deal_id is null and a.client_id=d.client_id))`,
   [activityId, dealId])).rows[0];
-  if (!source) refuse('requirement_reply_source_invalid');
+  if (!source) return { source_mismatch: 1 };
   await c.query(`insert into ops.requirement_reply_proposal
     (organization_tenant_id,deal_id,activity_id,attachment_id,created_by) values($1,$2,$3,$4,$5)
     on conflict(organization_tenant_id,activity_id,attachment_id) do nothing`,
