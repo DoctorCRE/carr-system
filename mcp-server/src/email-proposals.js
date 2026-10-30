@@ -578,46 +578,6 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             }) })) };
       },
     },
-    'email-proposal-quality': {
-      write: false,
-      description: 'WR-000441 QUALITY report: email proposals created in the last 1-90 days (default 7), by kind: how many were proposed, are still pending, were confirmed by Joe or dismissed, the dismissal rate among resolved ones, and the average router confidence of each outcome. over_threshold is true when at least 10 are resolved and more than 5% were dismissed, the point where that kind should stay propose-only until the router is fixed. corrections lists up to 20 dismissals made in the requested period with the reason given, regardless of when the proposal was created. Proposal counts use the creation date. automatic_filings counts automatic thread filings recorded in the requested period, how many have a linked undo receipt at read time, and their undo_rate (null when empty). Its over_threshold is true with at least 10 filings and more than 5% undone. This is a separate filing cohort, not a proposal dismissal rate. Counts only; changes nothing and does not enforce a policy change.',
-      inputSchema: { type: 'object', additionalProperties: false,
-        properties: { days: { type: 'integer', minimum: 1, maximum: 90 } } },
-      handler: async (c, _actor, args) => {
-        const days = args.days ?? 7;
-        const { rows } = await c.query(`select kind,count(*)::int as proposed,
-            count(*) filter (where status='pending')::int as pending,
-            count(*) filter (where status='confirmed')::int as confirmed,
-            count(*) filter (where status='dismissed')::int as dismissed,
-            avg(confidence) filter (where status='confirmed')::float8 as confirmed_confidence,
-            avg(confidence) filter (where status='dismissed')::float8 as dismissed_confidence
-          from email_proposal where created_at>now()-make_interval(days=>$1) group by kind`, [days]);
-        const kinds = Object.keys(KINDS).map(kind => {
-          const row = rows.find(r => r.kind === kind) ?? { proposed: 0, pending: 0, confirmed: 0, dismissed: 0 };
-          const resolved = row.confirmed + row.dismissed;
-          const dismissRate = resolved ? row.dismissed / resolved : null;
-          return { kind, proposed: row.proposed, pending: row.pending, confirmed: row.confirmed,
-            dismissed: row.dismissed, dismiss_rate: dismissRate,
-            confirmed_confidence: row.confirmed_confidence ?? null, dismissed_confidence: row.dismissed_confidence ?? null,
-            over_threshold: resolved >= 10 && dismissRate > 0.05 };
-        });
-        const corrections = (await c.query(`select p.id,p.kind,d.name as deal_name,p.resolution_reason as reason,
-            p.resolved_at from email_proposal p join deal d on d.id=p.deal_id
-          where p.status='dismissed' and p.resolved_at>now()-make_interval(days=>$1)
-          order by p.resolved_at desc,p.id limit 20`, [days])).rows
-          .map(row => ({ ...row, resolved_at: new Date(row.resolved_at).toISOString() }));
-        const filingCounts = (await c.query(`select count(*)::int as filed,
-            count(*) filter (where exists (select 1 from v_email_thread_filing_event u
-              where u.verb='undo-email-thread-filing' and u.new_value->>'event_id'=f.id::text))::int as undone
-          from v_email_thread_filing_event f where f.verb='inherit-email-thread'
-            and f.recorded_at>now()-make_interval(days=>$1)`, [days])).rows[0];
-        const undoRate = filingCounts.filed ? filingCounts.undone / filingCounts.filed : null;
-        const automaticFilings = { ...filingCounts, undo_rate: undoRate,
-          over_threshold: filingCounts.filed >= 10 && undoRate > 0.05 };
-        return { schema_version: 'email-proposal-quality.v1', days, kinds, corrections,
-          automatic_filings: automaticFilings, send: false };
-      },
-    },
     'dismiss-email-proposal': {
       write: true, humanOnly: true, humanCallerOnly: true,
       description: 'Joe or Dell dismisses one pending email proposal at the version they read, with a reason kept in deal history. The router never re-creates a dismissed proposal for the same deal, email and kind. If Joe later confirms the same proposal through its confirm verb, the confirmation wins and the row becomes confirmed with the dismissal kept as a note. Changes nothing else.',
