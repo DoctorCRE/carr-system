@@ -329,7 +329,7 @@ class IntakeTest(unittest.TestCase):
         calls = [a for v, a in self.fake.calls if v == 'log-activity' and a['kind'] == 'email_in']
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0].get('email_identity'),
-                         {'mailbox_owner': 'joe', 'item_id': 'stable@example.test'})
+                         {'mailbox_owner': 'joe', 'mailbox_account': OWNER, 'item_id': 'hxstore-key:77'})
 
     def test_receipt_subject_coverage_counts_all_admitted_messages_and_persists(self):
         old = mail('one@example.test', -timedelta(days=40), subject='')

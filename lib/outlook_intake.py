@@ -1026,6 +1026,9 @@ class Run:
                 'summary': f'{label}: {m["subject"] or "(no subject)"}', 'detail': m['text'],
                 'occurred_at': _iso(m['sent_unix']),
                 'email_context': email_context(m, self.settings.internal_domain),
+                **({'email_identity': {'mailbox_owner': self.settings.owner, 'mailbox_account': self.settings.account,
+                     'item_id': 'hxstore-key:' + ','.join(_store_keys(m['local_keys']))}}
+                   if _store_keys(m['local_keys']) else {}),
                 **({'email_source': {'sender_email': m['sender'].lower(), 'mailbox_owner': self.settings.owner}}
                    if not outbound else {})}, who, '' if m['full'] else 'preview_only') for ref in refs]
             completed.extend(ref for ref, ok in zip(refs, results) if ok)

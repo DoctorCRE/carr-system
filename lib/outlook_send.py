@@ -403,7 +403,7 @@ def _write_transport(item: Mail | Event, key: str, ports: Ports, record: str | N
             return Result(State.FAILED, 'another_write_running')
         result = _write(item, key, ports, Ledger(out / LEDGER), send_requested, submitted)
     if result.state is State.DONE and not submitted:
-        result = replace(result, logged=_log_matches(item, key, record, ports))
+        result = replace(result, logged=_log_matches(item, key, record, ports, result.sent_item_id))
         if 'log_failed' in result.logged:
             result = replace(result, state=State.ACTIVITY_LOG_FAILED, reason='confirmed_in_mailbox:log_failed')
     return result
@@ -500,7 +500,7 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
     if not _wait(form.closed, ports.close_seconds, ports):
         ledger.append(key, kind, State.WINDOW_NOT_CLOSED.value, print_, ports.now())
         return Result(State.WINDOW_NOT_CLOSED, reason if mode is None else 'window_still_open', mode)
-    return _await_sent(item, key, print_, ports, ledger, pressed_at, mode, submitted)
+    return _await_sent(item, key, print_, ports, ledger, pressed_at, mode)
 
 
 def default_sender(profile: Path | None = None) -> str | None:
@@ -539,11 +539,11 @@ def _script_write(mail: Mail, key: str, ports: Ports, ledger: Ledger) -> Result:
         state = 'aborted_before_dispatch' if outcome == 'aborted' else 'abort_cleanup_failed'
         ledger.append(key, 'send', state, print_, ports.now(), attachments=mail.attachments)
         return Result(State.FAILED, state, 'script')
-    return _await_sent(mail, key, print_, ports, ledger, pressed_at, 'script', True)
+    return _await_sent(mail, key, print_, ports, ledger, pressed_at, 'script')
 
 
 def _await_sent(item: Mail | Event, key: str, print_: str, ports: Ports, ledger: Ledger, pressed_at: float,
-                mode: str | None, submitted: bool) -> Result:
+                mode: str | None) -> Result:
     kind = _kind(item)
     sent_item_id, sent_at = None, None
 
@@ -551,7 +551,7 @@ def _await_sent(item: Mail | Event, key: str, print_: str, ports: Ports, ledger:
         nonlocal sent_item_id, sent_at
         try:
             snapshot = ports.mailbox.snapshot()
-            if submitted and isinstance(item, Mail):
+            if isinstance(item, Mail):
                 sent_item_id = confirmed_mail(snapshot, item, pressed_at - CLOCK_SKEW)
                 if sent_item_id:
                     sent_at = _sent_time(snapshot, sent_item_id)
@@ -624,9 +624,10 @@ def resolve_record(record: str, carr: Callable[[str, dict], dict]) -> str | None
     return hits.pop() if len(hits) == 1 else None
 
 
-def _log_matches(item: Mail | Event, key: str, record: str | None, ports: Ports) -> tuple[str, ...]:
+def _log_matches(item: Mail | Event, key: str, record: str | None, ports: Ports,
+                 sent_item_id: str | None = None) -> tuple[str, ...]:
     if record:
-        return _log(item, key, record, ports)
+        return _log(item, key, record, ports, sent_item_id)
     addresses = set(item.recipients if isinstance(item, Mail) else item.attendees)
     try:
         matched: dict[str, set[tuple[str, str]]] = {}
@@ -643,10 +644,11 @@ def _log_matches(item: Mail | Event, key: str, record: str | None, ports: Ports)
         return ('record_lookup_failed',)
     if not records:
         return ('record_not_matched',)
-    return tuple(value for ref in sorted(records) for value in _log(item, key, ref, ports))
+    return tuple(value for ref in sorted(records) for value in _log(item, key, ref, ports, sent_item_id))
 
 
-def _log(item: Mail | Event, key: str, record: str, ports: Ports) -> tuple[str, ...]:
+def _log(item: Mail | Event, key: str, record: str, ports: Ports,
+         sent_item_id: str | None = None) -> tuple[str, ...]:
     try:
         ref = resolve_record(record, ports.carr)
     except Exception:
@@ -663,6 +665,10 @@ def _log(item: Mail | Event, key: str, record: str, ports: Ports) -> tuple[str, 
     args = {'idempotency_key': str(uuid.uuid5(uuid.NAMESPACE_URL, f'log-activity|{ref}|outlook-{_kind(item)}|{key}')),
             'ref': ref, 'kind': kind, 'summary': summary, 'detail': detail,
             'occurred_at': occurred.isoformat()}
+    if isinstance(item, Mail) and sent_item_id:
+        settings = load_settings()
+        args['email_identity'] = {'mailbox_owner': settings.owner, 'mailbox_account': settings.account,
+                                  'item_id': sent_item_id}
     try:
         reply = ports.carr('log-activity', args)
     except Exception:
@@ -1010,8 +1016,8 @@ class DecodedMailbox:
             try:
                 sent = tuple(SentRow(*row) for row in con.execute(
                     'SELECT DISTINCT m.sender, m.recipients, m.subject, m.sent_unix, '
-                    "COALESCE(NULLIF(trim(m.message_id), ''), CASE WHEN m.local_keys <> '' "
-                    "AND m.local_keys NOT GLOB '*[^0-9]*' THEN 'hxstore-key:' || m.local_keys END) FROM messages m "
+                    "CASE WHEN m.local_keys <> '' "
+                    "AND m.local_keys NOT GLOB '*[^0-9]*' THEN 'hxstore-key:' || m.local_keys END FROM messages m "
                     'JOIN message_folders mf ON mf.message_id=m.id JOIN folders f ON f.id=mf.folder_id '
                     "WHERE lower(f.name) IN ('sent', 'sent items') AND m.sender IS NOT NULL "
                     'AND m.subject IS NOT NULL AND m.sent_unix IS NOT NULL'))
