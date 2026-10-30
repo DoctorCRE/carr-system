@@ -220,6 +220,24 @@ test('every Studio handoff operation rejects missing credentials before accessin
   }
 });
 
+test('audio storage receives independent bounded chunks totaling the upload size', async () => {
+  const state = handoffState();
+  const chunks = [];
+  const put = state.storage.put;
+  state.storage.put = async (key, value, ...options) => {
+    if (key.startsWith('audio:')) chunks.push(value);
+    return put(key, value, ...options);
+  };
+  const bytes = new Uint8Array(3_800_001).fill(7);
+  const response = await new PhoneAudioHandoff(state).fetch(new Request('https://fixture.test/audio', {
+    method: 'PUT', headers: { 'x-carr-call': JSON.stringify({ ...recording, byte_count: bytes.length }) }, body: bytes,
+  }));
+  assert.equal(response.status, 202);
+  assert.ok(chunks.every(chunk => chunk.buffer.byteLength <= 1_900_000));
+  assert.equal(chunks.length, 3);
+  assert.equal(chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0), bytes.length);
+});
+
 test('workerd keeps chunked audio across object re-instantiation and deletes it on acknowledgement', async t => {
   const { Miniflare } = await import('miniflare');
   const source = readFileSync(new URL('../src/phone-audio-handoff.js', import.meta.url), 'utf8');
