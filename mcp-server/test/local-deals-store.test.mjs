@@ -10,6 +10,9 @@ import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
+import { Pool } from '@neondatabase/serverless';
+import { callTool } from '../src/mcp.js';
+import { authenticatedIdentity } from '../src/identity.js';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { CHECKLIST_SOURCES } from '../src/deal-checklist.ts';
 import { readCommandCenterSummary } from '../src/workspace-command-center.js';
@@ -307,7 +310,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
           text: 'The landlord sent the requested revised terms.', next_step: 'Review revised terms', next_date: '2030-01-01' };
         const result = await addNote(c, actor, args);
         const replay = await addNote(c, actor, args);
-        assert.equal(calls, failure ? 2 : 1, 'successful assessments are never repeated');
+        assert.equal(calls, 1, 'successful and non-retryable assessments are never repeated');
         assert.equal(replay.replayed, true);
         const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
         const resolved = verdict === 'yes' && confidence === 0.99 && !failure;
@@ -424,7 +427,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal((await executeRegisteredTool(c, actor, 'read-deal-update-reviews', {})).proposals.length, 0);
     }));
 
-    await t.test('provider budget failures retry once and retain a visible pending assessment', async st => transaction(async () => {
+    await t.test('provider rate limits retain a visible pending assessment without an immediate retry', async st => transaction(async () => {
       await fixture(false);
       const prior = await TOOLS['set-next-step'].handler(c, actor, {
         base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
@@ -440,7 +443,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       const result = await addNote(c, actor, {
         idempotency_key: randomUUID(), deal: id(4), text: 'The requested revised terms were received.',
       });
-      assert.equal(calls, 2, 'one bounded retry follows a provider rate limit');
+      assert.equal(calls, 1, 'a rate limit waits for a later run');
       assert.equal(result.overdue_assessment.reason, 'jev_budget_exhausted');
       assert.equal((await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)})).next_actions.find(a => a.id === prior.next_action_id).status, 'open');
     }));
@@ -1758,6 +1761,97 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         }
       } finally {
         await c.query(`create or replace view v_deal_room_phase_change as ${definition}`);
+      }
+    });
+    await t.test('Home exposes expired pending, failed and stale running assessments for manual review', async () => transaction(async () => {
+      await fixture(false);
+      await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      const args = {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord sent the requested revised terms.'};
+      await TOOLS['add-deal-note'].handler(c, actor, args);
+      const read = () => TOOLS['read-deal-update-reviews'].handler(c, actor, {});
+      assert.equal((await read()).proposals.length, 0, 'fresh work has time to finish');
+      await c.query("update event set recorded_at=clock_timestamp()-interval '46 seconds' where field='overdue_assessment_pending'");
+      const [pending] = (await read()).proposals;
+      assert.ok(pending, 'expired pending work appears without another deal update');
+      assert.equal(pending.assessment.review_required, true);
+      delete c.jevClient;
+      const saved = await addNote(c, actor, args);
+      assert.equal(saved.overdue_assessment.reason, 'missing_credentials');
+      assert.equal((await read()).proposals[0].assessment.reason, 'missing_credentials');
+      await c.query(`update event set new_value=jsonb_set(jsonb_set(new_value,'{status}','"running"'),'{attempt}','3'),
+        recorded_at=clock_timestamp()-interval '46 seconds' where field='overdue_assessment_status'`);
+      assert.equal((await read()).proposals[0].assessment.reason, 'interrupted');
+      const review = await TOOLS['review-deal-update'].handler(c, actor, {
+        idempotency_key: randomUUID(), assessment_id: pending.assessment_id, decision: 'resolve', reason: 'Partner confirmed the terms arrived',
+      });
+      assert.equal(review.ok, true);
+      assert.equal((await read()).proposals.length, 0);
+    }));
+    await t.test('callTool returns the committed pending save before slow Jev and waitUntil completes it', async st => {
+      await c.query('begin');
+      await fixture(false);
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      await c.query('commit');
+      await c.query(`do $$ begin
+        begin create role carr_jobs; exception when duplicate_object then null; end;
+        begin create role carr_authority; exception when duplicate_object then null; end;
+      end $$; alter role carr_writer login;
+      grant select,insert,update,delete on all tables in schema public to carr_writer;
+      grant usage,select on all sequences in schema public to carr_writer`);
+      const writer = new pg.Client({...connection, user: 'carr_writer',
+        types: {getTypeParser: (oid, format) => oid === 1184 ? value => value : pg.types.getTypeParser(oid, format)}});
+      await writer.connect();
+      let released = false;
+      const adapter = { query: writer.query.bind(writer), release() { released = true; },
+        jevClient: {systemOne: async request => {
+          await new Promise(resolve => setTimeout(resolve, 10500));
+          assert.equal(released, false, 'background work retains its connection');
+          return jevStub().systemOne(request);
+        }} };
+      st.mock.method(Pool.prototype, 'connect', async () => adapter);
+      st.mock.method(Pool.prototype, 'end', async () => {});
+      const tasks = [];
+      const args = {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord sent the requested revised terms.'};
+      const save = callTool({DATABASE_URL_WRITER: 'postgresql://carr_writer@fixture.invalid/postgres',
+        ctx: {waitUntil: task => tasks.push(task)}}, authenticatedIdentity.connectionForGrant({slug: 'joe'}), 'add-deal-note', args);
+      try {
+        const result = await Promise.race([save, new Promise(resolve => setTimeout(() => resolve(null), 1000))]);
+        assert.ok(result, 'save must return while Jev is still waiting');
+        assert.equal(result.overdue_assessment.pending, true);
+        assert.equal((await c.query('select 1 from deal_note where id=$1', [result.note_id])).rows.length, 1);
+        assert.ok(tasks.length, 'assessment is registered with waitUntil');
+        await Promise.all(tasks);
+        assert.equal((await c.query('select status from next_action where id=$1', [prior.next_action_id])).rows[0].status, 'done');
+        assert.equal(released, true);
+        await c.query('begin');
+        await TOOLS['set-next-step'].handler(c, actor, {
+          base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+          idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms again', next_date: '2020-01-01',
+        });
+        await c.query('commit');
+        adapter.query = (text, params) => {
+          if (text.includes("where field='overdue_assessment_pending'")) throw new Error('synthetic post-commit database failure');
+          return writer.query(text, params);
+        };
+        const failedAssessment = await callTool({DATABASE_URL_WRITER: 'postgresql://carr_writer@fixture.invalid/postgres',
+          ctx: {waitUntil: task => tasks.push(task)}}, authenticatedIdentity.connectionForGrant({slug: 'joe'}),
+        'add-deal-note', {...args, idempotency_key: randomUUID()});
+        assert.equal(failedAssessment.overdue_assessment.pending, true, 'post-commit failure is a successful pending save');
+        await Promise.all(tasks);
+        assert.equal((await c.query('select 1 from deal_note where id=$1', [failedAssessment.note_id])).rows.length, 1);
+        await c.query("update event set recorded_at=clock_timestamp()-interval '46 seconds' where field='overdue_assessment_pending'");
+        assert.equal((await TOOLS['read-deal-update-reviews'].handler(c, actor, {})).proposals.length, 1);
+      } finally {
+        await save.catch(() => {});
+        await Promise.allSettled(tasks);
+        await writer.end();
+        await c.query('truncate event,tool_call,deal_note,next_action,deal,client,party cascade');
       }
     });
     await t.test('slow overdue assessment sees the committed update without a held transaction', async () => {
