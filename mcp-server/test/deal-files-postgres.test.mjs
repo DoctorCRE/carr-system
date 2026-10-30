@@ -99,3 +99,43 @@ test('refuses malformed metadata before touching the table', async () => {
   await refusal({ ...good, source: 'x'.repeat(201) }, 'invalid_source');
   assert.equal((await c.query("select count(*)::int n from attachment where sha256=$1", [good.sha256])).rows[0].n, 0);
 });
+
+test('lists only visible deal metadata with stable paging and citation attachment IDs', async () => {
+  await c.query('create role carr_reader; grant usage on schema public to carr_reader; grant select on v_ref_index to carr_reader');
+  await c.query(readFileSync(new URL('../../migrations/1080_deal_documents.sql', import.meta.url), 'utf8'));
+  const documentIds = ['00000000-0000-4000-8000-000000000010', '00000000-0000-4000-8000-000000000020'];
+  for (const id of documentIds) await c.query(`insert into attachment(id,subject_type,subject_id,r2_key,filename,mime,sha256,bytes,created_by,created_at)
+    values($1::uuid,'deal',$2,$1::text,'Synthetic lease.pdf',$3,$4,100,$5,'2026-01-01T00:00:00Z')`,
+    [id, dealId, PDF, 'a'.repeat(64), robot.id]);
+  await c.query('update attachment set deleted_at=now() where id not in (select unnest($1::uuid[])) and subject_id=$2', [documentIds, dealId]);
+  const orphan = randomUUID();
+  await c.query(`insert into attachment(subject_type,subject_id,r2_key,filename,mime,sha256,bytes,created_by)
+    values('deal',$1::uuid,$1::text,'Hidden.pdf',$2,$3,100,$4)`, [orphan, PDF, 'b'.repeat(64), robot.id]);
+  const list = async args => {
+    await c.query('set role carr_reader');
+    try { return await executeRegisteredTool(c, robot, 'list-deal-documents', args); }
+    finally { await c.query('reset role'); }
+  };
+  const first = await list({ deal_id: dealId, limit: 1 });
+  assert.deepEqual(JSON.parse(JSON.stringify(first.documents)), [{ id: documentIds[0], display_name: 'Synthetic lease.pdf',
+    document_type: PDF, page_count: null, content_hash: 'a'.repeat(64), stored_at: '2026-01-01T00:00:00.000Z' }]);
+  assert.equal(first.has_more, true);
+  await c.query(`insert into attachment(id,subject_type,subject_id,r2_key,filename,mime,sha256,bytes,created_by)
+    values('00000000-0000-4000-8000-000000000001','deal',$1,'new-before','New.pdf',$2,$3,100,$4)`, [dealId, PDF, 'c'.repeat(64), robot.id]);
+  const second = await list({ deal_id: dealId, limit: 1, cursor: first.next_cursor });
+  assert.deepEqual(second.documents.map(d => d.id), [documentIds[1]]);
+  assert.equal(second.has_more, false);
+  assert.equal(second.next_cursor, null);
+  assert.deepEqual((await list({ deal_id: orphan })).documents, []);
+  assert.ok((await list({ deal_id: otherDeal })).documents.every(d => !documentIds.includes(d.id)));
+  await assert.rejects(list({ deal_id: otherDeal, cursor: first.next_cursor }), e => e.payload.error === 'invalid_cursor');
+  await assert.rejects(list({ deal_id: dealId, cursor: JSON.stringify({ ...JSON.parse(first.next_cursor), tenant: 'other-tenant' }) }), e => e.payload.error === 'invalid_cursor');
+  for (const cursor of ['null', '{}', 'not-json'])
+    await assert.rejects(list({ deal_id: dealId, cursor }), e => e.payload.error === 'invalid_cursor');
+  await assert.rejects(list({ deal_id: dealId, tenant: 'other-tenant' }));
+  await c.query('set role carr_reader');
+  try {
+    await assert.rejects(c.query('select * from attachment'), { code: '42501' });
+    assert.deepEqual((await c.query("select * from v_deal_documents where organization_tenant_id='other-tenant'")).rows, []);
+  } finally { await c.query('reset role'); }
+});
