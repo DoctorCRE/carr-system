@@ -418,3 +418,32 @@ for (const mode of ['whole-call', 'change']) test(`${mode} undo restores the pri
     assert.equal(board.next_step, 'Request revised terms');
   } finally { delete c.jevClient; }
 });
+
+for (const mode of ['whole-call', 'change']) test(`${mode} undo after an earlier call undo keeps the completed shown action off the board`, async () => {
+  const first = await filePhase('We discussed parking at the other property.', { kind: 'next_step', overdue: true });
+  c.jevClient = { systemOne: async request => completionAnswer(request, 'no') };
+  try {
+    await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: first.id, accept: true, automatic: true });
+    await command('undo-call', { idempotency_key: randomUUID(), session_id: first.session });
+    const restored = await command('get-deal-room', { deal: first.deal });
+    assert.equal(restored.next_actions.find(a => a.id === first.prior.next_action_id).status, 'open');
+    assert.deepEqual([restored.next_step, restored.next_date], ['Request revised terms', '2020-01-01']);
+    const second = await filePhase('We discussed touring the second site.', {
+      kind: 'next_step', existingDeal: first.deal, stepText: 'Tour the second site',
+    });
+    await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: second.id, accept: true, automatic: true });
+    c.jevClient = { systemOne: async request => completionAnswer(request) };
+    const activity = await filePhase('The landlord sent the requested revised terms.', { kind: 'activity', existingDeal: first.deal });
+    await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: activity.id, accept: true });
+    const before = await command('get-deal-room', { deal: first.deal });
+    assert.equal(before.next_actions.find(a => a.id === first.prior.next_action_id).status, 'done');
+    if (mode === 'change') await command('undo-call-change', { idempotency_key: randomUUID(),
+      candidate_id: second.id, base_version: before.base_version });
+    else await command('undo-call', { idempotency_key: randomUUID(), session_id: second.session });
+    const room = await command('get-deal-room', { deal: first.deal });
+    assert.equal(room.next_actions.find(a => a.id === first.prior.next_action_id).status, 'done');
+    assert.deepEqual([room.next_step, room.next_date, room.next_step_required], [null, null, true]);
+    const board = (await command('deal-room-board')).deals.find(d => d.id === first.deal);
+    assert.deepEqual([board.next_step, board.next_date, board.next_step_required], [null, null, true]);
+  } finally { delete c.jevClient; }
+});
