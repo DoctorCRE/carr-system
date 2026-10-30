@@ -3,7 +3,6 @@ import json
 from pathlib import Path
 import re
 
-import yaml
 
 WORKFLOWS = Path(__file__).resolve().parents[1] / 'ops/config/job-workflows.v1.yaml'
 
@@ -17,7 +16,11 @@ def findings(body, sessions=None):
     matches = []
     for path in sessions.rglob('rollout-*.jsonl'):
         try:
-            rows = [json.loads(line) for line in path.read_text().splitlines()]
+            with path.open('rb') as stream:
+                if not any(f'Card: {card}'.encode() in line for line in stream):
+                    continue
+                stream.seek(0)
+                rows = [json.loads(line) for line in stream]
             messages = [part.get('text', '') for row in rows
                         if row.get('type') == 'response_item'
                         for payload in [row.get('payload', {})]
@@ -35,10 +38,19 @@ def findings(body, sessions=None):
         return [f'Multiple build session logs found for Card {card}; skill use cannot be determined']
     brief, rows = matches[0]
     job_type = re.search(r'^Type:\s*(\S+)', brief, re.M).group(1)
-    workflows = yaml.safe_load(WORKFLOWS.read_text())['job_types']
-    if job_type not in workflows:
+    workflow_text = WORKFLOWS.read_text()
+    types = re.search(r'(?ms)^job_types:\s*\n(.*?)(?=^\S|\Z)', workflow_text)
+    if not types:
+        raise ValueError('job_types missing from workflow')
+    job = re.search(r'(?ms)^  ' + re.escape(job_type) + r':\s*\n(.*?)(?=^  [\w-]+:|\Z)', types.group(1))
+    if not job:
         return [f'Unknown job type: {job_type}']
-    required = workflows[job_type]['stages']['build']['skills']
+    build = re.search(r'(?ms)^    stages:\s*\n(?:(?!^    \S).)*?^      build:\s*\n(?:(?!^      \S).)*?^        skills:\s*\[([^]]*)\]', job.group(1))
+    if not build:
+        raise ValueError(f'build skills missing for job type: {job_type}')
+    required = [item.strip().strip("'\"") for item in build.group(1).split(',') if item.strip()]
+    if any(not re.fullmatch(r'[\w:-]+', skill) for skill in required):
+        raise ValueError(f'invalid build skills for job type: {job_type}')
     calls = [row.get('payload', {}) for row in rows if row.get('type') == 'response_item'
              and row.get('payload', {}).get('type') in ('function_call', 'custom_tool_call')]
     outputs = {row.get('payload', {}).get('call_id'): str(row.get('payload', {}).get('output', ''))

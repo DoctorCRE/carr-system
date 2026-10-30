@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'bin'))
@@ -9,6 +10,23 @@ from review_skill_use import findings
 
 
 class SkillUse(unittest.TestCase):
+    def test_unrelated_rollout_is_not_json_parsed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / 'rollout-other.jsonl').write_text('{"unrelated": true}\n')
+            with mock.patch('review_skill_use.json.loads', side_effect=AssertionError('unrelated JSON parsed')):
+                self.assertEqual(findings('Card: WR594.S3.J1', root),
+                                 ['Build session log missing for Card WR594.S3.J1'])
+
+    def test_multiple_matching_logs_are_inconclusive(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            brief = {'type': 'response_item', 'payload': {'type': 'message', 'role': 'user',
+                     'content': [{'text': 'Card: WR594.S3.J1\nType: review'}]}}
+            for name in ('one', 'two'):
+                (root / f'rollout-{name}.jsonl').write_text(json.dumps(brief))
+            self.assertIn('Multiple build session logs', findings('Card: WR594.S3.J1', root)[0])
+
     def test_review_findings(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

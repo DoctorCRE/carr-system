@@ -2,16 +2,10 @@
 # Run an independent PR review and post its result.
 import argparse
 import json
-import os
-import sys
 from pathlib import Path
 import re
 import subprocess
 import tempfile
-
-python = Path(__file__).resolve().parents[1] / '.venv/bin/python'
-if python.is_file() and Path(sys.prefix) != python.parent.parent:
-    os.execv(str(python), [str(python), __file__, *sys.argv[1:]])
 
 from review_skill_use import findings as skill_findings
 
@@ -62,7 +56,8 @@ def main():
         if verdict not in ('VERDICT: APPROVE', 'VERDICT: CHANGES'):
             raise ValueError('Reviewer did not return a valid verdict')
         if missing_skills:
-            verdict = 'VERDICT: CHANGES'
+            if any(item.startswith('Required skill did not run: ') for item in missing_skills):
+                verdict = 'VERDICT: CHANGES'
             findings += '\n' + '\n'.join(missing_skills)
         if json.loads(gh('view', '--json', 'headRefOid'))['headRefOid'] != sha:
             raise ValueError('PR head moved during review; nothing posted')

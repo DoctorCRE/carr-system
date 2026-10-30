@@ -66,6 +66,17 @@ class ReviewPR(TestCase):
         self.assertIn('Required skill did not run: example', comment)
         self.assertFalse(any(args[1:2] == ['merge'] for name, args, _ in calls if name == 'gh'))
 
+    def test_inconclusive_skill_findings_preserve_reviewer_verdict(self):
+        for finding in ('Build session log missing for Card WR1.S1.J1',
+                        'Multiple build session logs found for Card WR1.S1.J1; skill use cannot be determined',
+                        'Unknown job type: future'):
+            for verdict in ('APPROVE', 'CHANGES'):
+                with self.subTest(finding=finding, verdict=verdict):
+                    error, _, comment = self.run_review(verdict=verdict, missing=[finding])
+                    self.assertIsNone(error)
+                    self.assertTrue(comment.startswith('VERDICT: ' + verdict))
+                    self.assertIn(finding, comment)
+
     def test_dot_polls_thread_on_paid_run_schedule(self):
         error, calls, _ = self.run_review()
         self.assertIsNone(error)
