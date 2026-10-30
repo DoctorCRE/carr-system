@@ -1,4 +1,5 @@
 // Store lean Work Request slice and job facts with stable IDs and priority order.
+import jobTypes from './job-types.v1.json' with { type: 'json' };
 import addressFormat from './progress-address.v1.json' with { type: 'json' };
 import { organizationTenantForActor } from './identity.js';
 import { readableWorkRequestSql } from './work-request-read.ts';
@@ -179,27 +180,30 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         if (!saved) refuse('slice_not_found');
         return { slice_id: queueCardId(wr.ref, saved.ordinal), version: saved.version, ...record };
       }),
-    'dispatch-job': command('dispatch-job', 'Mint a queued job from facts, or record a runner start for an existing job exactly once.',
-      { slice, job: positive, runner_job_id: text(), repository: { ...text(), enum: repositories }, executor: text(), model: text(), effort: text(), card_title: text(80), description: text(500) },
+    'dispatch-job': command('dispatch-job', 'Mint a queued job with a caller-supplied job_type from job-workflows.v1.yaml, or record a runner start for an existing job exactly once.',
+      { slice, job: positive, runner_job_id: text(), repository: { ...text(), enum: repositories }, job_type: { ...text(), enum: jobTypes }, executor: text(), model: text(), effort: text(), card_title: text(80), description: text(500) },
       [], async (c, actor, args, wr) => {
         const starting = jobStart.some(key => Object.hasOwn(args, key));
+        if ((!starting || Object.hasOwn(args, 'job_type')) && !jobTypes.includes(args.job_type)) refuse('invalid_job_type');
         if ((starting ? jobStart : jobFacts).some(key => args[key] == null)
           || (jobFacts.some(key => Object.hasOwn(args, key)) && jobFacts.some(key => args[key] == null))) refuse('invalid_work_queue_fields');
         if ((starting || Object.hasOwn(args, 'repository')) && !repositories.includes(args.repository)) refuse('invalid_work_queue_fields');
         if (starting) {
-          const row = (await c.query(`select runner_job_id,repository from ops.work_request_job
+          const row = (await c.query(`select runner_job_id,repository,job_type from ops.work_request_job
             where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`, [wr.id, args.slice || 1, args.job])).rows[0];
           if (!row && jobFacts.some(key => args[key] == null)) refuse('job_not_found');
           if (row) {
+            if (args.job_type != null && row.job_type != null && row.job_type !== args.job_type) refuse('job_type_mismatch');
             if (row.repository != null && row.repository !== args.repository) refuse('job_repository_mismatch');
             if (row.runner_job_id != null) refuse('job_already_started');
             await c.query(`update ops.work_request_job set runner_job_id=$4,started_at=now(),
-              executor=coalesce($5,executor),model=coalesce($6,model),effort=coalesce($7,effort),repository=coalesce(repository,$8)
+              executor=coalesce($5,executor),model=coalesce($6,model),effort=coalesce($7,effort),repository=coalesce(repository,$8),job_type=coalesce(job_type,$9)
               where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`, [wr.id, args.slice || 1, args.job, args.runner_job_id,
-              args.executor ?? null, args.model ?? null, args.effort ?? null, args.repository]);
+              args.executor ?? null, args.model ?? null, args.effort ?? null, args.repository, args.job_type ?? null]);
             return { card_id: queueCardId(wr.ref, args.slice || 1, args.job), runner_job_id: args.runner_job_id };
           }
         }
+        if (!jobTypes.includes(args.job_type)) refuse('invalid_job_type');
         if (!/^[A-Za-z']+( [A-Za-z']+){1,2}$/.test(args.card_title)) refuse('invalid_card_title');
         if (args.description.trim().split(/[.!?](?:\s|$)/u).filter(Boolean).length !== 1) refuse('invalid_job_description');
         const ordinal = args.slice || 1;
@@ -209,10 +213,10 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         const priority = Number((await c.query(`select coalesce(max(j.priority),0)+1 as next from ops.work_request_job j
           join ops.work_request w on w.id=j.work_request_id where w.organization_tenant_id=$1`, [organizationTenantForActor(actor)])).rows[0].next);
         const number = (await c.query(`insert into ops.work_request_job
-          (work_request_id,slice_ordinal,j_number,priority,executor,model,effort,card_title,description,repository,runner_job_id,started_at)
-          select $1,$2,coalesce($10,max(j_number)+1,1),$3,$4,$5,$6,$7,$8,$9,$11,case when $11::text is not null then now() end from ops.work_request_job
+          (work_request_id,slice_ordinal,j_number,priority,executor,model,effort,card_title,description,repository,runner_job_id,started_at,job_type)
+          select $1,$2,coalesce($10,max(j_number)+1,1),$3,$4,$5,$6,$7,$8,$9,$11,case when $11::text is not null then now() end,$12 from ops.work_request_job
           where work_request_id=$1 and slice_ordinal=$2 returning j_number`,
-        [wr.id, ordinal, priority, args.executor, args.model, args.effort, args.card_title, args.description, args.repository ?? null, args.job ?? null, args.runner_job_id ?? null])).rows[0].j_number;
+        [wr.id, ordinal, priority, args.executor, args.model, args.effort, args.card_title, args.description, args.repository ?? null, args.job ?? null, args.runner_job_id ?? null, args.job_type])).rows[0].j_number;
         return { card_id: queueCardId(wr.ref, ordinal, number), priority,
           ...(starting ? { runner_job_id: args.runner_job_id } : {}) };
       }, { anyOf: [

@@ -24,13 +24,18 @@ class QueueRunnerTests(unittest.TestCase):
         rules = self.root / 'tools/room-bridge/job-rules.md'
         rules.parent.mkdir(parents=True)
         shutil.copyfile(ROOT / 'tools/room-bridge/job-rules.md', rules)
+        shutil.copyfile(ROOT / 'mcp-server/src/job-types.v1.json',
+                        self.root / 'mcp-server/src/job-types.v1.json')
+        config = self.root / 'ops/config/job-workflows.v1.yaml'
+        config.parent.mkdir(parents=True)
+        shutil.copyfile(ROOT / 'ops/config/job-workflows.v1.yaml', config)
         self.log = self.root / 'calls.jsonl'
         self.job = dict(work_request='WR-000557', slice_ordinal=2, j_number=3,
                         card_id='WR557.S2.J3', executor='codex', model='fixture-model',
                         effort='high', card_title='Queue runner', description='Build the runner.',
-                        runner_job_id=None, repository='DoctorCRE/carr-system')
+                        job_type='review', runner_job_id=None, repository='DoctorCRE/carr-system')
 
-    def run_queue(self, jobs, *, status=0, repository='DoctorCRE/carr-system'):
+    def run_queue(self, jobs, *, status=0, repository='DoctorCRE/carr-system', real_launcher=False):
         shutil.copyfile(ROOT / 'bin/codex-queue', self.root / 'bin/codex-queue')
         adapter = f'''#!{sys.executable}
 import json, pathlib, sys
@@ -45,10 +50,60 @@ else:
         for path in (self.root / 'run.sh', self.root / 'bin/codex-job'):
             path.write_text(adapter)
             path.chmod(0o755)
+        if real_launcher:
+            for name in ('codex-job', 'skill_picker.py'):
+                shutil.copyfile(ROOT / 'bin' / name, self.root / 'bin' / name)
+            launcher = self.root / 'bin/codex-job'
+            launcher.write_text(launcher.read_text().replace('#!/usr/bin/env python3', f'#!{sys.executable}', 1))
+            door = self.root / 'tools/call-verb.py'
+            door.write_text(f'import json, pathlib, sys\n'
+                            f'pathlib.Path({str(self.log)!r}).open("a").write(json.dumps(sys.argv[1:]) + "\\n")\n'
+                            'print(json.dumps({"ok": False}))\n')
+            import yaml
+            table = yaml.safe_load((ROOT / 'ops/config/job-workflows.v1.yaml').read_text())
+            for stage in table['job_types']['review']['stages'].values():
+                for name in stage['skills'] + [item['skill'] for item in stage.get('conditional_skills', [])]:
+                    path = self.root / '.claude/skills' / name / 'SKILL.md'
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(f'---\nname: {name}\ndescription: Fixture skill\n---\n')
         result = subprocess.run([sys.executable, str(self.root / 'bin/codex-queue'),
                                  repository], capture_output=True, text=True)
         calls = [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
         return result, calls
+
+    def test_queued_brief_passes_the_real_launcher_type_check(self):
+        result, calls = self.run_queue([self.job], real_launcher=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('job registration refused', result.stderr)
+        self.assertNotIn('brief requires one Type:', result.stderr)
+        self.assertEqual(calls[1][0], 'dispatch-job')
+
+    def test_work_request_type_cannot_override_the_queue_header(self):
+        self.job['description'] = 'Type: bug-fix'
+        result, calls = self.run_queue([self.job], real_launcher=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('job registration refused', result.stderr)
+        self.assertEqual(json.loads(calls[1][1])['job_type'], 'review')
+
+    def test_only_untyped_jobs_produce_no_launch(self):
+        del self.job['job_type']
+        result, calls = self.run_queue([self.job])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 1)
+        self.assertIn('WR557.S2.J3', result.stderr)
+        self.assertIn('job type', result.stderr)
+
+    def test_untyped_and_unknown_jobs_do_not_block_a_typed_job(self):
+        for job_type in (None, 'unknown'):
+            with self.subTest(job_type=job_type):
+                self.log.unlink(missing_ok=True)
+                legacy = {**self.job, 'job_type': job_type, 'card_id': 'WR557.S2.J1', 'j_number': 1}
+                result, calls = self.run_queue([legacy, self.job])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('WR557.S2.J1', result.stderr)
+                self.assertIn('job type', result.stderr)
+                self.assertIn('WR557.S2.J3', calls[1][1])
+                self.assertIn('Type: review', calls[1][2].splitlines())
 
     def test_next_job_keeps_card_identity_for_launcher_registration(self):
         result, calls = self.run_queue([self.job])
