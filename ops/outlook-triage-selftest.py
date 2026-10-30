@@ -33,7 +33,7 @@ sys.path.insert(0, str(ROOT))
 from lib import outlook_triage as triage
 from outlook_test_support import write_settings
 from lib.launchd_calendar import calendar_for_window
-from lib.outlook_ui import Row, Waits, is_compose_window
+from lib.outlook_ui import Row, Waits, button_matches, is_compose_window
 
 ZONE = ZoneInfo('America/Chicago')
 EVENING = datetime(2026, 10, 20, 19, 15, tzinfo=ZONE)
@@ -371,6 +371,24 @@ else:
     fail('unexpected tool ' + tool)
 sys.exit(0)
 '''.replace('ACCOUNT', repr(ACCOUNT))
+
+
+class ButtonLabelTest(unittest.TestCase):
+    def test_known_state_suffixes_for_all_buttons(self):
+        for label in ('New Mail', 'Send', 'Discard', 'Cc', 'Bcc', 'Move', 'All Accounts', 'Save'):
+            for state in ('pressed', 'selected', 'expanded', 'collapsed', 'checked', 'unchecked'):
+                with self.subTest(label=label, state=state):
+                    self.assertTrue(button_matches({'role': 'AXButton', 'label': f'{label}, {state}'}, label))
+
+    def test_stacked_known_states_match(self):
+        self.assertTrue(button_matches({'role': 'AXButton', 'label': 'New Mail, pressed, selected'}, 'New Mail'))
+
+    def test_near_misses_and_missing_names_do_not_match(self):
+        for label in ('New Mail Rule', 'New Mail, Rule', 'New Mail, pressed, Rule', 'New Mail, ', '', None):
+            with self.subTest(label=label):
+                self.assertFalse(button_matches({'role': 'AXButton', 'label': label}, 'New Mail'))
+        self.assertFalse(button_matches({'role': 'AXButton'}, ''))
+        self.assertFalse(button_matches({'role': 'AXButton', 'label': ''}, ''))
 
 
 class FakeOutlookCase(unittest.TestCase):
