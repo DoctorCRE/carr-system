@@ -1393,15 +1393,40 @@ class OutboxTests(unittest.TestCase):
         output = io.StringIO()
         with patch.object(self.worker, 'load_settings', return_value=self.settings), \
                 patch.object(type(self.settings), 'require_repo'), \
-                patch.object(self.worker, 'run', return_value=dict(sent=1, failed=1, deferred=0, receipt_failed=0)), \
+                patch.object(self.worker, 'run', return_value=dict(sent=1, failed=1, deferred=1, receipt_failed=0)), \
                 patch('sys.stdout', output):
             self.assertEqual(self.worker.main(), 1)
         receipt = json.loads(output.getvalue().split('outlook-outbox-receipt ', 1)[1])
         self.assertEqual((receipt['state'], receipt['reason']), ('failed', 'send_failed'))
 
+    def test_identityless_row_alerts_once_and_stays_quarantined(self):
+        row = {'subject': 'private malformed subject', 'to': ['private@example.test']}
+        carr = self.ports.carr
+        valid = [self.draft]
+        self.ports.carr = lambda verb, args: (dict(schema_version='email-outbox.v1', owner='joe',
+            drafts=[row, *valid]) if verb == 'outbox-for-sender' else carr(verb, args))
+        first = self.worker.run(self.settings, self.ports)
+        self.assertEqual((first['failed'], first.get('quarantined')), (1, 1))
+        self.assertEqual(first['sent'], 1)
+        valid.clear()
+        row = dict(reversed(list(row.items())))
+        second = self.worker.run(self.settings, self.ports)
+        self.assertEqual((second['failed'], second['quarantined']), (0, 1))
+        stored = ''.join(p.read_text() for p in (self.ports.out / 'outbox' / 'quarantine').iterdir())
+        self.assertNotIn('private', stored)
+        self.assertEqual(len(self.sent), 1)
+
     def test_main_reports_deferred(self):
-        with patch.object(self.worker, 'load_settings', return_value=self.settings), patch.object(self.settings.__class__, 'require_repo'), patch.object(self.worker, 'run', return_value=dict(sent=0, failed=0, deferred=1, receipt_failed=0)):
-            self.assertEqual(self.worker.main(), 1)
+        import io
+        output = io.StringIO()
+        with patch.object(self.worker, 'load_settings', return_value=self.settings), \
+                patch.object(type(self.settings), 'require_repo'), \
+                patch.object(self.worker, 'run', return_value=dict(sent=0, failed=0, deferred=1, receipt_failed=0)), \
+                patch('sys.stdout', output):
+            self.assertEqual(self.worker.main(), 78)
+        receipt = json.loads(output.getvalue().split('outlook-outbox-receipt ', 1)[1])
+        self.assertEqual((receipt['state'], receipt['reason']), ('skipped', 'deferred'))
+        self.assertEqual(receipt['counts']['deferred'], 1)
 
     def test_other_partner_identity_cannot_send_on_this_machine(self):
         carr = self.ports.carr

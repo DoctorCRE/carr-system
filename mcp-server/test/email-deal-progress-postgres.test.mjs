@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
@@ -1447,6 +1447,29 @@ const submitDraft = (proposal, extra = {}, identity = actor) => command('submit-
   subject: 'Re: Floor plan', body: 'I will review.', to: ['sender@example.test'],
   cc: [identity.slug === 'dell' ? 'joe@example.test' : 'dell@example.test'], ...extra }, identity, 'carr_writer');
 const refuses = (promise, code) => assert.rejects(promise, error => error.payload?.error === code);
+
+test('submission audit binds recipients without addresses and proves both partner copies', async () => {
+  await c.query("update actor set email='joe@example.test' where slug='joe'");
+  await c.query("insert into actor(slug,kind,display_name,email) values('dell','human','Synthetic Dell','dell@example.test') on conflict(slug) do update set email=excluded.email,active=true");
+  for (const owner of ['joe', 'dell']) {
+    const identity = { ...actor, ...(await c.query('select id,slug from actor where slug=$1', [owner])).rows[0] };
+    const proposal = await draftFor(owner);
+    const key = randomUUID();
+    const submitted = await submitDraft(proposal, { idempotency_key: key }, identity);
+    const room = await command('get-deal-room', { deal });
+    const events = room.events.filter(e => e.verb === 'submit-email-draft' && e.new_value.proposal_id === proposal.proposal_id);
+    assert.equal(events.length, 1);
+    const audit = events[0].new_value;
+    assert.ok(!JSON.stringify(audit).includes('@'), 'audit must omit recipient addresses');
+    const digest = value => createHash('sha256').update(value).digest('hex');
+    assert.deepEqual(audit.recipient_binding, {
+      sha256: digest(JSON.stringify({ to: submitted.to, cc: submitted.cc })),
+      cc_owner: owner === 'joe' ? 'dell' : 'joe',
+      cc_sha256: digest(submitted.cc[0]),
+    });
+    assert.equal((await submitDraft(proposal, { idempotency_key: key }, identity)).replayed, true);
+  }
+});
 
 test('recent reply outcomes are bounded, ordered and scoped to the partner', async () => {
   await c.query('delete from email_proposal');

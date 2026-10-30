@@ -104,6 +104,21 @@ class ScheduledRunTests(unittest.TestCase):
             args = json.loads(self.rows()[-1][3])
             self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
 
+    def test_outbox_deferral_preserves_monitoring_counts_without_failure_class(self):
+        receipt = {'state': 'skipped', 'reason': 'deferred',
+                   'counts': {'deferred': 1, 'failed': 0, 'quarantined': 2}}
+        child = self.root / 'outbox.py'
+        child.write_text('import sys\n' +
+                         f"print({('outlook-outbox-receipt ' + json.dumps(receipt))!r})\nsys.exit(78)\n")
+        result = subprocess.run(['/bin/zsh', str(self.root / 'bin/run-scheduled.sh'),
+            'outlook-outbox', 'outlook-outbox.run', sys.executable, str(child)],
+            cwd=self.root, env=self.env, text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 78)
+        args = json.loads(self.rows()[-1][3])
+        self.assertEqual(args[args.index('--state') + 1], 'skipped')
+        self.assertNotIn('--failure-class', args)
+        self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
+
     def test_receipt_tempfile_failure_still_runs_service(self):
         (self.root / 'out').write_text('synthetic unavailable receipt directory')
         marker = self.root / 'service-ran'
