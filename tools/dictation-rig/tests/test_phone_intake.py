@@ -173,6 +173,77 @@ class PhoneIntakeTests(unittest.TestCase):
         self.assertEqual(cleared['report']['open_questions'], [])
         self.assertEqual(post_call.read_json(session / post_call.STATUS_FILE)['state'], 'filed')
 
+    def budget_held_phone(self):
+        import call_budget
+        import post_call
+        import post_call_jev
+        from datetime import datetime, timezone
+
+        phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
+        session = self.root / f"phone-{self.metadata['session_id']}"
+        transcript = {'segments': [{'speaker': 'Joe', 'text': 'Review the proposal'}]}
+        report = {'session': session.name, 'report': {'open_questions': []},
+                  'joe_tasks': [{'title': 'Review proposal', 'evidence': 'Review the proposal'}],
+                  'review_questions': []}
+        with (patch.dict('os.environ', {'CALL_JEV_DAILY_DOLLARS': '0.001'}),
+              patch.object(call_budget, 'datetime') as clock):
+            clock.now.return_value = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
+            post_call_jev.check_distillation(report, {'deals': []}, transcript,
+                                            budget_ledger=self.root / '.jev-budget.json')
+        post_call.write_private(session / 'transcript.json', transcript)
+        post_call.write_private(session / post_call.REPORT_FILE, report)
+        post_call.write_private(session / post_call.STATUS_FILE, {'state': 'filed'})
+        post_call.write_private(session / 'ingested.json', {'ok': True})
+        return session
+
+    def test_resume_error_keeps_processor_alive_and_other_calls_processing(self):
+        import call_budget
+        import post_call
+        from datetime import datetime, timezone
+        from unittest.mock import Mock
+
+        session = self.budget_held_phone()
+        original = post_call.read_json(session / post_call.REPORT_FILE)
+        other = self.root / 'phone-20000000-0000-0000-0000-000000000002'
+        other.mkdir()
+        post_call.write_private(other / 'transfer.json', {'ok': True})
+        post_call.write_private(other / 'ingested.json', {'ok': True})
+        visited, errors = [], []
+        swept, stopped = threading.Event(), threading.Event()
+        client = Mock()
+        client.system_one.side_effect = KeyError('private provider details')
+
+        def processor():
+            try:
+                phone_intake.process_pending(self.root, {}, 'synthetic')
+                swept.set()
+                stopped.wait(5)
+            except Exception as exc:
+                errors.append(type(exc).__name__)
+                swept.set()
+
+        with (patch.object(call_budget, 'datetime') as clock,
+              patch.object(post_call, 'fetch_context', return_value={'deals': []}),
+              patch.object(post_call, '_jev_fixture_client', return_value=client),
+              patch.object(phone_intake, 'publish_status', side_effect=lambda path, *_: visited.append(path) or True)):
+            clock.now.return_value = datetime(2026, 1, 2, 12, tzinfo=timezone.utc)
+            thread = threading.Thread(target=processor)
+            thread.start()
+            try:
+                self.assertTrue(swept.wait(5))
+                self.assertEqual(errors, [])
+                self.assertTrue(thread.is_alive())
+                self.assertIn(other, visited)
+            finally:
+                stopped.set()
+                thread.join(5)
+        held = post_call.read_json(session / post_call.REPORT_FILE)
+        self.assertEqual(held['checks_hold'], original['checks_hold'])
+        self.assertEqual(held['joe_tasks'], original['joe_tasks'])
+        self.assertEqual(held['deal_check'], {'status': 'unavailable', 'exception_class': 'KeyError'})
+        self.assertIn('exception=KeyError', post_call.LOG_PATH.read_text())
+        self.assertNotIn('private provider details', post_call.LOG_PATH.read_text())
+
     def test_outbound_download_is_acknowledged_only_after_durable_hash_verification(self):
         received = []
         listed = [True]
