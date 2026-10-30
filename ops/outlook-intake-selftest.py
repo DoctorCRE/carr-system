@@ -1003,6 +1003,7 @@ class IntakeTest(unittest.TestCase):
         first = intake.run(self.repo, self.home, self.fake.ports())
         self.assertEqual(first.state, 'succeeded')
         self.assertEqual(len(self.fake.writes('log-activity')), 7)
+
         for result in (first, intake.run(self.repo, self.home, self.fake.ports())):
             counts = json.loads(intake.receipt_line(result).split(' ', 1)[1])['counts']['backlog']
             self.assertEqual((counts['stored'], counts['admitted']), (8, 8))
@@ -1019,6 +1020,49 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual((moved.counts['stored'], moved.counts['admitted']), (8, 8))
         self.assertEqual((moved.counts['stored_user'], moved.counts['stored_archive']), (0, 2))
         self.assertEqual(len(self.fake.writes('log-activity')), 7)
+
+    def test_receipt_explains_only_work_account_admission_gaps(self):
+        messages = [mail('pat@example.test', -timedelta(hours=1), subject=f'Synthetic {i}',
+                         local_keys=str(100 + i)) for i in range(6)]
+        messages[3]['folder_account'] = 8
+        messages[4]['folder_account'] = None
+        write_db(self.fake.fixture, messages)
+        with sqlite3.connect(self.fake.fixture) as con:
+            con.execute('INSERT INTO message_folders VALUES(1,8)')
+            con.execute('INSERT INTO message_folders VALUES(2,999)')
+            con.execute('UPDATE messages SET folder_links_unresolved=1 WHERE id=3')
+            con.execute("INSERT INTO folders VALUES(10,7,NULL,'unknown',NULL)")
+            con.execute('UPDATE message_folders SET folder_id=10 WHERE message_id=6')
+        result = intake.run(self.repo, self.home, self.fake.ports())
+        self.assertEqual(result.state, 'succeeded')
+        counts = json.loads(intake.receipt_line(result).split(' ', 1)[1])['counts']['backlog']
+        self.assertEqual((counts['stored'], counts['admitted']), (5, 1))
+        self.assertEqual((counts['stored_not_admitted_account_ambiguous'],
+                          counts['stored_not_admitted_account_unresolved']), (1, 3))
+        self.assertEqual((counts['stored_inbox'], counts['admitted_inbox']), (3, 0))
+        self.assertEqual((counts['stored_unknown'], counts['admitted_unknown']), (1, 0))
+        self.assertEqual((counts['stored_sent'], counts['admitted_sent']), (1, 1))
+        self.assertEqual(counts['mail_outside_selected_account'], 1)
+        self.assertEqual(self.fake.writes('log-activity'), [])
+
+    def test_receipt_upgrade_recounts_unchanged_store_and_preserves_counts_on_write_failure(self):
+        message = mail('pat@example.test', -timedelta(hours=1), local_keys='77')
+        self.run_intake([message])
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        for name in ('stored', 'stored_inbox', 'admitted_inbox'):
+            state.pop(name)
+        path.write_text(json.dumps(state))
+        upgraded = self.run_intake([message], touch=False)
+        self.assertEqual((upgraded.counts['stored'], upgraded.counts['stored_inbox'],
+                          upgraded.counts['admitted_inbox']), (2, 1, 1))
+        self.assertEqual(self.fake.decodes, 2)
+        self.fake.fail_verbs.add('log-activity')
+        failed = self.run_intake([message, mail('pat@example.test', -timedelta(minutes=5),
+                                               subject='Synthetic follow-up', local_keys='78')])
+        self.assertEqual(failed.reason, 'writes_failed')
+        counts = json.loads(intake.receipt_line(failed).split(' ', 1)[1])['counts']['backlog']
+        self.assertEqual((counts['stored'], counts['admitted']), (3, 3))
 
     def test_unresolved_retries_do_not_count_as_new_emails(self):
         message = mail('unknown@example.test', -timedelta(hours=1))
