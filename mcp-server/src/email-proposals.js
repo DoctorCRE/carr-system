@@ -241,16 +241,17 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'submit-email-draft': {
       write: true, humanOnly: true, humanCallerOnly: true,
-      description: 'The owning partner submits the exact final subject, body and displayed to/cc arrays from a review card. Missing or changed recipients refuse email_draft_recipients_mismatch. Approval freezes the original sender as recipient, the other partner actor.email as cc, and the supplied attachment paths and sha256. Paths must be canonical absolute paths under the local attachment root. Missing copy address refuses. Enqueues for that partner’s Mac; does not send mail.',
+      description: 'The owning partner submits the exact final subject, body and displayed to/cc arrays from a review card. Missing or changed recipients refuse email_draft_recipients_mismatch. Approval freezes the original sender as recipient, the other partner actor.email as cc, and the supplied attachment paths, sha256 and byte sizes. Paths must be canonical absolute paths under the local attachment root. Missing copy address refuses. Enqueues for that partner’s Mac; does not send mail.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: [...Object.keys(draftProperties), 'subject', 'body'], properties: { ...draftProperties,
           subject: { type: 'string', minLength: 1, maxLength: 998 }, body: { type: 'string', maxLength: 20000 },
           to: { type: 'array', minItems: 1, maxItems: 1, items: { type: 'string', format: 'email' } },
           cc: { type: 'array', minItems: 1, maxItems: 1, items: { type: 'string', format: 'email' } },
           attachments: { type: 'array', maxItems: 50, items: { type: 'object', additionalProperties: false,
-            required: ['path', 'sha256'], properties: {
+            required: ['path', 'sha256', 'size'], properties: {
               path: { type: 'string', minLength: 2, maxLength: 4096, pattern: '^/(?:[^/\\u0000]+/)*[^/\\u0000]+$' },
-              sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' } } } } } },
+              sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              size: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER } } } } } },
       handler: async (c, actor, args) => {
         if (actor.human !== true || !['joe', 'dell'].includes(actor.slug)) fail('email_draft_not_owner');
         await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
@@ -267,6 +268,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
               args[field][0] !== recipients[field][0])) fail('email_draft_recipients_mismatch');
           if ((args.attachments ?? []).some(a => a.path.split('/').some(part => part === '.' || part === '..')))
             fail('email_draft_attachment_path_invalid');
+          if ((args.attachments ?? []).some(a => !Number.isSafeInteger(a.size) || a.size < 0))
+            fail('email_draft_attachment_size_invalid');
           const submitted = { subject: args.subject, body: args.body,
             sha256: sha256(JSON.stringify({ subject: args.subject, body: args.body })), ...recipients,
             attachments: args.attachments ?? [] };
@@ -298,7 +301,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'record-email-sent': {
       write: true,
-      description: 'The owning partner’s Mac records sent only after Sent Items confirms, or failed with a reason. Requires submitted text sha256 and base_version. Sent results also require the observed sent_at and sender_account matching the owning partner. Atomically appends email_out correspondence with frozen recipients and attachment names and hashes; retries of that send identity do not duplicate it. A failed result leaves the outbox to prevent ambiguous automatic resend. Never sends mail.',
+      description: 'The owning partner’s Mac records sent only after Sent Items confirms, or failed with a reason. Requires submitted text sha256 and base_version. Sent results also require the observed sent_at and sender_account matching the owning partner. Atomically appends email_out correspondence with frozen recipients and attachment names, hashes and byte sizes; retries of that send identity do not duplicate it. A failed result leaves the outbox to prevent ambiguous automatic resend. Never sends mail.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: [...Object.keys(draftProperties), 'status', 'sha256'], properties: { ...draftProperties,
           status: { type: 'string', enum: ['sent', 'failed'] },
@@ -337,7 +340,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
                 ...row.submitted_email.cc.map(email => ({ email, kind: 'cc', internal: true })),
               ], send_id: row.id, sent_item_id: args.sent_item_id,
               sent_at: args.sent_at, attachments: (row.submitted_email.attachments ?? []).map(a => ({
-                file_name: a.path.split('/').at(-1), sha256: a.sha256 })) };
+                file_name: a.path.split('/').at(-1), sha256: a.sha256, size: a.size })) };
             await c.query(`insert into activity(occurred_at,actor_id,kind,summary,deal_id,source,email_context)
               values($1,$2,'email_out','Partner-submitted email sent',$3,'outlook',$4::jsonb)`,
             [args.sent_at, partner.id, row.deal_id, JSON.stringify(context)]);
