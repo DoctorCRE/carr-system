@@ -1281,6 +1281,13 @@ class OutboxTests(unittest.TestCase):
                     else:
                         command.assert_not_called()
 
+    def test_locked_screen_defers_without_failure_receipt(self):
+        locked = send_mod.Result(send_mod.State.FAILED, 'screen_locked')
+        with patch.object(send_mod, 'send_submitted', return_value=locked):
+            counts = self.worker.run(self.settings, self.ports)
+        self.assertEqual((counts['deferred'], counts['failed'], counts['sent']), (1, 0, 0))
+        self.assertEqual([v for v, _ in self.calls if v == 'record-email-sent'], [])
+
     def test_invalid_rows_record_failure_and_do_not_block_later_draft(self):
         bad = dict(self.draft, cc=['wrong@example.test'])
         good = dict(self.draft, proposal_id='22222222-2222-4222-8222-222222222222')
