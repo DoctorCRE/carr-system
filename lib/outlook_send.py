@@ -753,7 +753,7 @@ class Window:
             return False
 
     def _button(self, elements: list[dict], label: str) -> dict:
-        hits = [e for e in elements if e.get('role') == 'AXButton' and e.get('label') == label and e.get('depth') == 1]
+        hits = [e for e in elements if ui.button_matches(e, label) and e.get('depth') == 1]
         if len(hits) != 1:
             raise UiFailure(f'{label.lower().replace(" ", "_")}_button_not_found')
         return hits[0]
@@ -764,7 +764,7 @@ class Window:
             _cua('click', {'pid': self.pid, 'element_token': self._button(self.elements(), 'Discard')['element_token']})
             time.sleep(self.waits.settle_seconds)
             if not self.closed():
-                confirm = [e for e in self.elements() if e.get('role') == 'AXButton' and e.get('label') == 'Discard'
+                confirm = [e for e in self.elements() if ui.button_matches(e, 'Discard')
                            and e.get('depth', 0) > 1]
                 if len(confirm) == 1:
                     _cua('click', {'pid': self.pid, 'element_token': confirm[0]['element_token']})
@@ -843,8 +843,7 @@ class ComposeWindow(Window):
             hits = [e for e in self.elements() if e.get('label') == label
                     and e.get('role') in ('AXTextField', 'AXTextArea')]
             if not hits and key in ('cc', 'bcc'):
-                toggles = [e for e in self.elements() if e.get('label') == key.capitalize()
-                           and e.get('role') == 'AXButton']
+                toggles = [e for e in self.elements() if ui.button_matches(e, key.capitalize())]
                 if len(toggles) == 1:
                     _cua('click', {'pid': self.pid, 'element_token': toggles[0]['element_token']})
                     hits = [e for e in self.elements() if e.get('label') == label and e.get('role') == 'AXTextField']

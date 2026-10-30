@@ -705,6 +705,31 @@ class PreflightQuitTest(FakeOutlookCase):
         self.assertNotIn(ACCOUNT, outcome.detail)
         self.assert_no_restart()
 
+    def test_different_new_mail_button_name_prevents_restart(self):
+        for label in ('New Mail Rule', 'New Mail Rule, pressed'):
+            with self.subTest(label=label):
+                self.given(windows=[ORDINARY], new_mail_label=label)
+                outcome = self.prepare()
+                self.assertEqual((outcome.state, outcome.reason),
+                                 ('skipped', 'no_usable_main_window'))
+                self.assert_no_restart()
+
+    def test_state_suffix_on_message_list_does_not_match_the_table(self):
+        from lib.outlook_ui import cua
+        self.given(windows=[ORDINARY])
+        def suffixed_table(tool, arguments):
+            result = cua(tool, arguments)
+            if tool == 'get_window_state':
+                for element in result.get('elements', []):
+                    if element.get('role') == 'AXTable':
+                        element['label'] = 'Message List, pressed'
+            return result
+        with patch('lib.outlook_ui.cua', side_effect=suffixed_table):
+            outcome = self.prepare()
+        self.assertEqual((outcome.state, outcome.reason),
+                         ('skipped', 'no_usable_main_window'))
+        self.assert_no_restart()
+
     def test_mailbox_whose_new_mail_button_reads_pressed_allows_restart(self):
         # Shape read on the Studio 2026-10-29: mailbox, twelve toolbar strips,
         # the unassigned offscreen window, and "New Mail, pressed".
