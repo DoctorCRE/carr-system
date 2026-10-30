@@ -1,6 +1,12 @@
 // Record an archived email attachment against the deal its mail matched.
 import { ToolError } from "./tool-error.ts";
 
+export const REQUIREMENT_UPLOAD_MAX_BYTES = 1024 * 1024;
+export function isRequirementPdf(bytes) {
+  return bytes.length >= 5 && bytes.length <= REQUIREMENT_UPLOAD_MAX_BYTES
+    && String.fromCharCode(...bytes.subarray(0, 5)) === '%PDF-';
+}
+
 const MAX_BYTES = 25 * 1024 * 1024;
 const MIME = new Set(["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

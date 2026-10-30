@@ -1261,6 +1261,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "issue-requirement-upload": {
+    "ingress_key": "mcp-tool:issue-requirement-upload",
+    "source_locator": "mcp-server/src/requirement-requests.js",
+    "schema_digest": "1719221eab60a995637a428f3e131cd8c6fc3128f32556ae046832f7d3a67c50",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": true,
+    "delegates_to": []
+  },
   "issue-tour-share-grant": {
     "ingress_key": "mcp-tool:issue-tour-share-grant",
     "source_locator": "mcp-server/src/tour-sharing.js",
@@ -1455,6 +1465,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:list-progress-boards",
     "source_locator": "mcp-server/src/board-answers.js",
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "list-requirement-requests": {
+    "ingress_key": "mcp-tool:list-requirement-requests",
+    "source_locator": "mcp-server/src/requirement-requests.js",
+    "schema_digest": "6090673a493e5225d9d0fa948e3ba6f8191dbef5560bff4696dcb8a86fbbb5a6",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -2872,6 +2892,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "request-checklist-document": {
+    "ingress_key": "mcp-tool:request-checklist-document",
+    "source_locator": "mcp-server/src/requirement-requests.js",
+    "schema_digest": "f32f9485f4a830d935b8ec2faa6891c86af22f0aee06fe7febae8de9ef886117",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "request-tour-pdf-render": {
     "ingress_key": "mcp-tool:request-tour-pdf-render",
     "source_locator": "mcp-server/src/tour-artifacts.js",
@@ -3025,6 +3055,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "human_only": true,
     "human_caller_only": false,
     "authority_only": false,
+    "delegates_to": []
+  },
+  "revoke-requirement-upload": {
+    "ingress_key": "mcp-tool:revoke-requirement-upload",
+    "source_locator": "mcp-server/src/requirement-requests.js",
+    "schema_digest": "fb1e2483a8d6da867a4fc7d161872a598a38efa47900eb71af2068932d06e141",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": true,
     "delegates_to": []
   },
   "revoke-salesforce-read-consent": {
@@ -3716,6 +3756,96 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "ingress_key": "db-relation-acl:ops.work_request_slice:carr_writer:update",
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_quota:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_quota",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "update",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_request:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_request",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_receipt:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_receipt",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_grant:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_grant",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_grant:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_grant",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "update",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_visitor:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_visitor",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_visitor:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_visitor",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "update",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_grant:carr_authority:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_grant",
+      "relation_kind": "r",
+      "grantee": "carr_authority",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_grant:carr_authority:update",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_grant",
+      "relation_kind": "r",
+      "grantee": "carr_authority",
+      "privilege": "update",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_quota:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_quota",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
     }
   ],
   "secdef_execute": [
