@@ -9223,7 +9223,7 @@ registerTools({
         `select a.id, to_jsonb(a.occurred_at)#>>'{}' as occurred_at, a.actor,
                 a.kind, a.summary, a.detail, a.source, a.email_context
            from v_deal_room_activity a
-          where a.deal_id=$1 order by a.occurred_at desc, a.id desc limit 50`, [s.id]);
+          where a.deal_id=$1 order by a.occurred_at desc, a.id desc`, [s.id]);
       const emailThreads = await c.query(
         `select conversation_id, subject, latest_message_at from (
            select distinct on (email_context->>'conversation_id',
