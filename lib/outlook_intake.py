@@ -86,6 +86,7 @@ import uuid
 
 from lib import email_links, unresolved_email
 from lib.outlook_settings import load_settings, OutlookSettings
+from lib.outlook_runtime import stamp
 OUT = Path('out/outlook-intake')
 STATE = 'state.json'
 WORK_PREFIX = 'work-'
@@ -238,10 +239,11 @@ def receipt_counts(counts: dict) -> dict:
     return split
 
 
-def receipt_line(outcome: Outcome) -> str:
+def receipt_line(outcome: Outcome, repo: Path | None = None) -> str:
     """The machine receipt bin/run-scheduled.sh validates and records."""
     reason = 'full_disk_access_required' if outcome.reason.startswith('grant Full Disk Access') else outcome.reason
-    receipt = {'state': outcome.state, 'reason': reason, 'counts': receipt_counts(outcome.counts)}
+    receipt = {'state': outcome.state, 'reason': reason, 'counts': receipt_counts(outcome.counts),
+               **stamp(repo or Path(__file__).resolve().parents[1])}
     if outcome.detail:
         receipt['detail'] = outcome.detail
     return 'outlook-intake-receipt ' + json.dumps(receipt)
@@ -1814,7 +1816,7 @@ def main() -> int:
                       mail, today, deals, parties, settings.model))
     outcome = run(repo, home, ports)
     print(status_line(outcome))
-    print(receipt_line(outcome))
+    print(receipt_line(outcome, settings.repo))
     if outcome.reason not in ('outside_window', 'previous_run_active'):
         try:
             from lib import email_router
