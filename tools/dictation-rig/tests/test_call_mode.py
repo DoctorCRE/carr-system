@@ -59,6 +59,10 @@ _CLIENT_PATCHES = (
 
 _LOG_DIR = tempfile.TemporaryDirectory()
 _LOG_PATCHES = (
+    patch.dict(os.environ, {'CALL_JEV_DAILY_DOLLARS': '100'}),
+    patch.object(post_call_jev, 'BUDGET_LEDGER', Path(_LOG_DIR.name) / 'budget.json'),
+    patch.object(runtime_jev, 'BUDGET_LEDGER', Path(_LOG_DIR.name) / 'budget.json'),
+    patch.object(post_call, 'LOG_PATH', Path(_LOG_DIR.name) / 'post-call.log'),
     # Keep test lines out of the live companion and bridge logs on the Studio.
     patch.object(call_mode, "LOG_PATH", Path(_LOG_DIR.name) / "call-mode.log"),
     patch.object(capture_bridge, "LOG_PATH", Path(_LOG_DIR.name) / "capture-bridge.log"),
@@ -1505,6 +1509,14 @@ class AutomaticApplyTests(unittest.TestCase):
         self.assertEqual(marked["deal_updates"][0]["next_step"]["apply"], "automatic")
         self.assertEqual(marked["deal_updates"][1]["phase_move"]["apply"], "automatic")
 
+    def test_budget_hold_keeps_previously_checked_changes_as_proposals(self) -> None:
+        report = self.mark(self.update(next_step=self.step()))
+        self.assertEqual(report['deal_updates'][0]['next_step']['apply'], 'automatic')
+        report['checks_hold'] = 'Jev daily dollar budget is exhausted.'
+        held = post_call.mark_automatic(report, self.transcript, {})
+        self.assertEqual(held['deal_updates'][0]['next_step']['apply'], 'review')
+        self.assertIn('budget is exhausted', held['deal_updates'][0]['next_step']['review_reason'])
+
     def test_client_stated_change_stays_for_partner_review(self) -> None:
         self.transcript["segments"][0]["speaker"] = "Client"
         change = self.mark(self.update(next_step=self.step()))["deal_updates"][0]["next_step"]
@@ -2013,7 +2025,7 @@ class PostCallJevChecksTests(unittest.TestCase):
     def fake_client(*, deal_choice: str = "deal-a", deal_confidence: float = 0.9,
                  speaker_probability: float = 0.9, details_probability: float = 0.9,
                  deal_in_candidates: float = 0.9):
-        def _ask(*, state: object, questions: dict[str, object]) -> SimpleNamespace:
+        def _ask(*, state: object, questions: dict[str, object], **kwargs) -> SimpleNamespace:
             body = {
                 "deal_match": {"type": "choice", "choice": deal_choice, "confidence": deal_confidence},
                 "deal_in_candidates": {"type": "noul", "noul": deal_in_candidates},
@@ -2032,7 +2044,7 @@ class PostCallJevChecksTests(unittest.TestCase):
                 "details_supported": SimpleNamespace(noul=0.9),
             })
         client = Mock()
-        client.system_one.side_effect = lambda *, state, questions: answers(
+        client.system_one.side_effect = lambda *, state, questions, **kwargs: answers(
             "deal-a" if "Acme" in state["item"]["fields"]["title"] else "deal-b")
         result = post_call_jev.check_distillation(self.result(dell_tasks=[{
             "title": "Send the revised LOI", "deal_id": "deal-b", "evidence": "Dell will send the revised LOI",
@@ -2079,7 +2091,7 @@ class PostCallJevChecksTests(unittest.TestCase):
         gate = threading.Event()
         inner = self.fake_client()
 
-        def slow(*, state: object, questions: dict[str, object]) -> SimpleNamespace:
+        def slow(*, state: object, questions: dict[str, object], **kwargs) -> SimpleNamespace:
             with lock:
                 state_["now"] += 1
                 state_["peak"] = max(state_["peak"], state_["now"])
@@ -2099,7 +2111,7 @@ class PostCallJevChecksTests(unittest.TestCase):
     def test_one_failed_item_call_leaves_the_others_checked(self) -> None:
         inner = self.fake_client()
 
-        def flaky(*, state: dict[str, Any], questions: dict[str, object]) -> SimpleNamespace:
+        def flaky(*, state: dict[str, Any], questions: dict[str, object], **kwargs) -> SimpleNamespace:
             if state["item"]["fields"]["title"] == "Bad":
                 raise TypeSafeError("refused")
             return inner.system_one(state=state, questions=questions)

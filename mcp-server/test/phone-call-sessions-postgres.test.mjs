@@ -70,3 +70,19 @@ test('concurrent imports admit one session under carr_writer and expose its repo
   assert.deepEqual(visible.deal_updates, []);
   assert.equal((await handler.fetch(new Request(`${url}/${id}`), env, { ...actor, id: '10000000-0000-0000-0000-000000000009', slug: 'dell' })).status, 404);
 });
+
+test('five admissions are isolated by partner and Chicago day, with free duplicate retries', async () => {
+  const admit = async (body, partner = actor) => handler.fetch(new Request(url, {
+    method: 'POST', body: JSON.stringify(body),
+  }), { ...env, CALL_DAILY_ADMISSIONS: 99 }, partner);
+  for (let n = 0; n < 4; n++) {
+    assert.equal((await admit({ ...metadata, sha256: String(n).repeat(64) })).status, 201);
+  }
+  const sixth = { ...metadata, sha256: 'c'.repeat(64) };
+  assert.equal((await admit(sixth)).status, 429);
+  assert.equal((await admit(metadata)).status, 200);
+  const dell = { ...(await pool.query("select id,slug from actor where slug='dell'")).rows[0], human: true };
+  assert.equal((await admit(sixth, dell)).status, 201);
+  await pool.query("update phone_call_session set admitted_on=(now() at time zone 'America/Chicago')::date-1 where owner_id=$1", [actor.id]);
+  assert.equal((await admit(sixth)).status, 201);
+});

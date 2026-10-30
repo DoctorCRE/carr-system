@@ -117,6 +117,7 @@ class PhoneIntakeTests(unittest.TestCase):
         self.assertNotIn('transcript', json.dumps(report['report']))
         self.assertFalse((session / 'ingested.json').exists())
         bridge = phone_intake.bridge_module()
+        bridge.LOG_PATH = self.root / 'bridge.log'
         uploaded = {}
 
         def http(_method, url, body, _headers):
@@ -142,6 +143,57 @@ class PhoneIntakeTests(unittest.TestCase):
         self.assertTrue(any('/capture/post-call/candidates' in url for url in uploaded))
         self.assertTrue(any('/capture/candidates' in url for url in uploaded))
         self.assertFalse((session / 'ingested.json').exists())
+
+    def test_limits_reject_before_reading_audio_even_with_larger_configuration(self):
+        source = unittest.mock.Mock()
+        with patch.dict('os.environ', {'CALL_MAX_BYTES': '999999999', 'CALL_MAX_SECONDS': '99999'}):
+            for changes in ({'byte_count': 52428801}, {'duration_seconds': 3601}):
+                with self.subTest(changes=changes), self.assertRaises(ValueError):
+                    phone_intake.receive(self.root, {**self.metadata, **changes}, source)
+        source.read.assert_not_called()
+        self.assertFalse(list(self.root.glob('phone-*')))
+
+    def test_exhausted_extraction_rejects_before_decoder_or_model_work(self):
+        phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
+        session = self.root / f"phone-{self.metadata['session_id']}"
+        phone_intake.post_call.write_private(session / 'post-call.json', {'extraction_attempts': 3})
+        with patch.dict('os.environ', {'CALL_EXTRACTION_ATTEMPTS': '99'}), patch.object(phone_intake.subprocess, 'run') as run:
+            status = phone_intake.extract(session)
+        self.assertEqual(status['state'], 'needs_attention')
+        run.assert_not_called()
+
+    def test_second_processor_slot_rejects_before_any_work(self):
+        with patch.dict('os.environ', {'CALL_PROCESSORS': '99'}), patch.object(phone_intake, 'bridge_module') as bridge:
+            with self.assertRaises(ValueError):
+                phone_intake.process_pending(self.root, {}, 'synthetic', slot=1)
+        bridge.assert_not_called()
+
+    def test_processor_lock_refuses_overlapping_sweep(self):
+        with phone_intake.exclusive(self.root / '.phone-processor-0.lock'):
+            result = phone_intake.process_pending(self.root, {}, 'synthetic')
+        self.assertEqual(result, {'busy': True})
+
+    def test_failed_decode_work_stops_after_three_attempts(self):
+        phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
+        session = self.root / f"phone-{self.metadata['session_id']}"
+        import transcribe_session
+        with patch.object(transcribe_session, 'resolve_model', side_effect=ValueError('synthetic model unavailable')) as model:
+            for _ in range(3):
+                with self.assertRaises(ValueError):
+                    phone_intake.extract(session)
+            status = phone_intake.extract(session)
+        self.assertEqual(model.call_count, 3)
+        self.assertEqual(status['state'], 'needs_attention')
+
+    def test_phone_retention_holds_unresolved_review_questions(self):
+        session = self.root / f"phone-{self.metadata['session_id']}"
+        session.mkdir()
+        report = {'joe_tasks': [], 'dell_tasks': [], 'deal_updates': [], 'draft_proposals': [],
+                  'review_questions': [{'id': 'synthetic', 'resolved': False}]}
+        phone_intake.post_call.write_private(session / 'post-call-report.json', report)
+        self.assertIsNone(phone_intake.post_call.retention_ready(session, 'b' * 64))
+        phone_intake.post_call.resolve_question(session, 'synthetic', 'Reviewed synthetic fixture')
+        self.assertEqual(phone_intake.post_call.retention_ready(session, 'b' * 64)['pending_items'], 0)
 
 
 if __name__ == '__main__':

@@ -69,6 +69,9 @@ try:
     marker = json.load(open(path))
 except Exception:
     print("HOLD unreadable-marker"); raise SystemExit(0)
+from pathlib import Path
+if Path(path).parent.name.startswith("phone-") and marker.get("post_call") is not True:
+    print("HOLD no-phone-filing-receipt"); raise SystemExit(0)
 if marker.get("post_call") is True:
     import re
     if re.fullmatch(r"[0-9a-fA-F]{64}", str(marker.get("aggregate_report_hash") or "")) is None:
@@ -99,12 +102,15 @@ for dir in "$RECORDINGS"/*/; do
     [ -d "$dir" ] || continue
     case "$(basename "$dir")" in
         [0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]-[0-9][0-9][0-9][0-9]) ;;
+        phone-????????-????-????-????-????????????) ;;
         *) continue ;;
     esac
 
     # Nothing left to reclaim in this session?
     have_something=0
-    for f in "$dir/mic.caf" "$dir/system.caf" "$dir/transcript.json" "$dir/transcript.md"; do
+    for f in "$dir/mic.caf" "$dir/system.caf" "$dir/transcript.json" "$dir/transcript.md" \
+             "$dir/imported.audio" "$dir/imported.wav" "$dir/imported.m4a" \
+             "$dir/imported.mp3" "$dir/imported.mp4" "$dir/imported.webm"; do
         [ -f "$f" ] && have_something=1
     done
     [ "$have_something" = "1" ] || continue
@@ -125,7 +131,9 @@ for dir in "$RECORDINGS"/*/; do
             ;;
     esac
 
-    for f in "$dir/mic.caf" "$dir/system.caf" "$dir/transcript.json" "$dir/transcript.md"; do
+    for f in "$dir/mic.caf" "$dir/system.caf" "$dir/transcript.json" "$dir/transcript.md" \
+             "$dir/imported.audio" "$dir/imported.wav" "$dir/imported.m4a" \
+             "$dir/imported.mp3" "$dir/imported.mp4" "$dir/imported.webm"; do
         if [ -f "$f" ]; then
             size=$(du -h "$f" | cut -f1)
             rm "$f"

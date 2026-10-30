@@ -735,7 +735,7 @@ def run_session(session_dir: Path, *, publish: bool = True) -> dict[str, Any]:
 
 
 def process_session(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]] = default_distiller, *,
-                    run_checks: bool = True, max_attempts: int = 3) -> dict[str, Any]:
+                    max_attempts: int = 3) -> dict[str, Any]:
     lock_path = session_dir / LOCK_FILE
     lock_path.touch(exist_ok=True)
     lock_path.chmod(0o600)
@@ -744,7 +744,7 @@ def process_session(session_dir: Path, distiller: Callable[[dict[str, Any]], dic
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise RuntimeError("post-call distillation already active for this session") from exc
-        return _process_session_locked(session_dir, distiller, run_checks=run_checks, max_attempts=max_attempts)
+        return _process_session_locked(session_dir, distiller, max_attempts=min(max_attempts, len(EXTRACTION_RETRY_DELAYS) + 1))
 
 
 def _complete_session(session_dir: Path, report: dict[str, Any]) -> dict[str, Any]:
@@ -759,7 +759,7 @@ def _complete_session(session_dir: Path, report: dict[str, Any]) -> dict[str, An
 
 
 def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]], *,
-                            run_checks: bool = True, max_attempts: int = 3) -> dict[str, Any]:
+                            max_attempts: int = 3) -> dict[str, Any]:
     if (session_dir / REPORT_FILE).exists():
         existing = read_json(session_dir / STATUS_FILE)
         if existing is not None and existing.get("state") in {"ready_review", "filed"}:
@@ -821,11 +821,11 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
     speaker_context = {**context, "speaker_labels": stored_context.get("speaker_labels"),
                        "local_partner": stored_context.get("recorder")}
     try:
-        if not run_checks:
-            raise RuntimeError("Phone checks require an admitted Jev budget")
         import post_call_jev
 
-        result = post_call_jev.check_distillation(result, speaker_context, transcript, client=_jev_fixture_client())
+        result = post_call_jev.check_distillation(
+            result, speaker_context, transcript, client=_jev_fixture_client(),
+            budget_ledger=session_dir.parent / ".jev-budget.json")
     except Exception as exc:
         exception_class = type(exc).__name__
         deal_check_status = {"status": "unavailable", "exception_class": exception_class}
@@ -870,6 +870,8 @@ def retention_ready(session_dir: Path, report_sha256: str) -> dict[str, Any] | N
     """Return a purge-safe filing receipt only after every candidate is final."""
     report = read_json(session_dir / REPORT_FILE)
     if report is None or not isinstance(report_sha256, str) or re.fullmatch(r"[0-9a-fA-F]{64}", report_sha256) is None:
+        return None
+    if session_dir.name.startswith("phone-") and any(q.get("resolved") is not True for q in report.get("review_questions", [])):
         return None
     items = _report_candidates(report)
     if any(item.get("candidate_status") not in {"confirmed", "skipped", "rejected"} for item in items):
@@ -997,6 +999,8 @@ def _automatic_hold(update: dict[str, Any], field: str, report: dict[str, Any],
     model cannot place is kicked back as an approval card. Confident here is
     deterministic and checkable, never the model's own say-so.
     """
+    if report.get("checks_hold"):
+        return str(report["checks_hold"])
     unavailable = report.get("deal_check")
     if isinstance(unavailable, dict) and unavailable.get("status") == "unavailable":
         return f"Deal check unavailable ({unavailable['exception_class']})."
