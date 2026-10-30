@@ -17,8 +17,21 @@ class BudgetTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.ledger = Path(self.temp.name) / 'budget.json'
 
-    def test_missing_invalid_or_exhausted_budget_holds(self):
-        for value in ('', '0', '-1', 'NaN', 'Infinity', 'abc', '0.002752'):
+    def test_default_and_lowered_caps(self):
+        for value, count in ((None, 145), ('', 145), ('0.10', 36), ('5', 145)):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as directory:
+                ledger = Path(directory) / 'budget.json'
+                with patch.dict('os.environ', {}, clear=True):
+                    if value is not None:
+                        import os
+                        os.environ['CALL_JEV_DAILY_DOLLARS'] = value
+                    for _ in range(count):
+                        call_budget.reserve(ledger)
+                    with self.assertRaises(call_budget.BudgetHold):
+                        call_budget.reserve(ledger)
+
+    def test_invalid_or_exhausted_budget_holds(self):
+        for value in ('0', '-1', 'NaN', 'Infinity', 'abc', '0.002752'):
             with self.subTest(value=value), patch.dict('os.environ', {'CALL_JEV_DAILY_DOLLARS': value}):
                 with self.assertRaises(call_budget.BudgetHold):
                     call_budget.reserve(self.ledger)
@@ -53,7 +66,7 @@ class BudgetTests(unittest.TestCase):
         from unittest.mock import Mock
         result = {'session': 'synthetic', 'joe_tasks': [{'title': 'Review proposal', 'evidence': 'Review proposal'}]}
         client = Mock()
-        with patch.dict('os.environ', {'CALL_JEV_DAILY_DOLLARS': ''}):
+        with patch.dict('os.environ', {'CALL_JEV_DAILY_DOLLARS': 'invalid'}):
             checked = post_call_jev.check_distillation(result, {}, {}, client=client, budget_ledger=self.ledger)
         client.system_one.assert_not_called()
         self.assertIn('unconfigured', checked['joe_tasks'][0]['checks']['reason'])
