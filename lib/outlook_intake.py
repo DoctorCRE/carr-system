@@ -1669,6 +1669,9 @@ def reconcile_only(repo: Path, home: Path, ports: Ports) -> Outcome:
     out = repo / OUT
     if not (out / STATE).exists():
         return Outcome('succeeded', 'no_state')
+    account_id = settings.folder_account_id
+    if account_id is None:
+        return Outcome('failed', 'reconcile_failed', detail='folder_account_id_required')
     # The intake lock covers the read, the check and the save, so a concurrent run's state is never lost.
     fd = _private_fd(out / 'lock', os.O_RDWR)
     try:
@@ -1676,7 +1679,7 @@ def reconcile_only(repo: Path, home: Path, ports: Ports) -> Outcome:
         state = json.loads((out / STATE).read_text())
         if 'mail_ids' in state:
             return Outcome('succeeded', 'already_reconciled')
-        with _decode(home, out, ports.decode, settings.folder_account_id, settings.account) as (_, mails, _, _, _):
+        with _decode(home, out, ports.decode, account_id, settings.account) as (_, mails, _, _, _):
             work = Run(ports, state, ports.now(), out, settings)
             work.reconcile([m for m in _best_copies(mails, state) if not m['metadata_incomplete']])
         _save(out, state)
