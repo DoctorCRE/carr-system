@@ -335,3 +335,33 @@ test('alarm deletes queued chunks and session read reports expired across restar
   assert.equal((await send(path + '/transfer', 'PUT', new Uint8Array(100), joe, env)).status, 202);
   assert.equal((await send(path, 'GET', undefined, joe, env)).body.state, 'queued');
 });
+
+test('abandoned upload after restart can be retried while concurrent upload is refused', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1000 });
+  const state = handoffState();
+  const headers = { 'x-carr-call': JSON.stringify({ ...recording, owner: 'joe' }) };
+  let finish;
+  const stream = new ReadableStream({ start(controller) { finish = () => controller.close(); } });
+  const first = new PhoneAudioHandoff(state).fetch(new Request('https://fixture.test/restart', {
+    method: 'PUT', headers, body: stream, duplex: 'half',
+  }));
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const upload = handoff => handoff.fetch(new Request('https://fixture.test/restart', {
+    method: 'PUT', headers, body: new Uint8Array(100),
+  }));
+  assert.equal((await upload(new PhoneAudioHandoff(state))).status, 409);
+  t.mock.timers.tick(120000);
+  assert.equal((await upload(new PhoneAudioHandoff(state))).status, 202);
+  finish();
+  assert.equal((await first).status, 400);
+});
+
+test('session read returns database state when handoff is unreachable', async () => {
+  const { send } = rig();
+  const session = (await send('', 'POST', recording)).body;
+  const env = { ...environment, PHONE_AUDIO_HANDOFF: { idFromName: n => n, get() { throw new Error('unreachable'); } } };
+  const result = await send(`/${session.session_id}`, 'GET', undefined, joe, env);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.state, 'pending');
+  assert.equal(result.body.upload_state_unavailable, true);
+});
