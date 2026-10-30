@@ -20,7 +20,7 @@ export function queueCardId(ref, ordinal, number) {
 
 // A PR belongs to a job through a "Card: WRn.Sm.Jk" line in its body, and stage is derived from those PRs live.
 // The one stored fact is a job's first observed merged or closed state (`finished`), so the search only has to
-// span unfinished jobs and a finished job keeps its stage after its PR leaves GitHub's 100-result window.
+// span unfinished jobs and a finished job keeps its stage after its PR leaves GitHub's search window.
 export const PULL_REQUEST_TTL_MS = 60_000;
 // Building is the only stage a job can stall in without anyone else holding it. Codex jobs run in hours, so a day
 // with no push to the open draft means stalled. Queued jobs wait their priority turn (dispatch-job starts nothing),
@@ -34,8 +34,8 @@ const validSliceChange = change => change && typeof change === 'object' && Objec
 const unavailablePullRequests = async repos => repos.map(repo => ({ repo, state: 'unavailable', reason: 'no_github_reader', prs: [] }));
 
 // One GitHub search per repository per TTL, shared by every caller in this isolate; failures are cached too.
-// `since` bounds it to PRs updated on or after the oldest unfinished job's day: a card ID does not exist until
-// dispatch-job mints it, so any PR carrying one was created or edited after that, and older PRs cannot fill the window.
+// `since` bounds it to PRs updated on or after the oldest started, unfinished job's day.
+// Search all available pages so a first read can find a PR behind newer results.
 // The cache is keyed by repository and bound day, so no caller receives a narrower window than it asked for.
 export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...a), now = Date.now, ttlMs = PULL_REQUEST_TTL_MS }) {
   const memo = new Map();
@@ -44,16 +44,25 @@ export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...
     const bound = since ? ` updated:>=${since.slice(0, 10)}` : '';
     const query = new URLSearchParams({ q: `repo:${repo} is:pr in:body "Card: WR"${bound}`, sort: 'updated', order: 'desc', per_page: '100' });
     try {
-      const response = await fetchImpl(`https://api.github.com/search/issues?${query}`, { headers: {
-        accept: 'application/vnd.github+json', authorization: `Bearer ${token}`, 'user-agent': 'carr-mcp-work-queue', 'x-github-api-version': '2022-11-28' } });
-      if (!response.ok) return { repo, state: 'unavailable', reason: `github_http_${response.status}`, prs: [] };
-      const body = await response.json();
-      const prs = body.items.flatMap(item => {
+      const items = [];
+      let total = 0, incomplete = false;
+      for (let page = 1; page <= 10; page++) {
+        query.set('page', String(page));
+        const response = await fetchImpl(`https://api.github.com/search/issues?${query}`, { headers: {
+          accept: 'application/vnd.github+json', authorization: `Bearer ${token}`, 'user-agent': 'carr-mcp-work-queue', 'x-github-api-version': '2022-11-28' } });
+        if (!response.ok) return { repo, state: 'unavailable', reason: `github_http_${response.status}`, prs: [] };
+        const body = await response.json();
+        total = body.total_count;
+        incomplete ||= body.incomplete_results === true;
+        items.push(...body.items);
+        if (items.length >= total || body.items.length < 100) break;
+      }
+      const prs = items.flatMap(item => {
         const cards = [...new Set([...String(item.body ?? '').matchAll(CARD_LINE)].map(match => match[1]))];
         return cards.length ? [{ repo, number: item.number, url: item.html_url, title: item.title, draft: item.draft === true, updated_at: item.updated_at,
           state: item.pull_request?.merged_at ? 'merged' : item.state === 'open' ? 'open' : 'closed', cards }] : [];
       });
-      return { repo, state: 'ok', observed_at: new Date(now()).toISOString(), truncated: body.incomplete_results === true || body.total_count > body.items.length, prs };
+      return { repo, state: 'ok', observed_at: new Date(now()).toISOString(), truncated: incomplete || total > items.length, prs };
     } catch { return { repo, state: 'unavailable', reason: 'github_unreachable', prs: [] }; }
   }
   return (repos, since) => Promise.all(repos.map(repo => {
@@ -266,7 +275,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
       handler: async (c, actor, args) => {
         validate(args, {}, []);
         const rows = await ordered(c, actor);
-        const oldest = rows.filter(row => !row.finished).reduce((min, row) => Math.min(min, new Date(row.created_at).getTime()), Infinity);
+        const oldest = rows.filter(row => !row.finished && (row.executor !== 'codex' || row.started_at)).reduce((min, row) => Math.min(min, new Date(row.started_at ?? row.created_at).getTime()), Infinity);
         const sources = await (c.pullRequests ?? unavailablePullRequests)(Object.keys(addressFormat.repositories),
           Number.isFinite(oldest) ? new Date(oldest).toISOString() : undefined);
         const { finishes, ...view } = queueView(rows, sources, Date.now());

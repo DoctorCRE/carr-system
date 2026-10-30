@@ -42,6 +42,7 @@ from lib.outlook_ui import (EXIT, CuaError, Moved, Outcome, ReadState, Row, UiEr
                             Window, outlook_pid, prepare_outlook, private_file, usable_window)
 
 from lib.outlook_settings import load_settings
+from lib.outlook_runtime import receipt_line
 OUT = Path('out/outlook-triage')
 FIRST_FIRE, LAST_FIRE, WINDOW_CLOSE = clock(19, 15), clock(21, 0), clock(21, 15)
 IDLE_SECONDS = 600
@@ -490,4 +491,5 @@ def fire(repo: Path | None = None, now: datetime | None = None) -> int:
 def main() -> int:
     load_settings().require_service('triage')
     outcome = run(Path(__file__).resolve().parents[1], Path.home(), datetime.now(load_settings().timezone))
+    print(receipt_line('outlook-triage', outcome.state, outcome.reason, {}, Path(__file__).resolve().parents[1]))
     return EXIT[outcome.state]

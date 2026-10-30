@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
-import { applyPendingPortalLink } from './helpers/snapshot-schema.mjs';
+import { applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 
 let fixture, admin, database, c, actor, deal, clientRef, connection;
@@ -43,7 +43,7 @@ before(async () => {
   const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
   if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
   else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
-  await applyPendingPortalLink(c);
+  await applyPendingDealRoomReads(c);
   if (!(await c.query("select 1 from information_schema.columns where table_schema='public' and table_name='activity' and column_name='email_source'")).rows.length)
     await c.query(readFileSync(new URL('../../migrations/1008_email_reply_draft.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select 1 from information_schema.columns where table_schema='public' and table_name='activity' and column_name='email_context'")).rows.length)
@@ -73,6 +73,8 @@ after(async () => {
 beforeEach(async () => { await c.query("update deal set phase='site_selection',deal_type='purchase' where id=$1", [deal]); });
 
 async function command(name, args = {}, identity = actor, role = null, client = c) {
+  if (name === 'record-email-sent' && args.status === 'sent')
+    args = { sender_account: `${identity.sponsoring_human_slug ?? identity.slug}@example.test`, sent_at: '2026-01-04T12:00:00Z', ...args };
   await client.query('begin');
   try {
     if (role) await client.query(`set local role ${role}`);
@@ -1579,7 +1581,7 @@ test('only the sending Mac records matching Sent Items confirmation once and rem
   const afterResult = (await c.query('select clock_timestamp() as time')).rows[0].time;
   assert.equal(result.status, 'sent');
   assert.equal((await recordSent()).replayed, true);
-  await refuses(recordSent({ idempotency_key: randomUUID() }), 'email_draft_not_approved');
+  assert.equal((await recordSent({ idempotency_key: randomUUID() })).replayed, true);
   assert.deepEqual((await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader')).drafts, []);
   const sent = (await command('list-email-proposals', { status: 'sent' }, actor, 'carr_reader')).proposals[0];
   assert.equal(sent.send_result.sent_item_id, 'synthetic-sent-item');
@@ -1903,4 +1905,105 @@ test('quality reports automatic filing undo rates for the requested filing cohor
   assert.deepEqual((await report(30)).automatic_filings,
     { filed: 20, undone: 2, undo_rate: 0.1, over_threshold: true });
   assert.equal((await report()).send, false);
+});
+
+async function sentDraftFixture() {
+  await c.query("update actor set email='joe@example.test' where slug='joe'");
+  await c.query("insert into actor(slug,kind,display_name,email) values('dell','human','Synthetic partner','dell@example.test') on conflict(slug) do update set email=excluded.email,active=true");
+  const proposal = await draftFor();
+  const sentDeal = (await c.query(`insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by)
+    select 'Synthetic sent correspondence',client_id,deal_type,phase,owner,created_by,updated_by
+    from deal where id=$1 returning id`, [deal])).rows[0].id;
+  await c.query('update email_proposal set deal_id=$2 where id=$1', [proposal.proposal_id, sentDeal]);
+  return { proposal, sentDeal };
+}
+
+test('confirmed submitted files appear on deal correspondence with sender, recipients and sent time', async () => {
+  await c.query('delete from email_proposal');
+  const { proposal, sentDeal } = await sentDraftFixture();
+  const attachments = [
+    { path: '/synthetic/deal/packet.pdf', sha256: 'a'.repeat(64) },
+    { path: '/synthetic/deal/plan.pdf', sha256: 'b'.repeat(64) },
+  ];
+  const submitted = await submitDraft(proposal, { attachments });
+  const confirmation = { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+    base_version: 2, sha256: submitted.sha256, status: 'sent', sent_item_id: 'synthetic-files-sent',
+    sender_account: 'joe@example.test', sent_at: '2026-01-04T12:00:00Z' };
+  await command('record-email-sent', confirmation, machineFor('joe'), 'carr_writer');
+  const room = await command('get-deal-room', { deal: sentDeal }, actor, 'carr_reader');
+  const sent = room.activities.find(a => a.email_context?.send_id === proposal.proposal_id);
+  assert.equal(sent.kind, 'email_out');
+  assert.equal(sent.actor, 'joe');
+  assert.deepEqual(sent.email_context.sender, { email: 'joe@example.test', internal: true });
+  assert.equal(new Date(sent.occurred_at).toISOString(), '2026-01-04T12:00:00.000Z');
+  assert.deepEqual(sent.email_context.recipients, [
+    { email: 'sender@example.test', kind: 'to', internal: false },
+    { email: 'dell@example.test', kind: 'cc', internal: true },
+  ]);
+  assert.deepEqual(sent.email_context.attachments, [
+    { file_name: 'packet.pdf', sha256: 'a'.repeat(64) },
+    { file_name: 'plan.pdf', sha256: 'b'.repeat(64) },
+  ]);
+  assert.ok(!JSON.stringify(room.events.filter(e => e.verb === 'record-email-sent')).includes('packet.pdf'));
+  const ledger = (await c.query('select response from tool_call where verb in ($1,$2)',
+    ['submit-email-draft', 'record-email-sent'])).rows;
+  assert.ok(!JSON.stringify(ledger).includes('packet.pdf'));
+  const newer = await draftFor();
+  await c.query('update email_proposal set deal_id=$2 where id=$1', [newer.proposal_id, sentDeal]);
+  const next = await submitDraft(newer);
+  await command('record-email-sent', { ...confirmation, idempotency_key: randomUUID(),
+    proposal_id: newer.proposal_id, sha256: next.sha256, sent_item_id: 'synthetic-newer-send',
+    sent_at: '2026-01-05T12:00:00Z' }, machineFor('joe'), 'carr_writer');
+  const ordered = (await command('get-deal-room', { deal: sentDeal })).activities;
+  assert.deepEqual(ordered.map(a => a.email_context.send_id), [newer.proposal_id, proposal.proposal_id]);
+});
+
+test('a client reply inherits the deal from partner-sent mail on the same conversation', async () => {
+  const { proposal, sentDeal } = await sentDraftFixture();
+  const source = (await listed()).find(row => row.id === proposal.proposal_id).source.activity_id;
+  const conversation = randomUUID();
+  await c.query('update activity set email_context=$2::jsonb where id=$1', [source, JSON.stringify({
+    subject: 'Floor plan', conversation_id: conversation,
+    sender: { email: 'sender@example.test', internal: false }, recipients: [] })]);
+  const submitted = await submitDraft(proposal);
+  await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+    base_version: 2, sha256: submitted.sha256, status: 'sent', sent_item_id: 'synthetic-thread-send' },
+  machineFor('joe'), 'carr_writer');
+  const sent = (await command('get-deal-room', { deal: sentDeal })).activities[0];
+  const reply = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+    kind: 'email_in', summary: 'Synthetic client reply', detail: quote, occurred_at: '2026-01-05T12:00:00Z',
+    email_context: { subject: 'Re: Floor plan', conversation_id: conversation,
+      sender: { email: 'sender@example.test', internal: false },
+      recipients: [{ email: 'joe@example.test', kind: 'to', internal: true }] } });
+  const filed = await command('inherit-email-thread', { idempotency_key: randomUUID(),
+    activity_id: reply.activity_id, thread_activity_id: sent.id }, router(), 'carr_writer');
+  assert.equal(filed.deal, sentDeal);
+  assert.equal(sent.email_context.subject, 'Re: Floor plan');
+  assert.equal(sent.email_context.conversation_id, conversation);
+  assert.deepEqual(sent.email_context.sender, { email: 'joe@example.test', internal: true });
+  assert.deepEqual(sent.email_context.recipients, [
+    { email: 'sender@example.test', kind: 'to', internal: false },
+    { email: 'dell@example.test', kind: 'cc', internal: true },
+  ]);
+});
+
+test('a send identity retries with a fresh receipt key without duplicating correspondence', async () => {
+  const { proposal, sentDeal } = await sentDraftFixture();
+  const submitted = await submitDraft(proposal);
+  const args = { proposal_id: proposal.proposal_id, base_version: 2, status: 'sent',
+    sent_item_id: 'synthetic-retry-item', sha256: submitted.sha256 };
+  await command('record-email-sent', { ...args, idempotency_key: randomUUID() }, machineFor('joe'), 'carr_writer');
+  await command('record-email-sent', { ...args, idempotency_key: randomUUID() }, machineFor('joe'), 'carr_writer');
+  const room = await command('get-deal-room', { deal: sentDeal });
+  assert.equal(room.activities.filter(a => a.email_context?.send_id === proposal.proposal_id).length, 1);
+});
+
+test('an unconfirmed receipt never creates sent correspondence', async () => {
+  const { proposal, sentDeal } = await sentDraftFixture();
+  const submitted = await submitDraft(proposal);
+  const args = { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id, base_version: 2,
+    sha256: submitted.sha256, status: 'sent' };
+  await refuses(command('record-email-sent', args, machineFor('joe'), 'carr_writer'), 'email_draft_sent_confirmation_required');
+  await command('record-email-sent', { ...args, status: 'failed', reason: 'unconfirmed_after_86400' }, machineFor('joe'), 'carr_writer');
+  assert.deepEqual((await command('get-deal-room', { deal: sentDeal })).activities, []);
 });

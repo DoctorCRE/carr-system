@@ -76,3 +76,9 @@ Credential entries are pointers to private files, never credential values.
 **Granted copy scope**:
 The profile, private snapshot root, and intake command bound into the executable granted Full Disk Access.
 Changing settings does not widen an existing executable's scope.
+
+**Partner-submitted send**:
+Mail whose sending partner approved its exact text, recipients, copies, and attachment files.
+
+**Confirmed send**:
+A partner-submitted send matched to a Sent Items entry with a sender, recipients, identifier, and sent time.
