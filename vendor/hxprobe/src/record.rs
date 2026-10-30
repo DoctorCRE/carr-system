@@ -554,7 +554,8 @@ pub fn parse(offset: usize, blob: &[u8], anchor: usize) -> Option<Record> {
                 .position(|f| is_email(f.text.trim()))
                 .map(|i| (tail[i].text.trim().to_lowercase(), tail[i + 1..].to_vec()))
         });
-    if let Some((addr, rest)) = picked {
+    // A run of glued addresses is a list, so this fallback has no sender either.
+    if let Some((addr, rest)) = picked.filter(|(a, _)| undouble(a).matches('@').count() == 1) {
         // The display name is the first plausible run after the address, not
         // the longest: the longest pulls in the subject or the body preview,
         // which sit in the same group. Values are often stored doubled

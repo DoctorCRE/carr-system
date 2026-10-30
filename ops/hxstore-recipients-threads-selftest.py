@@ -193,6 +193,11 @@ class RecipientThreadExportTests(unittest.TestCase):
         self.assertEqual([row[:3] for row in out['messages']],
                          [('owner@example.test', 'Synthetic thread', 'cy@example.test')])
 
+    def test_a_glued_sender_run_leaves_the_sender_unknown_and_keeps_the_recipient(self):
+        out = self.export(message(0xc401, sender=None, inline=True,
+                                  row_sender='target@example.test' + 'owner@example.test', runs=('cy@example.test',)))
+        self.assertEqual([row[:3] for row in out['messages']], [(None, 'Synthetic thread', 'cy@example.test')])
+
     def test_keyless_row_takes_the_subject_pair_just_before_its_anchor(self):
         # Layout B: the header precedes the anchor. These subjects fail the prose checks (mostly digits, a
         # file name), but the stored Topic/NormalizedSubject pair beside the anchor identifies them.
@@ -203,6 +208,12 @@ class RecipientThreadExportTests(unittest.TestCase):
                        + struct.pack('<Q', 1_793_000_000 * 10_000_000 + 621_355_968_000_000_000))
                 out = self.export(row)
                 self.assertEqual([row[:2] for row in out['messages']], [('owner@example.test', subject)])
+
+    def test_a_fragment_of_the_next_run_is_not_a_subject_pair(self):
+        row = (utf16('owner@example.test') + utf16('Synthetic preview text for a keyless row here')
+               + utf16('2026') + utf16('Invoice batch 2026') + utf16('IPM.Note')
+               + struct.pack('<Q', 1_793_000_000 * 10_000_000 + 621_355_968_000_000_000))
+        self.assertEqual([row[:2] for row in self.export(row)['messages']], [('owner@example.test', None)])
 
     def test_sender_is_exported_only_when_cached_revisions_agree(self):
         out = self.export(message(0xc001, sender='actual@example.test'),

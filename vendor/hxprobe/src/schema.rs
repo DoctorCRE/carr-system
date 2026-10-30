@@ -135,7 +135,14 @@ pub fn build_bounded(blob: &[u8], anchor: usize, end: usize, back: usize) -> Map
         .filter(|f| f.rel.abs() <= SENDER_MAX_DIST || f.rel > 0)
         .collect();
     for (i, f) in nearest.iter().enumerate() {
-        if let Some(sender) = address(&f.text) {
+        // The nearest address-shaped run is the sender slot. When it holds a
+        // glued list, the sender is unknown; searching on would take a
+        // recipient after the anchor instead.
+        let t = f.text.trim();
+        if address(t).is_none() && record::looks_like_email(t) && !is_message_id(t) {
+            break;
+        }
+        if let Some(sender) = address(t) {
             push!(Key::SenderAddress, f, -(i as isize) - 1, sender);
             // The display name is the run *immediately* adjacent to the
             // address -- either just before it (the schema's Name/Address
@@ -296,7 +303,7 @@ pub fn build_bounded(blob: &[u8], anchor: usize, end: usize, back: usize) -> Map
     let subject = subject.map(|f| **f).or_else(|| {
         let [first, second] = before.last_chunk::<2>()?;
         let (a, b) = (record::undouble_pub(first.text.trim()), record::undouble_pub(second.text.trim()));
-        (first.rel >= -PAIR_MAX_DIST && matches(&a, &b) && record::subject_value(&a) && record::subject_value(&b))
+        (first.rel >= -PAIR_MAX_DIST && key40(&a) == key40(&b) && record::subject_value(&a) && record::subject_value(&b))
             .then_some(*first)
     });
     if let Some(f) = subject {
