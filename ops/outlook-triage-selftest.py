@@ -181,6 +181,14 @@ if name == 'open':
     save()
     sys.exit(0)
 if name == 'ioreg':
+    if args == ['-a', '-d1', '-k', 'IOConsoleUsers', '-r']:
+        import plistlib
+        if state.get('ioreg_unreadable'):
+            print(state.get('ioreg_output', 'unreadable'))
+        else:
+            sys.stdout.buffer.write(plistlib.dumps([{'IOConsoleUsers': [
+                {'CGSSessionScreenIsLocked': state.get('screen_locked', False)}]}]))
+        sys.exit(state.get('ioreg_exit', 0))
     print('    | |   "HIDIdleTime" = %d' % int(state['idle_seconds'] * 1e9))
     sys.exit(0)
 if name == 'run.sh':
@@ -499,6 +507,22 @@ class PreflightQuitTest(FakeOutlookCase):
                 patch('lib.outlook_ui.subprocess.run', side_effect=run):
             return prepare_outlook(waits)
 
+    def test_locked_screen_skips_before_any_outlook_access(self):
+        self.given(screen_locked=True, windows=[])
+        self.assertEqual(self.prepare(), triage.Outcome('skipped', 'screen_locked'))
+        self.assert_no_restart()
+        self.assertEqual(self.called('pgrep') + self.called('cua-driver'), [])
+
+    def test_unlocked_or_unreadable_lock_probe_follows_existing_preflight(self):
+        for options in ({'screen_locked': False}, {'ioreg_unreadable': True},
+                        {'ioreg_unreadable': True, 'ioreg_output': '<?xml version="1.0"?><plist><array>'},
+                        {'screen_locked': True, 'ioreg_exit': 1}):
+            with self.subTest(options=options):
+                self.calls.unlink(missing_ok=True)
+                self.given(**options)
+                self.assertIsNone(self.prepare())
+                self.assertTrue(self.called('open'))
+
     def test_mailbox_with_twelve_toolbar_strips_allows_restart(self):
         strips = [window(wid, '', 1920, 30, False) for wid in range(20, 32)]
         self.given(windows=strips + [ORDINARY], after_launch=strips + [ORDINARY])
@@ -789,6 +813,14 @@ class ComposeWindowTest(unittest.TestCase):
 
 
 class OutlookTriageTest(FakeOutlookCase):
+    def test_locked_screen_is_an_expected_triage_skip(self):
+        self.given(screen_locked=True, windows=[])
+        outcome, state = self.run_triage()
+        self.assertEqual(outcome, triage.Outcome('skipped', 'screen_locked'))
+        self.assert_no_restart()
+        self.assertEqual(state['selections'], [])
+        self.assertIn('outcome: skipped screen_locked', self.report())
+
     def test_titled_and_untitled_drafts_skip_triage_without_restart(self):
         for title in (f'Re: subject-000 • {ACCOUNT}', ''):
             with self.subTest(title=title):
