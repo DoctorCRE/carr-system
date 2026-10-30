@@ -1241,6 +1241,18 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(report["draft_proposals"][0]["candidate_id"], "candidate-draft")
         self.assertEqual(report["draft_proposals"][0]["candidate_status"], "pending")
 
+    def test_question_only_call_holds_retention_until_partner_resolution(self) -> None:
+        post_call.store_context(self.session, self.context)
+        post_call.process_session(self.session, distiller=lambda _request: self.output(
+            joe_tasks=[], deal_updates=[], draft_proposals=[],
+            review_questions=["Which deal did Dell mean?"],
+        ))
+        self.assertIsNone(post_call.retention_ready(self.session, "b" * 64))
+        self.assertEqual(post_call.read_json(self.session / post_call.STATUS_FILE)["state"], "ready_review")
+        question = post_call.report_for_deal_room(self.session)["report"]["review_questions"][0]
+        post_call.resolve_question(self.session, question["id"], "Dell meant deal A.")
+        self.assertIsNotNone(post_call.retention_ready(self.session, "b" * 64))
+
     def test_retention_requires_final_candidate_dispositions(self) -> None:
         post_call.store_context(self.session, self.context)
         post_call.process_session(self.session, distiller=lambda _request: self.output())
@@ -1272,6 +1284,30 @@ class PostCallTests(unittest.TestCase):
                 self.assertIsNone(post_call.retention_ready(self.session, digest))
         unchanged = post_call.read_json(self.session / post_call.REPORT_FILE)
         self.assertNotIn("backend_report_sha256", unchanged)
+
+    def test_purger_holds_unresolved_review_even_with_old_filing_receipt(self) -> None:
+        home = Path(self.tmp.name) / "home"
+        session = home / "Recordings" / "2026.01.01-1200"
+        session.mkdir(parents=True)
+        (home / "Library" / "Logs").mkdir(parents=True)
+        (session / "mic.caf").write_bytes(b"synthetic audio")
+        report = post_call.normalize_distillation(self.output(
+            joe_tasks=[], deal_updates=[], draft_proposals=[],
+            review_questions=["Which deal did Dell mean?"],
+        ), self.context, session.name)
+        post_call.write_private(session / post_call.REPORT_FILE, report)
+        post_call.write_private(session / "ingested.json", {
+            "post_call": True, "aggregate_report_hash": "a" * 64,
+            "backend_report_sha256": "b" * 64, "pending_items": 0,
+            "ingested_at": "2000-01-01T00:00:00Z",
+        })
+        command = ["/bin/sh", str(BIN_DIR / "purge-recordings.sh")]
+        isolated = {"HOME": str(home), "PATH": "/usr/bin:/bin"}
+        subprocess.run(command, check=True, env=isolated)
+        self.assertTrue((session / "mic.caf").exists())
+        post_call.resolve_question(session, report["review_questions"][0]["id"], "Dell meant deal A.")
+        subprocess.run(command, check=True, env=isolated)
+        self.assertFalse((session / "mic.caf").exists())
 
     def test_purger_holds_malformed_post_call_hashes_and_preserves_consent(self) -> None:
         home = Path(self.tmp.name) / "home"
@@ -1959,6 +1995,29 @@ class CaptureBridgePostCallTests(unittest.TestCase):
         self.assertTrue(final["backend_report_sha256"])
         for key in ("joe_tasks", "deal_updates", "draft_proposals"):
             self.assertEqual(final[key][0]["candidate_status"], "confirmed")
+
+    def test_poll_holds_question_only_call_before_filing_or_done(self) -> None:
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        for key in ("joe_tasks", "dell_tasks", "deal_updates", "draft_proposals"):
+            report[key] = []
+        report["review_questions"] = [{"id": "q1", "question": "Which deal?", "resolved": False}]
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        for already_filed in (False, True):
+            with self.subTest(already_filed=already_filed):
+                response = {"state": "distilling", "post_call": True, "meeting_record": None,
+                            "candidates": {"pending": 0}, "candidate_statuses": [],
+                            "post_call_report": {"filed": already_filed, "sha256": "b" * 64}}
+                with (
+                    patch.object(capture_bridge, "publish_cmd", return_value=0),
+                    patch.object(capture_bridge, "http_request", return_value=(200, response)),
+                    patch.object(capture_bridge, "file_post_call_report", return_value=(True, "b" * 64)) as file_report,
+                    patch.object(capture_bridge, "status_cmd", return_value=0) as status,
+                ):
+                    capture_bridge.poll_cmd(self.cfg, self.session)
+                file_report.assert_not_called()
+                status.assert_not_called()
+                self.assertFalse((self.session / "ingested.json").exists())
+                self.assertTrue((self.session / ".capture.json").exists())
 
     def test_poll_never_files_zero_count_report_when_candidate_publish_fails(self) -> None:
         calls: list[str] = []
