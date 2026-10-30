@@ -41,8 +41,8 @@ const command = async (name, args = {}) => {
     ? TOOLS[name].afterCommit(c, actor, args, result, fn => transaction(fn)) : result;
 };
 
-async function filePhase(evidence, { speaker = "joe", storedQuote = evidence, kind = "phase_move", overdue = false } = {}) {
-  const deal = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic phase purchase',$1,'purchase','site_selection','joe',$2,$2) returning id", [clientId, actor.id])).rows[0].id;
+async function filePhase(evidence, { speaker = "joe", storedQuote = evidence, kind = "phase_move", overdue = false, existingDeal = null } = {}) {
+  const deal = existingDeal || (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic phase purchase',$1,'purchase','site_selection','joe',$2,$2) returning id", [clientId, actor.id])).rows[0].id;
   let prior;
   if (overdue) prior = await command('set-next-step', {
     idempotency_key: randomUUID(), deal, text: 'Request revised terms', next_date: '2020-01-01',
@@ -51,16 +51,16 @@ async function filePhase(evidence, { speaker = "joe", storedQuote = evidence, ki
   const token = randomUUID();
   const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,consent_announced_at,
     session_token_hash,expires_at,state,state_at,post_call) values($1,'fixture',$2,'meeting',now(),now(),$1,
-    now()+interval '1 day','distilling',now(),true) returning id`, [createHash('sha256').update(token).digest('hex'), actor.id])).rows[0].id;
+    now()+interval '1 day','distilling',now(),$3) returning id`, [createHash('sha256').update(token).digest('hex'), actor.id, kind !== 'meeting_record'])).rows[0].id;
   const handler = createCaptureHandler({ withWriter: fn => transaction(fn, 'carr_writer') });
   const response = await handler.fetch(new Request('http://127.0.0.1/capture/candidates', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
-      session_token: token, idempotency_key: randomUUID(), evidence_sources: [speaker === "client" ? null : {
+      session_token: token, idempotency_key: randomUUID(), ...(kind === 'meeting_record' ? {} : { evidence_sources: [speaker === "client" ? null : {
         speaker, source_sha256: createHash('sha256').update(JSON.stringify({ speaker, text: storedQuote })).digest('hex'),
         quote_sha256: createHash('sha256').update(storedQuote).digest('hex'),
-      }], items: [{ kind,
+      }] }), items: [{ kind,
         payload: kind === 'next_step' ? { deal, text: 'Review revised terms', next_date: '2030-01-01' }
-          : kind === 'activity' ? { ref: deal, kind: 'note', summary: evidence }
+          : ['activity', 'meeting_record'].includes(kind) ? { ref: deal, kind: 'note', summary: evidence }
           : { deal, field: 'phase', value: 'legal' }, evidence_quote: evidence, confidence: 1 }]
     })
   }), {});
@@ -264,5 +264,88 @@ test('a later assessment receipt cannot hide a plan edit made while Jev runs', a
     await assert.rejects(command('undo-call-change', { idempotency_key: randomUUID(), candidate_id: id,
       base_version: room.base_version }), error => error.payload?.error === 'newer_change_exists');
     assert.equal((await command('get-deal-room', { deal })).next_date, '2031-01-01');
+  } finally { delete c.jevClient; }
+});
+
+function completionAnswer(request, verdict = 'yes') {
+  return { answers: Object.fromEntries(Object.keys(request.questions).map(key => [key,
+    key.startsWith('quote_') ? { type: 'choice', choice: 'quote_0' } : {
+      type: 'choice', choice: verdict, confidence: 0.99,
+      probabilities: Object.fromEntries(['yes', 'no', 'unclear'].map(v => [v, v === verdict ? 0.98 : 0.01])),
+    }])) };
+}
+
+for (const kind of ['activity', 'meeting_record']) test(`${kind} closing the current action prompts for a new step without rewriting the plan`, async () => {
+  const { deal, id, prior } = await filePhase('The landlord sent the requested revised terms.', { kind, overdue: true });
+  c.jevClient = { systemOne: async request => completionAnswer(request) };
+  try {
+    await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: id, accept: true });
+    const room = await command('get-deal-room', { deal });
+    assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'done');
+    assert.equal(room.next_step, null, 'finished action must not appear as the current step');
+    assert.equal(room.next_date, null, 'finished action must not appear overdue');
+    assert.equal(room.next_step_required, true);
+    assert.equal(room.events.filter(e => e.field === 'next_step').length, 1, 'projection must not rewrite the stored plan');
+  } finally { delete c.jevClient; }
+});
+
+for (const verdict of ['no', 'down']) test(`retained action after Jev ${verdict} keeps its own due date for later notes`, async () => {
+  const { deal, id, prior } = await filePhase('We discussed parking at the other property.', { kind: 'next_step', overdue: true });
+  c.jevClient = { systemOne: async request => {
+    if (verdict === 'down') throw new Error('Synthetic Jev unavailable');
+    return completionAnswer(request, 'no');
+  } };
+  try {
+    await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: id, accept: true, automatic: true });
+    const note = await command('add-deal-note', { idempotency_key: randomUUID(), deal,
+      text: 'The landlord sent the requested revised terms.' });
+    const room = await command('get-deal-room', { deal });
+    const request = room.events.find(e => e.field === 'overdue_assessment_pending' && e.new_value.note_id === note.note_id);
+    assert.ok(request, 'the old action remains overdue despite the future call date');
+    assert.equal(request.new_value.actions.find(a => a.id === prior.next_action_id).due_on, '2020-01-01');
+  } finally { delete c.jevClient; }
+});
+
+for (const verdict of ['no', 'down']) for (const later of ['note', 'activity', 'meeting_record'])
+  test(`later ${later} completion after Jev ${verdict} preserves the call plan`, async () => {
+    const { deal, id, prior } = await filePhase('We discussed parking at the other property.', { kind: 'next_step', overdue: true });
+    c.jevClient = { systemOne: async request => {
+      if (verdict === 'down') throw new Error('Synthetic Jev unavailable');
+      return completionAnswer(request, 'no');
+    } };
+    try {
+      await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: id, accept: true, automatic: true });
+      const before = await command('get-deal-room', { deal });
+      c.jevClient = { systemOne: async request => completionAnswer(request) };
+      const text = 'The landlord sent the requested revised terms.';
+      if (later === 'note') await command('add-deal-note', { idempotency_key: randomUUID(), deal, text });
+      else {
+        const candidate = await filePhase(text, { kind: later, existingDeal: deal });
+        await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: candidate.id, accept: true });
+      }
+      const room = await command('get-deal-room', { deal });
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'done');
+      assert.equal(room.next_step, 'Review revised terms', 'closing the hidden action must preserve the call step');
+      assert.equal(room.next_date, '2030-01-01', 'closing the hidden action must preserve the call date');
+      assert.equal(room.next_step_required, false);
+      assert.deepEqual(room.items, before.items);
+      assert.deepEqual(room.events.filter(e => ['next_step', 'next_date'].includes(e.field)),
+        before.events.filter(e => ['next_step', 'next_date'].includes(e.field)));
+    } finally { delete c.jevClient; }
+  });
+
+test('an earlier completed step cannot hide a later call plan with a retained action', async () => {
+  const first = await filePhase('The landlord sent the requested revised terms.', { kind: 'activity', overdue: true });
+  c.jevClient = { systemOne: async request => completionAnswer(request) };
+  try {
+    await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: first.id, accept: true });
+    const call = await filePhase('We discussed parking at the other property.', {
+      kind: 'next_step', overdue: true, existingDeal: first.deal,
+    });
+    c.jevClient = { systemOne: async request => completionAnswer(request, 'no') };
+    await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: call.id, accept: true, automatic: true });
+    const room = await command('get-deal-room', { deal: first.deal });
+    assert.equal(room.next_step, 'Review revised terms');
+    assert.equal(room.next_date, '2030-01-01');
   } finally { delete c.jevClient; }
 });
