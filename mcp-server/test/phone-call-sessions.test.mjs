@@ -155,17 +155,44 @@ test('transient audio expires without extending on replay and framing failures r
   await restarted.alarm();
 });
 
-test('upload write budget survives restart and refuses the twenty-first attempt before reading audio', async t => {
+test('upload write budget survives restart and refuses the fourth attempt before reading audio', async t => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1000 });
   const state = handoffState();
   const upload = () => new Request('https://fixture.test/budget', { method: 'PUT',
     headers: { 'x-carr-call': JSON.stringify({ ...recording, owner: 'joe' }) }, body: new Uint8Array(99) });
-  for (let i = 0; i < 20; i++) assert.equal((await new PhoneAudioHandoff(state).fetch(upload())).status, 400);
+  let writes = 0;
+  for (const method of ['put', 'delete', 'setAlarm', 'deleteAlarm']) {
+    const original = state.storage[method];
+    state.storage[method] = async (...args) => { writes++; return original(...args); };
+  }
+  for (let i = 0; i < 3; i++) {
+    const before = writes;
+    assert.equal((await new PhoneAudioHandoff(state).fetch(upload())).status, 400);
+    assert.ok(writes - before <= 5, `failed attempt used ${writes - before} writes`);
+  }
   const refused = upload();
   Object.defineProperty(refused, 'body', { get() { assert.fail('rate limited request read audio'); } });
-  assert.equal((await new PhoneAudioHandoff(state).fetch(refused)).status, 429);
+  const before = writes;
+  const response = await new PhoneAudioHandoff(state).fetch(refused);
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get('retry-after'), '60');
+  assert.equal(writes, before);
   t.mock.timers.tick(60000);
   assert.equal((await new PhoneAudioHandoff(state).fetch(upload())).status, 400);
+});
+
+test('phone transfer forwards the upload retry delay', async () => {
+  const { send, handler } = rig();
+  const session = (await send('', 'POST', recording)).body;
+  const handoff = new PhoneAudioHandoff(handoffState());
+  const env = { ...environment, PHONE_AUDIO_HANDOFF: { idFromName: n => n, get: () => handoff } };
+  const transfer = () => handler.fetch(new Request(`${root}/${session.session_id}/transfer`, {
+    method: 'PUT', headers: { 'content-type': 'audio/wav', 'content-length': '100' }, body: new Uint8Array(99),
+  }), env, joe);
+  for (let i = 0; i < 3; i++) assert.equal((await transfer()).status, 400);
+  const response = await transfer();
+  assert.equal(response.status, 429);
+  assert.ok(Number(response.headers.get('retry-after')) > 0);
 });
 
 test('queued audio survives a Durable Object restart', async t => {

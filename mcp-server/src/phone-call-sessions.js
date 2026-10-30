@@ -217,7 +217,12 @@ export function createPhoneCallHandler({ withWriter }) {
           method: 'PUT', headers: { 'x-carr-call': JSON.stringify(metadata) },
           body: request.body, duplex: 'half',
         });
-        if (!response.ok) return json({ ...view(row), error: 'audio_handoff_unavailable' }, response.status);
+        if (!response.ok) {
+          const retryAfter = response.headers.get('retry-after');
+          const result = json({ ...view(row), error: 'audio_handoff_unavailable' }, response.status);
+          if (retryAfter) result.headers.set('retry-after', retryAfter);
+          return result;
+        }
         return json({ ...view(row), state: 'queued', queued: true, retry_after_seconds: 30 }, 202);
       } catch { return json({ error: 'phone_intake_unavailable' }, 503); }
     },
