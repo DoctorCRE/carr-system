@@ -69,6 +69,41 @@ class PhoneIntakeTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=5)
 
+    def test_malformed_lease_does_not_stop_other_sessions(self):
+        phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
+        bad = self.root / f"phone-{self.metadata['session_id']}"
+        self.metadata['session_id'] = '10000000-0000-0000-0000-000000000002'
+        phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
+        good = self.root / f"phone-{self.metadata['session_id']}"
+        bridge = phone_intake.bridge_module()
+
+        def http(_method, url, _body, _headers):
+            if url.endswith('/lease'):
+                return 200, [] if bad.name.removeprefix('phone-') in url else {'session_token': 'fixture'}
+            return 200, {'ok': True}
+
+        phone_intake.post_call.write_private(good / phone_intake.post_call.REPORT_FILE, {'report': {}})
+        with patch.object(phone_intake, 'bridge_module', return_value=bridge), \
+             patch.object(bridge, 'http_request', side_effect=http), \
+             patch.object(bridge, 'publish_cmd', return_value=0), \
+             patch.object(bridge, 'poll_cmd'), \
+             patch.object(phone_intake, 'extract', return_value={'state': 'ready_review'}):
+            result = phone_intake.process_pending(self.root, {'base_url': 'https://api.example.test'}, 'fixture')
+        self.assertEqual(result, {'ready': 1, 'pending': 1})
+        status = phone_intake.post_call.read_json(bad / phone_intake.post_call.STATUS_FILE)
+        self.assertEqual(status['extraction_attempts'], 1)
+        self.assertTrue(status['reason'])
+        with patch.object(phone_intake, 'bridge_module', return_value=bridge), \
+             patch.object(bridge, 'http_request', side_effect=http), \
+             patch.object(bridge, 'publish_cmd', return_value=0), \
+             patch.object(bridge, 'poll_cmd'), \
+             patch.object(phone_intake, 'extract', return_value={'state': 'ready_review'}):
+            for _ in range(4):
+                phone_intake.process_pending(self.root, {'base_url': 'https://api.example.test'}, 'fixture')
+        status = phone_intake.post_call.read_json(bad / phone_intake.post_call.STATUS_FILE)
+        self.assertEqual(status['extraction_attempts'], 3)
+        self.assertEqual(status['state'], 'needs_attention')
+
     def test_imported_recording_uses_existing_extraction_and_candidate_processing(self):
         wav = io.BytesIO()
         with wave.open(wav, 'wb') as handle:
