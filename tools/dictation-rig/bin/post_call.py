@@ -789,6 +789,7 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
                 report = resumed
             except Exception as exc:
                 _deal_check_unavailable(report, session_dir, exc)
+                report["checks_hold_day"] = call_budget.budget_day()
             write_private(session_dir / REPORT_FILE, report)
         existing = read_json(session_dir / STATUS_FILE)
         if existing is not None and existing.get("state") in {"ready_review", "filed"}:
