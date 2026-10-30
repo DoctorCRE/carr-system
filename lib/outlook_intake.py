@@ -93,6 +93,7 @@ OUT = Path('out/outlook-intake')
 STATE = 'state.json'
 WORK_PREFIX = 'work-'
 WINDOW = (time(7, 0), time(19, 30))
+COVERAGE_HELD_RECIPIENTS_LIMIT = 20  # More held Sent items require human attention.
 COVERAGE_CHECK_AT = time(18, 0)  # the first successful run from here judges the day's coverage once
 WRITE_VERBS = frozenset({'log-activity', 'publish-board-snapshot', 'propose-email-lead', 'attach-deal-file',
                          'record-deal-item', 'complete-deal-item', 'drop-action'})
@@ -234,6 +235,8 @@ BACKLOG_COUNTS = frozenset((
     'calendar_follow_up_reviews', 'calendar_follow_up_trimmed', 'calendar_agenda_items'))
 BACKLOG_PREFIXES = ('mapping_', 'error_')
 RECEIPT_NAMES = {'calendar_lifecycle_unsupported': 'calendar_copies_in_store',
+                 'calendar_lifecycle_canceled': 'calendar_canceled_copies_in_store',
+                 'calendar_requests_quarantined': 'calendar_write_requests_held',
                  'calendar_unresolved_expired': 'calendar_expired_total'}
 LEAD_OUTCOMES = {'proposed': 'lead_proposed', 'known_party': 'lead_known_party', 'refused': 'lead_refused'}
 
@@ -1661,43 +1664,23 @@ def _quarantine_calendar_requests(state: dict) -> None:
 
 
 
-def reconcile_only(repo: Path, home: Path, ports: Ports) -> Outcome:
-    """Record Message-IDs for saved state from the installed decoder's rows, filing nothing.
-
-    The installer runs this once, with the old decoder, before replacing it, so `mail_ids` exists when
-    the new decoder's identities arrive. State that already has `mail_ids` is left alone.
-    """
-    settings = load_settings(home)
-    settings.require_repo(repo)
-    out = repo / OUT
-    if not (out / STATE).exists():
-        return Outcome('succeeded', 'no_state')
-    account_id = settings.folder_account_id
-    if account_id is None:
+def _reconcile(out: Path, home: Path, ports: Ports, settings: OutlookSettings, state: dict) -> Outcome:
+    """Save old decoder identities under the intake lock before any filing or window gate."""
+    if settings.folder_account_id is None:
         return Outcome('failed', 'reconcile_failed', detail='folder_account_id_required')
-    # The intake lock covers the read, the check and the save, so a concurrent run's state is never lost.
-    fd = _private_fd(out / 'lock', os.O_RDWR)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        state = json.loads((out / STATE).read_text())
-        if 'mail_ids' in state:
-            return Outcome('succeeded', 'already_reconciled')
-        with _decode(home, out, ports.decode, account_id, settings.account) as (_, mails, _, _, _):
+        with _decode(home, out, ports.decode, settings.folder_account_id, settings.account) as (_, mails, _, _, _):
             work = Run(ports, state, ports.now(), out, settings)
             work.reconcile([m for m in _best_copies(mails, state) if not m['metadata_incomplete']])
         _save(out, state)
     except (FullDiskAccessRequired, DecodeError, sqlite3.Error, OSError, ValueError) as error:
         return Outcome('failed', 'reconcile_failed', detail=type(error).__name__)
-    finally:
-        os.close(fd)
     return Outcome('succeeded', 'reconciled', {**work.counts, 'mail_ids': len(state['mail_ids'])})
 
 
 def run(repo: Path, home: Path, ports: Ports) -> Outcome:
     settings = load_settings(home)
     settings.require_repo(repo)
-    if not in_window(ports.now()):
-        return Outcome('skipped', 'outside_window')
     out = repo / OUT
     out.mkdir(parents=True, exist_ok=True)
     os.chmod(out, 0o700)
@@ -1708,9 +1691,18 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
         except OSError:
             return Outcome('skipped', 'previous_run_active')
         try:
+            try:
+                state = json.loads((out / STATE).read_text())
+            except (OSError, ValueError):
+                state = {}
+            reconcile = (out / STATE).is_file() and 'mail_ids' not in state and os.access(settings.decoder, os.X_OK)
+            if not reconcile and not in_window(ports.now()):
+                return Outcome('skipped', 'outside_window')
             for stale in out.glob(WORK_PREFIX + '*'):
                 _remove(stale)
-            outcome = _run(out, home, ports)
+            if reconcile:
+                return _reconcile(out, home, ports, settings, state)
+            outcome = _run(out, home, ports, state)
             if outcome.state != 'succeeded':
                 return outcome
             state = json.loads((out / STATE).read_text())
@@ -1733,14 +1725,25 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
             if work.counts['links_filed']:
                 outcome.reason = 'processed'
             local = ports.now().astimezone(settings.timezone)
-            if local.time() >= COVERAGE_CHECK_AT and state.get('coverage_check_day') != local.date().isoformat():
-                state['coverage_check_day'] = local.date().isoformat()
-                _save(out, state)
+            today = local.date()
+            previous_day = (today - timedelta(days=1)).isoformat()
+            last_run = state.get('coverage_run_day') or state.get('coverage_check_day')
+            missed = bool(last_run and last_run <= previous_day and state.get('coverage_check_day', '') < previous_day)
+            state['coverage_run_day'] = today.isoformat()
+            if local.time() >= COVERAGE_CHECK_AT and state.get('coverage_check_day') != today.isoformat():
+                state['coverage_check_day'] = today.isoformat()
                 shortfalls = coverage_verdict(outcome.counts)
-                failed = any(shortfalls.values())
-                outcome.counts.update(shortfalls, coverage_checked=1, coverage_failed=int(failed))
-                if failed:
-                    outcome.state, outcome.reason = 'failed', 'coverage_failed'
+                held = int(outcome.counts.get('unresolved_recipients_unknown', 0) > COVERAGE_HELD_RECIPIENTS_LIMIT)
+                failed = any(shortfalls.values()) or held or missed
+                outcome.counts.update(shortfalls, coverage_checked=1, coverage_failed=int(failed),
+                                      coverage_held_recipients_over_limit=held)
+            else:
+                failed = missed
+            if missed:
+                outcome.counts.update(coverage_missed_verdict=1, coverage_failed=1)
+            _save(out, state)
+            if failed:
+                outcome.state, outcome.reason = 'failed', 'coverage_failed'
             return outcome
         except CleanupError:
             return Outcome('failed', 'cleanup_failed')
@@ -1752,7 +1755,7 @@ def _save(out: Path, state: dict) -> None:
     _private_write(out / STATE, json.dumps(state))
 
 
-def _run(out: Path, home: Path, ports: Ports) -> Outcome:
+def _run(out: Path, home: Path, ports: Ports, state: dict) -> Outcome:
     settings = load_settings(home)
     if settings.folder_account_id is None:
         return Outcome('failed', 'folder_account_id_required')
@@ -1760,14 +1763,14 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         store = resolve_store(home)
     except FileNotFoundError:
         return Outcome('failed', 'store_missing')
-    try:
-        state = json.loads((out / STATE).read_text())
-    except (OSError, ValueError):
-        state = {}
     if _retire_email_steps(state):
         _save(out, state)
     info = store.stat()
-    signature = [info.st_mtime_ns, info.st_size]
+    try:
+        decoder_identity = json.loads((settings.vendor / '.carr-build.json').read_text()).get('binary_sha256')
+    except (OSError, ValueError, AttributeError):
+        decoder_identity = None
+    signature = [info.st_mtime_ns, info.st_size, decoder_identity]
     now = ports.now()
     matcher = None
     if state.get('mail_unresolved') or state.get('calendar_unresolved'):
@@ -1997,14 +2000,10 @@ def main() -> int:
                   decode=_decoder(home), now=lambda: datetime.now(timezone.utc),
                   read_unresolved=lambda mail, today, deals, parties: unresolved_email.ask(
                       mail, today, deals, parties, settings.model))
-    if sys.argv[1:] == ['--reconcile-only']:
-        outcome = reconcile_only(repo, home, ports)
-        print(status_line(outcome))
-        return EXIT[outcome.state]
     outcome = run(repo, home, ports)
     print(status_line(outcome))
     print(receipt_line(outcome, settings.repo))
-    if outcome.reason not in ('outside_window', 'previous_run_active'):
+    if outcome.reason not in ('outside_window', 'previous_run_active', 'reconciled', 'reconcile_failed'):
         try:
             from lib import email_router
             email_router.step(repo, settings)

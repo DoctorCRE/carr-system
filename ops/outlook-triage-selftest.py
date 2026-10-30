@@ -181,6 +181,15 @@ if name == 'open':
     save()
     sys.exit(0)
 if name == 'ioreg':
+    if args == ['-a', '-d1', '-k', 'IOConsoleUsers', '-r']:
+        import plistlib
+        if state.get('ioreg_unreadable'):
+            print(state.get('ioreg_output', 'unreadable'))
+        else:
+            users = state.get('console_users', [{'kCGSSessionUserIDKey': os.getuid(),
+                                                 'CGSSessionScreenIsLocked': state.get('screen_locked', False)}])
+            sys.stdout.buffer.write(plistlib.dumps([{'IOConsoleUsers': users}]))
+        sys.exit(state.get('ioreg_exit', 0))
     print('    | |   "HIDIdleTime" = %d' % int(state['idle_seconds'] * 1e9))
     sys.exit(0)
 if name == 'run.sh':
@@ -499,6 +508,41 @@ class PreflightQuitTest(FakeOutlookCase):
                 patch('lib.outlook_ui.subprocess.run', side_effect=run):
             return prepare_outlook(waits)
 
+    def test_locked_screen_skips_before_any_outlook_access(self):
+        self.given(screen_locked=True, windows=[])
+        self.assertEqual(self.prepare(), triage.Outcome('skipped', 'screen_locked'))
+        self.assert_no_restart()
+        self.assertEqual(self.called('pgrep') + self.called('cua-driver'), [])
+
+    def test_lock_probe_only_uses_current_console_user(self):
+        for other_locked, current_locked in ((False, True), (True, False)):
+            with self.subTest(other_locked=other_locked, current_locked=current_locked):
+                self.calls.unlink(missing_ok=True)
+                self.given(console_users=[
+                    {'kCGSSessionUserIDKey': os.getuid() + 1, 'CGSSessionScreenIsLocked': other_locked},
+                    {'kCGSSessionUserIDKey': os.getuid(), 'CGSSessionScreenIsLocked': current_locked},
+                ])
+                outcome = self.prepare()
+                if current_locked:
+                    self.assertEqual(outcome, triage.Outcome('skipped', 'screen_locked'))
+                    self.assert_no_restart()
+                else:
+                    self.assertIsNone(outcome)
+                    self.assertTrue(self.called('open'))
+
+    def test_unlocked_or_unreadable_lock_probe_follows_existing_preflight(self):
+        for options in ({'screen_locked': False},
+                        {'console_users': [{'kCGSSessionUserIDKey': os.getuid() + 1,
+                                            'CGSSessionScreenIsLocked': True}]},
+                        {'ioreg_unreadable': True},
+                        {'ioreg_unreadable': True, 'ioreg_output': '<?xml version="1.0"?><plist><array>'},
+                        {'screen_locked': True, 'ioreg_exit': 1}):
+            with self.subTest(options=options):
+                self.calls.unlink(missing_ok=True)
+                self.given(**options)
+                self.assertIsNone(self.prepare())
+                self.assertTrue(self.called('open'))
+
     def test_mailbox_with_twelve_toolbar_strips_allows_restart(self):
         strips = [window(wid, '', 1920, 30, False) for wid in range(20, 32)]
         self.given(windows=strips + [ORDINARY], after_launch=strips + [ORDINARY])
@@ -723,6 +767,30 @@ class PreflightQuitTest(FakeOutlookCase):
         self.assertNotIn(ACCOUNT, outcome.detail)
         self.assert_no_restart()
 
+    def test_unreadable_candidates_report_same_probe_without_titles(self):
+        from lib.outlook_ui import cua
+        second = window(16, f'Private title • {ACCOUNT}', 1230, 800, True)
+        self.given(windows=[ORDINARY | {'title': f'Secret title • {ACCOUNT}'}, second])
+        probes = {13: {'degraded_reason': 'ax_window_unresolved', 'elements': [
+                      {'role': 'AXButton', 'label': 'New Mail'},
+                      {'role': 'AXTable', 'label': 'Message List'}]},
+                  16: {'elements': [{'role': 'AXButton', 'label': 'Private subject'}]}}
+        seen = []
+        def probe(tool, arguments):
+            if tool == 'get_window_state' and arguments['window_id'] in probes:
+                seen.append(arguments['window_id'])
+                return probes[arguments['window_id']]
+            return cua(tool, arguments)
+        with patch('lib.outlook_ui.cua', side_effect=probe):
+            outcome = self.prepare()
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'no_usable_main_window'))
+        self.assertEqual(seen, [13, 16])
+        self.assertIn('"unresolved":true,"new_mail_found":true,"message_list_found":true,"element_count":2', outcome.detail)
+        self.assertIn('"unresolved":false,"new_mail_found":false,"message_list_found":false,"element_count":1', outcome.detail)
+        for private in ('Secret title', 'Private title', 'Private subject', ACCOUNT):
+            self.assertNotIn(private, outcome.detail)
+        self.assert_no_restart()
+
     def test_different_new_mail_button_name_prevents_restart(self):
         for label in ('New Mail Rule', 'New Mail Rule, pressed'):
             with self.subTest(label=label):
@@ -789,6 +857,14 @@ class ComposeWindowTest(unittest.TestCase):
 
 
 class OutlookTriageTest(FakeOutlookCase):
+    def test_locked_screen_is_an_expected_triage_skip(self):
+        self.given(screen_locked=True, windows=[])
+        outcome, state = self.run_triage()
+        self.assertEqual(outcome, triage.Outcome('skipped', 'screen_locked'))
+        self.assert_no_restart()
+        self.assertEqual(state['selections'], [])
+        self.assertIn('outcome: skipped screen_locked', self.report())
+
     def test_titled_and_untitled_drafts_skip_triage_without_restart(self):
         for title in (f'Re: subject-000 • {ACCOUNT}', ''):
             with self.subTest(title=title):
