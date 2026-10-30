@@ -227,6 +227,28 @@ print(json.dumps({{'ok': True, 'card_id': 'WR557.S2.J2', 'runner_job_id': args['
         self.assertEqual(job.returncode, 1)
         self.assertTrue(line.startswith('Delivery: failed missing=pr ') and line.endswith(' pr=unchecked'), line)
 
+    def test_stacked_job_survives_one_failed_remote_listing(self):
+        git = self.root / 'git'
+        marker = self.root / 'listing-failed'
+        real_git = shutil.which('git')
+        git.write_text(f'#!{sys.executable}\nimport os, pathlib, sys\n'
+                       f'marker = pathlib.Path({str(marker)!r})\n'
+                       "if 'ls-remote' in sys.argv and not marker.exists():\n"
+                       "    marker.touch()\n    sys.exit(1)\n"
+                       f'os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n')
+        git.chmod(0o755)
+        subprocess.run(['git', '-C', str(self.root / 'seed'), 'push', '-q', str(self.origin),
+                        'HEAD:refs/heads/stack/base'], env=self.git_env, check=True)
+        body = ("import subprocess, sys\n"
+                "clone = sys.argv[sys.argv.index('-C') + 1]\n"
+                "subprocess.run(['git', '-C', clone, 'fetch', '-q', 'origin', 'stack/base'], check=True)\n"
+                "subprocess.run(['git', '-C', clone, 'checkout', '-qB', 'test/job', 'FETCH_HEAD'], check=True)\n" + PUSH)
+        job = self.launch(body, brief=PR_BRIEF, push=False)
+        stdout, stderr = job.communicate(timeout=15)
+        line, errors = stdout.decode(), stderr.decode()
+        self.assertEqual(job.returncode, 0, line + errors)
+        self.assertIn('Delivery: ok missing=none branch=test/job', line)
+
     def test_pushed_job_with_its_pr_succeeds(self):
         self.pr_url.write_text('https://github.com/o/r/pull/2\n')
         job = self.launch('', brief=PR_BRIEF)
