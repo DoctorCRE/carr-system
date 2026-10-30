@@ -1,22 +1,4 @@
 {
-  "document_types": {
-    "loi": {
-      "method": "text_layer",
-      "auto_accept": false
-    },
-    "lease": {
-      "method": "text_layer",
-      "auto_accept": false
-    },
-    "counter": {
-      "method": "text_layer",
-      "auto_accept": false
-    },
-    "amendment": {
-      "method": "text_layer",
-      "auto_accept": false
-    }
-  },
   "output_schema": {
     "type": "object",
     "additionalProperties": false,
@@ -54,7 +36,7 @@
                 "cited_text": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4000
+                  "maxLength": 600
                 },
                 "region": {
                   "enum": [
@@ -109,7 +91,7 @@
                 "cited_text": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4000
+                  "maxLength": 600
                 },
                 "region": {
                   "enum": [
@@ -156,7 +138,7 @@
                 "cited_text": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4000
+                  "maxLength": 600
                 },
                 "region": {
                   "enum": [
@@ -202,7 +184,7 @@
                 "cited_text": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4000
+                  "maxLength": 600
                 },
                 "region": {
                   "enum": [

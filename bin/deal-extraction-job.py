@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run a stored PDF text-layer job and submit one proposal-only fact batch."""
 import argparse
+from decimal import Decimal
 import json
 from pathlib import Path
 import subprocess
@@ -10,7 +11,7 @@ from uuid import UUID
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
-from lib.deal_extraction import ExtractionJob, run_job
+from lib.deal_extraction import ExtractionJob, MODELS, run_job
 from lib.model_call import ask_with_usage
 from lib.record_call import call_verb
 from lib.r2_archive import BUCKET, wrangler_bin
@@ -60,9 +61,10 @@ def main():
     parser.add_argument('--entity', type=UUID, required=True)
     parser.add_argument('--document', type=UUID, required=True)
     parser.add_argument('--document-type', choices=['loi', 'lease', 'counter', 'amendment'], required=True)
-    parser.add_argument('--model', required=True)
+    parser.add_argument('--model', choices=MODELS, required=True)
+    parser.add_argument('--max-budget-usd', type=Decimal, default=Decimal('0.50'))
     args = parser.parse_args()
-    job = ExtractionJob(args.job_id, args.entity, args.document, args.document_type, args.model)
+    job = ExtractionJob(args.job_id, args.entity, args.document, args.document_type, args.model, args.max_budget_usd)
     try:
         result = run_job(job, call=call, read_bytes=read_bytes, text_pages=text_pages, model=ask_with_usage)
     except (ValueError, RuntimeError, OSError, subprocess.SubprocessError):

@@ -2055,7 +2055,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "read-deal-extraction-source": {
     "ingress_key": "mcp-tool:read-deal-extraction-source",
     "source_locator": "mcp-server/src/deal-extraction.js",
-    "schema_digest": "22af54f512832ade8474f8c15a338294d6fc1d2ef168365bdfb1a58acc00c345",
+    "schema_digest": "b5a22a2d82c40946035d8e254f39db463dc3a8683be2d6dcd710f4ef6ac38f10",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -2495,7 +2495,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-deal-extraction": {
     "ingress_key": "mcp-tool:record-deal-extraction",
     "source_locator": "mcp-server/src/deal-extraction.js",
-    "schema_digest": "278ae7d2c36e6315b342f3536890330788b19e48c6f6b77c675f0ac885b2517c",
+    "schema_digest": "f9f1bd1c147b39e3ab203454c5a7038bcdf3d73c0d5a28164d1a0a82b8889fe7",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

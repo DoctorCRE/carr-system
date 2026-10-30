@@ -8,7 +8,7 @@ const text = maxLength => ({ type: 'string', minLength: 1, maxLength });
 const hash = { type: 'string', pattern: '^[0-9a-f]{64}$' };
 const factKeys = ['base_rent_per_sf', 'landlord_ti_per_sf', 'term_months', 'free_rent_months'];
 const contract = { idempotency_key: uuid, entity_ref: uuid, document_ref: uuid,
-  document_type: { enum: ['loi', 'lease', 'counter', 'amendment'] }, model: text(100), extractor_version: { const: 'deal-text.v1' } };
+  document_type: { enum: ['loi', 'lease', 'counter', 'amendment'] }, model: { enum: ['haiku', 'sonnet'] }, extractor_version: { const: 'deal-text.v1' } };
 const object = properties => ({ type: 'object', additionalProperties: false, properties, required: Object.keys(properties) });
 const money = { type: 'string', pattern: '^(0|[1-9][0-9]*)(\\.[0-9]+)?$' };
 const array = (items, maxItems, minItems = 0) => ({ type: 'array', items, minItems, maxItems });
@@ -21,7 +21,7 @@ const receiptSchema = object({ schema_version: { const: 'deal-extraction.v1' }, 
     status: { enum: ['completed', 'failed'] }, cost_usd: { anyOf: [money, { type: 'null' }] } }), 4),
   cost_usd: money, cost_complete: { type: 'boolean' }, grounding_changes: array({ enum: factKeys }, 4),
   abstentions: array(object({ fact_key: { enum: factKeys }, status: { enum: ['not_present', 'unreadable'] },
-    reason: { enum: ['absent', 'no_text_layer', 'unsupported_schedule', 'unsupported_ocr', 'ambiguous', 'ungrounded'] } }), 4),
+    reason: { enum: ['absent', 'no_text_layer', 'unsupported_schedule', 'unsupported_ocr', 'ambiguous', 'ungrounded', 'over_budget', 'model_failed'] } }), 4),
   proposed_effects: array({ enum: factKeys }, 4), canonical: { const: false } });
 
 function jobOnly(actor) {
@@ -40,7 +40,7 @@ export function dealExtractionTools() {
   return {
     'read-deal-extraction-source': {
       write: false,
-      description: 'Read the exact undeleted stored PDF attachment binding for a proposal-only extraction job, including tenant, deal, content hash and object locator. An authenticated R2 read must verify the bytes separately. Source family is conservative byte identity; derivative lineage is unverified. Returns the prior receipt on retry of the same actor and typed job contract. No bytes, model call, writes or promotions.',
+      description: 'Read the exact undeleted stored PDF attachment binding for a proposal-only extraction job, including tenant, deal, content hash and object locator. An authenticated R2 read must verify the bytes separately. Source family is conservative byte identity; derivative lineage is unverified. Returns the prior receipt for the same document, hash, extractor version and model. No bytes, model call, writes or promotions.',
       inputSchema: object(contract),
       handler: async (c, actor, args) => {
         jobOnly(actor);
@@ -50,7 +50,7 @@ export function dealExtractionTools() {
     },
     'record-deal-extraction': {
       write: true,
-      description: 'Atomically retain one typed text-layer extraction job receipt and record its scalar proposals in the fact review queue. Rebinds stored document, deal, tenant and hash; overwrites source family from byte identity and refuses auto-accept, OCR and foreign sources. Four fields must be accounted for by proposals or distinct abstentions. Retains model/cost/retry/pass digests, grounding changes and proposed effects. Retries return the first completed receipt for this actor and job contract, even when a model rerun differs. Never promotes facts. No OCR or schedule auto-accept support.',
+      description: 'Atomically retain one typed text-layer extraction job receipt and record its scalar proposals in the fact review queue. Rebinds stored document, deal, tenant and hash; overwrites source family from byte identity and refuses auto-accept, OCR and foreign sources. Four fields must be accounted for by proposals or distinct abstentions. Retains model/cost/retry/pass digests, grounding changes and proposed effects. Reruns return the first completed receipt for the same document, hash, extractor version and model. Citation spans are capped at 600 characters and must contain the value; source byte grounding still requires the authenticated client. Never promotes facts. No OCR or schedule auto-accept support.',
       inputSchema: object({ ...contract, content_hash: hash, receipt: receiptSchema,
         observations: array(factObservationTools()['record-fact-observations'].inputSchema.properties.observations.items, 4) }),
       handler: async (c, actor, args) => {
@@ -66,6 +66,9 @@ export function dealExtractionTools() {
         if (args.receipt.proposed_effects.length !== args.observations.length
           || args.observations.some(o => !args.receipt.proposed_effects.includes(o.fact_key))) invalid();
         for (const o of args.observations) {
+          const citation = o.source.cited_text;
+          if (typeof citation !== 'string' || citation.length > 600
+            || !(citation.replaceAll(',', '').match(/[0-9]+(?:\.[0-9]+)?/g) || []).includes(o.value)) invalid();
           if (o.confidence_tier !== 'human_review' || o.method !== 'text_layer' || o.source.document_ref !== args.document_ref
             || o.source.content_hash !== args.content_hash || o.extractor_version !== args.extractor_version
             || o.extraction?.model !== args.model || o.extraction?.pass !== 'ground') invalid();
