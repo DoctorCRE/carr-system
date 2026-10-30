@@ -33,6 +33,11 @@ test("get-deal-room and email router: rows carrying email origin are marked", ()
     "$.emails[0].email_context.subject"]);
 });
 
+test('deal room thread subjects are marked as outside-origin text', () => {
+  assert.deepEqual(paths({ email_threads: [{ conversation_id: 'synthetic', subject: 'synthetic', latest_message_at: '2026-01-01' }] }),
+    ['$.email_threads[0].subject']);
+});
+
 test("read-room: turns from a non-partner seat are marked, the human seat is not", () => {
   const result = { ok: true, room: "partner-line", turns: [
     { seq: 1, sponsor: "joe", seat: "human", kind: "message", body: "Joe typed this." },

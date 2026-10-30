@@ -4,8 +4,12 @@
 pub mod block;
 #[path = "../../src/lz.rs"]
 pub mod lz;
-#[path = "../../src/record.rs"]
-pub mod record;
+#[path = "../../src/folder.rs"]
+pub mod folder;
+#[path = "../../src/message.rs"]
+pub mod message;
+#[path = "../../src/object.rs"]
+pub mod object;
 
 fn word(bytes: &[u8]) -> usize {
     let mut value = [0u8; 8];
@@ -29,19 +33,18 @@ pub fn fuzz_lz4(bytes: &[u8]) {
     let _ = lz::decode_exact(bytes, word(bytes) & 0xffff);
 }
 
-pub fn fuzz_record(bytes: &[u8]) {
-    let anchor = word(bytes);
-    let _ = record::parse(0, bytes, anchor);
-    let _ = record::parse(0, bytes, 0);
-    let _ = record::fields(
-        bytes,
-        anchor,
-        word(bytes.get(8..).unwrap_or_default()),
-        word(bytes.get(16..).unwrap_or_default()),
-    );
-    for anchor in memchr::memmem::find_iter(bytes, &record::anchor_needle()) {
-        let _ = record::parse(0, bytes, anchor);
+pub fn fuzz_message(bytes: &[u8]) {
+    let mut index = message::Index::default();
+    index.observe(0, bytes);
+    let _ = index.messages();
+    let at = word(bytes);
+    for fixed in [0, 340, 1541, 1860, at] {
+        if let Some(o) = object::Object::new(bytes, fixed) {
+            let _ = o.slot(at);
+            let _ = o.slot(at % 2048);
+            let _ = o.reference(at % 2048, 0x00c9, 212);
+        }
     }
-    let _ = record::read_time(bytes);
-    let _ = record::html_to_text(&String::from_utf8_lossy(bytes));
+    let _ = object::text(bytes);
+    let _ = object::unix(word(bytes) as u64);
 }

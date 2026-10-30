@@ -746,6 +746,16 @@ test('email next-step proposals refuse closed and invoiced deals', async () => {
 });
 
 const router = () => ({ ...actor, human: false, slug: 'codex', native_agent_verified: true, sponsoring_human_slug: 'joe' });
+// The shared database outgrows one 200-row page, so read the whole queue.
+async function wholeQueue(who, role) {
+  const first = await command('email-router-queue', { limit: 200 }, who, role);
+  const emails = [...first.emails];
+  for (let page = first; page.more;) {
+    page = await command('email-router-queue', { limit: 200, exclude: emails.map(e => e.activity_id) }, who, role);
+    emails.push(...page.emails);
+  }
+  return { ...first, emails };
+}
 const record = (args, identity = router()) => command('record-email-proposal',
   { idempotency_key: randomUUID(), deal, confidence: 0.9, ...args }, identity, 'carr_writer');
 const listed = async () => (await command('list-email-proposals', {}, actor, 'carr_reader')).proposals;
@@ -1177,7 +1187,7 @@ test('the router queue includes logged outbound email with sender evidence', asy
     recipients: [{ email: 'recipient@example.test', internal: false }] };
   const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
     kind: 'email_out', summary: 'Email to Synthetic Recipient: Commitment', detail: askQuote, email_context: context }, router());
-  const rows = (await command('email-router-queue', { limit: 200 }, router(), 'carr_reader')).emails;
+  const rows = (await wholeQueue(router(), 'carr_reader')).emails;
   const queued = rows.find(row => row.activity_id === source.activity_id);
   assert.equal(queued?.kind, 'email_out');
   assert.equal(queued.mailbox_owner, 'joe');
@@ -1208,40 +1218,6 @@ test('a proposal the deal has outgrown stays listed with its refusal so a partne
   assert.equal(item.preview, null);
   assert.equal(item.preview_error, 'email_deal_phase_not_eligible');
 });
-
-test('the quality report counts proposal outcomes by kind and lists Joe\'s corrections', async () => {
-  await c.query('delete from email_proposal');
-  const report = days => command('email-proposal-quality', days ? { days } : {}, actor, 'carr_reader');
-  const empty = await report();
-  assert.deepEqual(empty.kinds.map(k => [k.kind, k.proposed, k.dismiss_rate, k.over_threshold]),
-    [['file_to_deal', 0, null, false], ['possible_new_deal', 0, null, false], ['phase_move', 0, null, false], ['next_step', 0, null, false], ['reply_draft', 0, null, false]]);
-  const loi = await email();
-  const ask = await email(askQuote);
-  await record({ kind: 'phase_move', activity_id: loi.activity_id, evidence_quote: quote, confidence: 0.9 });
-  const step = await record({ kind: 'next_step', activity_id: ask.activity_id, evidence_quote: askQuote,
-    text: 'Send the floor plan', next_date: '2027-01-08', confidence: 0.5 });
-  let [move, next] = (await report()).kinds.filter(k => ['phase_move','next_step'].includes(k.kind));
-  assert.deepEqual([move.proposed, move.pending, next.proposed, next.pending], [1, 1, 1, 1]);
-  await command('dismiss-email-proposal', { idempotency_key: randomUUID(), proposal_id: step.proposal_id,
-    base_version: 1, reason: 'Dell already sent it' }, { ...actor, slug: 'dell' }, 'carr_writer');
-  const [card] = await listed();
-  await confirm(card.preview, {}, actor, 'carr_writer');
-  const after = await report();
-  [move, next] = after.kinds.filter(k => ['phase_move','next_step'].includes(k.kind));
-  assert.deepEqual([move.pending, move.confirmed, move.dismissed, move.dismiss_rate, move.confirmed_confidence], [0, 1, 0, 0, 0.9]);
-  assert.deepEqual([next.pending, next.confirmed, next.dismissed, next.dismiss_rate, next.dismissed_confidence], [0, 0, 1, 1, 0.5]);
-  assert.equal(next.over_threshold, false, 'one resolved proposal is too few to trip the threshold');
-  assert.deepEqual(after.corrections.map(row => [row.kind, row.deal_name, row.reason]),
-    [['next_step', 'Synthetic coastal purchase', 'Dell already sent it']]);
-  await c.query("update email_proposal set created_at=now()-interval '10 days'");
-  const recentDecision = await report();
-  assert.equal(recentDecision.kinds.every(k => k.proposed === 0), true);
-  assert.deepEqual(recentDecision.corrections.map(row => row.reason), ['Dell already sent it']);
-  await c.query("update email_proposal set resolved_at=now()-interval '10 days' where status='dismissed'");
-  assert.deepEqual((await report()).corrections, []);
-  assert.equal((await report(30)).kinds.find(k => k.kind === 'phase_move').proposed, 1);
-});
-
 
 test('a vendor email stays unfiled until a partner confirms, then records a participant hint', async () => {
   const address = `synthetic-${randomUUID()}@vendor.example`;
@@ -1353,7 +1329,7 @@ test('thread continuity files an unchanged reply but a new doctor defeats inheri
     await assert.rejects(command('inherit-email-thread', { idempotency_key: randomUUID(), activity_id: message.activity_id,
       thread_activity_id: prior.activity_id }, router()), error => error.payload?.error === 'email_thread_recipient_changed');
   }
-  const queue = await command('email-router-queue', { limit: 200 }, router());
+  const queue = await wholeQueue(router());
   const item = queue.emails.find(p => p.activity_id === changed.activity_id);
   assert.equal(item.recipients.find(p => p.email === 'new-doctor@synthetic.example').unknown, true);
   assert.equal(queue.open_deals.some(d => d.id === deal && d.client && d.phase), true);
@@ -1382,7 +1358,7 @@ test('the queue resolves every recipient, split contact addresses, clients and l
       recipients: [{ email: address, kind: 'to', internal: false },
         { email: 'new-person@synthetic.example', kind: 'cc', internal: false }] } });
   const legacy = await email();
-  const queue = await command('email-router-queue', { limit: 200 }, router(), 'carr_reader');
+  const queue = await wholeQueue(router(), 'carr_reader');
   const row = queue.emails.find(p => p.activity_id === source.activity_id);
   assert.equal(row.recipients.length, 2);
   assert.equal(row.recipients[0].client, client.name);
@@ -1430,7 +1406,7 @@ test('queue history includes recent subject candidates and older matching conver
   const current = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
     summary: 'Email from Vendor: History', detail: quote,
     email_context: { subject: 'History', conversation_id: conversation, sender: { email: 'vendor@synthetic.example', internal: false }, recipients: [] } });
-  const queue = await command('email-router-queue', { limit: 200 }, router());
+  const queue = await wholeQueue(router());
   const history = queue.emails.find(row => row.activity_id === current.activity_id).thread_history.map(row => row.activity_id);
   assert.ok(history.includes(recent));
   assert.ok(history.includes(matching));
@@ -1771,7 +1747,7 @@ test('each partner router queues only its captured mailbox provenance', async ()
       email_source: { mailbox_owner: owner, sender_email: 'sender@example.test' } }, machineFor(owner))).activity_id;
   }
   for (const owner of ['joe', 'dell']) {
-    const queue = await command('email-router-queue', { limit: 200 }, machineFor(owner), 'carr_reader');
+    const queue = await wholeQueue(machineFor(owner), 'carr_reader');
     const captured = queue.emails.filter(item => Object.values(sources).includes(item.activity_id));
     assert.deepEqual(captured.map(item => [item.activity_id, item.mailbox_owner]), [[sources[owner], owner]]);
   }
@@ -1822,7 +1798,7 @@ test('a partner can undo an automatic thread filing and the router cannot refile
 test('undo prevents a new filing proposal for the same email and deal', async () => {
   const { reply, filing } = await automaticThreadFiling();
   await command('undo-email-thread-filing', { idempotency_key: randomUUID(), event_id: filing.event_id }, actor, 'carr_writer');
-  const queue = await command('email-router-queue', { limit: 200 }, router(), 'carr_reader');
+  const queue = await wholeQueue(router(), 'carr_reader');
   assert.ok(queue.emails.find(e => e.activity_id === reply.activity_id).suppressed_deals.includes(deal));
   const args = { idempotency_key: randomUUID(), kind: 'file_to_deal', activity_id: reply.activity_id,
     deal, evidence_quote: quote, confidence: 0.9, sender_role: 'client' };
@@ -1882,30 +1858,6 @@ test('legacy undo refuses when the deal owner is unknown', async () => {
   } finally { await c.query("update deal set owner='joe' where id=$1", [deal]); }
 });
 
-
-test('quality reports automatic filing undo rates for the requested filing cohort', async () => {
-  await c.query("delete from event where verb in ('inherit-email-thread','undo-email-thread-filing')");
-  const report = (days = 7) => command('email-proposal-quality', { days }, actor, 'carr_reader');
-  assert.deepEqual((await report()).automatic_filings,
-    { filed: 0, undone: 0, undo_rate: null, over_threshold: false });
-  const filings = [];
-  for (let i = 0; i < 20; i++) filings.push((await automaticThreadFiling()).filing);
-  assert.deepEqual((await report()).automatic_filings,
-    { filed: 20, undone: 0, undo_rate: 0, over_threshold: false });
-  const undo = event_id => command('undo-email-thread-filing', { idempotency_key: randomUUID(), event_id }, actor, 'carr_writer');
-  await undo(filings[0].event_id);
-  assert.deepEqual((await report()).automatic_filings,
-    { filed: 20, undone: 1, undo_rate: 0.05, over_threshold: false });
-  await undo(filings[1].event_id);
-  assert.deepEqual((await report()).automatic_filings,
-    { filed: 20, undone: 2, undo_rate: 0.1, over_threshold: true });
-  await c.query("update event set recorded_at=now()-interval '10 days' where verb='inherit-email-thread' and id<>$1", [filings[1].event_id]);
-  assert.deepEqual((await report()).automatic_filings,
-    { filed: 1, undone: 1, undo_rate: 1, over_threshold: false });
-  assert.deepEqual((await report(30)).automatic_filings,
-    { filed: 20, undone: 2, undo_rate: 0.1, over_threshold: true });
-  assert.equal((await report()).send, false);
-});
 
 async function sentDraftFixture() {
   await c.query("update actor set email='joe@example.test' where slug='joe'");

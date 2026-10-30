@@ -66,10 +66,12 @@ def ts(delta: timedelta) -> int:
 
 
 def mail(sender, sent, subject='Suite question', body='Can we meet Thursday?', name=None,
-         recipients=OWNER, kind='full', copy_key=None, local_keys=None, flag=None, due=None, done=None):
+         recipients=OWNER, kind='full', copy_key=None, local_keys=None, flag=None, due=None, done=None,
+         message_id=None):
     return dict(flag_status=flag, flag_due_unix=due, flag_completed_unix=done, sender=sender, sender_name=name, recipients=recipients, subject=subject,
                 body=body, body_kind=kind, sent_unix=ts(sent),
-                copy_key=copy_key or f'{sender}\x1f{subject.lower()}\x1f{body.lower()}', local_keys=local_keys)
+                copy_key=copy_key or f'{sender}\x1f{subject.lower()}\x1f{body.lower()}', local_keys=local_keys,
+                message_id=message_id)
 
 
 def ident(m):
@@ -86,7 +88,7 @@ def event(goid, start, minutes=60, subject='Site visit', attendees=(), organizer
 
 
 def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identities=None, decoded=None,
-             folder_membership=True):
+             folder_membership=True, rejected=None):
     con = sqlite3.connect(path)
     con.executescript(SCHEMA)
     # Decoders built before WR-000502 have no local_keys column; keep testing that shape.
@@ -101,6 +103,8 @@ def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identiti
                      m['body_kind'], m['sent_unix'], m['copy_key']))
         if keyed:
             con.execute('UPDATE messages SET local_keys = ? WHERE id = last_insert_rowid()', (m.get('local_keys'),))
+    for row_id, m in enumerate(mails, 1):
+        con.execute('UPDATE messages SET message_id=? WHERE id=?', (m.get('message_id'), row_id))
     for field in ('conversation_id', 'cc', 'flag_status', 'flag_due_unix', 'flag_completed_unix'):
         if any(m.get(field) is not None for m in mails):
             con.execute(f'ALTER TABLE messages ADD COLUMN {field} {"INTEGER" if field.endswith("_unix") else "TEXT"}')
@@ -119,7 +123,9 @@ def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identiti
     con.executemany('INSERT INTO meta VALUES (?,?)',
                     [('blocks_found', found), ('blocks_verified', verified), ('messages', len(mails)),
                      ('event_identities', len(events) if identities is None else identities),
-                     ('events_decoded', len(events) if decoded is None else decoded)])
+                     ('events_decoded', len(events) if decoded is None else decoded),
+                     # The slot decoder (WR-000589) reports rejected messages; older decoders do not.
+                     *([('messages_rejected', rejected)] if rejected is not None else [])])
     if folder_membership:
         con.executescript("""
             CREATE TABLE folders(id INTEGER PRIMARY KEY, account_id INTEGER, name TEXT,
@@ -836,16 +842,9 @@ class IntakeTest(unittest.TestCase):
         helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
         crate = ROOT / 'vendor/hxprobe'
         REAL_RUN(['cargo', 'build', '--locked'], cwd=crate, check=True, capture_output=True)
-        envelopes = []
-        for folder_id, label in ((50, folder_name), (51, 'Sent Items')):
-            folder = bytearray(840)
-            struct.pack_into('<H', folder, 0, 0x004d)
-            struct.pack_into('<QIQQQ', folder, 10, folder_id, 2, 7, folder_id, 7)
-            folder.extend(b'\1\1\1\1\0' + helpers['utf16'](label))
-            envelopes.append(struct.pack('<HHIH', 5, 0x04d8, len(folder) + 10, 0) + folder)
-        binding = bytearray(helpers['message'](0x9999, sender=OWNER, sent=ts(-timedelta(days=60))))
-        struct.pack_into('<QIQQQ', binding, 418, 51, 2, 7, 51, 7)
-        self.store.write_bytes(helpers['STORE'](b''.join(envelopes) + b''.join(records) + binding))
+        folders = helpers['folder'](50, folder_name) + helpers['folder'](51, 'Sent Items')
+        binding = helpers['message'](0x9999, sender=OWNER, sent=ts(-timedelta(days=60)), folder=51)
+        self.store.write_bytes(helpers['STORE'](folders + b''.join(records) + binding))
 
         def decode(source, files, target):
             result = REAL_RUN([str(crate / 'target/debug/hxprobe'), 'db', str(source), str(target)],
@@ -858,10 +857,7 @@ class IntakeTest(unittest.TestCase):
     def test_cli_historical_drafts_link_never_drops_short_sent_revision(self):
         helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
         draft = helpers['message'](71, sender='', sent=0, preview='')
-        draft = draft.replace(struct.pack('<Q', helpers['EPOCH_TICKS']), b'\0' * 8)
-        sent = bytearray(helpers['message'](71, sender=OWNER,
-                                          sent=ts(-timedelta(hours=1)), preview='Pending'))
-        struct.pack_into('<QIQQQ', sent, 418, 51, 2, 7, 51, 7)
+        sent = helpers['message'](71, sender=OWNER, sent=ts(-timedelta(hours=1)), preview='Pending', folder=51)
         for records in ([draft, sent], [sent, draft]):
             with self.subTest(draft_first=records[0] is draft):
                 shutil.rmtree(self.out(), ignore_errors=True)
@@ -875,7 +871,6 @@ class IntakeTest(unittest.TestCase):
     def test_cli_blank_draft_stays_unresolved_without_recount_on_redecode(self):
         helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
         draft = helpers['message'](71, sender='', sent=0, preview='')
-        draft = draft.replace(struct.pack('<Q', helpers['EPOCH_TICKS']), b'\0' * 8)
         ports = self.cli_mail_fixture([draft])
         result = intake.run(self.repo, self.home, ports)
         self.assertEqual(result.state, 'succeeded')
@@ -892,7 +887,6 @@ class IntakeTest(unittest.TestCase):
     def test_cli_revisions_count_once_and_clear_incomplete_identity(self):
         helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
         incomplete = helpers['message'](71, sender='', sent=0)
-        incomplete = incomplete.replace(struct.pack('<Q', helpers['EPOCH_TICKS']), b'\0' * 8)
         complete = helpers['message'](71, sent=ts(-timedelta(hours=1)))
         ports = self.cli_mail_fixture([incomplete, complete], folder_name='Inbox')
         result = intake.run(self.repo, self.home, ports)
@@ -925,11 +919,12 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(retry.counts['unresolved_messages'], 0)
         self.assertEqual(len(self.fake.writes('log-activity')), 1)
 
-    def test_cli_incomplete_revision_preserves_ownership_uncertainty(self):
+    def test_cli_message_in_an_uncatalogued_folder_is_not_admitted(self):
+        # An Outbox revision: undated and in a folder the store does not catalogue.
         helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
-        incomplete = bytearray(helpers['message'](71, sender='', sent=0))
-        struct.pack_into('<QIQQQ', incomplete, 418, 999, 2, 7, 999, 7)
         complete = helpers['message'](71, sent=ts(-timedelta(hours=1)))
+        incomplete = helpers['message'](71, sent=ts(-timedelta(hours=1)), folder=999,
+                                        modified=ts(-timedelta(minutes=5)))
         ports = self.cli_mail_fixture([incomplete, complete], folder_name='Inbox')
         result = intake.run(self.repo, self.home, ports)
         self.assertEqual(result.state, 'succeeded')
@@ -940,7 +935,6 @@ class IntakeTest(unittest.TestCase):
     def test_cli_complete_revision_settles_a_prior_incomplete_message(self):
         helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
         incomplete = helpers['message'](71, sender='', sent=0)
-        incomplete = incomplete.replace(struct.pack('<Q', helpers['EPOCH_TICKS']), b'\0' * 8)
         ports = self.cli_mail_fixture([incomplete], folder_name='Inbox')
         first = intake.run(self.repo, self.home, ports)
         self.assertEqual(first.counts['unresolved_messages'], 1)
@@ -1023,6 +1017,146 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(result.counts['logged'], 1)
         [(_, activity)] = self.fake.writes('log-activity')
         self.assertEqual((activity['ref'], activity['kind']), ('C-901', 'email_out'))
+
+    def test_keyed_mail_settles_when_its_decoded_send_time_moves(self):
+        # hxprobe moved send times from the anchor scan to the Date slot, up to days earlier (WR-000589):
+        # mail filed from its preview still gets its full text, and is filed once.
+        first = self.run_intake([mail('pat@example.test', -timedelta(hours=1), kind='preview', local_keys='77')])
+        self.assertEqual((first.counts['logged'], first.counts['preview_only']), (1, 1))
+        moved = self.run_intake([mail('pat@example.test', -timedelta(days=3), local_keys='77')])
+        self.assertEqual((moved.counts['emails'], moved.counts['full_text_notes']), (0, 1))
+        self.assertEqual([a['kind'] for _, a in self.fake.writes('log-activity')], ['email_in', 'note'])
+
+    # Decoder identity changes (WR-000589): the anchor decoder named a message by content, the slot decoder
+    # by store key; both export its Message-ID, and the intake carries state across by it.
+
+    def test_keyless_preview_hands_its_pending_full_text_to_the_keyed_row(self):
+        old = mail('pat@example.test', -timedelta(hours=1), kind='preview', message_id='<a@example.test>')
+        self.assertEqual(self.run_intake([old]).counts['preview_only'], 1)
+        new = mail('pat@example.test', -timedelta(hours=2), local_keys='77', message_id='<a@example.test>')
+        result = self.run_intake([new], rejected=0)
+        self.assertEqual((result.counts['logged'], result.counts['full_text_notes'], result.counts['mail_inherited'],
+                          result.counts['legacy_unmatched']), (0, 1, 1, 0))
+        self.assertEqual([a['kind'] for _, a in self.fake.writes('log-activity')], ['email_in', 'note'])
+
+    def test_unseen_keyed_mail_sent_before_the_upgrade_is_filed(self):
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1), message_id='<a@example.test>')])
+        unseen = mail('pat@example.test', -timedelta(hours=2), subject='Unseen', local_keys='78',
+                      message_id='<b@example.test>')
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=1), local_keys='77',
+                                       message_id='<a@example.test>'), unseen], rejected=0)
+        self.assertEqual((result.counts['logged'], result.counts['mail_rekeyed']), (1, 1))
+        self.assertEqual([a['email_context']['subject'] for _, a in self.fake.writes('log-activity')],
+                         ['Suite question', 'Unseen'])
+
+    def test_unresolved_outbound_mail_files_after_the_upgrade_once_its_contact_exists(self):
+        sent = dict(sender=OWNER, sent=-timedelta(hours=1), recipients='new@example.test', message_id='<c@example.test>')
+        first = self.run_intake([mail(**sent)])
+        self.assertEqual((first.counts['logged'], len(json.loads((self.out() / intake.STATE).read_text())
+                                                         ['mail_unresolved'])), (0, 1))
+        self.fake.contacts_rows.append(intake.Contact('new@example.test', 'C-903', 'New Example'))
+        result = self.run_intake([mail(**sent, local_keys='79')], rejected=0)
+        self.assertEqual((result.counts['logged'], result.counts['unresolved_messages']), (1, 0))
+        [(_, activity)] = self.fake.writes('log-activity')
+        self.assertEqual((activity['ref'], activity['kind']), ('C-903', 'email_out'))
+
+    def test_old_new_old_new_decoders_file_each_email_and_its_full_text_once(self):
+        old = mail('pat@example.test', -timedelta(hours=1), kind='preview', message_id='<a@example.test>')
+        new = mail('pat@example.test', -timedelta(hours=2), local_keys='77', message_id='<a@example.test>')
+        for rows, rejected in (([old], None), ([new], 0), ([old], None), ([new], 0)):
+            self.fake.now += timedelta(minutes=30)
+            self.assertEqual(self.run_intake(rows, rejected=rejected).state, 'succeeded')
+        self.assertEqual([a['kind'] for _, a in self.fake.writes('log-activity')], ['email_in', 'note'])
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertEqual((state['pending_full'], state['mail_unresolved']), ({}, {}))
+
+    def test_a_reused_message_id_on_two_store_keys_never_merges(self):
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1), local_keys='77', message_id='<x@example.test>')])
+        other = mail('pat@example.test', -timedelta(hours=1), subject='Different', body='Another message',
+                     local_keys='78', message_id='<x@example.test>')
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=1), local_keys='77',
+                                       message_id='<x@example.test>'), other], rejected=0)
+        self.assertEqual((result.counts['logged'], result.counts['mail_rekeyed'], result.counts['message_id_ambiguous']),
+                         (1, 0, 1))
+
+    def test_a_reused_message_id_never_attaches_another_body_to_a_pending_preview(self):
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1), kind='preview', local_keys='77',
+                              message_id='<x@example.test>')])
+        lee = mail('lee@example.test', -timedelta(hours=1), subject='Lee topic', body='Lee body text',
+                   local_keys='78', message_id='<x@example.test>')
+        result = self.run_intake([lee], rejected=0)
+        self.assertEqual((result.counts['full_text_notes'], result.counts['mail_inherited'],
+                          result.counts['message_id_ambiguous']), (0, 0, 1))
+        self.assertEqual([(a['kind'], a['email_context']['sender']['email']) for _, a in self.fake.writes('log-activity')],
+                         [('email_in', 'pat@example.test'), ('email_in', 'lee@example.test')])
+        self.assertEqual(len(json.loads((self.out() / intake.STATE).read_text())['pending_full']), 1)
+
+    def test_message_ids_saved_for_another_mailbox_are_not_reused(self):
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1), message_id='<x@example.test>')])
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        state['mail_ids_account'] = 'another-mailbox'
+        path.write_text(json.dumps(state))
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=1), local_keys='78',
+                                       message_id='<x@example.test>')], rejected=0)
+        self.assertEqual((result.counts['mail_ids_reset'], result.counts['mail_rekeyed'], result.counts['logged']),
+                         (1, 0, 1))
+
+    def test_unchanged_store_receipts_still_count_legacy_entries(self):
+        old = mail('pat@example.test', -timedelta(hours=1), kind='preview')
+        self.assertEqual(self.run_intake([old]).counts['legacy_unmatched'], 1)
+        self.assertEqual(self.run_intake([old], touch=False).counts['legacy_unmatched'], 1)
+
+    def test_reconcile_only_pass_saves_message_ids_from_the_old_decoder_and_files_nothing(self):
+        old = mail('pat@example.test', -timedelta(hours=1), kind='preview', message_id='<a@example.test>')
+        self.run_intake([old])
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        del state['mail_ids']
+        path.write_text(json.dumps(state))
+        first = intake.reconcile_only(self.repo, self.home, self.fake.ports())
+        again = intake.reconcile_only(self.repo, self.home, self.fake.ports())
+        self.assertEqual((first.reason, first.counts['mail_ids'], again.reason), ('reconciled', 1, 'already_reconciled'))
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+        new = mail('pat@example.test', -timedelta(hours=9), local_keys='77', message_id='<a@example.test>')
+        result = self.run_intake([new], rejected=0)
+        self.assertEqual((result.counts['logged'], result.counts['full_text_notes']), (0, 1))
+
+    def test_reconcile_only_pass_never_overwrites_state_a_concurrent_run_saved(self):
+        first = mail('pat@example.test', -timedelta(hours=2), message_id='<a@example.test>')
+        self.run_intake([first])
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        del state['mail_ids']
+        path.write_text(json.dumps(state))
+        later = mail('lee@example.test', -timedelta(hours=1), subject='Later', message_id='<b@example.test>')
+        write_db(self.fake.fixture.with_name('later.db'), [first, later])
+        real_flock, interleaved = intake.fcntl.flock, []
+
+        def flock(fd, op):
+            # A scheduled intake run lands just before the reconcile pass takes the lock.
+            if not interleaved:
+                interleaved.append(True)
+                self.fake.fixture.unlink()
+                self.fake.fixture.with_name('later.db').rename(self.fake.fixture)
+                self.store.write_bytes(self.store.read_bytes() + b'.')
+                self.assertEqual(intake.run(self.repo, self.home, self.fake.ports()).counts['logged'], 1)
+            return real_flock(fd, op)
+        with patch.object(intake.fcntl, 'flock', flock):
+            intake.reconcile_only(self.repo, self.home, self.fake.ports())
+        self.store.write_bytes(self.store.read_bytes() + b'.')
+        intake.run(self.repo, self.home, self.fake.ports())
+        self.assertEqual([a['email_context']['subject'] for _, a in self.fake.writes('log-activity')],
+                         ['Suite question', 'Later'])
+
+    def test_message_layout_alarm_clears_and_rearms_on_the_rejection_count(self):
+        rows = [mail('pat@example.test', -timedelta(hours=1), local_keys='77')]
+        alarms = []
+        for rejected in (1, 0, 1):
+            result = self.run_intake(rows, rejected=rejected)
+            state = json.loads((self.out() / intake.STATE).read_text())
+            alarms.append((result.counts['decoder_alarm'], result.counts['decoder_rejected'], state['decoder_degraded']))
+        self.assertEqual(alarms, [(1, 1, True), (0, 0, False), (1, 1, True)])
 
     def test_nested_folder_move_preserves_one_message(self):
         message = mail('pat@example.test', -timedelta(hours=1), local_keys='77')

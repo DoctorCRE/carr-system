@@ -5,6 +5,8 @@ use memmap2::Mmap;
 
 use crate::{block, header};
 
+include!(concat!(env!("OUT_DIR"), "/atlas_names.rs"));
+
 #[derive(Default)]
 struct Counts {
     occurrences: usize,
@@ -165,7 +167,7 @@ pub fn run(path: &OsStr) -> Result<String, Issue> {
             String::new()
         };
         for (id, count) in &n.fields {
-            let wire = crate::schema::CONFIRMED_SPANS.iter().find(|h| h.field_id == id).unwrap().encoding;
+            let wire = CONFIRMED_SPANS.iter().find(|h| h.field_id == id).unwrap().encoding;
             if !fields.is_empty() { fields.push(','); }
             fields.push_str(&format!("{{\"field_id\":\"{id}\",\"identifier_kind\":\"byte_offset\",\"wire_type\":\"{wire}\",\"occurrences\":{count}}}"));
         }
@@ -218,7 +220,7 @@ fn observe_payload(data: &[u8], records: &mut BTreeMap<String, Counts>) -> Resul
         let mut ranges = vec![(0, span.decoded)];
         let mut fields = Vec::new();
         let bytes = &data[span.start..span.end];
-        for h in crate::schema::CONFIRMED_SPANS
+        for h in CONFIRMED_SPANS
             .iter()
             .filter(|h| h.record_type == span.kind)
         {
@@ -290,7 +292,7 @@ pub fn partition(data: &[u8]) -> Result<Vec<Span>, ()> {
 }
 
 fn partition_gap(data: &[u8], start: usize, end: usize, spans: &mut Vec<Span>) {
-    let needle = crate::record::anchor_needle();
+    let needle: Vec<u8> = "IPM.Note".encode_utf16().flat_map(u16::to_le_bytes).collect();
     let anchors: Vec<_> = memchr::memmem::find_iter(&data[start..end], &needle)
         .map(|n| start + n)
         .collect();

@@ -5,7 +5,8 @@
 //! checksums make every block self-validating, this is a parser rather than a
 //! carver — a wrong offset fails loudly instead of yielding plausible garbage.
 //!
-//! See `SPEC.md` for the format itself. Four commands:
+//! Objects follow one grammar (`object.rs`); each mail field is a fixed slot,
+//! catalogued with its evidence in spec/outlook/hxstore-atlas.json. Commands:
 //!
 //! ```text
 //!   hxprobe blocks <file>            verify every block, report coverage
@@ -13,8 +14,6 @@
 //!                                    build a SQLite database with FTS5 search;
 //!                                    files-dir is the profile's Files folder,
 //!                                    for EFMData sidecar bodies
-//!   hxprobe map    <file> [n]        dump the named field map for n records
-//!   hxprobe find   <file> <term>     show records whose text contains <term>
 //! ```
 //!
 //! The file is memory-mapped throughout and never read into an owned buffer, so
@@ -39,10 +38,9 @@ mod identity;
 mod lz;
 mod locate;
 mod message;
+mod object;
 mod study;
 mod observe;
-mod record;
-mod schema;
 
 /// Memory-map a store file read-only.
 ///
@@ -76,35 +74,6 @@ fn map(path: &str) -> Mmap {
     mm
 }
 
-/// One message record, located and bounded inside a decompressed block.
-struct Located<'a> {
-    /// Bytes of the record: from the previous anchor to the next.
-    span: &'a [u8],
-    /// Offset of the anchor within the block payload.
-    anchor: usize,
-    /// Distance from the anchor back to the start of the span.
-    back: usize,
-    /// Offset of the anchor's record end within the block payload.
-    end: usize,
-}
-
-/// Split a decompressed block into its records.
-///
-/// Records sit back to back with no length field, so each one is bounded by the
-/// neighbouring `IPM.Note` anchors. Without that bound fields bleed between
-/// messages and pair one message's sender with another's subject.
-fn records<'a>(data: &'a [u8], needle: &[u8]) -> Vec<Located<'a>> {
-    memchr::memmem::find_iter(data, needle)
-        .map(|anchor| {
-            let end = memchr::memmem::find(&data[anchor + 2..], needle)
-                .map_or(data.len(), |p| anchor + 2 + p);
-            let back = memchr::memmem::rfind(&data[..anchor], needle)
-                .map_or(anchor.min(2048), |p| anchor - p);
-            Located { span: &data[anchor - back..end], anchor, back, end }
-        })
-        .collect()
-}
-
 /// Verify every block in the file and report coverage.
 fn cmd_blocks(path: &str) {
     let mm = map(path);
@@ -117,9 +86,7 @@ fn cmd_blocks(path: &str) {
         );
     }
     let offs = block::find_all(&mm);
-    let needle = record::anchor_needle();
-
-    let (mut ok, mut bytes, mut with_ipm, mut recs) = (0usize, 0usize, 0usize, 0usize);
+    let (mut ok, mut bytes) = (0usize, 0usize);
     let mut by_kind: BTreeMap<u32, usize> = BTreeMap::new();
 
     for &o in &offs {
@@ -127,11 +94,6 @@ fn cmd_blocks(path: &str) {
         ok += 1;
         bytes += b.data.len();
         *by_kind.entry(b.kind).or_default() += 1;
-        let n = memchr::memmem::find_iter(&b.data, &needle).count();
-        if n > 0 {
-            with_ipm += 1;
-            recs += n;
-        }
     }
 
     println!("{} block signatures found", offs.len());
@@ -141,87 +103,21 @@ fn cmd_blocks(path: &str) {
         100.0 * ok as f64 / offs.len() as f64,
         bytes as f64 / 1e6
     );
-    println!("{with_ipm} blocks hold mail, {recs} IPM.Note records");
     for (k, n) in &by_kind {
         println!("  type {k:<3} {n}");
     }
 }
 
-/// Dump the named field map for the first `n` records.
-///
-/// With `n = 0`, prints only the aggregate coverage per key — the numbers
-/// quoted in SPEC.md §6.2.
-fn cmd_map(path: &str, n: usize) {
-    let mm = map(path);
-    let needle = record::anchor_needle();
-    let mut maps = Vec::new();
-    let mut shown = 0usize;
-
-    for o in block::find_all(&mm) {
-        let Some(b) = block::parse(&mm, o) else { continue };
-        for r in records(&b.data, &needle) {
-            let m = schema::build_bounded(&b.data, r.anchor, r.end, r.back);
-            if shown < n {
-                println!("\n=== block 0x{o:08x}  anchor +{} ===", r.anchor);
-                print!("{}", m.dump());
-                shown += 1;
-            }
-            maps.push(m);
-        }
-    }
-
-    println!("\n{} records\n", maps.len());
-    for (k, v) in schema::tally(&maps) {
-        println!("  {:<20} {:>6}  {:>5.1}%", k, v, v as f64 * 100.0 / maps.len() as f64);
-    }
-}
-
-/// Show the records whose span contains `term`, with their field maps.
-///
-/// Used to check a row in the database against the bytes it came from: if a
-/// sender and a subject appear in the same map, they really are stored
-/// together.
-fn cmd_find(path: &str, term: &str, limit: usize) {
-    let mm = map(path);
-    let needle = record::anchor_needle();
-    let want: Vec<u8> = term.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
-    let mut shown = 0usize;
-
-    for o in block::find_all(&mm) {
-        if shown >= limit {
-            return;
-        }
-        let Some(b) = block::parse(&mm, o) else { continue };
-        // Cheap reject: skip the whole block before walking its records.
-        if memchr::memmem::find(&b.data, &want).is_none() {
-            continue;
-        }
-        for r in records(&b.data, &needle) {
-            if shown >= limit {
-                return;
-            }
-            if memchr::memmem::find(r.span, &want).is_none() {
-                continue;
-            }
-            shown += 1;
-            let m = schema::build_bounded(&b.data, r.anchor, r.end, r.back);
-            println!("\n=== block 0x{o:08x}  anchor +{}  span {} bytes ===", r.anchor, r.span.len());
-            print!("{}", m.dump());
-        }
-    }
-    if shown == 0 {
-        println!("no records contain {term:?}");
-    }
-}
 
 /// Parse the whole store into a SQLite database with a full-text index.
+///
+/// One row per mail message object (class 00c9, ItemClass `IPM.Note*`), every field read from
+/// its slot. See `message.rs` and spec/outlook/hxstore-atlas.json.
 fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     let mm = map(path);
-    let needle = record::anchor_needle();
     let offs = block::find_all(&mm);
     println!("{} blocks -> {db_path}", offs.len());
 
-    // Folder catalogs and membership metadata can occur after the messages.
     let mut folders = folder::Index::default();
     let mut events = calendar::Index::default();
     let mut attachments = attachment::Index::default();
@@ -229,18 +125,26 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     let mut categories = category::Index::default();
     let mut details = detail::Index::default();
     let mut sidecars = files_dir.map(|d| body::Sidecars::open(std::path::Path::new(d))).unwrap_or_default();
+    let mut blocks_ok = 0usize;
     for &o in &offs {
         if let Some(b) = block::parse(&mm, o) {
+            blocks_ok += 1;
             folders.observe(o, &b.data);
             events.observe(&b.data);
             attachments.observe(&b.data);
-            objects.observe(&b.data);
+            objects.observe(o, &b.data);
             categories.observe(&b.data);
             details.observe(&b.data);
         }
     }
 
     let message_objects = objects.messages();
+    let mut rows: Vec<Row> = message_objects
+        .iter()
+        .filter(|(_, m)| m.item_class.as_deref().is_some_and(|c| c.starts_with("IPM.Note")))
+        .map(|(&key, m)| Row::new(key, m, &mut sidecars, &folders))
+        .collect();
+    rows.sort_by_key(|r| (r.m.sent_unix, r.key));
 
     for suffix in ["", "-wal", "-shm"] {
         let _ = std::fs::remove_file(format!("{db_path}{suffix}"));
@@ -264,7 +168,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              block        INTEGER,   -- file offset of the source block
              sender       TEXT,
              sender_name  TEXT,
-             recipients   TEXT,      -- comma-separated; ordering is not stored
+             recipients   TEXT,      -- To, Cc and Bcc addresses, comma-separated; order not stored
              subject      TEXT,
              message_id   TEXT,
              body         TEXT,      -- plain text, tags stripped
@@ -275,29 +179,23 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              -- holds only Outlook's ~255-character cache of it. Most messages
              -- are preview-only: that is the format, not a parse failure.
              body_kind    TEXT,
-             sent_unix    INTEGER,   -- earliest .NET tick in the record span
+             sent_unix    INTEGER,   -- send time (Date), message slot +718
              sent_utc     TEXT,
-             -- 1 when the subject came from another record in the same
-             -- conversation, because this record stores none of its own.
-             subject_inherited INTEGER,
+             subject_inherited INTEGER, -- always 0: subjects are never borrowed
              preview      TEXT,      -- Outlook's own preview of the message
              body_source  TEXT,      -- 'inline' or 'efm' when html is set
-             copies       INTEGER,   -- revisions collapsed into this row
-             -- sender, normalized subject and preview opening: the identity
-             -- this row's copies share; NULL when too short to identify.
-             copy_key     TEXT,
-             -- store-local keys of the message objects merged into this row,
-             -- decimal, comma-separated and ascending; NULL when none linked.
-             -- More than one means this row joined distinct store items.
-             local_keys   TEXT,
-             -- From the message detail object (class 00c9, tag 060f) joined by
-             -- local key; NULL when no detail, several keyed details, or
-             -- disagreeing newest revisions.
+             copies       INTEGER,   -- cached revisions of the message object
+             copy_key     TEXT,      -- always NULL: rows are store items, not merged copies
+             local_keys   TEXT,      -- the message object's store-local key, decimal
+             -- From the message object's detail slots; NULL when its newest
+             -- revisions disagree.
              flag_status  TEXT,      -- 'none', 'flagged' or 'complete'
              flag_due_unix INTEGER,  -- NULL also when the flag has no due date
              flag_completed_unix INTEGER,
              moved_to_other INTEGER, -- 1 after a one-time move to Other
              pinned       INTEGER,
+             received_unix INTEGER,  -- delivery or save-to-folder time, slot +278
+             -- 1 when the current folder reference names no catalogued folder of the account
              folder_links_unresolved INTEGER NOT NULL
          );
          CREATE TABLE message_folders (
@@ -412,246 +310,9 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     )
     .expect("schema");
 
-    let mut blocks_ok = 0usize;
-    let mut best: std::collections::HashMap<String, record::Record> = Default::default();
-    // `Topic` is a conversation-level field, so a record can legitimately hold
-    // no subject of its own while its thread has one. These map each thread to
-    // its known subject, and each message identity to its threads.
-    let mut convo_subject: std::collections::HashMap<String, String> = Default::default();
-    let mut convo_of: std::collections::HashMap<String, Vec<String>> = Default::default();
-
-    for &o in &offs {
-        let Some(b) = block::parse(&mm, o) else { continue };
-        blocks_ok += 1;
-        let folder_links = folders.links(&b.data, &needle);
-        let key_links = folders.keys(&b.data, &needle);
-
-        for loc in records(&b.data, &needle) {
-            let Some(mut r) = record::parse(o, &b.data, loc.anchor) else { continue };
-            r.folder_ids = folder_links.get(&loc.anchor).cloned().unwrap_or_default();
-            r.folder_links_unresolved = r.folder_ids.is_empty();
-            r.local_keys = key_links.get(&loc.anchor).into_iter().copied().collect();
-            let m = schema::build_bounded(&b.data, loc.anchor, loc.end, loc.back);
-
-            // The named map is authoritative for every field it covers: it
-            // assigns slots by their position in the run sequence and checks
-            // each against the type the protocol schema says it holds.
-            // `record::parse` supplies only what is not a string run -- the
-            // HTML body -- plus the send time, read here from the span.
-            r.sent_unix = record::read_time(loc.span);
-            // Take the map's value where it has one, but keep what
-            // `record::parse` found otherwise -- the two paths locate fields
-            // differently, and the shape-based path still covers records the
-            // map's stricter type checks reject.
-            if let Some(v) = m.get(schema::Key::SenderAddress) {
-                r.sender = Some(v.to_string());
-            }
-            if let Some(v) = m.get(schema::Key::SenderName) {
-                r.sender_name = Some(v.to_string());
-            }
-            if let Some(v) = m.get(schema::Key::InternetMessageId) {
-                r.message_id = Some(v.to_string());
-            }
-            // The subject is the exception: the map is the only path that
-            // requires the Topic/NormalizedSubject duplicate, and the
-            // shape-based fallback supplies attachment paths instead of
-            // subjects, so an empty map result must win.
-            r.subject = m.get(schema::Key::NormalizedSubject).map(str::to_string);
-            r.recipients = m
-                .all(schema::Key::Recipient)
-                .iter()
-                .filter(|t| Some(**t) != r.sender.as_deref())
-                .map(|t| t.to_string())
-                .collect();
-            if r.local_keys.len() == 1 {
-                if let Some(object) = r.local_keys.first().and_then(|key| message_objects.get(key)) {
-                    if let Some(subject) = object.subject.as_ref().filter(|s| !s.trim().is_empty()) {
-                        r.subject = Some(subject.clone());
-                    }
-                    if let Some(sender) = object.sender.as_ref().filter(|s| !s.trim().is_empty()) {
-                        if r.sender.as_deref() != Some(sender) {
-                            r.sender_name = None;
-                        }
-                        r.sender = Some(sender.clone());
-                    }
-                    if let Some(recipients) = &object.recipients {
-                        let listed: Vec<String> = recipients.iter()
-                            .filter(|r| matches!(r.kind, message::TO | message::CC))
-                            .map(|r| r.address.clone()).collect();
-                        if !listed.is_empty() {
-                            r.recipients = listed;
-                        }
-                    }
-                }
-            }
-            r.preview = m.get(schema::Key::Preview).map(str::to_string);
-            if r.html.is_some() {
-                r.body_source = Some("inline");
-            } else if let Some(html) = sidecars.body_for(loc.span, &r) {
-                r.body = record::html_to_text(&html);
-                r.html = Some(html);
-                r.body_source = Some("efm");
-            }
-            if r.body.split_whitespace().count() < 3 {
-                if let Some(v) = &r.preview {
-                    r.body = v.clone();
-                }
-            }
-
-            // Built from every raw record, not the deduplicated set: a revision
-            // that loses the merge can still be the only one carrying the
-            // thread's subject.
-            let convo_ids: Vec<String> =
-                m.all(schema::Key::ConversationId).iter().map(|s| s.to_string()).collect();
-
-            // A local identity or folder link is evidence even without readable text.
-            if r.local_keys.is_empty() && r.folder_ids.is_empty()
-                && r.sender.is_none() && r.body.split_whitespace().count() < 5 {
-                continue;
-            }
-
-            // Local keys partition every merge so identical templates from
-            // distinct store items stay separate. Unkeyed records retain the
-            // sender/time and content heuristics, isolated from keyed records.
-            // `InternetMessageId` is deliberately
-            // excluded -- the store reuses one across a conversation, so keying
-            // on it merges distinct messages, and pairing it with anything else
-            // splits the revisions of one. See SPEC.md 4.7.
-            let key = if r.local_keys.is_empty() {
-                format!("{:?}|{:?}|{:?}", r.local_keys, r.sender, r.sent_unix)
-            } else {
-                format!("{:?}", r.local_keys)
-            };
-            for id in &convo_ids {
-                if let Some(sub) = &r.subject {
-                    convo_subject.entry(id.clone()).or_insert_with(|| sub.clone());
-                }
-            }
-            let slot = convo_of.entry(key.clone()).or_default();
-            for id in convo_ids {
-                if !slot.contains(&id) {
-                    slot.push(id);
-                }
-            }
-
-            match best.get_mut(&key) {
-                None => {
-                    best.insert(key, r);
-                }
-                // Merge field by field rather than keeping one whole record.
-                // Revisions are not uniformly complete -- one carries the
-                // subject, another the full HTML body -- so choosing a single
-                // "best" record discards fields recovered from a sibling.
-                Some(prev) => merge(prev, r),
-            }
-        }
-    }
-
-    // Back-fill subjects from the conversation. Measured over the store, 90.9 %
-    // of *records* lacking a subject share a thread identifier with one that
-    // has it; most of those merge into messages that already recovered a
-    // subject, leaving 219 messages genuinely fixed by this pass.
-    let mut backfilled = 0usize;
-    for (key, rec) in best.iter_mut() {
-        if rec.subject.is_some() {
-            continue;
-        }
-        let Some(ids) = convo_of.get(key) else { continue };
-        if let Some(sub) = ids.iter().find_map(|i| convo_subject.get(i)) {
-            rec.subject = Some(sub.clone());
-            rec.subject_inherited = true;
-            backfilled += 1;
-        }
-    }
-    println!("  {backfilled} subjects recovered from conversation threads");
-
-    // A display name equal to the subject is the subject. Extraction rejects
-    // this within a record, but a merged message can take its name from one
-    // revision and its subject from another, so the check runs again here.
-    for r in best.values_mut() {
-        if r.sender_name.is_some() && r.sender_name == r.subject {
-            r.sender_name = None;
-        }
-    }
-
-    // Collapse the copies `sender + send time` could not join. See body.rs.
-    // Ties on send time are broken by merge key, not hash order, so the same
-    // store always collapses and numbers its rows the same way.
-    let mut keyed: Vec<(String, record::Record)> = best.into_iter().collect();
-    keyed.sort_by(|(a, x), (b, y)| (x.sent_unix, a).cmp(&(y.sent_unix, b)));
-    let by_time = keyed.into_iter().map(|(_, r)| r);
-    let mut best: Vec<record::Record> = Vec::with_capacity(by_time.len());
-    let mut first_copy: std::collections::HashMap<(std::collections::BTreeSet<u64>, String), Vec<usize>> = Default::default();
-    let mut collapsed = 0usize;
-    for r in by_time {
-        let Some(key) = body::copy_key(&r) else {
-            best.push(r);
-            continue;
-        };
-        let slots = first_copy.entry((r.local_keys.clone(), key)).or_default();
-        let near = slots.iter().copied().find(|&i| match (best[i].sent_unix, r.sent_unix) {
-            (Some(a), Some(b)) => b - a <= body::COPY_WINDOW,
-            _ => false,
-        });
-        match near {
-            Some(i) => {
-                merge(&mut best[i], r);
-                collapsed += 1;
-            }
-            None => {
-                slots.push(best.len());
-                best.push(r);
-            }
-        }
-    }
-    // A revision can carry another subject (inherited from the thread, or a
-    // field the map could not claim). A preview-only message joins a full one
-    // with the same sender and opening when exactly one is within the window.
-    let full_by_opening: std::collections::HashMap<(std::collections::BTreeSet<u64>, String), Vec<usize>> =
-        best.iter().enumerate().filter(|(_, r)| r.html.is_some()).fold(Default::default(), |mut m, (i, r)| {
-            if let Some(k) = body::sender_opening(r) {
-                m.entry((r.local_keys.clone(), k)).or_default().push(i);
-            }
-            m
-        });
-    let mut absorbed = vec![false; best.len()];
-    for i in 0..best.len() {
-        if best[i].html.is_some() {
-            continue;
-        }
-        let Some(k) = body::sender_opening(&best[i]) else { continue };
-        let near: Vec<usize> = full_by_opening
-            .get(&(best[i].local_keys.clone(), k))
-            .into_iter()
-            .flatten()
-            .copied()
-            .filter(|&j| match (best[i].sent_unix, best[j].sent_unix) {
-                (Some(a), Some(b)) => (a - b).abs() <= body::COPY_WINDOW,
-                _ => false,
-            })
-            .collect();
-        if let [j] = near[..] {
-            let r = std::mem::take(&mut best[i]);
-            let sent = r.sent_unix.min(best[j].sent_unix);
-            merge(&mut best[j], r);
-            best[j].sent_unix = sent;
-            absorbed[i] = true;
-            collapsed += 1;
-        }
-    }
-    let mut keep = absorbed.iter().map(|a| !a);
-    best.retain(|_| keep.next().unwrap_or(true));
-    println!(
-        "  {collapsed} copies collapsed; {} sidecar bodies linked, {} rejected, of {} files",
-        sidecars.linked,
-        sidecars.rejected,
-        sidecars.len()
-    );
-
-    let stored = best.len();
-    let with_folder = best.iter().filter(|r| !r.folder_ids.is_empty()).count();
-    let multi_folder = best.iter().filter(|r| r.folder_ids.len() > 1).count();
-    println!("  {} folders; {with_folder}/{stored} messages linked ({multi_folder} with multiple observed folders)", folders.folders.len());
+    let stored = rows.len();
+    let with_folder = rows.iter().filter(|r| r.folder.is_some()).count();
+    println!("  {} folders; {with_folder}/{stored} messages in a catalogued folder", folders.folders.len());
     println!(
         "  {} message objects; {} with a conversation, {} with recipients",
         message_objects.len(),
@@ -742,9 +403,10 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                    (block,sender,sender_name,recipients,subject,message_id,body,
                     html,body_words,html_bytes,body_kind,sent_unix,sent_utc,
                     subject_inherited,preview,body_source,copies,copy_key,local_keys,
-                    flag_status,flag_due_unix,flag_completed_unix,moved_to_other,pinned,folder_links_unresolved)
+                    flag_status,flag_due_unix,flag_completed_unix,moved_to_other,pinned,received_unix,
+                    folder_links_unresolved)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,
-                         datetime(?12,'unixepoch'),?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)",
+                         datetime(?12,'unixepoch'),0,?13,?14,?15,NULL,?16,?17,?18,?19,?20,?21,?22,?23)",
             )
             .expect("prepare");
 
@@ -753,33 +415,37 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         let mut ins_message_category = tx
             .prepare("INSERT OR IGNORE INTO message_categories(message_id,category) VALUES (?1,?2)")
             .expect("prepare message categories");
-        for r in &best {
-            let d = details.for_keys(&r.local_keys);
+        for r in &rows {
+            let m = r.m;
+            let d = details.get(r.key);
+            let recipients: Vec<&str> = m.recipients.iter().flatten()
+                .filter(|p| matches!(p.kind, message::TO | message::CC | message::BCC))
+                .map(|p| p.address.as_str())
+                .collect();
             ins.execute(rusqlite::params![
-                r.offset as i64,
-                r.sender,
-                r.sender_name,
-                (!r.recipients.is_empty()).then(|| r.recipients.join(", ")),
-                r.subject,
-                r.message_id,
+                m.block as i64,
+                m.sender,
+                m.sender_name,
+                (!recipients.is_empty()).then(|| recipients.join(", ")),
+                m.subject,
+                m.message_id,
                 r.body,
                 r.html,
                 r.body.split_whitespace().count() as i64,
                 r.html.as_ref().map(|h| h.len() as i64),
                 if r.html.is_some() { "full" } else { "preview" },
-                r.sent_unix,
-                r.subject_inherited as i64,
-                r.preview,
+                m.sent_unix,
+                m.preview,
                 r.body_source,
-                r.copies as i64,
-                body::copy_key(r),
-                local_keys(r),
+                m.revisions as i64,
+                r.key.to_string(),
                 d.and_then(|d| d.flag).map(detail::Flag::as_str),
                 d.and_then(|d| d.due_unix).flatten(),
                 d.and_then(|d| d.completed_unix).flatten(),
                 d.and_then(|d| d.moved_to_other),
                 d.and_then(|d| d.pinned),
-                r.folder_links_unresolved as i64,
+                m.received_unix,
+                r.folder.is_none() as i64,
             ])
             .expect("insert");
             let message_id = tx.last_insert_rowid();
@@ -789,14 +455,12 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                         .expect("insert message category");
                 }
             }
-            for folder_id in &r.folder_ids {
-                ins_link.execute(rusqlite::params![message_id, *folder_id as i64])
+            if let Some(folder_id) = r.folder {
+                ins_link.execute(rusqlite::params![message_id, folder_id as i64])
                     .expect("insert folder link");
             }
-            for key in &r.local_keys {
-                ins_key.execute(rusqlite::params![message_id, *key as i64])
-                    .expect("insert message key");
-            }
+            ins_key.execute(rusqlite::params![message_id, r.key as i64])
+                .expect("insert message key");
         }
     }
     {
@@ -841,9 +505,11 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             ("blocks_found", offs.len()),
             ("blocks_verified", blocks_ok),
             ("messages", stored),
-            ("messages_full", best.iter().filter(|r| r.html.is_some()).count()),
-            ("copies_collapsed", collapsed),
-            ("local_key_conflicts", best.iter().filter(|r| r.local_keys.len() > 1).count()),
+            ("messages_full", rows.iter().filter(|r| r.html.is_some()).count()),
+            // Message keys the decoder could not read or classify: lost mail, never silently dropped.
+            ("messages_rejected", objects.rejected(&message_objects)),
+            ("copies_collapsed", rows.iter().map(|r| r.m.revisions - 1).sum()),
+            ("local_key_conflicts", 0),
             ("sidecar_files", sidecars.len()),
             ("sidecar_linked", sidecars.linked),
             ("sidecar_rejected", sidecars.rejected),
@@ -860,8 +526,8 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             ("category_objects", categories.objects),
             ("categories", categories.categories.len()),
             ("detail_objects", details.objects),
-            ("messages_with_detail", best.iter().filter(|r| details.for_keys(&r.local_keys).is_some()).count()),
-            ("messages_with_key", best.iter().filter(|r| !r.local_keys.is_empty()).count()),
+            ("messages_with_detail", rows.iter().filter(|r| details.get(r.key).is_some()).count()),
+            ("messages_with_key", stored),
             ("message_objects", message_objects.len()),
             ("message_objects_with_conversation",
              message_objects.values().filter(|m| m.conversation_id.is_some()).count()),
@@ -907,55 +573,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     }
 }
 
-/// The local keys of every revision merged into this row.
-fn local_keys(r: &record::Record) -> Option<String> {
-    (!r.local_keys.is_empty())
-        .then(|| r.local_keys.iter().map(u64::to_string).collect::<Vec<_>>().join(","))
-}
 
-/// Combine a later revision of a message into the copy already held.
-fn merge(prev: &mut record::Record, r: record::Record) {
-    prev.folder_links_unresolved |= r.folder_links_unresolved;
-    prev.folder_ids.extend(r.folder_ids);
-    prev.local_keys.extend(r.local_keys);
-    prev.copies += r.copies;
-    if prev.sender.is_none() {
-        prev.sender = r.sender;
-    }
-    prev.sent_unix = match (prev.sent_unix, r.sent_unix) {
-        (Some(a), Some(b)) => Some(a.min(b)),
-        (a, b) => a.or(b),
-    };
-    if prev.preview.is_none() {
-        prev.preview = r.preview;
-    }
-    if prev.subject.is_none() {
-        prev.subject = r.subject;
-    }
-    if prev.sender_name.is_none() {
-        prev.sender_name = r.sender_name;
-    }
-    if prev.message_id.is_none() {
-        prev.message_id = r.message_id;
-    }
-    if r.recipients.len() > prev.recipients.len() {
-        prev.recipients = r.recipients;
-    }
-    let better_html = match (&prev.html, &r.html) {
-        (None, Some(_)) => true,
-        (Some(a), Some(b)) => b.len() > a.len(),
-        _ => false,
-    };
-    // The body follows the HTML it was rendered from; a preview never
-    // replaces the text of a full copy.
-    if better_html {
-        prev.html = r.html;
-        prev.body_source = r.body_source;
-        prev.body = r.body;
-    } else if prev.html.is_none() && r.body.len() > prev.body.len() {
-        prev.body = r.body;
-    }
-}
 
 const USAGE: &str = "\
 hxprobe — parse HxStore.hxd, the New Outlook for Mac message store
@@ -966,8 +584,6 @@ usage:
   hxprobe db     <file> [out.db] [files-dir]
                                      build a SQLite database (default mail.db);
                                      files-dir reads EFMData sidecar bodies
-  hxprobe map    <file> [n]          dump the field map for n records (0 = stats)
-  hxprobe find   <file> <term> [n]   show records whose text contains <term>
 
 Work on a snapshot, not the live store: Outlook holds HxStore.lock and
 rewrites the file while it runs.";
@@ -1029,8 +645,6 @@ fn main() {
         eprintln!("{USAGE}");
         std::process::exit(2);
     }
-    let num = |i: usize, d: usize| args.get(i).and_then(|s| s.parse().ok()).unwrap_or(d);
-
     match args[1].as_str() {
         "blocks" => cmd_blocks(&args[2]),
         "db" => cmd_db(
@@ -1038,17 +652,42 @@ fn main() {
             args.get(3).map(String::as_str).unwrap_or("mail.db"),
             args.get(4).map(String::as_str),
         ),
-        "map" => cmd_map(&args[2], num(3, 4)),
-        "find" => match args.get(3) {
-            Some(term) => cmd_find(&args[2], term, num(4, 4)),
-            None => {
-                eprintln!("find needs a search term\n\n{USAGE}");
-                std::process::exit(2);
-            }
-        },
         other => {
             eprintln!("unknown command {other:?}\n\n{USAGE}");
             std::process::exit(2);
         }
+    }
+}
+
+/// One exported message row: the decoded object plus its resolved body and folder.
+struct Row<'a> {
+    key: u64,
+    m: &'a message::Message,
+    html: Option<String>,
+    body: String,
+    body_source: Option<&'static str>,
+    folder: Option<u64>,
+}
+
+impl<'a> Row<'a> {
+    fn new(key: u64, m: &'a message::Message, sidecars: &mut body::Sidecars, folders: &folder::Index) -> Self {
+        let mut found = None;
+        for b in &m.bodies {
+            found = match b {
+                message::Body::Html(html) => Some((html.clone(), "inline")),
+                message::Body::Sidecar(path) => sidecars.html(path).map(|html| (html, "efm")),
+            };
+            if found.is_some() {
+                break;
+            }
+        }
+        let (html, body_source) = found.map_or((None, None), |(h, s)| (Some(h), Some(s)));
+        let mut body = html.as_deref().map(body::html_to_text).unwrap_or_default();
+        if body.split_whitespace().count() < 3 {
+            body = m.preview.clone().unwrap_or(body);
+        }
+        // The folder must be a catalogued folder of the message's own account.
+        let folder = m.folder.filter(|f| folders.folders.get(f).is_some_and(|x| Some(x.account_id) == m.account));
+        Row { key, m, html, body, body_source, folder }
     }
 }

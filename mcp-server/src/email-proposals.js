@@ -554,6 +554,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           exclude: { type: 'array', maxItems: 5000, items: { type: 'string', format: 'uuid' } } } },
       handler: async (c, _actor, args) => {
         const limit = args.limit ?? 25;
+        // The age window's start follows the server clock, so tests on a fixed clock stay in range.
+        const clock = new Date().toISOString();
         if (args.purpose === 'links') {
           const { rows } = await c.query(`select a.id as activity_id,a.deal_id as deal,
               coalesce(hydrated.detail,a.detail) as body,a.occurred_at
@@ -586,9 +588,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
               (select party_id from lead where id=a.lead_id))) as recorded_sender,d.id as deal,d.name as deal_name,d.phase,d.deal_type
           from activity a left join deal d on d.id=a.deal_id
           where a.kind in ('email_in','email_out') and a.detail is not null and a.occurred_at<=now()
-            and a.occurred_at>now()-make_interval(days=>$1) and a.id<>all($2::uuid[]) and (a.email_source is null or a.email_source->>'mailbox_owner'=$4)
+            and a.occurred_at>$6::timestamptz-make_interval(days=>$1) and a.id<>all($2::uuid[]) and (a.email_source is null or a.email_source->>'mailbox_owner'=$4)
             and (a.kind <> 'email_out' or a.actor_id=$5::uuid)
-          order by a.occurred_at,a.id limit $3`, [args.days ?? 3, args.exclude ?? [], limit + 1, partnerAuthoritySlugForActor(_actor), _actor.id]);
+          order by a.occurred_at,a.id limit $3`, [args.days ?? 3, args.exclude ?? [], limit + 1, partnerAuthoritySlugForActor(_actor), _actor.id, clock]);
         const people = await contacts(c);
         const openDeals = (await c.query(`select d.id,d.name,d.city,d.source_row->>'property' as property,
             d.client_id,p.name as client,d.phase,d.deal_type,
@@ -602,8 +604,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const history = (await c.query(`select id as activity_id,deal_id as deal,summary,email_context,occurred_at
           from activity where kind in ('email_in','email_out') and deal_id is not null
             and email_context is not null and occurred_at<=now()
-            and (occurred_at >= now()-make_interval(days=>$1) or email_context->>'conversation_id'=any($2::text[]))`,
-          [(args.days ?? 3) + 30, conversations])).rows.map(row => evidence(row, people));
+            and (occurred_at >= $3::timestamptz-make_interval(days=>$1) or email_context->>'conversation_id'=any($2::text[]))`,
+          [(args.days ?? 3) + 30, conversations, clock])).rows.map(row => evidence(row, people));
         return { schema_version: 'email-router-queue.v2', more: rows.length > limit, open_deals: openDeals,
           emails: queued.map(row => ({ ...evidence(row, people),
             thread_history: history.filter(prior => {
@@ -611,46 +613,6 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
               return age > 0 && (age <= 30*86400000 ||
                 (row.email_context?.conversation_id && row.email_context.conversation_id === prior.conversation_id));
             }) })) };
-      },
-    },
-    'email-proposal-quality': {
-      write: false,
-      description: 'WR-000441 QUALITY report: email proposals created in the last 1-90 days (default 7), by kind: how many were proposed, are still pending, were confirmed by Joe or dismissed, the dismissal rate among resolved ones, and the average router confidence of each outcome. over_threshold is true when at least 10 are resolved and more than 5% were dismissed, the point where that kind should stay propose-only until the router is fixed. corrections lists up to 20 dismissals made in the requested period with the reason given, regardless of when the proposal was created. Proposal counts use the creation date. automatic_filings counts automatic thread filings recorded in the requested period, how many have a linked undo receipt at read time, and their undo_rate (null when empty). Its over_threshold is true with at least 10 filings and more than 5% undone. This is a separate filing cohort, not a proposal dismissal rate. Counts only; changes nothing and does not enforce a policy change.',
-      inputSchema: { type: 'object', additionalProperties: false,
-        properties: { days: { type: 'integer', minimum: 1, maximum: 90 } } },
-      handler: async (c, _actor, args) => {
-        const days = args.days ?? 7;
-        const { rows } = await c.query(`select kind,count(*)::int as proposed,
-            count(*) filter (where status='pending')::int as pending,
-            count(*) filter (where status='confirmed')::int as confirmed,
-            count(*) filter (where status='dismissed')::int as dismissed,
-            avg(confidence) filter (where status='confirmed')::float8 as confirmed_confidence,
-            avg(confidence) filter (where status='dismissed')::float8 as dismissed_confidence
-          from email_proposal where created_at>now()-make_interval(days=>$1) group by kind`, [days]);
-        const kinds = Object.keys(KINDS).map(kind => {
-          const row = rows.find(r => r.kind === kind) ?? { proposed: 0, pending: 0, confirmed: 0, dismissed: 0 };
-          const resolved = row.confirmed + row.dismissed;
-          const dismissRate = resolved ? row.dismissed / resolved : null;
-          return { kind, proposed: row.proposed, pending: row.pending, confirmed: row.confirmed,
-            dismissed: row.dismissed, dismiss_rate: dismissRate,
-            confirmed_confidence: row.confirmed_confidence ?? null, dismissed_confidence: row.dismissed_confidence ?? null,
-            over_threshold: resolved >= 10 && dismissRate > 0.05 };
-        });
-        const corrections = (await c.query(`select p.id,p.kind,d.name as deal_name,p.resolution_reason as reason,
-            p.resolved_at from email_proposal p join deal d on d.id=p.deal_id
-          where p.status='dismissed' and p.resolved_at>now()-make_interval(days=>$1)
-          order by p.resolved_at desc,p.id limit 20`, [days])).rows
-          .map(row => ({ ...row, resolved_at: new Date(row.resolved_at).toISOString() }));
-        const filingCounts = (await c.query(`select count(*)::int as filed,
-            count(*) filter (where exists (select 1 from v_email_thread_filing_event u
-              where u.verb='undo-email-thread-filing' and u.new_value->>'event_id'=f.id::text))::int as undone
-          from v_email_thread_filing_event f where f.verb='inherit-email-thread'
-            and f.recorded_at>now()-make_interval(days=>$1)`, [days])).rows[0];
-        const undoRate = filingCounts.filed ? filingCounts.undone / filingCounts.filed : null;
-        const automaticFilings = { ...filingCounts, undo_rate: undoRate,
-          over_threshold: filingCounts.filed >= 10 && undoRate > 0.05 };
-        return { schema_version: 'email-proposal-quality.v1', days, kinds, corrections,
-          automatic_filings: automaticFilings, send: false };
       },
     },
     'dismiss-email-proposal': {
