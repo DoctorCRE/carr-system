@@ -25,13 +25,13 @@
   },
   {
     "name": "Playwright server",
-    "path": "control-room/test/api.mjs",
+    "path": "dealroom/test/api.mjs",
     "source": "await playwright.chromium.launchServer();",
     "allowed": false
   },
   {
     "name": "namespaced spawn",
-    "path": "workspace/test/spawn.cjs",
+    "path": "dealroom/test/spawn.cjs",
     "source": "childProcess.spawn(CHROME_BIN, []);",
     "allowed": false
   },
@@ -151,7 +151,7 @@
   },
   {
     "name": "an unowned test launch through the low-level helper",
-    "path": "workspace/test/unowned.mjs",
+    "path": "dealroom/test/unowned.mjs",
     "source": "import { launchChrome } from \"../../mcp-server/test/helpers/chrome-launch.mjs\";\nawait launchChrome(chrome);",
     "allowed": false
   },

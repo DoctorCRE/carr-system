@@ -15,10 +15,10 @@ A failed check FLAGS the item -- it is never silently dropped.  Joe and Dell
 still approve or reject every candidate by hand; this module only adds a
 visible signal ahead of that approval.
 
-PRIVACY: a short evidence excerpt, the handful of transcript segments nearest
-that excerpt, and a short list of candidate deal names go to TypeSafe
-(api.typesafe.ai) for this check -- never the full transcript, never the full
-recorded-deal list, never an email body.
+PRIVACY: the evidence quote, the one transcript segment holding it, the
+item's short title, summary or draft subject, and a short list of candidate
+deal names go to TypeSafe (api.typesafe.ai) for this check -- never the full
+transcript, never the full recorded-deal list, never a draft or email body.
 """
 from __future__ import annotations
 
@@ -35,10 +35,8 @@ CHECKS_SCHEMA = "post-call-jev-checks/v1"
 # Keep the candidate-deal state small: the item's own deal plus a handful of
 # plausible alternatives, never the whole recorded-deal list.
 MAX_CANDIDATE_DEALS = 5
-# How many transcript segments on either side of the best evidence match ride
-# along, and the hard cap on how many are ever sent.
-SEGMENT_WINDOW = 2
-MAX_SEGMENTS_SENT = 6
+# The evidence quote is at most 15 words; this caps what a malformed one sends.
+MAX_QUOTE_CHARS = 300
 # A Choice answer below this confidence is not trusted to confirm the deal.
 DEAL_CONFIDENCE_GATE = 0.55
 # Items are judged one call each, at most this many in flight at once.
@@ -89,9 +87,8 @@ def _resolve_partner(speaker: Any, context: dict[str, Any]) -> str | None:
 
 
 def _evidence_segments(evidence: str, segments: list[Any]) -> list[dict[str, Any]]:
-    """The handful of transcript segments closest to where the evidence text
-    actually appears, found by simple token overlap -- never the whole
-    transcript."""
+    """The one transcript segment where the evidence text actually appears,
+    found by simple token overlap -- never the whole transcript."""
     ev_tokens = _tokens(evidence)
     if not ev_tokens or not segments:
         return []
@@ -105,11 +102,7 @@ def _evidence_segments(evidence: str, segments: list[Any]) -> list[dict[str, Any
     if not scored:
         return []
     scored.sort(key=lambda pair: (-pair[0], pair[1]))
-    best_index = scored[0][1]
-    lo = max(0, best_index - SEGMENT_WINDOW)
-    hi = min(len(segments), best_index + SEGMENT_WINDOW + 1)
-    window = [segment for segment in segments[lo:hi] if isinstance(segment, dict)]
-    return window[:MAX_SEGMENTS_SENT]
+    return [segments[scored[0][1]]]
 
 
 def _candidate_deals(item_deal_id: Any, deals: list[Any],
@@ -145,7 +138,7 @@ def _text_fields(kind: str, item: dict[str, Any]) -> dict[str, str]:
         return {"title": item.get("title", "")}
     if kind == "deal_update":
         return {"summary": item.get("summary", "")}
-    return {"subject": item.get("subject", ""), "body": item.get("body", "")}
+    return {"subject": item.get("subject", "")}
 
 
 def _questions(deal_options: dict[str, str], attributed: str | None) -> dict[str, Any]:
@@ -204,7 +197,7 @@ def _item_request(kind: str, list_partner: str | None,
     state = {
         "item": {
             "kind": kind, "attributed_partner": attributed,
-            "fields": _text_fields(kind, item), "evidence_excerpt": str(evidence)[:1200],
+            "fields": _text_fields(kind, item), "evidence_excerpt": str(evidence)[:MAX_QUOTE_CHARS],
         },
         "transcript_excerpt": [
             {

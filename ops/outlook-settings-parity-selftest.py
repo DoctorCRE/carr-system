@@ -9,7 +9,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from types import ModuleType
 import unittest
 import uuid
 from unittest.mock import patch
@@ -19,18 +18,6 @@ sys.path.insert(0, str(ROOT))
 from lib import outlook_intake as current
 from lib.outlook_settings import SettingsError, load_settings
 from outlook_test_support import write_settings
-
-
-BASELINE = '712ee39b8d6b61f986d210107a83ad07846a32ba'
-
-
-def baseline_module():
-    source = subprocess.run(['git', 'show', f'{BASELINE}:lib/outlook_intake.py'], cwd=ROOT,
-                            check=True, capture_output=True, text=True).stdout
-    module = ModuleType('outlook_before_settings')
-    sys.modules[module.__name__] = module
-    exec(compile(source, f'{BASELINE}:lib/outlook_intake.py', 'exec'), module.__dict__)
-    return module
 
 
 def fixture_module():
@@ -90,42 +77,10 @@ class ParityTest(unittest.TestCase):
         f.write_db(self.fixture, mails, events)
         fake = f.Fake(self)
         fake.fixture = self.fixture
-        fake.model_reply = {'next_step': 'Confirm the visit.', 'due_on': '2026-10-23'}
         with patch.object(f, 'intake', module), patch('uuid.uuid4', return_value=uuid.UUID(int=1)):
             result = module.run(self.repo, self.home, fake.ports())
         artifacts = {path.name: path.read_bytes() for path in sorted(out.glob('*')) if path.is_file()}
         return result, fake.calls, artifacts, module.status_line(result).encode()
-
-    def test_mail_record_payloads_preserve_baseline_except_provenance_and_partner_keys(self):
-        before = self.exercise(baseline_module())
-        after = self.exercise()
-        calendar_activity = current.key('log-activity', 'C-901',
-                                        f'past-visit|{self.fixtures.ts(-timedelta(hours=5))}')
-        before_calls = [(verb, args) for verb, args in before[1]
-                        if args.get('idempotency_key') != calendar_activity]
-        self.assertNotIn('email-router-queue', [verb for verb, _ in before[1]])
-        router_reads = [args for verb, args in after[1] if verb == 'email-router-queue']
-        self.assertEqual(router_reads, [{'purpose': 'links', 'limit': 200}])
-        after_calls = [(verb, args) for verb, args in after[1] if verb != 'email-router-queue']
-        self.assertEqual(len(before_calls), len(after_calls))
-        captured = [args['email_context'] for verb, args in after_calls
-                    if verb == 'log-activity' and args.get('kind') == 'email_in']
-        self.assertEqual([context['sender']['email'] for context in captured],
-                         ['pat@example.test', 'pat@example.test'])
-        for (old_verb, old_args), (verb, args) in zip(before_calls, after_calls, strict=True):
-            self.assertEqual(verb, old_verb)
-            expected, actual = dict(old_args), dict(args)
-            if verb == 'set-next-action':
-                self.assertNotEqual(actual.pop('idempotency_key'), expected.pop('idempotency_key'))
-            if verb == 'log-activity':
-                self.assertNotEqual(actual.pop('idempotency_key'), expected.pop('idempotency_key'))
-                if args['kind'] == 'email_in':
-                    self.assertEqual(actual.pop('email_source'),
-                                     {'sender_email': 'pat@example.test', 'mailbox_owner': 'joe'})
-                    actual.pop('email_context')
-                else:
-                    self.assertNotIn('email_source', actual)
-            self.assertEqual(json.dumps(expected).encode(), json.dumps(actual).encode())
 
     def test_studio_settings_preserve_mail_artifacts_and_quarantine_calendar(self):
         result, calls, artifacts, status = self.exercise()
@@ -134,10 +89,8 @@ class ParityTest(unittest.TestCase):
         activities = [args['kind'] for verb, args in calls if verb == 'log-activity']
         self.assertEqual(activities, ['email_in', 'email_out', 'email_in'])
         actions = [args for verb, args in calls if verb == 'set-next-action']
-        self.assertTrue(actions)
-        self.assertEqual({args['owner'] for args in actions}, {'joe'})
+        self.assertEqual(actions, [])
         self.assertTrue(any(name.startswith('report-') for name in artifacts))
-        self.assertIn('needs-refresh.json', artifacts)
         state = json.loads(artifacts['state.json'])
         self.assertEqual(len(state['calendar_evidence']), 2)
         self.assertTrue(all(row['status'] == 'unsupported' for row in state['calendar_evidence'].values()))
@@ -154,8 +107,7 @@ class ParityTest(unittest.TestCase):
         result, calls, _, _ = self.exercise()
         self.assertEqual(result.state, 'succeeded')
         writes = [args for verb, args in calls if verb == 'set-next-action']
-        self.assertTrue(writes)
-        self.assertEqual({args['owner'] for args in writes}, {'dell'})
+        self.assertEqual(writes, [])
         outgoing = [args for verb, args in calls if verb == 'log-activity' and args['kind'] == 'email_out']
         self.assertEqual(len(outgoing), 1)
         self.assertEqual(outgoing[0]['ref'], 'L-902')

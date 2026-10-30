@@ -75,7 +75,7 @@ import sys
 
 reasons = frozenset("outside_window previous_run_active cleanup_failed store_missing carr_unreachable "
                     "decode_failed store_verification_low decoder_degraded calendar_decode_empty store_unchanged "
-                    "writes_failed model_failed steps_pending processed nothing_new writes_deferred "
+                    "writes_failed model_failed processed nothing_new writes_deferred "
                     "request_blocked full_disk_access_required contacts_empty contacts_read_failed timeout auth_refused "
                     "key_reuse transport_oversized no_acknowledgement reply_unreadable transport_error "
                     "invalid_request subject_unresolved database_refused setup_failed calendar_lifecycle_unsupported "
@@ -100,15 +100,22 @@ with open(sys.argv[1]) as output:
                 receipt = json.loads(line[len(prefix):])
             except ValueError:
                 receipt = None
-if (isinstance(receipt, dict) and isinstance(receipt.get("counts"), dict)
+# Counts are {"run": {...}, "backlog": {...}}; a flat dict from an older runtime is still read.
+counts = receipt.get("counts") if isinstance(receipt, dict) else None
+if isinstance(counts, dict) and set(counts) == {"run", "backlog"}:
+    groups, run_counts = [counts["run"], counts["backlog"]], counts["run"]
+else:
+    groups, run_counts = [counts], counts
+if (isinstance(receipt, dict) and isinstance(counts, dict)
         and (receipt.get("state") == sys.argv[2]
         or (receipt.get("state") == "degraded" and receipt.get("reason") in ("decoder_degraded", "writes_deferred")
-            and ((sys.argv[2] == "failed" and receipt.get("counts", {}).get("decoder_alarm") == 1)
-                 or (sys.argv[2] == "succeeded" and receipt.get("counts", {}).get("decoder_alarm") == 0))))
+            and isinstance(run_counts, dict)
+            and ((sys.argv[2] == "failed" and run_counts.get("decoder_alarm") == 1)
+                 or (sys.argv[2] == "succeeded" and run_counts.get("decoder_alarm") == 0))))
         and isinstance(receipt.get("reason"), str) and receipt["reason"] in reasons
-        and isinstance(receipt.get("counts"), dict)
+        and all(isinstance(group, dict) for group in groups)
         and all(count_key.fullmatch(k) and type(v) is int and 0 <= v <= 1_000_000_000
-                for k, v in receipt["counts"].items())):
+                for group in groups for k, v in group.items())):
     safe = {k: receipt[k] for k in ("state", "reason", "counts")}
     if (isinstance(receipt.get("runtime_sha"), str)
             and re.fullmatch(r"[0-9a-f]{7,40}", receipt["runtime_sha"])

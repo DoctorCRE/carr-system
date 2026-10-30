@@ -17,7 +17,7 @@
 # there. Pulling the canonical checkout therefore never ships Outlook code, and
 # the granted helper's compiled paths stay the same on every later run.
 #
-# Usage: ./bin/install-outlook-intake.sh
+# Usage: ./bin/install-outlook-intake.sh [--rebuild-helper]
 
 set -eu
 
@@ -48,10 +48,21 @@ if [ "$REPO" != "$RUNTIME" ]; then
     fi
   done
   print -- "install-outlook-intake: Outlook jobs run from $RUNTIME at $SHA"
-  exec /bin/zsh "$RUNTIME/bin/install-outlook-intake.sh"
+  exec /bin/zsh "$RUNTIME/bin/install-outlook-intake.sh" "$@"
 fi
 "$PY" -m lib.outlook_settings service intake
-"$PY" -m lib.outlook_settings service refresh
+"$PY" - "$REPO" <<'PYCODE'
+import importlib.util
+from pathlib import Path
+import sys
+
+repo = Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location('config_as_code', repo / 'ops/config-as-code.py')
+config = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(config)
+if config.reconcile_retired_launchd(True, ['com.carr.outlook-refresh.plist']):
+    raise SystemExit('install-outlook-intake: could not retire Outlook refresh LaunchAgent')
+PYCODE
 LABEL="com.carr.outlook-intake"
 SOURCE="$REPO/ops/launchd/$LABEL.plist"
 DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -84,41 +95,27 @@ fi
 "$PY" "$REPO/ops/hxprobe-source-digest.py" --build-into "$VENDOR"
 rm -f "$PIN"
 
-"$REPO/.venv/bin/python" - "$REPO" "$HOME" <<'PY'
-import hashlib
-import json
+"$REPO/.venv/bin/python" - "$REPO" "$HOME" "$@" <<'PY'
+import argparse
 import os
 from pathlib import Path
-import subprocess
 import sys
-import tempfile
 
-repo, home = (Path(value).resolve() for value in sys.argv[1:])
+parser = argparse.ArgumentParser()
+parser.add_argument('--rebuild-helper', action='store_true',
+                    help='allow replacing the copy helper; ad-hoc signing requires a Full Disk Access re-grant')
+args = parser.parse_args(sys.argv[3:])
+repo, home = (Path(value).resolve() for value in sys.argv[1:3])
 sys.path.insert(0, str(repo))
 from lib.outlook_settings import load_settings
 
 settings = load_settings(home)
 settings.require_repo(repo)
 
-source = repo / 'tools/outlook-intake-copy.c'
-helper = settings.copy_helper
-work_root = (settings.repo / 'out/outlook-intake').resolve()
-flags = ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
-         f'-DOUTLOOK_PROFILE={json.dumps(str(settings.profile))}',
-         f'-DOUTLOOK_WORK_ROOT={json.dumps(str(work_root))}',
-         f'-DOUTLOOK_REPO={json.dumps(str(settings.repo))}']
-pin = helper.with_suffix('.pin')
-wanted = hashlib.sha256(source.read_bytes() + json.dumps(flags).encode()).hexdigest()
-helper.parent.mkdir(parents=True, exist_ok=True)
-if not (helper.is_file() and os.access(helper, os.X_OK) and pin.is_file() and pin.read_text() == wanted):
-    with tempfile.TemporaryDirectory(dir=helper.parent) as temp:
-        built = Path(temp) / helper.name
-        subprocess.run(['/usr/bin/cc', *flags, str(source), '-o', str(built)], check=True)
-        built.chmod(0o700)
-        os.replace(built, helper)
-        print(f'install-outlook-intake: Full Disk Access must be re-granted for {helper}', flush=True)
-    pin.write_text(wanted)
-settings.verify_helper()
+
+from lib.outlook_helper import install_helper
+
+install_helper(settings, rebuild_helper=args.rebuild_helper)
 
 if 'outbox' in settings.services:
     label = 'com.carr.outlook-outbox'
@@ -149,18 +146,3 @@ print -- "install-outlook-intake: it is NOT loaded. To load it, run:"
 print -- "  install -m 644 '$RENDERED' '$DEST'"
 print -- "  launchctl bootstrap gui/$(id -u) '$DEST'"
 print -- "install-outlook-intake: private reports: $REPO/out/outlook-intake/"
-
-LABEL="com.carr.outlook-refresh"
-SOURCE="$REPO/ops/launchd/$LABEL.plist"
-DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
-RENDERED="$REPO/out/$LABEL.plist"
-LOG="$REPO/out/outlook-refresh-launchd.log"
-"$PY" -m lib.outlook_settings render "$SOURCE" > "$TMP"
-/usr/bin/plutil -lint "$TMP" >/dev/null
-cp "$TMP" "$RENDERED"
-chmod 644 "$RENDERED"
-touch "$LOG"
-chmod 600 "$LOG"
-print -- "install-outlook-intake: refresh worker rendered for the same host and user; it is NOT loaded."
-print -- "  install -m 644 '$RENDERED' '$DEST'"
-print -- "  launchctl bootstrap gui/$(id -u) '$DEST'"

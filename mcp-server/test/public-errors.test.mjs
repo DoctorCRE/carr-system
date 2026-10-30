@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { dispatch } from "./helpers/budgeted-dispatch.mjs";
 import { ToolError, coerceArgsToSchema, pgConstraintError, TOOLS } from "../src/tools.js";
+import { publicError } from "../src/public-errors.ts";
 import { Pool } from "@neondatabase/serverless";
 
 const correlationId = "d170d000-0000-4000-8000-000000000031";
@@ -25,8 +26,8 @@ async function failure(t, error, { correlated = true, method = "tools/call", out
   assert.match(payload.correlation_id, /^[a-f0-9-]{36}$/);
   if (correlated) assert.equal(payload.correlation_id, correlationId);
   assert.doesNotMatch(JSON.stringify(body), /stack|SELECT|private_table|private_constraint|synthetic-private-row|Failing row|\bat .+\(/i);
-  assert.ok(logs.some(log => log.correlation_id === payload.correlation_id &&
-    JSON.stringify(log).includes("synthetic-private-row")), "full diagnostics are logged under the public id");
+  assert.ok(logs.some(log => log.correlation_id === payload.correlation_id && log.diagnostic?.stack),
+    "diagnostics are logged under the public id");
   return payload;
 }
 
@@ -188,6 +189,21 @@ test("unknown ToolError codes cannot carry diagnostic text onto the wire", async
   assert.equal(payload.error, "unhandled_verb_failure");
 });
 
+test("logged diagnostics drop row values: pg detail, hint, where and ToolError payload", async t => {
+  const { publicError } = await import("../src/public-errors.ts");
+  const logs = [];
+  t.mock.method(console, "error", line => logs.push(JSON.parse(line)));
+  const row = "Failing row contains (synthetic-row-value)";
+  const pg = Object.assign(new Error("new row violates check constraint"), {
+    code: "23514", constraint: "synthetic_check", detail: row, hint: row, where: row });
+  publicError(Object.assign(new ToolError({ error: "invalid_field_value", detail: row }), { cause: pg }),
+    { env: { CORRELATION_ID: correlationId } });
+  const logged = JSON.stringify(logs);
+  assert.doesNotMatch(logged, /synthetic-row-value|"payload"|"detail"|"hint"|"where"/);
+  assert.match(logged, /23514/);
+  assert.match(logged, /synthetic_check/);
+});
+
 test("outer JSON-RPC errors also hide diagnostics", async t => {
   const payload = await failure(t, new Error(privateText), { outer: true });
   assert.equal(payload.error, "internal_error");
@@ -344,4 +360,71 @@ test("rule ID refusals expose fixed hints without internal details", async t => 
     assert.deepEqual(publicError(new ToolError({ error: code, hint: privateText, got: privateText }),
       { env: { CORRELATION_ID: correlationId } }), { error: code, correlation_id: correlationId, hint });
   }
+});
+
+for (const [name, args] of [
+  ["report-problem", { idempotency_key: "d170d000-0000-4000-8000-000000000034", situation: "Synthetic fixture",
+    title: "Synthetic", desired_outcome: "Synthetic", acceptance_criteria: [{ id: "A", text: "Synthetic" }] }],
+  ["write-doctrine-section", { idempotency_key: "d170d000-0000-4000-8000-000000000035", document: "synthetic",
+    section_key: "synthetic", body_text: "Synthetic fixture", base_version: 0 }],
+]) test(`MCP ${name} names the unknown top-level field it refused`, async t => {
+  t.mock.method(console, "error", () => {});
+  const request = new Request("https://synthetic.example/mcp", { method: "POST",
+    body: JSON.stringify({ jsonrpc: "2.0", id: 33, method: "tools/call", params: {
+      name, arguments: { ...args, unexpected_field: "synthetic-private-value", "private input": "x" } } }),
+  });
+  const body = await (await dispatch(request, { CORRELATION_ID: correlationId }, {}, { slug: "joe", human: true })).json();
+  const payload = JSON.parse(body.result.content[0].text);
+  assert.ok(["unregistered_operation_fields", "invalid_report_problem_fields"].includes(payload.error), payload.error);
+  assert.deepEqual(payload.fields, ["unexpected_field"]);
+  assert.doesNotMatch(JSON.stringify(body), /synthetic-private-value|private input/);
+});
+
+test("MCP names the caller authority field it refused", async t => {
+  t.mock.method(console, "error", () => {});
+  const request = new Request("https://synthetic.example/mcp", { method: "POST",
+    body: JSON.stringify({ jsonrpc: "2.0", id: 34, method: "tools/call", params: {
+      name: "find", arguments: { query: "Synthetic", actor: "synthetic-private-value" } } }),
+  });
+  const body = await (await dispatch(request, { CORRELATION_ID: correlationId }, {}, { slug: "joe", human: true })).json();
+  const payload = JSON.parse(body.result.content[0].text);
+  assert.equal(payload.error, "caller_authority_field_forbidden");
+  assert.deepEqual(payload.fields, ["actor"]);
+  assert.doesNotMatch(JSON.stringify(body), /synthetic-private-value/);
+});
+
+test("MCP returns recorded slice titles only on a slice plan conflict", async t => {
+  const payload = await failure(t, new ToolError({ error: "slice_plan_conflict",
+    recorded_titles: ["First slice", "Second slice"], detail: privateText }));
+  assert.equal(payload.error, "slice_plan_conflict");
+  assert.deepEqual(payload.recorded_titles, ["First slice", "Second slice"]);
+  assert.deepEqual(Object.keys(payload).sort(), ["correlation_id", "error", "hint", "recorded_titles"]);
+});
+
+for (const recorded_titles of [[privateText, {}], ["x".repeat(201)], Array(101).fill("Slice"), "Slice"])
+  test("MCP omits malformed recorded slice titles", async t => {
+    const payload = await failure(t, new ToolError({ error: "slice_plan_conflict", recorded_titles }));
+    assert.equal(payload.error, "slice_plan_conflict");
+    assert.equal(Object.hasOwn(payload, "recorded_titles"), false);
+  });
+
+test("MCP omits recorded slice titles on unrelated refusals", async t => {
+  const payload = await failure(t, new ToolError({ error: "not_found", recorded_titles: [privateText] }));
+  assert.equal(Object.hasOwn(payload, "recorded_titles"), false);
+});
+
+test("loop owner refusals reach callers with a single-owner hint", t => {
+  t.mock.method(console, "error", () => {});
+  for (const code of ["joint_ownership_refused", "unknown_owner"]) {
+    const payload = publicError(new ToolError({ error: code, got: "Joe/Claude" }));
+    assert.equal(payload.error, code);
+    assert.match(payload.hint, /joe, dell or claude/);
+    assert.doesNotMatch(JSON.stringify(payload), /Joe\/Claude/);
+  }
+});
+
+test("add-loop advertises single owners only", () => {
+  const owner = TOOLS["add-loop"].inputSchema.properties.owner;
+  assert.doesNotMatch(owner.description, /\/|→/);
+  assert.match(owner.description, /joe, dell or claude/);
 });

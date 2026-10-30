@@ -35,7 +35,8 @@ from lib.outlook_settings import load_settings
 EXIT = {'succeeded': 0, 'skipped': 78, 'timed_out': 124, 'failed': 1}
 SIDEBAR = ['View', 'Sidebar']
 QUIT = ['Outlook', 'Quit Outlook']
-TABS = re.compile(r'Focused Inbox (Selected|Unselected);\s*Other Inbox (Selected|Unselected)')
+# Outlook names the selected tab first: "Other Inbox Selected;  Focused Inbox Unselected".
+TABS = re.compile(r'(Focused|Other) Inbox Selected;\s*(?:Focused|Other) Inbox Unselected')
 SWITCH = {'focused': ['View', 'Switch to Focused'], 'other': ['View', 'Switch to Other']}
 LIST_WALK = 1500
 PANE_WALK = {'max_elements': 1500, 'max_depth': 3}
@@ -61,6 +62,10 @@ class Waits:
 
 
 class CuaError(Exception):
+    pass
+
+
+class ComposeWindowOpen(Exception):
     pass
 
 
@@ -136,18 +141,16 @@ def is_main_window(window: dict) -> bool:
 
 
 def is_compose_window(window: dict) -> bool:
-    """Protect possible drafts, except the observed unassigned off-screen window.
-
-    The 500x500 window has an empty title and unknown purpose; AX did not resolve it.
-    Keep all other sizeable non-mailbox windows protected, even without a subject.
-    """
+    """Identify titled drafts, retaining the observed unassigned-window exemption."""
     bounds = window.get('bounds') or {}
     if (window.get('title') == '' and bounds.get('width') == 500
             and bounds.get('height') == 500 and window.get('is_on_screen') is False
             and 'on_current_space' in window and window['on_current_space'] is None):
         return False
-    return (not is_main_window(window) and bounds.get('width', 0) >= 400
-            and bounds.get('height', 0) >= 400)
+    title = window.get('title') or ''
+    return bool(re.match(r'^(?:Draft|Compose|New (?:Mail|Message))(?: • |$)', title, re.I)
+                or (title and not is_main_window(window) and bounds.get('width', 0) >= 400
+                    and bounds.get('height', 0) >= 400))
 
 
 def is_ordinary_main_window(window: dict) -> bool:
@@ -191,7 +194,28 @@ def usable_window(pid: int) -> dict | None:
     return next((w for w in _windows(pid) if is_ordinary_main_window(w) and _readable(pid, w)), None)
 
 
+def compose_window_open(pid: int, windows: list[dict]) -> bool:
+    """True on positive draft evidence: a draft title, or readable Send/Subject controls."""
+    for window in windows:
+        if is_compose_window(window):
+            return True
+        bounds = window.get('bounds') or {}
+        if (window.get('title') == '' and window.get('is_on_screen') is False
+                and bounds.get('height') in (30, 32)):
+            continue
+        state = cua('get_window_state', {'pid': pid, 'window_id': window['window_id'],
+                                         'include_screenshot': False, 'max_elements': LIST_WALK})
+        controls = {(element.get('role'), element.get('label'))
+                    for element in state.get('elements') or []}
+        if (not str(state.get('degraded_reason') or '').startswith('ax_window_unresolved')
+                and ({('AXButton', 'Send'), ('AXTextField', 'Subject')} & controls)):
+            return True
+    return False
+
+
 def _quit(pid: int, windows: list[dict], waits: Waits) -> bool:
+    if compose_window_open(pid, windows):
+        raise ComposeWindowOpen
     window = next((w for w in windows if is_ordinary_main_window(w)), None)
     fallback_at = time.monotonic()
     if window is not None:
@@ -207,6 +231,11 @@ def _quit(pid: int, windows: list[dict], waits: Waits) -> bool:
         if now >= deadline:
             return False
         if now >= fallback_at:
+            if compose_window_open(pid, _windows(pid)):
+                raise ComposeWindowOpen
+            now = time.monotonic()
+            if now >= deadline:
+                return False
             try:
                 subprocess.run(['osascript', '-e', f'tell application "{APP}" to quit'],
                                capture_output=True, timeout=min(30, deadline - now))
@@ -218,7 +247,9 @@ def _quit(pid: int, windows: list[dict], waits: Waits) -> bool:
     return True
 
 
-def _quit_window_detail(pid: int) -> str:
+def window_detail(pid: int | None) -> str:
+    if pid is None:
+        return 'process_missing'
     try:
         windows = _windows(pid)
     except CuaError:
@@ -256,9 +287,11 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
                 return Outcome('skipped', 'compose_window_open')
             candidates = [w for w in windows if is_ordinary_main_window(w)]
             if candidates and not any(_readable(pid, w) for w in candidates):
-                return Outcome('skipped', 'no_usable_main_window')
+                return Outcome('skipped', 'no_usable_main_window',
+                               'phase=before_quit ordinary_candidates_unreadable '
+                               + window_detail(pid))
             if not _quit(pid, windows, waits):
-                return Outcome('failed', 'outlook_quit_timeout', _quit_window_detail(pid))
+                return Outcome('failed', 'outlook_quit_timeout', window_detail(pid))
         launched = subprocess.run(['open', '-g', '-a', APP, '--args',
                                    '-ApplePersistenceIgnoreState', 'YES'],
                                   capture_output=True, timeout=60)
@@ -278,7 +311,12 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
             except CuaError:
                 pass
             time.sleep(waits.new_window_seconds)
-        return None if usable_window(pid) else Outcome('failed', 'no_usable_main_window')
+        if usable_window(pid):
+            return None
+        return Outcome('failed', 'no_usable_main_window',
+                       'phase=after_launch_and_new_window ' + window_detail(pid))
+    except ComposeWindowOpen:
+        return Outcome('skipped', 'compose_window_open')
     except CuaError:
         return Outcome('failed', 'cua_driver_unavailable')
     except subprocess.TimeoutExpired:
@@ -392,12 +430,103 @@ class Window:
                                 selected=bool(cell.get('selected') or e.get('selected'))))
         return _tab(elements), rows
 
+    def _scroll_list(self, direction: str) -> None:
+        elements = self._walk(max_elements=LIST_WALK)
+        tables = [e for e in elements if e.get('role') == 'AXTable' and e.get('label') == 'Message List']
+        if len(tables) != 1 or not tables[0].get('element_token'):
+            raise UiError('message_list_not_found', step='scan_rows')
+        cua('scroll', {'pid': self.pid, 'window_id': self.window_id,
+                       'element_token': tables[0]['element_token'],
+                       'direction': direction, 'by': 'line', 'amount': 50 if direction == 'up' else 1})
+        time.sleep(self.waits.settle_seconds)
+
+    def scan_rows(self, allowed: Callable[[], bool]) -> list[Row]:
+        """Collect overlapping viewports using wheel events, with bounded top restoration."""
+        observed: dict[str, Row] = {}
+
+        def page(rows: list[Row] | None = None) -> list[Row]:
+            if rows is None:
+                rows = self.rows()[1]
+            if any(not r.sender or r.subject is None for r in rows) or len({r.key for r in rows}) != len(rows):
+                raise UiError('coverage_identity_ambiguous', step='scan_rows')
+            if any(r.selected and r.read_state is not ReadState.READ for r in rows):
+                raise UiError('unread_row_selected', step='scan_rows')
+            for row in rows:
+                previous = observed.get(row.key)
+                if previous is not None and (previous.label, previous.selected) != (row.label, row.selected):
+                    raise UiError('coverage_changed', step='scan_rows')
+                observed[row.key] = row
+            return rows
+
+        def signature(rows: list[Row]) -> list[tuple[str, bool]]:
+            return [(r.label, r.selected) for r in rows]
+
+        def top() -> list[Row]:
+            deadline = time.monotonic() + 30
+            error = None
+
+            def snapshot() -> list[Row]:
+                nonlocal error
+                rows = self.rows()[1]
+                try:
+                    page(rows)
+                except UiError as exc:
+                    error = error or exc
+                return rows
+
+            previous = snapshot()
+            for _ in range(50):
+                if time.monotonic() >= deadline:
+                    break
+                self._scroll_list('up')
+                current = snapshot()
+                if signature(previous) == signature(current):
+                    if error is not None:
+                        raise error
+                    return current
+                previous = current
+            raise UiError('coverage_restore_failed', step='scan_rows')
+
+        first = None
+        collected: dict[str, Row] = {}
+        try:
+            first = top()
+            previous = page()
+            collected = {r.key: r for r in previous}
+            for _ in range(50):
+                if not allowed():
+                    raise UiError('coverage_deadline', step='scan_rows')
+                self._scroll_list('down')
+                current = page()
+                if signature(current) == signature(previous):
+                    if observed.keys() != collected.keys():
+                        raise UiError('coverage_changed', step='scan_rows')
+                    return list(collected.values())
+                old_keys, keys = [r.key for r in previous], [r.key for r in current]
+                overlap = next((n for n in range(min(len(old_keys), len(keys)), 0, -1)
+                                if old_keys[-n:] == keys[:n]), 0)
+                if not overlap or any(r.key in collected for r in current[overlap:]):
+                    raise UiError('coverage_identity_ambiguous', step='scan_rows')
+                if any(signature([collected[r.key]]) != signature([r]) for r in current[:overlap]):
+                    raise UiError('coverage_changed', step='scan_rows')
+                collected.update((r.key, r) for r in current)
+                previous = current
+            raise UiError('coverage_page_limit', step='scan_rows')
+        finally:
+            restored = top()
+            if first is not None and (signature(first) != signature(restored)
+                                      or observed.keys() != collected.keys()):
+                raise UiError('coverage_changed', step='scan_rows')
+
     def switch_tab(self, tab: str) -> None:
-        if self.rows()[0] == tab:
+        before = self.rows()[0]
+        if before == tab:
             return
         self._menu(SWITCH[tab])
-        if self.rows()[0] != tab:
-            raise UiError('tab_switch_failed', step='switch_tab')
+        after = self.rows()[0]
+        if after != tab:
+            raise UiError(f'tab_switch_failed requested={tab} before={before} observed={after}',
+                          step='switch_tab')
 
     def move(self, label: str, leaf: str, allowed: Callable[[], bool]) -> Moved:
         """Move the read row with this label to the folder named leaf, then confirm it left the list.
@@ -508,5 +637,5 @@ def _tab(elements: list[dict]) -> str | None:
     for e in elements:
         match = TABS.search(e.get('label') or '')
         if e.get('role') == 'AXCheckBox' and match:
-            return 'focused' if match.group(1) == 'Selected' else 'other'
+            return match.group(1).lower()
     return None

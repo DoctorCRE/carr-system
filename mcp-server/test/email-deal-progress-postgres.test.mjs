@@ -703,7 +703,7 @@ test('changed email evidence, linkage or current deal plan invalidates next-step
   assert.equal((await command('get-deal-room', { deal })).next_step, 'Call the architect first');
 });
 
-test('next-step proposals require a literal inbound quote on the selected client and a real due date', async () => {
+test('next-step proposals require a literal email quote on the selected client and a real due date', async () => {
   const source = await email(askQuote);
   const args = nextStepArgs(source.activity_id);
   await assert.rejects(command('preview-email-next-step', { ...args, evidence_quote: 'Can you send another file tomorrow?' }),
@@ -716,8 +716,10 @@ test('next-step proposals require a literal inbound quote on the selected client
     error => error.payload?.error === 'email_next_step_input_invalid');
   const outbound = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
     kind: 'email_out', summary: 'Synthetic ask sent', detail: askQuote });
-  await assert.rejects(command('preview-email-next-step', nextStepArgs(outbound.activity_id)),
-    error => error.payload?.error === 'email_next_step_evidence_not_found');
+  const sent = await record({ kind: 'next_step', activity_id: outbound.activity_id, evidence_quote: askQuote,
+    text: 'Send the floor plan', next_date: '2027-01-08' });
+  assert.equal(sent.status, 'pending');
+  assert.equal(sent.requires_confirmation, true);
   const unrelated = await command('log-activity', { idempotency_key: randomUUID(), ref: 'C-999442',
     kind: 'email_in', summary: 'Unrelated synthetic ask', detail: askQuote });
   await assert.rejects(command('preview-email-next-step', nextStepArgs(unrelated.activity_id)),
@@ -1166,6 +1168,18 @@ test('the router queue keeps a partly proposed email until the router excludes i
     const rows = (await command('email-router-queue', { days: 3, limit: 200 }, router(), 'carr_reader')).emails;
     assert.equal(rows.some(item => item.activity_id === other.activity_id), true, 'multiple deals do not hide unfiled mail');
   } finally { await c.query("update deal set phase='closed' where id=$1", [second]); }
+});
+
+test('the router queue includes logged outbound email with sender evidence', async () => {
+  const context = { subject: 'Synthetic commitment', sender: { email: 'sender@example.test', internal: true },
+    recipients: [{ email: 'recipient@example.test', internal: false }] };
+  const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+    kind: 'email_out', summary: 'Email to Synthetic Recipient: Commitment', detail: askQuote, email_context: context }, router());
+  const rows = (await command('email-router-queue', { limit: 200 }, router(), 'carr_reader')).emails;
+  const queued = rows.find(row => row.activity_id === source.activity_id);
+  assert.equal(queued?.kind, 'email_out');
+  assert.equal(queued.mailbox_owner, 'joe');
+  assert.equal(queued.sender.email, 'sender@example.test');
 });
 
 test('the router queue drains a long backlog in pages and skips emails the router already handled', async () => {

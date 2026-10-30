@@ -20,6 +20,10 @@ class SubmittedDraft:
     sha256: str
     mail: send.Mail
 
+    def __post_init__(self):
+        if self.mail.attachments:
+            raise ValueError('attachments_not_wired')  # until the submitted record carries approved files
+
     @classmethod
     def parse(cls, row: dict, settings: OutlookSettings):
         ident = str(uuid.UUID(row['proposal_id']))
@@ -34,9 +38,10 @@ class SubmittedDraft:
         if row['sha256'] != text_hash:
             raise ValueError('submission_hash_mismatch')
         to, cc = send._addresses(row['to']), send._addresses(row['cc'])
-        if len(to) != 1 or cc != (settings.partner_cc,):
+        mail = send.Mail(to, cc, (), subject, body)
+        if not send.partner_copied(mail, settings):
             raise ValueError('submission_recipients_invalid')
-        return cls(ident, version, text_hash, send.Mail(to, cc, (), subject, body))
+        return cls(ident, version, text_hash, mail)
 
     @property
     def key(self):
@@ -73,7 +78,7 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
     if (send._addresses([settings.partner_cc]) != (settings.partner_cc,)
             or not settings.partner_cc or settings.partner_cc == settings.account):
         raise ValueError('partner_copy_required')
-    counts = dict(sent=0, failed=0, deferred=0, receipt_failed=0)
+    counts = dict(sent=0, failed=0, deferred=0, receipt_failed=0, compose_window_open=0)
     ports.out.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(ports.out, 0o700)
     root = ports.out / 'outbox'
@@ -121,11 +126,13 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
                 receipt = dict(idempotency_key=key, proposal_id=ident, base_version=version,
                                sha256=digest, status='failed', reason=reason)
             else:
-                result = send.send_submitted(draft.mail, idempotency_key=draft.key, ports=ports)
+                result = send.send_submitted(draft, ports=ports)
                 if (result.state in (send.State.NOT_IDLE, send.State.PRESSED_UNCONFIRMED,
                                      send.State.WINDOW_NOT_CLOSED)
-                        or result.reason in ('daily_cap', 'another_write_running')):
+                        or result.reason in ('daily_cap', 'another_write_running', 'compose_window_open')):
                     counts['deferred'] += 1
+                    if result.reason == 'compose_window_open':
+                        counts['compose_window_open'] += 1
                     continue
                 receipt = draft.receipt(result)
                 key = draft.key

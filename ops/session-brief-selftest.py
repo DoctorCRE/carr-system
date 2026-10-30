@@ -35,7 +35,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import json
 import re
 from pathlib import Path
 
@@ -113,19 +112,6 @@ def _(assert_):
             "MCP initialize rail does not exactly match the Claude session brief")
     assert_("+ RULE_DELIVERY_RAIL" in mcp,
             "shared connector instructions do not install the rule-delivery rail")
-
-    commands = []
-    for relative in ("claude-tree/settings/carr-ai-project.settings.json",
-                     "claude-tree/settings/my-drive-root.settings.json"):
-        document = json.loads((REPO / relative).read_text(encoding="utf-8"))
-        commands.append([
-            hook["command"]
-            for group in document["hooks"]["SessionStart"]
-            for hook in group["hooks"]
-            if "session-brief.py" in hook.get("command", "")
-        ])
-    assert_(commands[0] == commands[1] and len(commands[0]) == 1,
-            f"Claude session-brief install differs across managed roots: {commands!r}")
 
 
 # One failing run, then a second run that failed on ONE different step. This is

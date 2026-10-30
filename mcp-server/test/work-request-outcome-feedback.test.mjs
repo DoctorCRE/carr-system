@@ -66,6 +66,7 @@ class CardFake {
     }] : [] };
     // The card also asks who actually performed each authority act, joining the
     // receipts to public.tool_call by idempotency key. No acts in this fixture.
+    if (String(text).includes("work-request-intake:slices")) return { rows: [] };
     if (String(text).includes("acting-identity")) return { rows: [] };
     if (!String(text).includes("work_request_card")) throw new Error(`unexpected query: ${text}`);
     const history = this.mode === "b" ? [acceptedA, acceptedB] : [acceptedA];

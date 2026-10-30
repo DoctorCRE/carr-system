@@ -50,6 +50,10 @@ WHAT CARR ADDS to `hxprobe db <file> [out.db] [files-dir]`:
   subject and preview opening within a day. A preview-only copy then joins the
   one full copy with the same sender and opening. The full body always wins,
   and `copy_key` is stored as the identity the copies share.
+- Folder ownership uncertainty. `messages.folder_links_unresolved` is true when
+  any merged revision lacks a resolved folder link. Copy collapse preserves this
+  flag alongside the union of known folder IDs. Intake excludes these messages
+  even when another copy links to the selected account.
 - Store-local message keys (WR-000502). `messages.local_keys` lists, comma-separated,
   the key of every message object merged into the row; more than one means the
   copy join merged distinct store items. `messages_with_key` and

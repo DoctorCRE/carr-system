@@ -44,7 +44,7 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
     await c.query(await readFile(new URL('../../migrations/0001_init.sql', import.meta.url), 'utf8'));
     await c.query('create schema ops; create role carr_reader; create role carr_writer; create role carr_authority; create role dot_reader; grant usage on schema ops to dot_reader; alter default privileges in schema ops grant select on tables to dot_reader');
     // Grants registered by migrations after 0983 are not in the predecessor; they follow the fact-store grants.
-    const LATER_FUNCTIONS = /^ops\.(register_client_portal|adopt_rule)\(/;
+    const LATER_FUNCTIONS = /^ops\.(register_client_portal|adopt_rule|reap_expired_runs)\(/;
     const predecessor = { ...SCAC_MUTATION_CURRENT_DB_GRANTS,
       secdef_execute: SCAC_MUTATION_CURRENT_DB_GRANTS.secdef_execute.filter(g => !FACT_FUNCTIONS.test(g.signature) && !LATER_FUNCTIONS.test(g.signature)) };
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as $f$select ${c.escapeLiteral(JSON.stringify(predecessor))}::jsonb$f$`);

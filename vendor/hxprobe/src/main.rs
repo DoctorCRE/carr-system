@@ -240,6 +240,8 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         }
     }
 
+    let message_objects = objects.messages();
+
     for suffix in ["", "-wal", "-shm"] {
         let _ = std::fs::remove_file(format!("{db_path}{suffix}"));
     }
@@ -295,7 +297,8 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              flag_due_unix INTEGER,  -- NULL also when the flag has no due date
              flag_completed_unix INTEGER,
              moved_to_other INTEGER, -- 1 after a one-time move to Other
-             pinned       INTEGER
+             pinned       INTEGER,
+             folder_links_unresolved INTEGER NOT NULL
          );
          CREATE TABLE message_folders (
              message_id INTEGER NOT NULL REFERENCES messages(id),
@@ -373,6 +376,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              conversation_depth INTEGER, -- 0 for a thread start, +1 per reply level
              in_reply_to        TEXT,    -- parent Message-ID without angle brackets
              subject            TEXT,    -- '' when the store holds an empty subject
+             sender             TEXT,
              -- 'listed' (rows in recipients), 'none' (no recipient objects) or
              -- 'conflict' (cached revisions of a recipient disagree; none exported).
              recipients_status  TEXT NOT NULL
@@ -425,6 +429,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         for loc in records(&b.data, &needle) {
             let Some(mut r) = record::parse(o, &b.data, loc.anchor) else { continue };
             r.folder_ids = folder_links.get(&loc.anchor).cloned().unwrap_or_default();
+            r.folder_links_unresolved = r.folder_ids.is_empty();
             r.local_keys = key_links.get(&loc.anchor).into_iter().copied().collect();
             let m = schema::build_bounded(&b.data, loc.anchor, loc.end, loc.back);
 
@@ -458,6 +463,27 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 .filter(|t| Some(**t) != r.sender.as_deref())
                 .map(|t| t.to_string())
                 .collect();
+            if r.local_keys.len() == 1 {
+                if let Some(object) = r.local_keys.first().and_then(|key| message_objects.get(key)) {
+                    if let Some(subject) = object.subject.as_ref().filter(|s| !s.trim().is_empty()) {
+                        r.subject = Some(subject.clone());
+                    }
+                    if let Some(sender) = object.sender.as_ref().filter(|s| !s.trim().is_empty()) {
+                        if r.sender.as_deref() != Some(sender) {
+                            r.sender_name = None;
+                        }
+                        r.sender = Some(sender.clone());
+                    }
+                    if let Some(recipients) = &object.recipients {
+                        let listed: Vec<String> = recipients.iter()
+                            .filter(|r| matches!(r.kind, message::TO | message::CC))
+                            .map(|r| r.address.clone()).collect();
+                        if !listed.is_empty() {
+                            r.recipients = listed;
+                        }
+                    }
+                }
+            }
             r.preview = m.get(schema::Key::Preview).map(str::to_string);
             if r.html.is_some() {
                 r.body_source = Some("inline");
@@ -478,8 +504,9 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             let convo_ids: Vec<String> =
                 m.all(schema::Key::ConversationId).iter().map(|s| s.to_string()).collect();
 
-            // A record with neither a sender nor readable text is a stub.
-            if r.sender.is_none() && r.body.split_whitespace().count() < 5 {
+            // A local identity or folder link is evidence even without readable text.
+            if r.local_keys.is_empty() && r.folder_ids.is_empty()
+                && r.sender.is_none() && r.body.split_whitespace().count() < 5 {
                 continue;
             }
 
@@ -490,7 +517,11 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             // excluded -- the store reuses one across a conversation, so keying
             // on it merges distinct messages, and pairing it with anything else
             // splits the revisions of one. See SPEC.md 4.7.
-            let key = format!("{:?}|{:?}|{:?}", r.local_keys, r.sender, r.sent_unix);
+            let key = if r.local_keys.is_empty() {
+                format!("{:?}|{:?}|{:?}", r.local_keys, r.sender, r.sent_unix)
+            } else {
+                format!("{:?}", r.local_keys)
+            };
             for id in &convo_ids {
                 if let Some(sub) = &r.subject {
                     convo_subject.entry(id.clone()).or_insert_with(|| sub.clone());
@@ -621,7 +652,6 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     let with_folder = best.iter().filter(|r| !r.folder_ids.is_empty()).count();
     let multi_folder = best.iter().filter(|r| r.folder_ids.len() > 1).count();
     println!("  {} folders; {with_folder}/{stored} messages linked ({multi_folder} with multiple observed folders)", folders.folders.len());
-    let message_objects = objects.messages();
     println!(
         "  {} message objects; {} with a conversation, {} with recipients",
         message_objects.len(),
@@ -676,8 +706,8 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         }
         let mut ins_object = tx
             .prepare(
-                "INSERT INTO message_objects(local_key,conversation_id,conversation_depth,in_reply_to,subject,
-                                             recipients_status) VALUES (?1,?2,?3,?4,?5,?6)",
+                "INSERT INTO message_objects(local_key,conversation_id,conversation_depth,in_reply_to,subject,sender,
+                                             recipients_status) VALUES (?1,?2,?3,?4,?5,?6,?7)",
             )
             .expect("prepare message objects");
         let mut ins_recipient = tx
@@ -694,7 +724,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             let conversation = m.conversation_id.map(|g| g.iter().map(|b| format!("{b:02x}")).collect::<String>());
             ins_object
                 .execute(rusqlite::params![*key as i64, conversation, m.conversation_depth.map(|d| d as i64),
-                                           m.in_reply_to, m.subject, status])
+                                           m.in_reply_to, m.subject, m.sender, status])
                 .expect("insert message object");
             let mut positions: BTreeMap<u32, i64> = BTreeMap::new();
             for r in m.recipients.iter().flatten() {
@@ -712,9 +742,9 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                    (block,sender,sender_name,recipients,subject,message_id,body,
                     html,body_words,html_bytes,body_kind,sent_unix,sent_utc,
                     subject_inherited,preview,body_source,copies,copy_key,local_keys,
-                    flag_status,flag_due_unix,flag_completed_unix,moved_to_other,pinned)
+                    flag_status,flag_due_unix,flag_completed_unix,moved_to_other,pinned,folder_links_unresolved)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,
-                         datetime(?12,'unixepoch'),?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)",
+                         datetime(?12,'unixepoch'),?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)",
             )
             .expect("prepare");
 
@@ -749,6 +779,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 d.and_then(|d| d.completed_unix).flatten(),
                 d.and_then(|d| d.moved_to_other),
                 d.and_then(|d| d.pinned),
+                r.folder_links_unresolved as i64,
             ])
             .expect("insert");
             let message_id = tx.last_insert_rowid();
@@ -884,9 +915,17 @@ fn local_keys(r: &record::Record) -> Option<String> {
 
 /// Combine a later revision of a message into the copy already held.
 fn merge(prev: &mut record::Record, r: record::Record) {
+    prev.folder_links_unresolved |= r.folder_links_unresolved;
     prev.folder_ids.extend(r.folder_ids);
     prev.local_keys.extend(r.local_keys);
     prev.copies += r.copies;
+    if prev.sender.is_none() {
+        prev.sender = r.sender;
+    }
+    prev.sent_unix = match (prev.sent_unix, r.sent_unix) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    };
     if prev.preview.is_none() {
         prev.preview = r.preview;
     }

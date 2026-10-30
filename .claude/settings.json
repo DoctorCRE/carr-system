@@ -2,14 +2,15 @@
   "autoCompactEnabled": true,
   "autoCompactWindow": 500000,
   "hooks": {
-    "PreToolUse": [],
-    "Stop": [
+    "PreToolUse": [
       {
+        "matcher": "Agent|Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "if [ -d \"${HOME}/carr-system/hooks\" ]; then r=\"${HOME}/carr-system\"; else r=\"${CLAUDE_PROJECT_DIR:-}\"; fi; if [ ! -e \"$r/hooks/rule-claim-gate.py\" ] && [ ! -L \"$r/hooks/rule-claim-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script $r/hooks/rule-claim-gate.py; skipping\" >&2; exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/rule-claim-gate.py\"",
-            "timeout": 10
+            "command": "r=\"${HOME}/carr-system\"; [ -f \"$r/hooks/agent-card-gate.py\" ] || r=\"${CLAUDE_PROJECT_DIR:-}\"; if [ ! -f \"$r/hooks/agent-card-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script $r/hooks/agent-card-gate.py; skipping\" >&2; exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/agent-card-gate.py\"",
+            "timeout": 10,
+            "onFailure": "block"
           }
         ]
       }

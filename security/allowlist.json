@@ -652,6 +652,32 @@
       "sha256": "1d3039f808bfba7848b99c47d54c6ad1ec342e2a08824ae34ab3d005d7a32b39",
       "rule": "generic-api-key",
       "reason": "Historical synthetic UUID idempotency fixture introduced by 9067df46 in PR #2607, replaced in 3e3c9dcd by patterned UUIDs. Pushed history is retained without force-push. Qualification binds only this path, these exact historical file bytes and this detector."
+    },
+    {
+      "path": "db/schema.sql",
+      "sha256": "370981c239bb5f52b9011287b1d42ea3d6e458cc48cb1f8589e2d6cdded94f73",
+      "rule": "pii-email",
+      "reason": "Pushed PR history (d3cafe75) holds a regenerated schema dump with a partner work address; 7cba9c4f reverted the file, so only this historical blob carries it."
+    },
+    {
+      "path": "ops/incident-recovery-local-pg-acceptance.py",
+      "sha256": "4f0dbb9a2e197f11fbbb1b3efa0e5b035f5c018b7fa30c355717bfcad320bd65",
+      "rule": "pii-phone",
+      "reason": "The integer maximum in commit a2b9482df tests the retention batch clamp. It is not a phone number and was replaced by 1001 in 929431cc6. Only this historical blob is exempt."
+    },
+    {
+      "path": "mcp-server/test/email-lead-proposal-postgres.test.mjs",
+      "sha256": "3cd48d89d3d4c536744e6e355369fd95604dda53c547baab3fd4ad2acbcb07ce",
+      "rule": "client-data",
+      "reason": "Pushed PR history (e9e50256..913d2ade) named a synthetic fixture deal whose words collide with a client fingerprint; renamed at the next commit, so only these historical blobs carry it.",
+      "value_sha256": "b5d8dfb4d92c397df16cda0399e543925f248f2e1172876a39bd40d4812dc1ab"
+    },
+    {
+      "path": "mcp-server/test/email-lead-proposal-postgres.test.mjs",
+      "sha256": "794e6401739d917fac5777e98a602df5a44cb9f93db9281926014de42e886be5",
+      "rule": "client-data",
+      "reason": "Pushed PR history (e9e50256..913d2ade) named a synthetic fixture deal whose words collide with a client fingerprint; renamed at the next commit, so only these historical blobs carry it.",
+      "value_sha256": "b5d8dfb4d92c397df16cda0399e543925f248f2e1172876a39bd40d4812dc1ab"
     }
   ]
 }

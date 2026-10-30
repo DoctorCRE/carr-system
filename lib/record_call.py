@@ -181,3 +181,28 @@ def _text(value: Any) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     return value or ""
+
+
+def call_command(argv: list[str], verb: str, args: Mapping[str, Any], *,
+                 timeout: float = 60, runner: Runner | None = None) -> tuple[bool, dict[str, Any]]:
+    """Call a line-oriented command, preserving its last JSON dictionary reply.
+
+    Unlike call_verb, this command contract requires an explicit ok:true and
+    returns subprocess exception names without interpreting record outcomes.
+    """
+    runner = runner or subprocess.run
+    try:
+        done = runner(argv + [verb, json.dumps(args)], capture_output=True, text=True,
+                      timeout=timeout, check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, {"error": type(exc).__name__}
+    reply: dict[str, Any] = {}
+    for line in reversed(done.stdout.strip().splitlines()):
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            reply = parsed
+            break
+    return done.returncode == 0 and reply.get("ok") is True, reply

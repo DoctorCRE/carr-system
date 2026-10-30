@@ -6,7 +6,7 @@ import { isValidCorrelationId, logLine } from "./correlation.js";
 type PublicError = {
   error: string; correlation_id: string; hint: string;
   candidates?: Record<string, string | null>[]; retired_aliases?: Record<string, string | null>[];
-  current_version?: number; fields?: unknown[]; invalid_deal_ids?: string[];
+  current_version?: number; fields?: unknown[]; invalid_deal_ids?: string[]; recorded_titles?: string[];
 };
 type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSchema };
 
@@ -95,7 +95,15 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["invalid_work_request", "Supply a numeric Work Request reference such as WR-000014."],
   ["invalid_idempotency_key", "Supply a UUID as idempotency_key and reuse it only for the same action."],
   ["invalid_slice_plan", "Supply one through one hundred non-empty slice titles, each at most 200 characters."],
-  ["slice_plan_conflict", "Use the existing ordered slices; replacing their identities is refused."],
+  ["slice_plan_conflict", "Keep the recorded titles in order and append new titles after them."],
+  ["joint_ownership_refused", "A loop has one owner: pass joe, dell or claude, and name the blocker for what it waits on."],
+  ["unknown_owner", "Owner is one of joe, dell or claude."],
+  ["invalid_slice_outcome", "Choose done or retired with the evidence for that outcome."],
+  ["slice_outcome_already_recorded", "The recorded outcome and its evidence are final. Plan a new slice for further work."],
+  ["slice_reason_required", "Explain why the slice is retired."],
+  ["slice_merged_change_required", "Supply at least one merged PR URL and its full merge commit SHA."],
+  ["invalid_slice_successor", "Only a retired slice may name a different recorded slice as its replacement."],
+  ["work_request_open_slices", "Finish or retire every open slice before completing the Work Request."],
   ["slice_not_found", "Choose a slice from the recorded plan."],
   ["invalid_card_title", "Supply a card title of two or three plain words."],
   ["invalid_job_description", "Describe the job in one sentence."],
@@ -103,6 +111,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["job_repository_mismatch", "Start this job in its recorded repository."],
   ["job_not_found", "Choose an existing job under this Work Request and slice."],
   ["priority_out_of_range", "Choose a position within the visible queue."],
+  ["census_inventory_invalid", "Send a JSON object with an items array under 8 MB."],
   ["key_reuse", "Use a fresh idempotency_key for changed arguments."],
   ["unknown_tool", "Discover the tool with list-verbs."],
   ["not_in_profile", "This operation is unavailable in the current profile."],
@@ -169,6 +178,16 @@ function inputFields(schema: InputSchema | undefined, names = new Set<string>())
   return names;
 }
 
+// Refusals of caller-sent keys outside the schema echo those keys back so the
+// caller can see which one to remove (2026-10-28 retro: the wire said
+// "fields": [] and the orchestrator had to diff schemas by hand). Only
+// identifier-shaped keys travel; values and free-form keys never do.
+const REJECTED_KEY_CODES = new Set(["unregistered_operation_fields", "invalid_report_problem_fields", "caller_authority_field_forbidden"]);
+const REJECTED_KEY = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;
+
+// Row values travel in these: pg's "Failing row contains (...)" and ToolError payloads.
+const UNLOGGED = new Set(["detail", "hint", "where", "payload"]);
+
 function diagnostics(error: unknown) {
   const seen = new WeakSet();
   return JSON.parse(JSON.stringify(error, (_key, value) => {
@@ -177,7 +196,7 @@ function diagnostics(error: unknown) {
       seen.add(value);
       if (value instanceof Error) return {
         ...Object.fromEntries(Object.entries(Object.getOwnPropertyDescriptors(value))
-          .filter(([, descriptor]) => "value" in descriptor)
+          .filter(([key, descriptor]) => "value" in descriptor && !UNLOGGED.has(key))
           .map(([key, descriptor]) => [key, descriptor.value])),
         name: value.name, message: value.message, stack: value.stack,
       };
@@ -210,15 +229,20 @@ export function publicError(error: unknown, { env, inputSchema, fallback = "unha
   if (code === "invalid_call_context_deals")
     result.invalid_deal_ids = [...new Set((Array.isArray(payload?.invalid_deal_ids) ? payload.invalid_deal_ids : [])
       .filter(id => typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(id)))].slice(0, 50);
+  if (code === "slice_plan_conflict" && Array.isArray(payload?.recorded_titles)
+      && payload.recorded_titles.length <= 100
+      && payload.recorded_titles.every(title => typeof title === "string" && title.trim() && title.length <= 200))
+    result.recorded_titles = payload.recorded_titles;
   if (code === "version_conflict" && Number.isSafeInteger(payload?.current_version) && (payload!.current_version as number) >= 0)
     result.current_version = payload!.current_version as number;
-  if (["invalid_idempotency_key", "invalid_report_problem", "invalid_report_problem_fields", "invalid_acceptance_criteria", "current_situation_source_not_found", "invalid_field_value", "validation_error", "value_not_in_declared_vocabulary", "unregistered_operation_fields", "missing_required", "invalid_boolean", "invalid_number", "tool_call_markup_in_value"].includes(code)) {
+  if (["invalid_idempotency_key", "invalid_report_problem", "invalid_report_problem_fields", "caller_authority_field_forbidden", "invalid_acceptance_criteria", "current_situation_source_not_found", "invalid_field_value", "validation_error", "value_not_in_declared_vocabulary", "unregistered_operation_fields", "missing_required", "invalid_boolean", "invalid_number", "tool_call_markup_in_value"].includes(code)) {
     const allowed = inputFields(inputSchema);
     const candidates = [payload?.field, payload?.column,
       ...(Array.isArray(payload?.fields) ? payload.fields : []),
       ...(Array.isArray(payload?.missing) ? payload.missing : []),
       ...(Array.isArray(payload?.columns) ? payload.columns : [])];
-    result.fields = [...new Set(candidates.filter(field => allowed.has(field)))];
+    const rejected = (field: unknown) => REJECTED_KEY_CODES.has(code) && typeof field === "string" && REJECTED_KEY.test(field);
+    result.fields = [...new Set(candidates.filter(field => allowed.has(field) || rejected(field)))].slice(0, 20);
     if (code === "invalid_field_value" && result.fields.length === 0) {
       result.error = "database_refused_the_statement";
       result.hint = PUBLIC_ERRORS.get(result.error)!;

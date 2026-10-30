@@ -8,6 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'bin'))
 import skill_picker
 
@@ -35,6 +37,150 @@ class CatalogTests(unittest.TestCase):
             self.assertTrue(all(s.path.is_absolute() for s in skills))
             local.write_text('---\nname: local\ndescription: Updated immediately\n---\n')
             self.assertIn('Updated immediately', [s.description for s in skill_picker.catalog(repo, home=home)])
+
+    def test_catalog_without_new_roots_matches_main(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, repo = Path(tmp) / 'home', Path(tmp) / 'repo'
+            entries = [
+                (home / '.agents/skills/synced/docs', 'docs'),
+                (home / '.agents/skills/first', 'shared'),
+                (home / '.agents/skills/second', 'shared'),
+                (repo / '.claude/skills/shared', 'shared'),
+                (repo / '.claude/skills/synced/pdf', 'pdf'),
+                (home / '.agents/skills/.hidden/agent', 'hidden-agent'),
+                (repo / '.claude/skills/.hidden/local', 'hidden-local'),
+            ]
+            for directory, name in entries:
+                directory.mkdir(parents=True)
+                (directory / 'SKILL.md').write_text(
+                    f'---\nname: {name}\ndescription: Procedure {name}\n---\n')
+            expected = sorted([
+                skill_picker.Skill(name, f'Procedure {name}', (directory / 'SKILL.md').resolve())
+                for directory, name in entries
+            ], key=lambda skill: (skill.name, str(skill.path)))
+            self.assertEqual(skill_picker.catalog(repo, home=home), expected)
+
+    def test_catalog_reads_tstack_roots_and_deduplicates_symlinks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, repo = Path(tmp) / 'home', Path(tmp) / 'repo'
+            for root, name in (('.claude/skills', 'file-pr'), ('.codex/skills', 'modernize')):
+                path = home / root / name / 'SKILL.md'
+                path.parent.mkdir(parents=True)
+                path.write_text(f'---\nname: {name}\ndescription: Procedure {name}\n---\n')
+            alias = home / '.codex/skills/file-pr'
+            alias.symlink_to(home / '.claude/skills/file-pr', target_is_directory=True)
+            self.assertEqual([s.name for s in skill_picker.catalog(repo, home=home)],
+                             ['file-pr', 'modernize'])
+
+    def test_catalog_prefers_agents_copy_over_claude_and_codex(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, repo = Path(tmp) / 'home', Path(tmp) / 'repo'
+            for root in ('.agents/skills', '.claude/skills', '.codex/skills'):
+                path = home / root / 'file-pr/SKILL.md'
+                path.parent.mkdir(parents=True)
+                path.write_text('---\nname: file-pr\ndescription: Open a PR\n---\n')
+            skills = skill_picker.catalog(repo, home=home)
+            self.assertEqual([(s.name, s.path) for s in skills], [
+                ('file-pr', (home / '.agents/skills/file-pr/SKILL.md').resolve())])
+            for removed, expected in (('.agents/skills', '.claude/skills'),
+                                      ('.claude/skills', '.codex/skills')):
+                (home / removed / 'file-pr/SKILL.md').unlink()
+                with self.subTest(expected_root=expected):
+                    self.assertEqual([(s.name, s.path) for s in skill_picker.catalog(repo, home=home)], [
+                        ('file-pr', (home / expected / 'file-pr/SKILL.md').resolve())])
+
+    def test_catalog_prefers_repo_copy_over_new_roots(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, repo = Path(tmp) / 'home', Path(tmp) / 'repo'
+            local = repo / '.claude/skills/file-pr/SKILL.md'
+            for root in (local.parent, home / '.claude/skills/file-pr',
+                         home / '.codex/skills/file-pr'):
+                root.mkdir(parents=True)
+                (root / 'SKILL.md').write_text('---\nname: file-pr\ndescription: Open a PR\n---\n')
+            self.assertEqual(skill_picker.catalog(repo, home=home), [
+                skill_picker.Skill('file-pr', 'Open a PR', local.resolve())])
+
+    def test_catalog_skips_dot_directories_in_new_roots(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, repo = Path(tmp) / 'home', Path(tmp) / 'repo'
+            for root in (home / '.claude/skills', home / '.codex/skills'):
+                for relative in ('.system/hidden', 'nested/.hidden'):
+                    path = root / relative / 'SKILL.md'
+                    path.parent.mkdir(parents=True)
+                    path.write_text('---\nname: hidden\ndescription: Hidden skill\n---\n')
+                visible = root / 'visible/SKILL.md'
+                visible.parent.mkdir(parents=True)
+                visible.write_text('---\nname: visible\ndescription: Visible skill\n---\n')
+            self.assertEqual(skill_picker.catalog(repo, home=home), [
+                skill_picker.Skill('visible', 'Visible skill',
+                                  (home / '.claude/skills/visible/SKILL.md').resolve())])
+
+    def test_catalog_skips_synced_subfolders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, repo = Path(tmp) / 'home', Path(tmp) / 'repo'
+            for root in (home / '.claude/skills', home / '.codex/skills'):
+                for relative in ('synced/handoff', 'nested/synced/handoff'):
+                    path = root / relative / 'SKILL.md'
+                    path.parent.mkdir(parents=True)
+                    path.write_text('---\nname: handoff\ndescription: Synced copy\n---\n')
+            self.assertEqual(skill_picker.catalog(repo, home=home), [])
+
+    def test_workflow_validation_rejects_unknown_skill(self):
+        table = yaml.safe_load((Path(__file__).resolve().parents[1] /
+                                'ops/config/job-workflows.v1.yaml').read_text())
+        table['job_types']['feature-backend']['stages']['build']['skills'].append('unknown-skill')
+        with self.assertRaisesRegex(AssertionError, 'unknown-skill'):
+            self.assert_workflow_skills_resolve(table, {
+                'pstack:poteto-mode', 'pstack:principle-prove-it-works',
+                'mattpocock-skills:grill-with-docs', 'mattpocock-skills:tdd',
+                'mattpocock-skills:pr', 'mattpocock-skills:code-review',
+                'mattpocock-skills:codebase-design', 'mattpocock-skills:diagnosing-bugs',
+                'mattpocock-skills:domain-modeling', 'file-pr', 'babysit-pr',
+                'modernize', 'zero-tech-debt'})
+
+    def assert_workflow_skills_resolve(self, table, available):
+        for job_type, job in table['job_types'].items():
+            for stage in job['stages'].values():
+                names = stage['skills'] + [item['skill'] for item in
+                                           stage.get('conditional_skills', [])]
+                self.assertFalse(set(names) - available,
+                                 f'{job_type}: unknown skills {set(names) - available}')
+
+    def test_workflow_skills_resolve_in_fixture_home(self):
+        table = yaml.safe_load((Path(__file__).resolve().parents[1] /
+                                'ops/config/job-workflows.v1.yaml').read_text())
+        with tempfile.TemporaryDirectory() as tmp:
+            home, repo = Path(tmp) / 'home', Path(tmp) / 'repo'
+            inventories = {
+                '.claude/plugins/cache/cursor-plugins/pstack/1.0/skills':
+                    ('poteto-mode', 'principle-prove-it-works'),
+                '.claude/plugins/cache/claude-plugins-official/mattpocock-skills/1.0/skills/engineering':
+                    ('grill-with-docs', 'tdd', 'pr', 'code-review', 'codebase-design',
+                     'diagnosing-bugs', 'domain-modeling'),
+                '.claude/skills': ('file-pr', 'babysit-pr'),
+                '.codex/skills': ('modernize', 'zero-tech-debt'),
+            }
+            for root, names in inventories.items():
+                for name in names:
+                    path = home / root / name / 'SKILL.md'
+                    path.parent.mkdir(parents=True)
+                    path.write_text(f'---\nname: {name}\ndescription: Procedure {name}\n---\n')
+            available = {skill.name for skill in skill_picker.catalog(repo, home=home)}
+            self.assert_workflow_skills_resolve(table, available)
+            jobs = table['job_types']
+            self.assertEqual(set(jobs), {'feature-ui', 'feature-backend', 'bug-fix',
+                                        'removal-refactor', 'data-migration', 'review', 'research-audit'})
+            for job_type, job in jobs.items():
+                with self.subTest(job_type=job_type):
+                    self.assertTrue(job['stages'])
+                    if job['read_only']:
+                        self.assertTrue({'pr', 'fix-rounds', 'ship'}.isdisjoint(job['stages']))
+                        self.assertNotIn('mattpocock-skills:tdd', job['stages']['build']['skills'])
+                        self.assertEqual(job['stages']['close']['artifact'], 'report_file')
+                    else:
+                        self.assertEqual(set(job['stages']),
+                                         {'shape', 'build', 'pr', 'review', 'fix-rounds', 'ship', 'close'})
+                        self.assertEqual(job['stages']['fix-rounds']['max_rounds'], 3)
 
 
 class PickerTests(unittest.TestCase):

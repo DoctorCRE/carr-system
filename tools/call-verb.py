@@ -35,7 +35,7 @@ Usage:
 THE DEFECT THIS CLOSES. Until this change, EVERY call through this path opened
 a direct connection to the production database and ran the verb's handler
 locally — bypassing the deployed Worker's identity derivation, its profile
-gate, and its read-call instrumentation (tool_read_call) entirely. The DEFAULT
+gate, and its read-call instrumentation (tool_read_count) entirely. The DEFAULT
 path is now the deployed Worker, exactly like every other MCP caller; the
 direct-database path survives only as explicit, receipted break-glass. See
 mcp-server/local-verb.mjs's own header for the full design, and

@@ -18,7 +18,7 @@ class UsageTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(result.stderr, b"")
                 self.assertEqual(hashlib.sha256(result.stdout).hexdigest(),
-                                 "76ed74bee733bb135aed173d27bea59103472bcd0d9e2a0e8478d69b76666123")
+                                 "0a117a3fa99a036a9636291e7c9e0185cc4a1c077448a079dd4bd5b1a44b3d0e")
 
     def test_independent_usage_additions_merge(self):
         source = (REPO / "run.sh").read_text()

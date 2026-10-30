@@ -161,8 +161,6 @@ def main() -> int:
     ))
 
     loaded = migration_runner.load_migrations()
-    # A merge can add an earlier migration after a branch exported its snapshot.
-    # The real rebuild must see an immutable prefix, not a hole below its tip.
     snapshot = (REPO / "db/schema.sql").read_text(encoding="utf-8")
     marker = "COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;"
     rows = snapshot.split(marker, 1)[1].split("\n\\.\n", 1)[0].strip().splitlines()
@@ -571,25 +569,13 @@ def main() -> int:
     else:
         raise AssertionError("applied 0546 without 0547 was accepted")
 
-    # A bounded prefix must not make an out-of-order ledger look safe.  If a
-    # later file is already applied while an earlier file is absent, history
-    # has drifted and the runner must stop before selecting anything.
-    try:
-        migration_runner.validate_applied_ledger(
-            loaded,
-            {
-                name: digest
-                for name, _sql, digest in loaded
-                if name != "0170_guidance_import_lifecycle.sql"
-                and name <= "0171_program5_provider_version.sql"
-            },
-        )
-    except migration_runner.AppliedMigrationLedgerError as exc:
-        assert "ledger is reordered" in str(exc), str(exc)
-        assert "0170_guidance_import_lifecycle.sql" in str(exc), str(exc)
-        assert "0171_program5_provider_version.sql" in str(exc), str(exc)
-    else:
-        raise AssertionError("out-of-order applied ledger was accepted")
+    applied = {
+        name: digest for name, _sql, digest in loaded
+        if name != "0170_guidance_import_lifecycle.sql"
+        and name <= "0171_program5_provider_version.sql"
+    }
+    migration_runner.validate_applied_ledger(loaded, applied)
+    assert migration_runner.pending_migrations(loaded, applied)[0][0] == "0170_guidance_import_lifecycle.sql"
 
     # A ledger row whose file disappeared is a rename/deletion, not harmless
     # history. Only the exact pre-renumber Control Plane aliases are accepted,

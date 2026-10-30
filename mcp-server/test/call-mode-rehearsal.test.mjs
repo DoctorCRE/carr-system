@@ -238,7 +238,10 @@ test('a recorded weekly call updates every confidently discussed card and leaves
     }
     await run(PYTHON, [path.join(BIN, 'transcribe_session.py'), session], { env, timeout: 600_000 });
   } else {
-    write('transcript.json', { segments: CALL.map(([speaker, text], i) => ({ start_ms: i * 5000, end_ms: i * 5000 + 4000, speaker, text })) });
+    // As transcribe_session.py records it: the diarizer ran on each track and
+    // heard one voice, so the system label identifies Dell.
+    write('transcript.json', { speaker_tracks: { mic: { diarized: true, speakers: 1 }, system: { diarized: true, speakers: 1 } },
+      segments: CALL.map(([speaker, text], i) => ({ start_ms: i * 5000, end_ms: i * 5000 + 4000, speaker, text })) });
     await companionCall(port, '/api/call-context', context);
   }
   let review;
