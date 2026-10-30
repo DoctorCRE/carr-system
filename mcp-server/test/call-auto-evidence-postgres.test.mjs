@@ -2,6 +2,7 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { randomUUID, createHash } from 'node:crypto';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
@@ -18,6 +19,8 @@ before(async () => {
     '-U', 'fixture', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q',
     '-f', new URL('../../db/schema.sql', import.meta.url).pathname], { maxBuffer: 4 * 1024 * 1024 });
   await applyPendingDealRoomReads(c);
+  await c.query(readFileSync(new URL('../../migrations/1073_retain_assessed_deal_actions.sql', import.meta.url), 'utf8'));
+  await c.query('alter table activity add column email_context jsonb, add column email_source jsonb');
   actor = { ...(await c.query("select id,slug from actor where slug='joe'")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic phase physician',$1,$1) returning id", [actor.id])).rows[0].id;
   await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
@@ -128,10 +131,11 @@ test('a caller without partner authority cannot automatically apply a valid part
   assert.deepEqual(after.events, before.events);
 });
 
-for (const [kind, automatic, verdict] of [
+for (const [kind, automatic, verdict, callUndo = false] of [
   ['next_step', true, 'yes'], ['next_step', false, 'yes'],
   ['next_step', true, 'no'], ['activity', false, 'yes'], ['activity', false, 'no'],
-]) test(`${kind} call confirmation automatic=${automatic} assesses overdue completion ${verdict} once with Undo`, async () => {
+  ['next_step', true, 'yes', true],
+]) test(`${kind} call confirmation automatic=${automatic} assesses overdue completion ${verdict} once with ${callUndo ? 'call Undo' : 'assessment Undo'}`, async () => {
   const evidence = verdict === 'yes' ? 'The landlord sent the requested revised terms.' : 'We discussed parking at the other property.';
   const { deal, id, prior } = await filePhase(evidence, { kind, overdue: true });
   let calls = 0;
@@ -152,15 +156,22 @@ for (const [kind, automatic, verdict] of [
     assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, verdict === 'yes' ? 'done' : 'open');
     const assessment = room.events.find(e => e.field === 'overdue_assessment');
     assert.equal(assessment.new_value.update, evidence);
+    assert.equal(assessment.new_value.candidate_id, id);
     assert.equal(assessment.new_value.resolved, verdict === 'yes');
     assert.equal((await command('resolve-candidate', args)).replayed, true);
     assert.equal((await command('resolve-candidate', { ...args, idempotency_key: randomUUID() })).already, 'confirmed');
     assert.equal(calls, 1);
     assert.deepEqual((await command('get-deal-room', { deal })).events, room.events);
     if (verdict === 'yes') {
-      await command('review-deal-update', { idempotency_key: randomUUID(), assessment_id: assessment.id,
+      if (callUndo) await command('undo-call-change', {
+        idempotency_key: randomUUID(), candidate_id: id, base_version: room.base_version,
+      });
+      else await command('review-deal-update', { idempotency_key: randomUUID(), assessment_id: assessment.id,
         decision: 'undo', reason: 'Synthetic completion correction' });
-      assert.equal((await command('get-deal-room', { deal })).next_actions.find(a => a.id === prior.next_action_id).status, 'open');
+      const restored = await command('get-deal-room', { deal });
+      assert.equal(restored.next_actions.find(a => a.id === prior.next_action_id).status, 'open');
+      assert.equal(restored.next_date, '2020-01-01');
+      assert.ok(!restored.items.some(item => item.source_ref === `capture_candidate:${id}`));
     }
   } finally { delete c.jevClient; }
 });

@@ -13,7 +13,7 @@ const verdicts = {
 const MIN_RESOLUTION_CONFIDENCE = 0.9;
 const probability = n => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1;
 
-export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds, lockDealField, dealNextStepStatus, ToolError }) {
+export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds, lockDealField, dealNextStepStatus, undoAppliedNextStep, ToolError }) {
   const visibleScopes = actor => {
     const scope = personalScopeForActor(actor);
     return scope.status === 'personal' ? ['none', `${scope.sponsor}-personal`] : ['none'];
@@ -62,7 +62,8 @@ export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds
     }
     return plan;
   }
-  async function assess(c, actor, deal, note, text, key) {
+  async function assess(c, actor, deal, note, text, key, source = {}) {
+    const verb = source.verb || 'add-deal-note';
     if (!partnerAuthoritySlugForActor(actor)) return { preserved_action_ids: [] };
     await lockDealField(c, deal, 'next_date');
     await lockDealField(c, deal, 'next_step');
@@ -108,15 +109,15 @@ export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds
       const resolved = verdict === 'yes' && !hold;
       const resolvedAt = resolved ? await change(c, actor, action, 'done') : null;
       const assessment = { action, verdict, quote, model, reason: hold || `${verdicts[verdict]} “${quote}”`,
-        resolved, resolved_at: resolvedAt?.updated_at ?? null, resolved_version: resolvedAt?.version ?? null, review_required: !failure && (verdict === 'unclear' || !!hold), note_id: note,
+        resolved, resolved_at: resolvedAt?.updated_at ?? null, resolved_version: resolvedAt?.version ?? null, review_required: !failure && (verdict === 'unclear' || !!hold), note_id: note, ...(source.candidate_id ? { candidate_id: source.candidate_id } : {}),
         update: text, confidence: valid ? answer.confidence : null };
-      await writeEvent(c, actor, 'add-deal-note', 'deal', deal, { field: 'overdue_assessment',
+      await writeEvent(c, actor, verb, 'deal', deal, { field: 'overdue_assessment',
         old: { status: 'open' }, new: assessment, human_quote: quote, cause: 'automation_job', agent_rationale: assessment.reason,
         idempotency_key: key, recorded_at_after_lock: true });
       assessments.push(assessment);
     }
     const resolvedIds = assessments.filter(a => a.resolved).map(a => a.action.id);
-    const plan = await reconcilePlan(c, actor, deal, before, resolvedIds, key, 'add-deal-note');
+    const plan = await reconcilePlan(c, actor, deal, before, resolvedIds, key, verb);
     return { ...plan, overdue_assessment: { reason: failure || null, items: assessments },
       resolved_action_ids: resolvedIds,
       preserved_action_ids: assessments.filter(a => !a.resolved && a.action.source === 'next_action').map(a => a.action.id) };
@@ -163,6 +164,11 @@ export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds
           ? 'select 1 from next_action where id=$1 and owner_id=any($2::uuid[])'
           : 'select 1 from capture_post_call_action where id=$1 and owner_id=any($2::uuid[])', [a.action.id, owners]);
         if (!owned.rows.length) throw new ToolError({ error: 'not_action_owner' });
+        const candidate = a.candidate_id ? (await c.query(
+          "select id,payload from capture_candidate where id=$1 and kind='next_step' and status='confirmed'",
+          [a.candidate_id])).rows[0] : null;
+        if (candidate)
+          await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0))", [event.subject_id]);
         await lockDealField(c, event.subject_id, 'next_date');
         await lockDealField(c, event.subject_id, 'next_step');
         if ((await c.query("select 1 from event where field='overdue_review' and new_value->>'assessment_id'=$1", [args.assessment_id])).rows.length)
@@ -199,11 +205,14 @@ export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds
             order by recorded_at,id`, [event.subject_id, event.idempotency_key])).rows;
           if (fields.length && latest?.idempotency_key !== event.idempotency_key)
             throw new ToolError({ error: 'newer_change_exists' });
+          if (candidate) await undoAppliedNextStep(c, actor, event.subject_id, candidate, [event.idempotency_key], {
+            ...args, base_version: (await c.query('select version from deal where id=$1', [event.subject_id])).rows[0].version,
+          }, false);
           const replacement = fields.find(row => row.new_value.next_action_id)?.new_value.next_action_id;
-          if (replacement && !(await c.query(`update next_action set status='dropped',updated_by=$2
+          if (!candidate && replacement && !(await c.query(`update next_action set status='dropped',updated_by=$2
             where id=$1 and status='open' and version=1 returning id`, [replacement, actor.id])).rows.length)
             throw new ToolError({ error: 'newer_change_exists' });
-          for (const field of ['next_step', 'next_date']) {
+          for (const field of candidate ? [] : ['next_step', 'next_date']) {
             const original = fields.find(row => row.field === field);
             if (!original) continue;
             if (field === 'next_date') await c.query('update deal set next_date=$2,updated_by=$3 where id=$1',
@@ -233,5 +242,20 @@ export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds
         and e.new_value->>'resolved'='false' and e.recorded_at >= current_timestamp - interval '14 days'
         /* deal-update:preserved */`, [deal])).rows.map(row => row.id);
   }
-  return { assess, tools, preserved };
+  async function undoCallAssessments(c, actor, deal, keys, key) {
+    const rows = (await c.query(`select e.id,e.new_value from event e
+      where e.subject_type='deal' and e.subject_id=$1 and e.field='overdue_assessment'
+        and e.idempotency_key=any($2::text[]) and e.new_value->>'resolved'='true'
+        and not exists(select 1 from event r where r.field='overdue_review' and r.new_value->>'assessment_id'=e.id::text)
+      order by e.id`, [deal, keys])).rows;
+    for (const row of rows) {
+      const a = row.new_value;
+      await change(c, actor, { ...a.action, updated_at: a.resolved_at, version: a.resolved_version }, 'open');
+      await writeEvent(c, actor, 'undo-call-change', 'deal', deal, { field: 'overdue_review',
+        new: { assessment_id: row.id, decision: 'undo', reason: 'Undid the recorded call change' },
+        idempotency_key: key, recorded_at_after_lock: true });
+    }
+    return rows.map(row => row.new_value.action.id);
+  }
+  return { assess, tools, preserved, undoCallAssessments };
 }

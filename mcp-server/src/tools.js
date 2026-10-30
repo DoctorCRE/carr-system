@@ -2508,7 +2508,7 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
 const captureKey = id => derivedIdempotencyKey("capture-candidate", id);
 const captureKeys = id => [`capture:${id}`, captureKey(id)];
 
-async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args) {
+async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args, restoreAssessments = true) {
   // Same lock order as resolve-candidate's apply: the checklist first, so a
   // partner completing one of the call's items waits for (or beats) the undo.
   await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0)) /* call-outcome:undo-items-lock */", [dealId]);
@@ -2549,6 +2549,8 @@ async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args) {
     ...(await c.query(`update capture_post_call_action set status='open', updated_at=clock_timestamp()
       where id=any($1::uuid[]) and status='dropped' returning id /* call-outcome:undo-step-reopen-post-call */`, [reopenIds])).rows,
   ].map(row => row.id);
+  if (restoreAssessments)
+    reopened.push(...await overdueUpdates.undoCallAssessments(c, actor, dealId, keys, args.idempotency_key));
   await c.query("update deal set next_date=$2, updated_by=$3 where id=$1 /* call-outcome:undo-step-date */", [dealId, priorDate, actor.id]);
   const shown = (await c.query("select next_step from v_deal_room_board where id=$1", [dealId])).rows[0]?.next_step ?? null;
   // The board shows the newest open ball, else the newest unhidden note. Put
@@ -9944,7 +9946,16 @@ registerTools({
             hint: "The plan changed after this call proposal was filed. Review it before applying." });
         }
         if (candidate.kind === "next_step")
+          await overdueUpdates.assess(c, actor, subject.id, null, candidate.evidence_quote,
+            innerArgs.idempotency_key, { candidate_id: candidate.id, verb: 'resolve-candidate' });
+        if (candidate.kind === "next_step")
           innerArgs.base_version = (await c.query("select version from deal where id=$1 for update", [subject.id])).rows[0]?.version;
+      }
+      if (['activity', 'meeting_record'].includes(candidate.kind)) {
+        const subject = await resolveSubject(c, innerArgs.ref);
+        if (subject.type === 'deal')
+          await overdueUpdates.assess(c, actor, subject.id, null, candidate.evidence_quote,
+            innerArgs.idempotency_key, { candidate_id: candidate.id, verb: 'resolve-candidate' });
       }
       const result = await executeRegisteredTool(c, actor, verb, innerArgs);
       if (!result || result.ok === false) throw new ToolError(result || { error: "inner_write_failed" });
@@ -10779,7 +10790,7 @@ registerTools(ruleContextRuntimeTools({ withEnvelope, ToolError }), "rule-contex
 
 registerTools(vendorMeetingTools(), "vendor-meetings");
 
-const overdueUpdates = dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds, lockDealField, dealNextStepStatus, ToolError });
+const overdueUpdates = dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds, lockDealField, dealNextStepStatus, undoAppliedNextStep, ToolError });
 registerTools(overdueUpdates.tools, "deal-update-resolution");
 
 Object.freeze(TOOLS);
