@@ -246,7 +246,11 @@ def publish_status(session: Path, cfg: dict, token: str, bridge) -> bool:
     if 'review_questions' in report:
         payload['review_questions'] = questions
     receipt = session / 'phone-status.json'
-    if not count and post_call.read_json(receipt) == payload:
+    previous = post_call.read_json(receipt) or {}
+    pending = previous.get('pending_answer_outcomes', [])
+    if pending:
+        payload['answer_outcomes'] = pending
+    if not count and previous == payload:
         return True
     metadata = required_json(session / 'phone.json')
     code, reply = bridge.http_request('POST',
@@ -254,10 +258,21 @@ def publish_status(session: Path, cfg: dict, token: str, bridge) -> bool:
         payload, {'Authorization': f'Bearer {token}'})
     if code != 200 or reply.get('ok') is not True:
         return False
+    acknowledged = {item['question_id'] for item in pending}
+    outcomes = []
     for answer in reply.get('question_answers', []):
-        if any(question['id'] == answer['question_id'] for question in questions):
+        if answer['question_id'] in acknowledged:
+            continue
+        current = post_call.read_json(session / post_call.REPORT_FILE) or {}
+        question = next((q for q in current.get('review_questions', [])
+                         if q['id'] == answer['question_id']), None)
+        outcome = 'already_resolved'
+        if question and not question.get('resolved', False):
             post_call.resolve_question(session, answer['question_id'], answer['answer'])
-    post_call.write_private(receipt, payload)
+            outcome = 'applied'
+        outcomes.append({'question_id': answer['question_id'], 'outcome': outcome})
+    post_call.write_private(receipt, {**payload, **(
+        {'pending_answer_outcomes': outcomes} if outcomes else {})})
     return True
 
 

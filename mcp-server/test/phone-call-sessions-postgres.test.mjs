@@ -108,6 +108,24 @@ test('owner answers once and Studio pickup cannot resurrect resolved questions',
     assert.equal((await response.json()).answer, value);
   }
   assert.equal((await (await read()).json()).open_questions, 0);
+  const local = { id: 'q4', question: 'Confirm the local closure?' };
+  await status({ ...held, review_questions: [local] });
+  await answer({ ...body, question_id: local.id, idempotency_key: local.id });
+  const clear = { state: null, reason: null, open_questions: 0 };
+  const beforeAck = await (await status(clear)).json();
+  assert.ok(beforeAck.question_answers.some(q => q.question_id === local.id));
+  assert.deepEqual((await (await read()).json()).review_questions, []);
+  const outcomes = [{ question_id: local.id, outcome: 'already_resolved' }];
+  assert.equal((await status({ ...clear, answer_outcomes: outcomes })).status, 200);
+  assert.deepEqual((await (await read()).json()).answer_outcomes, outcomes);
+  assert.equal((await answer({ ...body, question_id: local.id, idempotency_key: local.id })).status, 200);
+  assert.equal((await (await answer({ ...body, question_id: local.id, idempotency_key: local.id })).json()).outcome,
+    'already_resolved');
+  assert.ok(!(await (await status(clear)).json()).question_answers.some(q => q.question_id === local.id));
+  const stale = { id: 'q5', question: 'Resolved on the Mac?' };
+  await status({ ...held, review_questions: [stale] });
+  await status(clear);
+  assert.deepEqual((await (await read()).json()).review_questions, []);
 });
 
 test('Studio holds override normal reads and clear idempotently', async () => {

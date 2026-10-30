@@ -73,8 +73,38 @@ class PhoneIntakeTests(unittest.TestCase):
         self.assertEqual(question['resolution'], 'dismiss')
         self.assertEqual(updates[0]['review_questions'], [{'id': 'q1', 'question': 'Confirm closure?'}])
         self.assertEqual(updates[1], updates[0])
-        self.assertEqual(updates[2], {'state': None, 'reason': None, 'open_questions': 0, 'review_questions': []})
+        self.assertEqual(updates[2], {'state': None, 'reason': None, 'open_questions': 0, 'review_questions': [],
+                                      'answer_outcomes': [{'question_id': 'q1', 'outcome': 'applied'}]})
         self.assertNotIn('Private summary', json.dumps(updates))
+
+    def test_locally_resolved_answer_is_acknowledged_to_the_app(self):
+        import post_call
+        phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
+        session = self.root / f"phone-{self.metadata['session_id']}"
+        post_call.write_private(session / post_call.REPORT_FILE, {
+            'review_questions': [{'id': 'q1', 'question': 'Confirm closure?',
+                                  'resolved': True, 'resolution': 'dismiss'}],
+        })
+        bridge = phone_intake.bridge_module()
+        updates = []
+
+        def http(_method, _url, body, _headers):
+            updates.append(body)
+            if len(updates) == 2:
+                return 503, {}
+            return 200, {'ok': True, 'question_answers': [] if 'answer_outcomes' in body else [
+                {'question_id': 'q1', 'answer': 'confirm'}]}
+
+        cfg = {'base_url': 'https://api.example.test'}
+        with patch.object(bridge, 'http_request', side_effect=http):
+            self.assertTrue(phone_intake.publish_status(session, cfg, 'synthetic-service-secret', bridge))
+            self.assertFalse(phone_intake.publish_status(session, cfg, 'synthetic-service-secret', bridge))
+            self.assertTrue(phone_intake.publish_status(session, cfg, 'synthetic-service-secret', bridge))
+        self.assertEqual(updates[1], updates[2])
+        self.assertEqual(updates[-1].get('answer_outcomes'), [
+            {'question_id': 'q1', 'outcome': 'already_resolved'}])
+        self.assertEqual(post_call.read_json(session / post_call.REPORT_FILE)[
+            'review_questions'][0]['resolution'], 'dismiss')
 
     def test_processor_reports_questions_and_holds_without_transcript_or_summary(self):
         import post_call

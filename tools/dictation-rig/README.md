@@ -28,14 +28,20 @@ The owning partner answers with `POST /api/v1/call-sessions/<id>/answers` and
 `{idempotency_key, session_id, question_id, answer}`. `answer` is a nonempty string
 of at most 1000 characters, including `confirm`, `dismiss`, or a written answer.
 A successful response is `{ok:true, session_id, question_id, answer}`. Replaying
-the same key and payload returns the same response. Reusing the key with a
+the same key and payload returns its receipt, including a later pickup outcome. Reusing the key with a
 different payload or answering a resolved question with a new key returns 409.
 An unknown question or another partner's session returns 404.
 
 Answers remove questions from the partner read and reduce its count immediately.
 The status response returns `question_answers` as `{question_id, answer}` objects.
 The Studio applies them through local `post_call.resolve_question` and reports
-its new count on the next status exchange. Answer receipts stay in the existing
+`answer_outcomes` as `{question_id, outcome}` on the next status exchange.
+The outcome is `applied`, or `already_resolved` when Call Mode resolved it first.
+Session reads expose `answer_outcomes` for `already_resolved` answers so the app
+can explain the result. Acknowledged answers stop appearing in `question_answers`.
+The existing local status receipt carries outcomes until the exchange succeeds.
+Studio reports are authoritative for open questions. Omitting `review_questions`
+clears old unanswered questions while preserving answer receipts. Answer receipts stay in the existing
 `studio_status` JSON so a delayed report cannot reopen an answered question.
 The Studio hold clears after local pickup and the cleared status report.
 
