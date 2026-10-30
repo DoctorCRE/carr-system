@@ -79,6 +79,14 @@ fn is_message_id(t: &str) -> bool {
     t.starts_with('<') && t.ends_with('>') && t.contains('@') && !t.contains(' ')
 }
 
+/// The address a run holds, if it holds exactly one. The store writes some addresses twice with no
+/// separator, and glues a recipient to the account address in recent Sent Items rows; a run with a
+/// second `@` after undoubling is a list, not an address.
+fn address(t: &str) -> Option<String> {
+    let t = record::undouble_pub(t.trim());
+    (t.matches('@').count() == 1 && record::looks_like_email(&t) && !is_message_id(&t)).then_some(t)
+}
+
 /// Build the named map for the record anchored at `anchor`.
 ///
 /// `end` bounds the record, so fields never bleed in from the next message.
@@ -127,9 +135,15 @@ pub fn build_bounded(blob: &[u8], anchor: usize, end: usize, back: usize) -> Map
         .filter(|f| f.rel.abs() <= SENDER_MAX_DIST || f.rel > 0)
         .collect();
     for (i, f) in nearest.iter().enumerate() {
+        // The nearest address-shaped run is the sender slot. When it holds a
+        // glued list, the sender is unknown; searching on would take a
+        // recipient after the anchor instead.
         let t = f.text.trim();
-        if record::looks_like_email(t) && !is_message_id(t) {
-            push!(Key::SenderAddress, f, -(i as isize) - 1, record::undouble_pub(t));
+        if address(t).is_none() && record::looks_like_email(t) && !is_message_id(t) {
+            break;
+        }
+        if let Some(sender) = address(t) {
+            push!(Key::SenderAddress, f, -(i as isize) - 1, sender);
             // The display name is the run *immediately* adjacent to the
             // address -- either just before it (the schema's Name/Address
             // order) or just after. Searching further back finds subject and
@@ -172,8 +186,8 @@ pub fn build_bounded(blob: &[u8], anchor: usize, end: usize, back: usize) -> Map
             }
             continue;
         }
-        if record::looks_like_email(t) {
-            push!(Key::Recipient, f, seq, t.to_lowercase());
+        if let Some(recipient) = address(t) {
+            push!(Key::Recipient, f, seq, recipient.to_lowercase());
             continue;
         }
     }
@@ -281,6 +295,16 @@ pub fn build_bounded(blob: &[u8], anchor: usize, end: usize, back: usize) -> Map
             // it rejects short title-case subjects like "Acme API routes".
             t.split_whitespace().count() >= 2
         })
+    });
+    // Layout B ends its header with the subject pair, just before the anchor. Prose checks reject a
+    // subject that is mostly digits or names a file, so a pair in that position needs only the value
+    // checks. The stored-first half keeps any reply prefix.
+    const PAIR_MAX_DIST: isize = 1024;
+    let subject = subject.map(|f| **f).or_else(|| {
+        let [first, second] = before.last_chunk::<2>()?;
+        let (a, b) = (record::undouble_pub(first.text.trim()), record::undouble_pub(second.text.trim()));
+        (first.rel >= -PAIR_MAX_DIST && key40(&a) == key40(&b) && record::subject_value(&a) && record::subject_value(&b))
+            .then_some(*first)
     });
     if let Some(f) = subject {
         let seq = ordered.iter().position(|g| g.rel == f.rel).unwrap_or(0) as isize + 1;
