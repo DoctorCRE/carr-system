@@ -871,6 +871,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
   client.jevApiKey = env.TYPESAFE_API_KEY;
   const writerRead = tool.writerConnection === true && !tool.write;
   let readOk = true;
+  let backgroundOwnsConnection = false;
   try {
     await client.query(tool.writerConnection && !tool.write ? "begin read only" : "begin");
     client.inTransaction = true;
@@ -908,7 +909,15 @@ export async function callTool(env, actor, name, args, profile = "full") {
         } catch (error) { await client.query('rollback'); throw error; }
         finally { client.inTransaction = false; }
       };
-      return await tool.afterCommit(client, actorWithId, args || {}, result, transact);
+      if (typeof env.ctx?.waitUntil === 'function') {
+        backgroundOwnsConnection = true;
+        const task = Promise.resolve()
+          .then(() => tool.afterCommit(client, actorWithId, args || {}, result, transact))
+          .catch(() => {}) // The committed pending receipt remains available on Home.
+          .finally(async () => { client.release(); await pool.end(); });
+        try { env.ctx.waitUntil(task); } catch { /* The save is already committed. */ }
+      }
+      return result;
     }
     return result;
   } catch (e) {
@@ -948,7 +957,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
     }
     throw e;
   } finally {
-    client.release();
+    if (!backgroundOwnsConnection) client.release();
     // Actor-scoped read doors use a read-only writer transaction. Record their
     // metadata through the same detached audit path as ordinary reader calls;
     // the transaction has already ended, so this cannot change its answer.
@@ -957,7 +966,10 @@ export async function callTool(env, actor, name, args, profile = "full") {
       scheduleWriterReadCall(tool, actor, name, readOk,
         env.ctx?.waitUntil?.bind(env.ctx), insertFn);
     }
-    env.ctx?.waitUntil?.(pool.end());
+    if (!backgroundOwnsConnection) {
+      const cleanup = pool.end().catch(() => {});
+      env.ctx?.waitUntil?.(cleanup);
+    }
   }
 }
 

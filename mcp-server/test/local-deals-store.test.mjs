@@ -1763,6 +1763,29 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         await c.query(`create or replace view v_deal_room_phase_change as ${definition}`);
       }
     });
+    await t.test('two transient timeouts share one background budget across pending requests', async () => transaction(async () => {
+      await fixture(false);
+      await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      const args = {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord sent the requested revised terms.'};
+      await TOOLS['add-deal-note'].handler(c, actor, {...args, idempotency_key: randomUUID()});
+      let calls = 0;
+      c.jevClient = {systemOne: async (_request, {signal}) => {
+        calls++;
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(resolve, 31000);
+          signal.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason); }, {once: true});
+        });
+        throw new Error('assessment exceeded the Worker lifetime');
+      }};
+      const started = performance.now();
+      const saved = await addNote(c, actor, args);
+      assert.equal(saved.overdue_assessment.pending, true);
+      assert.equal(calls, 2, 'the budget covers both requests together');
+      assert.ok(performance.now()-started < 30000, 'both attempts fit the waitUntil lifetime');
+    }));
     await t.test('Home exposes expired pending, failed and stale running assessments for manual review', async () => transaction(async () => {
       await fixture(false);
       await TOOLS['set-next-step'].handler(c, actor, {
