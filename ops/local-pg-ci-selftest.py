@@ -462,10 +462,12 @@ m.run_local_ci(repo=Path(sys.argv[2]), ci_class='migration', port=int(sys.argv[3
 """
     child = subprocess.Popen([sys.executable, '-u', '-c', script, str(MODULE_PATH), str(repo), str(port)],
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    assert child.stdout is not None
+    stdout = child.stdout
     root = None
     pid = None
     try:
-        root = Path(child.stdout.readline().strip())
+        root = Path(stdout.readline().strip())
         deadline = time.monotonic() + 20
         pidfile = root / 'data/postmaster.pid'
         while not (repo / 'ready').exists() and child.poll() is None and time.monotonic() < deadline:
@@ -476,7 +478,7 @@ m.run_local_ci(repo=Path(sys.argv[2]), ci_class='migration', port=int(sys.argv[3
         child.wait(timeout=5)
         deadline = time.monotonic() + 15
         alive = pid is not None
-        while alive and time.monotonic() < deadline:
+        while pid is not None and alive and time.monotonic() < deadline:
             try:
                 os.kill(pid, 0)
             except ProcessLookupError:
@@ -498,7 +500,7 @@ m.run_local_ci(repo=Path(sys.argv[2]), ci_class='migration', port=int(sys.argv[3
             subprocess.run([str(bins.pg_ctl), '-D', str(root / 'data'), '-m', 'immediate', '-w', 'stop'], capture_output=True)
         if root and root.exists():
             shutil.rmtree(root)
-        child.stdout.close()
+        stdout.close()
 
 print(f"local PG CI selftest — {passed}/{passed + len(failed)} passed")
 if failed:
