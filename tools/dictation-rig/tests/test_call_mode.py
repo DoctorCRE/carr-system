@@ -1284,6 +1284,41 @@ class PostCallTests(unittest.TestCase):
         post_call.resolve_question(self.session, question["id"], "Dell meant deal A.")
         self.assertIsNotNone(post_call.retention_ready(self.session, "b" * 64))
 
+    def test_missing_side_requires_visible_partner_acknowledgment_before_purge(self) -> None:
+        home = Path(self.tmp.name) / "home"
+        recordings = home / "Recordings"
+        recordings.mkdir(parents=True)
+        self.session = self.session.rename(recordings / self.session.name)
+        (home / "Library" / "Logs").mkdir(parents=True)
+        (self.session / "mic.caf").write_bytes(b"synthetic audio")
+        post_call.write_private(self.session / "transcript.json", {
+            "segments": [{"speaker": "Joe", "text": "Hello"}],
+            "speaker_labels": {"mic": "Joe", "system": "Dell"}, "missing_tracks": ["system"],
+        })
+        post_call.store_context(self.session, self.context)
+        post_call.process_session(self.session, distiller=lambda _request: self.output(
+            joe_tasks=[], deal_updates=[], draft_proposals=[],
+        ))
+        visible = post_call.report_for_deal_room(self.session)["report"]
+        self.assertEqual(visible.get("missing_tracks"), ["system"])
+        question = visible["review_questions"][0]
+        self.assertIn("system", question["question"])
+        self.assertIn("Dell", question["question"])
+        self.assertIsNone(post_call.retention_ready(self.session, "b" * 64))
+        post_call.write_private(self.session / "ingested.json", {
+            "post_call": True, "aggregate_report_hash": "a" * 64,
+            "backend_report_sha256": "b" * 64, "pending_items": 0,
+            "ingested_at": "2000-01-01T00:00:00Z",
+        })
+        command = ["/bin/sh", str(BIN_DIR / "purge-recordings.sh")]
+        isolated = {"HOME": str(home), "PATH": "/usr/bin:/bin"}
+        subprocess.run(command, check=True, env=isolated)
+        self.assertTrue((self.session / "mic.caf").exists())
+        post_call.resolve_question(self.session, question["id"], "File knowingly with Dell audio missing.")
+        self.assertIsNotNone(post_call.retention_ready(self.session, "b" * 64))
+        subprocess.run(command, check=True, env=isolated)
+        self.assertFalse((self.session / "mic.caf").exists())
+
     def test_retention_requires_final_candidate_dispositions(self) -> None:
         post_call.store_context(self.session, self.context)
         post_call.process_session(self.session, distiller=lambda _request: self.output())
