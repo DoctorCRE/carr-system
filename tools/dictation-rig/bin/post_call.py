@@ -1262,6 +1262,24 @@ def report_sha256(session_dir: Path) -> str:
     return hashlib.sha256(json.dumps(report, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def resolve_outlook_intent(session_dir: Path, draft_id: str, exists: bool) -> dict[str, Any]:
+    if not isinstance(exists, bool):
+        raise ContractError("exists must be true or false")
+    with update_report(session_dir) as report:
+        draft = next((item for item in report.get("draft_proposals", []) if item.get("draft_id") == draft_id), None)
+        drafts = read_json(session_dir / DRAFTS_FILE) or {"drafts": {}}
+        intent = drafts["drafts"].get(draft_id)
+        if (draft is None or not isinstance(intent, dict) or intent.get("state") != "intent"
+                or intent.get("content_hash") != draft.get("content_hash")):
+            raise ContractError("draft has no matching intent marker")
+        if exists:
+            drafts["drafts"][draft_id] = {"content_hash": intent["content_hash"], "created_at": now()}
+        else:
+            del drafts["drafts"][draft_id]
+        write_private(session_dir / DRAFTS_FILE, drafts)
+        return {"draft_id": draft_id, "state": "created" if exists else "cleared"}
+
+
 def create_outlook_draft(session_dir: Path, draft_id: str, approved_content_hash: str, runner: Callable[..., Any] = subprocess.run) -> dict[str, Any]:
     with session_lock(session_dir):
         report = read_json(session_dir / REPORT_FILE)
