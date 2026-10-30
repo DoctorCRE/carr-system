@@ -1448,6 +1448,23 @@ const submitDraft = (proposal, extra = {}, identity = actor) => command('submit-
   cc: [identity.slug === 'dell' ? 'joe@example.test' : 'dell@example.test'], ...extra }, identity, 'carr_writer');
 const refuses = (promise, code) => assert.rejects(promise, error => error.payload?.error === code);
 
+test('only the mailbox owner can dismiss a reply draft', async () => {
+  const dell = { ...(await c.query("insert into actor(slug,kind,display_name) values('dell','human','Synthetic Dell') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
+  for (const [owner, other] of [[actor, dell], [dell, actor]]) {
+    const proposal = await draftFor(owner.slug);
+    const args = { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+      base_version: 1, reason: 'Already handled' };
+    await refuses(command('dismiss-email-proposal', args, other, 'carr_writer'), 'email_draft_not_owner');
+    const pending = (await command('list-email-proposals', {}, owner, 'carr_reader')).proposals
+      .find(item => item.id === proposal.proposal_id);
+    assert.equal(pending.status, 'pending');
+    assert.equal(pending.version, 1);
+    const dismissed = await command('dismiss-email-proposal', args, owner, 'carr_writer');
+    assert.equal(dismissed.status, 'dismissed');
+    assert.equal((await command('dismiss-email-proposal', args, owner, 'carr_writer')).replayed, true);
+  }
+});
+
 test('recent reply outcomes are bounded, ordered and scoped to the partner', async () => {
   await c.query('delete from email_proposal');
   const older = await draftFor(), newer = await draftFor(), other = await draftFor('dell'), legacy = await draftFor();
