@@ -294,6 +294,12 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                     if not publish_status(session, cfg, token, bridge):
                         counts['pending'] += 1
                         continue
+                    report = post_call.read_json(session / post_call.REPORT_FILE) or {}
+                    if report.get('checks_hold'):
+                        post_call.process_session(session)
+                        if not publish_status(session, cfg, token, bridge):
+                            counts['pending'] += 1
+                            continue
                     if (session / 'ingested.json').exists():
                         continue
                     local = post_call.read_json(session / post_call.STATUS_FILE) or {}

@@ -761,12 +761,26 @@ def _complete_session(session_dir: Path, report: dict[str, Any]) -> dict[str, An
 def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]], *,
                             max_attempts: int = 3) -> dict[str, Any]:
     if (session_dir / REPORT_FILE).exists():
-        existing = read_json(session_dir / STATUS_FILE)
-        if existing is not None and existing.get("state") in {"ready_review", "filed"}:
-            return existing
         report = read_json(session_dir / REPORT_FILE)
         if report is None:
             raise ContractError("post-call report is unreadable")
+        if report.get("checks_hold") and any((item.get("checks") or {}).get("reason")
+                                             for item in _report_candidates(report)):
+            import post_call_jev
+
+            resume_context = context_from_session(session_dir) or fetch_context(session_dir)
+            stored = read_json(session_dir / CONTEXT_FILE) or {}
+            resume_context = {**resume_context, "speaker_labels": stored.get("speaker_labels"),
+                       "local_partner": stored.get("recorder")}
+            transcript = read_json(session_dir / "transcript.json")
+            if transcript is None:
+                raise ContractError("transcript.json is required to resume Jev checks")
+            post_call_jev.check_distillation(report, resume_context, transcript, client=_jev_fixture_client(),
+                                            budget_ledger=session_dir.parent / ".jev-budget.json")
+            write_private(session_dir / REPORT_FILE, report)
+        existing = read_json(session_dir / STATUS_FILE)
+        if existing is not None and existing.get("state") in {"ready_review", "filed"}:
+            return existing
         return _complete_session(session_dir, report)
     existing = read_json(session_dir / STATUS_FILE) or {}
     attempts = existing.get("extraction_attempts", 0)
@@ -1126,6 +1140,17 @@ def report_for_deal_room(session_dir: Path) -> dict[str, Any]:
     return {"status": status, "report": visible}
 
 
+def jev_question_id(session: str) -> str:
+    return hashlib.sha256(f"{session}:jev_partial_unavailable".encode()).hexdigest()[:16]
+
+
+def clear_checks_hold(report: dict[str, Any]) -> None:
+    hold = report.pop("checks_hold", None)
+    if hold:
+        narrative = report.get("report", {})
+        narrative["open_questions"] = [q for q in narrative.get("open_questions", []) if q != hold]
+
+
 def resolve_question(session_dir: Path, question_id: str, resolution: str) -> dict[str, Any]:
     report = read_json(session_dir / REPORT_FILE)
     if report is None:
@@ -1135,6 +1160,8 @@ def resolve_question(session_dir: Path, question_id: str, resolution: str) -> di
         if question.get("id") == question_id:
             question["resolved"] = True
             question["resolution"] = resolution
+            if question_id == jev_question_id(session_dir.name):
+                clear_checks_hold(report)
             write_private(session_dir / REPORT_FILE, report)
             return {"question_id": question_id, "resolved": True}
     raise ContractError("unknown question id")

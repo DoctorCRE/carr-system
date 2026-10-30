@@ -22,7 +22,7 @@ transcript, never the full recorded-deal list, never a draft or email body.
 """
 from __future__ import annotations
 
-import hashlib
+from post_call import clear_checks_hold, jev_question_id
 from pathlib import Path
 import call_budget
 from concurrent.futures import ThreadPoolExecutor
@@ -256,10 +256,6 @@ def _unavailable() -> dict[str, Any]:
     return {"unavailable": True}
 
 
-def _review_id(session: str, tag: str) -> str:
-    return hashlib.sha256(f"{session}:{tag}".encode()).hexdigest()[:16]
-
-
 def check_distillation(result: dict[str, Any], context: dict[str, Any],
                         transcript: dict[str, Any], *,
                         client: Any = None, budget_ledger: Path | None = None) -> dict[str, Any]:
@@ -290,10 +286,13 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
     lists = [(name, _LIST_KIND[name]) for name in
              ("joe_tasks", "dell_tasks", "deal_updates", "draft_proposals")]
 
-    any_unavailable = False
+    resuming = bool(result.get("checks_hold"))
+    clear_checks_hold(result)
     pending: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
     for list_name, kind in lists:
         for item in result.get(list_name, []):
+            if resuming and not (item.get("checks") or {}).get("reason"):
+                continue
             if not item.get("evidence"):
                 item["checks"] = {"advisory_only": True, "flagged": True,
                                   "reasons": ["No bounded evidence available; independent review required."]}
@@ -318,17 +317,27 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
 
         with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CALLS) as pool:
             list(pool.map(judge, pending))
-        any_unavailable = any(item["checks"].get("unavailable") for item, _, _ in pending)
 
     holds = sorted({item['checks']['reason'] for item, _, _ in pending if item['checks'].get('reason')})
     if holds:
         result['checks_hold'] = ' '.join(holds)
         result.setdefault('report', {}).setdefault('open_questions', []).append(result['checks_hold'])
+    any_unavailable = any((item.get("checks") or {}).get("unavailable")
+                          for list_name, _ in lists for item in result.get(list_name, []))
+    questions = result.setdefault("review_questions", [])
+    question_id = jev_question_id(session)
+    question = next((q for q in questions if q.get("id") == question_id), None)
     if any_unavailable:
-        result.setdefault("review_questions", []).append({
-            "id": _review_id(session, "jev_partial_unavailable"),
+        replacement = {
+            "id": question_id,
             "question": "Automatic Jev checks did not run for one or more items in this pack. " +
                 " ".join(holds),
             "resolved": False,
-        })
+        }
+        if question is None:
+            questions.append(replacement)
+        else:
+            question.update(replacement)
+    elif question is not None:
+        question.update(resolved=True, resolution="Automatic Jev checks resumed.")
     return result
