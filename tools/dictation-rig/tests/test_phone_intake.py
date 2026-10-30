@@ -27,6 +27,10 @@ class PhoneIntakeTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        isolated_env = patch.dict('os.environ', {'HOME': str(self.root),
+                                                   'CARR_CAPTURE_LOG': str(self.root / 'capture-bridge.log')})
+        isolated_env.start()
+        self.addCleanup(isolated_env.stop)
         self.audio = b'synthetic fixture only'
         self.metadata = {
             'schema_version': 1, 'session_id': '10000000-0000-0000-0000-000000000001',
