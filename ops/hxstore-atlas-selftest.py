@@ -59,6 +59,8 @@ class AtlasContractTests(unittest.TestCase):
             code = subprocess.check_output(['git', 'show', f'{revision}:{source}'], cwd=ROOT, text=True)
             symbols = {ev['symbol'] for entry in self.atlas['entries'] for ev in entry['evidence']
                        if ev['source'] == source}
+            symbols.update(entry['decoder'] for entry in self.atlas['entries']
+                           if (entry['decoder'] or '').startswith(Path(source).stem + '::'))
             for symbol in symbols:
                 with self.subTest(source=source, symbol=symbol):
                     self.assertIsNotNone(re.search(r'\bfn\s+' + re.escape(symbol.split('::')[-1]) + r'\s*\(', code),
