@@ -327,6 +327,55 @@ test("claim authenticates first, requires consent, and never mints on nonce repl
   assert.equal(db.sessions.length, 1);
 });
 
+test("Studio claims pass the actor gate after the idempotent device migration", async () => {
+  const { acquireDisposablePostgres } = await import("./helpers/disposable-postgres.mjs");
+  const { existsSync } = await import("node:fs");
+  const { default: pg } = await import("pg");
+  const { migrationNames } = await import("./migration-source.testhelper.mjs");
+  const bin = ["/opt/homebrew/opt/postgresql@18/bin", "/usr/lib/postgresql/18/bin"]
+    .find(path => existsSync(`${path}/initdb`));
+  assert.ok(bin, "PostgreSQL 18 is required for the Studio migration proof");
+  const fixture = await acquireDisposablePostgres({ prefix: "studio-capture-", pgCtl: `${bin}/pg_ctl` });
+  let client;
+  try {
+    await fixture.run(`${bin}/initdb`, ["-D", `${fixture.root}/data`, "-U", "carr_ci", "--auth=trust", "--no-locale"]);
+    await fixture.run(`${bin}/pg_ctl`, ["-D", `${fixture.root}/data`, "-l", `${fixture.root}/server.log`,
+      "-o", `-k ${fixture.root} -h ''`, "-w", "start"]);
+    await fixture.run(`${bin}/createdb`, ["-h", fixture.root, "-U", "carr_ci", "carr_ci"]);
+    client = new pg.Client({ host: fixture.root, user: "carr_ci", database: "carr_ci" });
+    await client.connect();
+    await client.query("create role neondb_owner");
+    await fixture.run(`${bin}/psql`, ["-h", fixture.root, "-U", "carr_ci", "-d", "carr_ci",
+      "-X", "-v", "ON_ERROR_STOP=1", "-q", "-f", new URL("../../db/schema.sql", import.meta.url).pathname]);
+    const handler = createCaptureHandler({ withWriter: fn => fn(client), randomStringFn: () => "studio-session-proof" });
+    const body = { ...validClaim, device_id: "quill-joe-studio" };
+    const environment = { CAPTURE_TOKENS: '{"quill-joe-studio":"device-secret"}' };
+    const before = await handler.fetch(claimRequest(body), environment);
+    assert.equal(before.status, 503);
+    assert.equal((await before.json()).error, "device_actor_not_provisioned");
+    const migration = migrationNames().find(name => /^\d{4}_provision_studio_capture_device\.sql$/.test(name));
+    assert.ok(migration, "Studio device migration exists");
+    await client.query(readMigration(migration));
+    const first = (await client.query("select * from actor where slug='quill-joe-studio'")).rows;
+    assert.equal(first.length, 1);
+    assert.equal(first[0].kind, "automation");
+    assert.equal(first[0].active, true);
+    assert.equal(first[0].display_name, "Quill capture rig (Joe Mac Studio)");
+    assert.equal(first[0].email, null);
+    assert.equal(first[0].phone, null);
+    await client.query(readMigration(migration));
+    assert.deepEqual((await client.query("select * from actor where slug='quill-joe-studio'")).rows, first);
+    const claimed = await handler.fetch(claimRequest(body), environment);
+    assert.equal(claimed.status, 200);
+    assert.equal((await claimed.json()).session_token, "studio-session-proof");
+    await assert.rejects(executeRegisteredTool(client, { id: first[0].id, slug: body.device_id, human: false },
+      "resolve-candidate", { idempotency_key: "studio-human-only-proof", candidate_id: ids.session, accept: true }),
+    error => error instanceof ToolError && error.payload.error === "human_only_verb_requires_verified_partner");
+  } finally {
+    try { await client?.end(); } finally { await fixture.close(); }
+  }
+});
+
 test("status transitions move forward, reject every backward edge, and stop at terminals", async () => {
   for (const terminal of ["done", "failed"]) {
     const { db, r, token } = await claimed();
