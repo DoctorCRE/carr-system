@@ -86,7 +86,7 @@ def event(goid, start, minutes=60, subject='Site visit', attendees=(), organizer
 
 
 def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identities=None, decoded=None,
-             folder_membership=True):
+             folder_membership=True, slot_decoder=False):
     con = sqlite3.connect(path)
     con.executescript(SCHEMA)
     # Decoders built before WR-000502 have no local_keys column; keep testing that shape.
@@ -119,7 +119,9 @@ def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identiti
     con.executemany('INSERT INTO meta VALUES (?,?)',
                     [('blocks_found', found), ('blocks_verified', verified), ('messages', len(mails)),
                      ('event_identities', len(events) if identities is None else identities),
-                     ('events_decoded', len(events) if decoded is None else decoded)])
+                     ('events_decoded', len(events) if decoded is None else decoded),
+                     # The slot decoder (WR-000589) reports rejected messages; older decoders do not.
+                     *([('messages_rejected', 0)] if slot_decoder else [])])
     if folder_membership:
         con.executescript("""
             CREATE TABLE folders(id INTEGER PRIMARY KEY, account_id INTEGER, name TEXT,
@@ -1020,6 +1022,23 @@ class IntakeTest(unittest.TestCase):
         moved = self.run_intake([mail('pat@example.test', -timedelta(days=3), local_keys='77')])
         self.assertEqual((moved.counts['emails'], moved.counts['full_text_notes']), (0, 1))
         self.assertEqual([a['kind'] for _, a in self.fake.writes('log-activity')], ['email_in', 'note'])
+
+    def test_keyless_state_is_retired_once_when_the_decoder_keys_every_row(self):
+        # A keyless preview filed by the anchor decoder, then the same email from the slot decoder with a
+        # store key and a corrected (earlier) time: no second email_in, and no orphaned hydration entry.
+        first = self.run_intake([mail('pat@example.test', -timedelta(hours=1), kind='preview')])
+        self.assertEqual((first.counts['logged'], first.counts['preview_only']), (1, 1))
+        self.fake.now += timedelta(minutes=30)
+        switched = self.run_intake([mail('pat@example.test', -timedelta(hours=2), local_keys='77')], slot_decoder=True)
+        self.assertEqual((switched.counts['logged'], switched.counts['legacy_keyless_retired'],
+                          switched.counts['legacy_keyed_baseline']), (0, 1, 1))
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertEqual((state['pending_full'], state['mail_unresolved']), ({}, {}))
+        later = mail('lee@example.test', timedelta(minutes=10), subject='New after switch', local_keys='78')
+        self.fake.now += timedelta(minutes=30)
+        after = self.run_intake([mail('pat@example.test', -timedelta(hours=2), local_keys='77'), later], slot_decoder=True)
+        self.assertEqual((after.counts['logged'], after.counts['legacy_keyless_retired']), (1, 0))
+        self.assertEqual([a['kind'] for _, a in self.fake.writes('log-activity')], ['email_in', 'email_in'])
 
     def test_nested_folder_move_preserves_one_message(self):
         message = mail('pat@example.test', -timedelta(hours=1), local_keys='77')
@@ -2425,13 +2444,13 @@ class IntakeTest(unittest.TestCase):
                   for i in range(19)] + [mail(OWNER, -timedelta(hours=1), subject='', recipients=None)]
         expected = {'decoder_block_verification_bp': 9990, 'decoder_sender_bp': 10000,
                     'decoder_subject_bp': 9500, 'decoder_recipients_bp': 9048, 'decoder_sent_time_bp': 10000,
-                    'decoder_folder_bp': 10000}
+                    'decoder_folder_bp': 10000, 'decoder_message_layout_bp': 10000}
         processed = self.run_intake(sample)
         self.assertEqual({k: v for k, v in processed.counts.items() if k.endswith('_bp')}, expected)
         expected_samples = {'decoder_block_verification_sample': 1000, 'decoder_sender_sample': 20,
                             'decoder_subject_sample': 20, 'decoder_recipients_sample': 21,
                             'decoder_sent_time_sample': 21, 'decoder_folder_sample': 20,
-                            'decoder_attachment_metadata_sample': 0}
+                            'decoder_attachment_metadata_sample': 0, 'decoder_message_layout_sample': 21}
         self.assertEqual({k: v for k, v in processed.counts.items() if k.endswith('_sample')}, expected_samples)
         unchanged = self.run_intake(sample, touch=False)
         self.assertEqual(unchanged.reason, 'store_unchanged')

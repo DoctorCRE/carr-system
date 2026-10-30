@@ -506,6 +506,8 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             ("blocks_verified", blocks_ok),
             ("messages", stored),
             ("messages_full", rows.iter().filter(|r| r.html.is_some()).count()),
+            // Message keys the decoder could not read or classify: lost mail, never silently dropped.
+            ("messages_rejected", objects.rejected(&message_objects)),
             ("copies_collapsed", rows.iter().map(|r| r.m.revisions - 1).sum()),
             ("local_key_conflicts", 0),
             ("sidecar_files", sidecars.len()),

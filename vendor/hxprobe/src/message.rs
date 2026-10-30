@@ -125,6 +125,8 @@ pub struct Message {
 
 #[derive(Default)]
 pub struct Index {
+    /// Every key named by a message identity header, accepted or not.
+    observed: BTreeSet<u64>,
     revisions: BTreeMap<u64, Vec<Revision>>,
     recipients: BTreeMap<u64, BTreeMap<u64, BTreeSet<RecipientKey>>>,
     bodies: BTreeMap<u64, BTreeSet<Body>>,
@@ -203,6 +205,14 @@ fn newest<T: Clone + Ord>(revs: &[Revision], get: impl Fn(&Revision) -> Option<T
     best.and_then(|(_, values)| (values.len() == 1).then(|| values.into_iter().next().unwrap()))
 }
 
+/// The current value: every revision tied at the newest time must hold the same set value.
+/// Unlike `newest`, an unset or invalid current value is not filled from an older revision.
+fn current<T: Clone + Ord>(revs: &[Revision], get: impl Fn(&Revision) -> Option<T>) -> Option<T> {
+    let latest = revs.iter().map(|r| r.modified).max()?;
+    let values: Option<BTreeSet<T>> = revs.iter().filter(|r| r.modified == latest).map(get).collect();
+    values.filter(|v| v.len() == 1).and_then(|v| v.into_iter().next())
+}
+
 /// One value all revisions agree on, or `None`.
 fn agreed<T: Clone + Ord>(values: impl Iterator<Item = T>) -> Option<T> {
     let set: BTreeSet<T> = values.collect();
@@ -212,6 +222,9 @@ fn agreed<T: Clone + Ord>(values: impl Iterator<Item = T>) -> Option<T> {
 impl Index {
     pub fn observe(&mut self, block: usize, data: &[u8]) {
         for (_, object) in envelopes(data, MESSAGE) {
+            if let Some((key, _)) = super::object::reference(object, MESSAGE.1, MESSAGE_KIND) {
+                self.observed.insert(key);
+            }
             if let Some((key, r)) = revision(block, object) {
                 self.revisions.entry(key).or_default().push(r);
             }
@@ -226,6 +239,12 @@ impl Index {
                 self.bodies.entry(key).or_default().insert(b);
             }
         }
+    }
+
+    /// Keys whose every revision broke the layout, plus decoded keys with no readable ItemClass:
+    /// mail the decoder cannot place, which must count against coverage rather than vanish.
+    pub fn rejected(&self, messages: &BTreeMap<u64, Message>) -> usize {
+        self.observed.iter().filter(|k| messages.get(k).is_none_or(|m| m.item_class.is_none())).count()
     }
 
     pub fn messages(&self) -> BTreeMap<u64, Message> {
@@ -257,7 +276,7 @@ impl Index {
                     block: latest.block,
                     revisions: revs.len(),
                     account: newest(revs, |r| Some(r.account)),
-                    folder: newest(revs, |r| r.folder),
+                    folder: current(revs, |r| r.folder),
                     item_class: newest(revs, |r| r.item_class.clone()),
                     sent_unix: newest(revs, |r| r.sent),
                     received_unix: newest(revs, |r| r.received),
@@ -389,6 +408,32 @@ pub(crate) mod tests {
                          ("bcc", "bcc@example.test".into(), "Bcc".into())]);
         index.observe(0, &envelope(0x015e, &recipient(72, CC, "other@example.test", None)));
         assert_eq!(index.messages()[&70].recipients, None);
+    }
+
+    #[test]
+    fn the_folder_comes_from_the_current_revision_only() {
+        let inbox = |m: &mut Vec<u8>, owner: u64| header(&mut m[888..934], 0x004d, 50, FOLDER_KIND, owner);
+        let mut older = message(70, 10, &[]);
+        inbox(&mut older, 7);
+        for newer in [message(70, 20, &[]), { let mut m = message(70, 20, &[]); inbox(&mut m, 8); m }] {
+            let mut index = Index::default();
+            index.observe(0, &[envelope(0x060f, &older), envelope(0x060f, &newer)].concat());
+            assert_eq!(index.messages()[&70].folder, None);
+        }
+        let mut index = Index::default();
+        index.observe(0, &envelope(0x060f, &older));
+        assert_eq!(index.messages()[&70].folder, Some(50));
+    }
+
+    #[test]
+    fn keys_without_a_readable_revision_or_item_class_are_counted_as_rejected() {
+        let mut bad = message(71, 10, &[(SUBJECT, utf16("Subject"))]);
+        put(&mut bad, SUBJECT, &0xffffu32.to_le_bytes());
+        let mut index = Index::default();
+        index.observe(0, &[envelope(0x060f, &message(70, 10, &[(ITEM_CLASS, utf16("IPM.Note"))])),
+                           envelope(0x060f, &bad), envelope(0x060f, &message(72, 10, &[]))].concat());
+        let messages = index.messages();
+        assert_eq!((messages.len(), index.rejected(&messages)), (2, 2));
     }
 
     #[test]
