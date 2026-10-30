@@ -322,6 +322,15 @@ class IntakeTest(unittest.TestCase):
     def report_text(self):
         return '\n'.join(p.read_text() for p in sorted(self.out().glob('report-*.md')))
 
+    def test_record_layer_receives_stable_mailbox_identity(self):
+        first = mail(CLIENT.email, timedelta(hours=-1),
+                     local_keys='77', message_id='<Stable@example.test>')
+        self.run_intake([first])
+        calls = [a for v, a in self.fake.calls if v == 'log-activity' and a['kind'] == 'email_in']
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].get('email_identity'),
+                         {'mailbox_owner': 'joe', 'item_id': 'stable@example.test'})
+
     def test_receipt_subject_coverage_counts_all_admitted_messages_and_persists(self):
         old = mail('one@example.test', -timedelta(days=40), subject='')
         recent = mail('two@example.test', -timedelta(hours=1), subject='Synthetic topic')

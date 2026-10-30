@@ -1949,3 +1949,38 @@ test('an unconfirmed receipt never creates sent correspondence', async () => {
   await command('record-email-sent', { ...args, status: 'failed', reason: 'unconfirmed_after_86400' }, machineFor('joe'), 'carr_writer');
   assert.deepEqual((await command('get-deal-room', { deal: sentDeal })).activities, []);
 });
+
+
+test('email identity survives new retry keys and filing to a deal', async () => {
+  const identity = { mailbox_owner: 'joe', item_id: '<Durable-Retry@example.test>' };
+  const args = { ref: clientRef, kind: 'email_in', summary: 'Synthetic durable email',
+    detail: quote, email_identity: identity };
+  const first = await command('log-activity', { ...args, idempotency_key: randomUUID() }, machineFor('joe'));
+  await c.query('update activity set deal_id=$2 where id=$1', [first.activity_id, deal]);
+  const retry = await command('log-activity', { ...args, summary: 'Decoder corrected the subject',
+    email_identity: { ...identity, item_id: 'durable-retry@example.test' },
+    idempotency_key: randomUUID() }, machineFor('joe'));
+  assert.equal(retry.activity_id, first.activity_id);
+  const distinct = await command('log-activity', { ...args, idempotency_key: randomUUID(),
+    email_identity: { ...identity, item_id: 'distinct@example.test' } }, machineFor('joe'));
+  assert.notEqual(distinct.activity_id, first.activity_id);
+});
+
+test('intake and confirmed send share correspondence in either arrival order', async () => {
+  for (const intakeFirst of [false, true]) {
+    const { proposal, sentDeal } = await sentDraftFixture();
+    const submitted = await submitDraft(proposal);
+    const item = `durable-send-${intakeFirst}@example.test`;
+    const ingest = () => command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+      kind: 'email_out', summary: 'Synthetic sent intake', detail: 'Synthetic reply',
+      email_identity: { mailbox_owner: 'joe', item_id: item } }, machineFor('joe'), 'carr_writer');
+    const initial = intakeFirst ? await ingest() : null;
+    await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+      base_version: 2, sha256: submitted.sha256, status: 'sent', sent_item_id: item }, machineFor('joe'), 'carr_writer');
+    const room = await command('get-deal-room', { deal: sentDeal }, actor, 'carr_reader');
+    const sent = room.activities.filter(a => a.email_context?.send_id === proposal.proposal_id);
+    assert.equal(sent.length, 1);
+    if (initial) assert.equal(sent[0].id, initial.activity_id);
+    assert.equal((await ingest()).activity_id, sent[0].id);
+  }
+});
