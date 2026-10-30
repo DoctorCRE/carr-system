@@ -428,3 +428,37 @@ test("add-loop advertises single owners only", () => {
   assert.doesNotMatch(owner.description, /\/|→/);
   assert.match(owner.description, /joe, dell or claude/);
 });
+
+test("loop input refusals preserve their names and safe hints", t => {
+  t.mock.method(console, "error", () => {});
+  for (const [code, hint] of [
+    ["blocker_detail_required", "Provide blocker_detail of at least 12 characters naming the specific person, ruling, date or prerequisite."],
+    ["blocker_detail_vague", "Make blocker_detail specific about who or what must happen first."],
+    ["blocker_not_carried_by_kind", "Use kind open_loop for blocker, blocker_detail, residue_kind and residue_host, or omit those fields."],
+    ["blocker_required", "For kind open_loop, provide blocker as human_only, counterparty, ruling, external_event, other_lane or capability."],
+    ["dated_marker_needs_date", "Provide due_on as YYYY-MM-DD when marker is dated."],
+    ["due_date_needs_dated_marker", "Use marker dated with due_on, omit marker on add-loop to infer it, or omit due_on."],
+    ["empty_loop", "Provide body or title with the loop text."],
+    ["missing_kind", "Provide kind as open_loop, team_loop, action_required or idea."],
+    ["unknown_blocker_class", "Use blocker human_only, counterparty, ruling, external_event, other_lane or capability."],
+    ["unknown_domain", "Use domain deals, prospecting, networking, marketing, business or system, or omit it."],
+    ["unknown_kind", "For loops use kind open_loop, team_loop, action_required or idea; for party links use the documented link kind vocabulary."],
+    ["unknown_marker", "Use marker bell, dated, decision or none."],
+    ["residue_not_carried_by_class", "Omit residue_kind and residue_host unless blocker is human_only, ruling or capability."],
+    ["residue_required", "Provide residue_kind and residue_host for blocker human_only, ruling or capability."],
+    ["unknown_residue_kind", "Use residue_kind provider_login, os_password, physical_act, money_movement, external_send or joe_only_fact."],
+    ["residue_host_required", "Provide residue_host with at least two characters naming the provider or host."],
+    ["bad_number", "Use digits only for number."],
+    ["bad_last_surfaced", "Use YYYY-MM-DD for last_surfaced."],
+    ["need_block_id_or_file_and_section", "Provide block_id or both file and section."],
+    ["empty_prose", "Provide a non-empty replacement paragraph in prose_md."],
+    ["outcome_required", "Provide a non-empty outcome describing what happened, and use resolution dropped if abandoning the work."],
+    ["bookkeeping_close_is_dropped", "Use resolution dropped and name successor_loop when work continues in another loop."],
+    ["bookkeeping_outcome_prefix", "Start outcome with renumbered or superseded when naming successor_loop."],
+    ["successor_loop_required", "Provide successor_loop as the open loop number or loop_id carrying the work forward."],
+  ]) {
+    const payload = publicError(new ToolError({ error: code, got: privateText, hint: privateText }),
+      { env: { CORRELATION_ID: correlationId } });
+    assert.deepEqual(payload, { error: code, correlation_id: correlationId, hint });
+  }
+});
