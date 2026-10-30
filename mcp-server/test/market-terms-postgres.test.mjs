@@ -8,7 +8,7 @@ import { executeRegisteredTool } from '../src/tools.js';
 import { rebuildMarketTerms } from '../src/market-terms.ts';
 
 const actor = { id: '00000000-0000-4000-8000-000000000001', slug: 'joe', human: true };
-const migration = new URL('../../migrations/1076_market_terms.sql', import.meta.url);
+const migration = new URL('../../migrations/1077_market_terms.sql', import.meta.url);
 
 test('market terms project confirmed history with explicit coverage', async t => {
   const db = await postgresDatabase('market-terms-');
