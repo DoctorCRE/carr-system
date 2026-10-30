@@ -21,7 +21,7 @@ from outlook_test_support import write_settings
 
 CRATE = ROOT / 'vendor/hxprobe'
 SOURCES = ('vendor/hxprobe', 'spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py')
-INSTALLER_FILES = ('ops/hxprobe-source-digest.py', 'ops/config-as-code.py', 'ops/git_env.py', 'ops/config/services.json', 'bin/install-outlook-intake.sh', 'tools/outlook-intake-copy.c',
+INSTALLER_FILES = ('ops/hxprobe-source-digest.py', 'ops/config-as-code.py', 'ops/git_env.py', 'ops/config/services.json', 'bin/install-outlook-intake.sh', 'bin/run-scheduled.sh', 'tools/outlook-intake-copy.c',
                    'ops/launchd/com.carr.outlook-intake.plist', 'tools/credential_env.py')
 
 
@@ -122,7 +122,7 @@ class InstalledDecoderTest(unittest.TestCase):
         self.assertEqual(self.receipt()['binary_sha256'], self.ci_build)
 
 
-    def test_saved_intake_state_gets_one_reconcile_pass_on_the_old_decoder_before_it_is_replaced(self):
+    def test_saved_intake_state_reconciles_through_launchd_before_decoder_replacement(self):
         self.install()
         with (self.repo / 'vendor/hxprobe/tests/parser_regressions.rs').open('a') as tests:
             tests.write('\n// Fixture source change.\n')
@@ -131,14 +131,70 @@ class InstalledDecoderTest(unittest.TestCase):
         state.parent.mkdir(parents=True, exist_ok=True)
         state.write_text(json.dumps({'mail_unresolved': {}}))
         built = self.receipt()
-        # No copy helper exists in this fixture, so the pass fails, and the old decoder must stay.
+        launchctl = self.repo / '.venv/bin/launchctl'
+        launchctl.write_text(f'''#!{sys.executable}
+import sys
+from pathlib import Path
+repo = Path({str(self.repo)!r})
+if sys.argv[1:] == ['kickstart', 'gui/{os.getuid()}/com.carr.outlook-intake']:
+    (repo / 'out/kickstarted').touch()
+    sys.exit(0 if (repo / 'out/loaded').exists() else 113)
+if sys.argv[1] == 'print' and sys.argv[2].endswith('/com.carr.outlook-refresh'):
+    sys.stderr.write('Could not find service "com.carr.outlook-refresh"\\n')
+    sys.exit(113)
+sys.exit(1)
+''')
+        sleep = self.repo / '.venv/bin/sleep'
+        sleep.write_text(f'''#!{sys.executable}
+import json
+import sys
+from pathlib import Path
+repo = Path({str(self.repo)!r})
+assert sys.argv[1:] == ['2']
+path = repo / 'out/waits'
+waits = int(path.read_text()) + 1 if path.exists() else 1
+path.write_text(str(waits))
+if waits == 2 and (repo / 'out/complete').exists():
+    state = repo / 'out/outlook-intake/state.json'
+    state.write_text(json.dumps({{'mail_unresolved': {{}}, 'mail_ids': {{}}}}))
+''')
+        sleep.chmod(0o700)
+        self.helper.write_text(f'#!{sys.executable}\nimport sys\n'
+                               f'if sys.argv[1:] == ["--scope"]:\n'
+                               f'    print({str(self.home / "Profile")!r})\n'
+                               f'    print({str(self.repo / "out/outlook-intake")!r})\n'
+                               f'    print({str(self.repo)!r})\n'
+                               'else:\n    sys.exit(23)\n')
+        self.helper.chmod(0o700)
+        (self.repo / 'lib/outlook_intake.py').write_text('raise SystemExit(24)\n')
+        helper_before = self.helper.read_bytes()
+
+        missing = self.install(check=False)
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn('job is not loaded', missing.stderr)
+        self.assertIn('out/run-scheduled.log', missing.stderr)
+        self.assertFalse((self.repo / 'out/waits').exists())
+        self.assertEqual(self.receipt(), built)
+
+        (self.repo / 'out/loaded').touch()
         failed = self.install(check=False)
         self.assertNotEqual(failed.returncode, 0)
-        self.assertIn('outlook-intake failed reconcile_failed', failed.stdout)
+        self.assertIn('out/run-scheduled.log', failed.stderr)
+        self.assertEqual((self.repo / 'out/waits').read_text(), '60')
         self.assertEqual(self.receipt(), built)
-        state.write_text(json.dumps({'mail_unresolved': {}, 'mail_ids': {}}))
+        self.assertNotIn('mail_ids', json.loads(state.read_text()))
+        self.assertEqual(self.helper.read_bytes(), helper_before)
+
+        (self.repo / 'out/waits').unlink()
+        (self.repo / 'out/complete').touch()
         self.install()
+        self.assertTrue((self.repo / 'out/kickstarted').exists())
+        self.assertEqual((self.repo / 'out/waits').read_text(), '2')
+        self.assertIn('mail_ids', json.loads(state.read_text()))
         self.assertNotEqual(self.receipt()['source_digest'], built['source_digest'])
+        (self.repo / 'out/kickstarted').unlink()
+        self.install()
+        self.assertFalse((self.repo / 'out/kickstarted').exists(), 'reconciled state skips launchd')
 
 
 if __name__ == '__main__':

@@ -36,10 +36,11 @@ class SubmittedDraft:
             raise ValueError('submission_hash_mismatch')
         to, cc = send._addresses(row['to']), send._addresses(row['cc'])
         approved = row.get('attachments', [])
-        if not isinstance(approved, list) or any(not isinstance(a, dict) or set(a) != {'path', 'sha256'} for a in approved):
+        if not isinstance(approved, list) or any(not isinstance(a, dict) or set(a) != {'path', 'sha256', 'size'} for a in approved):
             raise ValueError('invalid_submission')
         attached = send.attachments([a['path'] for a in approved])
         if any(a.sha256 != expected['sha256'] or str(a.path) != expected['path']
+               or type(expected['size']) is not int or a.size != expected['size']
                for a, expected in zip(attached, approved)):
             raise ValueError('submission_attachment_mismatch')
         mail = send.Mail(to, cc, (), subject, body, attached)
@@ -145,7 +146,8 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
                 result = send.send_submitted(draft, ports=ports)
                 if (result.state in (send.State.NOT_IDLE, send.State.PRESSED_UNCONFIRMED,
                                      send.State.WINDOW_NOT_CLOSED)
-                        or result.reason in ('daily_cap', 'another_write_running', 'compose_window_open')):
+                        or result.reason in ('daily_cap', 'another_write_running', 'compose_window_open',
+                                         'screen_locked')):
                     counts['deferred'] += 1
                     if result.reason == 'sent_time_unavailable':
                         counts['sent_unrecorded'] += 1
