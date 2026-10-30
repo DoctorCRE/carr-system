@@ -124,6 +124,7 @@ class SentRow:
     subject: str
     sent_unix: int
     item_id: str | None = None
+    body_fingerprint: str | None = None
 
     @property
     def sent_at(self) -> str:
@@ -297,9 +298,11 @@ class Ledger:
 
     def append(self, key: str, kind: str, state: str, print_: str, at: float,
                sent_item_id: str | None = None, attachments: tuple[Attachment, ...] = (),
-               sent_at: str | None = None) -> None:
+               sent_at: str | None = None, body_status: str | None = None) -> None:
         row = {'key': key, 'kind': kind, 'state': state, 'fingerprint': print_,
                'at': int(at), 'sent_item_id': sent_item_id}
+        if body_status:
+            row['body_status'] = body_status
         if sent_at:
             row['sent_at'] = sent_at
         if attachments:
@@ -337,15 +340,27 @@ def mail_in_mailbox(snapshot: Snapshot, mail: Mail, since: float) -> bool:
     return False
 
 
-def confirmed_mail(snapshot: Snapshot, mail: Mail, since: float) -> str | None:
-    """Require readable exact recipients and a decoded Sent Items identifier."""
+def body_fingerprint(body: str) -> str:
+    return hashlib.sha256(' '.join(body.split()).encode()).hexdigest()
+
+
+def _mail_confirmation(snapshot: Snapshot, mail: Mail, since: float) -> tuple[str | None, str]:
+    mismatch = False
     for row in snapshot.sent:
         listed = set(re.findall(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+", (row.recipients or '').lower()))
         if (row.sender.lower() == account() and row.sent_unix >= since
                 and row.subject == mail.subject
                 and listed == set(mail.recipients) and row.item_id):
-            return row.item_id
-    return None
+            if row.body_fingerprint is not None and row.body_fingerprint != body_fingerprint(mail.body):
+                mismatch = True
+                continue
+            return row.item_id, 'body_verified' if row.body_fingerprint is not None else 'body_unverified'
+    return None, 'body_mismatch' if mismatch else 'not_in_mailbox_yet'
+
+
+def confirmed_mail(snapshot: Snapshot, mail: Mail, since: float) -> str | None:
+    """Require exact recipients, Sent Items identity and any readable full body."""
+    return _mail_confirmation(snapshot, mail, since)[0]
 
 
 def _sent_time(snapshot: Snapshot, item_id: str) -> str:
@@ -415,23 +430,26 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
         rows = [r for r in map(json.loads, ledger.path.read_text().splitlines()) if r.get('key') == key]
         done = next((r for r in reversed(rows) if r['state'] == State.DONE.value and r.get('sent_item_id')), None)
         if done and done.get('sent_at'):
-            return Result(State.DONE, 'confirmed_in_mailbox', sent_item_id=done['sent_item_id'], sent_at=done['sent_at'])
+            return Result(State.DONE, done.get('body_status', 'body_unverified'), sent_item_id=done['sent_item_id'], sent_at=done['sent_at'])
         if rows[-1]['state'] in NOT_DISPATCHED:
             return Result(State.FAILED, rows[-1]['state'])
+        body_status = 'not_in_mailbox_yet'
         try:
             snapshot = ports.mailbox.snapshot()
-            item_id = confirmed_mail(snapshot, item, min(r['at'] for r in rows) - CLOCK_SKEW)
+            item_id, body_status = _mail_confirmation(snapshot, item, min(r['at'] for r in rows) - CLOCK_SKEW)
         except Exception:
             item_id = None
         if item_id:
             sent_at = _sent_time(snapshot, item_id)
-            ledger.append(key, 'send', State.DONE.value, fingerprint(item), ports.now(), item_id, sent_at=sent_at)
-            return Result(State.DONE, 'confirmed_in_mailbox', sent_item_id=item_id, sent_at=sent_at)
+            ledger.append(key, 'send', State.DONE.value, fingerprint(item), ports.now(), item_id, sent_at=sent_at, body_status=body_status)
+            return Result(State.DONE, body_status, sent_item_id=item_id, sent_at=sent_at)
         if done:
             return Result(State.PRESSED_UNCONFIRMED, 'sent_time_unavailable')
         if ports.now() - min(r['at'] for r in rows) >= DUPLICATE_WINDOW:
-            return Result(State.FAILED, f'unconfirmed_after_{DUPLICATE_WINDOW}')
-        return Result(State.PRESSED_UNCONFIRMED, 'previous_attempt_unconfirmed')
+            return Result(State.FAILED, f'unconfirmed_after_{DUPLICATE_WINDOW}'
+                          + (':body_mismatch' if body_status == 'body_mismatch' else ''))
+        return Result(State.PRESSED_UNCONFIRMED,
+                      'body_mismatch' if body_status == 'body_mismatch' else 'previous_attempt_unconfirmed')
     if send_requested and (ledger.states(key) or ledger.contains_item(fingerprint(item),
             ports.now() - DUPLICATE_WINDOW if isinstance(item, Mail) else 0)):
         return Result(State.DUPLICATE_KEY, 'key_already_pressed')
@@ -546,13 +564,14 @@ def _await_sent(item: Mail | Event, key: str, print_: str, ports: Ports, ledger:
                 mode: str | None, submitted: bool) -> Result:
     kind = _kind(item)
     sent_item_id, sent_at = None, None
+    body_status = None
 
     def confirmed() -> bool:
-        nonlocal sent_item_id, sent_at
+        nonlocal sent_item_id, sent_at, body_status
         try:
             snapshot = ports.mailbox.snapshot()
             if submitted and isinstance(item, Mail):
-                sent_item_id = confirmed_mail(snapshot, item, pressed_at - CLOCK_SKEW)
+                sent_item_id, body_status = _mail_confirmation(snapshot, item, pressed_at - CLOCK_SKEW)
                 if sent_item_id:
                     sent_at = _sent_time(snapshot, sent_item_id)
                 return sent_item_id is not None
@@ -562,10 +581,10 @@ def _await_sent(item: Mail | Event, key: str, print_: str, ports: Ports, ledger:
 
     attached = item.attachments if isinstance(item, Mail) else ()
     if not _wait(confirmed, ports.confirm_seconds, ports):
-        ledger.append(key, kind, State.PRESSED_UNCONFIRMED.value, print_, ports.now(), attachments=attached)
-        return Result(State.PRESSED_UNCONFIRMED, 'not_in_mailbox_yet', mode)
-    ledger.append(key, kind, State.DONE.value, print_, ports.now(), sent_item_id, attached, sent_at)
-    return Result(State.DONE, 'confirmed_in_mailbox', mode, sent_item_id=sent_item_id, sent_at=sent_at)
+        ledger.append(key, kind, State.PRESSED_UNCONFIRMED.value, print_, ports.now(), attachments=attached, body_status=body_status)
+        return Result(State.PRESSED_UNCONFIRMED, body_status or 'not_in_mailbox_yet', mode)
+    ledger.append(key, kind, State.DONE.value, print_, ports.now(), sent_item_id, attached, sent_at, body_status)
+    return Result(State.DONE, body_status or 'confirmed_in_mailbox', mode, sent_item_id=sent_item_id, sent_at=sent_at)
 
 
 def _send_refusal(item: Mail | Event, ports: Ports, ledger: Ledger) -> str | None:
@@ -1008,10 +1027,12 @@ class DecodedMailbox:
             os.chmod(db, 0o600)
             con = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
             try:
-                sent = tuple(SentRow(*row) for row in con.execute(
+                sent = tuple(SentRow(*row[:5], body_fingerprint(row[5])
+                                     if row[6] == 'full' and (row[5] or '').strip() else None)
+                             for row in con.execute(
                     'SELECT DISTINCT m.sender, m.recipients, m.subject, m.sent_unix, '
                     "COALESCE(NULLIF(trim(m.message_id), ''), CASE WHEN m.local_keys <> '' "
-                    "AND m.local_keys NOT GLOB '*[^0-9]*' THEN 'hxstore-key:' || m.local_keys END) FROM messages m "
+                    "AND m.local_keys NOT GLOB '*[^0-9]*' THEN 'hxstore-key:' || m.local_keys END), m.body, m.body_kind FROM messages m "
                     'JOIN message_folders mf ON mf.message_id=m.id JOIN folders f ON f.id=mf.folder_id '
                     "WHERE lower(f.name) IN ('sent', 'sent items') AND m.sender IS NOT NULL "
                     'AND m.subject IS NOT NULL AND m.sent_unix IS NOT NULL'))

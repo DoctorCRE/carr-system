@@ -1541,7 +1541,7 @@ test('only the sending Mac records matching Sent Items confirmation once and rem
   await c.query('delete from email_proposal');
   const proposal = await draftFor();
   const args = { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id, base_version: 2,
-    status: 'sent', sent_item_id: 'synthetic-sent-item', sha256: 'a'.repeat(64) };
+    status: 'sent', sent_item_id: 'synthetic-sent-item', sha256: 'a'.repeat(64), reason: 'body_unverified' };
   const recordSent = (extra = {}, identity = machineFor('joe')) => command('record-email-sent',
     { ...args, ...extra }, identity, 'carr_writer');
   await refuses(recordSent({}, actor), 'email_sender_identity_required');
@@ -1561,6 +1561,7 @@ test('only the sending Mac records matching Sent Items confirmation once and rem
   assert.equal((await recordSent({ idempotency_key: randomUUID() })).replayed, true);
   assert.deepEqual((await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader')).drafts, []);
   const sent = (await command('list-email-proposals', { status: 'sent' }, actor, 'carr_reader')).proposals[0];
+  assert.equal(sent.send_result.reason, 'body_unverified');
   assert.equal(sent.send_result.sent_item_id, 'synthetic-sent-item');
   assert.equal(sent.send_result.status, 'sent');
   assert.ok(new Date(sent.result_recorded_at) >= beforeResult && new Date(sent.result_recorded_at) <= afterResult);

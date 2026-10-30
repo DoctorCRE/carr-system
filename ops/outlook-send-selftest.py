@@ -904,14 +904,16 @@ class SendTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(Path(command[2]).stat().st_mode), 0o600)
             con = sqlite3.connect(command[3])
             con.executescript("""
-                CREATE TABLE messages(id, sender, recipients, subject, sent_unix, message_id, local_keys);
+                CREATE TABLE messages(id, sender, recipients, subject, sent_unix, message_id, local_keys, body, body_kind);
                 CREATE TABLE message_folders(message_id, folder_id);
                 CREATE TABLE folders(id, name);
                 CREATE TABLE events(subject, start_unix);
                 INSERT INTO folders VALUES(1, 'Sent Items'), (2, 'Drafts');
-                INSERT INTO messages VALUES(1, 'sender@example.test', 'person-a@example.test', 'sent-001', 1800000000, '<sent-001@example.test>', '42'),
-                    (2, 'sender@example.test', 'person-a@example.test', 'draft-001', 1800000000, null, '43');
-                INSERT INTO message_folders VALUES(1, 1), (2, 2);
+                INSERT INTO messages VALUES(1, 'sender@example.test', 'person-a@example.test', 'sent-001', 1800000000, '<sent-001@example.test>', '42', 'Synthetic body', 'full'),
+                    (2, 'sender@example.test', 'person-a@example.test', 'draft-001', 1800000000, null, '43', null, 'preview'),
+                    (3, 'sender@example.test', 'person-a@example.test', 'preview-001', 1800000000, '<preview@example.test>', '44', 'Synthetic preview', 'preview'),
+                    (4, 'sender@example.test', 'person-a@example.test', 'header-001', 1800000000, '<header@example.test>', '45', null, null);
+                INSERT INTO message_folders VALUES(1, 1), (2, 2), (3, 1), (4, 1);
                 INSERT INTO events VALUES('event-001', 1893596400);
             """)
             con.close()
@@ -923,8 +925,11 @@ class SendTests(unittest.TestCase):
         with patch('lib.outlook_intake._snapshot', side_effect=copy) as copier, patch.object(send_mod.subprocess, 'run', decode):
             snap = send_mod.DecodedMailbox(home, repo).snapshot()
         copier.assert_called_once()
-        self.assertEqual([m.subject for m in snap.sent], ['sent-001'])
+        self.assertEqual([m.subject for m in snap.sent], ['sent-001', 'preview-001', 'header-001'])
+        self.assertIsNone(snap.sent[1].body_fingerprint)
+        self.assertIsNone(snap.sent[2].body_fingerprint)
         self.assertEqual(snap.sent[0].item_id, '<sent-001@example.test>')
+        self.assertEqual(snap.sent[0].body_fingerprint, send_mod.body_fingerprint('Synthetic body'))
         self.assertEqual(snap.events, (EventRow('event-001', 1893596400),))
         self.assertFalse(any(work.exists() for work in workspaces))
         self.assertEqual(list((repo / 'out/outlook-intake').iterdir()), [])
@@ -1041,6 +1046,7 @@ class OutboxTests(unittest.TestCase):
         self.enterContext(patch.object(send_mod, 'load_settings', lambda: self.settings))
         self.mailbox = FakeMailbox()
         self.sent = []
+        self.sent_body_fingerprint = None
         self.calls = []
         self.draft = dict(proposal_id='11111111-2222-4333-8444-555555555555', version=2,
                           subject='Submitted subject', body='Submitted final text.',
@@ -1058,7 +1064,8 @@ class OutboxTests(unittest.TestCase):
                 def press(self, **kwargs):
                     test.sent.append(item)
                     test.mailbox.sent.append(SentRow(ACCOUNT, '; '.join(item.recipients),
-                                                    item.subject, int(NOW), 'sent-42'))
+                                                    item.subject, int(NOW), 'sent-42',
+                                                    test.sent_body_fingerprint))
                     return 'fake'
                 def closed(self):
                     return True
@@ -1474,6 +1481,65 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual(len(self.sent), 1)
         [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
         self.assertEqual(receipt['sent_item_id'], 'sent-42')
+
+    def test_matching_sent_body_confirms_after_whitespace_normalization(self):
+        self.sent_body_fingerprint = send_mod.body_fingerprint('  Submitted\n final\ttext.  ')
+        self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
+        [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
+        self.assertEqual(receipt['status'], 'sent')
+        self.assertNotIn('reason', receipt)
+        ledger = (self.settings.send_state / send_mod.LEDGER).read_text()
+        self.assertIn('body_verified', ledger)
+        self.assertNotIn(self.draft['body'], ledger)
+
+    def test_preview_only_confirmation_receipt_survives_reconciliation(self):
+        self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
+        [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
+        self.assertEqual(receipt['reason'], 'body_unverified')
+        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        result = send_mod.send_submitted(draft, ports=self.ports)
+        self.assertEqual(draft.receipt(result), receipt)
+        self.assertNotIn(self.draft['body'], json.dumps(receipt))
+
+    def test_altered_body_after_dispatch_remains_unconfirmed(self):
+        self.sent_body_fingerprint = send_mod.body_fingerprint('Truncated.')
+        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        result = send_mod.send_submitted(draft, ports=self.ports)
+        self.assertEqual((result.state, result.reason),
+                         (State.PRESSED_UNCONFIRMED, 'body_mismatch'))
+        self.assertIsNone(send_mod.confirmed_mail(
+            self.mailbox.snapshot(), draft.mail, NOW - 5))
+        ledger = (self.settings.send_state / send_mod.LEDGER).read_text()
+        self.assertIn('body_mismatch', ledger)
+        self.assertNotIn('Truncated.', ledger)
+
+    def test_altered_sent_body_does_not_confirm(self):
+        self.settings.send_state.mkdir(parents=True)
+        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        send_mod.Ledger(self.settings.send_state / send_mod.LEDGER).append(
+            draft.key, 'send', 'pressing', send_mod.fingerprint(draft.mail), NOW)
+        row = SentRow(ACCOUNT, '; '.join(draft.mail.recipients), draft.mail.subject,
+                      int(NOW), 'sent-42', send_mod.body_fingerprint('Altered text.'))
+        self.mailbox.sent.append(row)
+        result = send_mod.send_submitted(draft, ports=self.ports)
+        self.assertEqual((result.state, result.reason),
+                         (State.PRESSED_UNCONFIRMED, 'body_mismatch'))
+        self.assertEqual(self.sent, [])
+
+    def test_body_mismatch_expires_without_another_send(self):
+        self.settings.send_state.mkdir(parents=True)
+        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        send_mod.Ledger(self.settings.send_state / send_mod.LEDGER).append(
+            draft.key, 'send', 'pressing', send_mod.fingerprint(draft.mail),
+            NOW - send_mod.DUPLICATE_WINDOW)
+        self.mailbox.sent.append(SentRow(
+            ACCOUNT, '; '.join(draft.mail.recipients), draft.mail.subject, int(NOW),
+            'sent-42', send_mod.body_fingerprint('Altered text.')))
+        self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
+        [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
+        self.assertEqual(receipt['reason'],
+                         f'unconfirmed_after_{send_mod.DUPLICATE_WINDOW}:body_mismatch')
+        self.assertEqual(self.sent, [])
 
     def test_contact_policy_refusal_records_failed_receipt_without_sending(self):
         carr = self.ports.carr
