@@ -309,7 +309,7 @@ def screen_locked() -> bool:
                for root in roots if isinstance(root, dict)
                if isinstance(root.get('IOConsoleUsers'), list)
                for session in root['IOConsoleUsers']
-               if isinstance(session, dict))
+               if isinstance(session, dict) and session.get('kCGSSessionUserIDKey') == os.getuid())
 
 
 def prepare_outlook(waits: Waits) -> Outcome | None:
