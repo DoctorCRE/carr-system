@@ -1122,6 +1122,33 @@ class IntakeTest(unittest.TestCase):
         result = self.run_intake([new], rejected=0)
         self.assertEqual((result.counts['logged'], result.counts['full_text_notes']), (0, 1))
 
+    def test_reconcile_only_pass_never_overwrites_state_a_concurrent_run_saved(self):
+        first = mail('pat@example.test', -timedelta(hours=2), message_id='<a@example.test>')
+        self.run_intake([first])
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        del state['mail_ids']
+        path.write_text(json.dumps(state))
+        later = mail('lee@example.test', -timedelta(hours=1), subject='Later', message_id='<b@example.test>')
+        write_db(self.fake.fixture.with_name('later.db'), [first, later])
+        real_flock, interleaved = intake.fcntl.flock, []
+
+        def flock(fd, op):
+            # A scheduled intake run lands just before the reconcile pass takes the lock.
+            if not interleaved:
+                interleaved.append(True)
+                self.fake.fixture.unlink()
+                self.fake.fixture.with_name('later.db').rename(self.fake.fixture)
+                self.store.write_bytes(self.store.read_bytes() + b'.')
+                self.assertEqual(intake.run(self.repo, self.home, self.fake.ports()).counts['logged'], 1)
+            return real_flock(fd, op)
+        with patch.object(intake.fcntl, 'flock', flock):
+            intake.reconcile_only(self.repo, self.home, self.fake.ports())
+        self.store.write_bytes(self.store.read_bytes() + b'.')
+        intake.run(self.repo, self.home, self.fake.ports())
+        self.assertEqual([a['email_context']['subject'] for _, a in self.fake.writes('log-activity')],
+                         ['Suite question', 'Later'])
+
     def test_message_layout_alarm_clears_and_rearms_on_the_rejection_count(self):
         rows = [mail('pat@example.test', -timedelta(hours=1), local_keys='77')]
         alarms = []

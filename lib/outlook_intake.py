@@ -1667,23 +1667,23 @@ def reconcile_only(repo: Path, home: Path, ports: Ports) -> Outcome:
     settings = load_settings(home)
     settings.require_repo(repo)
     out = repo / OUT
-    try:
-        state = json.loads((out / STATE).read_text())
-    except (OSError, ValueError):
+    if not (out / STATE).exists():
         return Outcome('succeeded', 'no_state')
-    if 'mail_ids' in state:
-        return Outcome('succeeded', 'already_reconciled')
+    # The intake lock covers the read, the check and the save, so a concurrent run's state is never lost.
     fd = _private_fd(out / 'lock', os.O_RDWR)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        state = json.loads((out / STATE).read_text())
+        if 'mail_ids' in state:
+            return Outcome('succeeded', 'already_reconciled')
         with _decode(home, out, ports.decode, settings.folder_account_id, settings.account) as (_, mails, _, _, _):
             work = Run(ports, state, ports.now(), out, settings)
             work.reconcile([m for m in _best_copies(mails, state) if not m['metadata_incomplete']])
-    except (FullDiskAccessRequired, DecodeError, sqlite3.Error, OSError) as error:
+        _save(out, state)
+    except (FullDiskAccessRequired, DecodeError, sqlite3.Error, OSError, ValueError) as error:
         return Outcome('failed', 'reconcile_failed', detail=type(error).__name__)
     finally:
         os.close(fd)
-    _save(out, state)
     return Outcome('succeeded', 'reconciled', {**work.counts, 'mail_ids': len(state['mail_ids'])})
 
 
