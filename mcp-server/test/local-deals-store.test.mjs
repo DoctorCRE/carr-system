@@ -1,6 +1,6 @@
 // Test Local Deals PostgreSQL operations, evidence and regressions.
 import { readMigration } from './migration-source.testhelper.mjs';
-import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
+import { restoreEventIdentity, applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
 import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -109,6 +109,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await c.query(schema.match(/CREATE TABLE ops\.client_portal \([\s\S]*?\n\);/)[0]);
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable as $$select '{"secdef_execute":[]}'::jsonb$$`);
     await c.query(readMigration('1013_register_client_portal.sql'));
+    await applyPendingDealRoomReads(c);
     await c.query(readFileSync(path.join(root, 'migrations/0923_deal_status_next_step.sql'), 'utf8'));
     await c.query("create view v_ref_index as select 'deal'::text subject_type, id subject_id from deal union all select 'vendor',id from vendor union all select 'lead', id from lead;");
     await c.query("grant select on v_ref_index to carr_reader");

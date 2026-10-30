@@ -75,6 +75,7 @@ class Result:
     mode: str | None = None
     logged: tuple[str, ...] = ()
     sent_item_id: str | None = None
+    sent_at: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -123,6 +124,10 @@ class SentRow:
     subject: str
     sent_unix: int
     item_id: str | None = None
+
+    @property
+    def sent_at(self) -> str:
+        return datetime.fromtimestamp(self.sent_unix, timezone.utc).isoformat()
 
 
 @dataclass(frozen=True)
@@ -256,7 +261,11 @@ def attachments(paths) -> tuple[Attachment, ...]:
             raise ValueError('attachment_outside_root')
         if not stat.S_ISREG(info.st_mode):
             raise ValueError('attachment_not_regular_file')
-        found.append(Attachment(real, _digest(real), info.st_size))
+        try:
+            digest = _digest(real)
+        except OSError:
+            raise ValueError('attachment_unreadable') from None
+        found.append(Attachment(real, digest, info.st_size))
     if sum(a.size for a in found) > settings.attachment_max_bytes:
         raise ValueError('attachments_too_large')
     return tuple(found)
@@ -287,9 +296,12 @@ class Ledger:
                    and row['state'] not in NOT_DISPATCHED for row in latest.values())
 
     def append(self, key: str, kind: str, state: str, print_: str, at: float,
-               sent_item_id: str | None = None, attachments: tuple[Attachment, ...] = ()) -> None:
+               sent_item_id: str | None = None, attachments: tuple[Attachment, ...] = (),
+               sent_at: str | None = None) -> None:
         row = {'key': key, 'kind': kind, 'state': state, 'fingerprint': print_,
                'at': int(at), 'sent_item_id': sent_item_id}
+        if sent_at:
+            row['sent_at'] = sent_at
         if attachments:
             row['attachments'] = {'count': len(attachments), 'sha256': [a.sha256 for a in attachments]}
         fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
@@ -334,6 +346,11 @@ def confirmed_mail(snapshot: Snapshot, mail: Mail, since: float) -> str | None:
                 and listed == set(mail.recipients) and row.item_id):
             return row.item_id
     return None
+
+
+def _sent_time(snapshot: Snapshot, item_id: str) -> str:
+    row = next(r for r in snapshot.sent if r.item_id == item_id)
+    return row.sent_at
 
 
 def event_in_mailbox(snapshot: Snapshot, event: Event) -> bool:
@@ -396,18 +413,22 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
            submitted: bool = False) -> Result:
     if submitted and isinstance(item, Mail) and ledger.states(key):
         rows = [r for r in map(json.loads, ledger.path.read_text().splitlines()) if r.get('key') == key]
-        done = next((r for r in rows if r['state'] == State.DONE.value and r.get('sent_item_id')), None)
-        if done:
-            return Result(State.DONE, 'confirmed_in_mailbox', sent_item_id=done['sent_item_id'])
+        done = next((r for r in reversed(rows) if r['state'] == State.DONE.value and r.get('sent_item_id')), None)
+        if done and done.get('sent_at'):
+            return Result(State.DONE, 'confirmed_in_mailbox', sent_item_id=done['sent_item_id'], sent_at=done['sent_at'])
         if rows[-1]['state'] in NOT_DISPATCHED:
             return Result(State.FAILED, rows[-1]['state'])
         try:
-            item_id = confirmed_mail(ports.mailbox.snapshot(), item, min(r['at'] for r in rows) - CLOCK_SKEW)
+            snapshot = ports.mailbox.snapshot()
+            item_id = confirmed_mail(snapshot, item, min(r['at'] for r in rows) - CLOCK_SKEW)
         except Exception:
             item_id = None
         if item_id:
-            ledger.append(key, 'send', State.DONE.value, fingerprint(item), ports.now(), item_id)
-            return Result(State.DONE, 'confirmed_in_mailbox', sent_item_id=item_id)
+            sent_at = _sent_time(snapshot, item_id)
+            ledger.append(key, 'send', State.DONE.value, fingerprint(item), ports.now(), item_id, sent_at=sent_at)
+            return Result(State.DONE, 'confirmed_in_mailbox', sent_item_id=item_id, sent_at=sent_at)
+        if done:
+            return Result(State.PRESSED_UNCONFIRMED, 'sent_time_unavailable')
         if ports.now() - min(r['at'] for r in rows) >= DUPLICATE_WINDOW:
             return Result(State.FAILED, f'unconfirmed_after_{DUPLICATE_WINDOW}')
         return Result(State.PRESSED_UNCONFIRMED, 'previous_attempt_unconfirmed')
@@ -524,14 +545,16 @@ def _script_write(mail: Mail, key: str, ports: Ports, ledger: Ledger) -> Result:
 def _await_sent(item: Mail | Event, key: str, print_: str, ports: Ports, ledger: Ledger, pressed_at: float,
                 mode: str | None, submitted: bool) -> Result:
     kind = _kind(item)
-    sent_item_id = None
+    sent_item_id, sent_at = None, None
 
     def confirmed() -> bool:
-        nonlocal sent_item_id
+        nonlocal sent_item_id, sent_at
         try:
             snapshot = ports.mailbox.snapshot()
             if submitted and isinstance(item, Mail):
                 sent_item_id = confirmed_mail(snapshot, item, pressed_at - CLOCK_SKEW)
+                if sent_item_id:
+                    sent_at = _sent_time(snapshot, sent_item_id)
                 return sent_item_id is not None
             return _in_mailbox(snapshot, item, pressed_at - CLOCK_SKEW)
         except Exception:
@@ -541,8 +564,8 @@ def _await_sent(item: Mail | Event, key: str, print_: str, ports: Ports, ledger:
     if not _wait(confirmed, ports.confirm_seconds, ports):
         ledger.append(key, kind, State.PRESSED_UNCONFIRMED.value, print_, ports.now(), attachments=attached)
         return Result(State.PRESSED_UNCONFIRMED, 'not_in_mailbox_yet', mode)
-    ledger.append(key, kind, State.DONE.value, print_, ports.now(), sent_item_id, attached)
-    return Result(State.DONE, 'confirmed_in_mailbox', mode, sent_item_id=sent_item_id)
+    ledger.append(key, kind, State.DONE.value, print_, ports.now(), sent_item_id, attached, sent_at)
+    return Result(State.DONE, 'confirmed_in_mailbox', mode, sent_item_id=sent_item_id, sent_at=sent_at)
 
 
 def _send_refusal(item: Mail | Event, ports: Ports, ledger: Ledger) -> str | None:
@@ -753,7 +776,7 @@ class Window:
             return False
 
     def _button(self, elements: list[dict], label: str) -> dict:
-        hits = [e for e in elements if e.get('role') == 'AXButton' and e.get('label') == label and e.get('depth') == 1]
+        hits = [e for e in elements if ui.button_matches(e, label) and e.get('depth') == 1]
         if len(hits) != 1:
             raise UiFailure(f'{label.lower().replace(" ", "_")}_button_not_found')
         return hits[0]
@@ -764,7 +787,7 @@ class Window:
             _cua('click', {'pid': self.pid, 'element_token': self._button(self.elements(), 'Discard')['element_token']})
             time.sleep(self.waits.settle_seconds)
             if not self.closed():
-                confirm = [e for e in self.elements() if e.get('role') == 'AXButton' and e.get('label') == 'Discard'
+                confirm = [e for e in self.elements() if ui.button_matches(e, 'Discard')
                            and e.get('depth', 0) > 1]
                 if len(confirm) == 1:
                     _cua('click', {'pid': self.pid, 'element_token': confirm[0]['element_token']})
@@ -843,8 +866,7 @@ class ComposeWindow(Window):
             hits = [e for e in self.elements() if e.get('label') == label
                     and e.get('role') in ('AXTextField', 'AXTextArea')]
             if not hits and key in ('cc', 'bcc'):
-                toggles = [e for e in self.elements() if e.get('label') == key.capitalize()
-                           and e.get('role') == 'AXButton']
+                toggles = [e for e in self.elements() if ui.button_matches(e, key.capitalize())]
                 if len(toggles) == 1:
                     _cua('click', {'pid': self.pid, 'element_token': toggles[0]['element_token']})
                     hits = [e for e in self.elements() if e.get('label') == label and e.get('role') == 'AXTextField']

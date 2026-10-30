@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID, createHash } from 'node:crypto';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
-import { applyPendingPortalLink } from './helpers/snapshot-schema.mjs';
+import { applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
 import { createCaptureHandler } from '../src/capture.js';
 import { executeRegisteredTool } from '../src/tools.js';
 
@@ -17,7 +17,7 @@ before(async () => {
   await promisify(execFile)('psql', ['-X', '-h', '127.0.0.1', '-p', String(c.connectionParameters.port),
     '-U', 'fixture', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q',
     '-f', new URL('../../db/schema.sql', import.meta.url).pathname], { maxBuffer: 4 * 1024 * 1024 });
-  await applyPendingPortalLink(c);
+  await applyPendingDealRoomReads(c);
   actor = { ...(await c.query("select id,slug from actor where slug='joe'")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic phase physician',$1,$1) returning id", [actor.id])).rows[0].id;
   await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
