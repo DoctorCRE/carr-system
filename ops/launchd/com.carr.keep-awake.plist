@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- doctrine: studio-stays-unlocked -->
+<!-- Long-running process: caffeinate -d -i holds the display and idle sleep
+     assertions for as long as it lives, so the lock screen never hides app
+     windows from accessibility. No StartCalendarInterval: launchd keeps it
+     alive (RunAtLoad + KeepAlive) instead of firing it on a schedule. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.carr.keep-awake</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/caffeinate</string>
+    <string>-d</string>
+    <string>-i</string>
+  </array>
+
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+
+  <key>StandardOutPath</key><string>{{REPO}}/out/keep-awake.log</string>
+  <key>StandardErrorPath</key><string>{{REPO}}/out/keep-awake.log</string>
+</dict>
+</plist>
