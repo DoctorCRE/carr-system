@@ -554,7 +554,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           exclude: { type: 'array', maxItems: 5000, items: { type: 'string', format: 'uuid' } } } },
       handler: async (c, _actor, args) => {
         const limit = args.limit ?? 25;
-        // The age window follows the server clock, so tests on a fixed clock stay in range.
+        // The age window's start follows the server clock, so tests on a fixed clock stay in range.
         const clock = new Date().toISOString();
         if (args.purpose === 'links') {
           const { rows } = await c.query(`select a.id as activity_id,a.deal_id as deal,
@@ -587,7 +587,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
               (select party_id from client where id=a.client_id),(select party_id from vendor where id=a.vendor_id),
               (select party_id from lead where id=a.lead_id))) as recorded_sender,d.id as deal,d.name as deal_name,d.phase,d.deal_type
           from activity a left join deal d on d.id=a.deal_id
-          where a.kind in ('email_in','email_out') and a.detail is not null and a.occurred_at<=$6::timestamptz
+          where a.kind in ('email_in','email_out') and a.detail is not null and a.occurred_at<=now()
             and a.occurred_at>$6::timestamptz-make_interval(days=>$1) and a.id<>all($2::uuid[]) and (a.email_source is null or a.email_source->>'mailbox_owner'=$4)
             and (a.kind <> 'email_out' or a.actor_id=$5::uuid)
           order by a.occurred_at,a.id limit $3`, [args.days ?? 3, args.exclude ?? [], limit + 1, partnerAuthoritySlugForActor(_actor), _actor.id, clock]);
@@ -603,7 +603,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const conversations = queued.map(row => row.email_context?.conversation_id).filter(Boolean);
         const history = (await c.query(`select id as activity_id,deal_id as deal,summary,email_context,occurred_at
           from activity where kind in ('email_in','email_out') and deal_id is not null
-            and email_context is not null and occurred_at<=$3::timestamptz
+            and email_context is not null and occurred_at<=now()
             and (occurred_at >= $3::timestamptz-make_interval(days=>$1) or email_context->>'conversation_id'=any($2::text[]))`,
           [(args.days ?? 3) + 30, conversations, clock])).rows.map(row => evidence(row, people));
         return { schema_version: 'email-router-queue.v2', more: rows.length > limit, open_deals: openDeals,
