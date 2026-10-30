@@ -104,6 +104,8 @@ export function practiceOriginationTools({withEnvelope}: {withEnvelope:WithEnvel
         const feeds = (await c.query('select source,checkpoint,published_on::text,status,detail,updated_at from practice_origination_feed')).rows;
         const rows = (await c.query(`with latest as (
             select distinct on (source,record_key) * from practice_origination_event order by source,record_key,id desc
+          ), page as materialized (
+            select * from latest where ($1::bigint is null or id<$1::bigint) order by id desc limit $2
           ) select e.id::text,e.source,e.record_key,e.npi,e.name,e.city,e.state,e.kind,
             e.evidence_date::text,e.date_basis,e.source_url,e.facts,e.published_on::text,e.recorded_at,
             case when m.parties=1 and m.exact=1 and m.clients=1 and not coalesce((e.facts->>'mailing_only')::boolean,false)
@@ -113,7 +115,7 @@ export function practiceOriginationTools({withEnvelope}: {withEnvelope:WithEnvel
               when 'registry_update' then 'NPPES registry updated'
               when 'pecos_correction' then 'Public PECOS evidence corrected'
               else 'Public PECOS enrollment observed' end || ' on ' || e.evidence_date::text as why_now
-          from latest e left join lateral (
+          from page e left join lateral (
             select count(distinct p.id)::int parties,
               count(distinct p.id) filter(where p.npi=e.npi)::int exact,
               count(distinct cl.id)::int clients,
@@ -125,8 +127,7 @@ export function practiceOriginationTools({withEnvelope}: {withEnvelope:WithEnvel
                 and p.state=e.state) or (length(coalesce(e.facts->>'address',''))>0 and p.state=e.state
                 and lower(coalesce((select a.street_address from v_practice_origination_party_address a
                   where a.party_id=p.id),''))=lower(e.facts->>'address')))
-          ) m on true where ($1::bigint is null or e.id<$1::bigint)
-          order by e.id desc limit $2`,[args.before_id ?? null,limit+1])).rows;
+          ) m on true order by e.id desc`,[args.before_id ?? null,limit+1])).rows;
         const cards = rows.slice(0,limit);
         return {ok:true,contract:'practice-origination.v1',cards,
           next_cursor:rows.length>limit ? cards.at(-1)?.id : null,

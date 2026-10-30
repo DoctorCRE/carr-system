@@ -92,7 +92,7 @@ test('address clusters require review and merged identities cannot supply a matc
   const party=(await c.query(`insert into party(kind,name,city,state,created_by,updated_by)
     values('org','Synthetic Separate Practice','Pensacola','FL',$1,$1) returning id`,[actor.id])).rows[0].id;
   await c.query(`insert into record_flag(subject_type,subject_id,kind,value,source,created_by)
-    values('party',$1,'address','{"found":true,"epistemic_status":"source_backed","street_address":"10 Synthetic Way"}',
+    values('party',$1,'address','{"found":true,"epistemic_status":"source_backed","street_address":"SYNTHETIC_ADDRESS_A"}',
       'https://example.invalid/synthetic',$2)`,[party,actor.id]);
   const row=record({record_key:'1111111111',npi:'1111111111',name:'Synthetic New Practice',
     source_url:'https://npiregistry.cms.hhs.gov/provider-view/1111111111'});

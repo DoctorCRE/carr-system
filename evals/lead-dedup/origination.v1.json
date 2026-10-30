@@ -12,12 +12,12 @@
       "date_basis": "registry_update",
       "source_url": "https://npiregistry.cms.hhs.gov/provider-view/1234567890",
       "facts": {
-        "address": "10 Synthetic Way"
+        "address": "SYNTHETIC_ADDRESS_A"
       }
     },
     "pecos": {
-      "record_key": "9999999999|I20200101000100",
-      "npi": "9999999999",
+      "record_key": "1234567891|I20200101000100",
+      "npi": "1234567891",
       "name": "Synthetic Group",
       "city": "",
       "state": "AL",
