@@ -1264,7 +1264,8 @@ class OutboxTests(unittest.TestCase):
                         quit_seconds=0, sync_seconds=0, new_window_seconds=0))
                     with patch.object(ui, 'cua', fake), \
                             patch.object(ui, 'outlook_pid', return_value=42), \
-                            patch.object(ui.subprocess, 'run') as command:
+                            patch.object(ui.subprocess, 'run', return_value=
+                                subprocess.CompletedProcess([], 1, b'', b'')) as command:
                         counts = self.worker.run(self.settings, self.ports)
                     self.assertEqual(counts['deferred'], 1)
                     self.assertEqual(counts['compose_window_open'], 1)
@@ -1273,7 +1274,19 @@ class OutboxTests(unittest.TestCase):
                     self.assertEqual(fake.presses(), 0)
                     self.assertEqual(len(fake.forms), 1)
                     self.assertFalse(any(tool == 'invoke_menu' for tool, _ in fake.calls))
-                    command.assert_not_called()
+                    if recovery:
+                        command.assert_called_once_with(
+                            ['ioreg', '-a', '-d1', '-k', 'IOConsoleUsers', '-r'],
+                            capture_output=True, timeout=5)
+                    else:
+                        command.assert_not_called()
+
+    def test_locked_screen_defers_without_failure_receipt(self):
+        locked = send_mod.Result(send_mod.State.FAILED, 'screen_locked')
+        with patch.object(send_mod, 'send_submitted', return_value=locked):
+            counts = self.worker.run(self.settings, self.ports)
+        self.assertEqual((counts['deferred'], counts['failed'], counts['sent']), (1, 0, 0))
+        self.assertEqual([v for v, _ in self.calls if v == 'record-email-sent'], [])
 
     def test_invalid_rows_record_failure_and_do_not_block_later_draft(self):
         bad = dict(self.draft, cc=['wrong@example.test'])
