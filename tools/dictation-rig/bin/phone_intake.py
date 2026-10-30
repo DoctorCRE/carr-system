@@ -224,6 +224,33 @@ def bridge_module():
     return module
 
 
+def report_processing(bridge, cfg: dict, token: str, session: Path, session_id: str, processing: dict) -> bool:
+    marker = session / 'phone-processing-reported.json'
+    if post_call.read_json(marker) == processing:
+        return True
+    code, receipt = bridge.http_request('POST',
+        f"{cfg['base_url']}/capture/phone/v1/call-sessions/{session_id}/report",
+        {'processing': processing}, {'Authorization': f'Bearer {token}'})
+    if code != 200 or receipt.get('ok') is not True:
+        return False
+    post_call.write_private(marker, processing)
+    return True
+
+
+def processing_state(status: dict, report: dict | None) -> dict:
+    if status.get('state') == 'held_review' and status.get('reason') == 'summary_repeats_transcript':
+        return {'status': 'held', 'hold_reason': 'transcript_repeat'}
+    if report and report.get('checks_hold'):
+        return {'status': 'held', 'hold_reason': 'budget'}
+    if report and any(q.get('resolved') is not True for q in report.get('review_questions', [])):
+        return {'status': 'held', 'hold_reason': 'question'}
+    if status.get('state') in {'ready_review', 'filed'}:
+        return {'status': status['state']}
+    if status.get('state') in {'needs_attention', 'held_review'}:
+        return {'status': 'failed'}
+    return {'status': 'processing'}
+
+
 def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict:
     """One bounded sweep. The processor lock also excludes another invocation."""
     from transcribe_session import TranscribeError
@@ -237,9 +264,13 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                 try:
                     if int(session.name.removeprefix('phone-').replace('-', ''), 16) % config_limit('CALL_PROCESSORS', 1) != slot:
                         continue
-                    if (session / 'ingested.json').exists():
-                        continue
                     metadata = required_json(session / 'phone.json')
+                    if (session / 'ingested.json').exists():
+                        report_processing(bridge, cfg, token, session, metadata['session_id'], {'status': 'filed'})
+                        continue
+                    if not (session / 'phone-processing-reported.json').exists() and not report_processing(bridge, cfg, token, session, metadata['session_id'], {'status': 'processing'}):
+                        counts['pending'] += 1
+                        continue
                     code, lease = bridge.http_request('POST',
                         f"{cfg['base_url']}/capture/phone/v1/call-sessions/{metadata['session_id']}/lease",
                         {}, {'Authorization': f'Bearer {token}'})
@@ -248,6 +279,11 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                         continue
                     post_call.write_private(session / '.capture.json', {'session_token': lease['session_token']})
                     status = extract(session, decoder=os.environ.get('CALL_AUDIO_DECODER', '/opt/homebrew/bin/ffmpeg'))
+                    report = post_call.read_json(session / post_call.REPORT_FILE)
+                    processing = processing_state(status, report)
+                    if processing['status'] != 'ready_review' and not report_processing(bridge, cfg, token, session, metadata['session_id'], processing):
+                        counts['pending'] += 1
+                        continue
                     if status.get('state') not in {'ready_review', 'filed'}:
                         counts['pending'] += 1
                         continue
@@ -259,6 +295,9 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                         f"{cfg['base_url']}/capture/phone/v1/call-sessions/{metadata['session_id']}/report",
                         report['report'], {'Authorization': f'Bearer {token}'})
                     if code != 200 or receipt.get('ok') is not True:
+                        counts['pending'] += 1
+                        continue
+                    if not report_processing(bridge, cfg, token, session, metadata['session_id'], processing):
                         counts['pending'] += 1
                         continue
                     bridge.poll_cmd(cfg, session)

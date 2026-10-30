@@ -58,7 +58,7 @@ function validAdmission(body, env) {
 }
 
 function view(row) {
-  return { schema_version: 1, session_id: row.id,
+  return { ...(row.processing ? { processing: row.processing } : {}), schema_version: 1, session_id: row.id,
     state: row.state === 'done' ? 'filed' : row.projection ? 'ready_review' : row.transferred_at ? 'transferred' : 'pending',
     filed: row.state === 'done', transferred: !!row.transferred_at };
 }
@@ -123,6 +123,24 @@ export function createPhoneCallHandler({ withWriter }) {
       if (text === null) return json({ error: 'report_too_large' }, 413);
       let report;
       try { report = JSON.parse(text); } catch { return json({ error: 'invalid_json' }, 400); }
+      if (report && Object.keys(report).join(',') === 'processing') {
+        const p = report.processing;
+        const statuses = ['processing', 'held', 'ready_review', 'filed', 'failed'];
+        const reasons = ['budget', 'transcript_repeat', 'question'];
+        if (!p || !statuses.includes(p.status) ||
+            (p.status === 'held' ? !reasons.includes(p.hold_reason) || Object.keys(p).sort().join(',') !== 'hold_reason,status' : Object.keys(p).join(',') !== 'status'))
+          return json({ error: 'invalid_processing' }, 400);
+        try {
+          return await withWriter(async client => {
+            const row = await readSession(client, match[1], null);
+            if (!row) return json({ error: 'not_found' }, 404);
+            await client.query(`update phone_call_session set processing=$2::jsonb || jsonb_build_object('since', now())
+              where id=$1 and (processing is null or processing - 'since' <> $2::jsonb) /* phone:processing */`,
+            [match[1], JSON.stringify(p)]);
+            return json({ ok: true, session_id: match[1] });
+          });
+        } catch { return json({ error: 'phone_intake_unavailable' }, 503); }
+      }
       if (!report || Object.keys(report).sort().join(',') !== 'decisions,open_questions,summary' ||
           typeof report.summary !== 'string' || report.summary.length > 8000 ||
           !['decisions', 'open_questions'].every(k => Array.isArray(report[k]) && report[k].length <= 50 &&

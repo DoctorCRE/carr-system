@@ -35,6 +35,7 @@ class PhoneStore {
       this.sessions.find(s => s.id === p[0]).transferred_at = '2026-01-01T12:01:00Z';
       return { rows: [] };
     }
+    if (sql.includes('phone:processing')) { this.sessions.find(s => s.id === p[0]).processing = { ...JSON.parse(p[1]), since: '2026-01-01T12:00:00Z' }; return { rows: [] }; }
     if (sql.includes('phone:projection')) { this.sessions.find(s => s.id === p[0]).projection = JSON.parse(p[1]); return { rows: [] }; }
     throw new Error(`Unexpected query ${sql}`);
   }
@@ -59,6 +60,28 @@ test('phone sessions refuse anonymous and machine actors before reading input or
     const response = await handler.fetch(new Request(root, { method: 'POST', body: 'invalid' }), {}, actor);
     assert.equal(response.status, 401);
   }
+});
+
+test('Studio processing holds round trip without exposing them to another partner', async () => {
+  const { send, handler } = rig();
+  const { body: session } = await send('', 'POST', recording);
+  const path = `https://api.example.test/capture/phone/v1/call-sessions/${session.session_id}/report`;
+  assert.equal((await send(`/${session.session_id}`)).body.processing, undefined);
+  for (const reason of ['budget', 'transcript_repeat', 'question']) {
+    const processing = { status: 'held', hold_reason: reason };
+    const response = await handler.studioFetch(new Request(path, { method: 'POST',
+      headers: { authorization: `Bearer ${environment.CALL_STUDIO_TOKEN}` }, body: JSON.stringify({ processing }) }), environment);
+    assert.equal(response.status, 200);
+    const read = await send(`/${session.session_id}`);
+    assert.equal(read.body.processing.status, 'held');
+    assert.equal(read.body.processing.hold_reason, reason);
+    assert.ok(read.body.processing.since);
+    assert.equal((await send(`/${session.session_id}`, 'GET', undefined, { ...joe, id: 'other', slug: 'dell' })).status, 404);
+  }
+  const bad = { processing: { status: 'held', hold_reason: 'question', transcript: 'private' } };
+  const rejected = await handler.studioFetch(new Request(path, { method: 'POST',
+    headers: { authorization: `Bearer ${environment.CALL_STUDIO_TOKEN}` }, body: JSON.stringify(bad) }), environment);
+  assert.equal(rejected.status, 400);
 });
 
 test('Studio reports reject transcript fields and leases preserve the session capability', async () => {

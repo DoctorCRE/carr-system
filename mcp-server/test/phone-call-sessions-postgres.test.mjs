@@ -28,6 +28,7 @@ before(async () => {
   await pool.query('create role neondb_owner');
   await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-f', new URL('../../db/schema.sql', import.meta.url).pathname]);
   await pool.query(readFileSync(new URL('../../migrations/1066_phone_call_sessions.sql', import.meta.url), 'utf8'));
+  await pool.query(readFileSync(new URL('../../migrations/1091_phone_call_processing.sql', import.meta.url), 'utf8'));
   actor = { ...(await pool.query("select id,slug from actor where slug='joe'")).rows[0], human: true };
   assert.ok(actor.id);
   handler = createPhoneCallHandler({ withWriter: async fn => {
@@ -67,6 +68,15 @@ test('concurrent imports admit one session under carr_writer and expose its repo
   assert.equal(new Set(replies.map(r => r.session_id)).size, 1);
   assert.equal(replies.filter(r => !r.duplicate).length, 1);
   const id = replies[0].session_id;
+  const studioUrl = `${url.replace('/api/v1/', '/capture/phone/v1/')}/${id}/report`;
+  for (const hold_reason of ['budget', 'transcript_repeat', 'question']) {
+    const response = await handler.studioFetch(new Request(studioUrl, { method: 'POST',
+      headers: { authorization: `Bearer ${env.CALL_STUDIO_TOKEN}` },
+      body: JSON.stringify({ processing: { status: 'held', hold_reason } }) }), env);
+    assert.equal(response.status, 200);
+    const read = await handler.fetch(new Request(`${url}/${id}`), env, actor);
+    assert.equal((await read.json()).processing.hold_reason, hold_reason);
+  }
   const transfer = await handler.fetch(new Request(`${url}/${id}/transfer`, { method: 'PUT',
     headers: { 'content-type': 'audio/wav', 'content-length': String(audio.length) }, body: audio }), env, actor);
   assert.equal(transfer.status, 202, await transfer.clone().text());

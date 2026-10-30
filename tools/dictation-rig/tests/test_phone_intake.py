@@ -97,6 +97,48 @@ class PhoneIntakeTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=5)
 
+    def test_processing_reports_are_typed_and_deduplicated(self):
+        session = self.root / 'phone-fixture'
+        session.mkdir()
+        bridge = phone_intake.bridge_module()
+        calls = []
+        def http(_method, _url, body, _headers):
+            calls.append(body)
+            return 200, {'ok': True}
+        with patch.object(bridge, 'http_request', side_effect=http):
+            for reason in ('budget', 'transcript_repeat', 'question'):
+                value = {'status': 'held', 'hold_reason': reason}
+                self.assertTrue(phone_intake.report_processing(bridge, {'base_url': 'https://api.example.test'}, 'token', session, 'id', value))
+                self.assertTrue(phone_intake.report_processing(bridge, {'base_url': 'https://api.example.test'}, 'token', session, 'id', value))
+        self.assertEqual(calls, [{'processing': {'status': 'held', 'hold_reason': reason}} for reason in ('budget', 'transcript_repeat', 'question')])
+
+    def test_processor_reports_each_hold_from_the_local_result(self):
+        import post_call
+        phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
+        session = self.root / f"phone-{self.metadata['session_id']}"
+        bridge = phone_intake.bridge_module()
+        sent = []
+        def http(_method, url, body, _headers):
+            if url.endswith('/lease'):
+                return 200, {'session_token': 'synthetic-session-token'}
+            sent.append(body)
+            return 200, {'ok': True}
+        scenarios = [
+            ({'state': 'held_review', 'reason': 'summary_repeats_transcript'}, None, 'transcript_repeat'),
+            ({'state': 'ready_review'}, {'checks_hold': 'budget exhausted', 'review_questions': []}, 'budget'),
+            ({'state': 'ready_review'}, {'review_questions': [{'resolved': False}]}, 'question'),
+        ]
+        with patch.object(phone_intake, 'bridge_module', return_value=bridge), patch.object(bridge, 'http_request', side_effect=http), patch.object(bridge, 'publish_cmd', return_value=1):
+            for status, report, reason in scenarios:
+                report_path = session / post_call.REPORT_FILE
+                if report is None:
+                    report_path.unlink(missing_ok=True)
+                else:
+                    post_call.write_private(report_path, report)
+                with patch.object(phone_intake, 'extract', return_value=status):
+                    phone_intake.process_pending(self.root, {'base_url': 'https://api.example.test'}, 'token')
+                self.assertEqual(sent[-1], {'processing': {'status': 'held', 'hold_reason': reason}})
+
     def test_imported_recording_uses_existing_extraction_and_candidate_processing(self):
         wav = io.BytesIO()
         with wave.open(wav, 'wb') as handle:
@@ -156,7 +198,8 @@ class PhoneIntakeTests(unittest.TestCase):
             if url.endswith('/status'):
                 return 200, {'ok': True}
             if url.endswith('/report'):
-                uploaded['narrative'] = body
+                if 'processing' not in body:
+                    uploaded['narrative'] = body
                 return 200, {'ok': True}
             if url.endswith('/session'):
                 return 200, {'state': 'distilling', 'meeting_record': None, 'post_call': True,
