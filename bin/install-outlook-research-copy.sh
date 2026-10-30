@@ -1,15 +1,19 @@
 #!/bin/zsh
 # Build and pin the research-only copier, then render its on-demand LaunchAgent.
+# With the CARR Local Helpers identity it signs the copier to a stable requirement,
+# and --rebuild-helper rebuilds it without losing Full Disk Access.
+#
+# Usage: ./bin/install-outlook-research-copy.sh [--rebuild-helper]
 set -eu
 
-if (( $# != 0 )); then
-  print -u2 -- "install-outlook-research-copy: no arguments accepted"
+if (( $# > 1 )) || { (( $# == 1 )) && [ "$1" != "--rebuild-helper" ]; }; then
+  print -u2 -- "install-outlook-research-copy: only --rebuild-helper is accepted"
   exit 1
 fi
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
-/usr/bin/python3 - "$REPO" "$HOME" <<'PY'
+/usr/bin/python3 - "$REPO" "$HOME" "$@" <<'PY'
 import hashlib
 import json
 import os
@@ -20,9 +24,20 @@ import subprocess
 import sys
 import tempfile
 
-if len(sys.argv) != 3:
+if len(sys.argv) not in (3, 4):
     raise SystemExit('install-outlook-research-copy: unexpected arguments')
-repo, home = (Path(value).resolve() for value in sys.argv[1:])
+repo, home = (Path(value).resolve() for value in sys.argv[1:3])
+rebuild = sys.argv[3:] == ['--rebuild-helper']
+sys.path.insert(0, str(repo))
+from lib import helper_signing
+
+identifier = 'com.carr.outlook-research-copy'
+try:
+    sha1 = helper_signing.certificate_sha1()
+except helper_signing.SigningError as error:
+    raise SystemExit(f'install-outlook-research-copy: {error}')
+if not sha1:
+    print(helper_signing.FALLBACK, file=sys.stderr, flush=True)
 source = repo / 'tools/outlook-research-copy.c'
 helper = home / 'carr-local/bin/outlook-research-copy'
 profile = home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity'
@@ -30,7 +45,8 @@ root = home / 'carr-local/outlook-research'
 flags = ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
          f'-DOUTLOOK_PROFILE={json.dumps(str(profile))}',
          f'-DOUTLOOK_RESEARCH_ROOT={json.dumps(str(root))}']
-wanted = hashlib.sha256(source.read_bytes() + json.dumps(flags).encode()).hexdigest()
+signer = [flags, identifier, sha1] if sha1 else flags
+wanted = hashlib.sha256(source.read_bytes() + json.dumps(signer).encode()).hexdigest()
 pin = helper.with_suffix('.pin')
 helper.parent.mkdir(parents=True, exist_ok=True)
 current = None
@@ -39,12 +55,18 @@ if pin.is_file() and not pin.is_symlink():
         current = json.loads(pin.read_text())
     except (ValueError, UnicodeError):
         pass
-if not (helper.is_file() and not helper.is_symlink() and os.access(helper, os.X_OK)
+# A stable signature keeps the grant, so an explicit rebuild really rebuilds.
+if (rebuild and sha1) or not (helper.is_file() and not helper.is_symlink() and os.access(helper, os.X_OK)
         and current == {'build_sha256': wanted, 'binary_sha256': hashlib.sha256(helper.read_bytes()).hexdigest()}):
     with tempfile.TemporaryDirectory(dir=helper.parent) as temp:
         built = Path(temp) / helper.name
         subprocess.run(['/usr/bin/cc', *flags, str(source), '-o', str(built)], check=True)
         built.chmod(0o700)
+        if sha1:
+            try:
+                helper_signing.sign(built, identifier, sha1)
+            except helper_signing.SigningError as error:
+                raise SystemExit(f'install-outlook-research-copy: {error}')
         digest = hashlib.sha256(built.read_bytes()).hexdigest()
         os.replace(built, helper)
         temporary_pin = Path(temp) / 'pin'
@@ -68,7 +90,10 @@ os.close(fd)
 destination = home / f'Library/LaunchAgents/{label}.plist'
 print(f'Built and pinned {helper}.')
 print('Grant Full Disk Access in System Settings > Privacy & Security > Full Disk Access > +.')
-print(f'Add {helper}. Rebuilding the binary requires re-granting access.')
+if sha1:
+    print(f'Add {helper} once. It is signed by {helper_signing.IDENTITY}, so rebuilds keep the grant.')
+else:
+    print(f'Add {helper}. Rebuilding the binary requires re-granting access.')
 print('The job is not loaded. Run both load commands:')
 print(f'  mkdir -p {shlex.quote(str(destination.parent))} && install -m 644 {shlex.quote(str(rendered))} {shlex.quote(str(destination))}')
 print(f'  launchctl bootstrap gui/{os.getuid()} {shlex.quote(str(destination))}')

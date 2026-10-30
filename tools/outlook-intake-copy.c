@@ -5,11 +5,13 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <spawn.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #ifdef __APPLE__
+#include <mach-o/dyld.h>
 #include <sys/clonefile.h>
 #endif
 #include <sys/wait.h>
@@ -30,6 +32,20 @@ static void fail(void) {
     int code = errno ? errno : EIO;
     fprintf(stderr, "outlook-intake-copy: snapshot failed (errno %d)\n", code);
     exit(code);
+}
+
+/* EPERM on the profile walk is macOS withholding Full Disk Access from this binary. */
+static void missing_access(void) {
+    char resolved[PATH_MAX];
+#ifdef __APPLE__
+    char path[PATH_MAX];
+    uint32_t size = sizeof path;
+    if (_NSGetExecutablePath(path, &size) != 0 || !realpath(path, resolved)) fail();
+#else
+    if (!realpath("/proc/self/exe", resolved)) fail();
+#endif
+    fprintf(stderr, "full_disk_access_missing: %s\nGrant Full Disk Access to this helper in System Settings.\n", resolved);
+    exit(77);
 }
 
 static void require(int condition) {
@@ -59,7 +75,10 @@ static int profile_directory(void) {
     for (char *part = strtok_r(path, "/", &state); part; part = strtok_r(NULL, "/", &state)) {
         require(strcmp(part, ".") != 0 && strcmp(part, "..") != 0);
         int next = directory(fd, part);
-        if (next < 0) fail();
+        if (next < 0) {
+            if (errno == EPERM) missing_access();
+            fail();
+        }
         close(fd);
         fd = next;
     }

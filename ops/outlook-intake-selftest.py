@@ -2587,6 +2587,19 @@ class IntakeTest(unittest.TestCase):
             self.assertIn('grant Full Disk Access to', intake.status_line(result))
             self.assertEqual(result.state, 'failed')
 
+    def test_helper_missing_grant_exit_records_full_disk_access_missing(self):
+        with patch('subprocess.run', return_value=subprocess.CompletedProcess([], 77)):
+            result = self.run_intake()
+        self.assertEqual((result.state, result.reason), ('failed', 'full_disk_access_missing'))
+        receipt = json.loads(intake.receipt_line(result).split(' ', 1)[1])
+        self.assertEqual((receipt['reason'], receipt['detail']),
+                         ('full_disk_access_missing', 'outlook-intake-copy exit=77 code=exit_nonzero'))
+        self.assertEqual([p for p in self.out().iterdir() if p.is_dir()], [])
+        state, detail, args = self.scheduled(result)
+        self.assertEqual((state, json.loads(detail)['reason']), ('failed', 'full_disk_access_missing'),
+                         'the scheduler records the missing grant')
+        self.assertEqual(args[args.index('--failure-class') + 1], 'full_disk_access_missing')
+
     def test_helper_timeout_fails_and_cleans_up(self):
         with patch('subprocess.run', side_effect=subprocess.TimeoutExpired('copy', 900)):
             result = self.run_intake()

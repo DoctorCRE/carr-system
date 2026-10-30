@@ -194,8 +194,9 @@ the two load commands. It does not load or run the helper.
 7. Run `launchctl kickstart gui/$(id -u)/com.carr.outlook-research-copy` for each snapshot.
 8. Check `launchctl print gui/$(id -u)/com.carr.outlook-research-copy` for exit code 0 and a new snapshot containing `<snapshot>/manifest.json`.
 
-The job has no schedule and no RunAtLoad. Rebuilding or replacing the binary
-requires re-granting Full Disk Access. An unchanged pinned build preserves the
+The job has no schedule and no RunAtLoad. Without the `CARR Local Helpers`
+identity, rebuilding or replacing the binary requires re-granting Full Disk
+Access; with it, see the next section. An unchanged pinned build preserves the
 existing executable. The helper publishes a snapshot only after copying succeeds.
 It never deletes completed snapshots. The operator removes old snapshots when
 space is needed and preserves required study baselines. Existing snapshots do
@@ -212,3 +213,67 @@ in [the harness contract](hxstore-harness.json). Compare consecutive copies afte
 one TEST-account action and capture an unchanged control. Store bytes and sidecars
 remain local; snapshot creation never writes into Outlook or produces production
 records.
+
+## Keep Full Disk Access across helper rebuilds
+
+macOS ties an ad-hoc signed helper's Full Disk Access grant to its exact binary
+hash, so every rebuild drops the grant. When `security find-identity -p codesigning -v`
+lists `CARR Local Helpers`, both installers sign their helper with it under a fixed
+identifier and an explicit designated requirement:
+`designated => identifier "com.carr.outlook-intake-copy" and certificate leaf = H"<certificate SHA-1>"`
+(and `com.carr.outlook-research-copy` for the research helper). The grant then
+follows the identifier and certificate, not the binary. Without the identity, each
+installer prints one line and keeps the pinned ad-hoc helper exactly as before.
+The installers only read the keychain; they never create or change certificates.
+A helper missing its grant exits 77 and prints `full_disk_access_missing: <helper path>`;
+the intake run records the reason `full_disk_access_missing`.
+
+All steps are required, once per Mac. Run them on the Mac itself, never over SSH:
+`codesign` needs a keychain prompt that SSH cannot show.
+
+1. In Finder, choose **Go > Go to Folder**.
+2. Paste `/System/Library/CoreServices/Applications/Keychain Access.app` there.
+3. Press **Return** to open Keychain Access.
+4. Choose **Keychain Access > Certificate Assistant > Create a Certificate**.
+5. Enter the name `CARR Local Helpers`.
+6. Set **Identity Type** to **Self Signed Root**.
+7. Set **Certificate Type** to **Code Signing**.
+8. Click **Create**; the certificate is saved in the login keychain.
+9. Click **Done**.
+10. Double-click `CARR Local Helpers` under the login keychain's **My Certificates**.
+11. Under **Trust**, set **Code Signing** to **Always Trust**.
+12. Close the certificate window.
+13. Enter the Mac login password if asked.
+14. Run `security find-identity -p codesigning -v`.
+15. Check that it lists `"CARR Local Helpers"`.
+16. In Terminal, run `./bin/install-outlook-intake.sh --rebuild-helper` from the source checkout.
+17. At the `codesign` keychain prompt, enter the Mac login password.
+18. Click **Always Allow**.
+19. Check the printed requirement names `com.carr.outlook-intake-copy` and `certificate leaf`, not `cdhash`.
+20. Run `./bin/install-outlook-research-copy.sh --rebuild-helper` from the same checkout.
+21. Click **Always Allow** if `codesign` prompts again.
+22. Check the printed requirement names `com.carr.outlook-research-copy` and `certificate leaf`, not `cdhash`.
+23. Open **System Settings > Privacy & Security > Full Disk Access**.
+24. Select the old **outlook-intake-copy** row.
+25. Click the minus button.
+26. Click the plus button.
+27. Press **Cmd-Shift-G**.
+28. Paste `~/carr-local/bin/outlook-intake-copy`.
+29. Click **Open**.
+30. Turn the **outlook-intake-copy** switch on.
+31. Select the old **outlook-research-copy** row.
+32. Click the minus button.
+33. Click the plus button.
+34. Press **Cmd-Shift-G**.
+35. Paste `~/carr-local/bin/outlook-research-copy`.
+36. Click **Open**.
+37. Turn the **outlook-research-copy** switch on.
+38. Run `./bin/install-outlook-intake.sh --rebuild-helper` again; it rebuilds the helper.
+39. Run `./bin/install-outlook-research-copy.sh --rebuild-helper` again.
+40. Check the next scheduled intake run succeeds, with no `full_disk_access_missing` failure.
+41. With Outlook quit, run `launchctl kickstart gui/$(id -u)/com.carr.outlook-research-copy`.
+42. Check `launchctl print gui/$(id -u)/com.carr.outlook-research-copy` shows last exit code 0, not 77.
+
+Steps 23 to 37 are the one re-grant on the switch from ad-hoc. Steps 38 to 42
+prove a rebuild keeps the grant. Do not create a second certificate later:
+replacing it changes the requirement and needs one more re-grant.

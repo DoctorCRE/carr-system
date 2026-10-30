@@ -42,6 +42,28 @@ class CopyTest(unittest.TestCase):
     def copy(self, *args):
         return subprocess.run([str(self.helper), *args], cwd=self.root, capture_output=True)
 
+    def test_profile_permission_denial_names_helper_and_fix(self):
+        wrapper = self.root / 'denied-profile.c'
+        wrapper.write_text('''#include <errno.h>
+#include <fcntl.h>
+#include <stdarg.h>
+#include <string.h>
+static int denied_openat(int fd, const char *name, int flags, ...) {
+    if (strcmp(name, "Main Identity") == 0) { errno = EPERM; return -1; }
+    if (flags & O_CREAT) {
+        va_list args; va_start(args, flags); int mode = va_arg(args, int); va_end(args);
+        return openat(fd, name, flags, mode);
+    }
+    return openat(fd, name, flags);
+}
+#define openat denied_openat
+''' + f'#include {json.dumps(str(ROOT / "tools/outlook-research-copy.c"))}\n')
+        self.build(wrapper)
+        result = self.copy()
+        self.assertEqual(result.returncode, 77)
+        self.assertIn(f'full_disk_access_missing: {self.helper}'.encode(), result.stderr)
+        self.assertIn(b'Full Disk Access', result.stderr)
+
     def snapshots(self):
         return sorted(self.out.glob('snap-*'))
 
@@ -184,56 +206,148 @@ static int fail_publish(int fromfd, const char *from, int tofd, const char *to, 
         self.assertEqual(outside.read_bytes(), b'outside-scope')
 
 
+IDENTITY_SHA1 = '0123456789ABCDEF0123456789ABCDEF01234567'
+REQUIREMENT = ('designated => identifier "com.carr.outlook-research-copy" and '
+               f'certificate leaf = H"{IDENTITY_SHA1.lower()}"')
+FALLBACK = ('CARR Local Helpers signing identity not found; keeping the pinned ad-hoc helper, '
+            'so a rebuild will need Full Disk Access re-granted')
+# Read-only keychain queries; IDENTITY_NAME lists one valid identity of that name.
+SECURITY_STUB = f'''#!{sys.executable}
+import json, os, sys
+with open(os.environ['STUB_LOG'], 'a') as log:
+    log.write(json.dumps(['security', *sys.argv[1:]]) + '\\n')
+name = os.environ.get('IDENTITY_NAME')
+if sys.argv[1] == 'find-identity':
+    if name:
+        print('  1) {IDENTITY_SHA1} "' + name + '"')
+    print('     ' + str(int(bool(name))) + ' valid identities found')
+elif sys.argv[1] == 'find-certificate' and name:
+    print('SHA-1 hash: {IDENTITY_SHA1}')
+else:
+    sys.exit(44)
+'''
+# Logs each call; -d prints the requirement the signing call passed with -r=.
+CODESIGN_STUB = f'''#!{sys.executable}
+import json, os, sys
+with open(os.environ['STUB_LOG'], 'a') as log:
+    log.write(json.dumps(['codesign', *sys.argv[1:]]) + '\\n')
+if '-d' in sys.argv:
+    print('Executable=' + sys.argv[-1], file=sys.stderr)
+    print({json.dumps(REQUIREMENT)})
+'''
+
+
 @unittest.skipUnless(sys.platform == 'darwin', 'the installer requires macOS')
 class InstallerTest(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name).resolve()
+        self.repo, self.home = self.root / 'repo', self.root / 'home & fixtures'
+        for relative in ('bin', 'tools', 'spec/outlook', 'lib', '.venv/bin'):
+            (self.repo / relative).mkdir(parents=True)
+        (self.repo / '.venv/bin/python').symlink_to(sys.executable)
+        for relative in ('bin/install-outlook-research-copy.sh',
+                         'tools/outlook-research-copy.c',
+                         'lib/helper_signing.py',
+                         'spec/outlook/com.carr.outlook-research-copy.plist'):
+            shutil.copyfile(ROOT / relative, self.repo / relative)
+        self.stubs = self.root / 'stubs'
+        self.stubs.mkdir()
+        for name, text in (('security', SECURITY_STUB), ('codesign', CODESIGN_STUB)):
+            (self.stubs / name).write_text(text)
+            (self.stubs / name).chmod(0o700)
+        self.log = self.root / 'stub-calls'
+        self.helper = self.home / 'carr-local/bin/outlook-research-copy'
+        self.pin = self.helper.with_suffix('.pin')
+
+    def install(self, *args, identity=False, check=True):
+        command = ['/bin/zsh', '-f', '-c',
+                   'export HOME="$1"; exec /bin/zsh -f "$2" "${@:3}"',
+                   'fixture-installer', str(self.home), str(self.repo / 'bin/install-outlook-research-copy.sh'), *args]
+        env = {**os.environ, 'PATH': f"{self.stubs}:{os.environ['PATH']}", 'STUB_LOG': str(self.log)}
+        env.pop('IDENTITY_NAME', None)
+        if identity:
+            env['IDENTITY_NAME'] = 'CARR Local Helpers'
+        return subprocess.run(command, check=check, capture_output=True, text=True, env=env)
+
+    def calls(self):
+        return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
+
     def test_fixture_install_preserves_identity_pins_binary_and_only_renders_job(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp).resolve()
-            repo, home = root / 'repo', root / 'home & fixtures'
-            for relative in ('bin', 'tools', 'spec/outlook', '.venv/bin'):
-                (repo / relative).mkdir(parents=True)
-            (repo / '.venv/bin/python').symlink_to(sys.executable)
-            for relative in ('bin/install-outlook-research-copy.sh',
-                             'tools/outlook-research-copy.c',
-                             'spec/outlook/com.carr.outlook-research-copy.plist'):
-                shutil.copyfile(ROOT / relative, repo / relative)
-            command = ['/bin/zsh', '-f', '-c',
-                       'export HOME="$1"; exec /bin/zsh -f "$2"',
-                       'fixture-installer', str(home), str(repo / 'bin/install-outlook-research-copy.sh')]
-            result = subprocess.run(command, check=True, capture_output=True, text=True)
-            helper = home / 'carr-local/bin/outlook-research-copy'
-            pin = helper.with_suffix('.pin')
-            self.assertTrue(helper.is_file())
-            self.assertTrue(pin.is_file())
-            self.assertEqual(stat.S_IMODE(helper.stat().st_mode), 0o700)
-            self.assertIn('Full Disk Access', result.stdout)
-            self.assertIn('launchctl bootstrap', result.stdout)
-            self.assertFalse((home / 'Library/LaunchAgents').exists())
-            self.assertFalse((home / 'carr-local/outlook-research').exists())
-            rendered = repo / 'out/com.carr.outlook-research-copy.plist'
-            job = plistlib.loads(rendered.read_bytes())
-            self.assertEqual(job['ProgramArguments'], [str(helper)])
-            for key in ('RunAtLoad', 'KeepAlive', 'StartInterval', 'StartCalendarInterval',
-                        'WatchPaths', 'QueueDirectories'):
-                self.assertNotIn(key, job)
-            load = next(line.strip() for line in result.stdout.splitlines()
-                        if line.startswith('  mkdir -p '))
-            subprocess.run(['/bin/zsh', '-f', '-c', load], check=True, capture_output=True)
-            self.assertEqual(plistlib.loads((home / 'Library/LaunchAgents/com.carr.outlook-research-copy.plist').read_bytes()), job)
-            before = helper.stat().st_mtime_ns
-            original = helper.read_bytes()
-            subprocess.run(command, check=True, capture_output=True)
-            self.assertEqual(helper.stat().st_mtime_ns, before)
-            helper.write_bytes(b'tampered')
-            subprocess.run(command, check=True, capture_output=True)
-            self.assertEqual(helper.read_bytes(), original)
-            profile = home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity'
-            profile.mkdir(parents=True)
-            (profile / 'HxStore.hxd').write_bytes(b'fixture-installed-store')
-            subprocess.run([str(helper)], cwd=root, check=True, capture_output=True)
-            snapshots = list((home / 'carr-local/outlook-research').glob('snap-*'))
-            self.assertEqual(len(snapshots), 1)
-            self.assertEqual((snapshots[0] / 'HxStore.hxd').read_bytes(), b'fixture-installed-store')
+        home, repo, root, helper, pin = self.home, self.repo, self.root, self.helper, self.pin
+        result = self.install()
+        self.assertTrue(helper.is_file())
+        self.assertTrue(pin.is_file())
+        self.assertEqual(stat.S_IMODE(helper.stat().st_mode), 0o700)
+        self.assertIn('Full Disk Access', result.stdout)
+        self.assertIn('launchctl bootstrap', result.stdout)
+        self.assertFalse((home / 'Library/LaunchAgents').exists())
+        self.assertFalse((home / 'carr-local/outlook-research').exists())
+        rendered = repo / 'out/com.carr.outlook-research-copy.plist'
+        job = plistlib.loads(rendered.read_bytes())
+        self.assertEqual(job['ProgramArguments'], [str(helper)])
+        for key in ('RunAtLoad', 'KeepAlive', 'StartInterval', 'StartCalendarInterval',
+                    'WatchPaths', 'QueueDirectories'):
+            self.assertNotIn(key, job)
+        load = next(line.strip() for line in result.stdout.splitlines()
+                    if line.startswith('  mkdir -p '))
+        subprocess.run(['/bin/zsh', '-f', '-c', load], check=True, capture_output=True)
+        self.assertEqual(plistlib.loads((home / 'Library/LaunchAgents/com.carr.outlook-research-copy.plist').read_bytes()), job)
+        before = helper.stat().st_mtime_ns
+        original = helper.read_bytes()
+        self.install()
+        self.assertEqual(helper.stat().st_mtime_ns, before)
+        helper.write_bytes(b'tampered')
+        self.install()
+        self.assertEqual(helper.read_bytes(), original)
+        profile = home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity'
+        profile.mkdir(parents=True)
+        (profile / 'HxStore.hxd').write_bytes(b'fixture-installed-store')
+        subprocess.run([str(helper)], cwd=root, check=True, capture_output=True)
+        snapshots = list((home / 'carr-local/outlook-research').glob('snap-*'))
+        self.assertEqual(len(snapshots), 1)
+        self.assertEqual((snapshots[0] / 'HxStore.hxd').read_bytes(), b'fixture-installed-store')
+
+    def test_carr_local_helpers_identity_signs_with_an_explicit_certificate_requirement(self):
+        result = self.install(identity=True)
+        self.assertEqual(self.calls()[:2], [['security', 'find-identity', '-p', 'codesigning', '-v'],
+                                            ['security', 'find-certificate', '-c', 'CARR Local Helpers', '-Z']])
+        signing = [call for call in self.calls() if call[0] == 'codesign']
+        self.assertEqual([call[:-1] for call in signing], [
+            ['codesign', '--force', '-s', IDENTITY_SHA1, '--identifier', 'com.carr.outlook-research-copy',
+             f'-r={REQUIREMENT}'],
+            ['codesign', '--verify', '--strict'],
+            ['codesign', '-d', '-r-']])
+        self.assertIn(REQUIREMENT, result.stdout.splitlines())
+        self.assertIn('rebuilds keep the grant', result.stdout)
+        self.assertNotIn(FALLBACK, result.stderr)
+        pinned = json.loads(self.pin.read_text())
+        self.assertEqual(pinned['binary_sha256'], hashlib.sha256(self.helper.read_bytes()).hexdigest())
+        before = self.helper.stat().st_mtime_ns
+        self.install(identity=True)
+        self.assertEqual(self.helper.stat().st_mtime_ns, before, 'an unchanged signed helper is kept')
+        self.install('--rebuild-helper', identity=True)
+        self.assertEqual(sum(call[:2] == ['codesign', '--force'] for call in self.calls()), 2,
+                         'a signed helper rebuilds on request')
+
+    def test_missing_identity_prints_one_line_and_keeps_the_pinned_ad_hoc_helper(self):
+        result = self.install()
+        self.assertEqual(result.stderr.splitlines().count(FALLBACK), 1)
+        self.assertFalse([call for call in self.calls() if call[0] == 'codesign'])
+        flags = ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
+                 f'-DOUTLOOK_PROFILE={json.dumps(str(self.home / "Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity"))}',
+                 f'-DOUTLOOK_RESEARCH_ROOT={json.dumps(str(self.home / "carr-local/outlook-research"))}']
+        source = (self.repo / 'tools/outlook-research-copy.c').read_bytes()
+        self.assertEqual(json.loads(self.pin.read_text())['build_sha256'],
+                         hashlib.sha256(source + json.dumps(flags).encode()).hexdigest(),
+                         'the ad-hoc pin keeps its pre-identity format')
+        self.assertIn('Rebuilding the binary requires re-granting access.', result.stdout)
+        before = self.helper.stat().st_mtime_ns
+        result = self.install('--rebuild-helper')
+        self.assertEqual(self.helper.stat().st_mtime_ns, before, 'an ad-hoc helper is never rebuilt needlessly')
+        self.assertIn(FALLBACK, result.stderr)
+        self.assertNotEqual(self.install('--other', check=False).returncode, 0)
 
 
 if __name__ == '__main__':

@@ -84,7 +84,7 @@ class CopyTest(unittest.TestCase):
         return subprocess.run([str(self.helper), *args], cwd=cwd or self.work,
                               env=env, input=input, capture_output=True)
 
-    def sidecar_open_fault(self, action):
+    def sidecar_open_fault(self, action, name='7.dat'):
         race = self.root / 'remove-sidecar.c'
         race.write_text("""
 #define _DARWIN_C_SOURCE
@@ -104,11 +104,11 @@ int openat(int fd, const char *name, int flags, ...) {
         mode = va_arg(args, int);
         va_end(args);
     }
-    if (!(flags & O_CREAT) && strcmp(name, "7.dat") == 0) { SIDECAR_FAULT; }
+    if (!(flags & O_CREAT) && strcmp(name, "FAULT_NAME") == 0) { SIDECAR_FAULT; }
     int (*real_openat)(int, const char *, int, ...) = dlsym(RTLD_NEXT, "openat");
     return real_openat(fd, name, flags, mode);
 }
-""".replace('SIDECAR_FAULT', action))
+""".replace('SIDECAR_FAULT', action).replace('FAULT_NAME', name))
         self.build(str(race))
 
     def test_sidecar_disappearing_at_open_does_not_fail_snapshot(self):
@@ -124,6 +124,14 @@ int openat(int fd, const char *name, int flags, ...) {
         result = self.copy()
         self.assertEqual(result.returncode, 13)
         self.assertIn(b'errno 13', result.stderr)
+
+    def test_profile_permission_denial_names_helper_and_fix(self):
+        self.sidecar_open_fault('errno = EPERM; return -1', name='Main Identity')
+        result = self.copy()
+        self.assertEqual(result.returncode, 77)
+        self.assertIn(f'full_disk_access_missing: {self.helper}'.encode(), result.stderr)
+        self.assertIn(b'Full Disk Access', result.stderr)
+        self.assertFalse((self.work / 'store.hxd').exists())
 
     def test_missing_required_store_still_fails(self):
         (self.profile / 'HxStore.hxd').unlink()
@@ -365,6 +373,58 @@ def digest_gate():
     return gate
 
 
+IDENTITY_SHA1 = '0123456789ABCDEF0123456789ABCDEF01234567'
+FALLBACK = ('CARR Local Helpers signing identity not found; keeping the pinned ad-hoc helper, '
+            'so a rebuild will need Full Disk Access re-granted')
+
+# Logs each call; -d prints the requirement passed with -r= at signing, unless REQUIREMENT overrides it.
+SIGN_STUB = '''#!/usr/bin/python3
+import json
+import os
+from pathlib import Path
+import sys
+with open(os.environ['SIGN_LOG'], 'a') as log:
+    log.write(json.dumps(sys.argv[1:]) + '\\n')
+signed = Path(os.environ['SIGN_LOG'] + '.requirements')
+known = json.loads(signed.read_text()) if signed.exists() else {}
+if '-s' in sys.argv:
+    if '--force' not in sys.argv:
+        sys.exit('already signed; replacement requires --force')
+    if os.environ.get('SIGN_FAIL'):
+        sys.stderr.write('specified item could not be found in the keychain')
+        sys.exit(1)
+    given = [arg[3:] for arg in sys.argv if arg.startswith('-r=')]
+    known[sys.argv[-1]] = given[0] if given else 'designated => cdhash H"0123"'
+    signed.write_text(json.dumps(known))
+elif '--verify' in sys.argv:
+    pass
+elif 'REQUIREMENT' in os.environ:
+    print(os.environ['REQUIREMENT'], file=sys.stderr)
+else:
+    print('Executable=' + sys.argv[-1], file=sys.stderr)
+    print(known.get(sys.argv[-1], 'designated => cdhash H"0123"'))
+'''
+
+# Read-only keychain queries; IDENTITY_NAME lists one valid identity of that name.
+SECURITY_STUB = '''#!/usr/bin/python3
+import json
+import os
+import sys
+with open(os.environ['SIGN_LOG'] + '.security', 'a') as log:
+    log.write(json.dumps(sys.argv[1:]) + '\\n')
+name = os.environ.get('IDENTITY_NAME')
+if sys.argv[1] == 'find-identity':
+    if name:
+        print(f'  1) {os.environ["IDENTITY_SHA1"]} "{name}"')
+    print(f'     {1 if name else 0} valid identities found')
+elif sys.argv[1] == 'find-certificate' and name and sys.argv[sys.argv.index('-c') + 1] == name:
+    print('SHA-256 hash: ' + 'AB' * 32)
+    print('SHA-1 hash: ' + os.environ['IDENTITY_SHA1'])
+else:
+    sys.exit('security: The specified item could not be found in the keychain.')
+'''
+
+
 @unittest.skipUnless(sys.platform == 'darwin', 'the installer requires macOS zsh and plutil')
 class InstallerTest(unittest.TestCase):
     def setUp(self):
@@ -411,23 +471,11 @@ class InstallerTest(unittest.TestCase):
         launchctl.chmod(0o700)
         self.sign_log = self.root / 'signing-calls'
         codesign = self.sign_tools / 'codesign'
-        codesign.write_text('''#!/usr/bin/python3
-import json
-import os
-from pathlib import Path
-import sys
-with open(os.environ['SIGN_LOG'], 'a') as log:
-    log.write(json.dumps(sys.argv[1:]) + '\\n')
-if '-s' in sys.argv:
-    if '--force' not in sys.argv:
-        sys.exit('already signed; replacement requires --force')
-    if os.environ.get('SIGN_FAIL'):
-        sys.stderr.write('specified item could not be found in the keychain')
-        sys.exit(1)
-else:
-    print(os.environ.get('REQUIREMENT', 'designated => identifier "outlook-intake-copy" and certificate leaf = H"012345"'), file=sys.stderr)
-''')
+        codesign.write_text(SIGN_STUB)
         codesign.chmod(0o700)
+        security = self.sign_tools / 'security'
+        security.write_text(SECURITY_STUB)
+        security.chmod(0o700)
 
     def install(self, name='intake', check=True, signing_env=None, args=()):
         if name == 'intake' and self.config.exists():
@@ -570,46 +618,90 @@ else:
         self.assertEqual(scope.stdout.splitlines()[0], values['profile'])
         self.assertIn(f'ad-hoc helper rebuilds need a Full Disk Access re-grant for {self.helper}', result.stdout)
 
-    def test_certificate_identity_rebuilds_without_an_access_warning(self):
+    def identity(self, name='CARR Local Helpers', **extra):
+        return {'IDENTITY_NAME': name, 'IDENTITY_SHA1': IDENTITY_SHA1, **extra}
+
+    def calls(self, log=''):
+        return [json.loads(line) for line in Path(f'{self.sign_log}{log}').read_text().splitlines()]
+
+    def test_carr_local_helpers_identity_signs_with_an_explicit_certificate_requirement(self):
+        requirement = ('designated => identifier "com.carr.outlook-intake-copy" and '
+                       f'certificate leaf = H"{IDENTITY_SHA1.lower()}"')
+        result = self.install(signing_env=self.identity())
+        self.assertEqual(self.calls('.security'), [['find-identity', '-p', 'codesigning', '-v'],
+                                                   ['find-certificate', '-c', 'CARR Local Helpers', '-Z']])
+        signing = self.calls()
+        self.assertEqual(signing[0][:-1], ['--force', '-s', IDENTITY_SHA1, '--identifier',
+                                           'com.carr.outlook-intake-copy', f'-r={requirement}'])
+        self.assertEqual(signing[1][:-1], ['--verify', '--strict'])
+        self.assertEqual(signing[2][:-1], ['-d', '-r-'])
+        self.assertIn(requirement, result.stdout.splitlines())
+        self.assertNotIn(FALLBACK, result.stderr)
+        self.assertNotIn('re-grant', result.stdout)
+        load_settings(self.home).verify_helper()
+        before = self.helper.stat().st_mtime_ns, len(signing)
+        self.install(signing_env=self.identity())
+        self.assertEqual((self.helper.stat().st_mtime_ns, len(self.calls())), before,
+                         'an unchanged signed helper is kept')
+        result = self.install(signing_env=self.identity(), args=('--rebuild-helper',))
+        self.assertEqual(len([c for c in self.calls() if c[0] == '--force']), 2, 'a signed helper rebuilds on request')
+        self.assertNotIn('re-grant', result.stdout)
+        load_settings(self.home).verify_helper()
+
+    def test_switching_an_ad_hoc_helper_to_the_identity_needs_the_rebuild_flag(self):
+        self.install()
+        before = self.helper.stat().st_mtime_ns, self.helper.with_suffix('.pin').read_text()
+        result = self.install(check=False, signing_env=self.identity())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('--rebuild-helper', result.stderr)
+        self.assertEqual((self.helper.stat().st_mtime_ns, self.helper.with_suffix('.pin').read_text()), before)
+        self.install(signing_env=self.identity(), args=('--rebuild-helper',))
+        forced = [call for call in self.calls() if call[0] == '--force']
+        self.assertEqual(forced[-1][1:5], ['-s', IDENTITY_SHA1, '--identifier', 'com.carr.outlook-intake-copy'])
+        self.assertNotEqual(self.helper.with_suffix('.pin').read_text(), before[1])
+
+    def test_missing_identity_prints_one_line_and_keeps_the_pinned_ad_hoc_helper(self):
+        result = self.install()
+        self.assertEqual(result.stderr.splitlines().count(FALLBACK), 1)
+        signing = self.calls()
+        self.assertEqual([call[:-1] for call in signing], [['--force', '-s', '-', '--identifier', 'outlook-intake-copy']])
+        flags = ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
+                 f'-DOUTLOOK_PROFILE={json.dumps(str(self.profile))}',
+                 f'-DOUTLOOK_WORK_ROOT={json.dumps(str((self.repo / "out/outlook-intake").resolve()))}',
+                 f'-DOUTLOOK_REPO={json.dumps(str(self.repo))}']
+        source = (self.repo / 'tools/outlook-intake-copy.c').read_bytes()
+        self.assertEqual(self.helper.with_suffix('.pin').read_text(),
+                         hashlib.sha256(source + json.dumps([flags, '']).encode()).hexdigest(),
+                         'the ad-hoc pin keeps its pre-identity format')
+        before = self.helper.stat().st_mtime_ns
+        result = self.install(args=('--rebuild-helper',))
+        self.assertEqual(self.helper.stat().st_mtime_ns, before, 'an ad-hoc helper is never rebuilt needlessly')
+        self.assertIn(FALLBACK, result.stderr)
+
+    def test_configured_identity_overrides_the_default_name(self):
         self.install()
         values = json.loads(self.config.read_text())
         values['signing_identity'] = 'Fixture Signing Identity'
         self.config.write_text(json.dumps(values))
-        result = self.install(args=('--rebuild-helper',))
+        result = self.install(signing_env=self.identity('Fixture Signing Identity'), args=('--rebuild-helper',))
         self.assertNotIn('re-grant', result.stdout)
-        calls = [json.loads(line) for line in self.sign_log.read_text().splitlines()]
-        self.assertEqual(calls[0][:-1], ['--force', '-s', '-', '--identifier', 'outlook-intake-copy'])
-        self.assertEqual(calls[1][:-1], ['--force', '-s', 'Fixture Signing Identity',
-                                       '--identifier', 'outlook-intake-copy'])
-        self.helper.with_suffix('.pin').unlink()
-        result = self.install(args=('--rebuild-helper',))
-        self.assertNotIn('re-grant', result.stdout)
-        self.assertEqual(self.sign_log.read_text().count('"-d", "-r-"'), 2)
+        self.assertIn(['find-certificate', '-c', 'Fixture Signing Identity', '-Z'], self.calls('.security'))
         load_settings(self.home).verify_helper()
-
-    def test_self_signed_certificate_anchor_requirement_is_accepted(self):
-        values = json.loads(self.config.read_text())
-        values['signing_identity'] = 'Fixture Signing Identity'
-        self.config.write_text(json.dumps(values))
-        requirement = 'designated => identifier "outlook-intake-copy" and anchor H"0123456789abcdef0123456789abcdef01234567"'
-        result = self.install(check=False, signing_env={'REQUIREMENT': requirement})
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn('re-grant', result.stdout)
-        load_settings(self.home).verify_helper()
+        result = self.install(check=False, signing_env=self.identity(), args=('--rebuild-helper',))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('keychain', result.stderr)
 
     def test_signing_failure_preserves_existing_helper_and_pin(self):
         self.install()
         before = self.helper.read_bytes(), self.helper.with_suffix('.pin').read_text()
-        values = json.loads(self.config.read_text())
-        values['signing_identity'] = 'Fixture Signing Identity'
-        self.config.write_text(json.dumps(values))
         for env, message in (({'SIGN_FAIL': '1'}, 'keychain'),
-                             ({'REQUIREMENT': 'designated => cdhash H"123"'}, 'certificate designated requirement'),
-                             ({'REQUIREMENT': ''}, 'certificate designated requirement'),
-                             ({'REQUIREMENT': 'designated => certificate leaf = H"123" or cdhash H"123"'},
-                              'certificate designated requirement')):
+                             ({'REQUIREMENT': 'designated => cdhash H"123"'}, 'designated requirement'),
+                             ({'REQUIREMENT': ''}, 'designated requirement'),
+                             ({'REQUIREMENT': f'designated => identifier "com.carr.outlook-intake-copy" and '
+                                              f'certificate leaf = H"{IDENTITY_SHA1.lower()}" or cdhash H"123"'},
+                              'designated requirement')):
             with self.subTest(env=env):
-                result = self.install(check=False, signing_env=env, args=('--rebuild-helper',))
+                result = self.install(check=False, signing_env=self.identity(**env), args=('--rebuild-helper',))
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(message, result.stderr)
                 self.assertNotIn('re-grant', result.stdout)
