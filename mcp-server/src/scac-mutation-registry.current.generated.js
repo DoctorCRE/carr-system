@@ -2980,7 +2980,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "retitle-job": {
     "ingress_key": "mcp-tool:retitle-job",
     "source_locator": "mcp-server/src/work-queue.js",
-    "schema_digest": "ee731084193cdc9a041baa6aa9af703217cca1c065e9e905f4dc2337f28d6b91",
+    "schema_digest": "23e5f33f54e36ea28cd0587150544bc9c221af3c75dbcb8f071cfe01d225afd1",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

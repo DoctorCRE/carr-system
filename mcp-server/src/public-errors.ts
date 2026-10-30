@@ -106,7 +106,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["invalid_card_title", "Supply a card title of two or three plain words."],
   ["card_title_verb", "Start the title with an imperative from mcp-server/src/job-card-verbs.v1.json."],
   ["card_title_duplicate", "Choose a title not already used by another job in this Work Request."],
-  ["invalid_job_description", "Supply one sentence starting with an imperative from mcp-server/src/job-card-verbs.v1.json."],
+  ["invalid_job_description", "Supply a new description as one sentence starting with an imperative from mcp-server/src/job-card-verbs.v1.json."],
   ["job_already_started", "This job already has a runner; choose the next unstarted queue job."],
   ["job_repository_mismatch", "Start this job in its recorded repository."],
   ["job_not_found", "Choose an existing job under this Work Request and slice."],

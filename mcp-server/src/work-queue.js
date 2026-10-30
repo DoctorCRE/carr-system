@@ -200,7 +200,6 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         if ((starting ? jobStart : jobFacts).some(key => args[key] == null)
           || (jobFacts.some(key => Object.hasOwn(args, key)) && jobFacts.some(key => args[key] == null))) refuse('invalid_work_queue_fields');
         if ((starting || Object.hasOwn(args, 'repository')) && !repositories.includes(args.repository)) refuse('invalid_work_queue_fields');
-        if (args.card_title != null) await validateCopy(c, wr, args, starting ? { slice: args.slice || 1, job: args.job } : undefined);
         if (starting) {
           const row = (await c.query(`select runner_job_id,repository from ops.work_request_job
             where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`, [wr.id, args.slice || 1, args.job])).rows[0];
@@ -215,6 +214,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
             return { card_id: queueCardId(wr.ref, args.slice || 1, args.job), runner_job_id: args.runner_job_id };
           }
         }
+        await validateCopy(c, wr, args);
         const ordinal = args.slice || 1;
         if (!starting) await c.query(`insert into ops.work_request_slice (work_request_id,ordinal,title) select $1,1,$2
           where not exists (select 1 from ops.work_request_slice where work_request_id=$1)`, [wr.id, wr.title]);
@@ -232,16 +232,17 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         { required: jobFacts },
         { required: [...jobStart, 'repository'] },
       ] }),
-    'retitle-job': command('retitle-job', 'Rename one job card and optionally replace its one-sentence description. Preserve all other job facts.',
-      { card_id: text(), card_title: text(80), description: text(500) }, ['card_id', 'card_title'], async (c, actor, args, wr) => {
-        const current = (await c.query(`select card_title,description from ops.work_request_job
+    'retitle-job': command('retitle-job', 'Rename one job card using its current base_version and optionally replace its one-sentence description. Preserve all other job facts.',
+      { card_id: text(), card_title: text(80), description: text(500), base_version: positive }, ['card_id', 'card_title', 'base_version'], async (c, actor, args, wr) => {
+        const current = (await c.query(`select card_title,description,version from ops.work_request_job
           where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`, [wr.id, args.slice, args.job])).rows[0];
         if (!current) refuse('job_not_found');
-        await validateCopy(c, wr, args, args);
+        if (current.version !== args.base_version) throw new ToolError({ error: 'version_conflict', current_version: current.version });
         const description = args.description ?? current.description;
-        await c.query(`update ops.work_request_job set card_title=$4,description=$5
+        await validateCopy(c, wr, { ...args, description }, args);
+        await c.query(`update ops.work_request_job set card_title=$4,description=$5,version=version+1
           where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`, [wr.id, args.slice, args.job, args.card_title, description]);
-        return { card_id: args.card_id, card_title: args.card_title, description };
+        return { card_id: args.card_id, card_title: args.card_title, description, version: current.version + 1 };
       }),
     'prioritize-job': command('prioritize-job', 'Move one visible job to a one-based queue position, preserving the relative order of its siblings.',
       { slice, job: positive, position: positive }, ['job', 'position'], async (c, actor, args, wr) => {

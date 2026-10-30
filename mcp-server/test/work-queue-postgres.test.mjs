@@ -53,6 +53,8 @@ before(async () => {
     await c.query(readFileSync(new URL('../../migrations/1025_work_request_job_finished.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select 1 from schema_migrations where filename='1060_work_request_slice_outcome.sql'")).rows.length)
     await c.query(readFileSync(new URL('../../migrations/1060_work_request_slice_outcome.sql', import.meta.url), 'utf8'));
+  if (!(await c.query("select 1 from schema_migrations where filename='1061_work_request_job_version.sql'")).rows.length)
+    await c.query(readFileSync(new URL('../../migrations/1061_work_request_job_version.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => {
@@ -332,6 +334,18 @@ test('launcher starts a queued card with actual execution settings and preserves
   assert.equal(row.card_title, minted.card_title);
 });
 
+test('launcher starts an existing legacy card with its stored copy', async () => {
+  const work_request = await request('WR-000096');
+  const repository = 'DoctorCRE/carr-system';
+  await command('dispatch-job', job(work_request, { repository }));
+  await c.query(`update ops.work_request_job set card_title='Codex job', description='Execute the supplied job brief.'
+    where work_request_id=(select id from ops.work_request where ref=$1)`, [work_request]);
+  const queued = (await command('work-queue')).jobs.find(row => row.work_request === work_request);
+  await command('dispatch-job', job(work_request, { repository, job: 1, runner_job_id: 'legacy-runner',
+    card_title: queued.card_title, description: queued.description }));
+  assert.equal((await command('work-queue')).jobs.find(row => row.work_request === work_request).runner_job_id, 'legacy-runner');
+});
+
 test('slice retirement requires a reason and replays one outcome event', async () => {
   const work_request = await request('WR-000070');
   await command('plan-work-request-slices', { work_request, slices: ['Build slice', 'Replacement slice'], idempotency_key: randomUUID() });
@@ -464,15 +478,15 @@ test('retitle changes only labels, replays safely, and enforces mint refusals', 
   const before = await read();
   const stored = async () => (await c.query('select j.* from ops.work_request_job j join ops.work_request w on w.id=j.work_request_id where w.ref=$1 order by j.j_number', [work_request])).rows;
   const storedBefore = await stored();
-  const args = { card_id: minted.card_id, card_title: 'Require readable titles', description: 'Require readable titles for every card.', idempotency_key: randomUUID() };
+  const args = { base_version: 1, card_id: minted.card_id, card_title: 'Require readable titles', description: 'Require readable titles for every card.', idempotency_key: randomUUID() };
   const result = await command('retitle-job', args);
   assert.equal(result.card_id, minted.card_id);
   assert.deepEqual(await command('retitle-job', args), { ...result, replayed: true });
   const after = await read();
   assert.deepEqual(await stored(), storedBefore.map(row => row.j_number === 1
-    ? { ...row, card_title: args.card_title, description: args.description } : row));
+    ? { ...row, card_title: args.card_title, description: args.description, version: row.version + 1 } : row));
   assert.deepEqual(after, before.map(row => row.card_id === minted.card_id
-    ? { ...row, card_title: args.card_title, description: args.description } : row));
+    ? { ...row, card_title: args.card_title, description: args.description, version: row.version + 1 } : row));
   for (const [changes, error] of [
     [{ card_title: 'Queue work' }, 'card_title_verb'],
     [{ card_title: 'Review rename proof' }, 'card_title_duplicate'],
@@ -480,11 +494,53 @@ test('retitle changes only labels, replays safely, and enforces mint refusals', 
     [{ description: 'Build one. Review two.' }, 'invalid_job_description'],
     [{ description: 'Implement the change.' }, 'invalid_job_description'],
     [{ card_id: 'WR94.S1.J999' }, 'job_not_found'],
-  ]) await assert.rejects(command('retitle-job', { ...args, ...changes, idempotency_key: randomUUID() }), { message: error });
+  ]) await assert.rejects(command('retitle-job', { ...args, base_version: 2, ...changes, idempotency_key: randomUUID() }), { message: error });
   assert.deepEqual(await read(), after);
-  await command('retitle-job', { card_id: minted.card_id, card_title: args.card_title, idempotency_key: randomUUID() });
-  assert.deepEqual(await read(), after);
+  await command('retitle-job', { card_id: minted.card_id, card_title: args.card_title, base_version: 2, idempotency_key: randomUUID() });
+  assert.equal((await read()).find(row => row.card_id === minted.card_id).version, 3);
   assert.equal(after.find(row => row.card_id === sibling.card_id).card_title, 'Review rename proof');
+});
+
+test('retitles reject a stale job version', async () => {
+  const work_request = await request('WR-000097');
+  const { card_id } = await command('dispatch-job', job(work_request));
+  const base_version = (await command('work-queue')).jobs.find(row => row.card_id === card_id).version;
+  const rename = card_title => command('retitle-job', { card_id, card_title, base_version, idempotency_key: randomUUID() });
+  await rename('Fix first title');
+  await assert.rejects(rename('Fix stale title'), error => {
+    assert.equal(error.message, 'version_conflict');
+    assert.equal(error.payload.current_version, base_version + 1);
+    return true;
+  });
+});
+
+test('concurrent retitles from one version preserve the winner', async () => {
+  const work_request = await request('WR-000099');
+  const { card_id } = await command('dispatch-job', job(work_request));
+  const base_version = (await command('work-queue')).jobs.find(row => row.card_id === card_id).version;
+  const clients = await Promise.all(Array.from({ length: 2 }, async () => { const client = new pg.Client(connection); await client.connect(); return client; }));
+  try {
+    const results = await Promise.allSettled(clients.map((client, i) => command('retitle-job',
+      { card_id, card_title: i ? 'Fix second title' : 'Fix first title', base_version, idempotency_key: randomUUID() }, client)));
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+    const rejected = results.find(result => result.status === 'rejected').reason;
+    assert.equal(rejected.message, 'version_conflict');
+    assert.equal(rejected.payload.current_version, base_version + 1);
+    assert.equal((await command('work-queue')).jobs.find(row => row.card_id === card_id).card_title,
+      results.find(result => result.status === 'fulfilled').value.card_title);
+  } finally { await Promise.all(clients.map(client => client.end())); }
+});
+
+test('retitle requires replacement for an invalid stored description', async () => {
+  const work_request = await request('WR-000098');
+  const { card_id } = await command('dispatch-job', job(work_request));
+  await c.query(`update ops.work_request_job set description='Execute the supplied job brief.'
+    where work_request_id=(select id from ops.work_request where ref=$1)`, [work_request]);
+  await assert.rejects(command('retitle-job', { card_id, card_title: 'Fix legacy description', base_version: 1, idempotency_key: randomUUID() }), error => {
+    assert.equal(error.message, 'invalid_job_description');
+    assert.match(publicError(error).hint, /new description/i);
+    return true;
+  });
 });
 
 test('concurrent duplicate mints admit one card and descriptions use the same vocabulary', async () => {
