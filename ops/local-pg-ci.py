@@ -308,7 +308,8 @@ def run_local_ci(
     clean_env = scrub_cloud_environment(os.environ)
     clean_env["LC_ALL"] = "C"
     clean_env["PATH"] = f"{binaries.initdb.parent}{os.pathsep}{clean_env.get('PATH', '')}"
-    fixture = DisposablePostgres("carr-local-pg-ci.", binaries.pg_ctl, clean_env, runner=command_runner.run)
+    fixture = DisposablePostgres("carr-local-pg-ci.", binaries.pg_ctl, clean_env,
+                                 runner=None if isinstance(command_runner, SubprocessRunner) else command_runner.run)
     root = fixture.root
     data = root / "data"
     integration_data = root / "integration-data"
@@ -319,9 +320,18 @@ def run_local_ci(
     clean_env["TMPDIR"] = str(root / "tmp")
     dsn = f"postgres://carr_ci@127.0.0.1:{port}/carr_ci"
     exit_code = 0
+    def run(command, *, env, cwd, capture):
+        if fixture.runner is not None:
+            return fixture.run(command, env=env, cwd=cwd, capture=capture)
+        name = Path(command[0]).name
+        if name == "initdb" or (name == "pg_ctl" and "start" in command):
+            result = fixture.run(command, env=env, cwd=cwd, capture_output=capture, text=True)
+            return CommandResult(result.returncode, result.stdout or "", result.stderr or "")
+        return command_runner.run(command, env=env, cwd=cwd, capture=capture)
+
     def setup(command: Sequence[str | Path]) -> bool:
         nonlocal exit_code
-        result = fixture.run(command, env=clean_env, cwd=repo, capture=True)
+        result = run(command, env=clean_env, cwd=repo, capture=True)
         if result.returncode:
             print(f"local-db-ci setup failed: {_failure_detail(result)}", file=sys.stderr)
             exit_code = result.returncode
@@ -386,7 +396,7 @@ def run_local_ci(
             # Restore current main, forward the candidate and prove consumers.
             from integration_candidate import git, validate_candidate
             # Keep one active cluster: macOS has a small shared-memory ID budget.
-            paused = fixture.run(
+            paused = run(
                 [binaries.pg_ctl, "-D", data, "-m", "fast", "-w", "stop"],
                 env=clean_env, cwd=repo, capture=True,
             )
@@ -404,13 +414,13 @@ def run_local_ci(
                 ("restore", [binaries.psql, integration_dsn, "-v", "ON_ERROR_STOP=1", "-q", "-f", schema]),
             )
             for stage, command in integration_commands:
-                result = fixture.run(command, env=clean_env, cwd=repo, capture=True)
+                result = run(command, env=clean_env, cwd=repo, capture=True)
                 if result.returncode:
                     print(f"local-db-ci: integrated {stage} failed (exit {result.returncode})", file=sys.stderr)
                     return result.returncode
             forward_env = dict(clean_env)
             forward_env["DATABASE_URL"] = integration_dsn
-            forward = fixture.run([acceptance_python, repo / "tools/migrate.py", "--apply", "--yes"],
+            forward = run([acceptance_python, repo / "tools/migrate.py", "--apply", "--yes"],
                                          env=forward_env, cwd=repo, capture=True)
             if forward.returncode:
                 print("local-db-ci: current-main restore to candidate forward migration failed", file=sys.stderr)
@@ -421,21 +431,21 @@ def run_local_ci(
             ):
                 consumer_env = dict(clean_env)
                 consumer_env[dsn_key] = integration_dsn
-                proof = fixture.run(["node", "--test", f"mcp-server/test/{test_file}"],
+                proof = run(["node", "--test", f"mcp-server/test/{test_file}"],
                                            env=consumer_env, cwd=repo, capture=True)
                 if proof.returncode:
                     print(f"local-db-ci: integrated consumer proof failed: {test_file}", file=sys.stderr)
                     return proof.returncode
             if validate_candidate(repo, integration_base) != integration_source:
                 raise LocalPGRefusal("integration source changed during restore/forward/consumer proof")
-            disposed = fixture.run(
+            disposed = run(
                 [binaries.pg_ctl, "-D", integration_data, "-m", "fast", "-w", "stop"],
                 env=clean_env, cwd=repo, capture=True,
             )
             if disposed.returncode:
                 print("local-db-ci: integration PostgreSQL stop failed", file=sys.stderr)
                 return disposed.returncode
-            resumed = fixture.run(
+            resumed = run(
                 [binaries.pg_ctl, "-D", data, "-l", root / "postgres.log",
                  "-o", f"-h 127.0.0.1 -p {port} -k {root / 'socket'}", "-w", "start"],
                 env=clean_env, cwd=repo, capture=True,
@@ -453,7 +463,7 @@ def run_local_ci(
             ci_command.extend(["--only", "migration"])
         if migration_part != "all":
             ci_command.extend(["--strict", "--migration-part", migration_part])
-        result = fixture.run(ci_command, env=ci_env, cwd=repo, capture=False)
+        result = run(ci_command, env=ci_env, cwd=repo, capture=False)
         exit_code = result.returncode
         if exit_code:
             print("local-db-ci: canonical CI failed", file=sys.stderr)
@@ -486,10 +496,10 @@ def run_local_ci(
                 else:
                     try:
                         if program.kind == "python":
-                            result = run_required_local_gate(fixture, acceptance_python, repo / program.path,
+                            result = run_required_local_gate(command_runner, acceptance_python, repo / program.path,
                                                              env=env, cwd=repo)
                         else:
-                            result = fixture.run(command, env=env, cwd=repo, capture=True)
+                            result = run(command, env=env, cwd=repo, capture=True)
                     except Exception:
                         # Raw exception text can include DSNs, parameters or
                         # identity data. It is never printed.
@@ -505,7 +515,7 @@ def run_local_ci(
                 # WR-000542: extends the per-program record ci.sh wrote above.
                 rows = root / "acceptance-programs.tsv"
                 rows.write_text("".join(acceptance_rows))
-                if fixture.run([sys.executable, repo / "ops/ci-evidence.py", "programs", "--rows", rows,
+                if run([sys.executable, repo / "ops/ci-evidence.py", "programs", "--rows", rows,
                                 "--output", records], env=clean_env, cwd=repo, capture=True).returncode:
                     print(f"ci-program-records: NOT WRITTEN to {records}", file=sys.stderr)
             if exit_code == 0 and integration_base is not None:

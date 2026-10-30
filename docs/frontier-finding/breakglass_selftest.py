@@ -34,7 +34,6 @@ import shutil
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -42,7 +41,7 @@ from typing import Any
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 sys.path.insert(0, str(REPO))
-from lib.disposable_pg_fixture import postgres_bin_dir
+from lib.disposable_pg_fixture import DisposablePostgres, postgres_bin_dir
 PYTHON = str(REPO / ".venv" / "bin" / "python")
 
 # breakglass_run.py and gen_breakglass_run.py are deliberately import-only
@@ -138,10 +137,11 @@ def test_duplicate_snapshot_identities_are_lossless() -> None:
 
 
 class Cluster:
-    def __init__(self, port: int, root: Path, bin_dir: Path):
+    def __init__(self, port: int, bin_dir: Path):
         self.port = port
-        self.root = root
-        self.data = root / "data"
+        self.fixture = DisposablePostgres("carr-breakglass_selftest.", bin_dir / "pg_ctl")
+        self.root = self.fixture.root
+        self.data = self.root / "data"
         self.bin_dir = bin_dir
         self.env = {**os.environ, "LC_ALL": "C"}
 
@@ -149,7 +149,7 @@ class Cluster:
         return str(self.bin_dir / name)
 
     def run(self, args: list[str], check_rc: bool = True) -> subprocess.CompletedProcess:
-        result = subprocess.run(args, env=self.env, capture_output=True, text=True)
+        result = self.fixture.run(args, env=self.env, capture_output=True, text=True)
         if check_rc and result.returncode != 0:
             raise RuntimeError(f"command failed ({args!r}): {result.stderr.strip()[-2000:]}")
         return result
@@ -163,10 +163,7 @@ class Cluster:
         self.run([self._bin("createdb"), "-h", "127.0.0.1", "-p", str(self.port), "-U", "carr_ci", "carr_ci_other"])
 
     def stop(self) -> None:
-        try:
-            self.run([self._bin("pg_ctl"), "-D", str(self.data), "-m", "fast", "-w", "stop"], check_rc=False)
-        finally:
-            shutil.rmtree(self.root, ignore_errors=True)
+        self.fixture.close()
 
     def dsn(self, database: str = "carr_ci") -> str:
         return f"postgres://carr_ci@127.0.0.1:{self.port}/{database}"
@@ -815,11 +812,10 @@ def main() -> int:
 
     bin_dir = find_pg_bin_dir()
     port = pick_port()
-    root = Path(tempfile.mkdtemp(prefix="carr-breakglass_selftest."))
-    cluster = Cluster(port=port, root=root, bin_dir=bin_dir)
+    cluster = Cluster(port=port, bin_dir=bin_dir)
     print(f"breakglass_selftest: starting disposable PostgreSQL on 127.0.0.1:{port} (never Neon, never production)")
-    cluster.start()
     try:
+        cluster.start()
         dsn = cluster.dsn("carr_ci")
         other_dsn = cluster.dsn("carr_ci_other")
         install_fixture(dsn)
