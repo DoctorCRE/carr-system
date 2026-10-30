@@ -137,13 +137,14 @@ async function renew(request, env, dependencies) {
   try {
     await dependencies.withWriter(async client => {
       const result = await client.query(
-        `select s.id,s.state,
-                exists(select 1 from capture_post_call_report r where r.session_id=s.id) as filed
+        `select s.id,s.state
            from capture_session s where s.session_token_hash=$1 and s.device_id=$2
            for update of s /* capture:renew-owner */`, [await sha256(body.session_token), device]);
       const session = result.rows[0];
       if (!session) refuse(401, { error: "unauthorized" });
-      if (session.state === "done" || session.state === "failed" || session.filed)
+      const report = await client.query(
+        "select 1 from capture_post_call_report where session_id=$1 /* capture:renew-filed */", [session.id]);
+      if (session.state === "done" || session.state === "failed" || report.rows.length)
         refuse(409, { error: "terminal_state" });
       // Keep the same credential so a lost response or concurrent bridge retry is safe.
       await client.query(
