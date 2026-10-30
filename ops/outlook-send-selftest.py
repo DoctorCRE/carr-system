@@ -1060,6 +1060,166 @@ class OutboxTests(unittest.TestCase):
             return {'recipients': [{'email': e, 'blocked': False} for e in args['emails']]}
         return dict(ok=True, proposal_id=self.draft['proposal_id'], status=args.get('status'))
 
+    def test_unreadable_attachment_fails_one_draft_and_next_draft_still_sends(self):
+        root = Path(self.tmp).resolve() / 'approved'
+        root.mkdir()
+        packet = root / 'synthetic-unreadable.pdf'
+        packet.write_bytes(b'synthetic bytes')
+        self.settings = replace(self.settings, attachment_root=root, attachment_max_bytes=1000)
+        self.draft['attachments'] = [dict(path=str(packet), sha256=send_mod._digest(packet))]
+        second = {**self.draft, 'proposal_id': '22222222-2222-4333-8444-555555555555', 'attachments': []}
+        carr = self.ports.carr
+        def two_drafts(verb, args):
+            if verb == 'outbox-for-sender':
+                return dict(schema_version='email-outbox.v1', owner='joe', drafts=[self.draft, second])
+            return carr(verb, args)
+        self.ports.carr = two_drafts
+        real_open = open
+        def unreadable(path, *args, **kwargs):
+            if Path(path) == packet:
+                raise PermissionError('synthetic private path must not escape')
+            return real_open(path, *args, **kwargs)
+        packet.chmod(0)
+        output = StringIO()
+        with patch('builtins.open', side_effect=unreadable), redirect_stdout(output), redirect_stderr(output):
+            counts = self.worker.run(self.settings, self.ports)
+        self.assertEqual((counts['failed'], counts['sent']), (1, 1))
+        receipts = [args for verb, args in self.calls if verb == 'record-email-sent']
+        self.assertEqual([(r['proposal_id'], r['status']) for r in receipts], [
+            (self.draft['proposal_id'], 'failed'), (second['proposal_id'], 'sent')])
+        self.assertEqual(receipts[0]['reason'], 'attachment_unreadable')
+        self.assertEqual(len(self.sent), 1)
+        private = json.dumps(receipts) + output.getvalue()
+        for value in (packet.name, str(packet), self.draft['subject'], 'synthetic private path'):
+            self.assertNotIn(value, private)
+
+    def test_recovered_older_ledger_retains_the_observed_sent_time(self):
+        self.worker.run(self.settings, self.ports)
+        ledger = self.ports.out / send_mod.LEDGER
+        rows = [json.loads(line) for line in ledger.read_text().splitlines()]
+        for row in rows:
+            row.pop('sent_at', None)
+        ledger.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+        self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
+        self.mailbox.sent.clear()
+        self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
+        self.assertEqual(len(self.sent), 1)
+
+    def test_old_confirmed_sent_without_time_never_records_failed_after_a_day(self):
+        with patch.object(self.worker, '_save', side_effect=OSError('synthetic crash before receipt')):
+            with self.assertRaises(OSError):
+                self.worker.run(self.settings, self.ports)
+        ledger = self.ports.out / send_mod.LEDGER
+        rows = [json.loads(line) for line in ledger.read_text().splitlines()]
+        for row in rows:
+            row.pop('sent_at', None)
+        ledger.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+        self.mailbox.sent.clear()
+        self.clock.t += 25 * 3600
+        for broken in (False, True):
+            self.mailbox.broken = broken
+            output = StringIO()
+            logger = logging.getLogger('lib.outlook_outbox')
+            handler = logging.StreamHandler(output)
+            logger.addHandler(handler)
+            try:
+                counts = self.worker.run(self.settings, self.ports)
+            finally:
+                logger.removeHandler(handler)
+            self.assertEqual(counts['failed'], 0)
+            self.assertEqual((counts['deferred'], counts['sent_unrecorded']), (1, 1))
+            self.assertIn('sent_time_unavailable', output.getvalue())
+            for value in (self.draft['subject'], *self.draft['to'], *self.draft['cc']):
+                self.assertNotIn(value, output.getvalue())
+        self.assertEqual(len(self.sent), 1)
+        self.assertFalse(any(verb == 'record-email-sent' for verb, _ in self.calls))
+        self.assertFalse(list((self.ports.out / 'outbox').glob('*.json')))
+
+    def test_pending_sent_receipt_recovers_observed_time_without_resending(self):
+        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        root = self.ports.out / 'outbox'
+        root.mkdir(parents=True)
+        receipt = dict(idempotency_key=draft.key, proposal_id=draft.proposal_id,
+                       base_version=draft.version, sha256=draft.sha256,
+                       status='sent', sent_item_id='synthetic-old-receipt')
+        path = root / f'{draft.key}.json'
+        path.write_text(json.dumps(receipt))
+        self.mailbox.sent.append(SentRow(ACCOUNT, '; '.join(draft.mail.recipients), draft.mail.subject,
+                                         int(NOW), 'synthetic-old-receipt'))
+        self.worker.run(self.settings, self.ports)
+        [recorded] = [args for verb, args in self.calls if verb == 'record-email-sent']
+        self.assertEqual(recorded['sent_at'], datetime.fromtimestamp(NOW, timezone.utc).isoformat())
+        self.assertEqual(recorded['sender_account'], ACCOUNT)
+        self.assertFalse(path.exists())
+        self.assertEqual(self.sent, [])
+
+    def test_unconfirmed_submitted_files_defer_without_a_sent_receipt(self):
+        root = Path(self.tmp).resolve() / 'approved'
+        root.mkdir()
+        packet = root / 'synthetic-packet.pdf'
+        packet.write_bytes(b'synthetic attachment')
+        from dataclasses import replace
+        self.settings = replace(self.settings, attachment_root=root, attachment_max_bytes=1000)
+        self.draft['attachments'] = [dict(path=str(packet), sha256=send_mod._digest(packet))]
+        self.ports.script_send = lambda mail: 'sent'
+        with patch.object(send_mod, 'default_sender', lambda: f'{ACCOUNT}_ActiveSyncExchange_HxS'):
+            counts = self.worker.run(self.settings, self.ports)
+        self.assertEqual(counts['deferred'], 1)
+        self.assertFalse(any(v == 'record-email-sent' for v, _ in self.calls))
+
+    def test_approved_attachment_identity_cannot_change_before_sending(self):
+        from dataclasses import replace
+        root = Path(self.tmp).resolve() / 'approved'
+        root.mkdir()
+        packet = root / 'synthetic-packet.pdf'
+        packet.write_bytes(b'original synthetic bytes')
+        self.settings = replace(self.settings, attachment_root=root, attachment_max_bytes=1000)
+        digest = send_mod._digest(packet)
+        self.draft['attachments'] = [dict(path=str(packet), sha256=digest)]
+        packet.write_bytes(b'changed synthetic bytes')
+        counts = self.worker.run(self.settings, self.ports)
+        self.assertEqual(counts['failed'], 1)
+        self.assertEqual(self.sent, [])
+        packet.write_bytes(b'original synthetic bytes')
+        alias = root / 'alias.pdf'
+        alias.symlink_to(packet)
+        self.draft['attachments'] = [dict(path=str(alias), sha256=digest)]
+        with self.assertRaisesRegex(ValueError, '^submission_attachment_mismatch$'):
+            self.worker.SubmittedDraft.parse(self.draft, self.settings)
+
+    def test_confirmed_files_keep_names_out_of_ledger_receipts_and_diagnostics(self):
+        from dataclasses import replace
+        import contextlib
+        import io
+        root = Path(self.tmp).resolve() / 'approved'
+        root.mkdir()
+        paths = [root / 'synthetic-packet.pdf', root / 'synthetic-plan.pdf']
+        for path in paths:
+            path.write_bytes(b'synthetic attachment')
+        self.settings = replace(self.settings, attachment_root=root, attachment_max_bytes=1000)
+        self.draft['attachments'] = [dict(path=str(p), sha256=send_mod._digest(p)) for p in paths]
+        def dispatch(mail):
+            self.sent.append(mail)
+            self.mailbox.sent.append(SentRow(ACCOUNT, '; '.join(mail.recipients), mail.subject,
+                                             int(NOW), 'synthetic-files-sent'))
+            return 'sent'
+        self.ports.script_send = dispatch
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output), patch.object(
+                send_mod, 'default_sender', lambda: f'{ACCOUNT}_ActiveSyncExchange_HxS'):
+            counts = self.worker.run(self.settings, self.ports)
+            self.worker.run(self.settings, self.ports)
+        self.assertEqual(counts['sent'], 1)
+        self.assertEqual(len(self.sent), 1)
+        receipts = [args for verb, args in self.calls if verb == 'record-email-sent']
+        self.assertEqual(receipts[0]['sender_account'], ACCOUNT)
+        self.assertEqual(receipts[0]['sent_at'], datetime.fromtimestamp(NOW, timezone.utc).isoformat())
+        ledger = (self.ports.out / send_mod.LEDGER).read_text()
+        self.assertIn('"count": 2', ledger)
+        for path in paths:
+            self.assertIn(send_mod._digest(path), ledger)
+            self.assertNotIn(path.name, ledger + json.dumps(receipts) + output.getvalue())
+
     def test_submitted_reply_sends_exact_text_once_with_partner_copy_and_receipt(self):
         with patch.object(send_mod, '_confirm_dispatch', side_effect=AssertionError('native dialog')):
             self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
@@ -1410,7 +1570,6 @@ class AttachmentTests(unittest.TestCase):
         return (self.tmp / 'send' / send_mod.LEDGER).read_text()
 
     def dispatch(self, mail, key):
-        """The submitted transport, reached directly: drafts refuse attachments until the record carries them."""
         return send_mod._write_transport(mail, key, self.ports, send_requested=True, submitted=True)
 
     def test_submitted_mail_sends_through_one_script_and_confirms(self):
@@ -1445,13 +1604,10 @@ class AttachmentTests(unittest.TestCase):
         self.assertIn('aborted_before_dispatch', self.ledger_text())
 
     def test_only_a_validated_submission_reaches_the_transport(self):
-        from lib.outlook_outbox import SubmittedDraft
         mail = self.mail()
         self.assertTrue(send_mod.partner_copied(mail, self.settings))
         result = send_mod.send_submitted(mail, ports=self.ports)
         self.assertEqual((result.state, result.reason), (State.REFUSED, 'submission_required'))
-        with self.assertRaisesRegex(ValueError, '^attachments_not_wired$'):
-            SubmittedDraft('00000000-0000-0000-0000-000000000001', 1, 'a' * 64, mail)
         self.assertEqual((self.scripts, self.forms), ([], []))
         self.assertFalse((self.tmp / 'send' / send_mod.LEDGER).exists())
 
