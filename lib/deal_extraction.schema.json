@@ -1,0 +1,268 @@
+{
+  "document_types": {
+    "loi": {
+      "method": "text_layer",
+      "auto_accept": false
+    },
+    "lease": {
+      "method": "text_layer",
+      "auto_accept": false
+    },
+    "counter": {
+      "method": "text_layer",
+      "auto_accept": false
+    },
+    "amendment": {
+      "method": "text_layer",
+      "auto_accept": false
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "fields": {
+        "type": "array",
+        "minItems": 4,
+        "maxItems": 4,
+        "items": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "fact_key": {
+                  "const": "base_rent_per_sf"
+                },
+                "status": {
+                  "const": "observed"
+                },
+                "value": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$"
+                },
+                "unit": {
+                  "enum": [
+                    "USD/SF/year",
+                    "USD/SF/month"
+                  ]
+                },
+                "page": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "cited_text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000
+                },
+                "region": {
+                  "enum": [
+                    "scalar",
+                    "schedule",
+                    "ocr"
+                  ]
+                },
+                "expense_basis": {
+                  "enum": [
+                    "nnn",
+                    "modified_gross",
+                    "full_service_gross",
+                    "gross"
+                  ]
+                }
+              },
+              "required": [
+                "fact_key",
+                "status",
+                "value",
+                "unit",
+                "page",
+                "cited_text",
+                "region",
+                "expense_basis"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "fact_key": {
+                  "const": "landlord_ti_per_sf"
+                },
+                "status": {
+                  "const": "observed"
+                },
+                "value": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$"
+                },
+                "unit": {
+                  "enum": [
+                    "USD/SF"
+                  ]
+                },
+                "page": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "cited_text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000
+                },
+                "region": {
+                  "enum": [
+                    "scalar",
+                    "schedule",
+                    "ocr"
+                  ]
+                }
+              },
+              "required": [
+                "fact_key",
+                "status",
+                "value",
+                "unit",
+                "page",
+                "cited_text",
+                "region"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "fact_key": {
+                  "const": "term_months"
+                },
+                "status": {
+                  "const": "observed"
+                },
+                "value": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$"
+                },
+                "unit": {
+                  "enum": [
+                    "months",
+                    "years"
+                  ]
+                },
+                "page": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "cited_text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000
+                },
+                "region": {
+                  "enum": [
+                    "scalar",
+                    "schedule",
+                    "ocr"
+                  ]
+                }
+              },
+              "required": [
+                "fact_key",
+                "status",
+                "value",
+                "unit",
+                "page",
+                "cited_text",
+                "region"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "fact_key": {
+                  "const": "free_rent_months"
+                },
+                "status": {
+                  "const": "observed"
+                },
+                "value": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$"
+                },
+                "unit": {
+                  "enum": [
+                    "months"
+                  ]
+                },
+                "page": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "cited_text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000
+                },
+                "region": {
+                  "enum": [
+                    "scalar",
+                    "schedule",
+                    "ocr"
+                  ]
+                }
+              },
+              "required": [
+                "fact_key",
+                "status",
+                "value",
+                "unit",
+                "page",
+                "cited_text",
+                "region"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "fact_key": {
+                  "enum": [
+                    "base_rent_per_sf",
+                    "landlord_ti_per_sf",
+                    "term_months",
+                    "free_rent_months"
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "not_present",
+                    "unreadable"
+                  ]
+                },
+                "reason": {
+                  "enum": [
+                    "absent",
+                    "no_text_layer",
+                    "unsupported_schedule",
+                    "unsupported_ocr",
+                    "ambiguous",
+                    "ungrounded"
+                  ]
+                }
+              },
+              "required": [
+                "fact_key",
+                "status",
+                "reason"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "required": [
+      "fields"
+    ]
+  }
+}

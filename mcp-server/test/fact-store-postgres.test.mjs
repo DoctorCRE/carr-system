@@ -11,7 +11,7 @@ import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.c
 // WR-000039 E09a. Synthetic tenants, entities, documents, and actors only.
 const partner = { id: '00000000-0000-4000-8000-000000000001', slug: 'joe', human: true };
 const job = { id: '00000000-0000-4000-8000-000000000002', slug: 'codex', human: false, sponsoring_human_slug: 'joe' };
-const FACT_FUNCTIONS = /^ops\.(record_fact_observations|promote_fact|list_fact_conflicts|record_human_fact|list_fact_review|resolve_fact_review)\(/;
+const FACT_FUNCTIONS = /^ops\.(record_fact_observations|promote_fact|list_fact_conflicts|record_human_fact|list_fact_review|resolve_fact_review|read_deal_extraction_source|record_deal_extraction)\(/;
 const hash = n => n.toString(16).padStart(64, '0');
 
 const observation = (id, patch = {}) => {
@@ -33,8 +33,14 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
     try { return await executeRegisteredTool(c, actor, verb, args); }
     finally { await c.query('reset role'); }
   };
-  const record = (entity_ref, observations, actor = job, idempotency_key = randomUUID()) =>
-    as('carr_writer', actor, 'record-fact-observations', { idempotency_key, entity_ref, observations });
+  const record = async (entity_ref, observations, actor = job, idempotency_key = randomUUID()) => {
+    const result = await as('carr_writer', actor, 'record-fact-observations', { idempotency_key, entity_ref, observations });
+    // Kernel fixtures supply an attestation as the owner. No runtime ingress can assert this flag.
+    await c.query('set session_replication_role=replica');
+    try { await c.query('update ops.fact_observation set lineage_verified=true where batch_id=$1', [result.batch_id]); }
+    finally { await c.query('set session_replication_role=origin'); }
+    return result;
+  };
   const promote = (entity_ref, observation_ids, patch = {}, actor = job) => as('carr_writer', actor, 'promote-fact', {
     idempotency_key: randomUUID(), entity_ref, fact_key: 'base_rent_per_sf', basis: 'independent_agreement',
     observation_ids, base_version: 0, ...patch });
@@ -50,6 +56,8 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as $f$select ${c.escapeLiteral(JSON.stringify(predecessor))}::jsonb$f$`);
     await c.query(await readFile(new URL('../../migrations/0983_fact_store.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(new URL('../../migrations/1070_fact_review.sql', import.meta.url), 'utf8'));
+    await c.query(await readFile(new URL('../../migrations/1074_deal_extraction.sql', import.meta.url), 'utf8'));
+    await c.query("update system_config set value='true'::jsonb where key='facts.automatic_promotion_enabled'");
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner'),($2,'codex','automation','Synthetic job')", [partner.id, job.id]);
 
     await t.test('partners record a sourced term from an existing deal attachment', async () => {
