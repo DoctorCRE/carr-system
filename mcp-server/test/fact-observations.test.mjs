@@ -496,7 +496,8 @@ test('registered dispatch routes all OCR tiers to human review even when values 
     assert.equal(out.fields[0].status, 'agreement');
     assert.deepEqual(out.observations.map(o => o.effective_confidence_tier), ['auto_accept', 'human_review']);
     assert.deepEqual(out.review_items.map(({ observations, ...item }) => item), [{
-      entity_ref: 'synthetic-dispatch-deal', fact_key: 'base_rent_per_sf', priority: 'normal',
+      entity_ref: 'synthetic-dispatch-deal', fact_key: 'base_rent_per_sf',
+      priority: confidence_tier === 'verify_band' ? 'high' : 'normal',
       observation_ids: ['text', 'scan'], reasons: ['human_review', 'ocr'],
       shared_source_groups: [{ fact_key: 'base_rent_per_sf', basis: 'document_ref',
         source_ref: 'synthetic-lease-v1', observation_ids: ['text', 'scan'] }], shared_extraction_groups: [],

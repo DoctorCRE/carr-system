@@ -193,7 +193,8 @@ export function factObservationTools() {
             ...(groups.get(field.fact_key)!.some(o => o.input.method === 'ocr') ? ['ocr'] : []),
           ];
           return reasons.length ? [{ entity_ref: args.entity_ref, fact_key: field.fact_key,
-            priority: field.status === 'conflict' || tiers.has('verify_band') ? 'high' : 'normal',
+            priority: field.status === 'conflict' || groups.get(field.fact_key)!.some(o => o.input.confidence_tier === 'verify_band')
+              ? 'high' : 'normal',
             observation_ids: field.observation_ids, observations: groups.get(field.fact_key), reasons,
             shared_source_groups: shared_source_groups.filter(group => group.fact_key === field.fact_key),
             shared_extraction_groups: shared_extraction_groups.filter(group => group.fact_key === field.fact_key),
