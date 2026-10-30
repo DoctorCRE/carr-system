@@ -20,8 +20,7 @@ export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds
   };
   async function actions(c, deal, owners) {
     return (await c.query(`select n.id, 'next_action' as source, n.description, n.version, n.updated_at::text as updated_at,
-        case when n.id=(select id from next_action where subject_type='deal' and subject_id=$1
-          and status='open' and item_title is null order by updated_at desc,id desc limit 1)
+        case when n.id=(select id from v_deal_current_action where deal_id=$1 and status='open')
           then d.next_date::text else n.due_on::text end as due_on
       from next_action n join deal d on d.id=n.subject_id
       where n.subject_type='deal' and n.subject_id=$1 and n.owner_id=any($2::uuid[])
@@ -44,15 +43,14 @@ export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds
   }
   async function currentPlan(c, deal) {
     return (await c.query(`select b.next_step,b.next_date::text as next_date,
-      (select id from next_action where subject_type='deal' and subject_id=$1 and status='open' and item_title is null
-        order by updated_at desc,id desc limit 1) as action_id from v_deal_room_board b where b.id=$1`, [deal])).rows[0];
+      (select id from v_deal_current_action where deal_id=$1 and status='open') as action_id from v_deal_room_board b where b.id=$1`, [deal])).rows[0];
   }
   async function reconcilePlan(c, actor, deal, before, resolvedIds, key, verb) {
     let plan = dealNextStepStatus(before?.next_step, before?.next_date);
     if (resolvedIds.includes(before?.action_id)) {
-      const next = (await c.query(`select description,due_on::text as due_on from next_action
-        where subject_type='deal' and subject_id=$1 and status='open' and item_title is null
-        order by updated_at desc,id desc limit 1`, [deal])).rows[0];
+      const next = (await c.query(`select n.description,n.due_on::text as due_on from v_deal_current_action current_action
+        join next_action n on n.id=current_action.id
+        where current_action.deal_id=$1 and current_action.status='open'`, [deal])).rows[0];
       await c.query('update deal set next_date=$2,updated_by=$3 where id=$1', [deal, next?.due_on ?? null, actor.id]);
       for (const [field, value] of [['next_step', next?.description ?? null], ['next_date', next?.due_on ?? null]])
         await writeEvent(c, actor, verb, 'deal', deal, { field,
