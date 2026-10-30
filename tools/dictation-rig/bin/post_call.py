@@ -68,11 +68,11 @@ def distiller_json_schema() -> dict[str, Any]:
                 "open_questions": string_array,
             }, ["summary", "decisions", "open_questions"]),
             "joe_tasks": {"type": "array", "items": item({
-                **common, "title": {"type": "string"},
+                **common, "counterpart": {"type": "string", "minLength": 1, "maxLength": 200}, "title": {"type": "string"},
                 "due_on": {"type": ["string", "null"], "format": "date"},
             }, ["title", "deal_id", "participant_ids", "evidence", "due_on"])},
             "dell_tasks": {"type": "array", "items": item({
-                **common, "title": {"type": "string"},
+                **common, "counterpart": {"type": "string", "minLength": 1, "maxLength": 200}, "title": {"type": "string"},
                 "due_on": {"type": ["string", "null"], "format": "date"},
             }, ["title", "deal_id", "participant_ids", "evidence", "due_on"])},
             "deal_updates": {"type": "array", "items": item({
@@ -89,7 +89,7 @@ def distiller_json_schema() -> dict[str, Any]:
                 }, ["text", "next_date", "needs_review"])]},
             }, ["deal_id", "summary", "participant_ids", "evidence", "next_step", "phase_move"])},
             "draft_proposals": {"type": "array", "items": item({
-                **common, "recipient_party_id": {"type": "string"},
+                **common, "counterpart": {"type": "string", "minLength": 1, "maxLength": 200}, "recipient_party_id": {"type": "string"},
                 "subject": {"type": "string"}, "body": {"type": "string"},
             }, ["recipient_party_id", "deal_id", "subject", "body", "participant_ids", "evidence"])},
             "review_questions": string_array,
@@ -447,7 +447,11 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
             if not isinstance(item, dict):
                 raise ContractError(f"{list_name} item must be an object")
             is_action = list_name in {"joe_tasks", "dell_tasks"}
-            _strict_keys(item, required, {"due_on"} if is_action else {"next_step", "phase_move"} if list_name == "deal_updates" else set())
+            _strict_keys(item, required, {"due_on", "counterpart"} if is_action else {"next_step", "phase_move"} if list_name == "deal_updates" else {"counterpart"})
+            if "counterpart" in item:
+                name = _string(item["counterpart"], f"{list_name}.counterpart")
+                if len(name) > 200:
+                    raise ContractError(f"{list_name}.counterpart exceeds 200 characters")
             if is_action:
                 _calendar_date_or_none(item.setdefault("due_on", None), f"{list_name}.due_on")
             step = item.get("next_step") if list_name == "deal_updates" else None
@@ -597,6 +601,8 @@ def _distiller_instruction() -> str:
     return (
         "You distill a Joe-and-Dell weekly commercial-real-estate call. " + DATA_SENTENCE + " "
         "Use only exact deal_id and party_id values present in CONTEXT; never copy display names into ID fields. "
+        "For each task or draft, include counterpart only when the person outside the partnership it concerns is clear; "
+        "use their name exactly as said on the call, and never guess. "
         "Extract each distinct action once, with exactly one accountable owner in joe_tasks or dell_tasks. "
         "Assign it to the partner who explicitly commits to doing it, even if the other partner owns the deal. "
         "A shared 'we' commitment or repeated discussion of the same action is one task, never one per partner. "
@@ -1160,6 +1166,7 @@ def sanitized_candidates(session_dir: Path) -> dict[str, Any]:
                 "kind": "assigned_action", "deal_id": task["deal_id"], "assignee": owner,
                 "action": task["title"], "due_on": task.get("due_on"), "evidence_quote": task["evidence"],
                 "confidence": 0.5,
+                **({"counterpart": {"name": task["counterpart"]}} if task.get("counterpart") else {}),
             })
             bindings.append(_candidate_binding(list_name, index, "post_call"))
     for index, update in enumerate(report.get("deal_updates", [])):
@@ -1200,6 +1207,7 @@ def sanitized_candidates(session_dir: Path) -> dict[str, Any]:
             "recipient_party_id": draft["recipient_party_id"], "recipient_ref": recipient_ref,
             "subject": draft["subject"], "body_sha256": draft["content_hash"],
             "evidence_quote": draft["evidence"], "confidence": 0.5,
+            **({"counterpart": {"name": draft["counterpart"]}} if draft.get("counterpart") else {}),
         })
         bindings.append(_candidate_binding("draft_proposals", index, "post_call"))
     return {"schema_version": SCHEMA_VERSION, "session": session_dir.name,

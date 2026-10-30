@@ -514,6 +514,23 @@ class PostCallTests(unittest.TestCase):
         result.update(overrides)
         return result
 
+    def test_counterpart_reaches_action_and_draft_candidates_when_named(self) -> None:
+        task = {"title": "Call Pat", "deal_id": "deal-a", "participant_ids": ["p-1"],
+                "evidence": "Joe will call Pat", "counterpart": "Pat"}
+        unclear = {"title": "Review options", "deal_id": "deal-a", "participant_ids": [],
+                   "evidence": "Review options"}
+        draft = {"recipient_party_id": "p-1", "deal_id": "deal-a", "subject": "Next steps",
+                 "body": "Thank you.", "participant_ids": ["p-1"], "evidence": "Email Pat",
+                 "counterpart": "Pat"}
+        transcript = {"segments": [{"speaker": "Joe", "text": "Joe will call Pat. Review options. Email Pat."}]}
+        report = post_call.normalize_distillation(self.output(joe_tasks=[task, unclear],
+            deal_updates=[], draft_proposals=[draft]), self.context, self.session.name, transcript=transcript)
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        candidates = post_call.sanitized_candidates(self.session)["post_call_items"]
+        self.assertEqual(candidates[0]["counterpart"], {"name": "Pat"})
+        self.assertNotIn("counterpart", candidates[1])
+        self.assertEqual(candidates[2]["counterpart"], {"name": "Pat"})
+
     def test_weekly_transcript_without_app_fetches_context_and_processes_once(self) -> None:
         call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
         replies = [
