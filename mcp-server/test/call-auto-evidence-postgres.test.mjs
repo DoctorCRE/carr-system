@@ -36,8 +36,13 @@ async function transaction(fn, role = null) {
 }
 const command = (name, args = {}) => transaction(client => executeRegisteredTool(client, actor, name, args));
 
-async function filePhase(evidence, { speaker = "joe", storedQuote = evidence } = {}) {
+async function filePhase(evidence, { speaker = "joe", storedQuote = evidence, kind = "phase_move", overdue = false } = {}) {
   const deal = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic phase purchase',$1,'purchase','site_selection','joe',$2,$2) returning id", [clientId, actor.id])).rows[0].id;
+  let prior;
+  if (overdue) prior = await command('set-next-step', {
+    idempotency_key: randomUUID(), deal, text: 'Request revised terms', next_date: '2020-01-01',
+    base_version: (await command('get-deal-room', { deal })).base_version,
+  });
   const token = randomUUID();
   const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,consent_announced_at,
     session_token_hash,expires_at,state,state_at,post_call) values($1,'fixture',$2,'meeting',now(),now(),$1,
@@ -48,13 +53,15 @@ async function filePhase(evidence, { speaker = "joe", storedQuote = evidence } =
       session_token: token, idempotency_key: randomUUID(), evidence_sources: [speaker === "client" ? null : {
         speaker, source_sha256: createHash('sha256').update(JSON.stringify({ speaker, text: storedQuote })).digest('hex'),
         quote_sha256: createHash('sha256').update(storedQuote).digest('hex'),
-      }], items: [{ kind: 'phase_move',
-        payload: { deal, field: 'phase', value: 'legal' }, evidence_quote: evidence, confidence: 1 }]
+      }], items: [{ kind,
+        payload: kind === 'next_step' ? { deal, text: 'Review revised terms', next_date: '2030-01-01' }
+          : kind === 'activity' ? { ref: deal, kind: 'note', summary: evidence }
+          : { deal, field: 'phase', value: 'legal' }, evidence_quote: evidence, confidence: 1 }]
     })
   }), {});
   const body = await response.json();
   assert.equal(response.status, 200, JSON.stringify(body));
-  return { deal, session, id: body.candidate_ids[0] };
+  return { deal, session, id: body.candidate_ids[0], prior };
 }
 
 test('punctuation-only evidence stays pending, preserves the deal and can be resolved by a partner', async () => {
@@ -119,4 +126,41 @@ test('a caller without partner authority cannot automatically apply a valid part
   const after = await command('get-deal-room', { deal });
   assert.equal(after.phase, before.phase);
   assert.deepEqual(after.events, before.events);
+});
+
+for (const [kind, automatic, verdict] of [
+  ['next_step', true, 'yes'], ['next_step', false, 'yes'],
+  ['next_step', true, 'no'], ['activity', false, 'yes'], ['activity', false, 'no'],
+]) test(`${kind} call confirmation automatic=${automatic} assesses overdue completion ${verdict} once with Undo`, async () => {
+  const evidence = verdict === 'yes' ? 'The landlord sent the requested revised terms.' : 'We discussed parking at the other property.';
+  const { deal, id, prior } = await filePhase(evidence, { kind, overdue: true });
+  let calls = 0;
+  c.jevClient = { systemOne: async request => {
+    calls++;
+    assert.equal(request.state.update, evidence);
+    assert.equal(request.state.actions[0].description, 'Request revised terms');
+    return { answers: Object.fromEntries(Object.keys(request.questions).map(key => [key,
+      key.startsWith('quote_') ? { type: 'choice', choice: 'quote_0' } : {
+        type: 'choice', choice: verdict, confidence: 0.99,
+        probabilities: Object.fromEntries(['yes', 'no', 'unclear'].map(v => [v, v === verdict ? 0.98 : 0.01])),
+      }])) };
+  } };
+  try {
+    const args = { idempotency_key: randomUUID(), candidate_id: id, accept: true, automatic };
+    await command('resolve-candidate', args);
+    const room = await command('get-deal-room', { deal });
+    assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, verdict === 'yes' ? 'done' : 'open');
+    const assessment = room.events.find(e => e.field === 'overdue_assessment');
+    assert.equal(assessment.new_value.update, evidence);
+    assert.equal(assessment.new_value.resolved, verdict === 'yes');
+    assert.equal((await command('resolve-candidate', args)).replayed, true);
+    assert.equal((await command('resolve-candidate', { ...args, idempotency_key: randomUUID() })).already, 'confirmed');
+    assert.equal(calls, 1);
+    assert.deepEqual((await command('get-deal-room', { deal })).events, room.events);
+    if (verdict === 'yes') {
+      await command('review-deal-update', { idempotency_key: randomUUID(), assessment_id: assessment.id,
+        decision: 'undo', reason: 'Synthetic completion correction' });
+      assert.equal((await command('get-deal-room', { deal })).next_actions.find(a => a.id === prior.next_action_id).status, 'open');
+    }
+  } finally { delete c.jevClient; }
 });
