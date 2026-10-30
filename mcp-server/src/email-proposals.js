@@ -615,7 +615,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'dismiss-email-proposal': {
       write: true, humanOnly: true, humanCallerOnly: true,
-      description: 'Joe or Dell dismisses one pending email proposal at the version they read, with a reason kept in deal history. The router never re-creates a dismissed proposal for the same deal, email and kind. If Joe later confirms the same proposal through its confirm verb, the confirmation wins and the row becomes confirmed with the dismissal kept as a note. Changes nothing else.',
+      description: 'Joe or Dell dismisses one pending email proposal at the version they read, with a reason kept in deal history. Only the mailbox owner can dismiss a reply draft. The router never re-creates a dismissed proposal for the same deal, email and kind. If Joe later confirms the same proposal through its confirm verb, the confirmation wins and the row becomes confirmed with the dismissal kept as a note. Changes nothing else.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: ['idempotency_key', 'proposal_id', 'base_version', 'reason'],
         properties: {
@@ -628,9 +628,10 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         if (actor.human !== true || !['joe', 'dell'].includes(actor.slug)) fail('partner_dismissal_required');
         return withEnvelope(c, actor, 'dismiss-email-proposal', args, async () => {
           if (!args.reason?.trim()) fail('email_proposal_reason_required');
-          const row = (await c.query(`select id,kind,deal_id,activity_id,status,version from email_proposal
+          const row = (await c.query(`select id,kind,deal_id,activity_id,status,version,owner from email_proposal
             where id=$1 for update`, [args.proposal_id])).rows[0];
           if (!row) fail('email_proposal_not_found');
+          if (row.kind === 'reply_draft' && row.owner !== actor.slug) fail('email_draft_not_owner');
           if (row.status !== 'pending') fail('email_proposal_not_pending', { status: row.status });
           if (row.version !== args.base_version)
             fail('version_conflict', { current_version: row.version, hint: 'surface this to the human and re-read; NEVER auto-retry' });
