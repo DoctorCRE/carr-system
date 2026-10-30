@@ -83,6 +83,14 @@ def register_job(args):
         match = re.fullmatch(r'WR([1-9]\d*)\.S([1-9]\d*)\.J([1-9]\d*)', card)
         if not match or any(int(number) > 0x7fffffff for number in match.groups()[1:]):
             raise ValueError('requires Card: WRn.Sm.Jk')
+        headers = {}
+        for header in ('Title', 'Description'):
+            value = next((line.removeprefix(header + ':').strip()
+                          for line in args.brief.splitlines() if line.startswith(header + ':')), '')
+            if not value:
+                print(f'codex-job: {card}: brief requires {header}: header', file=sys.stderr)
+                return False
+            headers[header] = value
         repository = args.repo
         if Path(repository).exists():
             repository = output(['git', '-C', repository, 'remote', 'get-url', 'origin']) or ''
@@ -98,7 +106,7 @@ def register_job(args):
                      work_request=f'WR-{int(match[1]):06d}', slice=int(match[2]), job=int(match[3]),
                      runner_job_id=runner, repository=repository, executor='codex', job_type=header_type(args.brief),
                      model=settings.get('model', 'default'), effort=settings.get('model_reasoning_effort', 'default'),
-                     card_title='Codex job', description='Execute the supplied job brief.')
+                     card_title=headers['Title'], description=headers['Description'])
         reply = output([sys.executable, str(Path(__file__).resolve().parents[1] / 'tools/call-verb.py'),
                         'dispatch-job', json.dumps(facts)])
         receipt = json.loads(reply or '{}')
