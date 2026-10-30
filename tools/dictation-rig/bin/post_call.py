@@ -30,7 +30,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from lib.fence import DATA_SENTENCE  # noqa: E402
-from lib.record_call import call_command  # noqa: E402
+from lib.record_call import call_command, call_verb  # noqa: E402
 
 SCHEMA_VERSION = 1
 CONTEXT_FILE = "call-context.json"
@@ -686,10 +686,17 @@ def default_distiller(request: dict[str, Any]) -> dict[str, Any]:
 
 
 def call_record_command(verb: str, args: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
-    """Use the partner's existing local identity; rehearsals inject an offline route."""
+    """Use the partner's existing local identity; rehearsals inject an offline route.
+
+    The live route is `run.sh call`, whose reply is indented JSON with no `ok`
+    key, so it goes through call_verb; only the rehearsal route speaks the
+    one-line `ok: true` contract that call_command reads.
+    """
     command = os.environ.get("CARR_POST_CALL_VERB_COMMAND")
-    argv = shlex.split(command) if command else [sys.executable, str(Path(__file__).resolve().parents[3] / "tools" / "call-verb.py")]
-    return call_command(argv, verb, args, timeout=60)
+    if command:
+        return call_command(shlex.split(command), verb, args, timeout=60)
+    result = call_verb(verb, args, timeout=60)
+    return result.ok, result.reply if isinstance(result.reply, dict) else {}
 
 
 def fetch_context(session_dir: Path) -> dict[str, Any]:

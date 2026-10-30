@@ -478,8 +478,23 @@ class CallModeHttpTests(unittest.TestCase):
         handler.send_json.assert_called_once_with({"error": "request body too large"}, 409)
 
 
+def through_fake_transport(verb: str, args: dict[str, Any], **kwargs: Any):
+    """Send the live `run.sh call` route through post_call.subprocess.run, which tests fake."""
+    def runner(argv, **options):
+        done = post_call.subprocess.run(argv, **options)
+        return SimpleNamespace(returncode=done.returncode, stdout=getattr(done, "stdout", ""),
+                               stderr=getattr(done, "stderr", ""))
+    return REAL_CALL_VERB(verb, args, runner=runner, **kwargs)
+
+
+REAL_CALL_VERB = post_call.call_verb
+
+
 class PostCallTests(unittest.TestCase):
     def setUp(self) -> None:
+        transport = patch.object(post_call, "call_verb", through_fake_transport)
+        transport.start()
+        self.addCleanup(transport.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.session = Path(self.tmp.name) / "2026.08.10-1234"
         self.session.mkdir()
@@ -2213,6 +2228,39 @@ class PostCallJevChecksTests(unittest.TestCase):
         )
         self.assertLessEqual(len(candidates), post_call_jev.MAX_CANDIDATE_DEALS)
         self.assertEqual(candidates[0]["id"], "deal-a")
+
+
+
+class RecordCommandRouteTests(unittest.TestCase):
+    """The live route reads `run.sh call`'s indented JSON, which has no `ok` key."""
+
+    def test_default_route_reads_pretty_reply_without_ok_key(self) -> None:
+        board = {"schema_version": "local-deals-board.v2", "deals": [{"id": "deal-a"}]}
+        seen: list[list[str]] = []
+
+        def runner(argv, **_kwargs):
+            seen.append(argv)
+            return subprocess.CompletedProcess(argv, 0, json.dumps(board, indent=2) + "\n", "banner\n")
+
+        real = post_call.call_verb
+        with patch.dict(os.environ, {}, clear=False), \
+                patch.object(post_call, "call_verb", lambda verb, args, **kw: real(verb, args, runner=runner, **kw)):
+            os.environ.pop("CARR_POST_CALL_VERB_COMMAND", None)
+            ok, reply = post_call.call_record_command("deal-room-board", {"workspace": "all"})
+        self.assertTrue(ok)
+        self.assertEqual(reply, board)
+        self.assertEqual(seen[0][1:3], ["call", "deal-room-board"])
+
+    def test_default_route_reports_refusal_payload(self) -> None:
+        def runner(argv, **_kwargs):
+            return subprocess.CompletedProcess(argv, 1, "", 'TOOL ERROR {"error": "version_conflict"}\n')
+
+        real = post_call.call_verb
+        with patch.object(post_call, "call_verb", lambda verb, args, **kw: real(verb, args, runner=runner, **kw)):
+            os.environ.pop("CARR_POST_CALL_VERB_COMMAND", None)
+            ok, reply = post_call.call_record_command("resolve-candidate", {"candidate_id": "c"})
+        self.assertFalse(ok)
+        self.assertEqual(reply.get("error"), "version_conflict")
 
 
 if __name__ == "__main__":
