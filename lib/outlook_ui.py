@@ -23,6 +23,7 @@ from enum import Enum
 import json
 import os
 from pathlib import Path
+import plistlib
 import re
 import subprocess
 import time
@@ -291,8 +292,29 @@ def window_detail(pid: int | None) -> str:
     return json.dumps({'windows': snapshot}, separators=(',', ':'))
 
 
+def screen_locked() -> bool:
+    """Return positive console lock evidence; an unavailable probe leaves preflight unchanged."""
+    try:
+        result = subprocess.run(['ioreg', '-a', '-d1', '-k', 'IOConsoleUsers', '-r'],
+                                capture_output=True, timeout=5)
+        if result.returncode:
+            return False
+        roots = plistlib.loads(result.stdout)
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return False
+    if not isinstance(roots, list):
+        return False
+    return any(session.get('CGSSessionScreenIsLocked') is True
+               for root in roots if isinstance(root, dict)
+               if isinstance(root.get('IOConsoleUsers'), list)
+               for session in root['IOConsoleUsers']
+               if isinstance(session, dict))
+
+
 def prepare_outlook(waits: Waits) -> Outcome | None:
     """Restart Outlook into one ordinary readable main window; None means ready."""
+    if screen_locked():
+        return Outcome('skipped', 'screen_locked')
     try:
         pid = outlook_pid()
         if pid is not None:
