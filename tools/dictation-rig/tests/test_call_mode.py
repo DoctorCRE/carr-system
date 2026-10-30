@@ -1901,6 +1901,51 @@ class CaptureBridgePostCallTests(unittest.TestCase):
             publish.assert_called_once_with(self.session.resolve())
             self.assertEqual(post_call.read_json(self.session / post_call.STATUS_FILE)["state"], "ready_review")
 
+    def test_release_keeps_edited_report_when_poll_interleaves(self) -> None:
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        report["report"]["summary"] = "Partner edit"
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        post_call.write_private(self.session / "transcript.json", {"segments": [{"text": "Original call"}]})
+        post_call.write_private(self.session / post_call.STATUS_FILE, {"state": "held_review", "reason": "summary_repeats_transcript"})
+        write = post_call.write_private
+        polled = []
+
+        def interleave(path, value):
+            if path.name == post_call.STATUS_FILE and value.get("state") == "blocked":
+                write(path, value)
+                try:
+                    polled.append(post_call.process_session(self.session, lambda _: self.fail("poll distilled")))
+                except RuntimeError:
+                    polled.append("locked")
+                return
+            return write(path, value)
+
+        with (patch.object(call_mode, "RECORDINGS", self.session.parent),
+              patch.object(sys, "argv", ["call-mode", "release", self.session.name]),
+              patch.object(call_mode.post_call, "write_private", side_effect=interleave),
+              patch.object(call_mode, "sync_post_call"), patch("sys.stdout", io.StringIO())):
+            self.assertEqual(call_mode.main(), 0)
+        self.assertEqual(polled, ["locked"])
+        self.assertEqual(post_call.read_json(self.session / post_call.REPORT_FILE)["report"]["summary"], "Partner edit")
+
+    def test_release_checks_edited_report_before_stale_draft(self) -> None:
+        words = "amber birch cedar dawn elm fern grove hazel iris jade kelp leaf moss oak pine"
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        report["report"]["summary"] = words
+        post_call.write_private(self.session / "post-call-held-draft.json", report)
+        post_call.write_private(self.session / "transcript.json", {"segments": [{"text": words}]})
+        post_call.write_private(self.session / post_call.STATUS_FILE, {"state": "held_review", "reason": "summary_repeats_transcript"})
+        with (patch.object(call_mode, "RECORDINGS", self.session.parent),
+              patch.object(sys, "argv", ["call-mode", "release", self.session.name]),
+              patch.object(call_mode, "sync_post_call"), patch("sys.stdout", io.StringIO())):
+            post_call.write_private(self.session / post_call.REPORT_FILE, report)
+            self.assertEqual(call_mode.main(), 1)
+            report["report"]["summary"] = "Partner edit"
+            post_call.write_private(self.session / post_call.REPORT_FILE, report)
+            self.assertEqual(call_mode.main(), 0)
+        self.assertFalse((self.session / "post-call-held-draft.json").exists())
+        self.assertEqual(post_call.read_json(self.session / post_call.REPORT_FILE)["report"]["summary"], "Partner edit")
+
     def test_missing_and_malformed_transcript_hold_saved_report(self) -> None:
         for transcript in (None, {"segments": [None]}):
             with self.subTest(transcript=transcript):

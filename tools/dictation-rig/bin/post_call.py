@@ -781,8 +781,8 @@ def hold_transcript_repeat(session_dir: Path, report: dict[str, Any]) -> dict[st
     return status
 
 
-def process_session(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]] = default_distiller, *,
-                    max_attempts: int = 3) -> dict[str, Any]:
+@contextlib.contextmanager
+def session_lock(session_dir: Path):
     lock_path = session_dir / LOCK_FILE
     lock_path.touch(exist_ok=True)
     lock_path.chmod(0o600)
@@ -791,6 +791,12 @@ def process_session(session_dir: Path, distiller: Callable[[dict[str, Any]], dic
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise RuntimeError("post-call distillation already active for this session") from exc
+        yield
+
+
+def process_session(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]] = default_distiller, *,
+                    max_attempts: int = 3) -> dict[str, Any]:
+    with session_lock(session_dir):
         return _process_session_locked(session_dir, distiller, max_attempts=min(max_attempts, len(EXTRACTION_RETRY_DELAYS) + 1))
 
 

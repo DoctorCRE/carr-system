@@ -110,7 +110,7 @@ for dir in "$RECORDINGS"/*/; do
     have_something=0
     for f in "$dir/mic.caf" "$dir/system.caf" "$dir/transcript.json" "$dir/transcript.md" \
              "$dir/imported.audio" "$dir/imported.wav" "$dir/imported.m4a" \
-             "$dir/imported.mp3" "$dir/imported.mp4" "$dir/imported.webm"; do
+             "$dir/imported.mp3" "$dir/imported.mp4" "$dir/imported.webm" "$dir/post-call-held-draft.json"; do
         [ -f "$f" ] && have_something=1
     done
     [ "$have_something" = "1" ] || continue
@@ -133,7 +133,7 @@ for dir in "$RECORDINGS"/*/; do
 
     for f in "$dir/mic.caf" "$dir/system.caf" "$dir/transcript.json" "$dir/transcript.md" \
              "$dir/imported.audio" "$dir/imported.wav" "$dir/imported.m4a" \
-             "$dir/imported.mp3" "$dir/imported.mp4" "$dir/imported.webm"; do
+             "$dir/imported.mp3" "$dir/imported.mp4" "$dir/imported.webm" "$dir/post-call-held-draft.json"; do
         if [ -f "$f" ]; then
             size=$(du -h "$f" | cut -f1)
             rm "$f"
