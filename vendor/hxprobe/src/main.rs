@@ -78,7 +78,7 @@ fn map(path: &str) -> Mmap {
 
 /// One message record, located and bounded inside a decompressed block.
 struct Located<'a> {
-    /// Bytes of the record: from the previous anchor to the next.
+    /// Bytes bounded by neighbouring anchors and checked object envelopes.
     span: &'a [u8],
     /// Offset of the anchor within the block payload.
     anchor: usize,
@@ -90,17 +90,33 @@ struct Located<'a> {
 
 /// Split a decompressed block into its records.
 ///
-/// Records sit back to back with no length field, so each one is bounded by the
-/// neighbouring `IPM.Note` anchors. Without that bound fields bleed between
-/// messages and pair one message's sender with another's subject.
+/// Anchors bound unframed records; checked envelopes additionally keep the
+/// next object's pre-anchor text out of this record.
 fn records<'a>(data: &'a [u8], needle: &[u8]) -> Vec<Located<'a>> {
+    let envelopes: Vec<_> = [folder::FOLDER, folder::VIEW, folder::MESSAGE, folder::METADATA,
+                            message::OBJECT, message::RECIPIENT, attachment::ATTACHMENT, category::CATEGORY]
+        .into_iter()
+        .flat_map(|kind| folder::envelopes(data, kind))
+        .map(|(start, object)| (start - 10, start, start + object.len()))
+        .collect();
     memchr::memmem::find_iter(data, needle)
         .map(|anchor| {
-            let end = memchr::memmem::find(&data[anchor + 2..], needle)
+            let mut end = memchr::memmem::find(&data[anchor + 2..], needle)
                 .map_or(data.len(), |p| anchor + 2 + p);
             let back = memchr::memmem::rfind(&data[..anchor], needle)
                 .map_or(anchor.min(2048), |p| anchor - p);
-            Located { span: &data[anchor - back..end], anchor, back, end }
+            let mut start = anchor - back;
+            for &(envelope, object, object_end) in &envelopes {
+                if object <= anchor && anchor < object_end {
+                    start = start.max(object);
+                    end = end.min(object_end);
+                } else if object_end <= anchor {
+                    start = start.max(object_end);
+                } else if envelope > anchor {
+                    end = end.min(envelope);
+                }
+            }
+            Located { span: &data[start..end], anchor, back: anchor - start, end }
         })
         .collect()
 }
@@ -425,12 +441,14 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         blocks_ok += 1;
         let folder_links = folders.links(&b.data, &needle);
         let key_links = folders.keys(&b.data, &needle);
+        let object_keys = message::keys(&b.data);
 
         for loc in records(&b.data, &needle) {
-            let Some(mut r) = record::parse(o, &b.data, loc.anchor) else { continue };
+            let Some(mut r) = record::parse(o, loc.span, loc.back) else { continue };
             r.folder_ids = folder_links.get(&loc.anchor).cloned().unwrap_or_default();
             r.folder_links_unresolved = r.folder_ids.is_empty();
-            r.local_keys = key_links.get(&loc.anchor).into_iter().copied().collect();
+            r.local_keys = object_keys.get(&loc.anchor).or_else(|| key_links.get(&loc.anchor))
+                .into_iter().copied().collect();
             let m = schema::build_bounded(&b.data, loc.anchor, loc.end, loc.back);
 
             // The named map is authoritative for every field it covers: it
@@ -841,6 +859,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             ("blocks_found", offs.len()),
             ("blocks_verified", blocks_ok),
             ("messages", stored),
+            ("messages_without_sender", best.iter().filter(|r| r.sender.is_none()).count()),
             ("messages_full", best.iter().filter(|r| r.html.is_some()).count()),
             ("copies_collapsed", collapsed),
             ("local_key_conflicts", best.iter().filter(|r| r.local_keys.len() > 1).count()),

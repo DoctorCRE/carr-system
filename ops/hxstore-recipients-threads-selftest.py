@@ -37,7 +37,8 @@ def index(guid, replies=0):
 
 
 def message(key, guid=b'\x11' * 16, replies=0, subject='Synthetic thread', sender='pat@example.test',
-            in_reply_to=None, conversation_index=None, inline=False, row_sender='wrong@example.test', runs=()):
+            in_reply_to=None, conversation_index=None, inline=False, row_sender='wrong@example.test', runs=(),
+            header=True, sent=1_793_000_000):
     """A class 00c9 message object with its expanded 00ca header at +480.
 
     `None` leaves the sender or subject slot unset, as a draft revision does. Inline rows carry `runs`
@@ -58,7 +59,7 @@ def message(key, guid=b'\x11' * 16, replies=0, subject='Synthetic thread', sende
     values = {name: value for name, value in values.items() if value}
     if inline:
         values = {'row_sender': utf16(row_sender), 'item_class': values.pop('item_class'),
-                  'sent': struct.pack('<Q', 1_793_000_000 * 10_000_000 + 621_355_968_000_000_000),
+                  'sent': struct.pack('<Q', sent * 10_000_000 + 621_355_968_000_000_000),
                   'message_id': values.pop('message_id'), 'duplicate_id': utf16(f'<{key}@example.test>'),
                   'html': b'<html><body>Synthetic inline message body with enough words.</body></html>',
                   **{f'run{i}': utf16(run) for i, run in enumerate(runs)}, **values}
@@ -69,6 +70,8 @@ def message(key, guid=b'\x11' * 16, replies=0, subject='Synthetic thread', sende
         if name in SLOTS:
             struct.pack_into('<II', obj, SLOTS[name], len(data), len(value) | 0x8000_0000)
         data += value
+    if not header:
+        obj[480:934] = bytes(454)
     return envelope(0x060f, bytes(obj) + data + utf16('Synthetic preview text for one message object'))
 
 
@@ -110,12 +113,62 @@ class RecipientThreadExportTests(unittest.TestCase):
                                           'ORDER BY local_key').fetchall(),
                     'senders': db.execute(f'SELECT local_key, {sender} FROM message_objects ORDER BY local_key').fetchall(),
                     'messages': db.execute('SELECT sender, subject, recipients, copies FROM messages ORDER BY id').fetchall(),
+                    'keyed_recipients': db.execute('SELECT k.local_key, m.recipients FROM message_keys k '
+                                                   'JOIN messages m ON m.id = k.message_id ORDER BY k.local_key').fetchall(),
+                    'contents': db.execute('SELECT message_id, body, local_keys FROM messages ORDER BY id').fetchall(),
                     'sent': tuple(send.SentRow(*r) for r in db.execute(
                         'SELECT sender, recipients, subject, sent_unix, message_id FROM messages')),
                     'threads': db.execute('SELECT conversation_id, messages, latest_local_key '
                                           'FROM threads ORDER BY conversation_id').fetchall(),
                     'meta': dict(db.execute('SELECT key, value FROM meta')),
                 }
+
+    def test_descriptor_links_keyless_rows_to_their_own_recipients(self):
+        objects = [recipient(0xd000 + i, 0xe000 + i, TO, f'target{i}@example.test') for i in range(10)]
+        objects.extend(message(0xd000 + i, inline=True, header=i < 7,
+                               row_sender='owner@example.test', sender=None,
+                               subject=f'Synthetic topic {i}', sent=1_793_000_000 + i)
+                       for i in range(10))
+        out = self.export(*objects)
+        covered = sum(bool(row[2]) for row in out['messages'])
+        print(f'Synthetic recipient coverage: {covered}/{len(out["messages"])}', flush=True)
+        self.assertEqual(len(out['messages']), 10)
+        self.assertEqual(covered, 10)
+        self.assertEqual({row[0] for row in out['messages']}, {'owner@example.test'})
+        self.assertEqual({row[2] for row in out['messages']},
+                         {f'target{i}@example.test' for i in range(10)})
+        self.assertEqual(out['keyed_recipients'],
+                         [(0xd000 + i, f'target{i}@example.test') for i in range(10)])
+
+    def test_keyless_row_resolves_sender_from_the_object_descriptor(self):
+        out = self.export(recipient(0xd101, 0xe101, TO, 'target@example.test'),
+                          message(0xd101, header=False, inline=True, row_sender='',
+                                  sender='owner@example.test'))
+        self.assertEqual([row[:3] for row in out['messages']],
+                         [('owner@example.test', 'Synthetic thread', 'target@example.test')])
+        self.assertEqual(out['contents'][0][2], str(0xd101))
+
+    def test_recipient_after_anchor_never_becomes_the_sender(self):
+        out = self.export(message(0xd100, sender=None, inline=True, row_sender='',
+                                  runs=('target@example.test',)))
+        self.assertEqual([row[:3] for row in out['messages']],
+                         [(None, 'Synthetic thread', 'target@example.test')])
+        self.assertEqual(out['meta']['messages_without_sender'], 1)
+
+    def test_keyless_row_does_not_read_text_before_the_next_objects_anchor(self):
+        obj = bytearray(100)
+        struct.pack_into('<H', obj, 0, 0x004f)
+        struct.pack_into('<QIQQQ', obj, 10, 0xd201, 4, 0xd299, 0xd201, 0xd299)
+        obj += utf16('owner@example.test') + utf16('IPM.Note')
+        obj += utf16('<keyless@example.test>')
+        obj += utf16('Isolated topic') * 2
+        obj += utf16('Own preview has enough synthetic words here')
+        obj += struct.pack('<Q', 1_793_000_000 * 10_000_000 + 621_355_968_000_000_000)
+        out = self.export(envelope(0x0430, obj), message(
+            0xd202, inline=True, sender=None, sent=1_793_000_100,
+            row_sender='Neighbour preview must never bleed into the preceding keyless row ' * 3))
+        row = next(row for row in out['contents'] if row[0] == 'keyless@example.test')
+        self.assertEqual(row[1:], ('Own preview has enough synthetic words here', None))
 
     def test_to_and_cc_keep_their_stored_order(self):
         out = self.export(

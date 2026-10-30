@@ -181,3 +181,15 @@ fn seeded_and_mutated_inputs_do_not_panic() {
 fn sustained_inputs_do_not_panic() {
     run_cases(0x440_fedc_ba98_7654, 262_144);
 }
+
+#[test]
+fn backup_sender_at_301_to_320_bytes_is_found() {
+    for distance in [301, 310, 319, 320] {
+        let mut bytes: Vec<u8> = "sender@example.test\0".encode_utf16().flat_map(u16::to_le_bytes).collect();
+        bytes.resize(distance, 0);
+        bytes.extend(record::anchor_needle());
+        bytes.extend([0, 0]);
+        assert_eq!(record::parse(0, &bytes, distance).unwrap().sender.as_deref(),
+                   Some("sender@example.test"), "distance {distance}");
+    }
+}

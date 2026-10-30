@@ -36,7 +36,9 @@ def message(key, sender='pat@example.test', sent=1_793_000_000, anchor_at=600,
         # Typed folder reference at +408 (class 004d, kind 2): folder 50 of account 7.
         struct.pack_into('<H', obj, 408, 0x004d)
         struct.pack_into('<QIQQQ', obj, 418, 50, 2, 7, 50, 7)
-    obj += utf16('IPM.Note') + utf16(sender)
+    encoded_sender = utf16(sender)
+    obj[anchor_at - len(encoded_sender):anchor_at] = encoded_sender
+    obj += utf16('IPM.Note')
     obj += struct.pack('<Q', sent * 10_000_000 + EPOCH_TICKS)
     if subject:
         obj += utf16(subject) * 2

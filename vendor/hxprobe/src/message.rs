@@ -155,6 +155,18 @@ fn recipient(object: &[u8]) -> Option<(u64, u64, RecipientKey)> {
     Some((owner, id, (kind, address, read(RECIPIENT_NAME).unwrap_or_default())))
 }
 
+/// Resolve the ItemClass descriptor to its owning message, without requiring an embedded 00ca header.
+pub fn keys(data: &[u8]) -> BTreeMap<usize, u64> {
+    folder::envelopes(data, OBJECT).into_iter().filter_map(|(start, object)| {
+        let key = u64_at(object, 10).filter(|&k| k != 0 && k <= i64::MAX as u64
+            && u64_at(object, 30) == Some(k))?;
+        let base = base(object)?;
+        let d = descriptor(object, ITEM_CLASS)?;
+        (text(value(object, base, d)?)?.as_str() == "IPM.Note")
+            .then_some((start + base + d.0, key))
+    }).collect()
+}
+
 /// One value all revisions agree on, or `None`.
 ///
 /// Callers pass only the revisions that set a field. A sent message keeps its draft revision, which

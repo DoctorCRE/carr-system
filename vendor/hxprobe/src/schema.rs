@@ -113,26 +113,13 @@ pub fn build_bounded(blob: &[u8], anchor: usize, end: usize, back: usize) -> Map
         push!(Key::ItemClass, f, 0, f.text.clone());
     }
 
-    // Walking backwards from the anchor, the schema puts the sender pair
-    // immediately before `ItemClass`: Address then Name. Taking the *nearest*
-    // address rather than any address is what keeps a quoted address from the
-    // body out of the sender slot.
-    // Nearest-first from the anchor: backwards through the runs before it (the
-    // common layout), then forwards. Layout B puts the whole header before the
-    // anchor, and some records carry the sender only after it.
-    //
-    // The distance bound matters as much as the ordering. In layout A the
-    // sender pair sits within ~120 bytes of the anchor; a match hundreds of
-    // bytes back belongs to the *previous* record, and taking it pairs one
-    // message's sender with another's subject. Where the header genuinely sits
-    // far from the anchor (layout B), the address is still the nearest one,
-    // so a generous bound costs nothing while excluding the neighbour.
+    // Post-anchor addresses may be recipients. Object descriptors resolve
+    // layouts with a sender after ItemClass; text inference stays before it.
     const SENDER_MAX_DIST: isize = 320;
     let nearest: Vec<&&Field> = before
         .iter()
         .rev()
-        .chain(after.iter())
-        .filter(|f| f.rel.abs() <= SENDER_MAX_DIST || f.rel > 0)
+        .filter(|f| f.rel.abs() <= SENDER_MAX_DIST)
         .collect();
     for (i, f) in nearest.iter().enumerate() {
         // The nearest address-shaped run is the sender slot. When it holds a
