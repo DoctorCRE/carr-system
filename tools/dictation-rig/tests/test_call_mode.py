@@ -58,7 +58,7 @@ _CLIENT_PATCHES = (
 
 
 _LOG_DIR = tempfile.TemporaryDirectory()
-_LOG_PATCHES = (
+_LOG_PATCHES: tuple[Any, ...] = (
     patch.dict(os.environ, {'CALL_JEV_DAILY_DOLLARS': '100'}),
     patch.object(post_call_jev, 'BUDGET_LEDGER', Path(_LOG_DIR.name) / 'budget.json'),
     patch.object(runtime_jev, 'BUDGET_LEDGER', Path(_LOG_DIR.name) / 'budget.json'),
