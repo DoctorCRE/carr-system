@@ -76,7 +76,7 @@ class PhoneIntakeTests(unittest.TestCase):
     def test_startup_requires_every_machine_setting_before_touching_recordings(self):
         names = ('CALL_STUDIO_TOKEN', 'CARR_CAPTURE_BASE_URL', 'CALL_MAX_BYTES',
                  'CALL_MAX_SECONDS', 'CALL_DAILY_ADMISSIONS', 'CALL_PROCESSORS',
-                 'CALL_EXTRACTION_ATTEMPTS', 'CALL_JEV_DAILY_DOLLARS', 'TYPESAFE_API_KEY')
+                 'CALL_EXTRACTION_ATTEMPTS', 'TYPESAFE_API_KEY')
         values = dict.fromkeys(names, '1')
         values['CARR_CAPTURE_BASE_URL'] = 'https://synthetic.invalid'
         config = self.root / '.config/carr/typesafe.env'
@@ -93,6 +93,28 @@ class PhoneIntakeTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0)
                 self.assertEqual(len(result.stderr.splitlines()), 1)
                 self.assertIn(missing, result.stderr)
+                self.assertFalse((self.root / 'Recordings').exists())
+
+    def test_invalid_settings_stop_without_restart(self):
+        values = dict.fromkeys(('CALL_STUDIO_TOKEN', 'CARR_CAPTURE_BASE_URL', 'CALL_MAX_BYTES',
+                                'CALL_MAX_SECONDS', 'CALL_DAILY_ADMISSIONS', 'CALL_PROCESSORS',
+                                'CALL_EXTRACTION_ATTEMPTS', 'TYPESAFE_API_KEY'), '1')
+        values['CARR_CAPTURE_BASE_URL'] = 'https://synthetic.invalid'
+        config = self.root / '.config/carr/typesafe.env'
+        config.parent.mkdir(parents=True)
+        for name, value, mode, message in [('CALL_MAX_BYTES', 'bad', 0o600, 'CALL_MAX_BYTES'),
+                                           ('CARR_CAPTURE_BASE_URL', 'http://invalid', 0o600, 'CARR_CAPTURE_BASE_URL'),
+                                           ('CALL_MAX_BYTES', '1', 0o644, 'mode 600')]:
+            with self.subTest(message=message):
+                config.write_text(''.join(f'{key}={item}\n' for key, item in {**values, name: value}.items()))
+                config.chmod(mode)
+                result = subprocess.run([sys.executable, str(Path(phone_intake.__file__)),
+                                         '--root', str(self.root / 'Recordings'), '--process'],
+                                        env={'HOME': str(self.root), 'PATH': os.defpath},
+                                        capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(len(result.stderr.splitlines()), 1)
+                self.assertIn(message, result.stderr)
                 self.assertFalse((self.root / 'Recordings').exists())
 
     def test_studio_token_is_not_in_child_environment(self):
@@ -118,7 +140,7 @@ class PhoneIntakeTests(unittest.TestCase):
                     'CARR_CAPTURE_BASE_URL': 'https://synthetic.invalid',
                     'CALL_MAX_BYTES': '1024', 'CALL_MAX_SECONDS': '60',
                     'CALL_DAILY_ADMISSIONS': '5', 'CALL_PROCESSORS': '1',
-                    'CALL_EXTRACTION_ATTEMPTS': '3', 'CALL_JEV_DAILY_DOLLARS': '0.1',
+                    'CALL_EXTRACTION_ATTEMPTS': '3',
                     'TYPESAFE_API_KEY': 'synthetic-key'}
         config = self.root / '.config/carr/typesafe.env'
         config.parent.mkdir(parents=True)
@@ -129,7 +151,6 @@ class PhoneIntakeTests(unittest.TestCase):
             write({**settings, 'UNRELATED': 'synthetic-unrelated'})
             self.assertEqual(phone_intake.load_machine_settings(), settings)
             for name, value in [('CALL_MAX_SECONDS', '0'), ('CALL_PROCESSORS', 'oops'),
-                                ('CALL_JEV_DAILY_DOLLARS', 'NaN'),
                                 ('CARR_CAPTURE_BASE_URL', 'http://synthetic.invalid')]:
                 write({**settings, name: value})
                 with self.assertRaisesRegex(ValueError, name):

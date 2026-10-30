@@ -8,7 +8,6 @@ import fcntl
 import hashlib
 import importlib.util
 import json
-from decimal import Decimal, InvalidOperation
 import os
 from pathlib import Path
 import re
@@ -31,7 +30,7 @@ ID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 INTEGER_SETTINGS = ('CALL_MAX_BYTES', 'CALL_MAX_SECONDS', 'CALL_DAILY_ADMISSIONS',
                     'CALL_PROCESSORS', 'CALL_EXTRACTION_ATTEMPTS')
 REQUIRED_SETTINGS = ('CALL_STUDIO_TOKEN', 'CARR_CAPTURE_BASE_URL', *INTEGER_SETTINGS,
-                     'CALL_JEV_DAILY_DOLLARS', 'TYPESAFE_API_KEY')
+                     'TYPESAFE_API_KEY')
 
 
 class MissingSettings(ValueError):
@@ -57,13 +56,6 @@ def load_machine_settings() -> dict[str, str]:
             valid = False
         if not valid:
             raise ValueError(name + ' must be a positive integer')
-    try:
-        budget = Decimal(values['CALL_JEV_DAILY_DOLLARS'])
-        valid = budget.is_finite() and budget > 0
-    except InvalidOperation:
-        valid = False
-    if not valid:
-        raise ValueError('CALL_JEV_DAILY_DOLLARS must be a positive finite amount')
     if not values['CARR_CAPTURE_BASE_URL'].startswith('https://'):
         raise ValueError('CARR_CAPTURE_BASE_URL must use HTTPS')
     return values
@@ -340,11 +332,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
     try:
         settings = load_machine_settings()
-    except MissingSettings as exc:
+    except ValueError as exc:
         print(str(exc), file=sys.stderr)
         sys.exit(0)
-    except ValueError as exc:
-        parser.error(str(exc))
     token = settings.pop('CALL_STUDIO_TOKEN')
     os.environ.pop('CALL_STUDIO_TOKEN', None)
     os.environ.update(settings)
