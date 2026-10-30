@@ -1776,7 +1776,11 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     if _retire_email_steps(state):
         _save(out, state)
     info = store.stat()
-    signature = [info.st_mtime_ns, info.st_size]
+    try:
+        decoder_identity = json.loads((settings.vendor / '.carr-build.json').read_text()).get('binary_sha256')
+    except (OSError, ValueError, AttributeError):
+        decoder_identity = None
+    signature = [info.st_mtime_ns, info.st_size, decoder_identity]
     now = ports.now()
     matcher = None
     if state.get('mail_unresolved') or state.get('calendar_unresolved'):
