@@ -28,6 +28,8 @@ from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
+import call_budget
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from lib.fence import DATA_SENTENCE  # noqa: E402
@@ -767,13 +769,17 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
             raise ContractError("post-call report is unreadable")
         if report.get("checks_hold") and any((item.get("checks") or {}).get("reason")
                                              for item in _report_candidates(report)):
+            hold_day = report.get("checks_hold_day") or call_budget.budget_day(
+                datetime.fromtimestamp((session_dir / REPORT_FILE).stat().st_mtime, timezone.utc))
+            if call_budget.budget_day() <= hold_day:
+                return read_json(session_dir / STATUS_FILE) or _complete_session(session_dir, report)
             import post_call_jev
 
             try:
                 resume_context = context_from_session(session_dir) or fetch_context(session_dir)
                 stored = read_json(session_dir / CONTEXT_FILE) or {}
                 resume_context = {**resume_context, "speaker_labels": stored.get("speaker_labels"),
-                           "local_partner": stored.get("recorder")}
+                                  "local_partner": stored.get("recorder")}
                 transcript = read_json(session_dir / "transcript.json")
                 if transcript is None:
                     raise ContractError("transcript.json is required to resume Jev checks")
@@ -1156,6 +1162,7 @@ def jev_question_id(session: str) -> str:
 
 def clear_checks_hold(report: dict[str, Any]) -> None:
     hold = report.pop("checks_hold", None)
+    report.pop("checks_hold_day", None)
     if hold:
         narrative = report.get("report", {})
         narrative["open_questions"] = [q for q in narrative.get("open_questions", []) if q != hold]

@@ -162,7 +162,7 @@ class PhoneIntakeTests(unittest.TestCase):
             self.assertEqual(updates[-1], {'state': 'held_review', 'reason': 'budget', 'open_questions': 1})
             self.assertEqual(client.system_one.call_count, 1)
             self.assertEqual(len(post_call.read_json(session / post_call.REPORT_FILE)['review_questions']), 1)
-            clock.now.return_value = datetime(2026, 1, 2, 12, tzinfo=timezone.utc)
+            clock.now.return_value = datetime(2026, 1, 2, 6, tzinfo=timezone.utc)
             phone_intake.process_pending(self.root, {'base_url': 'https://api.example.test'}, 'synthetic')
             self.assertEqual(updates[-1], {'state': None, 'reason': None, 'open_questions': 0})
             self.assertEqual(client.system_one.call_count, 2)
@@ -170,6 +170,7 @@ class PhoneIntakeTests(unittest.TestCase):
             self.assertEqual(client.system_one.call_count, 2)
         cleared = post_call.read_json(session / post_call.REPORT_FILE)
         self.assertNotIn('checks_hold', cleared)
+        self.assertNotIn('checks_hold_day', cleared)
         self.assertEqual(cleared['report']['open_questions'], [])
         self.assertEqual(post_call.read_json(session / post_call.STATUS_FILE)['state'], 'filed')
 

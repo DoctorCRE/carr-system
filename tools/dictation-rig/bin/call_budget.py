@@ -22,6 +22,10 @@ class BudgetHold(RuntimeError):
     """Checks stay proposals when a dollar reservation cannot be persisted."""
 
 
+def budget_day(instant: datetime | None = None) -> str:
+    return (instant or datetime.now(timezone.utc)).astimezone(ZoneInfo('America/Chicago')).date().isoformat()
+
+
 def reserve(ledger: Path, *, instant: datetime | None = None) -> None:
     global _clamp_logged
     try:
@@ -36,7 +40,7 @@ def reserve(ledger: Path, *, instant: datetime | None = None) -> None:
         cap = int(dollars * 1_000_000)
     except (InvalidOperation, ValueError, OverflowError):
         raise BudgetHold('Jev daily dollar budget is unconfigured or invalid.') from None
-    day = (instant or datetime.now(timezone.utc)).astimezone(ZoneInfo('America/Chicago')).date().isoformat()
+    day = budget_day(instant)
     if cap < REQUEST_MICRODOLLARS:
         raise BudgetHold('Jev daily dollar budget is exhausted.')
     try:

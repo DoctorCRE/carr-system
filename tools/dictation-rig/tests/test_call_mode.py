@@ -79,7 +79,7 @@ def setUpModule() -> None:
 
 
 def tearDownModule() -> None:
-    for log_patch in _LOG_PATCHES[::-1]:
+    for log_patch in reversed(_LOG_PATCHES):
         log_patch.stop()
     for client_patch in reversed(_CLIENT_PATCHES):
         client_patch.stop()

@@ -321,6 +321,7 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
     holds = sorted({item['checks']['reason'] for item, _, _ in pending if item['checks'].get('reason')})
     if holds:
         result['checks_hold'] = ' '.join(holds)
+        result['checks_hold_day'] = call_budget.budget_day()
         result.setdefault('report', {}).setdefault('open_questions', []).append(result['checks_hold'])
     any_unavailable = any((item.get("checks") or {}).get("unavailable")
                           for list_name, _ in lists for item in result.get(list_name, []))
