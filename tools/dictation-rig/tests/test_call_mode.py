@@ -1877,6 +1877,51 @@ class CaptureBridgePostCallTests(unittest.TestCase):
             self.assertEqual(capture_bridge.claim_cmd(self.cfg, self.session), 0)
         self.assertEqual(claims[0]["workflow"], "post_call")
 
+    def test_publish_renews_owned_expired_session_once(self) -> None:
+        (self.session / ".capture.json").unlink()
+        post_call.write_private(self.session / "announcement.json", {
+            "announcement_fired_at": "2026-08-10T12:00:00Z",
+        })
+        post_call.write_private(self.session / "meta.json", {"started": "2026-08-10T12:00:00Z"})
+        post_call.write_private(self.session / "call-context.json", {"mode": "weekly_deal_call"})
+        renewed = False
+        renewals = []
+        attempts = []
+        claims = []
+
+        def request(_method, url, body, headers):
+            nonlocal renewed
+            if url.endswith("/capture/claim"):
+                claims.append(body)
+                return 200, {"session_token": "opaque-session-token", "ttl_seconds": 86400}
+            if url.endswith("/capture/renew"):
+                self.assertEqual(headers, {"Authorization": "Bearer device"})
+                self.assertEqual(body["session_token"], "opaque-session-token")
+                renewals.append(body)
+                renewed = True
+                return 200, {"ttl_seconds": 86400}
+            if url.endswith("/capture/status"):
+                return 200, {}
+            if url.endswith("/capture/post-call/candidates"):
+                attempts.append(body.copy())
+                if not renewed:
+                    return 401, {"error": "session_token_expired"}
+                return 200, {"candidate_ids": ["action-id", "draft-id"]}
+            if url.endswith("/capture/candidates"):
+                return 200, {"candidate_ids": ["update-id"]}
+            raise AssertionError(url)
+
+        with patch.object(capture_bridge, "http_request", side_effect=request):
+            self.assertEqual(capture_bridge.claim_cmd(self.cfg, self.session), 0)
+            self.assertEqual(capture_bridge.publish_cmd(self.cfg, self.session), 0)
+            self.assertEqual(capture_bridge.publish_cmd(self.cfg, self.session), 0)
+        self.assertEqual(len(renewals), 1)
+        self.assertEqual(len(claims), 1)
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(attempts[0], attempts[1])
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        self.assertEqual(report["joe_tasks"][0]["candidate_id"], "action-id")
+
     def test_publish_exports_only_sanitized_metadata_and_binds_all_receipts(self) -> None:
         calls: list[tuple[str, str, dict[str, object] | None]] = []
 
