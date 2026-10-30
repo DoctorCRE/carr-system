@@ -265,7 +265,7 @@ language sql stable set search_path=pg_catalog,pg_temp as $$
     'pending',((cardinality(e.ids)>0 and (e.conflict or e.verify_band or e.human_review)) or cardinality(x.ids)>0)
       and not (coalesce(d.observation_ids=e.ids and d.extraction_job_ids=x.ids and d.canonical_version=coalesce(c.version,0),false)
         or coalesce(d.id is null and c.basis='human_review' and c.promoted_at>=e.newest and (x.newest is null or c.promoted_at>=x.newest),false)),
-    'priority',case when e.conflict or e.human_review or exists(select 1 from jsonb_array_elements(x.abstentions) a where a->>'reason'='ocr_disagreement') then 'high' else 'normal' end,
+    'priority',case when e.conflict or e.verify_band or exists(select 1 from jsonb_array_elements(x.abstentions) a where a->>'reason'='ocr_disagreement') then 'high' else 'normal' end,
     'reasons',to_jsonb(array_remove(array[case when e.conflict then 'conflict' end,
       case when e.verify_band then 'verify_band' end,case when e.human_review then 'human_review' end],null))||coalesce((select jsonb_agg(distinct a->>'reason') from jsonb_array_elements(x.abstentions) a),'[]'::jsonb),
     'extraction_abstentions',x.abstentions,'extraction_job_ids',to_jsonb(x.ids),

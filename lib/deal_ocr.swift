@@ -6,7 +6,8 @@ import AppKit
 
 let document = PDFDocument(url: URL(fileURLWithPath: CommandLine.arguments[1]))!
 var regions = [[String: Any]]()
-for index in 0..<min(document.pageCount, 1000) {
+let selectedPages = Set(CommandLine.arguments.dropFirst(2).compactMap { Int($0) })
+for index in 0..<min(document.pageCount, 1000) where selectedPages.contains(index + 1) {
     guard let page = document.page(at: index) else { continue }
     let bounds = page.bounds(for: .mediaBox)
     guard bounds.width > 0, bounds.height > 0 else { continue }

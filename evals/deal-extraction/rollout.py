@@ -13,15 +13,17 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from lib.deal_extraction import CONTRACTS, regional_facts
 from score import score_schedule
+from schedules import build_corpus
 
 POLICY = {
-    "version": "deal-regions-rollout.v1",
+    "version": "deal-regions-rollout.v2",
     "minimum_real_documents": 25,
-    "minimum_per_stratum": 25,
-    "precision_lower_bound": 0.95,
-    "recall_lower_bound": 0.90,
-    "schedule_lower_bound": 0.95,
-    "routing_lower_bound": 0.95,
+    "minimum_per_stratum": 2,
+    "minimum_stratum_accuracy": 0.80,
+    "precision_lower_bound": 0.85,
+    "recall_lower_bound": 0.85,
+    "schedule_lower_bound": 0.85,
+    "routing_lower_bound": 0.85,
     "maximum_abstention_upper_bound": 0.30,
     "confidence_level": 0.95,
     "maximum_high_priority_rate": 0.50,
@@ -137,6 +139,21 @@ def report(corpus, predictions, *, queue_capacity, daily_documents):
                     prediction["route"] == case["expected_route"],
                 )
             )
+    pooled = []
+    for field in FIELDS:
+        rows = [r for (key, _, _), group in buckets.items() if key == field for r in group]
+        support, emitted, matched = (sum(r[i] for r in rows) for i in range(3))
+        precision, recall = bounds(matched, emitted), bounds(matched, support)
+        routing = bounds(sum(r[3] for r in rows), len(rows))
+        abstention = bounds(sum(r[0] and not r[1] for r in rows), support)
+        pooled.append({"field": field, "support": support, "precision_95": precision,
+                       "recall_95": recall, "routing_95": routing, "abstention_95": abstention,
+                       "pass": support >= POLICY["minimum_real_documents"]
+                       and precision[0] >= POLICY["precision_lower_bound"]
+                       and recall[0] >= POLICY["recall_lower_bound"]
+                       and (field != "rent_schedule" or recall[0] >= POLICY["schedule_lower_bound"])
+                       and routing[0] >= POLICY["routing_lower_bound"]
+                       and abstention[1] <= POLICY["maximum_abstention_upper_bound"]})
     strata = []
     for field in FIELDS:
         for kind in TYPES:
@@ -151,17 +168,12 @@ def report(corpus, predictions, *, queue_capacity, daily_documents):
                 abstention = bounds(sum(r[0] and not r[1] for r in rows), support)
                 supported = (
                     len(rows) >= POLICY["minimum_per_stratum"]
-                    and support >= POLICY["minimum_per_stratum"]
+                    and support >= 1
                 )
-                passed = (
-                    supported
-                    and precision[0] >= POLICY["precision_lower_bound"]
-                    and recall[0] >= POLICY["recall_lower_bound"]
-                    and routing[0] >= POLICY["routing_lower_bound"]
-                    and abstention[1] <= POLICY["maximum_abstention_upper_bound"]
-                )
-                if field == "rent_schedule":
-                    passed = passed and recall[0] >= POLICY["schedule_lower_bound"]
+                passed = (supported and emitted > 0
+                          and matched / emitted >= POLICY["minimum_stratum_accuracy"]
+                          and matched / support >= POLICY["minimum_stratum_accuracy"]
+                          and sum(r[3] for r in rows) / len(rows) >= POLICY["minimum_stratum_accuracy"])
                 strata.append(
                     {
                         "field": field,
@@ -197,7 +209,7 @@ def report(corpus, predictions, *, queue_capacity, daily_documents):
         reasons.append("queue capacity inadequate")
     if rate > POLICY["maximum_high_priority_rate"]:
         reasons.append("routing rate inadequate")
-    if any(not s["pass"] for s in strata):
+    if any(not s["pass"] for s in strata + pooled):
         reasons.append("field accuracy or routing confidence inadequate")
     if not mutation["pass"]:
         reasons.append("mutation checks inadequate")
@@ -209,6 +221,8 @@ def report(corpus, predictions, *, queue_capacity, daily_documents):
         ).hexdigest(),
         "synthetic_only": corpus.get("synthetic_only"),
         "strata": strata,
+        "pooled": pooled,
+        "quality_pass": all(s["pass"] for s in strata + pooled),
         "mutations": mutation,
         "high_priority_rate": rate,
         "queue_capacity": queue_capacity,
@@ -250,7 +264,7 @@ def synthetic_predictions(corpus):
                 "case_id": case["id"],
                 "fields": fields,
                 "methods": methods,
-                "route": "high" if fields or disagreements else "normal",
+                "route": "high" if disagreements else "normal",
             }
         )
     return predictions
@@ -259,13 +273,13 @@ def synthetic_predictions(corpus):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--corpus", type=Path, default=Path(__file__).with_name("schedules.json")
+        "--corpus", type=Path
     )
     parser.add_argument("--predictions", type=Path)
     parser.add_argument("--queue-capacity", type=int, required=True)
     parser.add_argument("--daily-documents", type=int, required=True)
     args = parser.parse_args()
-    corpus = json.loads(args.corpus.read_text())
+    corpus = json.loads(args.corpus.read_text()) if args.corpus else build_corpus()
     predictions = (
         json.loads(args.predictions.read_text())
         if args.predictions

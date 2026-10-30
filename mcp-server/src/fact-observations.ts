@@ -1,6 +1,6 @@
 // Validate and manage economic fact observations.
 import { authorizationClassForActor, organizationTenantForActor } from './identity.js';
-import scheduleSchema from '../../lib/deal_schedule.schema.json' with { type: 'json' };
+import scheduleDefinition from '../../lib/deal_schedule.schema.json' with { type: 'json' };
 import type { Schema } from '@cfworker/json-schema';
 import { Validator } from '@cfworker/json-schema';
 import { ToolError } from './tool-error.ts';
@@ -17,6 +17,10 @@ export const CONTRACTS: Record<string, FactContract> = {
   rent_schedule: { units: { schedule: 1 }, unit: 'schedule' },
   free_rent_months: { units: { months: 1 }, unit: 'months' },
 };
+const { $defs, ...scheduleArray } = scheduleDefinition;
+const scheduleSchema = { ...scheduleArray, items: { ...scheduleArray.items,
+  properties: Object.fromEntries(Object.entries(scheduleArray.items.properties).map(([name, field]) =>
+    [name, { ...field, properties: { ...field.properties, source: $defs.source } }])) } };
 const scheduleValidator = new Validator(structuredClone(scheduleSchema) as Schema);
 const EXPENSE_BASES = ['nnn', 'modified_gross', 'full_service_gross', 'gross'];
 const DECIMAL = /^(?:0|[1-9][0-9]{0,29})(?:\.[0-9]{1,18})?$/;
@@ -189,7 +193,7 @@ export function factObservationTools() {
             ...(groups.get(field.fact_key)!.some(o => o.input.method === 'ocr') ? ['ocr'] : []),
           ];
           return reasons.length ? [{ entity_ref: args.entity_ref, fact_key: field.fact_key,
-            priority: field.status === 'conflict' || tiers.has('human_review') ? 'high' : 'normal',
+            priority: field.status === 'conflict' || tiers.has('verify_band') ? 'high' : 'normal',
             observation_ids: field.observation_ids, observations: groups.get(field.fact_key), reasons,
             shared_source_groups: shared_source_groups.filter(group => group.fact_key === field.fact_key),
             shared_extraction_groups: shared_extraction_groups.filter(group => group.fact_key === field.fact_key),

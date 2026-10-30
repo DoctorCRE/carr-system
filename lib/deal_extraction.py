@@ -193,7 +193,14 @@ def run_job(job: ExtractionJob, *, call: Callable, read_bytes: Callable,
                                    'page_end': field['page'], 'cited_text': field['cited_text']})
         observations.append(observation)
     # Regional parsing adds no model calls or spend and cannot replace a text proposal.
-    regions = ocr_regions(data) if ocr_regions is not None else []
+    scan_pages = [n + 1 for n, page in enumerate(pages) if not page.strip()]
+    regions = []
+    ocr_failed = False
+    if ocr_regions is not None and scan_pages and not stopped:
+        try:
+            regions = ocr_regions(data, pages=scan_pages)
+        except (RuntimeError, TimeoutError, subprocess.TimeoutExpired, OSError):
+            ocr_failed = True
     periods, scanned, disagreements, schedule_reason = regional_facts(pages, regions)
     if not stopped:
         for key, candidates in scanned.items():
@@ -224,6 +231,9 @@ def run_job(job: ExtractionJob, *, call: Callable, read_bytes: Callable,
         reason = stopped or schedule_reason or 'ambiguous'
         abstentions.append({'fact_key':'rent_schedule','status':'not_present' if reason=='absent' else 'unreadable',
                             'reason':reason})
+    if ocr_failed:
+        abstentions = [{**a, 'status': 'unreadable', 'reason': 'unsupported_ocr'}
+                       if a['reason'] in ('absent', 'no_text_layer') else a for a in abstentions]
     if regions:
         abstentions = [{**a, 'status':'unreadable', 'reason':'unsupported_ocr'} if a['reason']=='absent' else a for a in abstentions]
     for key in disagreements:

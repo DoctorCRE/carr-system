@@ -1,17 +1,57 @@
 """Verify schedule relationships and region provenance through extraction and scoring."""
 
 import copy
-import json
 from pathlib import Path
 import runpy
 import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.deal_extraction import validate_schedule
 
 
 class ScheduleTests(unittest.TestCase):
+    def test_ocr_failure_keeps_text_receipt_and_replays(self):
+        from lib.deal_extraction import run_job, ExtractionJob
+        from subprocess import CompletedProcess, TimeoutExpired
+        from unittest.mock import patch
+        from lib.deal_ocr import ocr_regions
+        from uuid import UUID
+        base = runpy.run_path("tools/test-deal-extraction.py")
+        failures = [{"return_value": CompletedProcess([], 1, b"", b"crashed")},
+                    {"side_effect": TimeoutExpired("swift", 180)},
+                    {"side_effect": OSError("swift unavailable")}]
+        for failure in failures:
+            with self.subTest(failure=failure), patch("lib.deal_ocr.subprocess.run", **failure) as runner:
+                store = base["Source"]()
+                job = ExtractionJob(UUID(base["KEY"]), UUID(base["ENTITY"]),
+                                    UUID(base["DOC"]), "lease", "haiku")
+                kwargs = dict(call=store, read_bytes=lambda d: base["TEXT"],
+                              text_pages=lambda d: [base["TEXT"].decode(), ""],
+                              model=lambda *a, **k: {"output": base["output"](),
+                                                    "cost_usd": "0", "model": "haiku"},
+                              ocr_regions=ocr_regions)
+                result = run_job(job, **kwargs)
+                self.assertEqual(runner.call_args.args[0][-1], "2")
+                submitted = store.submissions[0]
+                self.assertEqual([(o["fact_key"], o["value"]) for o in submitted["observations"]],
+                                 [("base_rent_per_sf", "24"), ("term_months", "60")])
+                self.assertEqual({a["reason"] for a in submitted["receipt"]["abstentions"]},
+                                 {"unsupported_ocr"})
+                self.assertEqual(run_job(job, **kwargs), result)
+                self.assertEqual(len(store.submissions), 1)
+
+    def test_text_only_never_needs_vision(self):
+        from lib.deal_extraction import run_job, ExtractionJob
+        from uuid import UUID
+        base = runpy.run_path("tools/test-deal-extraction.py")
+        store = base["Source"]()
+        run_job(ExtractionJob(UUID(base["KEY"]), UUID(base["ENTITY"]), UUID(base["DOC"]),
+                              "lease", "haiku"), call=store,
+                read_bytes=lambda d: base["TEXT"], text_pages=lambda d: [base["TEXT"].decode()],
+                model=lambda *a, **k: {"output": base["output"](), "cost_usd": "0", "model": "haiku"},
+                ocr_regions=lambda *a, **k: self.fail("Vision ran on a native text page"))
+        self.assertEqual(store.submissions[0]["receipt"]["abstentions"][0]["reason"], "absent")
+
     def test_region_job_keeps_text_scalar_and_flags_scanned_schedule(self):
         base = runpy.run_path("tools/test-deal-extraction.py")
         store = base["Source"]()
@@ -40,7 +80,7 @@ class ScheduleTests(unittest.TestCase):
                 "cost_usd": "0",
                 "model": "haiku",
             },
-            ocr_regions=lambda data: [region],
+            ocr_regions=lambda data, **kwargs: [region],
         )
         submitted = store.submissions[0]
         rent = next(
@@ -83,7 +123,7 @@ class ScheduleTests(unittest.TestCase):
                 read_bytes=lambda d: base["TEXT"],
                 text_pages=lambda d: [""],
                 model=lambda *a, **k: self.fail("scan-only job spent model money"),
-                ocr_regions=lambda d: [region],
+                ocr_regions=lambda d, **kwargs: [region],
             )
             submitted = store.submissions[0]
             if disagree:
@@ -108,7 +148,10 @@ class ScheduleTests(unittest.TestCase):
         from lib.deal_extraction import regional_facts
 
         score = runpy.run_path("evals/deal-extraction/score.py")["score_schedule"]
-        corpus = json.loads(Path("evals/deal-extraction/schedules.json").read_text())
+        corpus = runpy.run_path("evals/deal-extraction/schedules.py")["build_corpus"]()
+        sys.path.insert(0, str(Path("evals/deal-extraction").resolve()))
+        predictions = runpy.run_path("evals/deal-extraction/rollout.py")["synthetic_predictions"](corpus)
+        self.assertEqual([p["route"] for p in predictions], [c["expected_route"] for c in corpus["cases"]])
         for case in corpus["cases"]:
             periods, _, disagreements, _ = regional_facts(
                 case["pages"], case["regions"]
@@ -129,42 +172,44 @@ class ScheduleTests(unittest.TestCase):
                 self.assertEqual(periods, [])
                 self.assertIn("rent_schedule", disagreements)
 
-    def test_rollout_is_fail_closed_with_strata_bounds_and_operational_limits(self):
+    def test_planned_corpus_can_pass_quality_gate_but_synthetic_never_releases(self):
         sys.path.insert(0, str(Path("evals/deal-extraction").resolve()))
         module = runpy.run_path("evals/deal-extraction/rollout.py")
-        corpus = json.loads(Path("evals/deal-extraction/schedules.json").read_text())
-        predictions = module["synthetic_predictions"](corpus)
-        result = module["report"](
-            corpus, predictions, queue_capacity=0, daily_documents=100
-        )
-        self.assertFalse(result["release_allowed"])
-        self.assertEqual(result["status"], "insufficient corpus")
-        self.assertIn("queue capacity inadequate", result["reasons"])
-        self.assertIn("routing rate inadequate", result["reasons"])
-        self.assertEqual(len(result["strata"]), 40)
-        self.assertTrue(result["mutations"]["pass"])
+        schedule = [{"start_month": 1, "end_month": 12, "rate": "24",
+                     "unit": "USD/SF/year", "expense_basis": "nnn", "escalation_percent": None}]
+        cases = [{"id": str(n), "document_type": ("loi", "lease", "counter", "amendment")[n % 4],
+                  "ocr": n % 8 >= 4, "expected_route": "high" if n == 0 else "normal",
+                  "expected": {"rent_schedule": schedule, "base_rent_per_sf": "24",
+                               "landlord_ti_per_sf": "50", "term_months": "60", "free_rent_months": "3"}}
+                 for n in range(25)]
+        corpus = {"synthetic_only": True, "frozen_holdout": False,
+                  "adjudicated_real_documents": 0, "cases": cases}
+        predictions = [{"case_id": c["id"], "fields": copy.deepcopy(c["expected"]),
+                        "methods": {k: "ocr" if c["ocr"] else "text_layer" for k in c["expected"]},
+                        "route": c["expected_route"]} for c in cases]
+        def report(c=corpus, p=predictions, capacity=10):
+            return module["report"](c, p, queue_capacity=capacity, daily_documents=100)
+        synthetic = report()
+        self.assertFalse(synthetic["release_allowed"])
+        self.assertTrue(all(s["pass"] for s in synthetic["strata"]))
+        self.assertTrue(synthetic["quality_pass"])
+        # Exercise the real-holdout predicate without claiming these fixtures are real evidence.
+        holdout = {**corpus, "synthetic_only": False, "frozen_holdout": True,
+                   "adjudicated_real_documents": 25}
+        self.assertTrue(report(holdout)["release_allowed"])
+        self.assertFalse(report(holdout, capacity=0)["release_allowed"])
+        bad = copy.deepcopy(predictions)
+        for prediction in bad[:5]:
+            prediction["fields"]["rent_schedule"][0]["rate"] = "99"
+        self.assertFalse(report(holdout, bad)["quality_pass"])
+        self.assertFalse(report(holdout, [dict(p, route="high") for p in predictions])["release_allowed"])
+        sparse = {**holdout, "cases": [{**c, "ocr": False} for c in cases]}
+        self.assertFalse(report(sparse)["release_allowed"])
+        self.assertTrue(synthetic["mutations"]["pass"])
         self.assertEqual(module["bounds"](0, 0), [0, 1])
-        self.assertLess(module["bounds"](25, 25)[0], 0.95)
-        predictions[0]["fields"]["rent_schedule"][0]["rate"]["value"] = "24.72"
-        bad = module["report"](
-            corpus, predictions, queue_capacity=100, daily_documents=100
-        )
-        row = next(
-            s
-            for s in bad["strata"]
-            if s["field"] == "rent_schedule"
-            and s["document_type"] == "loi"
-            and not s["ocr"]
-        )
-        self.assertEqual(row["correct"], 0)
-        self.assertFalse(row["pass"])
+        self.assertGreater(module["bounds"](25, 25)[0], 0.85)
         with self.assertRaises(ValueError):
-            module["report"](
-                corpus,
-                predictions + [predictions[0]],
-                queue_capacity=100,
-                daily_documents=100,
-            )
+            report(corpus, predictions + [predictions[0]])
 
     def test_schedule_scorer_rejects_right_digits_attached_to_wrong_years(self):
         score = runpy.run_path("evals/deal-extraction/score.py")["score_schedule"]

@@ -23,7 +23,7 @@ class VisionTests(unittest.TestCase):
             build(Path(folder))
             for mode in ("scan-only", "mixed", "ocr-table"):
                 data = (Path(folder) / f"{mode}.pdf").read_bytes()
-                regions = ocr_regions(data)
+                regions = ocr_regions(data, pages=[n + 1 for n, page in enumerate(cli["text_pages"](data)) if not page.strip()])
                 self.assertFalse(any("Base rent" in r["text"] for r in regions))
                 store = fixture["Source"]()
 
@@ -62,7 +62,7 @@ class VisionTests(unittest.TestCase):
                     read_bytes=lambda d: data,
                     text_pages=cli["text_pages"],
                     model=model,
-                    ocr_regions=lambda d: regions,
+                    ocr_regions=lambda d, **kwargs: regions,
                 )
                 observations = {
                     o["fact_key"]: o for o in store.submissions[0]["observations"]

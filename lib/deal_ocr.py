@@ -6,12 +6,12 @@ import subprocess
 import tempfile
 
 
-def ocr_regions(data):
+def ocr_regions(data, *, pages):
     with tempfile.TemporaryDirectory(prefix="deal-vision-") as folder:
         source = Path(folder) / "source.pdf"
         source.write_bytes(data)
         result = subprocess.run(
-            ["/usr/bin/swift", str(Path(__file__).with_suffix(".swift")), str(source)],
+            ["/usr/bin/swift", str(Path(__file__).with_suffix(".swift")), str(source), *map(str, pages)],
             capture_output=True,
             timeout=180,
         )

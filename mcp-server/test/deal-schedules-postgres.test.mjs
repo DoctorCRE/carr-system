@@ -24,7 +24,7 @@ test('schedule relations survive storage and human promotion; OCR agreement neve
     await c.query(await readFile(new URL('../../migrations/0001_init.sql', import.meta.url), 'utf8'));
     await c.query('create schema ops; create role carr_reader; create role carr_writer; create role carr_authority; create role dot_reader');
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as $$select '{"secdef_execute":[]}'::jsonb$$`);
-    for (const file of ['0983_fact_store.sql', '1070_fact_review.sql', '1078_deal_extraction.sql', '1089_deal_schedules.sql'])
+    for (const file of ['0983_fact_store.sql', '1070_fact_review.sql', '1078_deal_extraction.sql', '1092_deal_schedules.sql'])
       await c.query(await readFile(new URL(`../../migrations/${file}`, import.meta.url), 'utf8'));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner'),($2,'codex','automation','Synthetic extractor')", [partner.id, job.id]);
     const entity_ref = randomUUID(), document_ref = randomUUID(), hash = 'a'.repeat(64);
@@ -39,7 +39,9 @@ test('schedule relations survive storage and human promotion; OCR agreement neve
     assert.equal(comparison.fields[0].status, 'conflict');
     assert.equal(comparison.review_items[0].priority, 'high');
     const before = (await invoke('list-fact-review', { entity_ref }, partner)).items[0];
-    assert.equal(before.priority, 'high');
+    assert.equal(before.priority, 'normal');
+    const agreeing = await invoke('compare-fact-observations', { entity_ref, observations: [observation] });
+    assert.equal(agreeing.review_items[0].priority, 'normal');
     assert.deepEqual(before.observations[0].value, observation.value);
     assert.equal(before.observations[0].normalized_value[1].start_month, 13);
     await c.query("update system_config set value='true'::jsonb where key='facts.automatic_promotion_enabled'");
@@ -59,9 +61,12 @@ test('schedule relations survive storage and human promotion; OCR agreement neve
       source: Object.fromEntries(Object.entries(source).filter(([k]) => !['r2_key','mime','bytes'].includes(k))),
       passes: ['extract','ground'].map(phase => ({ phase, output_sha256: hash, model: null })), attempts: [], cost_usd: '0', cost_complete: true,
       grounding_changes: [], abstentions: ['base_rent_per_sf','landlord_ti_per_sf','term_months','free_rent_months'].map(fact_key => ({ fact_key, status:'unreadable',reason:'no_text_layer' })), proposed_effects: ['rent_schedule'], canonical: false };
+    receipt.abstentions[0].reason = 'ocr_disagreement';
     const result = await invoke('record-deal-extraction', { ...contract, content_hash: hash, receipt, observations: [bound] });
     assert.equal(result.canonical, false);
     assert.equal(result.observations.length, 1);
+    const disagreement = (await invoke('list-fact-review', { entity_ref }, partner)).items.find(i => i.fact_key === 'base_rent_per_sf');
+    assert.equal(disagreement.priority, 'high');
     const altered = structuredClone(bound); altered.value[1].expense_basis.value = 'gross';
     await record(altered);
     const reopened = (await invoke('list-fact-review', { entity_ref }, partner)).items.find(i => i.fact_key === 'rent_schedule');

@@ -3,6 +3,7 @@
 from io import BytesIO
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
+import pymupdf
 
 
 def build(folder):
@@ -24,8 +25,6 @@ def build(folder):
     raster = buffer.getvalue()
     for mode in ("scan-only", "mixed", "ocr-table"):
         content = b"q 800 0 0 500 0 80 cm /Scan Do Q\n"
-        if mode == "mixed":
-            content += b"BT /F1 12 Tf 40 650 Td (Base rent is $30 per SF per year NNN.) Tj ET\n"
         objects = [
             b"<< /Type /Catalog /Pages 2 0 R >>",
             b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
@@ -53,6 +52,11 @@ def build(folder):
         pdf += (
             f"trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
         )
+        if mode == "mixed":
+            with pymupdf.open(stream=pdf, filetype="pdf") as document:
+                page = document.new_page(pno=0, width=800, height=700)
+                page.insert_text((40, 50), "Base rent is $30 per SF per year NNN.")
+                pdf = document.tobytes()
         (folder / f"{mode}.pdf").write_bytes(pdf)
 
 
