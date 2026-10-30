@@ -547,7 +547,9 @@ test('single completion refuses stale, terminal, missing and foreign-tenant acti
     const events = (await c.query('select * from event where idempotency_key=$1',[key])).rows;
     assert.equal(events.length,1);
     assert.equal(events[0].field,'status');
-    assert.deepEqual(events[0].old_value,{status:'open'});
+    assert.deepEqual(events[0].old_value,{status:'open',owner_id:actor.id,version:row.version});
+    assert.equal(events[0].new_value.owner_id,actor.id);
+    assert.equal(events[0].new_value.version,first.version);
     assert.equal(events[0].new_value[table==='next_action'?'next_action_id':'post_call_action_id'],row.id);
     assert.equal(events[0].new_value.status,'done');
     assert.equal(events[0].organization_tenant_id,'carr-internal');

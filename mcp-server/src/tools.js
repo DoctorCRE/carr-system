@@ -3866,7 +3866,7 @@ export const TOOLS = {
                          union all
                          select 'completed_action', coalesce(nullif(e.new_value->>'outcome', ''),
                            e.new_value->>'next_action', e.new_value->>'post_call_action'), e.recorded_at, e.id
-                           from v_deal_room_event e where e.subject_id=b.id and e.verb='complete-action'
+                           from v_deal_room_event e where e.subject_id=b.id and e.verb in ('complete-action','complete-one-action')
                              and e.new_value->>'status'='done') step
                   order by step.occurred_at desc, step.id desc limit 1) as last_step,
                 (b.next_step is null or b.next_date is null) as next_step_required, b.market, b.segment,

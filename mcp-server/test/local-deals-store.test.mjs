@@ -250,6 +250,10 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal(value.deals[0].last_step.kind, 'call');
       assert.equal(value.deals[0].last_step.summary, 'Synthetic call');
       assert.equal(new Date(value.deals[0].last_step.occurred_at).toISOString(), '2026-01-02T12:00:00.000Z');
+      await TOOLS['complete-one-action'].handler(c, actor, {idempotency_key:randomUUID(),action_id:id(11),base_version:1});
+      value = await board();
+      assert.equal(value.deals[0].last_step.kind, 'completed_action');
+      assert.equal(value.deals[0].last_step.summary, 'Earlier action');
       await TOOLS['complete-action'].handler(c, actor, {idempotency_key:randomUUID(),ref:id(4),outcome:'Synthetic outcome'});
       value = await board();
       assert.equal(value.deals[0].last_step.kind, 'completed_action');

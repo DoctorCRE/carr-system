@@ -69,9 +69,9 @@ export function actionClosureTools({ withEnvelope, writeEvent, canExercisePartne
             `update ${match.source} set status='done',${postCall ? 'completed_at=clock_timestamp()' : 'updated_by=$2'}
               where id=$1 returning version`, postCall ? [row.id] : [row.id, actor.id])).rows[0];
           await writeEvent(c, actor, 'complete-one-action', match.subject_type, match.subject_id, {
-            field: 'status', old: { status: 'open' },
+            field: 'status', old: { status: 'open', owner_id: row.owner_id, version: row.version },
             new: { [postCall ? 'post_call_action_id' : 'next_action_id']: row.id,
-              [postCall ? 'post_call_action' : 'next_action']: row.description, status: 'done', outcome: null },
+              [postCall ? 'post_call_action' : 'next_action']: row.description, status: 'done', outcome: null, owner_id: row.owner_id, version: saved.version },
             idempotency_key: args.idempotency_key,
           });
           return { ok: true, action_id: row.id, status: 'done', version: saved.version };
