@@ -195,14 +195,23 @@ def button_matches(element: dict, name: str) -> bool:
     } for part in state.split(', ')))
 
 
-def _readable(pid: int, window: dict) -> bool:
+def _readable_probe(pid: int, window: dict) -> dict:
     state = cua('get_window_state', {'pid': pid, 'window_id': window['window_id'],
                                      'include_screenshot': False, 'max_elements': LIST_WALK})
     elements = state.get('elements') or []
-    return (not str(state.get('degraded_reason') or '').startswith('ax_window_unresolved')
-            and any(button_matches(e, 'New Mail') for e in elements)
-            and any(e.get('role') == 'AXTable' and e.get('label') == 'Message List'
-                    for e in elements))
+    return {'unresolved': str(state.get('degraded_reason') or '').startswith('ax_window_unresolved'),
+            'new_mail_found': any(button_matches(e, 'New Mail') for e in elements),
+            'message_list_found': any(e.get('role') == 'AXTable' and e.get('label') == 'Message List'
+                                      for e in elements),
+            'element_count': len(elements)}
+
+
+def _probe_readable(probe: dict) -> bool:
+    return not probe['unresolved'] and probe['new_mail_found'] and probe['message_list_found']
+
+
+def _readable(pid: int, window: dict) -> bool:
+    return _probe_readable(_readable_probe(pid, window))
 
 
 def usable_window(pid: int) -> dict | None:
@@ -309,7 +318,7 @@ def screen_locked() -> bool:
                for root in roots if isinstance(root, dict)
                if isinstance(root.get('IOConsoleUsers'), list)
                for session in root['IOConsoleUsers']
-               if isinstance(session, dict))
+               if isinstance(session, dict) and session.get('kCGSSessionUserIDKey') == os.getuid())
 
 
 def prepare_outlook(waits: Waits) -> Outcome | None:
@@ -323,10 +332,17 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
             if any(is_compose_window(w) for w in windows):
                 return Outcome('skipped', 'compose_window_open')
             candidates = [w for w in windows if is_ordinary_main_window(w)]
-            if candidates and not any(_readable(pid, w) for w in candidates):
+            probes = []
+            for candidate in candidates:
+                probe = _readable_probe(pid, candidate)
+                probes.append(probe)
+                if _probe_readable(probe):
+                    break
+            if candidates and not _probe_readable(probes[-1]):
                 return Outcome('skipped', 'no_usable_main_window',
                                'phase=before_quit ordinary_candidates_unreadable '
-                               + window_detail(pid))
+                               + window_detail(pid) + ' readable_probes='
+                               + json.dumps(probes, separators=(',', ':')))
             if not _quit(pid, windows, waits):
                 return Outcome('failed', 'outlook_quit_timeout', window_detail(pid))
         launched = subprocess.run(['open', '-g', '-a', APP, '--args',

@@ -59,7 +59,18 @@ def delivery(clone, branch, start):
     Jobs may push to an existing PR's branch, so any branch whose tip is HEAD counts.
     """
     head = (output(['git', '-C', str(clone), 'rev-parse', 'HEAD']) or '').strip()
-    listing = output(['git', '-C', str(clone), 'ls-remote', '--heads', 'origin'])
+    detail = ''
+    try:
+        result = subprocess.run(['git', '-C', str(clone), 'ls-remote', '--heads', 'origin'],
+                                capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=120)
+        listing = result.stdout if result.returncode == 0 else None
+        if listing is None:
+            error = (result.stderr.splitlines() or [''])[0]
+            error = re.sub(r'(?i)([a-z][a-z0-9+.-]*://)[^\s/@]+@', r'\1', error)
+            detail = f' exit={result.returncode} error={error}'
+    except (OSError, subprocess.SubprocessError) as error:
+        listing = None
+        detail = f' error={type(error).__name__}'
     tips = [ref.removeprefix('refs/heads/') for sha, ref in
             (line.split('\t', 1) for line in (listing or '').splitlines())
             if sha == head and head not in ('', start)]
@@ -73,7 +84,7 @@ def delivery(clone, branch, start):
     missing = [name for name, gap in (('push', not pushed), ('pr', pr in ('unchecked', 'none'))) if gap]
     return missing, (f"Delivery: {'failed' if missing else 'ok'} missing={','.join(missing) or 'none'} "
                      f"branch={found or ('unchecked' if listing is None else 'none')} "
-                     f'start={start} head={head or "unchecked"} pr={pr}')
+                     f'start={start} head={head or "unchecked"} pr={pr}{detail}')
 
 
 def register_job(args):
