@@ -111,7 +111,7 @@ def read_json(path: Path) -> dict[str, Any] | None:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
         return value if isinstance(value, dict) else None
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeError, json.JSONDecodeError):
         return None
 
 
@@ -764,12 +764,19 @@ def transcript_repeat_field(report: Any, transcript: dict[str, Any]) -> str | No
 
 def hold_transcript_repeat(session_dir: Path, report: dict[str, Any]) -> dict[str, Any] | None:
     transcript = read_json(session_dir / "transcript.json")
-    field = transcript_repeat_field(report, transcript) if transcript is not None else None
-    if field is None:
+    segments = transcript.get("segments") if transcript else None
+    available = isinstance(segments, list) and all(
+        isinstance(segment, dict) and isinstance(segment.get("text"), str) for segment in segments
+    )
+    field = transcript_repeat_field(report, transcript) if available else None
+    if available and field is None:
         return None
     status = read_json(session_dir / STATUS_FILE) or {"schema_version": SCHEMA_VERSION, "session": session_dir.name}
-    status.update(state="held_review", reason="summary_repeats_transcript", field=field,
+    status.update(state="held_review", reason="summary_repeats_transcript" if available else "transcript_unavailable",
                   updated_at=now(), next_attempt_at=None)
+    status.pop("field", None)
+    if field is not None:
+        status["field"] = field
     write_private(session_dir / STATUS_FILE, status)
     return status
 
@@ -814,6 +821,9 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         if report is None:
             raise ContractError("post-call report is unreadable")
         return _complete_session(session_dir, report)
+    held = hold_transcript_repeat(session_dir, {})
+    if held is not None:
+        return held
     existing = read_json(session_dir / STATUS_FILE) or {}
     attempts = existing.get("extraction_attempts", 0)
     if attempts >= max_attempts:
@@ -855,6 +865,7 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         raw = distiller(request)
         held = hold_transcript_repeat(session_dir, raw)
         if held is not None:
+            write_private(session_dir / "post-call-held-draft.json", raw)
             return held
         result = normalize_distillation(raw, context, session_dir.name,
                                        call_date=call_date, transcript=transcript)

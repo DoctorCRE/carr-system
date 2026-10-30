@@ -638,7 +638,7 @@ class PostCallTests(unittest.TestCase):
         with patch.object(post_call.subprocess, "run") as route:
             status = post_call.process_session(self.session, distiller=Mock())
         route.assert_not_called()
-        self.assertEqual(status["state"], "awaiting_context")
+        self.assertEqual(status["reason"], "transcript_unavailable")
 
     def test_report_saved_before_worker_exit_recovers_without_distilling_again(self) -> None:
         call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
@@ -1853,6 +1853,7 @@ class CaptureBridgePostCallTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.session = Path(self.tmp.name) / "2026.08.10-bridge"
         self.session.mkdir()
+        post_call.write_private(self.session / "transcript.json", {"segments": [{"text": "Synthetic transcript"}]})
         post_call.write_private(
             self.session / ".capture.json", {"session_token": "opaque-session-token"},
         )
@@ -1878,6 +1879,38 @@ class CaptureBridgePostCallTests(unittest.TestCase):
             {"schema_version": 1, "session": self.session.name, "state": "ready_review"},
         )
         self.cfg = {"base_url": "https://worker.test", "device_id": "joe", "token": "device"}
+
+    def test_release_requires_edit_then_publishes(self) -> None:
+        words = "amber birch cedar dawn elm fern grove hazel iris jade kelp leaf moss oak pine"
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        report["report"]["summary"] = words
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        post_call.write_private(self.session / "transcript.json", {"segments": [{"text": words}]})
+        post_call.hold_transcript_repeat(self.session, report)
+        output = io.StringIO()
+        with (patch.object(call_mode, "RECORDINGS", self.session.parent),
+              patch.object(sys, "argv", ["call-mode", "release", self.session.name]),
+              patch("sys.stdout", output), patch.object(call_mode, "sync_post_call") as publish):
+            self.assertEqual(call_mode.main(), 1)
+            self.assertIn("report.summary", output.getvalue())
+            self.assertNotIn(words, output.getvalue())
+            publish.assert_not_called()
+            report["report"]["summary"] = "A short summary"
+            post_call.write_private(self.session / post_call.REPORT_FILE, report)
+            self.assertEqual(call_mode.main(), 0)
+            publish.assert_called_once_with(self.session.resolve())
+            self.assertEqual(post_call.read_json(self.session / post_call.STATUS_FILE)["state"], "ready_review")
+
+    def test_missing_and_malformed_transcript_hold_saved_report(self) -> None:
+        for transcript in (None, {"segments": [None]}):
+            with self.subTest(transcript=transcript):
+                path = self.session / "transcript.json"
+                if transcript is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    post_call.write_private(path, transcript)
+                status = post_call.hold_transcript_repeat(self.session, post_call.read_json(self.session / post_call.REPORT_FILE))
+                self.assertEqual(status["reason"], "transcript_unavailable")
 
     def test_saved_report_repeating_transcript_cannot_publish_and_keeps_audio(self) -> None:
         words = "amber birch cedar dawn elm fern grove hazel iris jade kelp leaf moss oak pine"

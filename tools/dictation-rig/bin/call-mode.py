@@ -529,6 +529,8 @@ def main() -> int:
     start_parser.add_argument("--mode", choices=["weekly_deal_call", "other_call"], default="weekly_deal_call")
     start_parser.add_argument("--consent-confirmed", action="store_true")
     sub.add_parser("stop")
+    release_parser = sub.add_parser("release")
+    release_parser.add_argument("session")
     args = parser.parse_args()
     if args.command == "serve":
         if args.host not in {"127.0.0.1", "localhost"}:
@@ -542,6 +544,30 @@ def main() -> int:
         print(json.dumps(start_recording(args.mode), indent=2))
     elif args.command == "stop":
         print(json.dumps(stop_recording(), indent=2))
+    elif args.command == "release":
+        path = session_path(args.session)
+        status = post_call.read_json(path / post_call.STATUS_FILE) or {}
+        if status.get("state") != "held_review" or status.get("reason") not in {"summary_repeats_transcript", "transcript_unavailable"}:
+            raise SystemExit("session is not held for transcript review")
+        draft_path = path / "post-call-held-draft.json"
+        report = post_call.read_json(draft_path if draft_path.exists() else path / post_call.REPORT_FILE)
+        if report is None:
+            raise SystemExit("held report is unavailable")
+        held = post_call.hold_transcript_repeat(path, report)
+        if held:
+            print(json.dumps(held, indent=2))
+            return 1
+        status.update(state="blocked", next_attempt_at=None, extraction_attempts=0)
+        post_call.write_private(path / post_call.STATUS_FILE, status)
+        if draft_path.exists():
+            status = post_call.process_session(path, distiller=lambda _: report)
+            if status.get("state") == "ready_review":
+                draft_path.unlink()
+        else:
+            status = post_call.process_session(path)
+        if status.get("state") == "ready_review":
+            sync_post_call(path)
+        print(json.dumps(status, indent=2))
     return 0
 
 
