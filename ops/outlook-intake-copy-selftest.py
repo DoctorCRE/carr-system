@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Build and run the dedicated copier against synthetic files only."""
+import errno
 import hashlib
 import json
 import importlib.util
@@ -125,12 +126,10 @@ int openat(int fd, const char *name, int flags, ...) {
         self.assertEqual(result.returncode, 13)
         self.assertIn(b'errno 13', result.stderr)
 
-    def test_profile_permission_denial_names_helper_and_fix(self):
+    def test_profile_permission_denial_exits_with_eperm_for_the_full_disk_access_mapping(self):
         self.sidecar_open_fault('errno = EPERM; return -1', name='Main Identity')
         result = self.copy()
-        self.assertEqual(result.returncode, 77)
-        self.assertIn(f'full_disk_access_missing: {self.helper}'.encode(), result.stderr)
-        self.assertIn(b'Full Disk Access', result.stderr)
+        self.assertEqual(result.returncode, errno.EPERM)
         self.assertFalse((self.work / 'store.hxd').exists())
 
     def test_missing_required_store_still_fails(self):
@@ -417,11 +416,8 @@ if sys.argv[1] == 'find-identity':
     if name:
         print(f'  1) {os.environ["IDENTITY_SHA1"]} "{name}"')
     print(f'     {1 if name else 0} valid identities found')
-elif sys.argv[1] == 'find-certificate' and name and sys.argv[sys.argv.index('-c') + 1] == name:
-    print('SHA-256 hash: ' + 'AB' * 32)
-    print('SHA-1 hash: ' + os.environ['IDENTITY_SHA1'])
 else:
-    sys.exit('security: The specified item could not be found in the keychain.')
+    sys.exit('security: unexpected call')
 '''
 
 
@@ -628,8 +624,7 @@ else:
         requirement = ('designated => identifier "com.carr.outlook-intake-copy" and '
                        f'certificate leaf = H"{IDENTITY_SHA1.lower()}"')
         result = self.install(signing_env=self.identity())
-        self.assertEqual(self.calls('.security'), [['find-identity', '-p', 'codesigning', '-v'],
-                                                   ['find-certificate', '-c', 'CARR Local Helpers', '-Z']])
+        self.assertEqual(self.calls('.security'), [['find-identity', '-p', 'codesigning', '-v']])
         signing = self.calls()
         self.assertEqual(signing[0][:-1], ['--force', '-s', IDENTITY_SHA1, '--identifier',
                                            'com.carr.outlook-intake-copy', f'-r={requirement}'])
@@ -643,22 +638,19 @@ else:
         self.install(signing_env=self.identity())
         self.assertEqual((self.helper.stat().st_mtime_ns, len(self.calls())), before,
                          'an unchanged signed helper is kept')
-        result = self.install(signing_env=self.identity(), args=('--rebuild-helper',))
-        self.assertEqual(len([c for c in self.calls() if c[0] == '--force']), 2, 'a signed helper rebuilds on request')
+        self.helper.with_suffix('.pin').unlink()
+        result = self.install(signing_env=self.identity())
+        self.assertEqual(len([c for c in self.calls() if c[0] == '--force']), 2, 'a signed helper rebuilds without consent')
         self.assertNotIn('re-grant', result.stdout)
         load_settings(self.home).verify_helper()
 
-    def test_switching_an_ad_hoc_helper_to_the_identity_needs_the_rebuild_flag(self):
+    def test_a_new_identity_replaces_the_ad_hoc_helper(self):
         self.install()
-        before = self.helper.stat().st_mtime_ns, self.helper.with_suffix('.pin').read_text()
-        result = self.install(check=False, signing_env=self.identity())
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('--rebuild-helper', result.stderr)
-        self.assertEqual((self.helper.stat().st_mtime_ns, self.helper.with_suffix('.pin').read_text()), before)
-        self.install(signing_env=self.identity(), args=('--rebuild-helper',))
+        before = self.helper.with_suffix('.pin').read_text()
+        self.install(signing_env=self.identity())
         forced = [call for call in self.calls() if call[0] == '--force']
         self.assertEqual(forced[-1][1:5], ['-s', IDENTITY_SHA1, '--identifier', 'com.carr.outlook-intake-copy'])
-        self.assertNotEqual(self.helper.with_suffix('.pin').read_text(), before[1])
+        self.assertNotEqual(self.helper.with_suffix('.pin').read_text(), before)
 
     def test_missing_identity_prints_one_line_and_keeps_the_pinned_ad_hoc_helper(self):
         result = self.install()
@@ -677,19 +669,6 @@ else:
         result = self.install(args=('--rebuild-helper',))
         self.assertEqual(self.helper.stat().st_mtime_ns, before, 'an ad-hoc helper is never rebuilt needlessly')
         self.assertIn(FALLBACK, result.stderr)
-
-    def test_configured_identity_overrides_the_default_name(self):
-        self.install()
-        values = json.loads(self.config.read_text())
-        values['signing_identity'] = 'Fixture Signing Identity'
-        self.config.write_text(json.dumps(values))
-        result = self.install(signing_env=self.identity('Fixture Signing Identity'), args=('--rebuild-helper',))
-        self.assertNotIn('re-grant', result.stdout)
-        self.assertIn(['find-certificate', '-c', 'Fixture Signing Identity', '-Z'], self.calls('.security'))
-        load_settings(self.home).verify_helper()
-        result = self.install(check=False, signing_env=self.identity(), args=('--rebuild-helper',))
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('keychain', result.stderr)
 
     def test_signing_failure_preserves_existing_helper_and_pin(self):
         self.install()

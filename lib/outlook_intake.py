@@ -170,10 +170,6 @@ class DecodeError(RuntimeError):
     """hxprobe could not decode the store copy."""
 
 
-# The copy helper exits 77 after printing 'full_disk_access_missing: <its path>'.
-FULL_DISK_ACCESS_MISSING_EXIT = 77
-
-
 class FullDiskAccessRequired(RuntimeError):
     """macOS denied the dedicated snapshot helper access to Outlook."""
 
@@ -628,9 +624,6 @@ def _snapshot(home: Path, work: Path) -> None:
     helper = settings.copy_helper
     try:
         done = subprocess.run([str(helper)], cwd=work, capture_output=True, timeout=900)
-        if done.returncode == FULL_DISK_ACCESS_MISSING_EXIT:
-            raise FullDiskAccessRequired('full_disk_access_missing',
-                                         _tool_detail('outlook-intake-copy', done.returncode, 'exit_nonzero'))
         if done.returncode in (errno.EPERM, errno.EACCES):
             raise FullDiskAccessRequired(f'grant Full Disk Access to {helper}',
                                          _tool_detail('outlook-intake-copy', done.returncode, 'exit_nonzero'))

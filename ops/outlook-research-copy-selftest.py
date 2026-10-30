@@ -221,8 +221,6 @@ if sys.argv[1] == 'find-identity':
     if name:
         print('  1) {IDENTITY_SHA1} "' + name + '"')
     print('     ' + str(int(bool(name))) + ' valid identities found')
-elif sys.argv[1] == 'find-certificate' and name:
-    print('SHA-1 hash: {IDENTITY_SHA1}')
 else:
     sys.exit(44)
 '''
@@ -311,8 +309,7 @@ class InstallerTest(unittest.TestCase):
 
     def test_carr_local_helpers_identity_signs_with_an_explicit_certificate_requirement(self):
         result = self.install(identity=True)
-        self.assertEqual(self.calls()[:2], [['security', 'find-identity', '-p', 'codesigning', '-v'],
-                                            ['security', 'find-certificate', '-c', 'CARR Local Helpers', '-Z']])
+        self.assertEqual(self.calls()[0], ['security', 'find-identity', '-p', 'codesigning', '-v'])
         signing = [call for call in self.calls() if call[0] == 'codesign']
         self.assertEqual([call[:-1] for call in signing], [
             ['codesign', '--force', '-s', IDENTITY_SHA1, '--identifier', 'com.carr.outlook-research-copy',
@@ -327,9 +324,10 @@ class InstallerTest(unittest.TestCase):
         before = self.helper.stat().st_mtime_ns
         self.install(identity=True)
         self.assertEqual(self.helper.stat().st_mtime_ns, before, 'an unchanged signed helper is kept')
-        self.install('--rebuild-helper', identity=True)
+        self.pin.unlink()
+        self.install(identity=True)
         self.assertEqual(sum(call[:2] == ['codesign', '--force'] for call in self.calls()), 2,
-                         'a signed helper rebuilds on request')
+                         'a deleted pin rebuilds the signed helper')
 
     def test_missing_identity_prints_one_line_and_keeps_the_pinned_ad_hoc_helper(self):
         result = self.install()
@@ -344,10 +342,10 @@ class InstallerTest(unittest.TestCase):
                          'the ad-hoc pin keeps its pre-identity format')
         self.assertIn('Rebuilding the binary requires re-granting access.', result.stdout)
         before = self.helper.stat().st_mtime_ns
-        result = self.install('--rebuild-helper')
+        result = self.install()
         self.assertEqual(self.helper.stat().st_mtime_ns, before, 'an ad-hoc helper is never rebuilt needlessly')
         self.assertIn(FALLBACK, result.stderr)
-        self.assertNotEqual(self.install('--other', check=False).returncode, 0)
+        self.assertNotEqual(self.install('--rebuild-helper', check=False).returncode, 0, 'no arguments accepted')
 
 
 if __name__ == '__main__':

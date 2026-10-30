@@ -23,23 +23,19 @@ def install_helper(settings: OutlookSettings, *, rebuild_helper: bool = False) -
              f'-DOUTLOOK_WORK_ROOT={json.dumps(str(work_root))}',
              f'-DOUTLOOK_REPO={json.dumps(str(settings.repo))}']
     pin = helper.with_suffix('.pin')
-    name = settings.signing_identity or helper_signing.IDENTITY
     try:
-        sha1 = helper_signing.certificate_sha1(name)
+        sha1 = helper_signing.certificate_sha1()
     except helper_signing.SigningError as error:
-        raise SettingsError(f'cannot read code-signing identity {name!r}: {error}') from error
-    if settings.signing_identity and not sha1:
-        raise SettingsError(f'cannot sign Outlook helper with {name!r}; '
-                            'check that the code-signing identity is in this Mac keychain')
+        raise SettingsError(str(error)) from error
     if not sha1:
         print(helper_signing.FALLBACK, file=sys.stderr, flush=True)
-    signer = [flags, settings.signing_identity] + ([IDENTIFIER, sha1] if sha1 else [])
+    # The '' keeps ad-hoc pins written before the stable identity valid.
+    signer = [flags, ''] + ([IDENTIFIER, sha1] if sha1 else [])
     wanted = hashlib.sha256(source.read_bytes() + json.dumps(signer).encode()).hexdigest()
     helper.parent.mkdir(parents=True, exist_ok=True)
-    current = helper.is_file() and os.access(helper, os.X_OK) and pin.is_file() and pin.read_text() == wanted
-    # A stable signature keeps the grant, so an explicit rebuild really rebuilds.
-    if not current or (rebuild_helper and sha1):
-        if helper.exists() and not rebuild_helper:
+    if not (helper.is_file() and os.access(helper, os.X_OK) and pin.is_file() and pin.read_text() == wanted):
+        # A stably signed rebuild keeps Full Disk Access, so only an ad-hoc one needs consent.
+        if helper.exists() and not rebuild_helper and not sha1:
             raise SettingsError(f'refusing to replace Outlook helper {helper}; '
                                 'rerun bin/install-outlook-intake.sh --rebuild-helper explicitly. '
                                 'Replacing an ad-hoc-signed helper loses Full Disk Access; '
@@ -52,7 +48,7 @@ def install_helper(settings: OutlookSettings, *, rebuild_helper: bool = False) -
                 try:
                     helper_signing.sign(built, IDENTIFIER, sha1)
                 except helper_signing.SigningError as error:
-                    raise SettingsError(f'cannot sign Outlook helper with {name!r}: {error}') from error
+                    raise SettingsError(f'cannot sign Outlook helper with {helper_signing.IDENTITY!r}: {error}') from error
             else:
                 try:
                     subprocess.run(['codesign', '--force', '-s', '-', '--identifier', 'outlook-intake-copy', str(built)],

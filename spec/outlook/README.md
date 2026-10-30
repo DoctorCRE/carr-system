@@ -218,62 +218,47 @@ records.
 
 macOS ties an ad-hoc signed helper's Full Disk Access grant to its exact binary
 hash, so every rebuild drops the grant. When `security find-identity -p codesigning -v`
-lists `CARR Local Helpers`, both installers sign their helper with it under a fixed
-identifier and an explicit designated requirement:
+lists `CARR Local Helpers`, both installers sign their helper with that certificate
+under a fixed identifier and an explicit designated requirement:
 `designated => identifier "com.carr.outlook-intake-copy" and certificate leaf = H"<certificate SHA-1>"`
-(and `com.carr.outlook-research-copy` for the research helper). The grant then
-follows the identifier and certificate, not the binary. Without the identity, each
-installer prints one line and keeps the pinned ad-hoc helper exactly as before.
-The installers only read the keychain; they never create or change certificates.
-A helper missing its grant exits 77 and prints `full_disk_access_missing: <helper path>`;
-the intake run records the reason `full_disk_access_missing`.
+(and `com.carr.outlook-research-copy` for the research helper), verify it, and print it.
+The grant then follows the identifier and certificate, so a rebuild needs no consent
+and no re-grant. Without the identity, each installer prints one line and keeps the
+pinned ad-hoc helper exactly as before. The installers only read the keychain.
 
-All steps are required, once per Mac. Run them on the Mac itself, never over SSH:
-`codesign` needs a keychain prompt that SSH cannot show.
+### Joe's steps
 
-1. In Finder, choose **Go > Go to Folder**.
-2. Paste `/System/Library/CoreServices/Applications/Keychain Access.app` there.
-3. Press **Return** to open Keychain Access.
-4. Choose **Keychain Access > Certificate Assistant > Create a Certificate**.
-5. Enter the name `CARR Local Helpers`.
-6. Set **Identity Type** to **Self Signed Root**.
-7. Set **Certificate Type** to **Code Signing**.
-8. Click **Create**; the certificate is saved in the login keychain.
-9. Click **Done**.
-10. Double-click `CARR Local Helpers` under the login keychain's **My Certificates**.
-11. Under **Trust**, set **Code Signing** to **Always Trust**.
-12. Close the certificate window.
-13. Enter the Mac login password if asked.
-14. Run `security find-identity -p codesigning -v`.
-15. Check that it lists `"CARR Local Helpers"`.
-16. In Terminal, run `./bin/install-outlook-intake.sh --rebuild-helper` from the source checkout.
-17. At the `codesign` keychain prompt, enter the Mac login password.
-18. Click **Always Allow**.
-19. Check the printed requirement names `com.carr.outlook-intake-copy` and `certificate leaf`, not `cdhash`.
-20. Run `./bin/install-outlook-research-copy.sh --rebuild-helper` from the same checkout.
-21. Click **Always Allow** if `codesign` prompts again.
-22. Check the printed requirement names `com.carr.outlook-research-copy` and `certificate leaf`, not `cdhash`.
-23. Open **System Settings > Privacy & Security > Full Disk Access**.
-24. Select the old **outlook-intake-copy** row.
-25. Click the minus button.
-26. Click the plus button.
-27. Press **Cmd-Shift-G**.
-28. Paste `~/carr-local/bin/outlook-intake-copy`.
-29. Click **Open**.
-30. Turn the **outlook-intake-copy** switch on.
-31. Select the old **outlook-research-copy** row.
-32. Click the minus button.
-33. Click the plus button.
-34. Press **Cmd-Shift-G**.
-35. Paste `~/carr-local/bin/outlook-research-copy`.
-36. Click **Open**.
-37. Turn the **outlook-research-copy** switch on.
-38. Run `./bin/install-outlook-intake.sh --rebuild-helper` again; it rebuilds the helper.
-39. Run `./bin/install-outlook-research-copy.sh --rebuild-helper` again.
-40. Check the next scheduled intake run succeeds, with no `full_disk_access_missing` failure.
-41. With Outlook quit, run `launchctl kickstart gui/$(id -u)/com.carr.outlook-research-copy`.
-42. Check `launchctl print gui/$(id -u)/com.carr.outlook-research-copy` shows last exit code 0, not 77.
+All steps are required, once per Mac, at the Mac itself. Steps 8 to 10 apply only
+when the agent reports that `find-identity` does not list the certificate.
 
-Steps 23 to 37 are the one re-grant on the switch from ad-hoc. Steps 38 to 42
-prove a rebuild keeps the grant. Do not create a second certificate later:
-replacing it changes the requirement and needs one more re-grant.
+1. Open Keychain Access from Spotlight.
+2. Choose **Keychain Access > Certificate Assistant > Create a Certificate**.
+3. Enter the name `CARR Local Helpers`.
+4. Set **Identity Type** to **Self Signed Root**.
+5. Set **Certificate Type** to **Code Signing**.
+6. Click **Create**; the certificate is saved in the login keychain.
+7. Click **Done**.
+8. Only if the agent reports it unlisted: double-click `CARR Local Helpers` under **My Certificates**.
+9. Only then: under **Trust**, set **Code Signing** to **Always Trust**.
+10. Only then: close the window and enter the Mac login password.
+11. At each `codesign` keychain prompt while the agent installs, enter the Mac login password.
+12. Click **Always Allow**.
+13. Open **System Settings > Privacy & Security > Full Disk Access**.
+14. Remove the old **outlook-intake-copy** and **outlook-research-copy** rows with the minus button.
+15. Click the plus button.
+16. Press **Cmd-Shift-G**, paste `~/carr-local/bin/`, and press **Return**.
+17. Command-click **outlook-intake-copy** and **outlook-research-copy**, then click **Open**.
+18. Turn both switches on.
+
+### Agent verifies
+
+Run these on the Mac in a local session, never over SSH, because `codesign` needs
+the keychain prompt in steps 11 and 12.
+
+1. After step 7, run `security find-identity -p codesigning -v`; if it omits `CARR Local Helpers`, ask for steps 8 to 10 and run it again.
+2. Run `./bin/install-outlook-intake.sh` and `./bin/install-outlook-research-copy.sh`; each prints its requirement, which must name its identifier and `certificate leaf`, not `cdhash`.
+3. After step 18, delete `~/carr-local/bin/outlook-intake-copy.pin` and `~/carr-local/bin/outlook-research-copy.pin`, then run both installers again; they rebuild without asking.
+4. Check the next scheduled intake run succeeds, with no `full_disk_access_required` failure.
+5. With Outlook quit, run `launchctl kickstart gui/$(id -u)/com.carr.outlook-research-copy` and check `launchctl print` shows last exit code 0.
+
+Do not create a second certificate later: replacing it changes the requirement and needs one more re-grant.

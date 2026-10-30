@@ -1,19 +1,17 @@
 #!/bin/zsh
 # Build and pin the research-only copier, then render its on-demand LaunchAgent.
 # With the CARR Local Helpers identity it signs the copier to a stable requirement,
-# and --rebuild-helper rebuilds it without losing Full Disk Access.
-#
-# Usage: ./bin/install-outlook-research-copy.sh [--rebuild-helper]
+# so a rebuild keeps Full Disk Access.
 set -eu
 
-if (( $# > 1 )) || { (( $# == 1 )) && [ "$1" != "--rebuild-helper" ]; }; then
-  print -u2 -- "install-outlook-research-copy: only --rebuild-helper is accepted"
+if (( $# != 0 )); then
+  print -u2 -- "install-outlook-research-copy: no arguments accepted"
   exit 1
 fi
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
-/usr/bin/python3 - "$REPO" "$HOME" "$@" <<'PY'
+/usr/bin/python3 - "$REPO" "$HOME" <<'PY'
 import hashlib
 import json
 import os
@@ -24,10 +22,9 @@ import subprocess
 import sys
 import tempfile
 
-if len(sys.argv) not in (3, 4):
+if len(sys.argv) != 3:
     raise SystemExit('install-outlook-research-copy: unexpected arguments')
-repo, home = (Path(value).resolve() for value in sys.argv[1:3])
-rebuild = sys.argv[3:] == ['--rebuild-helper']
+repo, home = (Path(value).resolve() for value in sys.argv[1:])
 sys.path.insert(0, str(repo))
 from lib import helper_signing
 
@@ -55,8 +52,7 @@ if pin.is_file() and not pin.is_symlink():
         current = json.loads(pin.read_text())
     except (ValueError, UnicodeError):
         pass
-# A stable signature keeps the grant, so an explicit rebuild really rebuilds.
-if (rebuild and sha1) or not (helper.is_file() and not helper.is_symlink() and os.access(helper, os.X_OK)
+if not (helper.is_file() and not helper.is_symlink() and os.access(helper, os.X_OK)
         and current == {'build_sha256': wanted, 'binary_sha256': hashlib.sha256(helper.read_bytes()).hexdigest()}):
     with tempfile.TemporaryDirectory(dir=helper.parent) as temp:
         built = Path(temp) / helper.name

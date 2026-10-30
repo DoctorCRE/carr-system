@@ -63,8 +63,6 @@ The decoder must export `folder_links_unresolved`, which preserves uncertainty a
 Conflicting owners and unresolved links are excluded under `mail_account_ambiguous` and `mail_account_unresolved`.
 Changing the mailbox address also forces fresh binding verification.
 
-Optional `signing_identity` names this Mac's code-signing certificate. Omit it to use `CARR Local Helpers` when present, else ad-hoc signing.
-
 | Fields | Type and meaning |
 | --- | --- |
 | `owner` | Lowercase record-layer owner principal. It does not assert authenticated identity. |
@@ -90,5 +88,4 @@ The shared services catalog retains its declared owner. Outlook jobs use the pri
 
 Follow [the README steps](README.md#keep-full-disk-access-across-helper-rebuilds).
 They create the `CARR Local Helpers` identity once, which both helper installers
-detect without any setting. A configured `signing_identity` overrides that name
-for the intake helper and must be a valid code-signing identity in this Mac's keychain.
+detect without any setting.
