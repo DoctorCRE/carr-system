@@ -409,9 +409,15 @@ async function postCallCandidates(request, dependencies) {
       if (!prior.rows.length && items.some(item => item.payload.counterpart)) {
         const people = (await client.query(`select id as party_id,name,email,phone,cell from party
           where merged_into is null and deleted_at is null /* capture:contact-resolution */`)).rows;
+        const participants = (await client.query(`select deal_id,party_id from deal_participant
+          where deal_id = any($1::uuid[]) and to_at is null`, [items.map(item => item.payload.deal_id)])).rows;
         for (const item of items) {
-          item.payload.contact_party_id = item.payload.counterpart
-            ? resolveContact(item.payload.counterpart, people, { call: true }).party_id : null;
+          const counterpart = item.payload.counterpart;
+          const candidates = counterpart && !counterpart.email && !counterpart.phone
+            ? people.filter(person => participants.some(p => p.deal_id === item.payload.deal_id && p.party_id === person.party_id))
+            : people;
+          item.payload.contact_party_id = counterpart
+            ? resolveContact(counterpart, candidates, { call: true }).party_id : null;
         }
       }
       await client.query(

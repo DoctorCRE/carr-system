@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID, createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
 import { createCaptureHandler } from '../src/capture.js';
@@ -20,8 +19,6 @@ before(async () => {
     '-U', 'fixture', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q',
     '-f', new URL('../../db/schema.sql', import.meta.url).pathname], { maxBuffer: 4 * 1024 * 1024 });
   await applyPendingDealRoomReads(c);
-  const migration = new URL('../../migrations/1065_call_followup_contact.sql', import.meta.url);
-  await c.query(readFileSync(migration, 'utf8'));
   actor = { ...(await c.query("select id,slug from actor where slug='joe'")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic physician',$1,$1) returning id", [actor.id])).rows[0].id;
   await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
@@ -29,8 +26,9 @@ before(async () => {
 });
 after(async () => { await fixture?.close(); });
 
-async function followup(counterpart, owner = 'joe', parked = false) {
+async function followup(counterpart, owner = 'joe', parked = false, participant = false) {
   const deal = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic contact call',$1,'purchase','site_selection',$2,$3,$3) returning id", [clientId, owner, actor.id])).rows[0].id;
+  if (participant) await c.query("insert into deal_participant(deal_id,party_id,role,set_by) select $1,id,'listing_side',$2 from party where name='Synthetic Pat'", [deal, actor.id]);
   const token = randomUUID();
   await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,consent_announced_at,
     session_token_hash,expires_at,state,state_at,post_call) values($1,'fixture',$2,'meeting',now(),now(),$1,
@@ -69,7 +67,8 @@ test('a captured phone resolves through the shared contact resolver', async () =
 });
 
 test('a unique participant name resolves without deriving a person from the deal', async () => {
-  assert.equal((await followup({ name: 'Synthetic Pat' })).contact_name, 'Synthetic Pat');
+  assert.equal((await followup({ name: 'Synthetic Pat' })).contact_name, null);
+  assert.equal((await followup({ name: 'Synthetic Pat' }, 'joe', false, true)).contact_name, 'Synthetic Pat');
 });
 
 test('missing and unmatched counterparts return null, never the supplied display name', async () => {
