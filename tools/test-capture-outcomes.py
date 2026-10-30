@@ -281,7 +281,8 @@ class CaptureSweepTests(unittest.TestCase):
         self.commands = self.root / "commands"
         self.commands.mkdir()
         self.attempts = self.root / "attempts"
-        self.env = {"HOME": str(self.root), "PATH": f"{self.commands}:/usr/bin:/bin", "CARR_RECORDINGS_DIR": str(self.recordings)}
+        self.env = {"HOME": str(self.root), "PATH": f"{self.commands}:/usr/bin:/bin", "CARR_RECORDINGS_DIR": str(self.recordings),
+                    "CARR_CAPTURE_LOG": str(self.root / "capture.log")}
         self.command("python3", f"#!/bin/bash\nprintf '%s\\n' \"$3\" >> '{self.attempts}'\ncase \"$3\" in *first*) exit 1;; esac\n")
         self.command("date", "#!/bin/bash\nif [ \"$1\" = -j ]; then printf '1\\n'; else /bin/date \"$@\"; fi\n")
         self.command("sleep", "#!/bin/bash\nexit 0\n")

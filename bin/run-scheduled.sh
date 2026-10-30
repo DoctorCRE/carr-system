@@ -93,7 +93,7 @@ if sys.argv[3] != "outlook-intake":
         "folder_guide_missing folder_guide_not_0600 folder_pane_restore_failed move_failed move_failed_twice "
         "unread_row_selected unread_set_changed unread_set_unverified cua_driver_unavailable "
         "outlook_launch_failed outlook_not_running_after_launch outlook_quit_timeout preflight_command_timeout "
-        "compose_window_open".split())
+        "compose_window_open screen_locked".split())
 prefix = sys.argv[3] + "-receipt "
 # Count keys are code-built names; values carry the meaning. A snake_case name with a
 # bounded non-negative integer value cannot carry mail content, so no key list drifts.

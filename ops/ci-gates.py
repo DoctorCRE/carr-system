@@ -14,8 +14,7 @@ import time
 PROGRAM_PATTERNS = (
     'ops/*-selftest.py', 'tools/test-*.py', 'tools/test_*.py', 'tools/*-selftest.py',
     'tools/room-bridge/test_*_unit.py', 'tools/room-bridge/test_activation_reliability.py',
-    'tools/dictation-rig/tests/test_call_mode_runtime.py',
-    'tools/dictation-rig/tests/test_call_mode.py',
+    'tools/dictation-rig/tests/test_*.py',
     'test/doc_drift/test_*.py', 'test/doc_drift_product/test_*.py',
     'tools/test-*.sh', 'tools/test_*.sh',
 )

@@ -69,6 +69,7 @@ def degraded_receipt(lines):
     """
     latest = {}
     reconcile_failures = 0
+    coverage_failure = None
     for line in lines:
         match = RECEIPT.match(line)
         if match:
@@ -80,10 +81,26 @@ def degraded_receipt(lines):
                         reconcile_failures += 1
                     else:
                         reconcile_failures = 0
+                if match.group(1) == "outlook-intake-receipt" and isinstance(receipt, dict):
+                    counts = receipt.get("counts", {})
+                    run = counts.get("run", counts) if isinstance(counts, dict) else {}
+                    if receipt.get("reason") == "coverage_failed":
+                        reasons = []
+                        if run.get("coverage_missed_verdict"):
+                            reasons.append("previous day's verdict was missed")
+                        if run.get("coverage_held_recipients_over_limit"):
+                            reasons.append("more than 20 Sent items have unknown recipients")
+                        if not reasons:
+                            reasons.append("mail coverage fell short")
+                        coverage_failure = "; ".join(reasons)
+                    elif isinstance(run, dict) and run.get("coverage_checked") == 1:
+                        coverage_failure = None
             except ValueError:
                 continue
     if reconcile_failures >= 3:
         return "reconciliation failed three consecutive times; mail is not being filed"
+    if coverage_failure:
+        return f"(coverage_failed): {coverage_failure}"
     for receipt in latest.values():
         if isinstance(receipt, dict) and receipt.get("state") == "degraded":
             counts = receipt.get("counts") if isinstance(receipt.get("counts"), dict) else {}
