@@ -102,7 +102,7 @@ test('refuses malformed metadata before touching the table', async () => {
 
 test('lists only visible deal metadata with stable paging and citation attachment IDs', async () => {
   await c.query('create role carr_reader; grant usage on schema public to carr_reader; grant select on v_ref_index to carr_reader');
-  await c.query(readFileSync(new URL('../../migrations/1080_deal_documents.sql', import.meta.url), 'utf8'));
+  await c.query(readFileSync(new URL('../../migrations/1086_deal_documents.sql', import.meta.url), 'utf8'));
   const documentIds = ['00000000-0000-4000-8000-000000000010', '00000000-0000-4000-8000-000000000020'];
   for (const id of documentIds) await c.query(`insert into attachment(id,subject_type,subject_id,r2_key,filename,mime,sha256,bytes,created_by,created_at)
     values($1::uuid,'deal',$2,$1::text,'Synthetic lease.pdf',$3,$4,100,$5,'2026-01-01T00:00:00Z')`,
