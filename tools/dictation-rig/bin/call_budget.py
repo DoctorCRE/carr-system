@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import fcntl
 import json
+import logging
 import os
 from pathlib import Path
 import tempfile
@@ -12,6 +13,9 @@ from zoneinfo import ZoneInfo
 # Reserve the whole context, round up, never refund uncertain/failed requests.
 MODEL = 'jev-1.14.0'
 REQUEST_MICRODOLLARS = 2753
+# Joe ruled that the daily Jev cap must be less than 50 cents.
+DAILY_CAP_DOLLARS = Decimal('0.40')
+_clamp_logged = False
 
 
 class BudgetHold(RuntimeError):
@@ -19,10 +23,16 @@ class BudgetHold(RuntimeError):
 
 
 def reserve(ledger: Path, *, instant: datetime | None = None) -> None:
+    global _clamp_logged
     try:
-        dollars = Decimal(os.environ.get('CALL_JEV_DAILY_DOLLARS', ''))
+        dollars = Decimal(os.environ.get('CALL_JEV_DAILY_DOLLARS') or '0.40')
         if not dollars.is_finite() or dollars <= 0:
             raise ValueError
+        if dollars > DAILY_CAP_DOLLARS:
+            if not _clamp_logged:
+                logging.warning('CALL_JEV_DAILY_DOLLARS exceeds $0.40; clamped to $0.40.')
+                _clamp_logged = True
+            dollars = DAILY_CAP_DOLLARS
         cap = int(dollars * 1_000_000)
     except (InvalidOperation, ValueError, OverflowError):
         raise BudgetHold('Jev daily dollar budget is unconfigured or invalid.') from None
