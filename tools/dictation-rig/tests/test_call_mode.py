@@ -83,6 +83,7 @@ def tearDownModule() -> None:
 
 class CallState(TypedDict, total=False):
     sessions: list[dict[str, object]]
+    hidden_older_count: int
     state: str
     status_text: str
     transcription_attempts: int
