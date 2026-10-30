@@ -11,7 +11,6 @@ import { writeFileSync } from 'node:fs';
 import { canonicalJson } from '../src/artifact-trust.js';
 import { readSystemWorkCensus } from '../src/system-work-census.v5.js';
 import { executeRegisteredTool } from '../src/tools.js';
-import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.current.generated.js';
 
 let fixture, admin, database, c, actor, connection;
 before(async () => {
@@ -91,6 +90,7 @@ test('the migration removes every hash page, leaves real boards, and registers t
   await seedBoard(`carr-v5-external-${hex('a')}`);
   await seedBoard(`carr-v5-snapshot-${hex('b')}`);
   await seedBoard('carr-v5-external-not-a-digest');
+  const predecessor = (await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract;
   await c.query(MIGRATION);
   const left = (await c.query('select board_id from board_snapshot order by board_id')).rows.map(r => r.board_id);
   assert.deepEqual(left, ['carr-v5', 'carr-v5-external-not-a-digest', 'needs-joe-local']);
@@ -99,13 +99,9 @@ test('the migration removes every hash page, leaves real boards, and registers t
     .filter(g => g.relation === 'public.system_work_census_inventory').map(g => g.privilege).sort();
   assert.deepEqual(grants, ['insert', 'update']);
   assert.equal((await c.query('select ops.scac_mutation_catalog_v118_current() as valid')).rows[0].valid, true);
-  const predecessor = { ...SCAC_MUTATION_CURRENT_DB_GRANTS,
-    relation_dml: SCAC_MUTATION_CURRENT_DB_GRANTS.relation_dml
-      .filter(g => g.ingress_key !== 'db-relation-acl:ops.work_request_slice:carr_writer:update'),
-    secdef_execute: SCAC_MUTATION_CURRENT_DB_GRANTS.secdef_execute
-      .filter(g => !/^ops\.(reap_expired_runs|record_human_fact|list_fact_review|resolve_fact_review)\(/.test(g.signature)) };
-  assert.deepEqual((await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract,
-    predecessor);
+  const installed = (await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract;
+  assert.deepEqual({ ...installed, relation_dml: installed.relation_dml
+    .filter(g => g.relation !== 'public.system_work_census_inventory') }, predecessor);
   if (process.env.CENSUS_INVENTORY_CONTRACT_OUT)
     writeFileSync(process.env.CENSUS_INVENTORY_CONTRACT_OUT, JSON.stringify((await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract));
 });

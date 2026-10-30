@@ -49,7 +49,7 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
       secdef_execute: SCAC_MUTATION_CURRENT_DB_GRANTS.secdef_execute.filter(g => !FACT_FUNCTIONS.test(g.signature) && !LATER_FUNCTIONS.test(g.signature)) };
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as $f$select ${c.escapeLiteral(JSON.stringify(predecessor))}::jsonb$f$`);
     await c.query(await readFile(new URL('../../migrations/0983_fact_store.sql', import.meta.url), 'utf8'));
-    await c.query(await readFile(new URL('../../migrations/1070_fact_review.sql', import.meta.url), 'utf8'));
+    await c.query(await readFile(new URL('../../migrations/1098_fact_review.sql', import.meta.url), 'utf8'));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner'),($2,'codex','automation','Synthetic job')", [partner.id, job.id]);
 
     await t.test('partners record a sourced term from an existing deal attachment', async () => {
