@@ -80,7 +80,7 @@ import re
 import sys
 
 reasons = frozenset("outside_window previous_run_active cleanup_failed store_missing carr_unreachable "
-                    "decode_failed store_verification_low decoder_degraded calendar_decode_empty store_unchanged "
+                    "decode_failed coverage_failed store_verification_low decoder_degraded calendar_decode_empty store_unchanged "
                     "writes_failed model_failed processed nothing_new writes_deferred "
                     "request_blocked full_disk_access_required contacts_empty contacts_read_failed timeout auth_refused "
                     "key_reuse transport_oversized no_acknowledgement reply_unreadable transport_error "
