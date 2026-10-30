@@ -380,8 +380,11 @@ class ButtonLabelTest(unittest.TestCase):
                 with self.subTest(label=label, state=state):
                     self.assertTrue(button_matches({'role': 'AXButton', 'label': f'{label}, {state}'}, label))
 
+    def test_stacked_known_states_match(self):
+        self.assertTrue(button_matches({'role': 'AXButton', 'label': 'New Mail, pressed, selected'}, 'New Mail'))
+
     def test_near_misses_and_missing_names_do_not_match(self):
-        for label in ('New Mail Rule', 'New Mail, Rule', '', None):
+        for label in ('New Mail Rule', 'New Mail, Rule', 'New Mail, pressed, Rule', 'New Mail, ', '', None):
             with self.subTest(label=label):
                 self.assertFalse(button_matches({'role': 'AXButton', 'label': label}, 'New Mail'))
         self.assertFalse(button_matches({'role': 'AXButton'}, ''))

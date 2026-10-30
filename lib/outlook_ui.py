@@ -188,9 +188,9 @@ def button_matches(element: dict, name: str) -> bool:
     if element.get('role') != 'AXButton' or not label or not name:
         return False
     base, separator, state = str(label).partition(', ')
-    return base == name and (not separator or state in {
+    return base == name and (not separator or all(part in {
         'pressed', 'selected', 'expanded', 'collapsed', 'checked', 'unchecked',
-    })
+    } for part in state.split(', ')))
 
 
 def _readable(pid: int, window: dict) -> bool:
