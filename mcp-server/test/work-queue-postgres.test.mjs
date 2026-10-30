@@ -55,6 +55,8 @@ before(async () => {
     await c.query(readFileSync(new URL('../../migrations/1060_work_request_slice_outcome.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select 1 from schema_migrations where filename='1061_work_request_job_version.sql'")).rows.length)
     await c.query(readFileSync(new URL('../../migrations/1061_work_request_job_version.sql', import.meta.url), 'utf8'));
+  if (!(await c.query("select 1 from schema_migrations where filename='1062_validate_work_request_job_version.sql'")).rows.length)
+    await c.query(readFileSync(new URL('../../migrations/1062_validate_work_request_job_version.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => {
@@ -560,4 +562,13 @@ test('concurrent duplicate mints admit one card and descriptions use the same vo
     assert.equal(results.find(result => result.status === 'rejected').reason.message, 'card_title_duplicate');
     assert.equal((await command('work-queue')).jobs.filter(row => row.work_request === work_request).length, 1);
   } finally { await Promise.all(clients.map(client => client.end())); }
+});
+
+test('launcher description fixtures are accepted at mint', async () => {
+  const descriptions = JSON.parse(readFileSync(new URL('../../tools/fixtures/job-descriptions.json', import.meta.url), 'utf8'));
+  const work_request = await request('WR-000101');
+  for (const description of descriptions) {
+    const result = await command('dispatch-job', job(work_request, { description }));
+    assert.ok(result.card_id);
+  }
 });

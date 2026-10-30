@@ -117,7 +117,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
   const validateCopy = async (c, wr, args, current) => {
     if (!/^[A-Za-z']+( [A-Za-z']+){1,2}$/.test(args.card_title)) refuse('invalid_card_title');
     if (!cardVerbs.includes(args.card_title.split(' ')[0])) refuse('card_title_verb');
-    if (args.description != null && (args.description.trim().split(/[.!?](?:\s|$)/u).filter(Boolean).length !== 1
+    if (args.description != null && (/[\r\n]/u.test(args.description) || args.description.trim().split(/[.!?](?:\s|$)/u).filter(Boolean).length !== 1
       || !cardVerbs.includes(args.description.split(/\s/u)[0]))) refuse('invalid_job_description');
     if ((await c.query(`select 1 from ops.work_request_job where work_request_id=$1
       and lower(card_title)=lower($2) and not (slice_ordinal=$3 and j_number=$4)`,
