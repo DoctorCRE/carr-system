@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from urllib.parse import quote
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,14 +63,13 @@ class ApprovedControlMigrationTests(unittest.TestCase):
         cls.child = shadow.local_pg.scrub_cloud_environment(os.environ)
         cls.fixture = shadow.local_pg.DisposablePostgres('approved-control.', cls.bins / 'pg_ctl', cls.child)
         cls.addClassCleanup(cls.fixture.close)
-        cls.port = shadow.free_port(55800)
-        cls.dsn = f'postgres://carr_ci@127.0.0.1:{cls.port}/carr_ci'
+        cls.dsn = f'postgres://carr_ci@{quote(str(cls.fixture.root), safe="")}/carr_ci'
         cls.fixture.run([cls.bins / 'initdb', '-D', cls.fixture.root / 'data', '-U', 'carr_ci',
                          '--auth=trust', '--encoding=UTF8', '--no-locale'], check=True, capture_output=True)
         cls.fixture.run([cls.bins / 'pg_ctl', '-D', cls.fixture.root / 'data', '-l', cls.fixture.root / 'postgres.log',
-                         '-o', f'-h 127.0.0.1 -p {cls.port} -k {cls.fixture.root}', '-w', 'start'],
+                         '-o', f'-c listen_addresses= -k {cls.fixture.root}', '-w', 'start'],
                         check=True, capture_output=True)
-        cls.fixture.run([cls.bins / 'createdb', '-h', '127.0.0.1', '-p', str(cls.port), '-U', 'carr_ci', 'carr_ci'],
+        cls.fixture.run([cls.bins / 'createdb', '-h', str(cls.fixture.root), '-U', 'carr_ci', 'carr_ci'],
                         check=True, capture_output=True)
         with psycopg.connect(cls.dsn, autocommit=True) as conn:
             conn.execute('create role neondb_owner')

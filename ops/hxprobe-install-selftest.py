@@ -21,7 +21,9 @@ from outlook_test_support import write_settings
 
 CRATE = ROOT / 'vendor/hxprobe'
 SOURCES = ('vendor/hxprobe', 'spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py')
-INSTALLER_FILES = ('ops/hxprobe-source-digest.py', 'bin/install-outlook-intake.sh', 'tools/outlook-intake-copy.c', 'lib/outlook_settings.py', 'lib/outlook_helper.py',
+INSTALLER_FILES = ('ops/hxprobe-source-digest.py', 'ops/config-as-code.py', 'ops/git_env.py', 'ops/config/services.json',
+                   'bin/install-outlook-intake.sh', 'tools/outlook-intake-copy.c', 'lib/outlook_settings.py', 'lib/outlook_helper.py',
+                   'lib/machine_prerequisites.py', 'lib/machine_role.py', 'lib/launchd_calendar.py', 'lib/launchd_hold.py', 'lib/launchd_scope.py',
                    'ops/launchd/com.carr.outlook-intake.plist')
 
 
@@ -50,6 +52,13 @@ class InstalledDecoderTest(unittest.TestCase):
         codesign = self.repo / '.venv/bin/codesign'
         codesign.write_text(f'#!{sys.executable}\n')
         codesign.chmod(0o700)
+        launchctl = self.repo / '.venv/bin/launchctl'
+        launchctl.write_text(f'#!{sys.executable}\nimport sys\n'
+                             'if len(sys.argv) != 3 or sys.argv[1] != "print" or not sys.argv[2].endswith("/com.carr.outlook-refresh"):\n'
+                             '    sys.exit(1)\n'
+                             'sys.stderr.write(\'Could not find service "com.carr.outlook-refresh"\\n\')\n'
+                             'sys.exit(113)\n')
+        launchctl.chmod(0o700)
         (self.repo / '.gitignore').write_text('.venv/\nout\ntarget/\n')
         self.git('init', '--quiet')
         self.commit('fixture')
