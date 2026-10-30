@@ -42,8 +42,8 @@
       "sha256": "b7f10a2112bbb8a3d7a4a10fc97f04ff757e2e514caf1fef10aa0929d54c7d58"
     },
     "vendor/hxprobe/src/message.rs": {
-      "revision": "f160135d4e5d38613ecf05643e64d8ba4975920d",
-      "sha256": "8f5ae1e61d55cc02d385f0cda01ff1513f84d803095c841c8c38497dc86b94e7"
+      "revision": "ee79130cc200f4e479ccb91d11a12d2ccb9da3bd",
+      "sha256": "66445c91d9404852cc2c68ffa22fd101d2dd481157078a28f6774e0a338b6eff"
     },
     "spec/outlook/hxstore-harness.json": {
       "revision": "f03be8931e4be950b68a034987eef062949e56bb",
@@ -52,6 +52,10 @@
     "spec/outlook/recipients-threads-research.md": {
       "revision": "578ced0753e446fe832a585e6932d2e60033cf0e",
       "sha256": "b2f00f918474cd190f4dbcc1a049e8d298d04d61139c3727043c172c550bf62e"
+    },
+    "vendor/hxprobe/src/main.rs": {
+      "revision": "ee79130cc200f4e479ccb91d11a12d2ccb9da3bd",
+      "sha256": "c71f63ca41aec62db8296bf8c95973e1415907c9307061957642bc352442e358"
     }
   },
   "entries": [
@@ -2233,6 +2237,10 @@
         {
           "source": "spec/outlook/hxstore-harness.json",
           "symbol": "corpus.cases"
+        },
+        {
+          "source": "vendor/hxprobe/src/main.rs",
+          "symbol": "cmd_db"
         }
       ],
       "first_seen_version": null,
@@ -2348,7 +2356,7 @@
       "evidence": [
         {
           "source": "vendor/hxprobe/src/message.rs",
-          "symbol": "base"
+          "symbol": "revision"
         },
         {
           "source": "spec/outlook/recipients-threads-research.md",
