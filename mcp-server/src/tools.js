@@ -3555,7 +3555,7 @@ export const TOOLS = {
       const next_cursor = has_more ? btoa(JSON.stringify({ v: 2, owners, on: last.triage_on,
         rank: last.triage_rank, due_on: last.triage_due_on,
         item_kind: last.item_kind, id: last.id })) : null;
-      const items = page.slice(0, limit).map(({ triage_total, triage_rank, triage_on, triage_due_on, triage_key, ...row }) => row);
+      const items = page.slice(0, limit).map(({ triage_total, triage_rank, triage_on, triage_due_on, triage_key, ...row }) => ({ ...row, due_on: triage_due_on }));
       return { items, total, has_more, next_cursor };
     },
   },
