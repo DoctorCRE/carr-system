@@ -2,13 +2,12 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { randomUUID, createHash } from 'node:crypto';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
 import { createCaptureHandler } from '../src/capture.js';
-import { executeRegisteredTool } from '../src/tools.js';
+import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 
 let fixture, c, actor, clientId;
 before(async () => {
@@ -19,7 +18,6 @@ before(async () => {
     '-U', 'fixture', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q',
     '-f', new URL('../../db/schema.sql', import.meta.url).pathname], { maxBuffer: 4 * 1024 * 1024 });
   await applyPendingDealRoomReads(c);
-  await c.query(readFileSync(new URL('../../migrations/1073_retain_assessed_deal_actions.sql', import.meta.url), 'utf8'));
   await c.query('alter table activity add column email_context jsonb, add column email_source jsonb');
   actor = { ...(await c.query("select id,slug from actor where slug='joe'")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic phase physician',$1,$1) returning id", [actor.id])).rows[0].id;
@@ -37,7 +35,11 @@ async function transaction(fn, role = null) {
     return result;
   } catch (error) { await c.query('rollback'); throw error; }
 }
-const command = (name, args = {}) => transaction(client => executeRegisteredTool(client, actor, name, args));
+const command = async (name, args = {}) => {
+  const result = await transaction(client => executeRegisteredTool(client, actor, name, args));
+  return TOOLS[name].afterCommit
+    ? TOOLS[name].afterCommit(c, actor, args, result, fn => transaction(fn)) : result;
+};
 
 async function filePhase(evidence, { speaker = "joe", storedQuote = evidence, kind = "phase_move", overdue = false } = {}) {
   const deal = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic phase purchase',$1,'purchase','site_selection','joe',$2,$2) returning id", [clientId, actor.id])).rows[0].id;
@@ -134,13 +136,15 @@ test('a caller without partner authority cannot automatically apply a valid part
 for (const [kind, automatic, verdict, callUndo = false] of [
   ['next_step', true, 'yes'], ['next_step', false, 'yes'],
   ['next_step', true, 'no'], ['activity', false, 'yes'], ['activity', false, 'no'],
-  ['next_step', true, 'yes', true],
-]) test(`${kind} call confirmation automatic=${automatic} assesses overdue completion ${verdict} once with ${callUndo ? 'call Undo' : 'assessment Undo'}`, async () => {
+  ['next_step', true, 'yes', true], ['next_step', false, 'yes', true],
+  ['next_step', true, 'yes', 'whole-call'], ['next_step', true, 'yes', 'assessment-then-whole-call'],
+]) test(`${kind} call confirmation automatic=${automatic} assesses overdue completion ${verdict} once with ${callUndo === true ? 'call Undo' : callUndo || 'assessment Undo'}`, async () => {
   const evidence = verdict === 'yes' ? 'The landlord sent the requested revised terms.' : 'We discussed parking at the other property.';
-  const { deal, id, prior } = await filePhase(evidence, { kind, overdue: true });
+  const { deal, session, id, prior } = await filePhase(evidence, { kind, overdue: true });
   let calls = 0;
   c.jevClient = { systemOne: async request => {
     calls++;
+    assert.equal((await c.query("select count(*)::int as count from pg_locks where pid=pg_backend_pid() and locktype='advisory'")).rows[0].count, 0, 'Jev runs after commit without transaction locks');
     assert.equal(request.state.update, evidence);
     assert.equal(request.state.actions[0].description, 'Request revised terms');
     return { answers: Object.fromEntries(Object.keys(request.questions).map(key => [key,
@@ -163,15 +167,102 @@ for (const [kind, automatic, verdict, callUndo = false] of [
     assert.equal(calls, 1);
     assert.deepEqual((await command('get-deal-room', { deal })).events, room.events);
     if (verdict === 'yes') {
-      if (callUndo) await command('undo-call-change', {
+      if (callUndo === 'whole-call') await command('undo-call', { idempotency_key: randomUUID(), session_id: session });
+      else if (callUndo === 'assessment-then-whole-call') {
+        await command('review-deal-update', { idempotency_key: randomUUID(), assessment_id: assessment.id,
+          decision: 'undo', reason: 'Synthetic completion correction' });
+        await command('undo-call', { idempotency_key: randomUUID(), session_id: session });
+      }
+      else if (callUndo && automatic) await command('undo-call-change', {
         idempotency_key: randomUUID(), candidate_id: id, base_version: room.base_version,
       });
+      else if (callUndo) {
+        await assert.rejects(command('undo-call-change', { idempotency_key: randomUUID(),
+          candidate_id: id, base_version: room.base_version }), error => error.payload?.error === 'not_applied_automatically');
+        await command('review-deal-update', { idempotency_key: randomUUID(), assessment_id: assessment.id,
+          decision: 'undo', reason: 'Synthetic completion correction' });
+      }
       else await command('review-deal-update', { idempotency_key: randomUUID(), assessment_id: assessment.id,
         decision: 'undo', reason: 'Synthetic completion correction' });
       const restored = await command('get-deal-room', { deal });
       assert.equal(restored.next_actions.find(a => a.id === prior.next_action_id).status, 'open');
-      assert.equal(restored.next_date, '2020-01-01');
-      assert.ok(!restored.items.some(item => item.source_ref === `capture_candidate:${id}`));
+      assert.equal(restored.next_date, kind === 'next_step' && (!callUndo || !automatic) ? '2030-01-01' : '2020-01-01');
+      assert.equal(restored.items.some(item => item.source_ref === `capture_candidate:${id}`), kind === 'next_step' && (!callUndo || !automatic));
+      if (kind === 'next_step' && (!callUndo || !automatic)) assert.equal(restored.next_step, 'Review revised terms');
+      if (kind === 'next_step' && !callUndo && automatic) {
+        await command('undo-call-change', { idempotency_key: randomUUID(), candidate_id: id,
+          base_version: restored.base_version });
+        assert.equal((await command('get-deal-room', { deal })).next_date, '2020-01-01');
+      }
+      if (kind === 'next_step' && !callUndo && !automatic)
+        await assert.rejects(command('undo-call-change', { idempotency_key: randomUUID(), candidate_id: id,
+          base_version: restored.base_version }), error => error.payload?.error === 'not_applied_automatically');
+      if (callUndo) {
+        const undone = await command('review-deal-update', { idempotency_key: randomUUID(),
+          assessment_id: assessment.id, decision: 'undo', reason: 'Undo after call Undo' });
+        assert.equal(undone.ok, true);
+      }
     }
+  } finally { delete c.jevClient; }
+});
+
+for (const automatic of [true, false]) test(`Jev failure preserves the overdue action and accepted call plan automatic=${automatic}`, async () => {
+  const { deal, id, prior } = await filePhase('The landlord sent the requested revised terms.', { kind: 'next_step', overdue: true });
+  c.jevClient = { systemOne: async () => { throw new Error('Synthetic Jev outage'); } };
+  try {
+    await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: id, accept: true, automatic });
+    const room = await command('get-deal-room', { deal });
+    assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'open');
+    assert.equal(room.next_date, '2030-01-01');
+    assert.equal(room.next_step, 'Review revised terms');
+    assert.ok(room.items.some(item => item.source_ref === `capture_candidate:${id}`));
+    const proposal = (await command('read-deal-update-reviews')).proposals.find(p => p.deal_id === deal);
+    assert.equal(proposal.assessment.candidate_id, id);
+    assert.equal(proposal.assessment.reason, 'jev_unavailable');
+    assert.equal(proposal.assessment.resolved, false);
+    await command('review-deal-update', { idempotency_key: randomUUID(), assessment_id: proposal.assessment_id,
+      decision: 'resolve', reason: 'Partner confirms the requested revised terms arrived' });
+    const reviewed = await command('get-deal-room', { deal });
+    assert.equal(reviewed.next_actions.find(a => a.id === prior.next_action_id).status, 'done');
+    assert.equal(reviewed.next_date, '2030-01-01');
+    assert.equal(reviewed.next_step, 'Review revised terms');
+  } finally { delete c.jevClient; }
+});
+
+test('call apply commits a pending assessment before Jev runs, and Undo invalidates it', async () => {
+  const { deal, id, prior } = await filePhase('The landlord sent the requested revised terms.', { kind: 'next_step', overdue: true });
+  const args = { idempotency_key: randomUUID(), candidate_id: id, accept: true, automatic: true };
+  const result = await transaction(client => executeRegisteredTool(client, actor, 'resolve-candidate', args));
+  const room = await command('get-deal-room', { deal });
+  assert.ok(room.events.some(e => e.field === 'overdue_assessment_pending' && e.verb === 'resolve-candidate'));
+  assert.ok(!room.events.some(e => e.field === 'overdue_assessment'));
+  assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'open');
+  await command('undo-call-change', { idempotency_key: randomUUID(), candidate_id: id, base_version: room.base_version });
+  c.jevClient = { systemOne: async () => assert.fail('Undone call must not run Jev') };
+  try {
+    const processed = await TOOLS['resolve-candidate'].afterCommit(c, actor, args, result, fn => transaction(fn));
+    assert.equal(processed.overdue_assessment.reason, 'overdue_action_changed');
+    assert.equal((await command('get-deal-room', { deal })).next_actions.find(a => a.id === prior.next_action_id).status, 'open');
+  } finally { delete c.jevClient; }
+});
+
+test('a later assessment receipt cannot hide a plan edit made while Jev runs', async () => {
+  const { deal, id } = await filePhase('The landlord sent the requested revised terms.', { kind: 'next_step', overdue: true });
+  c.jevClient = { systemOne: async request => {
+    const room = await command('get-deal-room', { deal });
+    await command('patch-deal-field', { idempotency_key: randomUUID(), deal, field: 'next_date',
+      value: '2031-01-01', base_event_id: room.events.find(e => e.field === 'next_date').id });
+    return { answers: Object.fromEntries(Object.keys(request.questions).map(key => [key,
+      key.startsWith('quote_') ? { type: 'choice', choice: 'quote_0' } : {
+        type: 'choice', choice: 'yes', confidence: 0.99, probabilities: { yes: 0.98, no: 0.01, unclear: 0.01 },
+      }])) };
+  } };
+  try {
+    await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: id, accept: true, automatic: true });
+    const room = await command('get-deal-room', { deal });
+    assert.ok(room.events.some(e => e.field === 'overdue_assessment' && e.new_value.resolved));
+    await assert.rejects(command('undo-call-change', { idempotency_key: randomUUID(), candidate_id: id,
+      base_version: room.base_version }), error => error.payload?.error === 'newer_change_exists');
+    assert.equal((await command('get-deal-room', { deal })).next_date, '2031-01-01');
   } finally { delete c.jevClient; }
 });

@@ -10,6 +10,9 @@ import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
+import { Pool } from '@neondatabase/serverless';
+import { callTool } from '../src/mcp.js';
+import { authenticatedIdentity } from '../src/identity.js';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { CHECKLIST_SOURCES } from '../src/deal-checklist.ts';
 import { readCommandCenterSummary } from '../src/workspace-command-center.js';
@@ -134,6 +137,15 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         key.startsWith('quote_') ? {type: 'choice', choice: 'quote_0'} :
           {type: 'choice', choice: verdict, confidence, probabilities: Object.fromEntries(
             ['yes', 'no', 'unclear'].map(v => [v, v === verdict ? 0.98 : 0.01]))}])) }) });
+    const addNote = async (client, who, args) => {
+      const result = await TOOLS['add-deal-note'].handler(client, who, args);
+      return TOOLS['add-deal-note'].afterCommit(client, who, args, result, async fn => {
+        await client.query('savepoint assessment_apply');
+        try { return await fn(); }
+        catch (error) { await client.query('rollback to savepoint assessment_apply'); throw error; }
+        finally { await client.query('release savepoint assessment_apply'); }
+      });
+    };
     const transaction = async fn => {
       c.jevClient = jevStub();
       await c.query('begin');
@@ -269,7 +281,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
       });
       delete c.jevClient;
-      const update = await TOOLS['add-deal-note'].handler(c, actor, {
+      const update = await addNote(c, actor, {
         idempotency_key: randomUUID(), deal: id(4), text: 'The landlord sent revised terms today.',
       });
       const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
@@ -296,9 +308,9 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         } };
         const args = { idempotency_key: randomUUID(), deal: id(4),
           text: 'The landlord sent the requested revised terms.', next_step: 'Review revised terms', next_date: '2030-01-01' };
-        const result = await TOOLS['add-deal-note'].handler(c, actor, args);
-        const replay = await TOOLS['add-deal-note'].handler(c, actor, args);
-        assert.equal(calls, 1, 'replay must not repeat the classifier');
+        const result = await addNote(c, actor, args);
+        const replay = await addNote(c, actor, args);
+        assert.equal(calls, 1, 'successful and non-retryable assessments are never repeated');
         assert.equal(replay.replayed, true);
         const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
         const resolved = verdict === 'yes' && confidence === 0.99 && !failure;
@@ -306,6 +318,11 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         assert.equal(room.next_step, 'Review revised terms');
         assert.equal(room.next_date, '2030-01-01');
         const assessment = room.events.find(e => e.field === 'overdue_assessment');
+        if (failure) {
+          assert.equal(result.overdue_assessment.pending, true);
+          assert.ok(room.events.some(e => e.field === 'overdue_assessment_status' && e.new_value.reason === 'jev_unavailable'));
+          return;
+        }
         assert.equal(assessment.new_value.note_id, result.note_id);
         assert.equal(assessment.new_value.update, args.text);
         if (!failure) assert.equal(assessment.new_value.quote, args.text);
@@ -333,7 +350,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
       });
       c.jevClient = jevStub('unclear');
-      await TOOLS['add-deal-note'].handler(c, actor, {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord may have sent terms.'});
+      await addNote(c, actor, {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord may have sent terms.'});
       await c.query("update event set personal_scope='none' where field='overdue_assessment'");
       const joeReviews = await executeRegisteredTool(c, actor, 'read-deal-update-reviews', {});
       assert.equal(joeReviews.proposals.length, 1);
@@ -360,7 +377,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         }
         return {answers};
       }};
-      await TOOLS['add-deal-note'].handler(c, actor, {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord sent the revised terms.'});
+      await addNote(c, actor, {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord sent the revised terms.'});
       const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
       assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'done');
       assert.equal((await c.query('select status from capture_post_call_action where id=$1', [other])).rows[0].status, 'open');
@@ -373,7 +390,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
       });
       c.jevClient = jevStub('unclear');
-      await TOOLS['add-deal-note'].handler(c, actor, {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord may have sent terms.'});
+      await addNote(c, actor, {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord may have sent terms.'});
       await c.query("update event set recorded_at=current_timestamp - interval '15 days' where field='overdue_assessment'");
       await TOOLS['set-next-step'].handler(c, actor, {
         base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
@@ -390,7 +407,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
       });
       c.jevClient = jevStub('unclear');
-      await TOOLS['add-deal-note'].handler(c, actor, {
+      await addNote(c, actor, {
         idempotency_key: randomUUID(), deal: id(4), text: 'The landlord may have sent terms.',
       });
       await TOOLS['set-next-step'].handler(c, actor, {
@@ -410,7 +427,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal((await executeRegisteredTool(c, actor, 'read-deal-update-reviews', {})).proposals.length, 0);
     }));
 
-    await t.test('provider budget failures make one SDK request and retain the open action', async st => transaction(async () => {
+    await t.test('provider rate limits retain a visible pending assessment without an immediate retry', async st => transaction(async () => {
       await fixture(false);
       const prior = await TOOLS['set-next-step'].handler(c, actor, {
         base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
@@ -423,10 +440,10 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         calls++;
         return new Response(JSON.stringify({error: 'synthetic budget exhausted'}), {status: 429});
       });
-      const result = await TOOLS['add-deal-note'].handler(c, actor, {
+      const result = await addNote(c, actor, {
         idempotency_key: randomUUID(), deal: id(4), text: 'The requested revised terms were received.',
       });
-      assert.equal(calls, 1, 'the SDK must not retry a write-path judgment');
+      assert.equal(calls, 1, 'a rate limit waits for a later run');
       assert.equal(result.overdue_assessment.reason, 'jev_budget_exhausted');
       assert.equal((await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)})).next_actions.find(a => a.id === prior.next_action_id).status, 'open');
     }));
@@ -438,7 +455,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
       });
-      await TOOLS['add-deal-note'].handler(c, actor, {
+      await addNote(c, actor, {
         idempotency_key: randomUUID(), deal: id(4), text: 'The requested revised terms were received.',
         next_step: 'Review the terms', next_date: '2030-01-01',
       });
@@ -460,7 +477,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
       });
       const callAction = await accept(id(4), 'joe', '2020-01-01');
-      await TOOLS['add-deal-note'].handler(c, actor, {
+      await addNote(c, actor, {
         idempotency_key: randomUUID(), deal: id(4), text: 'The requested revised terms were received.',
         next_step: 'Review the terms', next_date: '2030-01-01',
       });
@@ -481,7 +498,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: yesterday,
       });
-      const update = await TOOLS['add-deal-note'].handler(c, actor, {
+      const update = await addNote(c, actor, {
         idempotency_key: randomUUID(), deal: id(4), text: 'Revised terms received for review',
       });
       const board = await TOOLS['deal-room-board'].handler(c, actor, {workspace: 'all'});
@@ -492,7 +509,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal(Number(board.accounts[0].overdue_deals), 0);
       assert.equal(update.next_step_required, true);
       assert.match(update.prompt, /next step.*date/i);
-      const followup = await TOOLS['add-deal-note'].handler(c, actor, {
+      const followup = await addNote(c, actor, {
         idempotency_key: randomUUID(), deal: id(4), text: 'Further context with no new plan yet',
       });
       assert.equal(followup.next_step_required, true, 'the plan gap stays visible on later updates');
@@ -573,8 +590,8 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       });
       const args = {idempotency_key: randomUUID(), deal: id(4), text: 'The revised terms were received today',
         next_step: 'Review revised terms', next_date: dates.future};
-      const update = await TOOLS['add-deal-note'].handler(c, actor, args);
-      const replay = await TOOLS['add-deal-note'].handler(c, actor, args);
+      const update = await addNote(c, actor, args);
+      const replay = await addNote(c, actor, args);
       assert.equal(replay.replayed, true);
       assert.equal(replay.note_id, update.note_id);
       const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
@@ -595,7 +612,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
           base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
           idempotency_key: randomUUID(), deal: id(4), text: 'Review revised terms', next_date: day,
         });
-        await TOOLS['add-deal-note'].handler(c, actor, {
+        await addNote(c, actor, {
           idempotency_key: randomUUID(), deal: id(4), text: 'Additional context before review',
         });
         const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
@@ -608,7 +625,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Independent follow-up', next_date: dates.past,
       });
-      await TOOLS['add-deal-note'].handler(c, actor, {
+      await addNote(c, actor, {
         idempotency_key: randomUUID(), deal: id(4), text: 'Context from the other partner',
       });
       const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
@@ -707,7 +724,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         if (writer === 'patch-deal-field') Object.assign(args, {field: 'phase', value: 'legal', base_event_id: null});
         if (writer === 'update-deal') Object.assign(args, {fields: {phase: 'legal'}, base_version:
           (await TOOLS['read-deal-reconciliation'].handler(c, actor, {deal: id(4)})).base_version});
-        const update = await TOOLS[writer].handler(c, actor, args);
+        const update = await (writer === 'add-deal-note' ? addNote(c, actor, args) : TOOLS[writer].handler(c, actor, args));
         if (writer === 'set-next-action') assert.ok(update.dropped_post_call_action_ids.includes(expired),
           'replacement receipts must include expired Call Mode actions');
         assert.equal((await TOOLS[writer].handler(c, actor, args)).replayed, true);
@@ -795,7 +812,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       const expired = await accept(id(4), 'joe', dates.past);
       const native = {id: id(8), slug: 'codex', human: false, native_agent_verified: true, sponsoring_human_slug: 'joe'};
       await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'codex','Synthetic Runtime','automation',true)", [native.id]);
-      await TOOLS['add-deal-note'].handler(c, native, {
+      await addNote(c, native, {
         idempotency_key: randomUUID(), deal: id(4), text: 'Partner supplied updated terms',
       });
       const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
@@ -815,7 +832,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       });
       const native = {id: id(8), slug: 'codex', human: false, native_agent_verified: true, sponsoring_human_slug: 'joe'};
       await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'codex','Synthetic Runtime','automation',true)", [native.id]);
-      await TOOLS['add-deal-note'].handler(c, native, {
+      await addNote(c, native, {
         idempotency_key: randomUUID(), deal: id(4), text: 'Revised terms received from partner',
       });
       const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
@@ -836,7 +853,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         idempotency_key: randomUUID(), deal: id(4), field: 'next_date', value: dates[reschedule],
         base_event_id: board.deals[0].field_base.next_date.id,
       });
-      await TOOLS['add-deal-note'].handler(c, actor, {
+      await addNote(c, actor, {
         idempotency_key: randomUUID(), deal: id(4), text: 'Partner confirms the terms were reviewed',
       });
       const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
@@ -858,7 +875,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
         idempotency_key: randomUUID(), deal: id(4), text: 'Request proposed terms', next_date: dates.past,
       });
-      const update = await TOOLS['add-deal-note'].handler(c, actor, {
+      const update = await addNote(c, actor, {
         idempotency_key: randomUUID(), deal: id(4), text: 'The proposed terms were received',
       });
       const board = await TOOLS['deal-room-board'].handler(c, actor, {});
@@ -877,7 +894,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         idempotency_key: randomUUID(), deal: id(4), text: 'Request terms', next_date: past,
       });
       for (const fields of [{next_step: 'Review terms'}, {next_date: '2026-02-30'}, {next_date: past}]) {
-        await assert.rejects(TOOLS['add-deal-note'].handler(c, actor, {
+        await assert.rejects(addNote(c, actor, {
           idempotency_key: randomUUID(), deal: id(4), text: 'Status update', ...fields,
         }), e => e.payload?.error === 'next_step_and_date_required');
       }
@@ -1745,6 +1762,211 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       } finally {
         await c.query(`create or replace view v_deal_room_phase_change as ${definition}`);
       }
+    });
+    await t.test('two transient timeouts share one background budget across pending requests', async () => transaction(async () => {
+      await fixture(false);
+      await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      const args = {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord sent the requested revised terms.'};
+      await TOOLS['add-deal-note'].handler(c, actor, {...args, idempotency_key: randomUUID()});
+      let calls = 0;
+      c.jevClient = {systemOne: async (_request, {signal}) => {
+        calls++;
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(resolve, 31000);
+          signal.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason); }, {once: true});
+        });
+        throw new Error('assessment exceeded the Worker lifetime');
+      }};
+      const started = performance.now();
+      const saved = await addNote(c, actor, args);
+      assert.equal(saved.overdue_assessment.pending, true);
+      assert.equal(calls, 2, 'the budget covers both requests together');
+      assert.ok(performance.now()-started < 30000, 'both attempts fit the waitUntil lifetime');
+    }));
+    await t.test('Home exposes expired pending, failed and stale running assessments for manual review', async () => transaction(async () => {
+      await fixture(false);
+      await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      const args = {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord sent the requested revised terms.'};
+      await TOOLS['add-deal-note'].handler(c, actor, args);
+      const read = () => TOOLS['read-deal-update-reviews'].handler(c, actor, {});
+      assert.equal((await read()).proposals.length, 0, 'fresh work has time to finish');
+      await c.query("update event set recorded_at=clock_timestamp()-interval '46 seconds' where field='overdue_assessment_pending'");
+      const [pending] = (await read()).proposals;
+      assert.ok(pending, 'expired pending work appears without another deal update');
+      assert.equal(pending.assessment.review_required, true);
+      delete c.jevClient;
+      const saved = await addNote(c, actor, args);
+      assert.equal(saved.overdue_assessment.reason, 'missing_credentials');
+      assert.equal((await read()).proposals[0].assessment.reason, 'missing_credentials');
+      await c.query(`update event set new_value=jsonb_set(jsonb_set(new_value,'{status}','"running"'),'{attempt}','3'),
+        recorded_at=clock_timestamp()-interval '46 seconds' where field='overdue_assessment_status'`);
+      assert.equal((await read()).proposals[0].assessment.reason, 'interrupted');
+      const review = await TOOLS['review-deal-update'].handler(c, actor, {
+        idempotency_key: randomUUID(), assessment_id: pending.assessment_id, decision: 'resolve', reason: 'Partner confirmed the terms arrived',
+      });
+      assert.equal(review.ok, true);
+      assert.equal((await read()).proposals.length, 0);
+    }));
+    await t.test('callTool returns the committed pending save before slow Jev and waitUntil completes it', async st => {
+      await c.query('begin');
+      await fixture(false);
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      await c.query('commit');
+      await c.query(`do $$ begin
+        begin create role carr_jobs; exception when duplicate_object then null; end;
+        begin create role carr_authority; exception when duplicate_object then null; end;
+      end $$; alter role carr_writer login;
+      grant select,insert,update,delete on all tables in schema public to carr_writer;
+      grant usage,select on all sequences in schema public to carr_writer`);
+      const writer = new pg.Client({...connection, user: 'carr_writer',
+        types: {getTypeParser: (oid, format) => oid === 1184 ? value => value : pg.types.getTypeParser(oid, format)}});
+      await writer.connect();
+      let released = false;
+      const adapter = { query: writer.query.bind(writer), release() { released = true; },
+        jevClient: {systemOne: async request => {
+          await new Promise(resolve => setTimeout(resolve, 10500));
+          assert.equal(released, false, 'background work retains its connection');
+          return jevStub().systemOne(request);
+        }} };
+      st.mock.method(Pool.prototype, 'connect', async () => adapter);
+      st.mock.method(Pool.prototype, 'end', async () => {});
+      const tasks = [];
+      const args = {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord sent the requested revised terms.'};
+      const save = callTool({DATABASE_URL_WRITER: 'postgresql://carr_writer@fixture.invalid/postgres',
+        ctx: {waitUntil: task => tasks.push(task)}}, authenticatedIdentity.connectionForGrant({slug: 'joe'}), 'add-deal-note', args);
+      try {
+        const result = await Promise.race([save, new Promise(resolve => setTimeout(() => resolve(null), 1000))]);
+        assert.ok(result, 'save must return while Jev is still waiting');
+        assert.equal(result.overdue_assessment.pending, true);
+        assert.equal((await c.query('select 1 from deal_note where id=$1', [result.note_id])).rows.length, 1);
+        assert.ok(tasks.length, 'assessment is registered with waitUntil');
+        await Promise.all(tasks);
+        assert.equal((await c.query('select status from next_action where id=$1', [prior.next_action_id])).rows[0].status, 'done');
+        assert.equal(released, true);
+        await c.query('begin');
+        await TOOLS['set-next-step'].handler(c, actor, {
+          base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+          idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms again', next_date: '2020-01-01',
+        });
+        await c.query('commit');
+        adapter.query = (text, params) => {
+          if (text.includes("where field='overdue_assessment_pending'")) throw new Error('synthetic post-commit database failure');
+          return writer.query(text, params);
+        };
+        const failedAssessment = await callTool({DATABASE_URL_WRITER: 'postgresql://carr_writer@fixture.invalid/postgres',
+          ctx: {waitUntil: task => tasks.push(task)}}, authenticatedIdentity.connectionForGrant({slug: 'joe'}),
+        'add-deal-note', {...args, idempotency_key: randomUUID()});
+        assert.equal(failedAssessment.overdue_assessment.pending, true, 'post-commit failure is a successful pending save');
+        await Promise.all(tasks);
+        assert.equal((await c.query('select 1 from deal_note where id=$1', [failedAssessment.note_id])).rows.length, 1);
+        await c.query("update event set recorded_at=clock_timestamp()-interval '46 seconds' where field='overdue_assessment_pending'");
+        assert.equal((await TOOLS['read-deal-update-reviews'].handler(c, actor, {})).proposals.length, 1);
+      } finally {
+        await save.catch(() => {});
+        await Promise.allSettled(tasks);
+        await writer.end();
+        await c.query('truncate event,tool_call,deal_note,next_action,deal,client,party cascade');
+      }
+    });
+    await t.test('slow overdue assessment sees the committed update without a held transaction', async () => {
+      await c.query('begin');
+      await fixture(false);
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      let committed = false;
+      let calls = 0;
+      c.jevClient = { systemOne: async (request, options) => {
+        calls++;
+        const observer = new pg.Client(connection);
+        await observer.connect();
+        try { committed = (await observer.query("select 1 from deal_note where deal_id=$1 and text='The landlord sent the requested revised terms.'", [id(4)])).rows.length === 1; }
+        finally { await observer.end(); }
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(resolve, 1200);
+          options.signal.addEventListener('abort', () => { clearTimeout(timer); reject(options.signal.reason); }, {once: true});
+        });
+        return jevStub().systemOne(request);
+      } };
+      const args = {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord sent the requested revised terms.'};
+      let result = await TOOLS['add-deal-note'].handler(c, actor, args);
+      await c.query('commit');
+      const transact = async fn => {
+        await c.query('begin');
+        try { const value = await fn(); await c.query('commit'); return value; }
+        catch (error) { await c.query('rollback'); throw error; }
+      };
+      if (TOOLS['add-deal-note'].afterCommit)
+        result = await TOOLS['add-deal-note'].afterCommit(c, actor, args, result, transact);
+      assert.equal(committed, true, 'Jev must see the committed update from another connection');
+      assert.equal(calls, 1);
+      assert.equal((await c.query('select status from next_action where id=$1', [prior.next_action_id])).rows[0].status, 'done');
+      const submit = async args => {
+        const saved = await transact(() => TOOLS['add-deal-note'].handler(c, actor, args));
+        return TOOLS['add-deal-note'].afterCommit(c, actor, args, saved, transact);
+      };
+      const replace = async () => transact(async () => TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      }));
+      await replace();
+      const timeoutArgs = {...args, idempotency_key: randomUUID()};
+      let failures = 0;
+      c.jevClient = {systemOne: async () => { failures++; throw new DOMException('synthetic timeout', 'TimeoutError'); }};
+      const pending = await submit(timeoutArgs);
+      assert.equal(failures, 2, 'one immediate retry');
+      assert.equal(pending.overdue_assessment.pending, true);
+      assert.equal(pending.overdue_assessment.attempts, 2);
+      assert.equal((await c.query('select 1 from deal_note where id=$1', [pending.note_id])).rows.length, 1);
+      assert.ok((await c.query("select 1 from event where field='overdue_assessment_status' and new_value->>'reason'='jev_unavailable'")).rows.length);
+      let successes = 0;
+      c.jevClient = {systemOne: async request => { successes++; return jevStub().systemOne(request); }};
+      assert.equal((await submit(timeoutArgs)).overdue_assessment.items[0].resolved, true);
+      assert.equal((await submit(timeoutArgs)).replayed, true);
+      assert.equal(successes, 1, 'replay has exactly one successful Jev call');
+      await replace();
+      c.jevClient = {systemOne: async request => {
+        const observer = new pg.Client(connection);
+        await observer.connect();
+        try {
+          const backend = (await observer.query('select xact_start from pg_stat_activity where pid=$1', [c.processID])).rows[0];
+          assert.equal(backend.xact_start, null, 'no transaction is held during Jev');
+          await observer.query('update next_action set version=version+1 where id=$1', [request.state.actions[0].id]);
+        } finally { await observer.end(); }
+        return jevStub().systemOne(request);
+      }};
+      const conflict = await submit({...args, idempotency_key: randomUUID()});
+      assert.equal(conflict.overdue_assessment.reason, 'overdue_action_changed');
+      assert.equal((await c.query("select count(*)::int as n from next_action where status='open' and subject_id=$1", [id(4)])).rows[0].n, 1);
+      let nextRunCalls = 0;
+      const deferredArgs = {...args, idempotency_key: randomUUID()};
+      c.jevClient = {systemOne: async () => { throw new DOMException('synthetic timeout', 'TimeoutError'); }};
+      assert.equal((await submit(deferredArgs)).overdue_assessment.pending, true);
+      c.jevClient = {systemOne: async request => {
+        nextRunCalls++;
+        return jevStub(request.state.update === 'We are still waiting for revised terms.' ? 'no' : 'yes').systemOne(request);
+      }};
+      await submit({...args, idempotency_key: randomUUID(), text: 'We are still waiting for revised terms.'});
+      assert.equal(nextRunCalls, 2, 'next update retries the prior pending assessment');
+      assert.equal((await c.query("select count(*)::int as n from next_action where status='open' and subject_id=$1", [id(4)])).rows[0].n, 0);
+      await replace();
+      let exhausted = 0;
+      c.jevClient = {systemOne: async () => { exhausted++; throw Object.assign(Error('synthetic service failure'), {status: 503}); }};
+      const exhaustedArgs = {...args, idempotency_key: randomUUID()};
+      await submit(exhaustedArgs);
+      await submit(exhaustedArgs);
+      await submit(exhaustedArgs);
+      assert.equal(exhausted, 3, 'three attempts across runs is the hard bound');
     });
   } finally {
     try {

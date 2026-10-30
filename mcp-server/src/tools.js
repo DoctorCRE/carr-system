@@ -2375,7 +2375,7 @@ async function lockDealField(c, dealId, field) {
   );
 }
 
-async function appendDealNextStep(c, actor, dealId, text, nextDate, key, preservedActionIds = []) {
+async function appendDealNextStep(c, actor, dealId, text, nextDate, key, preservedActionIds = [], actionStatus = 'open') {
   assertDealRoomField("next_date", nextDate, ToolError);
   // The step also changes next_date. Take that cell's lock first so its
   // field history cannot race a direct date edit or undo.
@@ -2406,10 +2406,10 @@ async function appendDealNextStep(c, actor, dealId, text, nextDate, key, preserv
       returning id /* dealroom:drop-prior-action */`, [actor.id, dealId, await partnerOwnerIds(c, actor), preservedActionIds])).rows;
   const action = await c.query(
     `insert into next_action (subject_type, subject_id, owner_id, due_on,
-                              description, created_by, updated_by, updated_at)
-     values ('deal',$1,$2,$3,$4,$2,$2,clock_timestamp()) returning id
+                              description, created_by, updated_by, updated_at, status)
+     values ('deal',$1,$2,$3,$4,$2,$2,clock_timestamp(),$5) returning id
      /* dealroom:add-next-action */`,
-    [dealId, actor.id, nextDate, text]);
+    [dealId, actor.id, nextDate, text, actionStatus]);
   await writeEvent(c, actor, "set-next-step", "deal", dealId, {
     field: "next_step",
     old: { next_step: prior.rows[0]?.text ?? null, ...(board ? { board_next_step: board.next_step ?? null } : {}) },
@@ -2505,10 +2505,12 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
 // and refuses the undo instead of being overwritten.
 // A call proposal's write is filed under one derived UUID. Calls applied before
 // the envelope took only UUIDs were filed under `capture:<id>`; undo still reads those.
+// Only resolve-candidate can mark a next step for immediate checklist conversion.
+const callNextStepItems = Symbol('call next step items');
 const captureKey = id => derivedIdempotencyKey("capture-candidate", id);
 const captureKeys = id => [`capture:${id}`, captureKey(id)];
 
-async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args, restoreAssessments = true) {
+async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args) {
   // Same lock order as resolve-candidate's apply: the checklist first, so a
   // partner completing one of the call's items waits for (or beats) the undo.
   await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0)) /* call-outcome:undo-items-lock */", [dealId]);
@@ -2524,7 +2526,7 @@ async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args, rest
   if (!first("next_step") || !first("next_date") || !applied) throw new ToolError({ error: "applied_change_not_found" });
   const newer = (await c.query(
     `select 1 from event where subject_type='deal' and subject_id=$1 and field in ('next_step','next_date')
-        and recorded_at > (select max(recorded_at) from event where subject_type='deal' and subject_id=$1 and idempotency_key=any($2::text[]))
+        and recorded_at > (select max(recorded_at) from event where subject_type='deal' and subject_id=$1 and idempotency_key=any($2::text[]) and field in ('next_step','next_date'))
       limit 1 /* call-outcome:undo-step-newer */`, [dealId, keys])).rows;
   const items = (await c.query(
     `select n.id, n.status, (select count(*) from event e where e.subject_type='deal' and e.subject_id=$1
@@ -2549,8 +2551,7 @@ async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args, rest
     ...(await c.query(`update capture_post_call_action set status='open', updated_at=clock_timestamp()
       where id=any($1::uuid[]) and status='dropped' returning id /* call-outcome:undo-step-reopen-post-call */`, [reopenIds])).rows,
   ].map(row => row.id);
-  if (restoreAssessments)
-    reopened.push(...await overdueUpdates.undoCallAssessments(c, actor, dealId, keys, args.idempotency_key));
+  reopened.push(...await overdueUpdates.undoCallAssessments(c, actor, dealId, keys, args.idempotency_key));
   await c.query("update deal set next_date=$2, updated_by=$3 where id=$1 /* call-outcome:undo-step-date */", [dealId, priorDate, actor.id]);
   const shown = (await c.query("select next_step from v_deal_room_board where id=$1", [dealId])).rows[0]?.next_step ?? null;
   // The board shows the newest open ball, else the newest unhidden note. Put
@@ -9498,6 +9499,7 @@ registerTools({
 
   "add-deal-note": {
     write: true,
+    afterCommit: (...args) => overdueUpdates.process(...args),
     description: "Record a partner status update in the immutable deal thread. Jev checks the content against overdue actions. Only supported completion resolves them, with evidence and undo; uncertainty stays open for Home review. Supply next_step and next_date together, or Doc prompts for the missing plan. Other partners' actions and manual attention remain unchanged.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, deal: { type: "string" }, text: { type: "string" },
@@ -9516,7 +9518,7 @@ registerTools({
         "insert into deal_note (deal_id, kind, text, actor_id) values ($1,'note',$2,$3) returning id, created_at /* dealroom:add-note */",
         [s.id, args.text.trim(), actor.id],
       );
-      const assessment = await overdueUpdates.assess(c, actor, s.id, note.rows[0].id, args.text.trim(), args.idempotency_key);
+      const assessment = await overdueUpdates.prepare(c, actor, s.id, note.rows[0].id, args.text.trim(), args.idempotency_key);
       await writeEvent(c, actor, "add-deal-note", "deal", s.id, {
         field: "note", new: { note: args.text.trim() }, idempotency_key: args.idempotency_key,
       });
@@ -9543,9 +9545,10 @@ registerTools({
       await lockDealField(c, s.id, "next_date");
       await lockDealField(c, s.id, "next_step");
       await versionGuard(c, "deal", s.id, args.base_version);
-      const preserved = await overdueUpdates.preserved(c, s.id);
+      const preserved = await overdueUpdates.preserved(c, s.id, args.idempotency_key);
       await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key, "set-next-step", preserved);
-      return appendDealNextStep(c, actor, s.id, args.text.trim(), args.next_date ?? null, args.idempotency_key, preserved);
+      return appendDealNextStep(c, actor, s.id, args.text.trim(), args.next_date ?? null, args.idempotency_key, preserved,
+        args[callNextStepItems] ? 'dropped' : 'open');
     }),
   },
 
@@ -9870,6 +9873,8 @@ registerTools({
 
   "resolve-candidate": {
     write: true,
+    afterCommit: (c, actor, args, result, transact) => overdueUpdates.process(c, actor,
+      { ...args, idempotency_key: captureKey(args.candidate_id) }, result, transact),
     description: "Human gate for one capture proposal. Rejecting only skips it. Accepting invokes its mapped live verb as the confirming partner, then confirms the candidate only after that write returns a real record reference. automatic=true is the weekly pipeline call applying a next step or phase it heard stated plainly: partner authority only, post-call sessions only, and the change is listed on read-call-outcomes with its evidence and an undo.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, candidate_id: { type: "string" },
@@ -9922,6 +9927,7 @@ registerTools({
         innerArgs.human_quote = candidate.evidence_quote;
         innerArgs.change_reason = "Stated on the weekly pipeline call";
       }
+      let assessmentDealId;
       if (["next_step", "phase_move"].includes(candidate.kind)) {
         const subject = await resolveSubject(c, candidate.payload.deal);
         if (candidate.kind === "next_step")
@@ -9945,18 +9951,22 @@ registerTools({
           if (changed.rows.length) throw new ToolError({ error: "newer_change_exists", field: changed.rows[0].field,
             hint: "The plan changed after this call proposal was filed. Review it before applying." });
         }
-        if (candidate.kind === "next_step")
-          await overdueUpdates.assess(c, actor, subject.id, null, candidate.evidence_quote,
-            innerArgs.idempotency_key, { candidate_id: candidate.id, verb: 'resolve-candidate' });
-        if (candidate.kind === "next_step")
+        if (candidate.kind === "next_step") {
+          assessmentDealId = subject.id;
+          await overdueUpdates.prepare(c, actor, subject.id, null, candidate.evidence_quote,
+            innerArgs.idempotency_key, { candidate_id: candidate.id, candidate_kind: candidate.kind, verb: 'resolve-candidate' });
           innerArgs.base_version = (await c.query("select version from deal where id=$1 for update", [subject.id])).rows[0]?.version;
+        }
       }
       if (['activity', 'meeting_record'].includes(candidate.kind)) {
         const subject = await resolveSubject(c, innerArgs.ref);
-        if (subject.type === 'deal')
-          await overdueUpdates.assess(c, actor, subject.id, null, candidate.evidence_quote,
-            innerArgs.idempotency_key, { candidate_id: candidate.id, verb: 'resolve-candidate' });
+        if (subject.type === 'deal') {
+          assessmentDealId = subject.id;
+          await overdueUpdates.prepare(c, actor, subject.id, null, candidate.evidence_quote,
+            innerArgs.idempotency_key, { candidate_id: candidate.id, candidate_kind: candidate.kind, verb: 'resolve-candidate' });
+        }
       }
+      if (candidate.kind === 'next_step') innerArgs[callNextStepItems] = true;
       const result = await executeRegisteredTool(c, actor, verb, innerArgs);
       if (!result || result.ok === false) throw new ToolError(result || { error: "inner_write_failed" });
       if (candidate.kind === 'next_step') {
@@ -9970,7 +9980,6 @@ registerTools({
           });
           result.items.push(stored.item);
         }
-        await c.query("update next_action set status='dropped',updated_by=$2 where id=$1 and item_title is null", [result.next_action_id, actor.id]);
         await writeEvent(c, actor, 'resolve-candidate', 'deal', result.deal_id, {
           field: 'deal_items_conversion', old: { next_action_id: result.next_action_id },
           new: { item_ids: result.items.map(i => i.id), source_ref: `capture_candidate:${candidate.id}` }, idempotency_key: args.idempotency_key,
@@ -9988,7 +9997,7 @@ registerTools({
           where id=$1 /* capture:resolve-confirm */`,
         [candidate.id, actor.id, args.note || null, String(ref), automatic]);
       return { ok: true, candidate_id: candidate.id, status: "confirmed", ref: String(ref),
-        verb, automatic, result };
+        verb, automatic, result, ...(assessmentDealId ? { deal_id: assessmentDealId } : {}) };
     }),
   },
 
@@ -10218,6 +10227,7 @@ registerTools({
           where id=any($1::uuid[])`, [reopenIds,actor.id]);
         await c.query(`update capture_post_call_action set status='open',updated_at=clock_timestamp()
           where id=any($1::uuid[])`, [reopenIds]);
+        reopenIds.push(...await overdueUpdates.undoCallAssessments(c, actor, dealId, keys, args.idempotency_key, 'undo-call'));
         const restored = {};
         for (const field of ['phase','next_date','next_step']) {
           const first = journal.find(row=>row.field===field);
@@ -10790,7 +10800,7 @@ registerTools(ruleContextRuntimeTools({ withEnvelope, ToolError }), "rule-contex
 
 registerTools(vendorMeetingTools(), "vendor-meetings");
 
-const overdueUpdates = dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds, lockDealField, dealNextStepStatus, undoAppliedNextStep, ToolError });
+const overdueUpdates = dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds, lockDealField, dealNextStepStatus, ToolError });
 registerTools(overdueUpdates.tools, "deal-update-resolution");
 
 Object.freeze(TOOLS);
