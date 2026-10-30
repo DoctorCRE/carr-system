@@ -24,6 +24,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { createCaptureHandler } from '../src/capture.js';
 import { agentActorForToken } from '../src/identity.js';
@@ -110,6 +111,7 @@ before(async () => {
     if (ciDsn) await run('psql', [connection.connectionString, ...restore], { maxBuffer: 4 * 1024 * 1024 });
     else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
   }
+  await applyPendingDealRoomReads(c);
   pool = new pg.Pool({ ...connection, max: 4 });
   for (const actor of [joe, joeLocal]) actor.id = (await c.query('select id from actor where slug=$1', [actor.slug])).rows[0].id;
 
