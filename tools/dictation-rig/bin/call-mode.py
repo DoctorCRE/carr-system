@@ -546,7 +546,12 @@ def main() -> int:
         print(json.dumps(stop_recording(), indent=2))
     elif args.command == "release":
         path = session_path(args.session)
-        with post_call.session_lock(path):
+        lock = post_call.session_lock(path)
+        try:
+            lock.__enter__()
+        except RuntimeError as exc:
+            raise SystemExit(str(exc)) from None
+        try:
             status = post_call.read_json(path / post_call.STATUS_FILE) or {}
             if status.get("state") != "held_review" or status.get("reason") not in {"summary_repeats_transcript", "transcript_unavailable"}:
                 raise SystemExit("session is not held for transcript review")
@@ -559,14 +564,15 @@ def main() -> int:
             if held:
                 print(json.dumps(held, indent=2))
                 return 1
-            status.update(state="blocked", next_attempt_at=None, extraction_attempts=0)
-            post_call.write_private(path / post_call.STATUS_FILE, status)
-            status = post_call._process_session_locked(path, lambda _: report, max_attempts=3)
+            status = post_call._process_session_locked(path, lambda _: report, max_attempts=3, releasing=True)
             if status.get("state") == "ready_review":
                 draft_path.unlink(missing_ok=True)
+        finally:
+            lock.__exit__(None, None, None)
         if status.get("state") == "ready_review":
             sync_post_call(path)
         print(json.dumps(status, indent=2))
+        return 0 if status.get("state") == "ready_review" else 1
     return 0
 
 

@@ -1911,7 +1911,7 @@ class CaptureBridgePostCallTests(unittest.TestCase):
         polled = []
 
         def interleave(path, value):
-            if path.name == post_call.STATUS_FILE and value.get("state") == "blocked":
+            if path.name == post_call.STATUS_FILE and value.get("state") == "ready_review":
                 write(path, value)
                 try:
                     polled.append(post_call.process_session(self.session, lambda _: self.fail("poll distilled")))
@@ -1927,6 +1927,33 @@ class CaptureBridgePostCallTests(unittest.TestCase):
             self.assertEqual(call_mode.main(), 0)
         self.assertEqual(polled, ["locked"])
         self.assertEqual(post_call.read_json(self.session / post_call.REPORT_FILE)["report"]["summary"], "Partner edit")
+
+    def test_release_reports_busy_lock_without_traceback(self) -> None:
+        with (patch.object(call_mode, "RECORDINGS", self.session.parent),
+              patch.object(sys, "argv", ["call-mode", "release", self.session.name]),
+              post_call.session_lock(self.session)):
+            with self.assertRaises(SystemExit) as error:
+                call_mode.main()
+        self.assertEqual(str(error.exception), "post-call distillation already active for this session")
+
+    def test_interrupted_release_keeps_edited_draft_on_next_poll(self) -> None:
+        draft_path = self.session / "post-call-held-draft.json"
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        report["report"]["summary"] = "Partner edit"
+        post_call.write_private(draft_path, report)
+        (self.session / post_call.REPORT_FILE).unlink()
+        post_call.write_private(self.session / post_call.STATUS_FILE, {"state": "held_review", "reason": "summary_repeats_transcript"})
+        with (patch.object(call_mode, "RECORDINGS", self.session.parent),
+              patch.object(sys, "argv", ["call-mode", "release", self.session.name]),
+              patch.object(call_mode.post_call, "_process_session_locked", side_effect=RuntimeError("interrupted"))):
+            with self.assertRaisesRegex(RuntimeError, "interrupted"):
+                call_mode.main()
+        distiller = Mock(return_value={})
+        with patch.object(post_call, "context_from_session", return_value={"deals": []}):
+            status = post_call.process_session(self.session, distiller)
+        distiller.assert_not_called()
+        self.assertEqual(status["state"], "held_review")
+        self.assertEqual(post_call.read_json(draft_path)["report"]["summary"], "Partner edit")
 
     def test_release_checks_edited_report_before_stale_draft(self) -> None:
         words = "amber birch cedar dawn elm fern grove hazel iris jade kelp leaf moss oak pine"
