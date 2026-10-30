@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import wave
@@ -33,6 +34,10 @@ REQUIRED_SETTINGS = ('CALL_STUDIO_TOKEN', 'CARR_CAPTURE_BASE_URL', *INTEGER_SETT
                      'CALL_JEV_DAILY_DOLLARS', 'TYPESAFE_API_KEY')
 
 
+class MissingSettings(ValueError):
+    pass
+
+
 def load_machine_settings() -> dict[str, str]:
     """Require the shared private settings before any intake or paid work."""
     from credential_env import load_carr_tokens, TokensFilePermissionError
@@ -44,7 +49,7 @@ def load_machine_settings() -> dict[str, str]:
         raise ValueError('machine settings file must be private (mode 600)') from None
     missing = [name for name in REQUIRED_SETTINGS if not values.get(name, '').strip()]
     if missing:
-        raise ValueError('missing required machine settings: ' + ', '.join(missing))
+        raise MissingSettings('missing required machine settings: ' + ', '.join(missing))
     for name in INTEGER_SETTINGS:
         try:
             valid = int(values[name]) > 0
@@ -335,10 +340,14 @@ if __name__ == '__main__':
     args = parser.parse_args()
     try:
         settings = load_machine_settings()
+    except MissingSettings as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(0)
     except ValueError as exc:
         parser.error(str(exc))
+    token = settings.pop('CALL_STUDIO_TOKEN')
+    os.environ.pop('CALL_STUDIO_TOKEN', None)
     os.environ.update(settings)
-    token = settings['CALL_STUDIO_TOKEN']
     base_url = settings['CARR_CAPTURE_BASE_URL']
     if args.process:
         intake = pull_pending(args.root, {'base_url': base_url}, token)

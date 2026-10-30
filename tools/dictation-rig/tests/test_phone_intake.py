@@ -50,7 +50,7 @@ class PhoneIntakeTests(unittest.TestCase):
             '/released/carr/tools/dictation-rig/bin/phone_intake.py',
             '--root', '/fixture/home/Recordings'])
         self.assertEqual(agent['Label'], 'com.carr.phone-intake')
-        self.assertIs(agent['KeepAlive'], True)
+        self.assertEqual(agent['KeepAlive'], {'SuccessfulExit': False})
         self.assertEqual(agent['ThrottleInterval'], 30)
         self.assertEqual(agent['StandardOutPath'], '/fixture/home/Library/Logs/phone-intake.log')
         self.assertEqual(agent['StandardErrorPath'], agent['StandardOutPath'])
@@ -90,9 +90,28 @@ class PhoneIntakeTests(unittest.TestCase):
                                          '--root', str(self.root / 'Recordings'), '--process'],
                                         env={'HOME': str(self.root), 'PATH': os.defpath},
                                         capture_output=True, text=True, timeout=5)
-                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(len(result.stderr.splitlines()), 1)
                 self.assertIn(missing, result.stderr)
                 self.assertFalse((self.root / 'Recordings').exists())
+
+    def test_studio_token_is_not_in_child_environment(self):
+        import runpy
+        settings = dict.fromkeys(phone_intake.REQUIRED_SETTINGS, '1')
+        settings.update(CALL_STUDIO_TOKEN='synthetic-token', CARR_CAPTURE_BASE_URL='https://synthetic.invalid')
+        def check_child(_event, _seconds):
+            child = subprocess.run([sys.executable, '-c',
+                                    "import os, sys; sys.exit('CALL_STUDIO_TOKEN' in os.environ)"], check=False)
+            self.assertEqual(child.returncode, 0)
+            raise SystemExit
+        with patch.object(sys, 'argv', ['phone_intake.py', '--root', str(self.root)]), \
+                patch.dict(os.environ, {'CALL_STUDIO_TOKEN': 'inherited-token'}), \
+                patch('credential_env.load_carr_tokens', return_value=settings), \
+                patch('threading.Thread.start'), \
+                patch('threading.Event.wait', check_child), \
+                self.assertRaises(SystemExit):
+            with patch('urllib.request.urlopen', side_effect=OSError('offline')):
+                runpy.run_path(phone_intake.__file__, run_name='__main__')
 
     def test_machine_settings_load_only_named_values_and_reject_invalid_limits(self):
         settings = {'CALL_STUDIO_TOKEN': 'synthetic-token',
