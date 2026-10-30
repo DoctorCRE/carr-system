@@ -3,7 +3,6 @@ import ast
 import json
 from pathlib import Path
 import re
-import subprocess
 from subprocess import run as git_run
 
 
@@ -62,6 +61,10 @@ def stamp(repo: Path) -> dict:
     result: dict[str, str | int | None] = {'runtime_sha': None, 'runtime_behind': None}
     try:
         result['runtime_sha'] = _git(repo, 'rev-parse', '--short', 'HEAD')
+        installed = _git(repo, 'rev-parse', 'HEAD')
+        source = repo / '.venv'
+        if source.is_symlink():
+            repo = source.resolve(strict=True).parent
         main = None
         for ref in ('refs/remotes/origin/main', 'refs/heads/main'):
             if git_run(['git', '-C', str(repo), 'show-ref', '--verify', '--quiet', ref], timeout=10).returncode:
@@ -79,13 +82,13 @@ def stamp(repo: Path) -> dict:
             return result
         if _git(repo, 'rev-parse', '--is-shallow-repository') == 'true':
             raise ValueError('Incomplete history')
-        paths = _sources(repo, 'HEAD') | _sources(repo, main)
+        paths = _sources(repo, installed) | _sources(repo, main)
         latest = _git(repo, 'log', '-1', '--format=%H', main, '--', *sorted(paths))
         if not latest:
             raise ValueError('No installer history')
-        _git(repo, 'merge-base', 'HEAD', latest)
-        result['runtime_behind'] = int(_git(repo, 'rev-list', '--count', f'HEAD..{latest}'))
-    except (OSError, subprocess.SubprocessError, ValueError, SyntaxError):
+        _git(repo, 'merge-base', installed, latest)
+        result['runtime_behind'] = int(_git(repo, 'rev-list', '--count', f'{installed}..{latest}'))
+    except Exception:
         result['runtime_note'] = 'history_incomplete'
     return result
 

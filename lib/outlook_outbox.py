@@ -151,18 +151,25 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
 
 
 def main() -> int:
+    repo = Path(__file__).resolve().parents[1]
+    counts = {}
+    failed, reason = True, 'setup_failed'
     try:
         settings = load_settings()
-        settings.require_repo(Path(__file__).resolve().parents[1])
+        settings.require_repo(repo)
+        repo = settings.repo
         counts = run(settings, send.default_ports())
         print('outlook-outbox ' + ' '.join(f'{key}={value}' for key, value in counts.items()))
         failed = bool(counts['failed'] or counts['receipt_failed'] or counts['deferred'])
-        print(receipt_line('outlook-outbox', 'failed' if failed else 'succeeded', 'processed', counts, settings.repo))
-        return int(failed)
+        reason = 'send_failed' if counts['failed'] else ('receipt_failed' if counts['receipt_failed']
+                  else ('deferred' if counts['deferred'] else 'processed'))
     except Exception as exc:
         print(f'outlook-outbox failed {type(exc).__name__}')
-        print(receipt_line('outlook-outbox', 'failed', 'setup_failed', {}, Path(__file__).resolve().parents[1]))
-        return 1
+    try:
+        print(receipt_line('outlook-outbox', 'failed' if failed else 'succeeded', reason, counts, repo))
+    except Exception:
+        pass
+    return int(failed)
 
 
 if __name__ == '__main__':
