@@ -23,7 +23,7 @@ before(async () => {
   await fixture.run(`${bin}/psql`,['-h',fixture.root,'-U','carr_ci','-d','carr_ci','-X','-q','-v','ON_ERROR_STOP=1',
     '-f',new URL('../../db/schema.sql',import.meta.url).pathname]);
   await c.query(readFileSync(new URL('../../migrations/1071_practice_origination.sql',import.meta.url),'utf8'));
-  await c.query(readFileSync(new URL('../../migrations/1072_practice_address_key.sql',import.meta.url),'utf8'));
+  await c.query(readFileSync(new URL('../../migrations/1080_practice_address_key.sql',import.meta.url),'utf8'));
   actor={...(await c.query("select id,slug from actor where slug='joe'")).rows[0],human:true};
 });
 after(async()=>{try {await c?.end();} finally {await fixture?.close();}});

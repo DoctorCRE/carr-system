@@ -4,7 +4,7 @@ language sql immutable strict parallel safe as $$
     when 'street' then 'st' when 'avenue' then 'ave' when 'road' then 'rd'
     when 'boulevard' then 'blvd' when 'drive' then 'dr' when 'lane' then 'ln'
     when 'court' then 'ct' when 'place' then 'pl' when 'parkway' then 'pkwy'
-    when 'highway' then 'hwy' when 'suite' then 'ste' when 'unit' then 'unit'
+    when 'highway' then 'hwy' when 'suite' then 'ste'
     when 'apartment' then 'apt' when 'floor' then 'fl' else token end, ' ' order by ord)
   from regexp_split_to_table(
     regexp_replace(regexp_replace(lower(address), '\m([0-9]{5})-[0-9]{4}\M', '\1', 'g'),
