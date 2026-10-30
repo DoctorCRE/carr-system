@@ -7353,7 +7353,7 @@ export const TOOLS = {
         description: "deals | prospecting | networking | marketing | business | system. Classify by WHAT THE WORK IS, not who appears in it: a vendor introducing a PROSPECT normally means real intent and is DEALS (prospecting only while no deal has formed); a vendor introducing a VENDOR is networking; connecting a prospect to a vendor is networking; connecting a client to a vendor on a LIVE deal is deals. Omit only when genuinely unclear — an unclassified loop renders in its own unsorted section, which is honest, but a loop nobody can find is a loop nobody does." },
       title: { type: "string", description: "team_loop 'Ask' / action_required 'Action needed'. Not used by open_loop, whose text is `body`." },
       body: { type: "string", description: "open_loop 'Item' / team_loop 'Notes / links'" },
-      owner: { type: "string", description: "the label the file uses: 'Joe', 'Joe/Claude', 'Dell', 'Joe→Dell'" },
+      owner: { type: "string", description: "one owner: joe, dell or claude. Use claude when the system can finish it without a human." },
       unblocks: { type: "string", description: "what it unblocks / why it matters" },
       source_note: { type: "string", description: "source / detail / links" },
       marker: { type: "string", enum: LOOP_MARKERS },
