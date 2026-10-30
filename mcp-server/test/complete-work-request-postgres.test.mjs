@@ -3,6 +3,11 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
+import { mkdtemp, mkdir, copyFile, writeFile, chmod, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 import { publicError } from '../src/public-errors.ts';
@@ -192,4 +197,69 @@ test('completion refuses open slices and accepts an all-retired plan', async () 
     ['plan-work-request-slices', { slices: ['Build scope', 'Retired scope', 'New scope'] }]])
     await assert.rejects(command(name, { work_request: ref, idempotency_key: randomUUID(), ...extra }, actor, 'carr_writer'),
       error => publicError(error).error === 'work_request_terminal_state');
+});
+
+test('close command discovers merged Cards and closes slices and request through registered verbs', async () => {
+  const ref = 'WR-999070';
+  await sourcedRequest(ref);
+  await command('plan-work-request-slices', { work_request: ref, idempotency_key: randomUUID(), slices: ['First', 'Second'] });
+  const root = await mkdtemp(path.join(tmpdir(), 'close-wr-cli-'));
+  try {
+    await mkdir(path.join(root, 'bin'));
+    await mkdir(path.join(root, 'mcp-server/src'), { recursive: true });
+    await copyFile(new URL('../../bin/close-work-request', import.meta.url), path.join(root, 'bin/close-work-request'));
+    await copyFile(new URL('../src/progress-address.v1.json', import.meta.url), path.join(root, 'mcp-server/src/progress-address.v1.json'));
+    await writeFile(path.join(root, 'adapter.mjs'), `
+const { executeRegisteredTool } = await import(${JSON.stringify(new URL('../src/tools.js', import.meta.url).href)});
+const { default: pg } = await import(${JSON.stringify(new URL('../node_modules/pg/lib/index.js', import.meta.url).href)});
+const { appendFileSync } = await import('node:fs');
+if (process.argv[2] !== 'call') throw new Error('expected call');
+const verb = process.argv[3], args = JSON.parse(process.argv[4]);
+appendFileSync(${JSON.stringify(path.join(root, 'calls.jsonl'))}, JSON.stringify({ verb, args }) + '\\n');
+const client = new pg.Client(${JSON.stringify(connection)});
+await client.connect();
+try {
+  await client.query('begin');
+  await client.query('set local role ' + (verb === 'work-request-card' ? 'carr_reader' : 'carr_writer'));
+  const out = await executeRegisteredTool(client, ${JSON.stringify(actor)}, verb, args);
+  await client.query('commit');
+  console.log(JSON.stringify(out));
+} finally { await client.end(); }
+`);
+    await writeFile(path.join(root, 'run.sh'), `#!/usr/bin/env python3
+import os, sys
+os.execvp('node', ['node', ${JSON.stringify(path.join(root, 'adapter.mjs'))}, *sys.argv[1:]])
+`);
+    const merges = [1, 2].map(n => ({ body: `Card: WR999070.S${n}.J1`, state: 'MERGED',
+      url: `https://github.com/DoctorCRE/carr-system/pull/${120 + n}`, mergeCommit: { oid: String(n).repeat(40) } }));
+    await writeFile(path.join(root, 'prs.json'), JSON.stringify(merges));
+    await writeFile(path.join(root, 'bin/gh'), `#!/usr/bin/env python3
+import pathlib, sys
+assert sys.argv[1:3] == ['pr', 'list']
+print(pathlib.Path(${JSON.stringify(root)}, 'prs.json').read_text() if sys.argv[sys.argv.index('--repo')+1] == 'DoctorCRE/carr-system' else '[]')
+`);
+    await chmod(path.join(root, 'run.sh'), 0o755);
+    await chmod(path.join(root, 'bin/gh'), 0o755);
+    await writeFile(path.join(root, 'evidence.json'), JSON.stringify({ user_facing: false,
+      criterion_evidence: [{ id: 'AC-1', evidence: 'Synthetic closure exercised through the command and real registered verbs' }] }));
+    const cli = (...args) => promisify(execFile)('python3', [path.join(root, 'bin/close-work-request'), ref,
+      '--completion-evidence', path.join(root, 'evidence.json'), ...args], {
+      env: { ...process.env, PATH: path.join(root, 'bin') + path.delimiter + process.env.PATH },
+    });
+    const seen = () => readFileSync(path.join(root, 'calls.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line).verb);
+    const preview = JSON.parse((await cli()).stdout);
+    assert.deepEqual(preview.calls.map(call => call.verb), ['close-work-request-slice', 'close-work-request-slice', 'complete-work-request']);
+    assert.deepEqual(seen(), ['work-request-card']);
+    assert.ok((await command('work-request-card', { work_request: ref })).slices.every(slice => slice.outcome === 'open'));
+    const applied = (await cli('--apply')).stdout;
+    assert.equal(JSON.parse(applied.trim().split('\n').at(-1)).result.state, 'confirmed_closed');
+    assert.deepEqual(seen().slice(1), ['work-request-card', 'close-work-request-slice', 'close-work-request-slice', 'complete-work-request']);
+    const card = await command('work-request-card', { work_request: ref });
+    assert.equal(card.state, 'confirmed_closed');
+    assert.ok(card.slices.every(slice => slice.outcome === 'done'));
+    assert.equal(card.slices[1].change_refs[0].merge_commit_sha, '2'.repeat(40));
+    assert.deepEqual(JSON.parse((await cli('--apply')).stdout).calls, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
