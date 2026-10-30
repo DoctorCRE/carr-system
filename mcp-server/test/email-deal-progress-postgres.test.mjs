@@ -1567,6 +1567,19 @@ test('only the sending Mac records matching Sent Items confirmation once and rem
   assert.ok(new Date(sent.result_recorded_at) >= beforeResult && new Date(sent.result_recorded_at) <= afterResult);
 });
 
+test('sent receipt preserves the body mismatch reason on the proposal', async () => {
+  await c.query('delete from email_proposal');
+  await c.query("update actor set email='joe@example.test' where slug='joe'");
+  await c.query("insert into actor(slug,kind,display_name,email) values('dell','human','Synthetic partner','dell@example.test') on conflict(slug) do update set email=excluded.email,active=true");
+  const proposal = await draftFor();
+  const submitted = await submitDraft(proposal);
+  await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+    base_version: 2, status: 'sent', sent_item_id: 'synthetic-sent-item', sha256: submitted.sha256,
+    reason: 'body_mismatch' }, machineFor('joe'), 'carr_writer');
+  const sent = (await command('list-email-proposals', { status: 'sent' }, actor, 'carr_reader')).proposals[0];
+  assert.equal(sent.send_result.reason, 'body_mismatch');
+});
+
 test('failed delivery requires a reason and is recorded once without an automatic resend', async () => {
   await c.query('delete from email_proposal');
   const proposal = await draftFor();
