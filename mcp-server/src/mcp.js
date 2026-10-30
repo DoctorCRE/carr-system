@@ -895,6 +895,21 @@ export async function callTool(env, actor, name, args, profile = "full") {
       needsAuthority ? "carr_authority" : "carr_writer",
       fullActor => executeRegisteredTool(client, fullActor, name, args || {}));
     await client.query("commit");
+    client.inTransaction = false;
+    if (tool.afterCommit) {
+      const transact = async fn => {
+        await client.query('begin');
+        client.inTransaction = true;
+        try {
+          await setWriterActorContext(client, actorWithId);
+          const value = await fn();
+          await client.query('commit');
+          return value;
+        } catch (error) { await client.query('rollback'); throw error; }
+        finally { client.inTransaction = false; }
+      };
+      return await tool.afterCommit(client, actorWithId, args || {}, result, transact);
+    }
     return result;
   } catch (e) {
     await client.query("rollback").catch(() => {});

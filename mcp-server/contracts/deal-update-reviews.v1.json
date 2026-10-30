@@ -7,10 +7,10 @@
   "consumer_adoption": "The Home renderer must consume read-deal-update-reviews and render this new proposal kind. This backend contract does not change the existing app renderer.",
   "record": {
     "verb": "add-deal-note",
-    "judgment": "One bounded Jev systemOne call covers the calling partner's overdue ordinary and accepted post-call actions. Structured checklist items and other partners' actions remain separate.",
+    "judgment": "After the update commits, one Jev systemOne call covers its snapshot of the calling partner’s overdue ordinary and accepted post-call actions. The timeout is 15 seconds with one immediate retry for 429, 5xx or timeout and at most three attempts across runs. No database lock is held during Jev.",
     "automatic_resolution": "yes, confidence at least 0.9, valid choice distribution, and the shared #2449 evidence bar including four quoted words. The 0.9 numeric threshold is additional to #2449's deterministic evidence bar.",
     "evidence": "Each immutable overdue_assessment event retains the action snapshot, note ID, complete update, exact selected quote, verdict, confidence, reason, and completion stamp.",
-    "failure": "Missing credentials, provider errors, rate limits, time budget and input bounds preserve the open item and record a reason.",
+    "failure": "The update and overdue_assessment_pending event commit together. Immutable overdue_assessment_status events expose attempts, failure reasons, completion or version conflict in the deal timeline. Failed assessments retry on the next update for that deal by the same partner, including replay, with at most three attempts. Successful replay reuses the stored result. A 45-second attempt lease recovers interrupted execution without overlapping ordinary calls.",
     "plan": "A supplied next_step and next_date are saved together. The app's separate set-next-step command also preserves previously assessed unresolved overdue actions. Without a new plan, a resolved current action clears the obsolete plan and prompts for its replacement."
   },
   "read": {
