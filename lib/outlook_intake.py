@@ -234,6 +234,8 @@ BACKLOG_COUNTS = frozenset((
     'calendar_follow_up_reviews', 'calendar_follow_up_trimmed', 'calendar_agenda_items'))
 BACKLOG_PREFIXES = ('mapping_', 'error_')
 RECEIPT_NAMES = {'calendar_lifecycle_unsupported': 'calendar_copies_in_store',
+                 'calendar_lifecycle_canceled': 'calendar_canceled_copies_in_store',
+                 'calendar_requests_quarantined': 'calendar_write_requests_held',
                  'calendar_unresolved_expired': 'calendar_expired_total'}
 LEAD_OUTCOMES = {'proposed': 'lead_proposed', 'known_party': 'lead_known_party', 'refused': 'lead_refused'}
 
