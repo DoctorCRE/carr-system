@@ -9,7 +9,10 @@ import { createCaptureHandler } from '../src/capture.js';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
-import { executeRegisteredTool } from '../src/tools.js';
+import { TOOLS, executeRegisteredTool } from '../src/tools.js';
+import { createDealroomHandler } from '../src/dealroom-web.js';
+import { allowedIn, profileForActor } from '../src/mcp.js';
+import { publicError } from '../src/public-errors.ts';
 
 let fixture, admin, database, c, actor, deal, clientRef, connection;
 before(async () => {
@@ -454,4 +457,145 @@ test('named and UUID references to the same deal undo as one recorded call journ
   assert.ok(result.changes.every(change=>change.deal_id===deal));
   assert.equal((await room()).next_step,before.next_step);
   assert.equal((await room()).next_date,before.next_date);
+});
+
+
+test('one Home action completes while its open sibling stays open', async () => {
+  const ref = await secondDeal();
+  const rows = (await c.query(`insert into next_action(subject_type,subject_id,owner_id,description,created_by,item_title,source_ref)
+    values('deal',$1,$2,'Synthetic first task',$2,'First task','fixture'),('deal',$1,$2,'Synthetic sibling task',$2,'Sibling task','fixture') returning id,version`, [ref,actor.id])).rows;
+  const result = await command('complete-one-action', { idempotency_key:randomUUID(), action_id:rows[0].id, base_version:rows[0].version });
+  assert.equal(result.action_id,rows[0].id);
+  assert.deepEqual((await room(ref)).next_actions.map(row=>[row.id,row.status]).sort(),
+    [[rows[0].id,'done'],[rows[1].id,'open']].sort());
+});
+
+const refusesAction = code => error => {
+  assert.equal(error.payload?.error,code);
+  assert.equal(publicError(error).error,code);
+  return true;
+};
+const completeOne = (row, extra={}) => command('complete-one-action', {
+  idempotency_key:randomUUID(), action_id:row.id, base_version:row.version, ...extra,
+}, actor, 'carr_writer');
+
+test('authenticated app route admits single-task completion and refuses anonymous and cross-origin writes', async () => {
+  const ref = await secondDeal();
+  const row = await plainAction(ref);
+  const now = Date.now();
+  const opaque = randomUUID();
+  const sessionKey = 'dealroom_session:' + createHash('sha256').update(opaque).digest('hex');
+  const session = { props:{slug:'joe',via:'dealroom-cookie',client_id:'dealroom-pwa'},
+    createdAt:now,expiresAt:now+7200000,origin:'https://app.doctorcre.com',csrfToken:'synthetic-csrf' };
+  let calls = 0;
+  const handler = createDealroomHandler({now:()=>now,
+    mcpHandler:async (request,_env,_ctx,identity) => {
+      calls++;
+      const {params} = await request.json();
+      assert.equal(identity.slug,'joe');
+      assert.equal(identity.human,true);
+      assert.equal(allowedIn(profileForActor(identity,request),params.name,TOOLS[params.name]),true);
+      return Response.json(await command(params.name,params.arguments,{...identity,id:actor.id},'carr_writer'));
+    },
+  });
+  const environment = { APP_HOST:'app.doctorcre.com',OAUTH_KV:{
+    get:async key=>key===sessionKey ? session : null,
+  } };
+  const send = (cookie,origin='https://app.doctorcre.com') => handler.fetch(new Request('https://app.doctorcre.com/mcp', {
+    method:'POST',headers:{'content-type':'application/json',origin,'x-carr-csrf':'synthetic-csrf',...(cookie?{cookie}:{})},
+    body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'complete-one-action',arguments:{
+      idempotency_key:randomUUID(),action_id:row.id,base_version:row.version,
+    }}}),
+  }),environment,{});
+  assert.equal((await send()).status,401);
+  const cookie = '__Host-dealroom_session='+opaque;
+  assert.equal((await send(cookie,'https://other.example.test')).status,403);
+  assert.equal(calls,0);
+  const response = await send(cookie);
+  assert.equal(response.status,200);
+  assert.equal((await response.json()).action_id,row.id);
+  assert.equal(calls,1);
+  assert.equal((await room(ref)).next_actions[0].status,'done');
+});
+
+async function plainAction(ref, table='next_action', tenant='carr-internal') {
+  if (table === 'next_action') return (await c.query(`insert into next_action
+    (subject_type,subject_id,owner_id,description,created_by,organization_tenant_id)
+    values('deal',$1,$2,'Synthetic ordinary action',$2,$3) returning id,version`,[ref,actor.id,tenant])).rows[0];
+  const session = await filedCall();
+  const proposal = (await c.query(`insert into capture_post_call_candidate(session_id,kind,deal_id,assignee_slug,action_description,evidence_quote,idempotency_key,batch_hash,item_index,confidence)
+    values($1,'assigned_action',$2,'joe','Synthetic captured action','Synthetic evidence',gen_random_uuid()::text,'synthetic',0,1) returning id`,[session,ref])).rows[0];
+  return (await c.query(`insert into capture_post_call_action(candidate_id,deal_id,owner_id,description,accepted_by,organization_tenant_id)
+    values($1,$2,$3,'Synthetic captured action',$3,$4) returning id,version`,[proposal.id,ref,actor.id,tenant])).rows[0];
+}
+
+test('single completion refuses stale, terminal, missing and foreign-tenant actions in both stores', async () => {
+  for (const table of ['next_action','capture_post_call_action']) {
+    const ref = await secondDeal();
+    const row = await plainAction(ref,table);
+    const before = await room(ref);
+    await assert.rejects(completeOne(row,{base_version:row.version+1}),refusesAction('version_conflict'));
+    assert.deepEqual((await room(ref)).next_actions,before.next_actions);
+    const key = randomUUID();
+    const first = await completeOne(row,{idempotency_key:key});
+    assert.equal(first.version,row.version+1);
+    assert.deepEqual(await completeOne(row,{idempotency_key:key}),{replayed:true,...first});
+    await assert.rejects(completeOne({...row,version:first.version}),refusesAction('action_not_open'));
+    const foreign = await plainAction(await secondDeal(),table,'synthetic-other-tenant');
+    await assert.rejects(completeOne(foreign),refusesAction('action_not_found'));
+    assert.equal((await c.query(`select status from ${table} where id=$1`,[foreign.id])).rows[0].status,'open');
+    const events = (await c.query('select * from event where idempotency_key=$1',[key])).rows;
+    assert.equal(events.length,1);
+    assert.equal(events[0].field,'status');
+    assert.deepEqual(events[0].old_value,{status:'open'});
+    assert.equal(events[0].new_value[table==='next_action'?'next_action_id':'post_call_action_id'],row.id);
+    assert.equal(events[0].new_value.status,'done');
+    assert.equal(events[0].organization_tenant_id,'carr-internal');
+  }
+  await assert.rejects(completeOne({id:randomUUID(),version:1}),refusesAction('action_not_found'));
+});
+
+test('completing one post-call action leaves its sibling open and records readable subject history', async () => {
+  const ref = await secondDeal();
+  const one = await plainAction(ref,'capture_post_call_action');
+  const sibling = await plainAction(ref,'capture_post_call_action');
+  const ordinary = await plainAction(ref);
+  await completeOne(one);
+  const read = await room(ref);
+  assert.deepEqual(read.next_actions.map(row=>[row.id,row.status]).sort(),[[one.id,'done'],[sibling.id,'open'],[ordinary.id,'open']].sort());
+  assert.ok(read.events.some(event=>event.verb==='complete-one-action' && event.new_value.post_call_action_id===one.id));
+});
+
+test('complete-action v1 still closes all own untitled actions across both stores and preserves checklist tasks', async () => {
+  const ref = await secondDeal();
+  const ordinary = await plainAction(ref);
+  const captured = [await plainAction(ref,'capture_post_call_action'),await plainAction(ref,'capture_post_call_action')];
+  await command('record-deal-item',{idempotency_key:randomUUID(),deal:ref,title:'Synthetic checklist',source_ref:'fixture:v1',
+    bullets:[{date:null,kind:'promised',text:'Synthetic independent checklist task'}]});
+  const dell = (await c.query("insert into actor(slug,kind,display_name) values('dell','human','Synthetic partner') on conflict(slug) do update set active=true returning id")).rows[0];
+  await c.query("insert into next_action(subject_type,subject_id,owner_id,description,created_by) values('deal',$1,$2,'Synthetic other partner task',$2)",[ref,dell.id]);
+  const result = await command('complete-action',{idempotency_key:randomUUID(),ref},actor,'carr_writer');
+  assert.equal(result.count,3);
+  assert.deepEqual(result.completed.map(row=>row.next_action_id).sort(),[ordinary.id,...captured.map(row=>row.id)].sort());
+  const read = await room(ref);
+  assert.equal(read.items[0].status,'open');
+  assert.equal(read.next_actions.filter(row=>row.status==='done').length,3);
+  assert.equal(read.next_actions.find(row=>row.owner==='dell').status,'open');
+});
+
+test('one task created by weekly call auto-apply completes without its sibling and blocks both call Undo paths', async () => {
+  const ref = await secondDeal();
+  const session = await filedCall();
+  const applied = await candidate(session,'(1) INTRODUCTIONS: Introduce synthetic lender; (2) MARKET STUDY: Review synthetic market study',true,ref);
+  const before = await room(ref);
+  const items = before.items.filter(item=>item.source_ref===`capture_candidate:${applied}`);
+  assert.equal(items.length,2);
+  const target = before.next_actions.find(row=>row.id===items[0].id);
+  await completeOne(target);
+  const after = await room(ref);
+  assert.equal(after.items.find(row=>row.id===items[0].id).status,'done');
+  assert.equal(after.items.find(row=>row.id===items[1].id).status,'open');
+  for (const [verb,args] of [['undo-call',{session_id:session}],['undo-call-change',{candidate_id:applied,base_version:after.base_version}]])
+    await assert.rejects(command(verb,{idempotency_key:randomUUID(),...args}),refusesAction('newer_change_exists'));
+  assert.deepEqual((await room(ref)).items,after.items);
 });
