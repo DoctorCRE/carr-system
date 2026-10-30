@@ -1,5 +1,6 @@
 """Consume app-submitted Outlook drafts and durably replay delivery receipts."""
 from dataclasses import dataclass
+from datetime import datetime
 import fcntl
 import hashlib
 import json
@@ -83,7 +84,7 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
     if (send._addresses([settings.partner_cc]) != (settings.partner_cc,)
             or not settings.partner_cc or settings.partner_cc == settings.account):
         raise ValueError('partner_copy_required')
-    counts = dict(sent=0, failed=0, deferred=0, receipt_failed=0, compose_window_open=0, sent_unrecorded=0, quarantined=0)
+    counts = dict(sent=0, failed=0, deferred=0, receipt_failed=0, compose_window_open=0, sent_unrecorded=0, quarantined=0, daily_cap_reached=0, daily_cap_escalated=0)
     ports.out.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(ports.out, 0o700)
     root = ports.out / 'outbox'
@@ -154,13 +155,17 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
                                sha256=digest, status='failed', reason=reason)
             else:
                 result = send.send_submitted(draft, ports=ports)
-                if (result.state in (send.State.NOT_IDLE, send.State.PRESSED_UNCONFIRMED,
-                                     send.State.WINDOW_NOT_CLOSED)
-                        or result.reason in ('daily_cap', 'another_write_running', 'compose_window_open')):
-                    counts['deferred'] += 1
+                if result.state in (send.State.PRESSED_UNCONFIRMED, send.State.WINDOW_NOT_CLOSED):
+                    counts['failed'] += 1
                     if result.reason == 'sent_time_unavailable':
                         counts['sent_unrecorded'] += 1
                         logging.getLogger(__name__).warning('outlook-outbox sent_time_unavailable')
+                    continue
+                if (result.state is send.State.NOT_IDLE
+                        or result.reason in ('daily_cap', 'another_write_running', 'compose_window_open')):
+                    counts['deferred'] += 1
+                    if result.reason == 'daily_cap':
+                        counts['daily_cap_reached'] += 1
                     if result.reason == 'compose_window_open':
                         counts['compose_window_open'] += 1
                     continue
@@ -177,6 +182,17 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
                 counts['receipt_failed'] += 1
             else:
                 path.unlink()
+        cap_path = root / 'daily-cap-state'
+        today = datetime.fromtimestamp(ports.now(), settings.timezone).date().isoformat()
+        previous = json.loads(cap_path.read_text()) if cap_path.exists() else {}
+        if counts['daily_cap_reached']:
+            escalated = previous.get('escalated', False) or bool(previous.get('date') and previous['date'] != today)
+            _save(cap_path, dict(date=today, escalated=escalated))
+            if escalated:
+                counts['daily_cap_escalated'] = 1
+                counts['failed'] += 1
+        else:
+            cap_path.unlink(missing_ok=True)
     return counts
 
 
@@ -191,8 +207,8 @@ def main() -> int:
         counts = run(settings, send.default_ports())
         print('outlook-outbox ' + ' '.join(f'{key}={value}' for key, value in counts.items()))
         failed = bool(counts['failed'] or counts['receipt_failed'])
-        reason = 'send_failed' if counts['failed'] else ('receipt_failed' if counts['receipt_failed']
-                  else ('deferred' if counts['deferred'] else 'processed'))
+        reason = 'daily_cap_reached' if counts.get('daily_cap_escalated') else ('send_failed' if counts['failed'] else ('receipt_failed' if counts['receipt_failed']
+                  else ('deferred' if counts['deferred'] else 'processed')))
     except Exception as exc:
         print(f'outlook-outbox failed {type(exc).__name__}')
     try:
