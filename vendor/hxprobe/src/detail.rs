@@ -8,7 +8,7 @@
 //! Offsets were located with labelled TEST-account changes; see the store
 //! atlas for the evidence and its sample size.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::folder::{envelopes, reference};
 
@@ -171,12 +171,8 @@ impl Index {
     }
 
     /// The decoded detail for a message's keys, if exactly one key has one.
-    pub fn for_keys(&self, keys: &BTreeSet<u64>) -> Option<&Detail> {
-        let mut found = keys.iter().filter_map(|k| self.details.get(k));
-        match (found.next(), found.next()) {
-            (Some((_, d)), None) => Some(d),
-            _ => None,
-        }
+    pub fn get(&self, key: u64) -> Option<&Detail> {
+        self.details.get(&key).map(|(_, d)| d)
     }
 }
 
@@ -248,7 +244,7 @@ mod tests {
     }
 
     fn one(index: &Index, key: u64) -> Detail {
-        index.for_keys(&BTreeSet::from([key])).cloned().expect("detail")
+        index.get(key).cloned().expect("detail")
     }
 
     /// 2026-10-29 00:00 UTC.
@@ -323,15 +319,5 @@ mod tests {
         let mut index = Index::default();
         index.observe(&detail(&Spec { categories: &["Red category", "Blue category"], ..BASE }));
         assert_eq!(one(&index, 70).categories.unwrap(), ["Red category", "Blue category"]);
-    }
-
-    #[test]
-    fn several_keys_with_details_give_no_answer() {
-        let mut index = Index::default();
-        index.observe(&detail(&Spec { key: 1, ..BASE }));
-        index.observe(&detail(&Spec { key: 2, ..BASE }));
-        assert!(index.for_keys(&BTreeSet::from([1, 2])).is_none());
-        assert!(index.for_keys(&BTreeSet::from([1, 9])).is_some());
-        assert!(index.for_keys(&BTreeSet::new()).is_none());
     }
 }

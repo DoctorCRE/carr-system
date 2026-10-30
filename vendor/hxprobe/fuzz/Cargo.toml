@@ -29,8 +29,8 @@ doc = false
 bench = false
 
 [[bin]]
-name = "record"
-path = "fuzz_targets/record.rs"
+name = "message"
+path = "fuzz_targets/message.rs"
 test = false
 doc = false
 bench = false

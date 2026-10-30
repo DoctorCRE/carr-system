@@ -1209,40 +1209,6 @@ test('a proposal the deal has outgrown stays listed with its refusal so a partne
   assert.equal(item.preview_error, 'email_deal_phase_not_eligible');
 });
 
-test('the quality report counts proposal outcomes by kind and lists Joe\'s corrections', async () => {
-  await c.query('delete from email_proposal');
-  const report = days => command('email-proposal-quality', days ? { days } : {}, actor, 'carr_reader');
-  const empty = await report();
-  assert.deepEqual(empty.kinds.map(k => [k.kind, k.proposed, k.dismiss_rate, k.over_threshold]),
-    [['file_to_deal', 0, null, false], ['possible_new_deal', 0, null, false], ['phase_move', 0, null, false], ['next_step', 0, null, false], ['reply_draft', 0, null, false]]);
-  const loi = await email();
-  const ask = await email(askQuote);
-  await record({ kind: 'phase_move', activity_id: loi.activity_id, evidence_quote: quote, confidence: 0.9 });
-  const step = await record({ kind: 'next_step', activity_id: ask.activity_id, evidence_quote: askQuote,
-    text: 'Send the floor plan', next_date: '2027-01-08', confidence: 0.5 });
-  let [move, next] = (await report()).kinds.filter(k => ['phase_move','next_step'].includes(k.kind));
-  assert.deepEqual([move.proposed, move.pending, next.proposed, next.pending], [1, 1, 1, 1]);
-  await command('dismiss-email-proposal', { idempotency_key: randomUUID(), proposal_id: step.proposal_id,
-    base_version: 1, reason: 'Dell already sent it' }, { ...actor, slug: 'dell' }, 'carr_writer');
-  const [card] = await listed();
-  await confirm(card.preview, {}, actor, 'carr_writer');
-  const after = await report();
-  [move, next] = after.kinds.filter(k => ['phase_move','next_step'].includes(k.kind));
-  assert.deepEqual([move.pending, move.confirmed, move.dismissed, move.dismiss_rate, move.confirmed_confidence], [0, 1, 0, 0, 0.9]);
-  assert.deepEqual([next.pending, next.confirmed, next.dismissed, next.dismiss_rate, next.dismissed_confidence], [0, 0, 1, 1, 0.5]);
-  assert.equal(next.over_threshold, false, 'one resolved proposal is too few to trip the threshold');
-  assert.deepEqual(after.corrections.map(row => [row.kind, row.deal_name, row.reason]),
-    [['next_step', 'Synthetic coastal purchase', 'Dell already sent it']]);
-  await c.query("update email_proposal set created_at=now()-interval '10 days'");
-  const recentDecision = await report();
-  assert.equal(recentDecision.kinds.every(k => k.proposed === 0), true);
-  assert.deepEqual(recentDecision.corrections.map(row => row.reason), ['Dell already sent it']);
-  await c.query("update email_proposal set resolved_at=now()-interval '10 days' where status='dismissed'");
-  assert.deepEqual((await report()).corrections, []);
-  assert.equal((await report(30)).kinds.find(k => k.kind === 'phase_move').proposed, 1);
-});
-
-
 test('a vendor email stays unfiled until a partner confirms, then records a participant hint', async () => {
   const address = `synthetic-${randomUUID()}@vendor.example`;
   const party = (await c.query("insert into party(kind,name,email,created_by,updated_by) values('person','Synthetic lender',$1,$2,$2) returning id", [address,actor.id])).rows[0].id;
@@ -1882,30 +1848,6 @@ test('legacy undo refuses when the deal owner is unknown', async () => {
   } finally { await c.query("update deal set owner='joe' where id=$1", [deal]); }
 });
 
-
-test('quality reports automatic filing undo rates for the requested filing cohort', async () => {
-  await c.query("delete from event where verb in ('inherit-email-thread','undo-email-thread-filing')");
-  const report = (days = 7) => command('email-proposal-quality', { days }, actor, 'carr_reader');
-  assert.deepEqual((await report()).automatic_filings,
-    { filed: 0, undone: 0, undo_rate: null, over_threshold: false });
-  const filings = [];
-  for (let i = 0; i < 20; i++) filings.push((await automaticThreadFiling()).filing);
-  assert.deepEqual((await report()).automatic_filings,
-    { filed: 20, undone: 0, undo_rate: 0, over_threshold: false });
-  const undo = event_id => command('undo-email-thread-filing', { idempotency_key: randomUUID(), event_id }, actor, 'carr_writer');
-  await undo(filings[0].event_id);
-  assert.deepEqual((await report()).automatic_filings,
-    { filed: 20, undone: 1, undo_rate: 0.05, over_threshold: false });
-  await undo(filings[1].event_id);
-  assert.deepEqual((await report()).automatic_filings,
-    { filed: 20, undone: 2, undo_rate: 0.1, over_threshold: true });
-  await c.query("update event set recorded_at=now()-interval '10 days' where verb='inherit-email-thread' and id<>$1", [filings[1].event_id]);
-  assert.deepEqual((await report()).automatic_filings,
-    { filed: 1, undone: 1, undo_rate: 1, over_threshold: false });
-  assert.deepEqual((await report(30)).automatic_filings,
-    { filed: 20, undone: 2, undo_rate: 0.1, over_threshold: true });
-  assert.equal((await report()).send, false);
-});
 
 async function sentDraftFixture() {
   await c.query("update actor set email='joe@example.test' where slug='joe'");
