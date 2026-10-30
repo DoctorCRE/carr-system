@@ -1829,6 +1829,24 @@ class IntakeTest(unittest.TestCase):
         self.assertNotEqual(captured[0]['idempotency_key'], captured[1]['idempotency_key'])
         self.assertEqual([a['email_source']['mailbox_owner'] for a in captured], ['joe', 'dell'])
 
+    def test_decoder_change_reloads_unchanged_store(self):
+        receipt = load_settings(self.home).vendor / '.carr-build.json'
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        receipt.write_text(json.dumps({'binary_sha256': 'first'}))
+        self.run_intake(touch=False)
+        self.assertEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+        receipt.write_text(json.dumps({'binary_sha256': 'second'}))
+        before = self.fake.decodes
+        self.assertNotEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+        self.assertEqual(self.fake.decodes, before + 1)
+        self.assertEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+        state_path = self.out() / intake.STATE
+        state = json.loads(state_path.read_text())
+        state['store'] = state['store'][:2]
+        state_path.write_text(json.dumps(state))
+        self.assertNotEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+        self.assertEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+
     def test_old_steps_and_pending_actions_retire_without_replay(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         path = self.out() / intake.STATE
