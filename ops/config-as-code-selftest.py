@@ -1,6 +1,8 @@
+
 #!/usr/bin/env python3
 """Regression fixtures for non-destructive Codex global-hook reconciliation."""
 from __future__ import annotations
+import shutil
 
 import contextlib
 import importlib.util
@@ -282,6 +284,18 @@ def main():
         for name, body in primary_tasks.items():
             (tasks / f"{name}.SKILL.md").write_text(body, encoding="utf-8")
         original_primary = mod.IS_PRIMARY
+        mod.IS_PRIMARY = True
+        before_scoped = {p.relative_to(home): p.read_bytes() for p in home.rglob("*") if p.is_file()}
+        with patch.object(sys, "argv", ["config-as-code.py", "install", "--apply", "--only", "scheduled-tasks"]), \
+                patch.object(mod.subprocess, "run", side_effect=AssertionError("subprocess invoked")), \
+                contextlib.redirect_stdout(io.StringIO()):
+            scoped_rc = mod.main()
+        assert scoped_rc == 0
+        assert (Path(mod.TASKS_SRC) / "fixture-daily" / "SKILL.md").read_text() == mod.concrete(TASK_SOURCE)
+        assert not Path(mod.TASKS_QUARANTINE).exists()
+        after_scoped = {p.relative_to(home): p.read_bytes() for p in home.rglob("*") if p.is_file() and not p.is_relative_to(Path(mod.TASKS_SRC))}
+        assert after_scoped == before_scoped
+        shutil.rmtree(mod.TASKS_SRC)
         mod.IS_PRIMARY = True
         with contextlib.redirect_stdout(io.StringIO()) as primary_task_out:
             primary_task_install_rc = mod.cmd_install(True)
