@@ -3717,6 +3717,15 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "ingress_key": "db-relation-acl:public.system_work_census_inventory:carr_writer:update",
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "ops.work_request_slice",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:ops.work_request_slice:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
     }
   ],
   "secdef_execute": [
@@ -3911,6 +3920,21 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.adopt_rule(p_section_id uuid, p_base_version bigint, p_idempotency_key text, p_reason text)",
       "volatility": "v",
       "ingress_key": "db-function-acl:ops.adopt_rule(p_section_id uuid, p_base_version bigint, p_idempotency_key text, p_reason text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_jobs",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.reap_expired_runs(p_service_id uuid, p_environment text, p_run_key text, p_limit integer)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.reap_expired_runs(p_service_id uuid, p_environment text, p_run_key text, p_limit integer):carr_jobs:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
