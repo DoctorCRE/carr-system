@@ -16,6 +16,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'bin'))
 import phone_intake
 
 
+def test_bridge_paths_are_isolated(tmp_path):
+    bridge = phone_intake.bridge_module()
+    assert bridge.LOG_PATH == tmp_path / 'capture-bridge.log'
+    assert bridge.CONFIG_PATH == tmp_path / 'capture-config.json'
+
+
 class PhoneIntakeTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
