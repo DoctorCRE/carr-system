@@ -55,7 +55,7 @@ before(async () => {
   await c.query(readFileSync(new URL('../../migrations/1026_email_recent_outcomes_index.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select to_regclass('public.v_email_thread_filing_event') as relation")).rows[0].relation)
     await c.query(readFileSync(new URL('../../migrations/1023_email_thread_filing_events.sql', import.meta.url), 'utf8'));
-  await c.query(readFileSync(new URL('../../migrations/1065_email_non_deal_steps.sql', import.meta.url), 'utf8'));
+  await c.query(readFileSync(new URL('../../migrations/1069_email_non_deal_steps.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic physician',$1,$1) returning id", [actor.id])).rows[0].id;
   await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
