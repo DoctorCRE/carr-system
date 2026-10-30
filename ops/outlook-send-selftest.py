@@ -76,6 +76,7 @@ class FakeOutlook:
         self.background = False
         self.press_count = 0
         self.unresolved: set[int] = set()
+        self.new_mail_label = 'New Mail'
 
     def open_url(self, url: str) -> None:
         parts = urlsplit(url)
@@ -95,7 +96,7 @@ class FakeOutlook:
     def elements(self, wid: int) -> list[dict]:
         if wid == 1:
             return [{'element_index': 0, 'role': 'AXWindow', 'label': MAIN['title'], 'depth': 0},
-                    {'element_index': 1, 'role': 'AXButton', 'label': 'New Mail', 'depth': 1,
+                    {'element_index': 1, 'role': 'AXButton', 'label': self.new_mail_label, 'depth': 1,
                      'element_token': '1:1'},
                     {'role': 'AXTable', 'label': 'Message List', 'depth': 4}]
         form = self.forms[wid]
@@ -135,7 +136,7 @@ class FakeOutlook:
         if tool == 'click':
             wid, index = map(int, args['element_token'].split(':'))
             label = self.elements(wid)[index]['label']
-            if label == 'New Mail':
+            if wid == 1 and index == 1:
                 self.open_url('mailto:?subject=&body=')
                 return {'ok': True}
             if label in ('Save', 'Send'):
@@ -278,6 +279,22 @@ class SendTests(unittest.TestCase):
     def ledger(self) -> list[dict]:
         path = self.out / send_mod.LEDGER
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def test_pressed_new_mail_button_completes_the_send_flow(self):
+        h = Harness(self.out)
+        h.handler = 'com.example.browser'
+        h.fake.new_mail_label = 'New Mail, pressed'
+        self.assertEqual(h.send().state, State.DONE)
+        self.assertEqual(h.fake.presses(), 1)
+        self.assertEqual(h.mailbox.sent[0].subject, MAIL['subject'])
+
+    def test_new_mail_rule_button_does_not_open_a_compose_window(self):
+        h = Harness(self.out)
+        h.handler = 'com.example.browser'
+        h.fake.new_mail_label = 'New Mail Rule'
+        self.assertEqual(h.send().state, State.FAILED)
+        self.assertEqual(h.fake.forms, {})
+        self.assertEqual(h.fake.presses(), 0)
 
     def test_default_call_prepares_a_draft_without_pressing_send(self):
         h = Harness(self.out)
