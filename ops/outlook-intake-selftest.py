@@ -375,6 +375,25 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(intake.run(self.repo, self.home, self.fake.ports()).state, 'succeeded',
                          'one loud failure a day, not one per run')
 
+    def test_next_run_reports_yesterdays_missing_verdict(self):
+        self.run_intake()
+        self.fake.now += timedelta(days=1)
+        result = self.run_intake()
+        self.assertEqual((result.state, result.reason), ('failed', 'coverage_failed'))
+        self.assertEqual(result.counts['coverage_missed_verdict'], 1)
+        self.assertEqual(self.run_intake().state, 'succeeded')
+
+    def test_daily_verdict_fails_when_held_unknown_recipients_exceed_twenty(self):
+        held = [mail(OWNER, -timedelta(hours=1), recipients=None, subject=f'Held {i}') for i in range(21)]
+        unresolved = {ident(m): {'ck': intake.mail_identity(m['copy_key'], m['sender'], m['subject'],
+                      m['sent_unix'])[0], 'sent': m['sent_unix'], 'recipients_unknown': True,
+                      'participants': {}} for m in held}
+        self.out().mkdir(parents=True)
+        (self.out() / intake.STATE).write_text(json.dumps({'mail_unresolved': unresolved}))
+        result = self.coverage_run([])
+        self.assertEqual((result.state, result.reason), ('failed', 'coverage_failed'))
+        self.assertEqual(result.counts['coverage_held_recipients_over_limit'], 1)
+
     def test_coverage_verdict_waits_for_the_evening_run(self):
         result = self.coverage_run([mail('pat@example.test', -timedelta(hours=2), subject='', kind='preview')],
                                    evening=False)
@@ -660,7 +679,7 @@ class IntakeTest(unittest.TestCase):
             self.assertEqual(result.counts['attachments_uncached'], 1)
         self.fake.now = NOW + timedelta(days=31)
         result = intake.run(self.repo, self.home, ports)
-        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.reason, 'coverage_failed')
         self.assertEqual(result.counts['attachments_uncached_refused'], 1)
 
     def test_uncached_attachment_is_filed_when_cached(self):
@@ -968,6 +987,14 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(len(state['mail_unresolved']), 3)
         self.assertTrue(all(item['metadata_incomplete'] for item in state['mail_unresolved'].values()))
 
+    def test_keyless_senderless_messages_at_the_same_time_remain_separate(self):
+        messages = [mail(None, -timedelta(hours=1), copy_key='same-copy') for _ in range(2)]
+        result = self.run_intake(messages)
+        self.assertEqual((result.counts['emails'], result.counts['unresolved_messages']), (2, 2))
+        self.assertEqual(self.fake.writes('log-activity'), [])
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertEqual(len(state['mail_unresolved']), 2)
+
     def test_undated_message_can_resolve_when_metadata_decodes_later(self):
         message = mail(CLIENT.email, -timedelta(hours=1), local_keys='91')
         message['sent_unix'] = None
@@ -1108,47 +1135,50 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.run_intake([old]).counts['legacy_unmatched'], 1)
         self.assertEqual(self.run_intake([old], touch=False).counts['legacy_unmatched'], 1)
 
-    def test_reconcile_only_pass_saves_message_ids_from_the_old_decoder_and_files_nothing(self):
+    def test_run_reconciles_saved_rows_outside_window_without_filing(self):
         old = mail('pat@example.test', -timedelta(hours=1), kind='preview', message_id='<a@example.test>')
         self.run_intake([old])
         path = self.out() / intake.STATE
-        state = json.loads(path.read_text())
-        del state['mail_ids']
-        path.write_text(json.dumps(state))
-        first = intake.reconcile_only(self.repo, self.home, self.fake.ports())
-        again = intake.reconcile_only(self.repo, self.home, self.fake.ports())
-        self.assertEqual((first.reason, first.counts['mail_ids'], again.reason), ('reconciled', 1, 'already_reconciled'))
-        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+        saved = json.loads(path.read_text())
+        del saved['mail_ids']
+        path.write_text(json.dumps(saved))
+        decoder = load_settings(self.home).decoder
+        decoder.parent.mkdir(parents=True)
+        decoder.touch(mode=0o700)
+        self.fake.calls.clear()
+        self.fake.now = NOW.replace(hour=3)
+        result = intake.run(self.repo, self.home, self.fake.ports())
+        self.assertEqual((result.state, result.reason, result.counts.get('mail_ids')), ('succeeded', 'reconciled', 1))
+        self.assertEqual(len(json.loads(path.read_text())['mail_ids']), 1)
+        self.assertEqual(self.fake.calls, [])
+        self.assertEqual(intake.run(self.repo, self.home, self.fake.ports()).reason, 'outside_window')
+        self.fake.now = NOW
         new = mail('pat@example.test', -timedelta(hours=9), local_keys='77', message_id='<a@example.test>')
         result = self.run_intake([new], rejected=0)
         self.assertEqual((result.counts['logged'], result.counts['full_text_notes']), (0, 1))
 
-    def test_reconcile_only_pass_never_overwrites_state_a_concurrent_run_saved(self):
-        first = mail('pat@example.test', -timedelta(hours=2), message_id='<a@example.test>')
-        self.run_intake([first])
+    def test_main_reconciliation_emits_receipt_and_does_not_route(self):
+        from io import StringIO
+        old = mail('pat@example.test', -timedelta(hours=1), message_id='<a@example.test>')
+        self.run_intake([old])
         path = self.out() / intake.STATE
-        state = json.loads(path.read_text())
-        del state['mail_ids']
-        path.write_text(json.dumps(state))
-        later = mail('lee@example.test', -timedelta(hours=1), subject='Later', message_id='<b@example.test>')
-        write_db(self.fake.fixture.with_name('later.db'), [first, later])
-        real_flock, interleaved = intake.fcntl.flock, []
-
-        def flock(fd, op):
-            # A scheduled intake run lands just before the reconcile pass takes the lock.
-            if not interleaved:
-                interleaved.append(True)
-                self.fake.fixture.unlink()
-                self.fake.fixture.with_name('later.db').rename(self.fake.fixture)
-                self.store.write_bytes(self.store.read_bytes() + b'.')
-                self.assertEqual(intake.run(self.repo, self.home, self.fake.ports()).counts['logged'], 1)
-            return real_flock(fd, op)
-        with patch.object(intake.fcntl, 'flock', flock):
-            intake.reconcile_only(self.repo, self.home, self.fake.ports())
-        self.store.write_bytes(self.store.read_bytes() + b'.')
-        intake.run(self.repo, self.home, self.fake.ports())
-        self.assertEqual([a['email_context']['subject'] for _, a in self.fake.writes('log-activity')],
-                         ['Suite question', 'Later'])
+        saved = json.loads(path.read_text())
+        del saved['mail_ids']
+        path.write_text(json.dumps(saved))
+        decoder = load_settings(self.home).decoder
+        decoder.parent.mkdir(parents=True)
+        decoder.touch(mode=0o700)
+        self.fake.calls.clear()
+        with patch.object(intake, '__file__', str(self.repo / 'lib/outlook_intake.py')), \
+                patch.object(Path, 'home', return_value=self.home), \
+                patch.object(intake, '_carr', return_value=self.fake.carr), \
+                patch.object(intake, '_decoder', return_value=self.fake.decode), \
+                patch.object(email_router, 'step', side_effect=AssertionError('router ran')), \
+                patch('sys.stdout', new_callable=StringIO) as output:
+            self.assertEqual(intake.main(), 0)
+        receipt = json.loads(output.getvalue().split('outlook-intake-receipt ', 1)[1].splitlines()[0])
+        self.assertEqual(receipt['reason'], 'reconciled')
+        self.assertEqual(self.fake.calls, [])
 
     def test_rejected_details_raise_drift_alarm(self):
         result = self.run_intake([mail('pat@example.test', -timedelta(hours=1), local_keys='77')], details_rejected=1)
@@ -1836,6 +1866,24 @@ class IntakeTest(unittest.TestCase):
         self.assertNotEqual(captured[0]['idempotency_key'], captured[1]['idempotency_key'])
         self.assertEqual([a['email_source']['mailbox_owner'] for a in captured], ['joe', 'dell'])
 
+    def test_decoder_change_reloads_unchanged_store(self):
+        receipt = load_settings(self.home).vendor / '.carr-build.json'
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        receipt.write_text(json.dumps({'binary_sha256': 'first'}))
+        self.run_intake(touch=False)
+        self.assertEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+        receipt.write_text(json.dumps({'binary_sha256': 'second'}))
+        before = self.fake.decodes
+        self.assertNotEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+        self.assertEqual(self.fake.decodes, before + 1)
+        self.assertEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+        state_path = self.out() / intake.STATE
+        state = json.loads(state_path.read_text())
+        state['store'] = state['store'][:2]
+        state_path.write_text(json.dumps(state))
+        self.assertNotEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+        self.assertEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+
     def test_old_steps_and_pending_actions_retire_without_replay(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         path = self.out() / intake.STATE
@@ -2052,7 +2100,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.run_intake([m], touch=False).reason, 'store_unchanged')
         self.assertEqual(self.fake.decodes, decodes)
         self.fake.now += timedelta(days=14)
-        self.assertEqual(self.run_intake([m]).state, 'succeeded')
+        self.assertEqual(self.run_intake([m]).reason, 'coverage_failed')
         state = json.loads((self.out() / intake.STATE).read_text())
         self.assertIn(ident(m), state['mail_unresolved'])
         self.assertEqual(state['mail_done'], {})
@@ -2152,7 +2200,7 @@ class IntakeTest(unittest.TestCase):
         self.run_intake([m])
         self.fake.now += timedelta(days=14)
         self.fake.contacts_rows.append(intake.Contact('new@example.test', 'L-908', 'New Example'))
-        self.assertEqual(self.run_intake([], touch=False).state, 'succeeded')
+        self.assertEqual(self.run_intake([], touch=False).reason, 'coverage_failed')
         self.assertIn(ident(m), json.loads((self.out() / intake.STATE).read_text())['mail_unresolved'])
         self.run_intake([m])
         self.assertEqual([args['ref'] for _, args in self.fake.writes('log-activity')], ['L-908'])
@@ -2296,12 +2344,12 @@ class IntakeTest(unittest.TestCase):
         self.seed_legacy_mail_keys(original, ['9100'])
         keyed = {**original, 'local_keys': '9100'}
         self.fake.now = NOW + timedelta(days=12)
-        self.assertEqual(self.run_intake([keyed]).state, 'succeeded')
+        self.assertEqual(self.run_intake([keyed]).reason, 'coverage_failed')
         self.assertEqual(self.fake.writes('log-activity'), [])
         self.fake.now = NOW + timedelta(days=20)
         self.fake.contacts_rows.append(intake.Contact('later@example.test', 'C-903', 'Later Contact'))
         result = self.run_intake([keyed], touch=False)
-        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.reason, 'coverage_failed')
         self.assertEqual([(args['ref'], args['detail']) for _, args in self.fake.writes('log-activity')],
                          [('C-903', original['body'])])
         self.assertEqual(result.counts['unresolved_messages'], 0)
@@ -2315,11 +2363,11 @@ class IntakeTest(unittest.TestCase):
         self.seed_legacy_mail_keys(original, ['9100'])
         keyed = {**original, 'local_keys': '9100'}
         self.fake.now = NOW + timedelta(days=12)
-        self.assertEqual(self.run_intake([keyed]).state, 'succeeded')
+        self.assertEqual(self.run_intake([keyed]).reason, 'coverage_failed')
         self.fake.now = NOW + timedelta(days=20)
         full = {**keyed, 'body_kind': 'full', 'body': 'Complete original body'}
         result = self.run_intake([full])
-        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.reason, 'coverage_failed')
         self.assertEqual(result.counts['hydration_pending'], 0)
         notes = [args for _, args in self.fake.writes('log-activity') if args['kind'] == 'note']
         self.assertEqual([args['detail'] for args in notes], ['Complete original body'])
@@ -3069,6 +3117,15 @@ class IntakeTest(unittest.TestCase):
             self.assertNotIn(old, {**run, **backlog})
         self.assertEqual(result.counts['decoder_alarm'], run['decoder_alarm'])
 
+    def test_calendar_receipt_names_describe_stored_copies_and_held_writes(self):
+        outcome = intake.Outcome('succeeded', 'processed', {
+            'calendar_lifecycle_unsupported': 4, 'calendar_lifecycle_canceled': 2,
+            'calendar_requests_quarantined': 1, 'calendar_unresolved_expired': 3})
+        receipt = json.loads(intake.receipt_line(outcome).split(' ', 1)[1])
+        self.assertEqual(receipt['counts'], {'run': {}, 'backlog': {
+            'calendar_copies_in_store': 4, 'calendar_canceled_copies_in_store': 2,
+            'calendar_write_requests_held': 1, 'calendar_expired_total': 3}})
+
     def test_lead_outcomes_are_counted_from_the_disposition_on_every_run(self):
         self.fake.intent_reply = read('new_matter', 'Wants a clinic suite.')
         m = mail('new.doctor@practice.test', -timedelta(hours=2), name='Dana Doctor')
@@ -3477,7 +3534,7 @@ class IntakeTest(unittest.TestCase):
         self.run_intake([m], touch=False)
         self.fake.now = NOW + timedelta(days=12)
         self.fake.email_queue = []  # the links page no longer shows the activity
-        self.assertEqual(self.run_intake([m]).state, 'succeeded')
+        self.assertEqual(self.run_intake([m]).reason, 'coverage_failed')
 
     def test_a_flag_cleared_long_after_filing_still_drops_the_todo(self):
         m = self.flagged(flag='flagged', due=self.OCT29)
@@ -3509,11 +3566,11 @@ class IntakeTest(unittest.TestCase):
         self.fake.email_queue = []
         keyed = {**m, 'local_keys': '9100'}
         self.fake.now = NOW + timedelta(days=12)
-        self.assertEqual(self.run_intake([keyed]).state, 'succeeded')
+        self.assertEqual(self.run_intake([keyed]).reason, 'coverage_failed')
         self.fake.now = NOW + timedelta(days=20)
         closed = {**keyed, 'flag_status': status, 'flag_completed_unix': self.OCT28}
         result = self.run_intake([closed])
-        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.reason, 'coverage_failed')
         calls = self.flag_calls()
         self.assertEqual(calls[-1][0], verb)
         self.assertEqual(calls[-1][1]['item_id' if status == 'complete' else 'action_id'], item_id)
