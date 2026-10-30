@@ -93,6 +93,7 @@ OUT = Path('out/outlook-intake')
 STATE = 'state.json'
 WORK_PREFIX = 'work-'
 WINDOW = (time(7, 0), time(19, 30))
+COVERAGE_HELD_RECIPIENTS_LIMIT = 20  # More held Sent items require human attention.
 COVERAGE_CHECK_AT = time(18, 0)  # the first successful run from here judges the day's coverage once
 WRITE_VERBS = frozenset({'log-activity', 'publish-board-snapshot', 'propose-email-lead', 'attach-deal-file',
                          'record-deal-item', 'complete-deal-item', 'drop-action'})
@@ -1730,14 +1731,25 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
             if work.counts['links_filed']:
                 outcome.reason = 'processed'
             local = ports.now().astimezone(settings.timezone)
-            if local.time() >= COVERAGE_CHECK_AT and state.get('coverage_check_day') != local.date().isoformat():
-                state['coverage_check_day'] = local.date().isoformat()
-                _save(out, state)
+            today = local.date()
+            previous_day = (today - timedelta(days=1)).isoformat()
+            last_run = state.get('coverage_run_day') or state.get('coverage_check_day')
+            missed = bool(last_run and last_run <= previous_day and state.get('coverage_check_day', '') < previous_day)
+            state['coverage_run_day'] = today.isoformat()
+            if local.time() >= COVERAGE_CHECK_AT and state.get('coverage_check_day') != today.isoformat():
+                state['coverage_check_day'] = today.isoformat()
                 shortfalls = coverage_verdict(outcome.counts)
-                failed = any(shortfalls.values())
-                outcome.counts.update(shortfalls, coverage_checked=1, coverage_failed=int(failed))
-                if failed:
-                    outcome.state, outcome.reason = 'failed', 'coverage_failed'
+                held = int(outcome.counts.get('unresolved_recipients_unknown', 0) > COVERAGE_HELD_RECIPIENTS_LIMIT)
+                failed = any(shortfalls.values()) or held or missed
+                outcome.counts.update(shortfalls, coverage_checked=1, coverage_failed=int(failed),
+                                      coverage_held_recipients_over_limit=held)
+            else:
+                failed = missed
+            if missed:
+                outcome.counts.update(coverage_missed_verdict=1, coverage_failed=1)
+            _save(out, state)
+            if failed:
+                outcome.state, outcome.reason = 'failed', 'coverage_failed'
             return outcome
         except CleanupError:
             return Outcome('failed', 'cleanup_failed')
