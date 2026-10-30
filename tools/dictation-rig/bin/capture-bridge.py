@@ -438,6 +438,11 @@ def publish_cmd(cfg: dict[str, str], session_dir: Path) -> int:
     if capture_token(session_dir) is None:
         log_line(f"NOOP publish no-capture-marker session={session_dir.name}")
         return 0
+    report = post_call.read_json(session_dir / post_call.REPORT_FILE)
+    if report is not None and post_call.hold_transcript_repeat(session_dir, report) is not None:
+        return 1
+    if (post_call.read_json(session_dir / post_call.STATUS_FILE) or {}).get("state") == "held_review":
+        return 1
     try:
         shaped = post_call.sanitized_candidates(session_dir)
     except post_call.ContractError as exc:
