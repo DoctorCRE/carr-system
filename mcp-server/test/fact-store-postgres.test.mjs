@@ -50,6 +50,7 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as $f$select ${c.escapeLiteral(JSON.stringify(predecessor))}::jsonb$f$`);
     await c.query(await readFile(new URL('../../migrations/0983_fact_store.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(new URL('../../migrations/1070_fact_review.sql', import.meta.url), 'utf8'));
+    await c.query(await readFile(new URL('../../migrations/1080_fact_review_matching_promotion.sql', import.meta.url), 'utf8'));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner'),($2,'codex','automation','Synthetic job')", [partner.id, job.id]);
 
     await t.test('partners record a sourced term from an existing deal attachment', async () => {
@@ -149,12 +150,19 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
       const matching = await read();
       assert.equal(matching.pending, false, 'same reviewed value and source stays resolved');
       assert.equal(matching.canonical_version, 2);
+      assert.notEqual(matching.review_version, initial.review_version);
+      assert.equal(matching.review_history.length, 1);
+      assert.deepEqual(matching.canonical_history.map(f => f.normalized_value), ['24', '24']);
       assert.deepEqual((await as('carr_reader', partner, 'list-fact-review', { entity_ref: entity })).items, []);
       assert.deepEqual((await conflicts({ entity_ref: entity })).conflicts, []);
       await promote(entity, [ids(batch)[1]], { basis: 'human_review', base_version: 2 }, partner);
       assert.equal((await read()).pending, true, 'a different value reopens review');
       await promote(entity, [ids(batch)[2]], { basis: 'human_review', base_version: 3 }, partner);
       assert.equal((await read()).pending, true, 'a different source reopens review even at the reviewed value');
+      await promote(entity, [ids(batch)[0]], { basis: 'human_review', base_version: 4 }, partner);
+      assert.equal((await read()).pending, false);
+      await record(entity, [observation('new-evidence')]);
+      assert.equal((await read()).pending, true, 'new evidence still needs review even when its value agrees');
     });
 
     await t.test('human entries refuse another deal, tenant, deleted document and stale review evidence', async () => {
