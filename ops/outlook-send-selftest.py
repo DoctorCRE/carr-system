@@ -1060,6 +1060,39 @@ class OutboxTests(unittest.TestCase):
             return {'recipients': [{'email': e, 'blocked': False} for e in args['emails']]}
         return dict(ok=True, proposal_id=self.draft['proposal_id'], status=args.get('status'))
 
+    def test_unreadable_attachment_fails_one_draft_and_next_draft_still_sends(self):
+        root = Path(self.tmp).resolve() / 'approved'
+        root.mkdir()
+        packet = root / 'synthetic-unreadable.pdf'
+        packet.write_bytes(b'synthetic bytes')
+        self.settings = replace(self.settings, attachment_root=root, attachment_max_bytes=1000)
+        self.draft['attachments'] = [dict(path=str(packet), sha256=send_mod._digest(packet))]
+        second = {**self.draft, 'proposal_id': '22222222-2222-4333-8444-555555555555', 'attachments': []}
+        carr = self.ports.carr
+        def two_drafts(verb, args):
+            if verb == 'outbox-for-sender':
+                return dict(schema_version='email-outbox.v1', owner='joe', drafts=[self.draft, second])
+            return carr(verb, args)
+        self.ports.carr = two_drafts
+        real_open = open
+        def unreadable(path, *args, **kwargs):
+            if Path(path) == packet:
+                raise PermissionError('synthetic private path must not escape')
+            return real_open(path, *args, **kwargs)
+        packet.chmod(0)
+        output = StringIO()
+        with patch('builtins.open', side_effect=unreadable), redirect_stdout(output), redirect_stderr(output):
+            counts = self.worker.run(self.settings, self.ports)
+        self.assertEqual((counts['failed'], counts['sent']), (1, 1))
+        receipts = [args for verb, args in self.calls if verb == 'record-email-sent']
+        self.assertEqual([(r['proposal_id'], r['status']) for r in receipts], [
+            (self.draft['proposal_id'], 'failed'), (second['proposal_id'], 'sent')])
+        self.assertEqual(receipts[0]['reason'], 'attachment_unreadable')
+        self.assertEqual(len(self.sent), 1)
+        private = json.dumps(receipts) + output.getvalue()
+        for value in (packet.name, str(packet), self.draft['subject'], 'synthetic private path'):
+            self.assertNotIn(value, private)
+
     def test_recovered_older_ledger_retains_the_observed_sent_time(self):
         self.worker.run(self.settings, self.ports)
         ledger = self.ports.out / send_mod.LEDGER
@@ -1071,6 +1104,36 @@ class OutboxTests(unittest.TestCase):
         self.mailbox.sent.clear()
         self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
         self.assertEqual(len(self.sent), 1)
+
+    def test_old_confirmed_sent_without_time_never_records_failed_after_a_day(self):
+        with patch.object(self.worker, '_save', side_effect=OSError('synthetic crash before receipt')):
+            with self.assertRaises(OSError):
+                self.worker.run(self.settings, self.ports)
+        ledger = self.ports.out / send_mod.LEDGER
+        rows = [json.loads(line) for line in ledger.read_text().splitlines()]
+        for row in rows:
+            row.pop('sent_at', None)
+        ledger.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+        self.mailbox.sent.clear()
+        self.clock.t += 25 * 3600
+        for broken in (False, True):
+            self.mailbox.broken = broken
+            output = StringIO()
+            logger = logging.getLogger('lib.outlook_outbox')
+            handler = logging.StreamHandler(output)
+            logger.addHandler(handler)
+            try:
+                counts = self.worker.run(self.settings, self.ports)
+            finally:
+                logger.removeHandler(handler)
+            self.assertEqual(counts['failed'], 0)
+            self.assertEqual((counts['deferred'], counts['sent_unrecorded']), (1, 1))
+            self.assertIn('sent_time_unavailable', output.getvalue())
+            for value in (self.draft['subject'], *self.draft['to'], *self.draft['cc']):
+                self.assertNotIn(value, output.getvalue())
+        self.assertEqual(len(self.sent), 1)
+        self.assertFalse(any(verb == 'record-email-sent' for verb, _ in self.calls))
+        self.assertFalse(list((self.ports.out / 'outbox').glob('*.json')))
 
     def test_pending_sent_receipt_recovers_observed_time_without_resending(self):
         draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)

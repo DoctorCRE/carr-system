@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import fcntl
 import hashlib
 import json
+import logging
 import os
 import re
 from pathlib import Path
@@ -82,7 +83,7 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
     if (send._addresses([settings.partner_cc]) != (settings.partner_cc,)
             or not settings.partner_cc or settings.partner_cc == settings.account):
         raise ValueError('partner_copy_required')
-    counts = dict(sent=0, failed=0, deferred=0, receipt_failed=0, compose_window_open=0)
+    counts = dict(sent=0, failed=0, deferred=0, receipt_failed=0, compose_window_open=0, sent_unrecorded=0)
     ports.out.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(ports.out, 0o700)
     root = ports.out / 'outbox'
@@ -133,7 +134,11 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
                 except (ValueError, KeyError, TypeError, AttributeError):
                     continue
                 key = str(uuid.uuid5(uuid.NAMESPACE_URL, f'outlook-outbox|{ident}|{version}'))
-                reason = str(exc) if str(exc) in ('invalid_submission', 'submission_hash_mismatch', 'submission_recipients_invalid') else 'invalid_submission'
+                reason = str(exc) if str(exc) in (
+                    'invalid_submission', 'submission_hash_mismatch', 'submission_recipients_invalid',
+                    'submission_attachment_mismatch', 'attachment_settings_missing', 'attachment_root_missing',
+                    'attachment_path_not_absolute', 'attachment_missing', 'attachment_outside_root',
+                    'attachment_not_regular_file', 'attachment_unreadable', 'attachments_too_large') else 'invalid_submission'
                 receipt = dict(idempotency_key=key, proposal_id=ident, base_version=version,
                                sha256=digest, status='failed', reason=reason)
             else:
@@ -142,6 +147,9 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
                                      send.State.WINDOW_NOT_CLOSED)
                         or result.reason in ('daily_cap', 'another_write_running', 'compose_window_open')):
                     counts['deferred'] += 1
+                    if result.reason == 'sent_time_unavailable':
+                        counts['sent_unrecorded'] += 1
+                        logging.getLogger(__name__).warning('outlook-outbox sent_time_unavailable')
                     if result.reason == 'compose_window_open':
                         counts['compose_window_open'] += 1
                     continue

@@ -1933,11 +1933,13 @@ test('confirmed submitted files appear on deal correspondence with sender, recip
   const room = await command('get-deal-room', { deal: sentDeal }, actor, 'carr_reader');
   const sent = room.activities.find(a => a.email_context?.send_id === proposal.proposal_id);
   assert.equal(sent.kind, 'email_out');
-  assert.equal(sent.email_context.deal, sentDeal);
-  assert.equal(sent.email_context.sender_account, 'joe@example.test');
+  assert.equal(sent.actor, 'joe');
+  assert.deepEqual(sent.email_context.sender, { email: 'joe@example.test', internal: true });
   assert.equal(new Date(sent.occurred_at).toISOString(), '2026-01-04T12:00:00.000Z');
-  assert.deepEqual(sent.email_context.to, ['sender@example.test']);
-  assert.deepEqual(sent.email_context.cc, ['dell@example.test']);
+  assert.deepEqual(sent.email_context.recipients, [
+    { email: 'sender@example.test', kind: 'to', internal: false },
+    { email: 'dell@example.test', kind: 'cc', internal: true },
+  ]);
   assert.deepEqual(sent.email_context.attachments, [
     { file_name: 'packet.pdf', sha256: 'a'.repeat(64) },
     { file_name: 'plan.pdf', sha256: 'b'.repeat(64) },
@@ -1954,6 +1956,35 @@ test('confirmed submitted files appear on deal correspondence with sender, recip
     sent_at: '2026-01-05T12:00:00Z' }, machineFor('joe'), 'carr_writer');
   const ordered = (await command('get-deal-room', { deal: sentDeal })).activities;
   assert.deepEqual(ordered.map(a => a.email_context.send_id), [newer.proposal_id, proposal.proposal_id]);
+});
+
+test('a client reply inherits the deal from partner-sent mail on the same conversation', async () => {
+  const { proposal, sentDeal } = await sentDraftFixture();
+  const source = (await listed()).find(row => row.id === proposal.proposal_id).source.activity_id;
+  const conversation = randomUUID();
+  await c.query('update activity set email_context=$2::jsonb where id=$1', [source, JSON.stringify({
+    subject: 'Floor plan', conversation_id: conversation,
+    sender: { email: 'sender@example.test', internal: false }, recipients: [] })]);
+  const submitted = await submitDraft(proposal);
+  await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+    base_version: 2, sha256: submitted.sha256, status: 'sent', sent_item_id: 'synthetic-thread-send' },
+  machineFor('joe'), 'carr_writer');
+  const sent = (await command('get-deal-room', { deal: sentDeal })).activities[0];
+  const reply = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+    kind: 'email_in', summary: 'Synthetic client reply', detail: quote, occurred_at: '2026-01-05T12:00:00Z',
+    email_context: { subject: 'Re: Floor plan', conversation_id: conversation,
+      sender: { email: 'sender@example.test', internal: false },
+      recipients: [{ email: 'joe@example.test', kind: 'to', internal: true }] } });
+  const filed = await command('inherit-email-thread', { idempotency_key: randomUUID(),
+    activity_id: reply.activity_id, thread_activity_id: sent.id }, router(), 'carr_writer');
+  assert.equal(filed.deal, sentDeal);
+  assert.equal(sent.email_context.subject, 'Re: Floor plan');
+  assert.equal(sent.email_context.conversation_id, conversation);
+  assert.deepEqual(sent.email_context.sender, { email: 'joe@example.test', internal: true });
+  assert.deepEqual(sent.email_context.recipients, [
+    { email: 'sender@example.test', kind: 'to', internal: false },
+    { email: 'dell@example.test', kind: 'cc', internal: true },
+  ]);
 });
 
 test('a send identity retries with a fresh receipt key without duplicating correspondence', async () => {

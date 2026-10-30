@@ -261,7 +261,11 @@ def attachments(paths) -> tuple[Attachment, ...]:
             raise ValueError('attachment_outside_root')
         if not stat.S_ISREG(info.st_mode):
             raise ValueError('attachment_not_regular_file')
-        found.append(Attachment(real, _digest(real), info.st_size))
+        try:
+            digest = _digest(real)
+        except OSError:
+            raise ValueError('attachment_unreadable') from None
+        found.append(Attachment(real, digest, info.st_size))
     if sum(a.size for a in found) > settings.attachment_max_bytes:
         raise ValueError('attachments_too_large')
     return tuple(found)
@@ -423,6 +427,8 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
             sent_at = _sent_time(snapshot, item_id)
             ledger.append(key, 'send', State.DONE.value, fingerprint(item), ports.now(), item_id, sent_at=sent_at)
             return Result(State.DONE, 'confirmed_in_mailbox', sent_item_id=item_id, sent_at=sent_at)
+        if done:
+            return Result(State.PRESSED_UNCONFIRMED, 'sent_time_unavailable')
         if ports.now() - min(r['at'] for r in rows) >= DUPLICATE_WINDOW:
             return Result(State.FAILED, f'unconfirmed_after_{DUPLICATE_WINDOW}')
         return Result(State.PRESSED_UNCONFIRMED, 'previous_attempt_unconfirmed')

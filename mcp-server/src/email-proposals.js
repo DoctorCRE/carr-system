@@ -325,16 +325,22 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           if (args.status === 'failed' && !args.reason?.trim()) fail('email_draft_failure_reason_required');
           if (args.status === 'sent' && !args.sent_item_id?.trim()) fail('email_draft_sent_confirmation_required');
           if (args.status === 'sent') {
-            const account = (await c.query('select email from actor where slug=$1', [owner])).rows[0]?.email;
+            const partner = (await c.query('select id,email from actor where slug=$1', [owner])).rows[0];
+            const account = partner?.email;
             if (!args.sender_account || args.sender_account !== account) fail('email_draft_sender_mismatch');
             if (!args.sent_at || !Number.isFinite(Date.parse(args.sent_at))) fail('email_draft_sent_time_required');
-            const context = { send_id: row.id, sent_item_id: args.sent_item_id, deal: row.deal_id,
-              sender_account: args.sender_account, to: row.submitted_email.to, cc: row.submitted_email.cc,
+            const source = (await c.query('select email_context from activity where id=$1', [row.activity_id])).rows[0]?.email_context;
+            const context = { subject: row.submitted_email.subject, conversation_id: source?.conversation_id ?? null,
+              sender: { email: args.sender_account, internal: true },
+              recipients: [
+                ...row.submitted_email.to.map(email => ({ email, kind: 'to', internal: source?.sender?.internal === true })),
+                ...row.submitted_email.cc.map(email => ({ email, kind: 'cc', internal: true })),
+              ], send_id: row.id, sent_item_id: args.sent_item_id,
               sent_at: args.sent_at, attachments: (row.submitted_email.attachments ?? []).map(a => ({
                 file_name: a.path.split('/').at(-1), sha256: a.sha256 })) };
             await c.query(`insert into activity(occurred_at,actor_id,kind,summary,deal_id,source,email_context)
               values($1,$2,'email_out','Partner-submitted email sent',$3,'outlook',$4::jsonb)`,
-            [args.sent_at, actor.id, row.deal_id, JSON.stringify(context)]);
+            [args.sent_at, partner.id, row.deal_id, JSON.stringify(context)]);
           }
           const result = args.status === 'sent' ? { status: 'sent', sent_item_id: args.sent_item_id, sender_account: args.sender_account, sent_at: args.sent_at }
             : { status: 'failed', reason: args.reason };
