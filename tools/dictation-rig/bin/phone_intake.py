@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import wave
@@ -24,6 +25,40 @@ import post_call
 
 MIME_TYPES = {'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/m4a', 'audio/x-m4a', 'audio/mpeg', 'audio/webm'}
 ID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+
+
+INTEGER_SETTINGS = ('CALL_MAX_BYTES', 'CALL_MAX_SECONDS', 'CALL_DAILY_ADMISSIONS',
+                    'CALL_PROCESSORS', 'CALL_EXTRACTION_ATTEMPTS')
+REQUIRED_SETTINGS = ('CALL_STUDIO_TOKEN', 'CARR_CAPTURE_BASE_URL', *INTEGER_SETTINGS,
+                     'TYPESAFE_API_KEY')
+
+
+class MissingSettings(ValueError):
+    pass
+
+
+def load_machine_settings() -> dict[str, str]:
+    """Require the shared private settings before any intake or paid work."""
+    from credential_env import load_carr_tokens, TokensFilePermissionError
+
+    try:
+        values = load_carr_tokens(REQUIRED_SETTINGS,
+                                  path=Path.home() / '.config/carr/typesafe.env')
+    except TokensFilePermissionError:
+        raise ValueError('machine settings file must be private (mode 600)') from None
+    missing = [name for name in REQUIRED_SETTINGS if not values.get(name, '').strip()]
+    if missing:
+        raise MissingSettings('missing required machine settings: ' + ', '.join(missing))
+    for name in INTEGER_SETTINGS:
+        try:
+            valid = int(values[name]) > 0
+        except ValueError:
+            valid = False
+        if not valid:
+            raise ValueError(name + ' must be a positive integer')
+    if not values['CARR_CAPTURE_BASE_URL'].startswith('https://'):
+        raise ValueError('CARR_CAPTURE_BASE_URL must use HTTPS')
+    return values
 
 
 def config_limit(name: str, default: int) -> int:
@@ -394,12 +429,15 @@ def main() -> None:
     parser.add_argument('--root', required=True, type=Path)
     parser.add_argument('--process', action='store_true', help='Pull recordings and run one processing sweep')
     args = parser.parse_args()
-    token = os.environ.get('CALL_STUDIO_TOKEN', '')
-    if not token:
-        parser.error('CALL_STUDIO_TOKEN is required')
-    base_url = os.environ.get('CARR_CAPTURE_BASE_URL', '')
-    if not base_url.startswith('https://'):
-        parser.error('CARR_CAPTURE_BASE_URL must use HTTPS')
+    try:
+        settings = load_machine_settings()
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(0)
+    token = settings.pop('CALL_STUDIO_TOKEN')
+    os.environ.pop('CALL_STUDIO_TOKEN', None)
+    os.environ.update(settings)
+    base_url = settings['CARR_CAPTURE_BASE_URL']
     if args.process:
         intake = pull_pending(args.root, {'base_url': base_url}, token)
         print(json.dumps({'intake': intake, 'processors': [
