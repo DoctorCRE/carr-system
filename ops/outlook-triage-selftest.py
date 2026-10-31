@@ -903,17 +903,28 @@ class OutlookTriageTest(FakeOutlookCase):
                 self.assertEqual((outcome.reason, outcome.detail), ('cua_driver_failed', 'click: exit 7'))
                 self.assertIn('click: exit 7', self.report())
 
+    def test_undecodable_driver_output_raises_cua_error(self):
+        from lib.outlook_ui import CuaError, cua
+        for exit_code in (0, 1):
+            with self.subTest(exit_code=exit_code):
+                driver = self.tmp / 'bin/cua-driver'
+                driver.write_text(f"#!{sys.executable}\nimport os\nos.write(1, bytes([255, 254]))\nraise SystemExit({exit_code})\n")
+                with self.assertRaises(CuaError) as caught:
+                    cua('click', {})
+                self.assertEqual(str(caught.exception), 'click: UnicodeDecodeError')
+
     def test_driver_nonzero_error_diagnostic_excludes_mail(self):
         from lib.outlook_ui import CuaError, cua
         from subprocess import CompletedProcess
         cases = [('{"error":{"code":"AX_TIMEOUT"}}', 'Subject: Private deal', 'AX_TIMEOUT'),
-                 ('', 'TimeoutError: Subject: Private deal', 'TimeoutError')]
+                 ('', 'TimeoutError: Subject: Private deal', 'TimeoutError'),
+                 ('{"error":"AX_TIMEOUT"}', '', '')]
         for stdout, stderr, code in cases:
             with self.subTest(code=code), patch('lib.outlook_ui.subprocess.run',
                     return_value=CompletedProcess([], 7, stdout, stderr)):
                 with self.assertRaises(CuaError) as caught:
                     cua('click', {})
-                self.assertEqual(str(caught.exception), f'click: exit 7: {code}')
+                self.assertEqual(str(caught.exception), f'click: exit 7{": " + code if code else ""}')
                 self.assertNotIn('Private deal', str(caught.exception))
 
     def test_files_read_email_by_each_rule_and_never_selects_unread(self):
