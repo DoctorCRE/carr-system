@@ -23,12 +23,15 @@ test("collection works with only ordinary suites", () => {
 
 test("private PostgreSQL clusters run alone without dropping or duplicating suites", () => {
   const postgres = ["email-deal-progress-postgres.test.mjs", "a02-rule-enforcement-postgres.test.mjs", "confirm-merge-schema.test.mjs",
+    "clear-the-deck-postgres.test.mjs", "decision-about-work-request-postgres.test.mjs",
+    "complete-work-request-postgres.test.mjs", "org-conventions-postgres.test.mjs",
+    "team-memory-postgres.test.mjs", "doc-request-notify-postgres.test.mjs",
     "journey-one-clock-input-store.v5.test.mjs", "journey-one-clock-store.v5.test.mjs",
     "lease-radar-postgres.test.mjs", "local-deals-store.test.mjs", "whats-new-store.test.mjs",
     "self-closing-records-sql.test.mjs"];
   const files = ["chrome-launch.test.mjs",
     "ordinary.test.mjs", ...postgres];
-  const batches = suiteBatches(files);
+  const batches = suiteBatches(files, [], postgres);
   for (const file of postgres) assert.deepEqual(batches.find(batch => batch.includes(file)), [file]);
   assert.deepEqual(batches.flat().sort(), files.sort());
 });

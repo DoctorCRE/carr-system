@@ -720,7 +720,7 @@
       "carrying_control": "delegation_names_model_and_effort",
       "home": "gate",
       "id": "6cfb67f5",
-      "reason": "Codex jobs use bin/codex-job and inherit model and effort from Codex config. Codex validates the configuration; explicit -c overrides pass through unchanged.",
+      "reason": "T3 delegate_task accepts explicit provider, model and options; omitted model or effort may inherit. The agent-card gate checks card admission, not model or effort.",
       "title_gist": "CONSTRAINT, binding at the moment a session delegates any task to another seat"
     },
     {

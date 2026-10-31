@@ -120,12 +120,16 @@ class UnitClassTests(unittest.TestCase):
         self.all_packages()
         mcp = self.root / 'mcp-server'
         shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', mcp / 'run-tests.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 2}))
         (mcp / 'test/suite.test.mjs').rename(mcp / 'test/workspace-command-center-browser.test.mjs')
         (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
         (mcp / 'test/second.test.mjs').write_text("import test from 'node:test'; test('second', () => {});")
         result = self.run_class()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('mcp-server: 2 tests, 2 passed', result.stdout)
+        self.assertRegex(result.stdout, r'suite-timing: second\.test\.mjs \d+ms')
+        self.assertRegex(result.stdout, r'suite-timing: workspace-command-center-browser\.test\.mjs \d+ms')
 
     def test_mcp_failed_suite_survives_later_passing_suites(self):
         self.all_packages()
@@ -134,6 +138,8 @@ class UnitClassTests(unittest.TestCase):
         (self.root / 'mcp-server/test/suite.test.mjs').write_text(package_body)
         mcp = self.root / 'mcp-server'
         shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', mcp / 'run-tests.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 2}))
         (mcp / 'test/chrome-launch.test.mjs').write_text(
             "import test from 'node:test'; test('early failure', () => { throw Error('original diagnostic'); });")
         (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
@@ -145,17 +151,27 @@ class UnitClassTests(unittest.TestCase):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'
         runner = (ROOT / 'mcp-server/run-tests.mjs').read_text()
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 33}))
         for n in range(32):
             (mcp / f'test/extra{n}.test.mjs').write_text(
                 "import test from 'node:test'; test('executes', () => {});")
         (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
         command = ['bash', str(self.root / 'ops/ci.sh'), '--strict', '--only', 'unit', '--unit-part', 'mcp']
         receipt = self.root / 'receipt.json'
+        deadline = self.root / 'deadline.txt'
+        watchdog = self.root / 'bin/with-timeout.py'
+        original_watchdog = self.root / 'bin/watchdog.py'
+        watchdog.rename(original_watchdog)
+        watchdog.write_text('import os, sys\nfrom pathlib import Path\n'
+                            f'Path({str(deadline)!r}).write_text(sys.argv[1])\n'
+                            f'os.execv(sys.executable, [sys.executable, {str(original_watchdog)!r}, *sys.argv[1:]])\n')
         shard_env = {**self.env, 'CARR_CI_UNIT_SHARD': '1', 'CARR_CI_UNIT_RECEIPT': str(receipt)}
         (mcp / 'run-tests.mjs').write_text(runner)
         result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(json.loads(receipt.read_text())['suites'])
+        self.assertEqual(deadline.read_text(), '600')
         receipt.unlink()
         (mcp / 'run-tests.mjs').write_text(runner.replace('const files = selected || discovered;',
                                                          'const files = (selected || discovered).slice(1);'))
@@ -208,6 +224,8 @@ class UnitClassTests(unittest.TestCase):
         self.all_packages()
         mcp = self.root / 'mcp-server'
         shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', mcp / 'run-tests.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 1}))
         (mcp / 'test/suite.test.mjs').rename(mcp / 'test/workspace-command-center-browser.test.mjs')
         (mcp / 'test/workspace-command-center-browser.test.mjs').write_text(
             "import test from 'node:test'; test.skip('missing dependency', () => {});")

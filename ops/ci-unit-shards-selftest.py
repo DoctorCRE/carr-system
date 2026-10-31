@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the shard receipt command with omitted and empty execution."""
 import json
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -11,6 +12,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ShardCoverage(unittest.TestCase):
+    def inventory(self, root, expected):
+        mcp = root / 'mcp-server'
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': expected}))
+
     def test_measured_durations_balance_and_discovery_keeps_new_suites(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -24,11 +30,13 @@ class ShardCoverage(unittest.TestCase):
             timing_file = root / 'ops/config/ci-unit-durations.json'
             timing_file.parent.mkdir(parents=True)
             timing_file.write_text(json.dumps({'suites': records}))
+            self.inventory(root, len(list(tests.glob("*.test.mjs"))))
             command = [sys.executable, str(ROOT / 'ops/ci_unit_shards.py'), '--root', str(root), 'plan']
             result = subprocess.run(command, text=True, capture_output=True, check=True)
             shards = json.loads(result.stdout)
             self.assertEqual(sorted(sum(records[file]['milliseconds'] for file in shard) for shard in shards), [100] * 4)
             (tests / 'new.test.mjs').touch()
+            self.inventory(root, 9)
             result = subprocess.run(command, text=True, capture_output=True, check=True)
             self.assertEqual(sorted(file for shard in json.loads(result.stdout) for file in shard), sorted([*records, 'new.test.mjs']))
             log = root / 'incomplete.log'
@@ -46,6 +54,7 @@ class ShardCoverage(unittest.TestCase):
             tests.mkdir(parents=True)
             for n in range(32):
                 (tests / f'suite{n}.test.mjs').write_text('')
+            self.inventory(root, len(list(tests.glob("*.test.mjs"))))
             command = [sys.executable, str(ROOT / 'ops/ci_unit_shards.py'), '--root', str(root)]
             plan = subprocess.run([*command, 'plan'], text=True, capture_output=True)
             self.assertEqual(plan.returncode, 0, plan.stderr)

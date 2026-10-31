@@ -75,7 +75,7 @@ def hosted_verdict(*, drift=False):
 def contract_digest(root=ROOT):
     digest = hashlib.sha256()
     for name in ('.github/workflows/ci.yml', 'ops/ci-evidence.py', 'ops/ci.sh', 'ops/ci-unit.py',
-                 'ops/config/ci-unit-durations.json', 'ops/ci_unit_shards.py', 'mcp-server/run-tests.mjs', 'ops/ci-pushfloor.py', 'ops/ci-migration.py', 'ops/ci-gates.py', 'ops/ci-secret.py',
+                 'mcp-server/suite-discovery.mjs', 'mcp-server/suite-inventory.json', 'ops/config/ci-unit-durations.json', 'ops/ci_unit_shards.py', 'mcp-server/run-tests.mjs', 'ops/ci-pushfloor.py', 'ops/ci-migration.py', 'ops/ci-gates.py', 'ops/ci-secret.py',
                  'ops/node_test_summary.py',
                  'ops/ci-node-file.mjs',
                  'requirements.lock',

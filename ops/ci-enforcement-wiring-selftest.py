@@ -30,7 +30,7 @@ def unwired_checks(catalog, mutate=lambda root: None):
         with fixture.ci_fixture() as root:
             # Evidence hashes the actual CI contract, even in a synthetic checkout.
             for rel in (".github/workflows/ci.yml", "ops/ci-evidence.py", "ops/ci-unit.py",
-                        "ops/config/ci-unit-durations.json", "ops/ci-node-file.mjs", "ops/ci_unit_shards.py", "mcp-server/run-tests.mjs",
+                        "mcp-server/suite-discovery.mjs", "mcp-server/suite-inventory.json", "ops/config/ci-unit-durations.json", "ops/ci-node-file.mjs", "ops/ci_unit_shards.py", "mcp-server/run-tests.mjs",
                         "mcp-server/package-lock.json", ".nvmrc", ".python-version"):
                 target = root / rel
                 target.parent.mkdir(parents=True, exist_ok=True)

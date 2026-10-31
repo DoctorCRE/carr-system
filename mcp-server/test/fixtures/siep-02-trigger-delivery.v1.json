@@ -1,6 +1,6 @@
 {
   "schema_version": "siep-02-trigger-delivery-fixture.v1",
-  "reviewed_map_sha256": "sha256:168df7ba8abab350627531ad6a68b1b8d7ac2381087f0a21decd933cb67e1d28",
+  "reviewed_map_sha256": "sha256:7fd3df5915191d622359be00c4ea96c05a29cb99ea3da394a01217824984062b",
   "cases": [
     {
       "case_ref": "title-only-structural-work",

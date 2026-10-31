@@ -3,7 +3,6 @@
 import argparse
 from collections import Counter
 import heapq
-import statistics
 import subprocess
 import json
 from pathlib import Path
@@ -14,8 +13,8 @@ COUNT = 4
 
 
 def suite_files(root):
-    return sorted(file.name for file in (root / 'mcp-server/test').iterdir()
-                  if file.is_file() and re.search(r'\.test\.(?:js|mjs)$', file.name))
+    return json.loads(subprocess.check_output(['node', str(root / 'mcp-server/suite-discovery.mjs')],
+                                              cwd=root, text=True))
 
 
 def estimate(files, records):
@@ -33,7 +32,7 @@ def estimate(files, records):
 def plan(root=ROOT):
     timing_file = root / 'ops/config/ci-unit-durations.json'
     measured = json.loads(timing_file.read_text())['suites'] if timing_file.exists() else {}
-    fallback = statistics.median(row['milliseconds'] for row in measured.values()) if measured else 1000
+    fallback = max((row['milliseconds'] for row in measured.values()), default=1000)
     records = {file: measured.get(file, {'milliseconds': fallback, 'serial': True}) for file in suite_files(root)}
     shards = [[] for _ in range(COUNT)]
     for file in sorted(records, key=lambda file: (
@@ -57,12 +56,16 @@ def regenerate(logs, source_run, output, root=ROOT):
         raise ValueError(f'timings must cover current suites: missing={sorted(set(expected) - samples.keys())}, '
                          f'unexpected={sorted(samples.keys() - set(expected))}')
     script = """import {suiteBatches} from './mcp-server/run-tests.mjs';
-import {readdir,readFile} from 'node:fs/promises';
-const files=await readdir('mcp-server/test'), browsers=[];
-for(const file of files.filter(file=>/\\.test\\.(?:mjs|js)$/.test(file)))
-  if((await readFile('mcp-server/test/'+file,'utf8')).includes('chrome-launch.mjs')) browsers.push(file);
-console.log(JSON.stringify(suiteBatches(files,browsers)));"""
-    batches = json.loads(subprocess.check_output(['node', '--input-type=module', '-e', script], cwd=root, text=True))
+import {readFile} from 'node:fs/promises';
+const files=JSON.parse(process.argv[1]), browsers=[], postgres=[];
+for(const file of files) {
+  const source=await readFile('mcp-server/test/'+file,'utf8');
+  if(source.includes('chrome-launch.mjs')) browsers.push(file);
+  if(/disposable-postgres\\.mjs|postgres-database\\.mjs|initdb/.test(source)) postgres.push(file);
+}
+console.log(JSON.stringify(suiteBatches(files,browsers,postgres)));"""
+    batches = json.loads(subprocess.check_output(['node', '--input-type=module', '-e', script, json.dumps(expected)],
+                                                cwd=root, text=True))
     serial = {file for batch in batches if len(batch) == 1 for file in batch}
     data = {'source_run': source_run, 'suites': {file: {'milliseconds': samples[file], 'serial': file in serial}
                                               for file in expected}}
