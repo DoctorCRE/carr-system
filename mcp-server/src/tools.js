@@ -1,4 +1,5 @@
 // Register MCP tools and their shared write envelope.
+import { practiceOriginationTools } from "./practice-origination.ts";
 import { vendorMeetingTools } from "./vendor-meetings.js";
 import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.ts";
 import { canonicalJson } from "./artifact-trust.js";
@@ -7,6 +8,7 @@ import { invoiceTrackerTools } from "./invoice-tracker.ts";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.ts";
+import { dealExtractionTools } from "./deal-extraction.js";
 import { factReviewTools } from "./fact-review.ts";
 import { factObservationTools } from "./fact-observations.ts";
 import { actionClosureTools } from "./action-closure.ts";
@@ -9083,7 +9085,9 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "work-request-intake": "mcp-server/src/work-request-intake.js",
   "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
   "fact-review": "mcp-server/src/fact-review.ts",
+  "deal-extraction": "mcp-server/src/deal-extraction.js",
   "fact-observations": "mcp-server/src/fact-observations.ts",
+  "practice-origination": "mcp-server/src/practice-origination.ts",
   "partner-room": "mcp-server/src/partner-room.js",
   "agent-profile": "mcp-server/src/agent-profiles.js",
   "client-portal": "mcp-server/src/client-portal.ts",
@@ -9158,11 +9162,13 @@ function registerTools(additions, source) {
 
 registerTools(invoiceTrackerTools({ ToolError, withEnvelope, writeEvent }), "invoice-tracker");
 
+const DEAL_ROOM_HISTORY_CAP = 500;
+
 // Deal Room contract. Durable writes use the same envelope and event helper as
 // the rest of this registry; the one explicit exception is the ephemeral lease.
 registerTools({
   "get-deal-room": {
-    description: "Read one complete Deal Room work record, including closed and invoiced deals: board/workspace and active/parked fields, next actions, notes, critical dates, up to 500 newest activities, parties, premises, current economics, documents, and attributed history. activities_truncated indicates whether older activities were omitted. email_threads contains conversation_id, subject and latest_message_at from the latest filed message, newest first; messages without a conversation ID appear individually. Includes salesforce_id and base_version only so a reconciler can make one guarded follow-on write. Placeholder Salesforce fields are structurally excluded.",
+    description: "Read one complete Deal Room work record, including closed and invoiced deals: board/workspace and active/parked fields, next actions, notes, critical dates, up to 500 newest activities, notes and events, parties, premises, current economics, documents, and attributed history. activities_truncated, thread_truncated and events_truncated indicate whether older entries were omitted. email_threads contains conversation_id, subject and latest_message_at from the latest filed message, newest first; messages without a conversation ID appear individually. Includes salesforce_id and base_version only so a reconciler can make one guarded follow-on write. Placeholder Salesforce fields are structurally excluded.",
     inputSchema: { type: "object", properties: { deal: { type: "string" } }, required: ["deal"] },
     handler: async (c, _actor, args) => {
       const s = await resolveSubject(c, args.deal);
@@ -9206,8 +9212,8 @@ registerTools({
           where b.id=$1 /* dealroom:archived-detail */`, [s.id]);
       if (!deal.rows.length) throw new ToolError({ error: "not_found", table: "deal", id: s.id });
       const thread = await c.query(
-        "select id, kind, text, actor, to_jsonb(created_at)#>>'{}' as created_at from v_deal_room_note where deal_id=$1 order by created_at desc, id desc",
-        [s.id],
+        "select id, kind, text, actor, to_jsonb(created_at)#>>'{}' as created_at from v_deal_room_note where deal_id=$1 order by created_at desc, id desc limit $2",
+        [s.id, DEAL_ROOM_HISTORY_CAP + 1],
       );
       const criticalDates = await c.query(
         "select id, kind, to_jsonb(due_on)#>>'{}' as due_on, note, source, status from v_deal_room_critical_date where deal_id=$1 order by due_on, id",
@@ -9216,8 +9222,8 @@ registerTools({
       const history = await c.query(
         `select id, to_jsonb(recorded_at)#>>'{}' as recorded_at, actor, verb, field, old_value, new_value
            from v_deal_room_event where subject_id=$1
-          order by recorded_at desc, id desc`,
-        [s.id],
+          order by recorded_at desc, id desc limit $2`,
+        [s.id, DEAL_ROOM_HISTORY_CAP + 1],
       );
       const actions = await c.query(
         `select n.id, n.owner, n.description, n.item_title as title, n.item_bullets as bullets, n.source_ref,
@@ -9231,7 +9237,7 @@ registerTools({
         `select a.id, to_jsonb(a.occurred_at)#>>'{}' as occurred_at, a.actor,
                 a.kind, a.summary, a.detail, a.source, a.email_context
            from v_deal_room_activity a
-          where a.deal_id=$1 order by a.occurred_at desc, a.id desc limit 501`, [s.id]);
+          where a.deal_id=$1 order by a.occurred_at desc, a.id desc limit $2`, [s.id, DEAL_ROOM_HISTORY_CAP + 1]);
       const emailThreads = await c.query(
         `select conversation_id, subject, latest_message_at from (
            select distinct on (email_context->>'conversation_id',
@@ -9274,13 +9280,13 @@ registerTools({
            from v_deal_room_current_lease where deal_id=$1`, [s.id]);
       const checklist = await readDealChecklist(c, { ...deal.rows[0], lease: lease.rows[0] || null, critical_dates: criticalDates.rows });
       return stripDealPlaceholders({ schema_version: "deal-timeline.v1", checklist, lease: lease.rows[0] || null,
-        deal_id: s.id, ...deal.rows[0], short_name: shortDealHeading(deal.rows[0]), thread: thread.rows,
+        deal_id: s.id, ...deal.rows[0], short_name: shortDealHeading(deal.rows[0]), thread: thread.rows.slice(0, DEAL_ROOM_HISTORY_CAP), thread_truncated: thread.rows.length > DEAL_ROOM_HISTORY_CAP,
         critical_dates: criticalDates.rows, next_actions: actions.rows,
         item_schema_version: DEAL_ITEMS_SCHEMA, items: actions.rows.filter(i => i.title && !['dropped', 'expired'].includes(i.status))
           .map(({ id,title,due_on,status,bullets,source_ref }) => ({ id,title,due_on,status,bullets,source_ref })),
-        activities: activities.rows.slice(0, 500), activities_truncated: activities.rows.length > 500, email_threads: emailThreads.rows, participants: participants.rows,
+        activities: activities.rows.slice(0, DEAL_ROOM_HISTORY_CAP), activities_truncated: activities.rows.length > DEAL_ROOM_HISTORY_CAP, email_threads: emailThreads.rows, participants: participants.rows,
         premises: premises.rows, negotiation_rounds: negotiation.rows,
-        documents: documents.rows, events: history.rows });
+        documents: documents.rows, events: history.rows.slice(0, DEAL_ROOM_HISTORY_CAP), events_truncated: history.rows.length > DEAL_ROOM_HISTORY_CAP });
     },
   },
 
@@ -10685,6 +10691,7 @@ registerTools(workPortfolioTools({ ToolError }), "work-portfolio");
 registerTools(leaseTermComparisonTools({ ToolError }), "lease-term-comparison");
 registerTools(factObservationTools(), "fact-observations");
 registerTools(factReviewTools(), "fact-review");
+registerTools(dealExtractionTools(), "deal-extraction");
 
 // The partner room (Idea 78): shared AI-to-AI transcript both Macs poll; raw
 // turns, server-derived attribution, human-watchable. See src/partner-room.js.
@@ -10784,5 +10791,7 @@ registerTools(assuranceHealthStoreTools({ withEnvelope, ToolError }), "assurance
 registerTools(ruleContextRuntimeTools({ withEnvelope, ToolError }), "rule-context-runtime");
 
 registerTools(vendorMeetingTools(), "vendor-meetings");
+
+registerTools(practiceOriginationTools({ withEnvelope }), "practice-origination");
 
 Object.freeze(TOOLS);
