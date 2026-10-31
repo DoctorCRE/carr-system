@@ -376,16 +376,60 @@ if __name__ == '__main__':
     parser.add_argument('--pg-ctl')
     parser.add_argument('--data-name')
     parser.add_argument('--directory', default='/tmp')
+    parser.add_argument('--snapshot', action='store_true')
+    parser.add_argument('--snapshot-template', action='store_true')
+    parser.add_argument('--snapshot-copy')
+    parser.add_argument('--snapshot-key')
+    parser.add_argument('--snapshot-baseline', action='store_true')
+    parser.add_argument('--service-database', action='store_true')
     args = parser.parse_args()
+    snapshot_schema = Path(__file__).resolve().parents[1] / 'db/schema.sql'
+    if args.snapshot or args.snapshot_template:
+        from postgres_snapshot_fixture import snapshot_key
+        key = snapshot_key(snapshot_schema, args.snapshot_baseline)
+        source_baseline = args.snapshot_baseline or args.snapshot_template
+        expected = key.rsplit(':', 1)[0] + (':baseline' if source_baseline else ':current')
+        if args.snapshot_copy and args.snapshot_key != expected:
+            args.snapshot_copy = None
+        migrate = not args.snapshot_baseline and (not args.snapshot_copy or args.snapshot_template)
+    if args.supervise and (args.snapshot or args.snapshot_template or args.service_database) and os.environ.get('CARR_CI_DATABASE_URL'):
+        from postgres_service_fixture import service_database
+        with service_database(os.environ['CARR_CI_DATABASE_URL'], args.prefix,
+                              snapshot_schema if not args.service_database else None,
+                              args.snapshot_copy, template=args.snapshot_template,
+                              migrate=migrate if not args.service_database else False) as metadata:
+            if not args.service_database:
+                metadata['key'] = key
+            print(json.dumps(metadata), flush=True)
+            for line in sys.stdin:
+                if 'close' in json.loads(line):
+                    break
+                print(json.dumps({'returncode': 1, 'stdout': '',
+                                  'stderr': 'CI-service snapshots support SQL connections only'}), flush=True)
+        sys.exit(0)
     if args.supervise:
         # Callers hold stdin open. EOF (caller closed or died) stops every
         # cluster this process launched; a close request lets the caller retain
         # the root as evidence.
         _supervising = True
+        binaries = postgres_bin_dir() if args.snapshot or args.snapshot_template else None
+        if binaries:
+            args.pg_ctl = str(binaries / 'pg_ctl')
         with DisposablePostgres(args.prefix, args.pg_ctl, directory=args.directory) as fixture:
             if args.data_name:
                 fixture.register(fixture.root / args.data_name)
-            print(fixture.root, flush=True)
+            if binaries:
+                from postgres_snapshot_fixture import start_snapshot
+                start_snapshot(fixture, binaries, snapshot_schema, args.snapshot_copy,
+                               template=args.snapshot_template, migrate=migrate)
+            if binaries:
+                from urllib.parse import quote
+                print(json.dumps({'root': str(fixture.root),
+                    'connection': {'host': str(fixture.root), 'user': 'carr_ci', 'database': 'carr_ci'},
+                    'dsn': f'postgresql://carr_ci@localhost/carr_ci?host={quote(str(fixture.root), safe="")}',
+                    'snapshot': str(fixture.root / 'data'), 'key': key}), flush=True)
+            else:
+                print(fixture.root, flush=True)
             for line in sys.stdin:
                 request = json.loads(line)
                 if 'close' in request:
