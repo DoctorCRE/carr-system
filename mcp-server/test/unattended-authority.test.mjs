@@ -184,12 +184,12 @@ test("identity merges, retrieval, board answers, partner-only deal acts and huma
   assert.equal(TOOLS["confirm-merge"].humanCallerOnly, true);
   assert.equal(TOOLS["confirm-merge"].humanOnly, true);
   const flagged = Object.keys(TOOLS).filter(name => TOOLS[name].humanCallerOnly === true);
-  assert.deepEqual(flagged.sort(), ["adopt-rule", "answer-board-question", "answer-work-request-for-joe",
-    "append-tour-entrance-verification-receipt", "approve-retrieval-proposals", "cancel-pending-deal", "commit-winning-property",
-    "confirm-email-deal-progress", "confirm-email-filing", "confirm-email-next-step", "confirm-merge", "dismiss-email-proposal",
+  assert.deepEqual(flagged.sort(), ["answer-board-question", "answer-work-request-for-joe",
+    "append-tour-entrance-verification-receipt", "cancel-pending-deal", "commit-winning-property",
+    "confirm-email-deal-progress", "confirm-email-filing", "confirm-email-next-step", "confirm-merge", "confirm-requirement-reply", "dismiss-email-proposal",
     "record-artifact-preservation-hold", "record-deal-closing", "record-evidence-subject-link", "record-lifecycle-correction",
     "record-partner-lifecycle-fact", "record-tour-map-promotion-receipt", "record-tour-pdf-human-review",
-    "register-record-source-authority-policy", "retire-retrieval-curation", "submit-email-draft", "undo-email-thread-filing"]);
+    "register-record-source-authority-policy", "reject-requirement-reply", "retire-retrieval-curation", "submit-email-draft", "undo-email-thread-filing"]);
 });
 
 test("confirm-merge refuses the unattended actor before database access", async () => {
@@ -233,8 +233,10 @@ test("allowlisted authority verbs pass every partner-authority gate for the unat
   }
 });
 
-test("rule-context and deal-fact verbs refuse the unattended actor before database access", async () => {
-  for (const verb of ["bind-rule-context-contract", "record-executed-lease"]) {
+test("rule-context, rule-adoption and deal-fact verbs refuse the unattended actor before database access", async () => {
+  // adopt-rule admits attended sponsored agents (WR-000631) but stays off the
+  // unattended allowlist, so this gate is what refuses the unattended runner.
+  for (const verb of ["bind-rule-context-contract", "adopt-rule", "record-executed-lease"]) {
     const error = await gateError(unattended(), verb);
     assert.ok(error instanceof ToolError, `${verb}: expected a ToolError, got ${error}`);
     assert.equal(error.payload.error, "unattended_runner_authority_not_admitted", verb);
@@ -254,7 +256,7 @@ test("every humanOnly/authorityOnly verb off the allowlist refuses the unattende
 
 test("the allowlist does not narrow the attended local door", async () => {
   const local = agentActorForToken(BEARER, JSON.stringify({ "joe-local": SECRET }), "local-token");
-  for (const verb of ["bind-rule-context-contract", "accept-ready-plan", "record-executed-lease"]) {
+  for (const verb of ["bind-rule-context-contract", "accept-ready-plan", "adopt-rule", "record-executed-lease"]) {
     assert.equal(TOOLS[verb]?.authorityOnly, true, verb);
     assert.notEqual((await gateError(local, verb))?.payload?.error,
       "unattended_runner_authority_not_admitted", verb);

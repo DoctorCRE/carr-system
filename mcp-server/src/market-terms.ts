@@ -57,8 +57,9 @@ export function rebuildMarketTerms(snapshot: Snapshot, query: Query = {}) {
   return { ok: true, schema_version: 'market-terms.v1', empty: rows.length === 0, rows,
     coverage: { ...snapshot.coverage, coverage_scope: 'tenant_all_recorded_sources',
       unclassified_receipts: snapshot.coverage.canonical_receipts - snapshot.coverage.classified_receipts,
-      unsupported_receipts: snapshot.coverage.canonical_receipts - snapshot.coverage.classified_receipts
-        + snapshot.receipts.filter(receipt => !receipt.eligible).length,
+      eligible_receipts: snapshot.receipts.filter(receipt => receipt.eligible).length,
+      unsupported_receipts: snapshot.receipts.filter(receipt => !receipt.eligible).length,
+      superseded_without_context: snapshot.coverage.classified_receipts - snapshot.receipts.length,
       comparable_rows: rows.length, comparable_deals: new Set(rows.map(row => row.entity_ref)).size },
   };
 }
@@ -67,7 +68,7 @@ export function marketTermsTools() {
   return {
     'read-market-terms': {
       write: false,
-      description: 'Compare confirmed economic terms from recorded firm history, filtered by exact submarket and use_type. Optional as_of selects half-open business effective periods. Returns rows with canonical receipt, counter/executed classification, term date, confidence basis, expense basis and source evidence. Amendments close the prior field period and comparable_deals counts distinct entities, not terms. Tenant-wide source coverage remains explicit even for empty results; archive size and history coverage are unknown. Contextless facts are counted but never guessed into comparables. Quarantine is recomputed on every read; human-reviewed facts survive and rule-promoted facts require an unaffected independent pair. This is firm history, not external market comps.',
+      description: 'Compare confirmed economic terms from recorded firm history, filtered by exact submarket and use_type. Optional as_of selects half-open business effective periods. Returns rows with canonical receipt, counter/executed classification, term date, confidence basis, expense basis and source evidence. Amendments close the prior field period and comparable_deals counts distinct entities, not terms. Tenant-wide source coverage remains explicit even for empty results; archive size and history coverage are unknown. Unclassified receipts lack context; classified receipts are partitioned into eligible, unsupported, and superseded_without_context counts across the tenant, independent of filters and period deduplication. Contextless facts are never guessed into comparables. Quarantine is recomputed on every read; human-reviewed facts survive and rule-promoted facts require an unaffected independent pair. This is firm history, not external market comps.',
       inputSchema,
       handler: async (c: Db, actor: Actor, args: Query) => {
         if (!validator.validate(args).valid) throw new ToolError({ error: 'validation_error' });

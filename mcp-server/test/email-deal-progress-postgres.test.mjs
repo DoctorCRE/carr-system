@@ -1,63 +1,18 @@
 // Test email-sourced deal progress proposals and confirmation in PostgreSQL.
 import test, { before, beforeEach, after } from 'node:test';
-import { NOW } from './helpers/fixed-clock.mjs';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { readFileSync } from 'node:fs';
 import { randomUUID, createHash } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
-import { applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 
-let fixture, admin, database, c, actor, deal, clientRef, connection;
+let fixture, c, actor, deal, clientRef, connection;
 before(async () => {
-  const ciDsn = process.env.CARR_CI_DATABASE_URL;
-  let bin;
-  if (ciDsn) {
-    const url = new URL(ciDsn);
-    assert.ok(['postgres:', 'postgresql:'].includes(url.protocol));
-    assert.ok(['127.0.0.1', 'localhost'].includes(url.hostname), 'fixture requires disposable loopback PostgreSQL');
-    assert.equal(url.search, '', 'fixture connection must not override its loopback host');
-    admin = new pg.Client({ connectionString: ciDsn });
-    await admin.connect();
-    const name = `email_progress_${randomUUID().replaceAll('-', '')}`;
-    await admin.query(`create database "${name}" template template0`);
-    database = name;
-    url.pathname = `/${database}`;
-    connection = { connectionString: url.href };
-  } else {
-    bin = ['/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin',
-      '/opt/homebrew/opt/postgresql@18/bin', '/usr/lib/postgresql/18/bin'].find(p => existsSync(`${p}/initdb`));
-    assert.ok(bin, 'PostgreSQL is required for the isolated record-layer proof');
-    fixture = await acquireDisposablePostgres({ prefix: 'email-progress-', pgCtl: `${bin}/pg_ctl` });
-    await fixture.run(`${bin}/initdb`, ['-D', `${fixture.root}/data`, '-U', 'carr_ci', '--auth=trust', '--no-locale']);
-    await fixture.run(`${bin}/pg_ctl`, ['-D', `${fixture.root}/data`, '-l', `${fixture.root}/server.log`, '-o', `-k ${fixture.root} -h ''`, '-w', 'start']);
-    await fixture.run(`${bin}/createdb`, ['-h', fixture.root, '-U', 'carr_ci', 'carr_ci']);
-    connection = { host: fixture.root, user: 'carr_ci', database: 'carr_ci' };
-  }
+  fixture = await acquireDisposablePostgres({ prefix: 'email-progress-', snapshot: true });
+  connection = fixture.connection;
   c = new pg.Client(connection);
   await c.connect();
-  await c.query('do $$ begin create role neondb_owner; exception when duplicate_object then null; end $$;');
-  const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
-  if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
-  else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
-  await applyPendingDealRoomReads(c);
-  if (!(await c.query("select 1 from information_schema.columns where table_schema='public' and table_name='activity' and column_name='email_source'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1008_email_reply_draft.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select 1 from information_schema.columns where table_schema='public' and table_name='activity' and column_name='email_context'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1020_email_deal_matching.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select to_regclass('public.v_email_reply_partner') as relation")).rows[0].relation)
-    await c.query(readFileSync(new URL('../../migrations/1010_email_reply_recipients.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select 1 from information_schema.columns where table_schema='public' and table_name='email_proposal' and column_name='result_recorded_at'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1022_email_send_result_time.sql', import.meta.url), 'utf8'));
-  await c.query(readFileSync(new URL('../../migrations/1026_email_recent_outcomes_index.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select to_regclass('public.v_email_thread_filing_event') as relation")).rows[0].relation)
-    await c.query(readFileSync(new URL('../../migrations/1023_email_thread_filing_events.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select 1 from information_schema.columns where table_schema='public' and table_name='activity' and column_name='email_identity'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1068_email_identity.sql', import.meta.url), 'utf8'));
-  await c.query(readFileSync(new URL('../../migrations/1069_email_non_deal_steps.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic physician',$1,$1) returning id", [actor.id])).rows[0].id;
   await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
@@ -66,11 +21,7 @@ before(async () => {
   deal = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic coastal purchase',$1,'purchase','site_selection','joe',$2,$2) returning id", [client.id, actor.id])).rows[0].id;
 });
 after(async () => {
-  try { await c?.end(); }
-  finally {
-    try { if (database) await admin.query(`drop database "${database}"`); }
-    finally { await Promise.all([admin?.end(), fixture?.close()]); }
-  }
+  try { await c?.end(); } finally { await fixture?.close(); }
 });
 
 beforeEach(async () => { await c.query("update deal set phase='site_selection',deal_type='purchase' where id=$1", [deal]); });
@@ -786,7 +737,7 @@ test('Joe can read the captured source of an exact client-linked email proposal'
   assert.equal(result.source.evidence_quote, quote);
   assert.equal(result.source.kind, 'email_in');
   assert.equal(result.source.evidence_matches_captured_text, true);
-  assert.equal(new Date(result.source.occurred_at).toISOString(), result.source.occurred_at);
+  assert.equal(Temporal.Instant.from(result.source.occurred_at).toString({ fractionalSecondDigits: 3 }), result.source.occurred_at);
   assert.equal(result.suspected_instruction, null);
   assert.equal(result.source.text_is_untrusted, true);
   assert.equal(result.source.completeness, 'unknown');
@@ -1025,7 +976,7 @@ test('email proposal history retains confirmed and dismissed evidence without co
     assert.equal(item.source.evidence_quote, evidence);
     assert.equal(item.resolution.resolved_by, actor.id);
     assert.equal(item.resolution.reason, reason);
-    assert.equal(new Date(item.resolution.resolved_at).toISOString(), item.resolution.resolved_at);
+    assert.equal(Temporal.Instant.from(item.resolution.resolved_at).toString({ fractionalSecondDigits: 3 }), item.resolution.resolved_at);
     assert.equal(item.confirm_verb, null);
     assert.equal(item.preview, null);
     assert.equal(item.preview_error, null);
@@ -1436,7 +1387,7 @@ test('reply drafts keep captured mailbox ownership and submit the exact partner 
   assert.equal(submitted.status, 'approved_to_send');
   assert.equal(submitted.subject, args.subject);
   assert.equal(submitted.body, args.body);
-  assert.equal(submitted.sha256, '974630aaef6abfe952e460c370445eae6c38611048eb5737e3a50f924801df13');
+  assert.equal(submitted.sha256, createHash('sha256').update(JSON.stringify({ subject: args.subject, body: args.body }), 'utf8').digest('hex'));
   assert.equal((await command('submit-email-draft', args, actor, 'carr_writer')).replayed, true);
   const outbox = await command('outbox-for-sender', {}, { ...router(), slug: 'joe-local' }, 'carr_reader');
   assert.equal(outbox.drafts.length, 1);
@@ -1606,7 +1557,7 @@ test('only the sending Mac records matching Sent Items confirmation once and rem
   assert.equal(sent.send_result.reason, 'body_unverified');
   assert.equal(sent.send_result.sent_item_id, 'synthetic-sent-item');
   assert.equal(sent.send_result.status, 'sent');
-  assert.ok(new Date(sent.result_recorded_at) >= beforeResult && new Date(sent.result_recorded_at) <= afterResult);
+  assert.ok(Date.parse(sent.result_recorded_at) >= beforeResult.getTime() && Date.parse(sent.result_recorded_at) <= afterResult.getTime());
 });
 
 test('sent receipt preserves the body mismatch reason on the proposal', async () => {
@@ -1635,7 +1586,7 @@ test('failed delivery requires a reason and is recorded once without an automati
   const afterResult = (await c.query('select clock_timestamp() as time')).rows[0].time;
   const failed = (await command('list-email-proposals', { status: 'failed' }, actor, 'carr_reader')).proposals[0];
   assert.equal(failed.send_result.status, 'failed');
-  assert.ok(new Date(failed.result_recorded_at) >= beforeResult && new Date(failed.result_recorded_at) <= afterResult);
+  assert.ok(Date.parse(failed.result_recorded_at) >= beforeResult.getTime() && Date.parse(failed.result_recorded_at) <= afterResult.getTime());
   await c.query('update email_proposal set result_recorded_at=null where id=$1', [proposal.proposal_id]);
   const legacy = (await command('list-email-proposals', { status: 'failed' }, actor, 'carr_reader')).proposals[0];
   assert.equal(legacy.result_recorded_at, null);
@@ -1831,7 +1782,7 @@ test('filing list provides source email and recorded version for undo', async ()
   const { reply, filing, capturedAt } = await automaticThreadFiling();
   assert.equal(filing.subject, 'Synthetic thread');
   assert.equal(filing.sender_name, 'Synthetic Sender');
-  assert.equal(new Date(filing.occurred_at).toISOString(), new Date(capturedAt).toISOString());
+  assert.equal(filing.occurred_at.toISOString(), Temporal.Instant.fromEpochMilliseconds(capturedAt).toString({ fractionalSecondDigits: 3 }));
   assert.equal(filing.activity_version, 2);
   assert.equal(filing.activity_id, reply.activity_id);
   assert.equal(filing.deal, deal);
@@ -1949,7 +1900,7 @@ test('confirmed submitted files appear on deal correspondence with sender, recip
   assert.equal(sent.actor, 'joe');
   assert.equal(sent.email_context.sent_at, confirmation.sent_at);
   assert.deepEqual(sent.email_context.sender, { email: 'joe@example.test', internal: true });
-  assert.equal(new Date(sent.occurred_at).toISOString(), '2026-01-04T12:00:00.000Z');
+  assert.equal(Temporal.Instant.from(sent.occurred_at).toString({ fractionalSecondDigits: 3 }), '2026-01-04T12:00:00.000Z');
   assert.deepEqual(sent.email_context.recipients, [
     { email: 'sender@example.test', kind: 'to', internal: false },
     { email: 'dell@example.test', kind: 'cc', internal: true },

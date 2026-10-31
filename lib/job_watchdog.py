@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 from pathlib import Path
 import plistlib
 import re
@@ -16,7 +18,7 @@ from zoneinfo import ZoneInfo
 from email_outcomes import business_day_deadline
 from outlook_settings import load_settings
 
-from local_jobs import append, command, locked, path_at, read_latest, stamp, tail
+from local_jobs import append, command, epoch, locked, path_at, read_latest, stamp, tail
 
 SOURCE = Path(__file__).resolve().parents[1]
 KINDS = {"job_failed", "job_degraded", "disk_low"}
@@ -268,19 +270,60 @@ def report_social_batch(root, config, *, week_start, queue_count=None,
             "queue_complete": queue_complete, "failure_class": failure_class}
 
 
-def digest(root, config, *, session_id=None):
-    active = sorted((f for f in read_latest(path_at(root, config["paths"]["findings"])).values()
-                     if f.get("kind") in KINDS and (f["kind"] != "job_failed" or "exit_code" in f)
-                     and not f.get("cleared_at")), key=lambda f: f["key"])
-    view = [{k: f.get(k) for k in ("key", "reason")} for f in active]
-    if session_id:
-        signature = hashlib.sha256(json.dumps(view, sort_keys=True).encode()).hexdigest()
-        session = hashlib.sha256(session_id.encode()).hexdigest()
-        path = root / "out/watchdog/banner-sessions" / (session + ".digest")
-        with locked(path.with_suffix(".lock")):
-            if path.exists() and path.read_text() == signature:
-                return ""
-            path.write_text(signature)
+def active_findings(root, config):
+    return sorted((f for f in read_latest(path_at(root, config["paths"]["findings"])).values()
+                   if f.get("kind") in KINDS and (f["kind"] != "job_failed" or "exit_code" in f)
+                   and not f.get("cleared_at")), key=lambda f: f["key"])
+
+
+def deliver_findings(root, config, now):
+    inbox = path_at(root, config["paths"]["orchestrator_inbox"])
+    with locked(inbox.with_suffix(".lock")):
+        previous = {}
+        lines = []
+        if inbox.exists():
+            lines = inbox.read_bytes().splitlines(keepends=True)
+            for index, line in enumerate(lines):
+                try:
+                    row = json.loads(line)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    if index == len(lines) - 1 and not line.endswith(b"\n"):
+                        break
+                    raise
+                previous[row["key"]] = row
+        current = {}
+        for finding in active_findings(root, config):
+            content = {k: v for k, v in finding.items() if k not in {"last_seen", "cleared_at"}}
+            signature = hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
+            prior = previous.get(finding["key"], {})
+            if (prior.get("signature") == signature
+                    and now - epoch(prior["delivered_at"]) < config["thresholds"]["reminder_seconds"]):
+                current[finding["key"]] = prior
+            else:
+                current[finding["key"]] = {"key": finding["key"], "owner": "orchestrator", "signature": signature,
+                                           "delivered_at": stamp(now), "finding": finding}
+        if current != previous or len(lines) != len(previous) or (lines and not lines[-1].endswith(b"\n")):
+            fd, temporary = tempfile.mkstemp(prefix=f".{inbox.name}.", dir=inbox.parent)
+            try:
+                with os.fdopen(fd, "w") as handle:
+                    for row in current.values():
+                        handle.write(json.dumps(row, separators=(",", ":")) + "\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, inbox)
+                directory = os.open(inbox.parent, os.O_RDONLY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+
+
+
+def digest(root, config):
+    active = active_findings(root, config)
     if not active:
         return ""
     lines = [f"Orchestrator watchdog: {len(active)} open finding(s)."]
@@ -308,6 +351,7 @@ def scan(root, config):
             if facts.get("outlook") is not None:
                 observed.add("com.carr.outlook-intake")
             reconcile(root, config, found, observed, now)
+            deliver_findings(root, config, now)
             append(ledger, {"key": "scan", "status": "completed", "at": stamp(), "findings": len(found)})
             return 0
     except BlockingIOError:
