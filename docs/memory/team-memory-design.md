@@ -479,13 +479,57 @@ This follows `joe-dreaming-pass.png` step for step.
    gets `$MEM_OUT`, the condensed transcripts and the dream instructions, and
    starts one Sonnet subagent per transcript.
 3. **Subagents read and write `$MEM_OUT`.** They merge, delete stale entries,
-   add patterns, and append `Verified <date> from session <attach_id>`. The
+   add patterns, and label each claim with its supporting observations. The
    orchestrator finishes the structure and writes `<dream-output>/_dream/notes.md`, one entry
-   per change unit with its sessions.
+   per change unit with its sessions and a `claims` array. Each claim has
+   `section_key`, `text`, `label` (`observed`, `quoted`, or `inference`),
+   `anchors`, and `supersedes` (the changed section's key and clone version,
+   or null for a new section). All added nonblank body lines and new titles
+   must appear in claim text; removals also require a supported rationale.
+
+   `ops/dream.py:condense()` returns observation objects with `kind`, `text`,
+   and an `anchor` containing `transcript_ref`, `entry_index`, and `item_index`.
+   Indexes are zero-based parsed JSON-object and content-item indexes, so
+   malformed/blank JSONL lines do not count. Keep the referenced transcript
+   unchanged alongside this evidence. Commands, exit statuses, test totals,
+   failure and error lines survive; whole tool logs do not. Existing secret
+   patterns redact before truncation. The shared secret redactor removes whole
+   PEM, OpenSSH and PGP private-key blocks, including payloads. It carries block
+   state across ordered observations; an unterminated block suppresses the
+   remaining text until a matching END marker, before output-size caps apply.
+   Each item is capped at 2,000 characters;
+   tool excerpts select at most 24 relevant lines of 500 characters each.
+   The default per-transcript budget is 40k estimated tokens (four serialized
+   characters per token, not model-token accounting). Items that do not fit
+   are omitted, so their anchors cannot support claims. This bounds model input,
+   not the transcript reader's memory use.
+
+   The trusted caller passes `apply()` a mapping from allowed session IDs to
+   the preserved `condense()` output. Evidence is caller-owned input, outside
+   the model-edited clone. An untrusted worker must not construct this mapping.
+   Before application, the verified input mapping is also preserved as
+   `evidence.json` in the private sibling dream-state directory beside the
+   journal and receipt. Keep this with the clone for its retention period.
+   Session IDs alone are no longer sufficient.
 4. **Diff.** `git diff` against the clone commit.
 5. **Verify.** All checks are deterministic.
    1. **Rebase (D14):** drop and record change units on moved sections.
-   2. **Provenance:** every remaining change cites an input session.
+   2. **Provenance:** every changed claim cites anchors present in the condensed
+      evidence of its named allowed session, with its label and superseded
+      section version. Observed claims require all non-stopword alphanumeric
+      tokens to occur in the cited observations. Assistant prose cannot support
+      an observed claim. For every label, success claims (`passed`, `succeeded`,
+      `green`, `all pass`) are refused when cited evidence contains a positive
+      failure/error count, a FAIL/✖/not-ok marker or a nonzero parsed exit status.
+      Contradictions outrank keyword overlap; zero-failure totals with exit zero
+      are benign. Other quoted and inference claims still require real anchors;
+      their meaning is not checked.
+      Labels and citations are appended to written section bodies; retire
+      rationales remain in the dream report. The lexical check cannot establish
+      entailment, scope, negation, chronology, source truth, poisoning resistance,
+      or completeness of model-declared claims. It can reject valid paraphrases.
+      Keyword stuffing remains an explicit limitation. It does not replace
+      substantive review.
    3. **Secrets:** `ops/ci-secret-scan.py` is clean.
    4. **Shape:** front matter is intact and the index is at most 300 sections.
    5. **Gates:** `dry-run-doctrine-gates` passes.
