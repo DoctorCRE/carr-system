@@ -3870,14 +3870,14 @@ export const TOOLS = {
                          order by due_on nulls last, id limit 3) n), '[]'::jsonb) as open_actions,
                 (select jsonb_build_object('kind', step.kind, 'summary', step.summary,
                                            'occurred_at', to_jsonb(step.occurred_at)#>>'{}')
-                   from (select a.kind, a.summary, a.occurred_at, a.id
+                   from (select a.kind, a.summary, a.occurred_at, a.id, null::bigint as mutation_order
                            from v_deal_room_activity a where a.deal_id=b.id
                          union all
                          select 'completed_action', coalesce(nullif(e.new_value->>'outcome', ''),
-                           e.new_value->>'next_action', e.new_value->>'post_call_action'), e.recorded_at, e.id
-                           from v_deal_room_event e where e.subject_id=b.id and e.verb='complete-action'
+                           e.new_value->>'next_action', e.new_value->>'post_call_action'), e.recorded_at, e.id, e.mutation_order
+                           from v_deal_room_event e where e.subject_id=b.id and e.verb in ('complete-action','complete-one-action')
                              and e.new_value->>'status'='done') step
-                  order by step.occurred_at desc, step.id desc limit 1) as last_step,
+                  order by step.occurred_at desc, step.mutation_order desc nulls last, step.id desc limit 1) as last_step,
                 (b.next_step is null or b.next_date is null) as next_step_required, b.market, b.segment,
                 b.client_id, b.client_ref, b.client_name, ce.client_status, ce.client_version,
                 ce.prospect_engagement_status, b.account_client_id, b.account_client_ref,
@@ -9248,7 +9248,7 @@ registerTools({
       );
       const actions = await c.query(
         `select n.id, n.owner, n.description, n.item_title as title, n.item_bullets as bullets, n.source_ref,
-                to_jsonb(n.due_on)#>>'{}' as due_on, n.status,
+                to_jsonb(n.due_on)#>>'{}' as due_on, n.status, n.version,
                 to_jsonb(n.hold_until)#>>'{}' as hold_until,
                 to_jsonb(n.updated_at)#>>'{}' as updated_at
            from v_deal_room_action n
@@ -9393,7 +9393,7 @@ registerTools({
            order by d.deal_id, d.due_on nulls last, d.id limit 10001
         ), actions as materialized (
           select a.deal_id, a.id, a.owner, a.description, to_jsonb(a.due_on)#>>'{}' as due_on,
-                 a.status, to_jsonb(a.hold_until)#>>'{}' as hold_until
+                 a.status, a.version, to_jsonb(a.hold_until)#>>'{}' as hold_until
             from v_deal_room_action a join scoped s on s.id = a.deal_id
            where a.status = 'open'
            order by a.deal_id, a.updated_at desc, a.id desc limit 10001
@@ -10206,7 +10206,7 @@ registerTools({
           throw new ToolError({ error: "applied_change_not_found", deal_id: dealId });
         const fields = [...new Set(journal.map(row => row.field))];
         const newer = (await c.query(`select 1 from event e where e.subject_type='deal' and e.subject_id=$1
-          and (e.field=any($3::text[]) or e.verb in ('set-next-action','complete-action'))
+          and (e.field=any($3::text[]) or e.verb in ('set-next-action','complete-action','complete-one-action'))
           and not (coalesce(e.idempotency_key,'')=any($2::text[]))
           and (e.recorded_at,e.id) > (select b.recorded_at,b.id from event b where b.id=$4)
           limit 1`, [dealId,keys,fields,journal[0].id])).rows.length;
