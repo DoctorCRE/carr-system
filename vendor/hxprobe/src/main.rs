@@ -275,6 +275,8 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              in_reply_to        TEXT,    -- parent Message-ID without angle brackets
              subject            TEXT,    -- '' when the store holds an empty subject
              sender             TEXT,
+             account_id         INTEGER, -- typed message identity owner
+             folder_id          INTEGER, -- current typed folder reference in that account
              -- 'listed' (rows in recipients), 'none' (no recipient objects) or
              -- 'conflict' (cached revisions of a recipient disagree; none exported).
              recipients_status  TEXT NOT NULL
@@ -368,7 +370,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         let mut ins_object = tx
             .prepare(
                 "INSERT INTO message_objects(local_key,conversation_id,conversation_depth,in_reply_to,subject,sender,
-                                             recipients_status) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                                             recipients_status,account_id,folder_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
             )
             .expect("prepare message objects");
         let mut ins_recipient = tx
@@ -385,7 +387,9 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             let conversation = m.conversation_id.map(|g| g.iter().map(|b| format!("{b:02x}")).collect::<String>());
             ins_object
                 .execute(rusqlite::params![*key as i64, conversation, m.conversation_depth.map(|d| d as i64),
-                                           m.in_reply_to, m.subject, m.sender, status])
+                                           m.in_reply_to, m.subject, m.sender, status,
+                                           m.account.and_then(|v| i64::try_from(v).ok()),
+                                           m.folder.and_then(|v| i64::try_from(v).ok())])
                 .expect("insert message object");
             let mut positions: BTreeMap<u32, i64> = BTreeMap::new();
             for r in m.recipients.iter().flatten() {

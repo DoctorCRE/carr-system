@@ -54,8 +54,10 @@ Each decoded email carries its observed folder paths (Inbox, Sent Items, user
 subfolders such as Active Deals/<deal>) as `folders`; matched client attachments use them to resolve one deal.
 Attachment metadata travels as `attachments` with id, name, size, content_type and
 nullable content_id. Cache paths and bytes stay in the private decoder output.
-Mail enters intake through membership in the configured folder account, including
-all user subfolders. Decoded recipients provide context, never admission evidence.
+Mail enters intake through the configured folder account, including all user
+subfolders. A typed current-folder reference in the verified message account also
+proves admission when that folder is not catalogued. Decoded recipients provide
+context, never admission evidence.
 
 An email whose body is still only Outlook's preview is logged with the preview
 and flagged preview_only. A later full body is logged as a note.
@@ -218,6 +220,7 @@ FOLDER_CLASSES = {
 }
 MAIL_STORE_COUNTERS = ('decoder_rejected', 'decoder_details_rejected', 'mail_outside_selected_account', 'mail_account_ambiguous', 'mail_account_unresolved',
                        'stored', 'admitted', 'stored_multi_class', 'mail_account_unknown_not_stored', 'body_complete',
+                       'sender_decoded', 'recipients_decoded',
                        'stored_not_admitted_account_ambiguous',
                        'stored_not_admitted_account_unresolved',
                        *(prefix + kind for prefix in ('stored_', 'admitted_') for kind in FOLDER_CLASSES),
@@ -241,18 +244,21 @@ RECEIPT_NAMES = {'calendar_lifecycle_unsupported': 'calendar_copies_in_store',
 LEAD_OUTCOMES = {'proposed': 'lead_proposed', 'known_party': 'lead_known_party', 'refused': 'lead_refused'}
 
 
-COVERAGE_SHORTFALLS = ('coverage_messages_shortfall', 'coverage_subjects_shortfall', 'coverage_text_shortfall')
+COVERAGE_SHORTFALLS = ('coverage_messages_shortfall', 'coverage_subjects_shortfall', 'coverage_text_shortfall',
+                      'coverage_sender_shortfall', 'coverage_recipients_shortfall')
 
 
 def coverage_verdict(counts: dict) -> dict:
     """WR-000587's daily check: messages not admitted (ALL-MESSAGES, including messages the decoder
-    rejected), admitted without a subject (ALL-SUBJECTS) and admitted without full text (ALL-TEXT).
+    rejected), admitted without a subject, full text, sender or recipients.
     All zero is a pass."""
     return dict(zip(COVERAGE_SHORTFALLS, (
         counts['stored'] - counts['admitted'] + counts['mail_account_unknown_not_stored']
         + counts.get('decoder_rejected', 0),
         counts['admitted'] - counts['subject_decoded'],
-        counts['admitted'] - counts['body_complete'])))
+        counts['admitted'] - counts['body_complete'],
+        counts['admitted'] - counts['sender_decoded'],
+        counts['admitted'] - counts['recipients_decoded'])))
 
 
 def receipt_counts(counts: dict) -> dict:
@@ -452,15 +458,18 @@ def _message_object_fields(con: sqlite3.Connection) -> dict[int, dict]:
             recipients.setdefault(key, {}).setdefault(kind, []).append(address)
     object_columns = {r['name'] for r in con.execute('PRAGMA table_info(message_objects)')}
     sender = 'o.sender' if 'sender' in object_columns else 'NULL AS sender'
+    ownership_fields = ', '.join(f'o.{name}' if name in object_columns else f'NULL AS {name}'
+                                 for name in ('account_id', 'folder_id'))
     found = {}
     for row in con.execute(
             'WITH k AS (SELECT message_id, MIN(local_key) AS local_key FROM message_keys '
             'GROUP BY message_id HAVING COUNT(DISTINCT local_key) = 1) '
-            f'SELECT k.message_id, o.local_key, o.subject, o.conversation_id, o.recipients_status, {sender} '
+            f'SELECT k.message_id, o.local_key, o.subject, o.conversation_id, o.recipients_status, {sender}, {ownership_fields} '
             'FROM k '
             'JOIN message_objects o ON o.local_key = k.local_key'):
         fields = {name: row[name] for name in ('subject', 'conversation_id', 'sender')
                   if row[name] is not None and str(row[name]).strip()}
+        fields.update(account_id=row['account_id'], folder_id=row['folder_id'])
         lists = recipients.get(row['local_key'])
         # No observed recipient objects does not prove an empty recipient list.
         if row['recipients_status'] == 'listed' and lists:
@@ -477,11 +486,13 @@ def _folder_kind(path: str | None) -> str:
 
 
 def _coverage_counts(mails: list[dict], classes: dict[int, set[str]]) -> dict:
-    """Subject and full-text coverage over every admitted message; a message counts once per class."""
+    """Field coverage over every admitted message; a message counts once per class."""
     counts = dict.fromkeys(('subject_decoded', 'subject_missing',
                             *('subject_missing_' + kind for kind in FOLDER_CLASSES)), 0)
     counts['admitted'] = len(mails)
     counts['body_complete'] = sum(m['body_kind'] == 'full' and bool((m['body'] or '').strip()) for m in mails)
+    counts['sender_decoded'] = sum(bool((m['sender'] or '').strip()) for m in mails)
+    counts['recipients_decoded'] = sum(bool(_addresses(m['recipients']) or _addresses(m.get('cc'))) for m in mails)
     for mail in mails:
         if (mail['subject'] or '').strip():
             counts['subject_decoded'] += 1
@@ -547,10 +558,17 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
         admitted = []
         for m in mails:
             owners = ownership.get(m['id'], {None})
-            reason = ('mail_account_unresolved' if None in owners or m['folder_links_unresolved'] else
+            typed_folder = m.get('account_id') == account_id and m.get('folder_id') is not None
+            # A current typed reference retains ownership even when the folder catalogue omits it.
+            reason = ('mail_outside_selected_account' if m.get('account_id') not in (None, account_id) else
+                      None if typed_folder and owners <= {None, account_id} else
+                      'mail_account_unresolved' if None in owners or m['folder_links_unresolved'] else
                       'mail_account_ambiguous' if len(owners) > 1 else
                       'mail_outside_selected_account' if owners != {account_id} else None)
             kinds = folder_classes.get(m['id'], set())
+            if typed_folder and reason is None and not kinds:
+                kinds = {'unknown'}
+                folder_classes[m['id']] = kinds
             if kinds:
                 meta['stored'] += 1
                 meta['stored_multi_class'] += len(kinds) > 1

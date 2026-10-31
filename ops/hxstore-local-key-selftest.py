@@ -197,10 +197,28 @@ class LocalKeyExportTests(unittest.TestCase):
              'pair@example.test')])
         self.assertEqual(kinds, [(0x1001, 'bcc', 'bcc@example.test')])
 
-    def test_a_message_whose_current_folder_is_not_catalogued_is_not_admitted(self):
+    def test_a_typed_current_folder_proves_account_without_a_catalogue_entry(self):
+        def observed_header(key, account, current_folder):
+            # The four copied-store misses use 00c9/060f with a 150-byte inline region.
+            obj = bytearray(message(key, folder=current_folder, account=account, subject='Synthetic header'))
+            obj[10 + 1541 + 4:10 + 1541 + 4] = b'\xee' * 146
+            struct.pack_into('<I', obj, 4, len(obj))
+            struct.pack_into('<H', obj, 10 + 94, 150)
+            return bytes(obj)
+        target = decode(folder(50, 'Inbox'),
+                        observed_header(0x1001, 7, 999),
+                        observed_header(0x2002, 8, 999),
+                        observed_header(0x3003, 7, 0))
+        meta, mails, _ = intake._load(target, account_id=7)
+        self.assertEqual([m['local_keys'] for m in mails], [str(0x1001)])
+        self.assertEqual((meta['stored'], meta['admitted'], meta['stored_unknown']), (1, 1, 1))
+        self.assertEqual(meta['mail_account_unknown_not_stored'], 1)
+        self.assertEqual(meta['mail_outside_selected_account'], 1)
+
+    def test_a_message_needs_a_typed_current_folder_of_its_account(self):
         # The newest revision decides; an older revision's folder is history, not ownership doubt.
         # An unset or foreign-account current reference is unresolved too, never the older folder.
-        for current, account, admitted in ((50, 7, 1), (999, 7, 0), (0, 7, 0), (50, 8, 0)):
+        for current, account, admitted in ((50, 7, 1), (999, 7, 1), (0, 7, 0), (50, 8, 0)):
             with self.subTest(current=current, account=account):
                 newer = bytearray(message(0x1001, folder=current, modified=1_793_000_060))
                 if account != 7:
