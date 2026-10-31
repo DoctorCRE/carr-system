@@ -14,7 +14,7 @@
     "record-home-gate.py": "3d1ebadb06f47d98182838e088f0405771cf24e8f6a14c2a2acd2ccd07fe7060",
     "refused_content.py": "d3283e0efe48c63561c84cfa72b5cf363f5d53414c7e803584c569d4b26f1f4c",
     "rule-claim-gate.py": "d54a47d783e0379fb2c4de38dbc2654ad4b73c6486928b918b8e55d64b1d41ba",
-    "rule-pack-preuse-reselection.py": "81d6ad6d66ba83e7a6a9600942e55fd09d410ea75da0ea4b6db1d6180eb604c2",
+    "rule-pack-preuse-reselection.py": "f5cf0997cb9cb0e8c4f764b097e68957a4566232335407a66c59a4aeda884008",
     "scheduled-run-record.py": "34d230bf7dc9ad92fd30de7b21ce6263624fb3d1dfdf56a72ba121f613e31c80",
     "session-brief.py": "9df9928e64598ac469492abcc4af2452a25238c8b6978cd8871bf4c200684850",
     "turn_origin.py": "7fe75beaec283cd3ce3a3c8a109ef36e44999eb1b27dcebbffafff590a261f7e",
@@ -22,7 +22,7 @@
     "agent-card-gate.py": "b5f238545b81290669953cdd976c80356676b9b48c94a5c0fbc1631f6955184c"
   },
   "contracts": {
-    "hook_runtime.py": "d33d7a86ccd6e92bcec12bbe860d11b5549dbc254975a4bcfa49843a366e4517",
+    "hook_runtime.py": "ae29179c2bbd53f4f585a3c02a410e797b53ca7563b5b277e98287957e653622",
     "hooks.json": "a676ca5daf0821f02a5dac32642ab91ec355f91e4a729ee76f77fcbe514070bc",
     "codex-hooks.json": "365e3604f903d78d11e2c8702fc4cbd6ec497fc436249f06c5ed7dbc0b39e112",
     "rule-enforcement-map.json": "168df7ba8abab350627531ad6a68b1b8d7ac2381087f0a21decd933cb67e1d28",
