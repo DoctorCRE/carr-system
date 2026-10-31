@@ -148,6 +148,7 @@ test('Studio holds override normal reads and clear idempotently', async () => {
     { state: 'needs_attention', reason: 'transient_ceiling', open_questions: 0 },
     { state: 'held_review', reason: 'summary_repeats_transcript', open_questions: 2 },
     { state: 'held_review', reason: 'transcript_unavailable', open_questions: 1 },
+    { state: 'held_review', reason: 'budget', open_questions: 0 },
     { state: 'held_review', reason: 'open_review_questions', open_questions: 3 },
   ]) {
     assert.equal((await status(update)).status, 200);
