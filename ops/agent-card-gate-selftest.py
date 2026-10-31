@@ -90,10 +90,15 @@ class AgentCardGate(unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stderr)
 
     def test_other_bash_and_launcher_untouched(self):
-        for command in ('rg Card hooks', './bin/codex-job DoctorCRE/carr-system review "Review the plan."',
+        for command in ('rg Card hooks',
                         "printf '%s' 'codex exec review'", "cat <<'EOF'\ncodex exec review\nEOF"):
             with self.subTest(command=command):
                 self.assertEqual(self.run_hook('Bash', command=command).returncode, 0)
+
+    def test_unknown_codex_option_requires_inline_prompt(self):
+        result = self.run_hook('Bash', command='codex exec --unknown value')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('use a literal inline prompt', result.stderr)
 
     def test_bash_registered_prompt_allowed(self):
         self.register_fixture()

@@ -17,7 +17,7 @@ import { budgetedAi } from "./ai-budget.js";
 import { publicError } from "./public-errors.ts";
 import { mcpOriginRefusal } from "./oauth-policy.ts";
 import { DOC_TOOL_NAMES, DOC_INSTRUCTIONS, docToolAnnotations } from "./doc-profile.ts";
-import { isolatePullRequests } from "./work-queue.js";
+import { isolatePullRequests, isolateProduction } from "./work-queue.js";
 import { MEMORY_ATTACH_LINE } from "./doctrine.js";
 import { toolCallContent } from "./untrusted-text.js";
 import { TOOLS, ToolError, executeRegisteredTool, assertRegisteredToolInput, UNATTENDED_AUTHORITY_VERBS,
@@ -827,6 +827,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
     const client = {
       ai: budgetedAi(env),
       pullRequests: isolatePullRequests(env.GITHUB_TOKEN),
+      production: isolateProduction(env.GITHUB_TOKEN),
       query: async (text, params = []) => ({ rows: await retrySafeDatabaseOperation(() => sql.query(text, params)) }),
       sideWrite: env?.DATABASE_URL_WRITER
         ? (text, params = []) => {

@@ -146,13 +146,17 @@ def validate_context(value: Any, session: str) -> dict[str, Any]:
     """Validate Deal Room's exact index; IDs are opaque and never fuzzy-matched."""
     if not isinstance(value, dict):
         raise ContractError("call context must be an object")
-    _strict_keys(value, {"session", "workspace_kind", "generated_at", "deals"}, {"account_client_id"})
+    _strict_keys(value, {"session", "workspace_kind", "generated_at", "deals"}, {"account_client_id", "skipped_deals"})
     if _string(value["session"], "session") != session:
         raise ContractError("context session must equal the local session")
     for field in ("workspace_kind", "generated_at"):
         _string(value[field], field)
     if "account_client_id" in value:
         _string(value["account_client_id"], "account_client_id")
+    skipped = value.get("skipped_deals", [])
+    if not isinstance(skipped, list) or any(not isinstance(row, dict) or set(row) != {"id", "reason"}
+            or not all(isinstance(row[key], str) and row[key] for key in ("id", "reason")) for row in skipped):
+        raise ContractError("skipped_deals must name exact IDs and reasons")
     deals = value["deals"]
     if not isinstance(deals, list):
         raise ContractError("deals must be an array")
@@ -194,11 +198,11 @@ def shape_record_layer_context(value: Any) -> Any:
     returns ``email: null`` for a party with no address on file.  Any one of
     those failed ``validate_context`` and nothing was stored.
 
-    Only those three shapes are repaired, and nothing is inferred: a null text
+    Those text shapes are repaired without inference: a null text
     value becomes "", a participant without an exact party_id and ref is not a
     counterparty the distiller may address and is dropped, and one party named
     twice on a deal (two roles) is kept once with both roles.  IDs are never
-    matched by name, deals are never added or removed, and every other field
+    matched by name. Terminal deals are skipped with a reason; every other field
     still goes through the strict validation that follows.
     """
     if not isinstance(value, dict) or not isinstance(value.get("deals"), list):
@@ -210,6 +214,11 @@ def shape_record_layer_context(value: Any) -> Any:
             deals.append(deal)
             continue
         deal = dict(deal)
+        if deal.get("operating_state") in {"closed", "lost", "invoiced"}:
+            if "skipped_deals" not in shaped or shaped["skipped_deals"] is value.get("skipped_deals"):
+                shaped["skipped_deals"] = list(value.get("skipped_deals", []))
+            shaped["skipped_deals"].append({"id": deal["id"], "reason": f"Deal is {deal['operating_state']}."})
+            continue
         for field in ("name", "owner", "operating_state"):
             if field in deal and deal[field] is None:
                 deal[field] = ""
@@ -499,6 +508,17 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
                         value["review_questions"].append(
                             f"{list_name} item {number} ({subject}): {resolved.review_reason}"
                         )
+            if is_action:
+                item["due_defaulted"] = item["due_on"] is None
+                if item["due_defaulted"]:
+                    anchor = date.fromisoformat(call_date) if call_date else datetime.fromisoformat(now().replace("Z", "+00:00")).astimezone(ZoneInfo(CALL_TIME_ZONE)).date()
+                    due = anchor + timedelta(days=1)
+                    while due.weekday() >= 5:
+                        due += timedelta(days=1)
+                    item["due_on"] = due.isoformat()
+                    value["review_questions"].append(
+                        f"{list_name} item {number}: Due date defaulted to {item['due_on']} (next business day)."
+                    )
             if _word_count(item["evidence"]) > 15:
                 # Retain the quoted timing inside the remote 15-word ceiling.
                 # Other evidence keeps its original leading words.
@@ -527,6 +547,9 @@ def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
     deal_ids = {deal["id"] for deal in context["deals"]}
     parties_by_deal = {deal["id"]: {party["party_id"]: party for party in deal["participants"]} for deal in context["deals"]}
     review = [{"id": _review_id(session, "model", n), "question": q, "resolved": False} for n, q in enumerate(raw["review_questions"], 1)]
+    review.extend({"id": _review_id(session, "skipped_deal", n),
+                   "question": f"Skipped deal {row['id']}: {row['reason']}", "resolved": False}
+                  for n, row in enumerate(context.get("skipped_deals", []), 1))
     missing_tracks = (transcript or {}).get("missing_tracks", [])
     labels = (transcript or {}).get("speaker_labels", {})
     for number, track in enumerate(missing_tracks, 1):
@@ -723,17 +746,33 @@ def fetch_context(session_dir: Path) -> dict[str, Any]:
     if any(not isinstance(deal, dict) or not isinstance(deal.get("id"), str) or not deal["id"]
            for deal in board["deals"]):
         raise ContractError("deal-room-board returned invalid call context deal IDs")
-    ids = [deal["id"] for deal in board["deals"]
-           if deal.get("operating_state") == "active" and deal.get("outcome") is None
-           and not deal.get("closed_on") and not deal.get("invoiced_on")
-           and deal.get("phase") not in {"closed", "invoiced"}]
+    ids: list[str] = []
+    skipped: list[dict[str, str]] = []
+    for deal in board["deals"]:
+        if (deal.get("operating_state") != "active" or deal.get("outcome") is not None
+                or deal.get("closed_on") or deal.get("invoiced_on")
+                or deal.get("phase") in {"closed", "invoiced", "lost"}):
+            skipped.append({"id": deal["id"], "reason": "Deal is closed, lost, invoiced, or inactive."})
+        else:
+            ids.append(deal["id"])
     deals: list[dict[str, Any]] = []
     for start in range(0, len(ids), 50):
-        ok, reply = call_record_command("get-call-context", {"deal_ids": ids[start:start + 50]})
-        if not ok or not isinstance(reply.get("deals"), list):
-            raise ContractError("get-call-context unavailable while fetching call context")
-        deals.extend(reply["deals"])
-    return {"session": session_dir.name, "workspace_kind": "all", "generated_at": now(), "deals": deals}
+        pending = ids[start:start + 50]
+        while pending:
+            ok, reply = call_record_command("get-call-context", {"deal_ids": pending})
+            invalid = reply.get("invalid_deal_ids")
+            if (not ok and reply.get("error") == "invalid_call_context_deals"
+                    and isinstance(invalid, list) and invalid and set(invalid) <= set(pending)):
+                skipped.extend({"id": deal_id, "reason": "Deal became unavailable for active call context (closed, lost, parked, or removed)."}
+                               for deal_id in invalid)
+                pending = [deal_id for deal_id in pending if deal_id not in invalid]
+                continue
+            if not ok or not isinstance(reply.get("deals"), list):
+                raise ContractError("get-call-context unavailable while fetching call context")
+            deals.extend(reply["deals"])
+            break
+    return {"session": session_dir.name, "workspace_kind": "all", "generated_at": now(), "deals": deals,
+            **({"skipped_deals": skipped} if skipped else {})}
 
 
 def run_session(session_dir: Path, *, publish: bool = True) -> dict[str, Any]:
@@ -852,7 +891,11 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
     metadata = read_json(session_dir / CONTEXT_FILE) or {}
     transcript = read_json(session_dir / "transcript.json")
     reason = None
+    context_attempts = existing.get("context_attempts", 0)
     if context is None and transcript is not None and metadata.get("mode") == "weekly_deal_call":
+        if context_attempts >= len(EXTRACTION_RETRY_DELAYS) + 1:
+            return existing
+        context_attempts += 1
         try:
             context = store_context(session_dir, fetch_context(session_dir))
         except (ContractError, OSError, subprocess.SubprocessError) as exc:
@@ -862,6 +905,12 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         status = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "state": "awaiting_context", "updated_at": now(), "extraction_attempts": attempts, "next_attempt_at": None}
         if reason:
             status["reason"] = reason
+            status["context_attempts"] = context_attempts
+            if context_attempts <= len(EXTRACTION_RETRY_DELAYS):
+                status["next_attempt_at"] = (datetime.fromisoformat(now().replace("Z", "+00:00"))
+                    + timedelta(seconds=EXTRACTION_RETRY_DELAYS[context_attempts - 1])).strftime("%Y-%m-%dT%H:%M:%SZ")
+            else:
+                status["state"] = "needs_attention"
         write_private(session_dir / STATUS_FILE, status)
         return status
     if transcript is None:
@@ -911,6 +960,13 @@ def _deal_check_unavailable(result: dict[str, Any], session_dir: Path, exc: Exce
     exception_class = type(exc).__name__
     deal_check_status = {"status": "unavailable", "exception_class": exception_class}
     result["deal_check"] = deal_check_status
+    if not result.get("checks_hold"):
+        reason = f"Deal check unavailable ({exception_class}); review proposals manually."
+        for key in ("joe_tasks", "dell_tasks", "deal_updates", "draft_proposals"):
+            for item in result[key]:
+                item["checks"] = {"unavailable": True, "flagged": True, "reasons": [reason]}
+        result["review_questions"].append({"id": _review_id(session_dir.name, "jev_unavailable", 1),
+                                           "question": reason, "resolved": False})
     try:
         LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with LOG_PATH.open("a", encoding="utf-8") as handle:
@@ -1257,7 +1313,8 @@ def sanitized_candidates(session_dir: Path) -> dict[str, Any]:
                 continue
             post_call_items.append({
                 "kind": "assigned_action", "deal_id": task["deal_id"], "assignee": owner,
-                "action": task["title"], "due_on": task.get("due_on"), "evidence_quote": task["evidence"],
+                "action": task["title"], "due_on": task.get("due_on"),
+                "due_defaulted": task.get("due_defaulted"), "evidence_quote": task["evidence"],
                 "confidence": 0.5,
                 **({"counterpart": {"name": task["counterpart"]}} if task.get("counterpart") else {}),
             })

@@ -270,7 +270,7 @@ test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
     await seedRule(db, ctx, R.hardEnforcedTransactional, { fallback: false,
       controlClass: "transactional_schema", implementationRef: "mcp-server/src/tools.js" });
     await seedRule(db, ctx, R.hardEnforcedNonHook, { fallback: false,
-      implementationRef: "bin/codex-job" });
+      implementationRef: "ops/a02-synthetic-check.py" });
     await seedRule(db, ctx, R.hardEnforcedHookPlusScript, { fallback: false,
       implementationRef: "hooks/a02-synthetic-gate.py; ops/a02-synthetic-check.py" });
     await db.query("commit");
