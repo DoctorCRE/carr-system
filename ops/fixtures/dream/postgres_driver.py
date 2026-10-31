@@ -31,6 +31,19 @@ confirmed.write_text(confirmed.read_text() + '\nVerified from session synthetic-
 notes = [{'sections': [f'duplicate/{i}'], 'sessions': ['synthetic-a'], 'note': 'duplicate'} for i in range(1, 5)]
 notes += [{'sections': ['stale'], 'sessions': ['synthetic-b'], 'note': 'obsolete'},
           {'sections': ['confirmed'], 'sessions': ['synthetic-c'], 'note': 'confirmed'}]
-report = dream.apply(store, root, notes, ['synthetic-a', 'synthetic-b', 'synthetic-c'], attach, 'synthetic-dream')
-assert dream.apply(store, root, notes, ['synthetic-a', 'synthetic-b', 'synthetic-c'], attach, 'synthetic-dream') == report
+observations = {}
+for session, text in [('synthetic-a', 'duplicate'), ('synthetic-b', 'obsolete'),
+                      ('synthetic-c', 'Verified from session synthetic-a.')]:
+    transcript = root.parent / (session + '.jsonl')
+    transcript.write_text(json.dumps({'message': {'role': 'user', 'content': text}}))
+    observations[session] = dream.condense(transcript)
+for unit in notes:
+    section = unit['sections'][0]
+    session = unit['sessions'][0]
+    unit['claims'] = [{'section_key': section,
+                       'text': 'Verified from session synthetic-a.' if section == 'confirmed' else unit['note'],
+                       'label': 'quoted', 'anchors': [observations[session][0]['anchor']],
+                       'supersedes': {'section_key': section, 'version': 1}}]
+report = dream.apply(store, root, notes, observations, attach, 'synthetic-dream')
+assert dream.apply(store, root, notes, observations, attach, 'synthetic-dream') == report
 print(json.dumps({'done': report}), flush=True)

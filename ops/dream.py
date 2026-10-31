@@ -4,6 +4,7 @@
 The caller supplies selected sessions and edits. Scheduling and selection belong
 in the nightly orchestrator. Each note maps a change unit to its input sessions.
 """
+import difflib
 import hashlib
 import importlib.util
 import json
@@ -31,22 +32,94 @@ class VersionConflict(Exception):
 KEY = re.compile(r'^[^/\\\x00-\x1f]+(?:/[^/\\\x00-\x1f]+)*$')
 
 
-def condense(path):
-    """Extract transcript messages in order without tool payloads or metadata."""
+EVIDENCE_LINE = re.compile(
+    r'(?i)\b(fail(?:ed|ure|ures)?|error|exception|traceback|passed|tests?|'
+    r'\w*error|exit(?:ed)?|exit_code|returncode|status|ok)\b')
+
+
+def _redact(text):
+    for name, pattern, _, _ in secret_scan.PATTERNS:
+        text = pattern.sub('[REDACTED ' + name + ']', text)
+    return text
+
+
+def _text(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return '\n'.join(_text(part.get('text', '')) for part in content if isinstance(part, dict))
+    return json.dumps(content, sort_keys=True)
+
+
+def _tool_text(content):
+    if isinstance(content, dict):
+        lines = [f'{key}: {content[key]}' for key in ('exit_code', 'returncode', 'status', 'is_error') if key in content]
+        lines += [_tool_text(content[key]) for key in ('text', 'content', 'output', 'stdout', 'stderr') if key in content]
+        return '\n'.join(lines)
+    if isinstance(content, list):
+        return '\n'.join(_tool_text(part) for part in content)
+    return str(content)
+
+
+def condense(path, *, transcript_ref=None, max_tokens=40000):
+    """Bounded observations, never whole tool logs. Budget is <=4 chars/token.
+
+    Anchors use zero-based parsed JSON-object entry and content-item indexes.
+    Redaction precedes truncation, including commands and transcript references.
+    """
+    if not isinstance(max_tokens, int) or max_tokens < 1:
+        raise ValueError('invalid evidence budget')
+    ref = _redact(str(transcript_ref or Path(path).resolve()))
     result = []
-    for record in load_transcript(path, hook='dream'):
+    size = 2
+    for entry, record in enumerate(load_transcript(path, hook='dream')):
         message = record.get('message', record.get('payload', {}))
         if not isinstance(message, dict):
             continue
         role = message.get('role', record.get('type'))
-        if role not in ('user', 'assistant'):
-            continue
         content = message.get('content', '')
-        if isinstance(content, list):
-            content = '\n'.join(part.get('text', '') for part in content if isinstance(part, dict) and part.get('type') in ('text', 'input_text', 'output_text'))
-        if isinstance(content, str) and content.strip():
-            result.append(f'{role}: {content.strip()}')
-    return '\n\n'.join(result)
+        parts = content if isinstance(content, list) else [{'type': 'text', 'text': content}]
+        if role == 'tool':
+            parts = [{'type': 'tool_result', 'content': content}]
+        if message.get('type') in ('function_call', 'function_call_output'):
+            parts = [message]
+        for index, part in enumerate(parts):
+            if not isinstance(part, dict):
+                continue
+            kind = part.get('type')
+            if kind in ('tool_use', 'function_call'):
+                args = part.get('input', part.get('arguments', {}))
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except ValueError:
+                        args = {}
+                command = args.get('command', args.get('cmd')) if isinstance(args, dict) else None
+                if command is None:
+                    continue
+                kind, text = 'command', _text(command)
+            elif kind in ('tool_result', 'function_call_output'):
+                raw = _redact(_tool_text(part.get('content', part.get('output', ''))))
+                lines = [line[:500] for line in raw.splitlines() if EVIDENCE_LINE.search(line)]
+                text = '\n'.join(lines[:24])
+                if part.get('is_error'):
+                    text = 'tool error\n' + text
+                kind = 'tool_result'
+            elif kind in ('text', 'input_text', 'output_text') and role in ('user', 'assistant'):
+                kind, text = role, _text(part.get('text', ''))
+            else:
+                continue
+            text = _redact(text).strip()[:2000]
+            if not text:
+                continue
+            observation = {'anchor': {'transcript_ref': ref, 'entry_index': entry,
+                                      'item_index': index}, 'kind': kind, 'text': text}
+            cost = len(json.dumps(observation)) + (2 if result else 0)
+            if size + cost > max_tokens * 4:
+                continue
+            result.append(observation)
+            size += cost
+    return result
 
 
 def _path(root, key):
@@ -101,6 +174,84 @@ def _write_state(path, value):
         json.dump(value, handle)
         temporary = Path(handle.name)
     temporary.replace(path)
+
+
+STOP_WORDS = frozenset('a an the is are was were be been from in on at to of and or for with it this that'.split())
+
+
+def _tokens(text):
+    return set(re.findall(r'[a-z0-9_]+', text.casefold())) - STOP_WORDS
+
+
+def _anchor_key(anchor):
+    if (not isinstance(anchor, dict) or set(anchor) != {'transcript_ref', 'entry_index', 'item_index'}
+            or not isinstance(anchor['transcript_ref'], str) or not anchor['transcript_ref']
+            or any(type(anchor[k]) is not int or anchor[k] < 0 for k in ('entry_index', 'item_index'))):
+        raise ValueError('invalid claim anchor')
+    return json.dumps(anchor, sort_keys=True)
+
+
+def _verify_claims(unit, inputs, originals, output):
+    claims = unit.get('claims')
+    if not isinstance(claims, list) or not claims:
+        raise ValueError('missing change claims')
+    evidence = {}
+    if not isinstance(inputs, dict):
+        raise ValueError('missing condensed evidence')
+    for session in unit['sessions']:
+        for observation in inputs[session]:
+            anchor = _anchor_key(observation['anchor'])
+            if anchor in evidence and evidence[anchor] != observation:
+                raise ValueError('ambiguous claim anchor')
+            evidence[anchor] = observation
+    by_section = {key: [] for key in unit['sections']}
+    for claim in claims:
+        if (not isinstance(claim, dict) or claim.get('section_key') not in by_section
+                or not isinstance(claim.get('text'), str) or not claim['text'].strip()
+                or claim.get('label') not in ('observed', 'quoted', 'inference')
+                or not isinstance(claim.get('anchors'), list) or not claim['anchors']):
+            raise ValueError('invalid change claim')
+        section_key = claim['section_key']
+        old = originals.get(section_key)
+        expected = {'section_key': section_key, 'version': old[0]['version']} if old else None
+        if 'supersedes' not in claim or claim['supersedes'] != expected:
+            raise ValueError('invalid claim supersedes')
+        observations = []
+        for anchor in claim['anchors']:
+            observation = evidence.get(_anchor_key(anchor))
+            if observation is None:
+                raise ValueError('claim anchor absent from allowed session evidence')
+            observations.append(observation)
+        if claim['label'] == 'observed':
+            support = '\n'.join(o['text'] for o in observations)
+            tokens = _tokens(claim['text'])
+            if (any(o['kind'] == 'assistant' for o in observations) or not tokens
+                    or not tokens <= _tokens(support)
+                    or (tokens & {'passed', 'success', 'successful'}
+                        and _tokens(support) & {'failed', 'failure', 'failures', 'error'})):
+                raise ValueError('observed claim lacks key tokens or contradicts failure evidence')
+        by_section[section_key].append(claim)
+    for section_key, section_claims in by_section.items():
+        if not section_claims:
+            raise ValueError('missing section claims')
+        old, new = originals.get(section_key), output.get(section_key)
+        if new:
+            added = {line[2:].strip() for line in difflib.ndiff(
+                old[1].splitlines() if old else [], new[1].splitlines())
+                if line.startswith('+ ') and line[2:].strip()}
+            if not old or new[0].get('title') != old[0].get('title'):
+                if new[0].get('title'):
+                    added.add(new[0]['title'].strip())
+            covered = {line.strip() for claim in section_claims for line in claim['text'].splitlines()}
+            if not added <= covered:
+                raise ValueError('changed claim text lacks evidence coverage')
+    return by_section
+
+
+def _evidence_body(body, claims):
+    # Persist labels and citations beside the lesson, not only in the dream log.
+    return body + '\n\nDream evidence (labels are not proof of semantic entailment):\n' + '\n'.join(
+        '- ' + json.dumps(claim, sort_keys=True) for claim in claims)
 
 
 def apply(store, root, notes, input_sessions, attach, key, *, _attempt=0, _conflicts=frozenset()):
@@ -167,6 +318,9 @@ def apply(store, root, notes, input_sessions, attach, key, *, _attempt=0, _confl
             units[section_key] = unit
     if set(units) != changed_keys:
         raise ValueError('missing change provenance')
+    claims = {}
+    for unit in notes:
+        claims.update(_verify_claims(unit, input_sessions, originals, output))
     moved = set()
     for section_key in changed_keys:
         old, live = originals.get(section_key), current.get(section_key)
@@ -186,7 +340,7 @@ def apply(store, root, notes, input_sessions, attach, key, *, _attempt=0, _confl
             continue
         item = {'section_key': section_key, 'base_version': old[0]['version'] if old else 0, 'op': 'write' if new else 'retire'}
         if new:
-            item['body_text'] = new[1]
+            item['body_text'] = _evidence_body(new[1], claims[section_key])
             if new[0]['title'] is not None:
                 item['title'] = new[0]['title']
         changes.append(item)
@@ -194,7 +348,7 @@ def apply(store, root, notes, input_sessions, attach, key, *, _attempt=0, _confl
     if len(current) + sum(1 if i['section_key'] not in current else -1 if i['op'] == 'retire' else 0 for i in changes) > 300:
         raise ValueError('memory exceeds 300 sections')
     # Apply the scanner patterns directly: untrusted dream output cannot grant itself an exemption.
-    for text in [str(value) for unit in notes for value in (unit['note'], *unit['sections'], *unit['sessions'])] + [item['body_text'] for item in changes if item['op'] == 'write']:
+    for text in [json.dumps(unit, sort_keys=True) for unit in notes] + [item['body_text'] for item in changes if item['op'] == 'write']:
         if any(rx.search(text) for _, rx, _, _ in secret_scan.PATTERNS):
             raise ValueError('secret scan failed')
     for item in changes:
@@ -202,6 +356,7 @@ def apply(store, root, notes, input_sessions, attach, key, *, _attempt=0, _confl
             raise ValueError('doctrine gate failed')
     report = {'notes': applied, 'dropped': dropped, 'changed': len(changes)}
     receipt.parent.mkdir(parents=True, exist_ok=True)
+    _write_state(state / 'evidence.json', input_sessions)
     _write_state(journal, {'key': key, 'attach': attach, 'changes': changes, 'report': report})
     return _finish(store, root, notes, input_sessions, attach, key, journal, receipt,
                    {'changes': changes, 'report': report}, _attempt, _conflicts)
