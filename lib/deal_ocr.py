@@ -1,6 +1,7 @@
 """Read scanned PDF regions with installed Apple Vision, without a model or network."""
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -12,6 +13,7 @@ def ocr_regions(data, *, pages):
         source.write_bytes(data)
         result = subprocess.run(
             ["/usr/bin/swift", str(Path(__file__).with_suffix(".swift")), str(source), *map(str, pages)],
+            env={**os.environ, "TMPDIR": folder, "TMP": folder, "TEMP": folder},
             capture_output=True,
             timeout=180,
         )
