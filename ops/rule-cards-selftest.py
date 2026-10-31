@@ -110,8 +110,33 @@ class CardTests(unittest.TestCase):
         active = [card for card in adopted if card['id'] != 'K01']
         self.assertNotIn('K01', [card['id'] for card in sync.cards_from_store(document, active)['cards']],
                          'a retired card omitted by rule-cards is removed from the generated source')
-        with self.assertRaises(SystemExit):
-            sync.cards_from_store(document, [])
+
+    def test_authoritative_empty_store_removes_all_cards(self):
+        spec = importlib.util.spec_from_file_location('sync', REPO / 'ops/sync-core-rule-cards.py')
+        sync = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sync)
+        document = json.loads((REPO / 'ops/config/rule-cards.v1.json').read_text())
+        emptied = sync.cards_from_store(document, [])
+        self.assertEqual(emptied['cards'], [])
+        with mock.patch.object(sync, 'load_cards', return_value=emptied['cards']):
+            for name in ('CLAUDE.md', 'AGENTS.md'):
+                rendered = sync.render((REPO / name).read_text())
+                self.assertNotRegex(rendered, r'(?m)^\[K\d+\]')
+                self.assertEqual(sync.render(rendered), rendered)
+
+    def test_retiring_last_core_card_preserves_other_sections_and_renders_twice(self):
+        spec = importlib.util.spec_from_file_location('sync', REPO / 'ops/sync-core-rule-cards.py')
+        sync = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sync)
+        remaining = [card for card in self.cards if card['placement'] != 'CORE']
+        with mock.patch.object(sync, 'load_cards', return_value=remaining):
+            for name in ('CLAUDE.md', 'AGENTS.md'):
+                text = (REPO / name).read_text()
+                tail = text[text.index('\nNaming trap' if name == 'CLAUDE.md' else '\n## Active product-first delivery policy'):]
+                rendered = sync.render(text)
+                self.assertNotRegex(rendered, r'(?m)^\[K\d+\]')
+                self.assertTrue(rendered.endswith(tail))
+                self.assertEqual(sync.render(rendered), rendered)
 
     def setUp(self):
         self.cards = load_cards()
