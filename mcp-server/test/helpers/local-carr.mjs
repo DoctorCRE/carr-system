@@ -215,12 +215,12 @@ export async function startLocalCarr({ port = 0, assets = async () => new Respon
    * written transcript, then the companion's post-call worker, whose verbs reach
    * this Worker through tools/call-verb.py exactly as on the Studio. Resolves
    * once the call is filed and applied, or, for a failing distiller, once the
-   * companion reports the extraction blocked.
+   * companion reports the extraction blocked. The call starts at a fixed
+   * instant, the rehearsal's, so its call date never depends on the runner.
    */
-  async function fileCall({ distiller = 'stand-in' } = {}) {
+  async function fileCall({ distiller = 'stand-in', started = '2026-10-27T15:00:00Z' } = {}) {
     const root = mkdtempSync(path.join(tmpdir(), 'local-carr-call-'));
     roots.push(root);
-    const started = new Date().toISOString().replace(/\.\d+Z$/u, 'Z');
     const call = await openCallSession({ root, started, captureUrl: url, deviceToken, distiller,
       env: { CARR_MCP_URL: `${url}/mcp`, CARR_MCP_LOCAL_TOKEN: localToken, CARR_MCP_ENV: path.join(root, 'no-token-file') } });
     calls.push(call);
