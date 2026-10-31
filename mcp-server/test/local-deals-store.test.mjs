@@ -109,6 +109,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await c.query(readMigration('1004_phase_start_undo.sql'));
     // The portal table is reached only through ops functions; stub the grant contract the migration extends.
     await c.query('create schema if not exists ops; create extension if not exists pgcrypto');
+    await c.query(readMigration('1068_email_identity.sql'));
     await c.query(schema.match(/CREATE TABLE ops\.client_portal \([\s\S]*?\n\);/)[0]);
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable as $$select '{"secdef_execute":[]}'::jsonb$$`);
     await c.query(readMigration('1013_register_client_portal.sql'));
@@ -268,10 +269,24 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal(value.deals[0].last_step.kind, 'call');
       assert.equal(value.deals[0].last_step.summary, 'Synthetic call');
       assert.equal(new Date(value.deals[0].last_step.occurred_at).toISOString(), '2026-01-02T12:00:00.000Z');
+      await TOOLS['complete-one-action'].handler(c, actor, {idempotency_key:randomUUID(),action_id:id(11),base_version:1});
+      value = await board();
+      assert.equal(value.deals[0].last_step.kind, 'completed_action');
+      assert.equal(value.deals[0].last_step.summary, 'Earlier action');
       await TOOLS['complete-action'].handler(c, actor, {idempotency_key:randomUUID(),ref:id(4),outcome:'Synthetic outcome'});
       value = await board();
       assert.equal(value.deals[0].last_step.kind, 'completed_action');
       assert.equal(value.deals[0].last_step.summary, 'Synthetic outcome');
+    }));
+
+    await t.test('board chooses the later recorded completion when timestamps match', async () => transaction(async () => {
+      await fixture(false);
+      await c.query(`insert into event(id, occurred_at, actor_id, verb, subject_type, subject_id, new_value, cause)
+        values ($1, now(), $3, 'complete-one-action', 'deal', $4, '{"status":"done","outcome":"First"}', 'system'),
+               ($2, now(), $3, 'complete-one-action', 'deal', $4, '{"status":"done","outcome":"Second"}', 'system')`,
+        [id(90), id(89), actor.id, id(4)]);
+      const value = await TOOLS['deal-room-board'].handler(c, actor, {workspace:'team'});
+      assert.equal(value.deals[0].last_step.summary, 'Second');
     }));
 
     await t.test('unavailable Jev leaves the overdue action open with an assessment receipt', async () => transaction(async () => {
@@ -1034,7 +1049,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         } finally {
           release?.();
           await Promise.all(peers.map(peer=>peer.end()));
-          await c.query('truncate deal_vendor_assignment,activity,event,tool_call,vendor,deal,client,party');
+          await c.query('truncate ops.requirement_upload_receipt,ops.requirement_upload_grant,ops.requirement_request,deal_vendor_assignment,activity,event,tool_call,vendor,deal,client,capture_post_call_candidate,party');
         }
       });
     }
@@ -1475,6 +1490,12 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
             assert.equal(prior.schema_version,'deal-timeline.v1');
             assert.equal(prior.lease,null);
             assert.equal(prior.client_id,id(3));
+            assert.equal(prior.activities_truncated,false);
+            assert.equal(prior.thread_truncated,false);
+            assert.equal(prior.events_truncated,false);
+            delete prior.activities_truncated;
+            delete prior.thread_truncated;
+            delete prior.events_truncated;
             delete prior.client_id;
             delete prior.schema_version;
             delete prior.lease;
@@ -1827,7 +1848,13 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       end $$; alter role carr_writer login;
       grant select,insert,update,delete on all tables in schema public to carr_writer;
       grant usage,select on all sequences in schema public to carr_writer`);
-      const writer = new pg.Client({...connection, user: 'carr_writer',
+      const writerConnection = {...connection, user: 'carr_writer'};
+      if (writerConnection.connectionString) {
+        const url = new URL(writerConnection.connectionString);
+        url.username = 'carr_writer';
+        writerConnection.connectionString = url.href;
+      }
+      const writer = new pg.Client({...writerConnection,
         types: {getTypeParser: (oid, format) => oid === 1184 ? value => value : pg.types.getTypeParser(oid, format)}});
       await writer.connect();
       let released = false;

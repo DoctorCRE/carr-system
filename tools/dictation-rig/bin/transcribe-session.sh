@@ -87,7 +87,7 @@ fi
 
 # No exec here on purpose: we want to log FINISH/ERROR after the Python step
 # returns, which a process replacement would make impossible.
-"$PYTHON_BIN" "$PY_ENTRY" "$SESSION_DIR"
+"$PYTHON_BIN" "$SCRIPT_DIR/../../../lib/call_settings.py" "$PYTHON_BIN" "$PY_ENTRY" "$SESSION_DIR"
 rc=$?
 
 if [ "$rc" -eq 0 ]; then

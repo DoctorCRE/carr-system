@@ -308,7 +308,12 @@ def run_local_ci(
     clean_env = scrub_cloud_environment(os.environ)
     clean_env["LC_ALL"] = "C"
     clean_env["PATH"] = f"{binaries.initdb.parent}{os.pathsep}{clean_env.get('PATH', '')}"
-    fixture = DisposablePostgres("carr-local-pg-ci.", binaries.pg_ctl, clean_env, runner=command_runner.run)
+    fixture = DisposablePostgres(
+        "carr-local-pg-ci.", binaries.pg_ctl, clean_env,
+        runner=command_runner.run if runner is not None and not isinstance(runner, SubprocessRunner) else None,
+    )
+    if fixture.runner is None:
+        fixture.runner = command_runner.run
     root = fixture.root
     data = root / "data"
     integration_data = root / "integration-data"
