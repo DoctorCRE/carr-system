@@ -171,15 +171,15 @@ test('a runner adopts an unbound repository and records its start once without m
   const work_request = await request('WR-000017');
   const repository = 'DoctorCRE/carr-system';
   await command('dispatch-job', job(work_request));
-  const start = { work_request, slice: 1, job: 1, repository, runner_job_id: 'codex-job-synthetic', idempotency_key: randomUUID() };
+  const start = { work_request, slice: 1, job: 1, repository, runner_job_id: 't3-synthetic', idempotency_key: randomUUID() };
   const first = await command('dispatch-job', start);
   assert.equal(first.card_id, 'WR17.S1.J1');
-  assert.equal(first.runner_job_id, 'codex-job-synthetic');
+  assert.equal(first.runner_job_id, 't3-synthetic');
   assert.deepEqual(await command('dispatch-job', start), { ...first, replayed: true });
   const queued = (await command('work-queue')).jobs.filter(row => row.work_request === work_request);
   assert.equal(queued.length, 1);
   assert.equal(queued[0].repository, repository);
-  assert.equal(queued[0].runner_job_id, 'codex-job-synthetic');
+  assert.equal(queued[0].runner_job_id, 't3-synthetic');
   assert.ok(queued[0].started_at);
   await assert.rejects(command('dispatch-job', { ...start, runner_job_id: 'another-runner', idempotency_key: randomUUID() }),
     failure => { assert.equal(failure.message, 'job_already_started'); assert.equal(publicError(failure).error, 'job_already_started'); return true; });
@@ -290,31 +290,19 @@ test('queue grants preserve the current catalog seal and reject wider grants', a
   assert.equal(await current(), true);
 });
 
-test('the read saves a finish once on the side connection, and later reads keep it after the PR leaves the window', async () => {
+test('queue reads never persist observed completion', async () => {
   const work_request = await request('WR-000061');
-  const done = (await command('dispatch-job', job(work_request, { executor: 'claude' }))).card_id;
-  await c.query("update ops.work_request_job set created_at=now()-interval '20 days' where work_request_id=(select id from ops.work_request where ref=$1)", [work_request]);
-  const pending = (await command('dispatch-job', job(work_request))).card_id;
-  await c.query("update ops.work_request_job set runner_job_id='pending-runner', started_at=now() where work_request_id=(select id from ops.work_request where ref=$1) and j_number=2", [work_request]);
-  const bounds = [], writes = [];
-  const merged = { repo: 'DoctorCRE/carr-system', number: 77, url: 'u77', title: 'PR 77', draft: false, state: 'merged', updated_at: '2026-10-27T12:00:00Z', cards: [done] };
-  const reader = sources => ({ query: (text, params) => c.query(text, params),
-    pullRequests: async (repos, since) => { bounds.push(since); return repos.map(repo => ({ repo, state: 'ok', prs: repo === merged.repo ? sources : [] })); },
-    sideWrite: (text, params) => { writes.push(params[2]); return c.query(text, params); } });
-  const first = await command('work-queue', {}, reader([merged]));
-  assert.equal(first.jobs.find(row => row.card_id === done).stage, 'merged');
-  assert.equal(writes.length, 1, 'one single-row write for the newly finished job');
-  await command('work-queue', {}, reader([merged]));
-  const later = await command('work-queue', {}, reader([]));
-  assert.equal(writes.length, 1, 'a saved finish is never written again');
-  const saved = later.jobs.find(row => row.card_id === done);
-  assert.deepEqual([saved.stage, saved.stale, saved.prs.map(pr => pr.card_id)], ['merged', false, [`${done}.carr#77`]]);
-  const open = later.jobs.find(row => row.card_id === pending);
-  assert.equal(open.stage, 'queued');
-  assert.equal(bounds[0], new Date(first.jobs.find(row => row.card_id === done).created_at).toISOString(), 'before the finish is saved, the old job bounds the window');
-  const unfinished = later.jobs.filter(row => row.card_id !== done && !row.finished && row.started_at).map(row => new Date(row.started_at).toISOString()).sort();
-  assert.equal(bounds.at(-1), unfinished[0], 'once saved, the window starts at the oldest unfinished job');
-  assert.ok(bounds.at(-1) > bounds[0] && bounds.at(-1) <= new Date(open.started_at).toISOString());
+  const card = (await command('dispatch-job', job(work_request, { executor: 'claude' }))).card_id;
+  const queries = [];
+  const merged = { repo: 'DoctorCRE/carr-system', number: 77, url: 'u77', title: 'PR 77', draft: false, state: 'merged', updated_at: '2026-10-27T12:00:00Z', cards: [card] };
+  const reader = { query: (text, params) => { queries.push(text); return c.query(text, params); },
+    pullRequests: async repos => repos.map(repo => ({ repo, state: 'ok', prs: repo === merged.repo ? [merged] : [] })),
+    sideWrite: () => { throw new Error('queue read attempted a write'); } };
+  const result = await command('work-queue', {}, reader);
+  assert.equal(result.jobs.find(row => row.card_id === card).stage, 'merged');
+  assert.ok(queries.every(sql => !/\b(insert|update|delete)\b/i.test(sql)));
+  const stored = (await c.query('select finished from ops.work_request_job where work_request_id=(select id from ops.work_request where ref=$1)', [work_request])).rows[0];
+  assert.equal(stored.finished, null);
 });
 
 test('launcher registers an exact card and start atomically, with registered slices only', async () => {

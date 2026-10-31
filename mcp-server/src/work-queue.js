@@ -19,8 +19,7 @@ export function queueCardId(ref, ordinal, number) {
 }
 
 // A PR belongs to a job through a "Card: WRn.Sm.Jk" line in its body, and stage is derived from those PRs live.
-// The one stored fact is a job's first observed merged or closed state (`finished`), so the search only has to
-// span unfinished jobs and a finished job keeps its stage after its PR leaves GitHub's search window.
+// Historical finished records remain readable; the queue read never writes observations.
 export const PULL_REQUEST_TTL_MS = 60_000;
 // Building is the only stage a job can stall in without anyone else holding it. Codex jobs run in hours, so a day
 // with no push to the open draft means stalled. Queued jobs wait their priority turn (dispatch-job starts nothing),
@@ -76,6 +75,99 @@ export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...
   }));
 }
 
+
+const RELEASE_URLS = {
+  'DoctorCRE/carr-system': 'https://api.doctorcre.com/release',
+  'jbookout/doctorcre-app': 'https://app.doctorcre.com/app-release',
+};
+const SHA = /^[0-9a-f]{40}$/i;
+
+// Cache successful and failed observations alike so opening the board never starts a poller.
+export function createProductionSource({ token, fetchImpl = (...args) => fetch(...args), now = Date.now }) {
+  const cache = new Map();
+  const cursors = new Map();
+  const cached = (key, load, ttl = PULL_REQUEST_TTL_MS) => {
+    const hit = cache.get(key);
+    if (hit && now() - hit.at < hit.ttl) return hit.value;
+    const entry = { at: now(), ttl, value: null };
+    entry.value = Promise.resolve().then(load).catch(() => null).then(result => {
+      if (result === null) entry.ttl = PULL_REQUEST_TTL_MS;
+      return result;
+    });
+    if (cache.size >= 2000) cache.delete(cache.keys().next().value);
+    cache.set(key, entry);
+    return entry.value;
+  };
+  let active = 0;
+  const waiting = [];
+  const json = async (url, options = {}) => {
+    if (active >= 4) await new Promise(resolve => waiting.push(resolve));
+    else active++;
+    try {
+      const response = await fetchImpl(url, { ...options, signal: AbortSignal.timeout(8000) });
+      if (!response.ok) throw new Error('read failed');
+      return await response.json();
+    } finally { const next = waiting.shift(); if (next) next(); else active--; }
+  };
+  const headers = { accept: 'application/vnd.github+json', authorization: `Bearer ${token}`, 'user-agent': 'carr-mcp-work-queue' };
+  return async prs => {
+    const results = prs.map(() => null);
+    if (!token) return results;
+    const repos = Object.keys(RELEASE_URLS).filter(repo => prs.some(pr => pr.repo === repo && pr.state === 'merged'));
+    for (const repo of repos) {
+      let budget = Math.floor(8 / repos.length);
+      const eligible = prs.map((pr, index) => ({ pr, index })).filter(({ pr }) => pr.repo === repo && pr.state === 'merged'
+        && Number.isSafeInteger(pr.number) && pr.number > 0);
+      if (!eligible.length) continue;
+      const start = (cursors.get(repo) ?? 0) % eligible.length;
+      const items = [...eligible.slice(start), ...eligible.slice(0, start)].slice(0, 250);
+      cursors.set(repo, (start + items.length) % eligible.length);
+      const release = await cached(`release:${repo}`, async () => {
+        const data = await json(RELEASE_URLS[repo]);
+        const sha = repo === 'DoctorCRE/carr-system' ? data.env?.value === 'production' ? data.git_sha?.value : null
+          : data.environment === 'production' ? data.source_commit : null;
+        return SHA.test(sha || '') ? sha : null;
+      });
+      if (!release) continue;
+      const [owner, name] = repo.split('/');
+      const fields = items.map(({ pr }, i) => `p${i}: pullRequest(number: ${pr.number}) { mergeCommit { oid } }`).join(' ');
+      const batch = await cached(`prs:${repo}:${items.map(({ pr }) => pr.number).join(',')}`, async () => {
+        const data = await json('https://api.github.com/graphql', { method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
+          body: JSON.stringify({ query: `query { repository(owner: "${owner}", name: "${name}") { ${fields} } }` }) });
+        return data.errors?.length ? null : data.data?.repository ?? null;
+      });
+      if (!batch) continue;
+      const tasks = [];
+      for (const [i, { pr, index }] of items.entries()) {
+        const merge = batch[`p${i}`]?.mergeCommit?.oid;
+        if (!SHA.test(merge || '')) continue;
+        if (merge === release) { results[index] = true; continue; }
+        const key = `ancestry:${repo}:${merge}:${release}`;
+        const hit = cache.get(key);
+        if (!hit || now() - hit.at >= hit.ttl) { if (!budget) continue; budget--; }
+        tasks.push({ index, key, merge });
+      }
+      for (let offset = 0; offset < tasks.length; offset += 4) {
+        await Promise.all(tasks.slice(offset, offset + 4).map(async ({ index, key, merge }) => {
+          results[index] = await cached(key, async () => {
+            const comparison = await json(`https://api.github.com/repos/${repo}/compare/${merge}...${release}`, { headers });
+            if (comparison.status === 'ahead' || comparison.status === 'identical') return true;
+            if (comparison.status === 'behind' || comparison.status === 'diverged') return false;
+            return null;
+          }, 24 * 60 * 60_000);
+        }));
+      }
+    }
+    return results;
+  };
+}
+
+let productionSource;
+export function isolateProduction(token) {
+  if (!productionSource || productionSource.token !== token) productionSource = { token, read: createProductionSource({ token }) };
+  return productionSource.read;
+}
+
 let isolateSource;
 export function isolatePullRequests(token) {
   if (!isolateSource || isolateSource.token !== token) isolateSource = { token, read: createPullRequestSource({ token }) };
@@ -98,18 +190,16 @@ export function queueView(rows, sources, at) {
   }
   // A stall is only claimed when every repository answered in full: an unreadable or truncated (including GitHub's incomplete_results) one may hold the newer push.
   const complete = sources.every(source => source.state === 'ok' && !source.truncated);
-  const finishes = [];
   const jobs = rows.map(({ work_request_id, created_at, finished, ...row }) => {
     const card_id = queueCardId(row.work_request, row.slice_ordinal, row.j_number);
     const live = byCard.get(card_id) ?? [];
     const prs = live.length || !finished ? live : finished.prs;
-    const stage = live.length || !finished ? jobStage(live) : finished.stage;
-    if (complete && !finished && (stage === 'merged' || stage === 'closed'))
-      finishes.push({ key: [work_request_id, row.slice_ordinal, row.j_number], finished: { stage, prs } });
+    const stage = live.length || !finished ? (live.length ? jobStage(live) : row.started_at ? 'running' : 'queued') : finished.stage;
     const since = stage === 'build' ? Math.max(...prs.filter(pr => pr.state === 'open').map(pr => Date.parse(pr.updated_at))) : NaN;
-    return { ...row, card_id, created_at: new Date(created_at).toISOString(), stage, stale: complete && at - since >= STALE_AFTER_MS, prs };
+    return { ...row, card_id, created_at: new Date(created_at).toISOString(), stage, stale: complete && at - since >= STALE_AFTER_MS,
+      pr_evidence_complete: complete && (!finished || finished.prs.every(saved => live.some(pr => pr.repo === saved.repo && pr.number === saved.number))), prs };
   });
-  return { jobs, finishes, github: sources.map(({ prs, ...source }) => source) };
+  return { jobs, github: sources.map(({ prs, ...source }) => source) };
 }
 
 export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
@@ -313,14 +403,11 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
       handler: async (c, actor, args) => {
         validate(args, {}, []);
         const rows = await ordered(c, actor);
-        const oldest = rows.filter(row => !row.finished && (row.executor !== 'codex' || row.started_at)).reduce((min, row) => Math.min(min, new Date(row.started_at ?? row.created_at).getTime()), Infinity);
-        const sources = await (c.pullRequests ?? unavailablePullRequests)(Object.keys(addressFormat.repositories),
-          Number.isFinite(oldest) ? new Date(oldest).toISOString() : undefined);
-        const { finishes, ...view } = queueView(rows, sources, Date.now());
-        // One conditional single-row update per newly finished job, on the reader route's optional side connection:
-        // it runs only on the first observation, writes no audit row, and a lost write is redone by the next read.
-        for (const { key, finished } of finishes) c.sideWrite?.(`update ops.work_request_job set finished=$4::jsonb
-          where work_request_id=$1 and slice_ordinal=$2 and j_number=$3 and finished is null`, [...key, JSON.stringify(finished)]);
+        const sources = await (c.pullRequests ?? unavailablePullRequests)(Object.keys(addressFormat.repositories));
+        const view = queueView(rows, sources, Date.now());
+        const prs = view.jobs.flatMap(job => job.prs);
+        const live = c.production ? await c.production(prs) : prs.map(() => null);
+        prs.forEach((pr, index) => { pr.production_live = live[index]; });
         const slices = (await c.query(`select s.*,w.ref as work_request from ops.work_request_slice s
           join ops.work_request w on w.id=s.work_request_id where w.id=any($1::uuid[])
           order by w.ref,s.ordinal`, [[...new Set(rows.map(row => row.work_request_id))]])).rows;

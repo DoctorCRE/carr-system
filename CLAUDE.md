@@ -9,7 +9,7 @@ To find a script and its purpose, run `./run.sh map` for a fresh path-and-descri
 ## Always-on rules
 
 <!-- Generated from mcp-server/src/doctrine.js and ops/config/rule-cards.v1.json by ops/sync-core-rule-cards.py. -->
-OPENING ACT, every session: call attach-memory once, first, with surface claude_code for a Claude Code session (terminal or Desktop) or codex for a Codex job (pass the job log named on the brief's first line as transcript_ref); a claude.ai or other chat app does not attach and calls standing-context instead. Check its team-memory index before starting, read any section that bears on your task with doctrine-sections, and skip work a current section records as done or ruled out, citing it; as you learn or rule something out, write it with write-doctrine-section document=team-memory and your attach_id.
+OPENING ACT, every session: call attach-memory once, first, with surface claude_code for a Claude Code session (terminal or Desktop) or codex for a Codex session (pass transcript_ref if known); a claude.ai or other chat app does not attach and calls standing-context instead. Check its team-memory index before starting, read any section that bears on your task with doctrine-sections, and skip work a current section records as done or ruled out, citing it; as you learn or rule something out, write it with write-doctrine-section document=team-memory and your attach_id.
 
 These twelve core cards are loaded natively with this file.
 Before acting when a card applies, answer one line with applies yes/no and the action or reason.
@@ -75,17 +75,11 @@ no credential (the receipted break-glass close stays a human's call) and it is
 not `call-verb` — never reach for that generic passthrough to get at a verb
 the classifier declined; that is working around a denial rather than filing it.
 
-## Build sessions: lessons from the 2026-10-10 orchestrator
+## Build sessions
 
-Measured from the Orchestrator.macbook transcript (37 hours, 11 compactions,
-224 Stop turns). Each item is the fix, not the story.
+Dispatch with T3 `delegate_task`, using worktree isolation and the task's provider and model. Completion wakes the parent; never poll. Watch PRs with `watch_pull_request`.
 
-1. Launch `bin/codex-job <owner/repo> <new-branch> "<brief>" [-c model_reasoning_effort=high]` with the Bash tool's `run_in_background` and read its printed result. Start several tracked tasks for parallel work. Model and default effort come from `~/.codex/config.toml`.
-2. **The progress board is one per checkout**, resolved from the main working
-   tree; a worktree no longer needs its own `init`.
-3. **A Stop gate that holds the turn open is answered with the delta only**, and
-   if the gate misread a compaction summary or a request for instructions as an
-   order, that is the gate's defect: fix the gate, do not reword the reply.
+A Stop gate holding the turn open gets the delta only. If it misread a compaction summary or a request for instructions as an order, fix the gate.
 
 ## Migration and release state
 Read current canonical migration/release state before naming frontier/blocker.
