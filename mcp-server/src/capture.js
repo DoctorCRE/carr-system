@@ -88,6 +88,10 @@ function refuse(status, payload) {
   throw error;
 }
 
+function requireActiveDevice(active) {
+  if (!active) refuse(403, { error: "device_revoked" });
+}
+
 async function claim(request, env, dependencies) {
   // Authentication is intentionally first, before body size, JSON, nonce, or
   // consent checks, matching the ingest socket's information boundary.
@@ -107,8 +111,9 @@ async function claim(request, env, dependencies) {
       const replay = await client.query(
         "select id from capture_session where nonce=$1 /* capture:claim-nonce */", [body.nonce]);
       if (replay.rows.length) refuse(409, { error: "nonce_replayed" });
-      const actor = await client.query("select id from actor where slug=$1 /* capture:device-actor */", [device]);
+      const actor = await client.query("select id, active from actor where slug=$1 /* capture:device-actor */", [device]);
       if (!actor.rows.length) refuse(503, { error: "device_actor_not_provisioned", device_id: device });
+      requireActiveDevice(actor.rows[0].active);
       opaque = dependencies.randomStringFn(32);
       const tokenHash = await sha256(opaque);
       await client.query(
@@ -161,12 +166,14 @@ async function authenticatedSession(client, opaque, lock = false) {
   if (typeof opaque !== "string" || !opaque) refuse(401, { error: "unauthorized" });
   const tokenHash = await sha256(opaque);
   const result = await client.query(
-    `select id, state, post_call, to_jsonb(state_at)#>>'{}' as state_at, expires_at <= now() as expired
-       from capture_session
-      where session_token_hash=$1
-      ${lock ? "for update" : ""} /* capture:session-auth */`, [tokenHash]);
+    `select s.id, s.state, s.post_call, to_jsonb(s.state_at)#>>'{}' as state_at,
+            s.expires_at <= now() as expired, a.active as actor_active
+       from capture_session s join actor a on a.id=s.actor_id
+      where s.session_token_hash=$1
+      ${lock ? "for update of s" : ""} /* capture:session-auth */`, [tokenHash]);
   if (!result.rows.length) refuse(401, { error: "unauthorized" });
   if (result.rows[0].expired) refuse(401, { error: "session_token_expired" });
+  requireActiveDevice(result.rows[0].actor_active);
   return result.rows[0];
 }
 

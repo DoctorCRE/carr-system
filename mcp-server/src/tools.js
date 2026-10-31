@@ -9878,7 +9878,7 @@ registerTools({
 
   "resolve-candidate": {
     write: true,
-    description: "Human gate for one capture proposal. Rejecting only skips it. Accepting invokes its mapped live verb as the confirming partner, then confirms the candidate only after that write returns a real record reference. automatic=true is the weekly pipeline call applying a next step or phase it heard stated plainly: partner authority only, post-call sessions only, and the change is listed on read-call-outcomes with its evidence and an undo.",
+    description: "Resolve one capture proposal. Device credentials only reach /capture/*; this verb does not require a human actor. Rejecting only skips it. Accepting invokes its mapped live verb as the confirming partner, then confirms the candidate only after that write returns a real record reference. automatic=true is the weekly pipeline call applying a next step or phase it heard stated plainly: partner authority only, post-call sessions only, and the change is listed on read-call-outcomes with its evidence and an undo.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, candidate_id: { type: "string" },
       accept: { type: "boolean" }, note: { type: "string" }, automatic: { type: "boolean" },
