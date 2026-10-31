@@ -29,3 +29,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('predictions', type=Path)
     print(json.dumps(score(json.loads(parser.parse_args().predictions.read_text()))))
+
+
+def score_schedule(predicted, expected):
+    """Compare complete period relationships; digit bags cannot earn schedule credit."""
+    keys = {'start_month', 'end_month', 'rate', 'unit', 'expense_basis', 'escalation_percent'}
+    def values(rows):
+        if not isinstance(rows, list) or not rows:
+            return None
+        if any(not isinstance(row, dict) or set(row) != keys for row in rows):
+            return None
+        return [{k: v['value'] if isinstance(v, dict) and 'value' in v else v for k, v in row.items()} for row in rows]
+    return values(predicted) is not None and values(predicted) == values(expected)

@@ -13,7 +13,7 @@ from uuid import UUID
 
 from lib.model_call import ModelBudgetExceeded
 
-VERSION = 'deal-text.v1'
+VERSION = 'deal-regions.v2'
 MODELS = ('haiku', 'sonnet')
 MAX_BUDGET_USD = Decimal('0.50')
 SCHEMAS = Path(__file__).with_name('deal_extraction.schema.json')
@@ -94,7 +94,7 @@ def validate_fields(reply, pages) -> dict[str, dict[str, Any]]:
 
 
 def run_job(job: ExtractionJob, *, call: Callable, read_bytes: Callable,
-            text_pages: Callable, model: Callable):
+            text_pages: Callable, model: Callable, ocr_regions: Callable | None = None):
     contract = job.contract()
     source = call('read-deal-extraction-source', contract)
     if not source.get('ok'):
@@ -192,7 +192,59 @@ def run_job(job: ExtractionJob, *, call: Callable, read_bytes: Callable,
                                    'document_family_id': doc['document_family_id'], 'page_start': field['page'],
                                    'page_end': field['page'], 'cited_text': field['cited_text']})
         observations.append(observation)
-    receipt = {'schema_version': 'deal-extraction.v1', 'contract': contract,
+    # Regional parsing adds no model calls or spend and cannot replace a text proposal.
+    scan_pages = [n + 1 for n, page in enumerate(pages) if not page.strip()]
+    regions = []
+    ocr_failed = False
+    if ocr_regions is not None and scan_pages and not stopped:
+        try:
+            regions = ocr_regions(data, pages=scan_pages)
+        except (RuntimeError, TimeoutError, subprocess.TimeoutExpired, OSError):
+            ocr_failed = True
+    periods, scanned, disagreements, schedule_reason = regional_facts(pages, regions)
+    if not stopped:
+        for key, candidates in scanned.items():
+            if any(o['fact_key'] == key for o in observations):
+                continue
+            if len({(o['value'], o['unit'], o.get('expense_basis')) for o in candidates}) != 1:
+                disagreements.add(key)
+                continue
+            candidate = candidates[0].copy()
+            origin = candidate.pop('region_source')
+            candidate.update(id=key, extractor_version=VERSION, confidence_tier='human_review',
+                             extraction={'pass':'ground','model':job.model},
+                             source={'document_ref':doc['document_ref'],'content_hash':doc['content_hash'],
+                                     'document_family_id':doc['document_family_id'],'page_start':origin['page'],
+                                     'page_end':origin['page'],'region_id':origin['region_id'],'cited_text':origin['cited_text']})
+            abstentions = [a for a in abstentions if a['fact_key'] != key]
+            observations.append(candidate)
+        if periods:
+            origins = [f['source'] for period in periods for f in period.values()]
+            observations.append({'id':'rent_schedule','fact_key':'rent_schedule','value':periods,'unit':'schedule',
+                'method':'ocr' if any(o['method']=='ocr' for o in origins) else 'text_layer',
+                'extractor_version':VERSION,'confidence_tier':'human_review',
+                'extraction':{'pass':'ground','model':job.model},
+                'source':{'document_ref':doc['document_ref'],'content_hash':doc['content_hash'],
+                          'document_family_id':doc['document_family_id'],'page_start':min(o['page'] for o in origins),
+                          'page_end':max(o['page'] for o in origins),'cited_text':'\n'.join(r['text'] for r in ([{'text':line} for p in pages for line in p.splitlines()] + regions) if RENT_ROW.fullmatch(r['text']))[:4000]}})
+    if stopped or not periods:
+        reason = stopped or schedule_reason or 'ambiguous'
+        abstentions.append({'fact_key':'rent_schedule','status':'not_present' if reason=='absent' else 'unreadable',
+                            'reason':reason})
+    if ocr_failed:
+        abstentions = [{**a, 'status': 'unreadable', 'reason': 'unsupported_ocr'}
+                       if a['reason'] in ('absent', 'no_text_layer') else a for a in abstentions]
+    if regions:
+        abstentions = [{**a, 'status':'unreadable', 'reason':'unsupported_ocr'} if a['reason']=='absent' else a for a in abstentions]
+    for key in disagreements:
+        targets = [key] if key in CONTRACTS or key == 'rent_schedule' else list(CONTRACTS)
+        for target in targets:
+            if any(o['fact_key']==target and o['method']=='text_layer' for o in observations):
+                continue
+            observations = [o for o in observations if o['fact_key'] != target]
+            abstentions = [a for a in abstentions if a['fact_key'] != target]
+            abstentions.append({'fact_key':target,'status':'unreadable','reason':'ocr_disagreement'})
+    receipt = {'schema_version': 'deal-extraction.v2' , 'contract': contract,
                'source': {key: doc[key] for key in ('document_ref', 'entity_ref', 'organization_tenant_id',
                                                    'content_hash', 'document_family_id', 'lineage_verified')},
                'passes': passes, 'attempts': attempts, 'cost_usd': str(cost),
@@ -201,3 +253,117 @@ def run_job(job: ExtractionJob, *, call: Callable, read_bytes: Callable,
                'proposed_effects': [o['fact_key'] for o in observations], 'canonical': False}
     return call('record-deal-extraction', {**contract, 'content_hash': doc['content_hash'],
                                          'receipt': receipt, 'observations': observations})
+
+
+SCHEDULE_SCHEMA = json.loads(Path(__file__).with_name('deal_schedule.schema.json').read_text())
+PERIOD_KEYS = set(SCHEDULE_SCHEMA['items']['properties'])
+BASES = ('nnn', 'modified_gross', 'full_service_gross', 'gross')
+
+
+def validate_schedule(periods):
+    """Reject flattened, overlapping or untraceable schedule periods at the input seam."""
+    if not isinstance(periods, list) or not 1 <= len(periods) <= 100:
+        raise ValueError('invalid schedule')
+    end = 0
+    for period in periods:
+        if not isinstance(period, dict) or set(period) != PERIOD_KEYS:
+            raise ValueError('invalid schedule period')
+        for name, field in period.items():
+            if not isinstance(field, dict) or set(field) != {'value', 'source'}:
+                raise ValueError('schedule fields require provenance')
+            source = field['source']
+            if (not isinstance(source, dict) or set(source) != {'page', 'region_id', 'method'}
+                    or type(source['page']) is not int or not 1 <= source['page'] <= 1000
+                    or source['method'] not in ('text_layer', 'ocr')
+                    or not isinstance(source['region_id'], str) or not 1 <= len(source['region_id']) <= 100):
+                raise ValueError('invalid schedule provenance')
+            value = field['value']
+            if name in ('start_month', 'end_month'):
+                valid = type(value) is int and 1 <= value <= 12000
+            elif name in ('rate', 'escalation_percent'):
+                valid = (name == 'escalation_percent' and value is None) or (isinstance(value, str) and bool(DECIMAL.fullmatch(value)))
+            elif name == 'unit':
+                valid = value in CONTRACTS['base_rent_per_sf']
+            else:
+                valid = value in BASES
+            if not valid:
+                raise ValueError('invalid schedule field')
+        start, stop = period['start_month']['value'], period['end_month']['value']
+        if not end < start <= stop:
+            raise ValueError('overlapping or unordered schedule')
+        end = stop
+    return periods
+
+
+# Explicit row grammar avoids inferring period-to-rate relationships from nearby digits.
+RENT_ROW = re.compile(r'^\s*(?:Years?\s+(\d+)(?:\s*[-–]\s*(\d+))?|Months?\s+(\d+)\s*[-–]\s*(\d+))'
+                      r'\s*\|\s*\$?([\d,.]+)\s*\|\s*(USD/SF/(?:year|month))\s*\|\s*'
+                      r'(NNN|modified_gross|full_service_gross|gross)\s*\|\s*(none|[\d.]+%)\s*$', re.I)
+OCR_SCALARS = {
+    'base_rent_per_sf': re.compile(r'Base rent (?:is )?\$([\d,.]+) per SF per (year|month) (NNN|modified_gross|full_service_gross|gross)\.?', re.I),
+    'landlord_ti_per_sf': re.compile(r'Landlord TI (?:is )?\$([\d,.]+) per SF\.?', re.I),
+    'term_months': re.compile(r'Term (?:is )?([\d.]+) (months|years)\.?', re.I),
+    'free_rent_months': re.compile(r'Free rent (?:is )?([\d.]+) months\.?', re.I),
+}
+
+
+def regional_facts(pages, regions):
+    """Read explicit rent rows and OCR scalars without changing the model's text input."""
+    inputs = [{'page': n + 1, 'region_id': f'text-{n + 1}-{i}', 'method': 'text_layer', 'text': line}
+              for n, page in enumerate(pages) for i, line in enumerate(page.splitlines())]
+    if not isinstance(regions, list) or len(regions) > 10000:
+        raise ValueError('OCR region limit')
+    for region in regions:
+        if (type(region.get('page')) is not int or not 1 <= region['page'] <= len(pages)
+                or not isinstance(region.get('text'), str) or len(region['text']) > 4000
+                or not isinstance(region.get('region_id'), str) or not 1 <= len(region['region_id']) <= 100
+                or region.get('method') != 'ocr'):
+            raise ValueError('invalid OCR region')
+    inputs += regions
+    periods, scalars, disagreements = [], {}, set()
+    malformed_rows = False
+    for region in inputs:
+        source = {k: region[k] for k in ('page', 'region_id', 'method')}
+        source['cited_text'] = region['text'][:600]
+        alternative = region.get('alternative_text')
+        if alternative is not None and alternative.strip() != region['text'].strip():
+            disagreements.add('rent_schedule' if RENT_ROW.match(region['text']) else 'ocr')
+            continue
+        match = RENT_ROW.fullmatch(region['text'])
+        if not match and re.match(r'^\s*(?:Years?|Months?)\s+\d', region['text'], re.I):
+            malformed_rows = True
+        if match:
+            a, b, c, d, rate, unit, basis, escalation = match.groups()
+            values = {'start_month': (int(a) - 1) * 12 + 1 if a else int(c),
+                      'end_month': int(b or a) * 12 if a else int(d),
+                      'rate': rate.replace(',', ''), 'unit': unit, 'expense_basis': basis.lower(),
+                      'escalation_percent': None if escalation.lower() == 'none' else escalation[:-1]}
+            periods.append({key: {'value': value, 'source': {k:v for k,v in source.items() if k!='cited_text'}} for key, value in values.items()})
+        if region['method'] != 'ocr':
+            continue
+        for key, pattern in OCR_SCALARS.items():
+            match = pattern.fullmatch(region['text'].strip())
+            if not match:
+                continue
+            value = match[1].replace(',', '')
+            if not DECIMAL.fullmatch(value):
+                continue
+            fact = {'fact_key': key, 'value': value, 'method': 'ocr', 'region_source': source,
+                    'unit': ('USD/SF/' + match[2].lower()) if key == 'base_rent_per_sf' else
+                            'USD/SF' if key == 'landlord_ti_per_sf' else match[2].lower() if key == 'term_months' else 'months'}
+            if key == 'base_rent_per_sf':
+                fact['expense_basis'] = match[3].lower()
+            scalars.setdefault(key, []).append(fact)
+    schedule_reason = 'no_text_layer' if any(not p.strip() for p in pages) else 'ambiguous' if any(SCHEDULE.search(p) for p in pages) else 'absent'
+    if periods:
+        try:
+            validate_schedule(periods)
+            schedule_reason = None
+        except ValueError:
+            periods = []
+            schedule_reason = 'ambiguous'
+    if malformed_rows:
+        periods, schedule_reason = [], 'ambiguous'
+    if 'rent_schedule' in disagreements:
+        periods, schedule_reason = [], 'ocr_disagreement'
+    return periods, scalars, disagreements, schedule_reason
