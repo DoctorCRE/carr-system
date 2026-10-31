@@ -6,6 +6,26 @@ code work happens — booted with no instructions at all.
 
 To find a script and its purpose, run `./run.sh map` for a fresh path-and-description map.
 
+## Client market research websites
+
+For a client preliminary market study or property review website, first read
+`~/software-factory/capabilities/client-presentation/SKILL.md`. Retrieve client
+context through live CARR verbs and inspect the approved prior studies and
+existing delivery destination before building. A client research portal request
+does not imply a clinic marketing website. Search Google Drive when the task
+identifies a relevant Drive artifact; system workflow discovery starts with the
+repository and its skills. Keep client data and passwords out of public source.
+
+When matching an existing client site, inspect its actual map style and behavior;
+passing interaction tests alone does not establish visual parity. Separate
+partner-supplied properties from additional public research candidates, and
+explain comparisons introduced from client correspondence with their source.
+Check project-card coverage against actual rendered map markers before delivery.
+Client presentations state facts and observations, without narrated instructions
+for using the page or internal research-process commentary. Keep specific source
+uncertainties and functional control labels. Comparison tools show a useful
+default, explicitly labeled illustrative when actual client inputs are unknown.
+
 ## Always-on rules
 
 <!-- Generated from mcp-server/src/doctrine.js and ops/config/rule-cards.v1.json by ops/sync-core-rule-cards.py. -->
