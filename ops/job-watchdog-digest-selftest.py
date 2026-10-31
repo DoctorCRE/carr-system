@@ -35,15 +35,52 @@ class HookTests(unittest.TestCase):
             self.assertEqual(scan(1001), first)
             facts["jobs"][0]["log_line"] = "changed error"
             changed = scan(1002)
-            self.assertEqual(len(changed), 2)
+            self.assertEqual(len(changed), 1)
             self.assertIn("changed error", changed[-1]["finding"]["reason"])
             age = 86400
-            self.assertEqual(len(scan(1002 + age - 1)), 2)
-            self.assertEqual(len(scan(1002 + age)), 3)
+            self.assertEqual(scan(1002 + age - 1), changed)
+            self.assertNotEqual(scan(1002 + age), changed)
             facts["jobs"][0]["exit_code"] = 0
-            self.assertEqual(len(scan(1003 + age)), 3)
+            self.assertEqual(scan(1003 + age), [])
             facts["jobs"][0]["exit_code"] = 7
-            self.assertEqual(len(scan(1004 + age)), 4)
+            self.assertEqual(len(scan(1004 + age)), 1)
+
+    def test_interrupted_inbox_write_recovers_and_delivers(self):
+        config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            facts = {"jobs": [{"label": "fixture", "exit_code": 7, "log_line": "error"}], "disk_free_percent": 50}
+            inbox = root / config["paths"]["orchestrator_inbox"]
+            with patch.object(watchdog, "collect", return_value=facts), patch.object(watchdog.time, "time", return_value=1000):
+                self.assertEqual(watchdog.scan(root, config), 0)
+                complete = inbox.read_text()
+                facts["jobs"][0]["log_line"] = "new error"
+                with patch.object(watchdog.os, "replace", side_effect=OSError("interrupted")):
+                    with self.assertRaises(OSError):
+                        watchdog.scan(root, config)
+                self.assertEqual(inbox.read_text(), complete)
+                with inbox.open("a") as handle:
+                    handle.write('{"key":"partial"')
+                facts["jobs"][0]["log_line"] = "new error"
+                self.assertEqual(watchdog.scan(root, config), 0)
+            rows = [json.loads(line) for line in inbox.read_text().splitlines()]
+            self.assertIn("new error", rows[-1]["finding"]["reason"])
+            self.assertTrue(complete)
+
+    def test_inbox_compacts_reminders_and_keeps_all_pending_findings(self):
+        config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            facts = {"jobs": [{"label": label, "exit_code": 7, "log_line": "error"} for label in ("one", "two")], "disk_free_percent": 50}
+            inbox = root / config["paths"]["orchestrator_inbox"]
+            for day in range(30):
+                facts["jobs"][0]["log_line"] = f"error {day}"
+                with patch.object(watchdog, "collect", return_value=facts), patch.object(watchdog.time, "time", return_value=1000 + day * 86400):
+                    self.assertEqual(watchdog.scan(root, config), 0)
+            rows = [json.loads(line) for line in inbox.read_text().splitlines()]
+            self.assertEqual(len(rows), 2)
+            self.assertEqual({row["finding"]["subject"] for row in rows}, {"one", "two"})
+            self.assertIn("error 29", next(row for row in rows if row["finding"]["subject"] == "one")["finding"]["reason"])
 
     def test_partner_prompt_has_no_watchdog_hook(self):
         hooks = json.loads((ROOT / "ops/config/hooks.json").read_text())
