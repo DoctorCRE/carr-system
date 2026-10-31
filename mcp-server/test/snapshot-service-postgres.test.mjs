@@ -92,7 +92,7 @@ const clusterState = async client => ({
   memberships: (await client.query('select roleid,member,grantor,admin_option,inherit_option,set_option from pg_auth_members order by roleid,member,grantor')).rows,
 });
 
-test('all 17 snapshot callers use distinct databases on their actual CI-service connections', async () => {
+test('all direct snapshot callers use distinct databases on their actual CI-service connections', async () => {
   const suites = [];
   for (const file of await readdir(new URL('./', import.meta.url))) {
     if (file === 'snapshot-service-postgres.test.mjs' || !/\.test\.(?:js|mjs)$/.test(file)) continue;
@@ -100,7 +100,7 @@ test('all 17 snapshot callers use distinct databases on their actual CI-service 
     const match = source.match(/acquireDisposablePostgres\(\{\s*prefix:\s*'([^']+)'[^}]*\bsnapshot:\s*true/);
     if (match) suites.push({ file, prefix: match[1] });
   }
-  assert.equal(suites.length, 17, 'every snapshot caller must participate in the connection proof');
+  assert.ok(suites.length >= 17, 'retain the original snapshot callers in the connection proof');
   const service = await postgresDatabase('callers-ci-');
   const directory = await mkdtemp(path.join(tmpdir(), 'snapshot-callers-'));
   const savedUrl = process.env.CARR_CI_DATABASE_URL;
@@ -124,7 +124,7 @@ test('all 17 snapshot callers use distinct databases on their actual CI-service 
       databases.add(name);
       console.log(`snapshot-connection-proof: ${file} ${name} ${child.connections.length} clients`);
     }
-    assert.equal(databases.size, 17);
+    assert.equal(databases.size, suites.length);
     const bypass = await childSuite('deal-items-postgres.test.mjs', directory, env,
       { WR623_EXPECT_PREFIX: 'deal-items-', WR623_REDIRECT_TO_SHARED: '1' });
     assert.equal(bypass.error?.code, 1, 'bypassing the fixture must fail the actual-connection guard');

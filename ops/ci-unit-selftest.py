@@ -29,6 +29,7 @@ class UnitClassTests(unittest.TestCase):
         (self.root / 'ops/config/ci-check-scope.json').write_text('{}')
         shutil.copy2(ROOT / 'ops/config/public-source-identities.v1.json',
                      self.root / 'ops/config/public-source-identities.v1.json')
+        (self.root / 'ops/config/hosted-suite-exceptions.json').write_text('{}')
         # npm enables Node's compile cache under TMPDIR, which outlives the fixture.
         self.env = dict(fixture_env(), NODE_DISABLE_COMPILE_CACHE='1')
         subprocess.run(['git', 'init', '-q', str(self.root)], env=self.env, check=True)
@@ -184,13 +185,30 @@ class UnitClassTests(unittest.TestCase):
             (mcp / 'run-tests.mjs').write_text(runner)
             result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        exceptions = self.root / 'ops/config/hosted-suite-exceptions.json'
+        for body in ("import test from 'node:test'; test.skip('unavailable here', () => {});", ""):
+            first.write_text(body)
+            exceptions.write_text(json.dumps({first.name: 'explicit temporary exception'}))
+            receipt.unlink()
+            result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn(first.name, json.loads(receipt.read_text())['suites'])
+        first.write_text("import test from 'node:test'; test('crash', () => { throw Error('broken'); });")
+        receipt.unlink()
+        result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0, 'an exception must never permit a failure')
+        self.assertFalse(receipt.exists())
+        first.write_text(original)
+        result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         receipt.unlink()
         (mcp / 'run-tests.mjs').write_text(runner.replace('const files = selected || discovered;',
-                                                         'const files = (selected || discovered).slice(1);'))
+                                                         f'const files = (selected || discovered).filter(file => file !== {json.dumps(first.name)});'))
         result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('shard coverage mismatch', result.stderr)
         self.assertFalse(receipt.exists())
+        exceptions.write_text('{}')
         (mcp / 'run-tests.mjs').write_text(runner)
         for suite in (mcp / 'test').glob('*.test.mjs'):
             suite.write_text("import test from 'node:test'; test.skip('not executed', () => {});")

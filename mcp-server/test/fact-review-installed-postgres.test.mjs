@@ -1,9 +1,11 @@
+import { snapshotDatabase } from './helpers/postgres-database.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import pg from 'pg';
 
+const SNAPSHOT_DSN = await snapshotDatabase('fact-review-installed-postgres-');
 const tenant = 'carr-internal';
 const functions = ['fact_review_field', 'promote_fact', 'record_deal_extraction'];
 
@@ -36,8 +38,8 @@ const observation = (id, patch = {}) => ({
 });
 
 test('final installed fact-review functions preserve reviewed terms and extraction abstentions',
-  { skip: !process.env.CARR_FACT_REVIEW_DATABASE_URL }, async t => {
-  const dsn = process.env.CARR_FACT_REVIEW_DATABASE_URL;
+  async t => {
+  const dsn = SNAPSHOT_DSN;
   assert.ok(dsn, 'CARR_FACT_REVIEW_DATABASE_URL must name the migration lane database');
   assert.ok(['localhost', '127.0.0.1'].includes(new URL(dsn).hostname), 'proof requires loopback PostgreSQL');
   const client = new pg.Client({ connectionString: dsn });

@@ -13,6 +13,8 @@
 // coercion in one schema-driven place rather than in seventeen handlers, so that
 // is where the fix lives and where it has to be proven. Testing it through one
 // handler would pass while every other verb taking an array stayed broken.
+import test from "node:test";
+import assert from "node:assert/strict";
 import { coerceArgsToSchema } from "../src/tools.js";
 
 const schema = { type: "object", properties: {
@@ -20,32 +22,26 @@ const schema = { type: "object", properties: {
 const A = "d7eca7c6-95bc-4f40-8690-cb47ca62ac59";
 const B = "f85501dd-3625-4f50-a8e0-fcb2cb81456f";
 
-let failures = 0;
-function check(name, ok, detail) {
-  console.log((ok ? "  ok    " : "  FAIL  ") + name + (ok || !detail ? "" : " — " + detail));
-  if (!ok) failures++;
-}
+test('a two-id JSON string becomes two ids, not eighty characters', () => {
+  const args = { section_ids: JSON.stringify([A, B]) };
+  coerceArgsToSchema(schema, args);
+  assert.deepEqual(args.section_ids, [A, B]);
+});
 
-const asString = { section_ids: JSON.stringify([A, B]) };
-coerceArgsToSchema(schema, asString);
-check("a two-id JSON string becomes 2 ids, not 80 characters",
-      Array.isArray(asString.section_ids) && asString.section_ids.length === 2
-      && asString.section_ids[0] === A,
-      JSON.stringify(asString.section_ids).slice(0, 70));
+test('a plain array passes through unchanged', () => {
+  const ids = [A], args = { section_ids: ids };
+  coerceArgsToSchema(schema, args);
+  assert.equal(args.section_ids, ids);
+});
 
-const asArray = { section_ids: [A] };
-coerceArgsToSchema(schema, asArray);
-check("a plain array still passes through unchanged",
-      Array.isArray(asArray.section_ids) && asArray.section_ids.length === 1);
+test('a non-JSON string remains available for the handler to refuse', () => {
+  const args = { section_ids: 'not-json' };
+  coerceArgsToSchema(schema, args);
+  assert.equal(args.section_ids, 'not-json');
+});
 
-const notJson = { section_ids: "not-json" };
-coerceArgsToSchema(schema, notJson);
-check("a non-JSON string is left alone for the handler to refuse by name",
-      notJson.section_ids === "not-json");
-
-// The control: an object argument is untouched by the array branch.
-const other = { section_ids: [A, B], unrelated: "x" };
-coerceArgsToSchema(schema, other);
-check("an already-correct call is not disturbed", other.section_ids.length === 2);
-
-process.exit(failures ? 1 : 0);
+test('an already-correct call is not disturbed', () => {
+  const args = { section_ids: [A, B], unrelated: 'x' };
+  coerceArgsToSchema(schema, args);
+  assert.deepEqual(args, { section_ids: [A, B], unrelated: 'x' });
+});

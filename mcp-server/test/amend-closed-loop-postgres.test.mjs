@@ -1,3 +1,4 @@
+import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // amend-closed-loop-postgres.test.mjs — amend-closed-loop on REAL PostgreSQL.
 //
 // The fake-client suite (amend-closed-loop.test.mjs) proves the handler's own
@@ -8,9 +9,7 @@
 // really returns the recorded response without writing a second
 // loop_amendment row.
 //
-// Skips in the unit class; the migration class supplies DATABASE_URL and sets
-// CARR_AMEND_CLOSED_LOOP_DB_REQUIRED=1, which turns a silent skip into a
-// failure.
+// Each unit invocation owns a migrated snapshot clone.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -52,16 +51,10 @@ async function loadForUpdateRemovedMutant() {
 }
 test.after(() => { if (mutantWork) rmSync(mutantWork, { recursive: true, force: true }); });
 
-const DSN = process.env.DATABASE_URL || "";
-const REQUIRED = process.env.CARR_AMEND_CLOSED_LOOP_DB_REQUIRED === "1";
+const DSN = await snapshotDatabase('amend-closed-loop-postgres-');
 const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost|\/)/;
 
 async function database(t) {
-  if (!DSN) {
-    assert.equal(REQUIRED, false, "this proof was required and no database URL was given to it");
-    t.skip("the migration class supplies DATABASE_URL");
-    return null;
-  }
   assert.ok(LOOPBACK.test(DSN),
     "REFUSED: this proof writes loop rows and runs against a disposable loopback only");
   return (await import("pg")).default ?? (await import("pg"));

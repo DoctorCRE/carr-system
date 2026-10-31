@@ -1,15 +1,14 @@
 // Test lead workspace operations against PostgreSQL.
 import test from "node:test";
+import { snapshotDatabase } from "./helpers/postgres-database.mjs";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import pg from "pg";
 import { executeRegisteredTool } from "../src/tools.js";
-const dsn = process.env.LEAD_WORKSPACE_TEST_DATABASE_URL;
-if (dsn && !["127.0.0.1", "localhost"].includes(new URL(dsn).hostname))
-  throw new Error("loopback fixture database only");
+const dsn = await snapshotDatabase('lead-workspace-');
 const run = (name, fn) =>
-  test(name, { skip: !dsn }, async () => {
+  test(name, async () => {
     const c = new pg.Client({ connectionString: dsn });
     await c.connect();
     try {

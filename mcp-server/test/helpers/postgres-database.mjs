@@ -1,5 +1,6 @@
 // Create and clean up a disposable PostgreSQL database for tests.
 import { execFileSync } from 'node:child_process';
+import { after } from 'node:test';
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import path from 'node:path';
@@ -35,4 +36,11 @@ export async function postgresDatabase(prefix) {
     await client.connect();
     return { client, close };
   } catch (error) { await close(); throw error; }
+}
+
+// A suite owns one migrated clone; its after hook always drops it and restores roles.
+export async function snapshotDatabase(prefix) {
+  const fixture = await acquireDisposablePostgres({ prefix, snapshot: true });
+  after(async () => { await fixture.close(); });
+  return fixture.dsn;
 }

@@ -1,8 +1,9 @@
 // Tests CRE lifecycle transitions against disposable PostgreSQL.
 
-import { test, after } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID, createHash } from "node:crypto";
+import { acquireDisposablePostgres } from "./helpers/disposable-postgres.mjs";
 import { readMigration } from "./migration-source.testhelper.mjs";
 
 import { digest } from "../src/artifact-trust.js";
@@ -22,14 +23,46 @@ import {
 import { createCreLifecycleStore, v5J102StoreEnvelope } from "../src/cre-lifecycle-store.v5.js";
 import { createRecordSourceAuthorityStore } from "../src/record-source-authority-store.v5.js";
 
+// The migration gate supplies scratch-role DSNs; otherwise own a snapshot clone.
 const DSN = {
   joe: process.env.CARR_J102_LIVE_PG_DSN_JOE,
   dell: process.env.CARR_J102_LIVE_PG_DSN_DELL,
   writer: process.env.CARR_J102_LIVE_PG_DSN_WRITER,
 };
-const LIVE = Boolean(DSN.joe && DSN.dell && DSN.writer);
-const SKIP = LIVE ? false
-  : "CARR_J102_LIVE_PG_DSN_{JOE,DELL,WRITER} are not set; ops/cre-lifecycle-local-pg-gate.py sets them on a scratch database";
+let OWNER_DSN = process.env.CARR_J102_LIVE_PG_DSN_OWNER;
+let fixture;
+before(async () => {
+  if (DSN.joe && DSN.dell && DSN.writer && OWNER_DSN) return;
+  fixture = await acquireDisposablePostgres({ prefix: 'cre-lifecycle-', snapshot: true });
+  OWNER_DSN = fixture.dsn;
+  const { default: pg } = await import('pg');
+  const owner = new pg.Client(fixture.connection);
+  await owner.connect();
+  try {
+    await owner.query(`
+      do $$ begin
+        if not exists (select 1 from pg_roles where rolname='carr_authority_joe') then
+          create role carr_authority_joe;
+        end if;
+        if not exists (select 1 from pg_roles where rolname='carr_authority_dell') then
+          create role carr_authority_dell;
+        end if;
+      end $$;
+      grant carr_authority, carr_writer to carr_authority_joe, carr_authority_dell;
+      set session_replication_role = replica;
+      delete from public.deal;`);
+  } finally { await owner.end(); }
+  for (const name of ['joe', 'dell', 'writer']) DSN[name] = fixture.dsn;
+});
+
+function sessionRole(role) {
+  // Authenticate to the disposable owner, then assume the exact session_user
+  // checked by the SQL writers. No production role passwords are required.
+  return fixture ? { onConnect: async client => {
+    await client.query(`set session authorization ${role}`);
+    assert.equal((await client.query('select session_user as who')).rows[0].who, role);
+  } } : {};
+}
 
 const RUN = randomUUID().slice(0, 8);
 const id = prefix => `${prefix}-live-${RUN}-${randomUUID().slice(0, 8)}`;
@@ -54,7 +87,7 @@ async function pool(name) {
   if (name === "joe_writer") config.options = "-c carr.acting_actor_slug=joe -c carr.sponsoring_human_slug=joe";
   if (name === "agent_unsponsored") config.options = "-c carr.acting_actor_slug=codex";
   if (name === "agent_as_dell") config.options = "-c carr.acting_actor_slug=codex -c carr.sponsoring_human_slug=dell";
-  pools[name] = new pg.Pool(config);
+  pools[name] = new pg.Pool({ ...config, ...sessionRole(writer ? 'carr_writer' : `carr_authority_${name}`) });
   return pools[name];
 }
 
@@ -185,7 +218,8 @@ async function f01Artifact(name) {
 
 
 after(async () => {
-  for (const p of Object.values(pools)) await p.end();
+  try { for (const p of Object.values(pools)) await p.end(); }
+  finally { await fixture?.close(); }
 });
 
 function ok(answer, what) {
@@ -293,7 +327,7 @@ async function state(name, subject_kind, subject_id) {
   return answer;
 }
 
-test("a lease deal walks prospect to closed and paid, live, as a verified partner", { skip: SKIP }, async () => {
+test("a lease deal walks prospect to closed and paid, live, as a verified partner", async () => {
   const joe = as("joe");
   const { asg, deal } = await pendingDeal("lease");
 
@@ -334,7 +368,7 @@ test("a lease deal walks prospect to closed and paid, live, as a verified partne
   console.log(JSON.stringify(final).slice(0, 900));
 });
 
-test("a purchase deal is executed but PENDING through diligence, and closes only on its closing date", { skip: SKIP }, async () => {
+test("a purchase deal is executed but PENDING through diligence, and closes only on its closing date", async () => {
   const joe = as("joe");
   const { deal } = await pendingDeal("purchase");
   const contract = await f01Document("joe", { document_class: "purchase_contract" });
@@ -354,7 +388,7 @@ test("a purchase deal is executed but PENDING through diligence, and closes only
   console.log(JSON.stringify(await state("joe", "deal", deal)).slice(0, 900));
 });
 
-test("a failed pending deal is cancelled with its reason and the assignment returns to search", { skip: SKIP }, async () => {
+test("a failed pending deal is cancelled with its reason and the assignment returns to search", async () => {
   const joe = as("joe");
   const { rel, eng, asg, deal } = await pendingDeal("lease");
   const failure = await fact("joe", "deal_failure", "deal", deal,
@@ -687,7 +721,7 @@ async function admittedSubject(transition_id, instrument) {
   return subjectAt(c.subject_kind, axis, value, inst);
 }
 
-const TABLE = LIVE ? v5J102TransitionTruthTable() : null;
+const TABLE = v5J102TransitionTruthTable();
 
 const UNREACHABLE_STATE_VALUES = Object.freeze([
   "relationship_state=client_ended",
@@ -696,7 +730,7 @@ const UNREACHABLE_STATE_VALUES = Object.freeze([
   "negotiation_state=loi_withdrawn", "negotiation_state=superseded",
 ]);
 
-test("LIVE TRUTH TABLE (prerequisite guard): every reachable cell of every transition decides as the table says", { skip: SKIP, timeout: 900000 }, async () => {
+test("LIVE TRUTH TABLE (prerequisite guard): every reachable cell of every transition decides as the table says", { timeout: 900000 }, async () => {
   const cells = TABLE.cells.filter(c => c.guard === "prerequisite");
   const report = { cells: cells.length, driven: 0, isolated: 0, not_isolated: [], unreachable: [] };
   const cache = new Map();
@@ -787,7 +821,7 @@ async function evidenceOfKind(kind, family) {
   }
 }
 
-test("LIVE TRUTH TABLE (subject_kind, actor_class, instrument_kind, required_evidence guards)", { skip: SKIP, timeout: 900000 }, async () => {
+test("LIVE TRUTH TABLE (subject_kind, actor_class, instrument_kind, required_evidence guards)", { timeout: 900000 }, async () => {
   const report = {};
   const tally = (guard, outcome) => {
     report[guard] ??= {};
@@ -878,7 +912,7 @@ async function axisCall(who, deal, axis, evidence_kind, record_kind, base, extra
     declared: { axis, ...extra } });
 }
 
-test("Q103 LIVE: a non-overlapping concurrent edit MERGES automatically and keeps the other partner's write", { skip: SKIP }, async () => {
+test("Q103 LIVE: a non-overlapping concurrent edit MERGES automatically and keeps the other partner's write", async () => {
   const d = await dealWith("lease", ["lease_exec"]);
   const base = (await body("joe", "deal", d.deal)).state_digest;
 
@@ -904,7 +938,7 @@ test("Q103 LIVE: a non-overlapping concurrent edit MERGES automatically and keep
   assert.deepEqual(await reconciliationItems("deal", d.deal), [], "nothing needed a person");
 });
 
-test("Q103 LIVE: an OVERLAPPING concurrent edit reconciles VISIBLY, both versions preserved, nothing moves", { skip: SKIP }, async () => {
+test("Q103 LIVE: an OVERLAPPING concurrent edit reconciles VISIBLY, both versions preserved, nothing moves", async () => {
   const d = await dealWith("lease", ["lease_exec"]);
   const base = (await body("joe", "deal", d.deal)).state_digest;
 
@@ -941,7 +975,7 @@ test("Q103 LIVE: an OVERLAPPING concurrent edit reconciles VISIBLY, both version
   assert.equal(item.concurrent_change_evidence.characterized, true);
 });
 
-test("Q103 LIVE: two intervening writes are UNCHARACTERIZED and reconcile visibly rather than merging on an absence", { skip: SKIP }, async () => {
+test("Q103 LIVE: two intervening writes are UNCHARACTERIZED and reconcile visibly rather than merging on an absence", async () => {
   const d = await dealWith("lease", ["lease_exec"]);
   const base = (await body("joe", "deal", d.deal)).state_digest;
   await DEAL_STEPS.commission(d);
@@ -959,7 +993,7 @@ test("Q103 LIVE: two intervening writes are UNCHARACTERIZED and reconcile visibl
   assert.deepEqual(items[0].record.concurrent_edits, []);
 });
 
-test("Q103 LIVE: a disjoint edit whose transition no longer holds on the CURRENT row is refused, never merged", { skip: SKIP }, async () => {
+test("Q103 LIVE: a disjoint edit whose transition no longer holds on the CURRENT row is refused, never merged", async () => {
   const d = await dealWith("purchase", ["purchase_exec", "diligence:satisfied"]);
   const base = (await body("joe", "deal", d.deal)).state_digest;
   await DEAL_STEPS.completion(d);
@@ -990,7 +1024,7 @@ test("Q103 LIVE: a disjoint edit whose transition no longer holds on the CURRENT
   assert.equal(after2.execution_state, "unexecuted");
 });
 
-test("Q103 LIVE: two partners racing on disjoint axes from the same base both land, or the loser is told; nothing is lost", { skip: SKIP }, async () => {
+test("Q103 LIVE: two partners racing on disjoint axes from the same base both land, or the loser is told; nothing is lost", async () => {
   const d = await dealWith("lease", ["lease_exec"]);
   const base = (await body("joe", "deal", d.deal)).state_digest;
   const commission = await f01Document("dell", { document_class: "commission_agreement" });
@@ -1020,7 +1054,7 @@ test("Q103 LIVE: two partners racing on disjoint axes from the same base both la
 });
 
 
-test("CREDENTIAL SPLIT LIVE: Joe on the writer credential records agent-admitted work under the credential's class", { skip: SKIP }, async () => {
+test("CREDENTIAL SPLIT LIVE: Joe on the writer credential records agent-admitted work under the credential's class", async () => {
   const rel = id("rel");
   ok(await as("joe_writer").initializeProspectRelationship({ idempotency_key: key(),
     declared: { new_subject_id: rel } }), "Joe initializes over the writer credential");
@@ -1039,7 +1073,7 @@ test("CREDENTIAL SPLIT LIVE: Joe on the writer credential records agent-admitted
   assert.equal(onWriter, null, "an invoice cannot bind to a relationship on either credential");
 });
 
-test("CREDENTIAL SPLIT LIVE: a partner-authored fact over the writer credential refuses and names the authority verb", { skip: SKIP }, async () => {
+test("CREDENTIAL SPLIT LIVE: a partner-authored fact over the writer credential refuses and names the authority verb", async () => {
   const d = await pendingDeal("lease");
   await assert.rejects(
     as("joe_writer").recordLifecycleFact({ idempotency_key: key(), fact: {
@@ -1052,7 +1086,7 @@ test("CREDENTIAL SPLIT LIVE: a partner-authored fact over the writer credential 
   await fact("joe", "closing_settlement", "deal", d.deal, { closing_date: "2026-09-22T15:00:00Z" });
 });
 
-test("CREDENTIAL SPLIT LIVE: a partner-only transition over the writer credential is not attributable and refuses", { skip: SKIP }, async () => {
+test("CREDENTIAL SPLIT LIVE: a partner-only transition over the writer credential is not attributable and refuses", async () => {
   const d = await pendingDeal("lease");
   const failure = await fact("joe", "deal_failure", "deal", d.deal, { reason: "synthetic" });
   const base = (await subject("joe", "deal", d.deal)).readback.body.state_digest;
@@ -1068,9 +1102,7 @@ test("CREDENTIAL SPLIT LIVE: a partner-only transition over the writer credentia
 });
 
 
-const OWNER_DSN = process.env.CARR_J102_LIVE_PG_DSN_OWNER;
-const SHADOW_SKIP = SKIP || (!OWNER_DSN &&
-  "CARR_J102_LIVE_PG_DSN_OWNER is not set; the shadow test seeds legacy rows on the owner connection");
+
 
 async function owner(text, params = []) {
   if (!pg) pg = (await import("pg")).default;
@@ -1084,7 +1116,7 @@ async function owner(text, params = []) {
   }
 }
 
-test("step 2 SQL and kernel agree on engagement facts, vocabulary and migration hold", { skip: SHADOW_SKIP }, async () => {
+test("step 2 SQL and kernel agree on engagement facts, vocabulary and migration hold", async () => {
   const base = { subject_kind: "engagement", subject_id: "eng-synthetic-step2",
     relationship_id: "rel-synthetic-step2", engagement_state: "completed",
     representation_basis: "signed_engagement_letter" };
@@ -1125,7 +1157,7 @@ test("step 2 SQL and kernel agree on engagement facts, vocabulary and migration 
   assert.ok(readiness.value.missing_facts.some(fact => fact.fact === "exact_caller_census"));
 });
 
-test("step 2 SQL keeps the legacy projection unchanged across all engagement states", { skip: SHADOW_SKIP }, async () => {
+test("step 2 SQL keeps the legacy projection unchanged across all engagement states", async () => {
   const a = await openedAssignment("joe");
   const [saved] = await owner("select envelope from ops.j102_subject_current where subject_kind='engagement' and subject_id=$1", [a.eng]);
   const [assignment] = await owner("select ops.j102_subject('assignment',$1) as value", [a.asg]);
@@ -1150,7 +1182,7 @@ test("step 2 SQL keeps the legacy projection unchanged across all engagement sta
   await assert.rejects(writeEngagement({ effective_date: "2026-02-30" }), /j102_engagement_field_types/);
 });
 
-test("step 2 SQL refuses an in-use client_paused state before upgrading", { skip: SHADOW_SKIP }, async () => {
+test("step 2 SQL refuses an in-use client_paused state before upgrading", async () => {
   const a = await client("joe");
   const [saved] = await owner("select envelope from ops.j102_subject_current where subject_kind='relationship' and subject_id=$1", [a.rel]);
   const record = { ...saved.envelope.record, state: { ...saved.envelope.record.state, relationship_state: "client_paused" } };
@@ -1222,7 +1254,7 @@ async function runRecord(run_seq) {
   return row.envelope.record;
 }
 
-test("Q081 LIVE: the shadow compares old and new side by side, reports every difference and unlinked row, modifies neither, and retires nobody", { skip: SHADOW_SKIP }, async () => {
+test("Q081 LIVE: the shadow compares old and new side by side, reports every difference and unlinked row, modifies neither, and retires nobody", async () => {
   const preexisting = await owner("select count(*)::int as n from public.deal");
   assert.equal(preexisting[0].n, 0, "the scratch database must start with no legacy rows");
 
@@ -1362,7 +1394,7 @@ test("Q081 LIVE: the shadow compares old and new side by side, reports every dif
 });
 
 
-test("Q103 LIVE: a replay of a merged transition reports the merge the original write made", { skip: SKIP }, async () => {
+test("Q103 LIVE: a replay of a merged transition reports the merge the original write made", async () => {
   const d = await dealWith("lease", ["lease_exec"]);
   const base = (await body("joe", "deal", d.deal)).state_digest;
   await DEAL_STEPS.commission(d);
@@ -1380,7 +1412,7 @@ test("Q103 LIVE: a replay of a merged transition reports the merge the original 
     "caller_reported_merge_account_cas_enforced_on_current_row");
 });
 
-test("Q103 LIVE: a conflict does not spend the caller's key; the same key lands on a fresh base", { skip: SKIP }, async () => {
+test("Q103 LIVE: a conflict does not spend the caller's key; the same key lands on a fresh base", async () => {
   const d = await dealWith("lease", ["lease_exec"]);
   const base = (await body("joe", "deal", d.deal)).state_digest;
   ok(await axisCall("dell", d.deal, "payment_state", "payment_received", "payment", base,
@@ -1401,7 +1433,7 @@ test("Q103 LIVE: a conflict does not spend the caller's key; the same key lands 
   assert.equal(landed.auto_merged, undefined);
 });
 
-test("Q103 LIVE: an untraceable move of a subject the transition only READS refuses as a stale read", { skip: SKIP }, async () => {
+test("Q103 LIVE: an untraceable move of a subject the transition only READS refuses as a stale read", async () => {
   const { rel, eng } = await client("joe");
   const asg = id("asg");
   ok(await as("joe").initializeAssignment({ idempotency_key: key(),
@@ -1449,7 +1481,7 @@ function racingStoreFor(name, inject, writer = /ops\.j102_apply_transition\(/) {
   } });
 }
 
-test("CAS LIVE: a same-field write committed between the store's read and the SQL writer is refused by the database, never overwritten", { skip: SKIP }, async () => {
+test("CAS LIVE: a same-field write committed between the store's read and the SQL writer is refused by the database, never overwritten", async () => {
   const d = await dealWith("lease", ["lease_exec"]);
   const base = (await body("joe", "deal", d.deal)).state_digest;
   const payment = await fact("joe", "payment", "deal", d.deal, { detail: "synthetic" });
@@ -1472,7 +1504,7 @@ test("CAS LIVE: a same-field write committed between the store's read and the SQ
 });
 
 
-test("RULING (a) LIVE: a prospect may name its CARR party; a party nobody holds refuses", { skip: SHADOW_SKIP }, async () => {
+test("RULING (a) LIVE: a prospect may name its CARR party; a party nobody holds refuses", async () => {
   const [row] = await owner(
     `insert into public.party (kind, name, created_by, updated_by)
      select 'org', $1, a.id, a.id from (select id from public.actor order by id limit 1) a
@@ -1493,7 +1525,7 @@ test("RULING (a) LIVE: a prospect may name its CARR party; a party nobody holds 
     "a party id no CARR party holds is a dangling reference and refuses at the writer");
 });
 
-test("RULING (b) LIVE: one ACTIVE negotiation per assignment and property; a new one opens once the old is no longer active", { skip: SKIP }, async () => {
+test("RULING (b) LIVE: one ACTIVE negotiation per assignment and property; a new one opens once the old is no longer active", async () => {
   const { rel, eng, asg } = await openedAssignment("joe");
   const property = id("prop");
   const first = id("neg");
@@ -1545,7 +1577,7 @@ test("RULING (b) LIVE: one ACTIVE negotiation per assignment and property; a new
   "the same property reopens once nothing on it is active");
 });
 
-test("RULING (b) LIVE: a sibling committed inside the store's window is refused by the WRITER; the partial unique index backs it", { skip: SKIP }, async () => {
+test("RULING (b) LIVE: a sibling committed inside the store's window is refused by the WRITER; the partial unique index backs it", async () => {
   const { asg } = await openedAssignment("joe");
   const property = id("prop");
   let injected = false;
@@ -1586,7 +1618,7 @@ async function sponsorOf(subject_kind, subject_id) {
   return row;
 }
 
-test("RULING (c) LIVE: an agent's write is recorded under its sponsoring partner, a partner's under themself", { skip: SKIP }, async () => {
+test("RULING (c) LIVE: an agent's write is recorded under its sponsoring partner, a partner's under themself", async () => {
   const byAgent = id("rel");
   ok(await as("agent").initializeProspectRelationship({ idempotency_key: key(),
     declared: { new_subject_id: byAgent } }), "agent creates a prospect");
@@ -1619,7 +1651,7 @@ test("RULING (c) LIVE: an agent's write is recorded under its sponsoring partner
   assert.deepEqual(moved.events.at(-1), ["codex", "joe"]);
 });
 
-test("RULING (c) LIVE: a caller-supplied sponsor is refused, at the store and at the SQL writer", { skip: SKIP }, async () => {
+test("RULING (c) LIVE: a caller-supplied sponsor is refused, at the store and at the SQL writer", async () => {
   for (const payload of [
     { idempotency_key: key(), sponsoring_partner: "dell", declared: { new_subject_id: id("rel") } },
     { idempotency_key: key(), declared: { new_subject_id: id("rel"), sponsoring_partner: "dell" } },
@@ -1694,7 +1726,7 @@ function tamperingStoreFor(name, writer, edit) {
   } });
 }
 
-test("RULING (c) LIVE: a TRANSITION envelope naming another sponsor, digests recomputed, is refused by the SQL writer", { skip: SKIP }, async () => {
+test("RULING (c) LIVE: a TRANSITION envelope naming another sponsor, digests recomputed, is refused by the SQL writer", async () => {
   const d = await dealWith("lease", ["lease_exec"]);
   const base = (await body("joe", "deal", d.deal)).state_digest;
   const invoice = await fact("joe", "invoice", "deal", d.deal, { detail: "synthetic" });
@@ -1719,10 +1751,10 @@ test("RULING (c) LIVE: a TRANSITION envelope naming another sponsor, digests rec
   assert.equal((await body("joe", "deal", d.deal)).state_digest, base, "the deal did not move");
 });
 
-test("RULING (c) LIVE: a PARTNER session whose transaction names a different sponsor is refused", { skip: SKIP }, async () => {
+test("RULING (c) LIVE: a PARTNER session whose transaction names a different sponsor is refused", async () => {
   if (!pg) pg = (await import("pg")).default;
   const conflicted = new pg.Pool({ connectionString: DSN.joe, max: 1,
-    options: "-c carr.sponsoring_human_slug=dell" });
+    options: "-c carr.sponsoring_human_slug=dell", ...sessionRole("carr_authority_joe") });
   try {
     const store = createCreLifecycleStore({ db: {
       async query() { throw new Error("transaction() is always used"); },

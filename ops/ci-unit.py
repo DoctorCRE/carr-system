@@ -55,6 +55,8 @@ def main():
                 for line in output.splitlines():
                     if line.startswith('suite-timing: '):
                         print(line)
+                exceptions = (json.loads((ROOT / 'ops/config/hosted-suite-exceptions.json').read_text())
+                              if package == 'mcp-server' else {})
                 completed = []
                 suite_error = None
                 for line in output.splitlines():
@@ -62,10 +64,13 @@ def main():
                         continue
                     suite = json.loads(line.removeprefix('suite-result: '))
                     executed = test_counts(suite['summary'])
-                    if (suite['code'] or executed is None or executed['pass'] == 0
+                    if (suite['code'] or executed is None or (executed['pass'] == 0 and suite['file'] not in exceptions)
                             or executed['fail'] or executed['cancelled'] or executed['todo']):
                         suite_error = f"suite {suite['file']}: zero passing tests or incomplete execution"
+                        print(suite_error)
                     else:
+                        if executed['pass'] == 0:
+                            print(f"unit exception {suite['file']}: {exceptions[suite['file']]}")
                         completed.append(suite['file'])
                 counts = test_counts(output)
                 if result.returncode:

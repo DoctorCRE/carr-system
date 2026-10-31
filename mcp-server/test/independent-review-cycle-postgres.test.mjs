@@ -1,3 +1,4 @@
+import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // V5-A03 against real disposable PostgreSQL. The unit suite proves the JS
 // boundary; this proves the append-only relations and transition locks.
 //
@@ -14,18 +15,12 @@ const V5_REVIEW_DIMENSIONS = [
   "product", "repository", "resilience", "security", "sequencing",
 ];
 
-const DSN = process.env.DATABASE_URL || "";
-const REQUIRED = process.env.CARR_V5_A03_DB_REQUIRED === "1";
+const DSN = await snapshotDatabase('independent-review-cycle-postgres-');
 const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost|\/)/;
 const digest = () => `sha256:${randomBytes(32).toString("hex")}`;
 const session = label => `session:${label}-${randomUUID()}`;
 
 async function database(t) {
-  if (!DSN) {
-    assert.equal(REQUIRED, false, "V5-A03 database proof was required but DATABASE_URL is absent");
-    t.skip("the migration class supplies a disposable DATABASE_URL");
-    return null;
-  }
   assert.ok(LOOPBACK.test(DSN), "REFUSED: V5-A03 database proof only writes to disposable loopback PostgreSQL");
   return (await import("pg")).default ?? (await import("pg"));
 }
