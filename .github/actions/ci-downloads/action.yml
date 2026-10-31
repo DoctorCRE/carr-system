@@ -1,0 +1,18 @@
+name: Cached CI dependency downloads
+description: Share main-seeded downloads only within the same runner image and dependency locks.
+runs:
+  using: composite
+  steps:
+    - id: image
+      shell: bash
+      run: echo "identity=$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
+    - name: Restore npm downloads
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+      with:
+        path: ~/.npm
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ steps.image.outputs.identity }}-${{ hashFiles('.nvmrc', 'mcp-server/package-lock.json', 'practice-plugin/package-lock.json') }}
+    - name: Restore pip downloads
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+      with:
+        path: ~/.cache/pip
+        key: pip-${{ runner.os }}-${{ runner.arch }}-${{ steps.image.outputs.identity }}-${{ hashFiles('.python-version', 'requirements.lock') }}
