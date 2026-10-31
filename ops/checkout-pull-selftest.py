@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Checkout refresh stays independent of other fetches in the same Git repository."""
 import importlib.util
+import os
+import sys
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+
+from git_env import fixture_env
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -32,6 +36,35 @@ class CheckoutPullTests(unittest.TestCase):
             self.assertEqual(sum('fetch' in argv for argv in calls), attempts)
             self.assertFalse(any('merge' in argv for argv in calls))
 
+    def test_hostile_git_directory_does_not_change_another_repository(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            victim = root / 'victim'
+            victim.mkdir()
+            env = fixture_env()
+            env['HOME'] = str(root)
+            env['GIT_CONFIG_GLOBAL'] = str(root / 'global-config')
+            def git(*args):
+                return subprocess.run(['git', '-C', str(victim), *args], env=env,
+                                      check=True, capture_output=True, text=True).stdout.strip()
+            git('init', '-b', 'main')
+            git('config', 'user.name', 'Victim sentinel')
+            git('config', 'user.email', 'victim@example.invalid')
+            (victim / 'file').write_text('untouched')
+            git('add', 'file')
+            git('commit', '-m', 'sentinel')
+            before = (git('rev-parse', 'HEAD'), git('config', 'user.name'),
+                      git('status', '--porcelain'))
+            hostile = dict(env, GIT_DIR=str(victim / '.git'), GIT_WORK_TREE=str(victim),
+                           GIT_INDEX_FILE=str(victim / '.git/index'))
+            result = subprocess.run([sys.executable, __file__,
+                                     'CheckoutPullTests.test_competing_fetch_is_retried_and_cannot_redirect_the_merge'],
+                                    env=hostile, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(before, (git('rev-parse', 'HEAD'), git('config', 'user.name'),
+                                      git('status', '--porcelain')))
+            self.assertEqual((victim / 'file').read_text(), 'untouched')
+
     def test_competing_fetch_is_retried_and_cannot_redirect_the_merge(self):
         spec = importlib.util.spec_from_file_location('checkout_pull', ROOT / 'ops/checkout-pull.py')
         module = importlib.util.module_from_spec(spec)
@@ -40,9 +73,12 @@ class CheckoutPullTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             upstream, checkout = root / 'upstream', root / 'checkout'
+            env = fixture_env()
+            env['HOME'] = str(root)
+            env['GIT_CONFIG_GLOBAL'] = str(root / 'global-config')
             def git(repo, *args):
                 return subprocess.run(['git', '-C', str(repo), *args], check=True,
-                                      capture_output=True, text=True).stdout.strip()
+                                      capture_output=True, text=True, env=env).stdout.strip()
             upstream.mkdir()
             git(upstream, 'init', '-b', 'main')
             git(upstream, 'config', 'user.email', 'fixture@example.invalid')
@@ -51,7 +87,7 @@ class CheckoutPullTests(unittest.TestCase):
             git(upstream, 'add', 'file')
             git(upstream, 'commit', '-m', 'first')
             old = git(upstream, 'rev-parse', 'HEAD')
-            subprocess.run(['git', 'clone', '-q', str(upstream), str(checkout)], check=True)
+            subprocess.run(['git', 'clone', '-q', str(upstream), str(checkout)], check=True, env=env)
             (upstream / 'file').write_text('second')
             git(upstream, 'commit', '-am', 'second')
             new = git(upstream, 'rev-parse', 'HEAD')
@@ -59,6 +95,7 @@ class CheckoutPullTests(unittest.TestCase):
             lock.write_text('another fetch owns this ref')
             fetches = []
             def competing_fetch(argv, **kwargs):
+                kwargs['env'] = env
                 result = subprocess.run(argv, **kwargs)
                 if 'fetch' in argv:
                     fetches.append(result.returncode)
@@ -73,7 +110,11 @@ class CheckoutPullTests(unittest.TestCase):
             self.assertEqual(git(checkout, 'rev-parse', 'FETCH_HEAD'), old)
             self.assertEqual(fetches, [1, 0])
             git(checkout, 'switch', '-c', 'work')
-            self.assertNotEqual(update(checkout), 0)
+            script_env = dict(os.environ, HOME=str(root), GIT_CONFIG_GLOBAL=str(root / 'global-config'))
+            result = subprocess.run([sys.executable, str(ROOT / 'ops/checkout-pull.py'), str(checkout)],
+                                    env=script_env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('expected main', result.stderr)
 
 
 if __name__ == '__main__':
