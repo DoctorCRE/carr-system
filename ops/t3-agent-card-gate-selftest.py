@@ -16,6 +16,8 @@ class T3AgentCardGate(AgentCardGate):
     def dispatches(self, prompt):
         return {
             'delegate_task': {'task': prompt},
+            't3_pending_request': {'action': 'respond', 'requestId': 'fixture',
+                                   'answers': {'q': prompt}},
             't3_queue': {'action': 'edit', 'queuedRunId': 'fixture', 'text': prompt},
             't3_thread_launch': {'title': 'Review', 'message': prompt},
             'create_threads': {'threads': [{'prompt': prompt}, {'prompt': prompt}]},
@@ -42,6 +44,35 @@ class T3AgentCardGate(AgentCardGate):
                 with self.subTest(name=name, prompt=prompt):
                     result = self.configured_call(name, inputs)
                     self.assertEqual(result.returncode, code, result.stderr)
+
+    def test_pending_request_malformed_answers_fail_closed(self):
+        self.register_fixture()
+        for answers in [None, {}, [], 'Card: WR557.S6.J1', {'q': None},
+                        {'q': 7}, {'q': ['Card: WR557.S6.J1']},
+                        {'q': {'text': 'Card: WR557.S6.J1'}},
+                        {'q': 'Card: WR557.S6.J1', 'other': None}]:
+            with self.subTest(answers=answers):
+                result = self.configured_call('t3_pending_request',
+                                              {'action': 'respond', 'answers': answers})
+                self.assertEqual(result.returncode, 2, result.stderr)
+
+    def test_pending_request_validates_joined_answer_text(self):
+        self.register_fixture()
+        for answers, code in [({'q': 'Card: WR557.S6.J1', 'next': 'Review.'}, 0),
+                              ({'q': 'Card: WR557.S6.J1',
+                                'next': 'Card: WR557.S6.J1'}, 2),
+                              ({'q': '', 'next': 'Review.'}, 2)]:
+            with self.subTest(answers=answers):
+                result = self.configured_call('t3_pending_request',
+                                              {'action': 'respond', 'answers': answers})
+                self.assertEqual(result.returncode, code, result.stderr)
+
+    def test_pending_request_reads_do_not_check_cards(self):
+        self.lookup.write_text('raise SystemExit("queue must not be read")')
+        for action in ['list', 'read']:
+            with self.subTest(action=action):
+                result = self.configured_call('t3_pending_request', {'action': action})
+                self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_every_batch_prompt_needs_its_own_card(self):
         self.register_fixture()
