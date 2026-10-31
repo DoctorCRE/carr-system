@@ -125,8 +125,8 @@ export function practiceOriginationTools({withEnvelope}: {withEnvelope:WithEnvel
             where p.merged_into is null and p.deleted_at is null and
               (p.npi=e.npi or (lower(p.name)=lower(e.name) and lower(coalesce(p.city,''))=lower(e.city)
                 and p.state=e.state) or (length(coalesce(e.facts->>'address',''))>0 and p.state=e.state
-                and lower(coalesce((select a.street_address from v_practice_origination_party_address a
-                  where a.party_id=p.id),''))=lower(e.facts->>'address')))
+                and practice_address_key((select a.street_address from v_practice_origination_party_address a
+                  where a.party_id=p.id))=practice_address_key(e.facts->>'address')))
           ) m on true order by e.id desc`,[args.before_id ?? null,limit+1])).rows;
         const cards = rows.slice(0,limit);
         return {ok:true,contract:'practice-origination.v1',cards,

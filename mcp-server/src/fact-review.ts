@@ -30,6 +30,42 @@ function result(out: Record<string, unknown>) {
 }
 export function factReviewTools() {
   return {
+    'draft-terms-comparison': {
+      write: false,
+      description: 'Draft a comparison of canonical lease terms for two or more entities. Refuses every missing or pending field. Sends and stores nothing.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {
+        entity_refs: { type: 'array', minItems: 2, maxItems: 20, uniqueItems: true, items: entity },
+      }, required: ['entity_refs'] },
+      handler: async (c: Db, actor: Actor, args: { entity_refs: string[] }) => {
+        const rows = (await c.query(`select e.entity_ref, ops.list_fact_review($1,e.entity_ref,100,null,true) result
+          from unnest($2::text[]) with ordinality e(entity_ref,ordinal) order by e.ordinal`,
+          [organizationTenantForActor(actor), args.entity_refs])).rows;
+        const issues: { entity_ref: string; fact_key: string; reason: string }[] = [];
+        const deals = rows.map(({ entity_ref, result }: any) => {
+          const fields = Object.keys(CONTRACTS).map(fact_key => {
+            const item = result.items.find((entry: any) => entry.fact_key === fact_key);
+            const canonical = item?.canonical_fact;
+            if (item?.pending) issues.push({ entity_ref, fact_key, reason: item.reasons.includes('conflict') ? 'open_conflict' : 'pending_review' });
+            if (!canonical || (canonical.normalized_value == null && canonical.normalized_schedule == null))
+              issues.push({ entity_ref, fact_key, reason: 'missing_canonical' });
+            if (!canonical) return null;
+            const citations = item.observations.filter((observation: any) => canonical.observation_ids.includes(observation.id)).map((observation: any) => observation.source);
+            if (citations.length !== canonical.observation_ids.length) {
+              issues.push({ entity_ref, fact_key, reason: 'missing_citation' });
+              return null;
+            }
+            return { fact_key, value: canonical.normalized_schedule ?? canonical.normalized_value,
+              unit: canonical.canonical_unit, expense_basis: canonical.expense_basis,
+              fact_id: canonical.id, version: canonical.version, citations };
+          });
+          return { entity_ref, fields };
+        });
+        if (issues.length) throw new ToolError({ error: 'unresolved_facts', facts: issues });
+        const text = deals.map(({ entity_ref, fields }: any) => [entity_ref, ...fields.map((field: any) =>
+          `${field.fact_key}: ${JSON.stringify(field.value)} ${field.unit}${field.expense_basis ? ` (${field.expense_basis})` : ''} [fact ${field.fact_id} v${field.version}; sources ${JSON.stringify(field.citations)}]`)].join('\n')).join('\n\n');
+        return { ok: true, schema_version: 'terms-comparison-draft.v1', draft: true, text, deals };
+      },
+    },
     'record-human-fact': {
       write: true, humanOnly: true,
       description: 'Record a distinct human-authored term from an existing, undeleted deal attachment. entity_ref is the deal UUID and source.document_ref is its attachment UUID. The server binds the stored hash and author; supplied text is a human transcription, not verified document content. Returns the observation without promotion. The extraction recording verb remains job-only.',

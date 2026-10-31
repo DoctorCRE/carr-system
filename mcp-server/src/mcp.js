@@ -868,6 +868,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
     throw error;
   }
   client.ai = budgetedAi(env);
+  client.jevApiKey = env.TYPESAFE_API_KEY;
   const writerRead = tool.writerConnection === true && !tool.write;
   let readOk = true;
   try {
