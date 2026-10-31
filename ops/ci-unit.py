@@ -95,7 +95,7 @@ def main():
                           f"{counts['pass']} passed, {counts['skipped']} skipped")
                     continue
                 print(f'FAIL unit {package}: {reason}')
-                print('\n'.join(output.splitlines()[-25:]))
+                print(output)
             except (OSError, ValueError, TypeError) as exc:
                 print(f'FAIL unit {package}: required check could not complete ({type(exc).__name__})')
             failed = True

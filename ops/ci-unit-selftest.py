@@ -148,6 +148,27 @@ class UnitClassTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn('original diagnostic', result.stderr)
 
+    def test_all_failed_suite_diagnostics_survive_the_log_tail(self):
+        self.all_packages()
+        mcp = self.root / 'mcp-server'
+        for name in ('run-tests.mjs', 'suite-discovery.mjs'):
+            shutil.copy2(ROOT / 'mcp-server' / name, mcp / name)
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 2}))
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
+        (mcp / 'test/chrome-launch.test.mjs').write_text(
+            "import test from 'node:test'; test('early', () => { throw Error('first suite assertion detail'); });")
+        (mcp / 'test/suite.test.mjs').write_text(
+            "import test from 'node:test'; test('late', () => { const error = Error('second suite assertion detail');"
+            "error.stack += '\\n' + Array(100).fill('diagnostic padding').join('\\n'); throw error; });")
+        result = self.run_class()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('first suite assertion detail', result.stderr)
+        self.assertIn('second suite assertion detail', result.stderr)
+        (mcp / 'test/chrome-launch.test.mjs').write_text("process.kill(process.pid, 'SIGTERM');")
+        result = self.run_class()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('SIGTERM', result.stderr, 'file-level termination must report its signal')
+
     def test_shard_refuses_hidden_suite_and_zero_executed_tests(self):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'

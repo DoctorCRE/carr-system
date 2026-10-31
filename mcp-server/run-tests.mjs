@@ -64,7 +64,7 @@ async function main() {
           let output = '';
           const started = performance.now();
           const code = await new Promise((resolve, reject) => {
-            const child = spawn(process.execPath, ['--test', path.join(ROOT, 'test', file)],
+            const child = spawn(process.execPath, ['--test', '--test-reporter=tap', path.join(ROOT, 'test', file)],
               { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'],
                 env: { ...suiteEnv, ...(template && {
                   CARR_TEST_PG_SNAPSHOT: template.snapshot, CARR_TEST_PG_SNAPSHOT_KEY: template.key,

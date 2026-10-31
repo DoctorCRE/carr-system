@@ -31,6 +31,7 @@ const DSN = {
 };
 let OWNER_DSN = process.env.CARR_J102_LIVE_PG_DSN_OWNER;
 let fixture;
+const clientShutdowns = [];
 before(async () => {
   if (DSN.joe && DSN.dell && DSN.writer && OWNER_DSN) return;
   fixture = await acquireDisposablePostgres({ prefix: 'cre-lifecycle-', snapshot: true });
@@ -59,6 +60,7 @@ function sessionRole(role) {
   // Authenticate to the disposable owner, then assume the exact session_user
   // checked by the SQL writers. No production role passwords are required.
   return fixture ? { onConnect: async client => {
+    clientShutdowns.push(new Promise(resolve => client.once('end', resolve)));
     await client.query(`set session authorization ${role}`);
     assert.equal((await client.query('select session_user as who')).rows[0].who, role);
   } } : {};
@@ -218,7 +220,12 @@ async function f01Artifact(name) {
 
 
 after(async () => {
-  try { for (const p of Object.values(pools)) await p.end(); }
+  try {
+    for (const p of Object.values(pools)) await p.end();
+    // Pool.end removes clients before their sockets finish closing. The clone
+    // must outlive those sockets or DROP DATABASE FORCE raises late pool errors.
+    await Promise.all(clientShutdowns);
+  }
   finally { await fixture?.close(); }
 });
 
