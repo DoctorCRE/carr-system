@@ -178,6 +178,12 @@ test('Home inbox is an actor-scoped bounded snapshot over canonical records', as
     const task=snapshot.items.find(i=>i.source_id===id(11));
     assert.equal(task.source_state,'failed'); assert.equal(task.unseen,true);
     assert.equal(snapshot.items.filter(i=>i.source_type==='notification').length,1,'linked notifications do not make another inbox item');
+    await c.query("update next_action set status='open',version=version+1,updated_at='2026-11-06' where id=$1",[id(11)]);
+    const reopened=(await read()).items.find(i=>i.source_id===id(11));
+    await change('snooze-home-inbox',[reopened],{until:'2099-11-01T12:00:00Z'});
+    await c.query(`insert into ops.notification values($1,$2,'next_action',$3,'completion','Background work finished','/home','2026-11-07')`,[id(51),joe.id,id(11)]);
+    assert.equal((await read()).items.find(i=>i.source_id===id(11)).disposition,'snoozed',
+      'a completion notification never wakes a still-open canonical task');
   });
   await t.test('reader cannot read dispositions or supply another actor to private helpers',async()=>{
     await c.query('set role carr_reader');

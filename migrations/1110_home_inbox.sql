@@ -70,7 +70,7 @@ language sql stable set search_path=pg_catalog,pg_temp as $$
       when status='approved_to_send' then 'working' else 'needs_attention' end,
     coalesce(draft_subject,'Reply draft'),coalesce(result_recorded_at,submitted_at,created_at),null,false from drafts
   ), enriched as (
-    select s.item_id,s.source_type,s.source_id,s.source_version||':'||coalesce(g.revision,'') source_version,
+    select s.item_id,s.source_type,s.source_id,s.source_version||':'||coalesce(g.material,md5('')) source_version,
       s.material_version||':'||coalesce(g.material,md5('')) material_version,
       case when (g.latest->>'created_at')::timestamptz>=s.activity_at
         and g.latest->>'severity' in ('failure','action_required')
