@@ -50,7 +50,7 @@ test('recorded proposed-rent comps persist through the sole append door and read
     const view = snapshot.match(/CREATE VIEW public\.v_deal_room_negotiation AS[\s\S]*?;/)?.[0];
     assert.ok(view);
     await c.query(view);
-    await c.query(readMigration('1112_doc_answer_blocks.sql').split('do $answer_grants$')[0]);
+    await c.query(readMigration('1115_doc_answer_blocks.sql').split('do $answer_grants$')[0]);
     await c.query(`insert into actor(id,slug,kind,display_name) values ($1,'synthetic-author','automation','Synthetic');
       `, [id(1)]);
     await c.query('insert into ops.doc_conversation(id,title,created_by_actor) values ($1,$2,$3)',

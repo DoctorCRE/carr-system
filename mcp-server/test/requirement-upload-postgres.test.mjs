@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID, createHash, createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
@@ -37,6 +37,8 @@ test('a requested checklist row receives a quarantined PDF without becoming sati
     await c.query("insert into v_ref_index values('deal',$1,'D-1','Synthetic closing'),('deal',$2,'D-2','Synthetic other')", [deal, other]);
     for (const s of CHECKLIST_SOURCES) await c.query("insert into doctrine_section values($1,'active',$2)", [s.section_id, s.content_hash]);
     await c.query(readFileSync(new URL('../../migrations/1105_requirement_requests.sql', import.meta.url), 'utf8'));
+    await c.query(readFileSync(new URL('../../migrations/1106_requirement_visitor_retention.sql', import.meta.url), 'utf8'));
+    await c.query('grant usage on schema ops to carr_writer');
     const call = async (name, args) => {
       await c.query('begin');
       try {
@@ -44,7 +46,7 @@ test('a requested checklist row receives a quarantined PDF without becoming sati
         await c.query('commit'); return result;
       } catch (error) { await c.query('rollback'); throw error; }
     };
-    const requested = await call('request-checklist-document', { deal, row_key: 'title_commitment', owner: 'joe', due_on: '2026-11-15' });
+    const requested = await call('request-checklist-document', { deal, row_key: 'title_commitment', owner: 'joe', due_on: '2020-01-01' });
     assert.equal(requested.request.document_type, 'title_commitment');
     assert.equal(requested.request.source.section_id, CHECKLIST_SOURCES[2].section_id);
     await t.test('the checklist projects row ownership, deadline and request without altering milestone state', async () => {
@@ -52,8 +54,19 @@ test('a requested checklist row receives a quarantined PDF without becoming sati
       const row = checklist.phases.flatMap(p => p.items).find(r => r.id === 'title_commitment');
       assert.equal(row.request.id, requested.request.id);
       assert.equal(row.owner, 'joe');
-      assert.equal(row.due_on, '2026-11-15');
-      assert.equal(row.status, 'not_recorded');
+      assert.equal(row.due_on, '2020-01-01');
+      assert.ok(checklist.due_items.some(item => item.id === row.id));
+      assert.equal(row.status, 'overdue');
+    });
+    await t.test('missing requests view degrades the checklist', async () => {
+      await c.query('alter view v_requirement_request rename to hidden_requests');
+      try {
+        const checklist = await readDealChecklist(c, { id: deal, type: 'purchase' });
+        assert.equal(checklist.template_state, 'current');
+        assert.ok(checklist.phases.flatMap(p => p.items).some(row => row.id === 'title_commitment'));
+        assert.equal(checklist.requests_state, 'unavailable');
+      }
+      finally { await c.query('alter view hidden_requests rename to v_requirement_request'); }
     });
     const request_id = requested.request.id;
     const grant = async (overrides = {}) => {
@@ -61,13 +74,15 @@ test('a requested checklist row receives a quarantined PDF without becoming sati
       const issued = await call('issue-requirement-upload', { request_id, token_sha256: hash(token), expires_in_seconds: 600, ...overrides });
       return { token, ...issued };
     };
-    const buildHandler = db => createRequirementUploadHandler({
+    const buildHandler = (db, put = async (key, bytes) => { objects.set(key, Buffer.from(bytes)); }) => createRequirementUploadHandler({
+      visitorSecret: 'synthetic-visitor-secret',
       transaction: async fn => {
         await db.query('begin');
+        await db.query('set local role carr_writer');
         try { const result = await fn(db); await db.query('commit'); return result; }
         catch (error) { await db.query('rollback'); throw error; }
       },
-      bucket: { put: async (key, bytes) => { objects.set(key, Buffer.from(bytes)); } },
+      bucket: { put, delete: async key => { objects.delete(key); } },
     });
     const handler = buildHandler(c);
     const upload = (g, { tenant = 'carr-internal', dealId = deal, row = 'title_commitment', body = pdf, headers = {}, visitor = '192.0.2.1' } = {}) => handler(new Request(
@@ -75,6 +90,16 @@ test('a requested checklist row receives a quarantined PDF without becoming sati
       { method: 'POST', body, headers: { authorization: `Bearer ${g.token}`, 'content-type': 'application/pdf',
         'content-length': String(body.length), 'cf-connecting-ip': visitor, ...headers }, duplex: 'half' }));
 
+    await t.test('visitor hashes are keyed and old visitor rows are pruned on write', async () => {
+      await c.query("insert into ops.requirement_upload_visitor values($1,now()-interval '25 hours',5)", ['0'.repeat(64)]);
+      assert.equal((await upload(await grant(), { visitor: '192.0.2.99' })).status, 201);
+      const rows = (await c.query('select visitor_hash from ops.requirement_upload_visitor')).rows.map(r => r.visitor_hash);
+      assert.ok(rows.includes(createHmac('sha256', 'synthetic-visitor-secret').update('192.0.2.99').digest('hex')));
+      assert.ok(!rows.includes(hash('192.0.2.99')));
+      assert.ok(!rows.includes('0'.repeat(64)));
+      objects.clear();
+      await c.query('delete from ops.requirement_upload_receipt; update ops.requirement_upload_quota set reserved_bytes=0');
+    });
     await t.test('receives only on its tenant, deal and row, and refuses replay', async () => {
       const g = await grant();
       for (const mismatch of [{ tenant: 'other-tenant' }, { dealId: other }, { row: 'appraisal' }])
@@ -113,14 +138,60 @@ test('a requested checklist row receives a quarantined PDF without becoming sati
       }
       assert.equal((await upload(g, { body: Buffer.from('not a PDF'), visitor: '192.0.2.2' })).status, 415);
       assert.equal((await upload(g)).status, 403, 'failed content inspection consumes the capability');
+      assert.equal(Number((await c.query('select reserved_bytes from ops.requirement_upload_quota')).rows[0].reserved_bytes), [...objects.values()].reduce((n, b) => n + b.length, 0));
       const lying = await grant();
       assert.equal((await upload(lying, { headers: { 'content-length': '5' }, visitor: '192.0.2.3' })).status, 413);
       const short = await grant();
       assert.equal((await upload(short, { headers: { 'content-length': '99' }, visitor: '192.0.2.4' })).status, 413);
     });
-    await t.test('per-visitor write reservations stop the fifth attempt and leave another visitor independent', async () => {
+    await t.test('storage and receipt failures, expiry and revocation refund the byte reservation', async () => {
+      for (const outcome of ['put', 'receipt', 'expired', 'revoked']) {
+        const before = objects.size;
+        const quota = Number((await c.query('select reserved_bytes from ops.requirement_upload_quota')).rows[0].reserved_bytes);
+        const g = await grant();
+        const failing = buildHandler(c, async (key, bytes) => {
+          if (outcome === 'put') throw new Error('synthetic storage failure');
+          objects.set(key, Buffer.from(bytes));
+          if (outcome === 'receipt') await c.query(`create function pg_temp.reject_receipt() returns trigger language plpgsql as $$begin raise exception 'synthetic receipt failure'; end$$;
+            create trigger reject_receipt before insert on ops.requirement_upload_receipt for each row execute function pg_temp.reject_receipt()`);
+          if (outcome === 'expired') await c.query("update ops.requirement_upload_grant set created_at=now()-interval '2 hours',expires_at=now()-interval '1 hour' where id=$1", [g.grant_id]);
+          if (outcome === 'revoked') await call('revoke-requirement-upload', { grant_id: g.grant_id });
+        });
+        try {
+          const response = await failing(new Request(`https://share.doctorcre.com${g.upload_path}`, { method: 'POST', body: pdf,
+            headers: { authorization: `Bearer ${g.token}`, 'content-type': 'application/pdf', 'content-length': String(pdf.length), 'cf-connecting-ip': `synthetic-${outcome}` } }));
+          assert.equal(response.status, ['expired', 'revoked'].includes(outcome) ? 403 : 503);
+          assert.equal(objects.size, before);
+          assert.equal(Number((await c.query('select reserved_bytes from ops.requirement_upload_quota')).rows[0].reserved_bytes), quota);
+        } finally { if (outcome === 'receipt') await c.query('drop trigger reject_receipt on ops.requirement_upload_receipt'); }
+      }
+    });
+    await t.test('lost receipt confirmation preserves the uploaded object and quota', async () => {
+      const g = await grant();
+      const before = Number((await c.query('select reserved_bytes from ops.requirement_upload_quota')).rows[0].reserved_bytes);
+      let transactions = 0;
+      const lostConfirmation = createRequirementUploadHandler({ visitorSecret: 'synthetic-visitor-secret',
+        bucket: { put: async (key, bytes) => objects.set(key, Buffer.from(bytes)), delete: async key => objects.delete(key) },
+        transaction: async fn => {
+          await c.query('begin');
+          try {
+            const result = await fn(c);
+            await c.query('commit');
+            if (++transactions === 4) throw new Error('synthetic lost confirmation');
+            return result;
+          } catch (error) { await c.query('rollback'); throw error; }
+        },
+      });
+      const response = await lostConfirmation(new Request(`https://share.doctorcre.com${g.upload_path}`, { method: 'POST', body: pdf,
+        headers: { authorization: `Bearer ${g.token}`, 'content-type': 'application/pdf', 'content-length': String(pdf.length), 'cf-connecting-ip': '192.0.2.88' } }));
+      assert.equal(response.status, 503);
+      const receipt = (await c.query('select r2_key from ops.requirement_upload_receipt where grant_id=$1', [g.grant_id])).rows[0];
+      assert.ok(objects.has(receipt.r2_key));
+      assert.equal(Number((await c.query('select reserved_bytes from ops.requirement_upload_quota')).rows[0].reserved_bytes), before + pdf.length);
+    });
+    await t.test('per-visitor write reservations stop the third attempt and leave another visitor independent', async () => {
       const visitor = '192.0.2.20';
-      for (let i = 0; i < 4; i++) assert.equal((await upload(await grant(), { visitor })).status, 201);
+      for (let i = 0; i < 2; i++) assert.equal((await upload(await grant(), { visitor })).status, 201);
       const limited = await grant();
       assert.equal((await upload(limited, { visitor })).status, 429);
       assert.equal((await upload(limited, { visitor: '192.0.2.21' })).status, 201);
@@ -142,6 +213,8 @@ test('a requested checklist row receives a quarantined PDF without becoming sati
       await c.query('update ops.requirement_upload_quota set reserved_bytes=104857600 where singleton');
       assert.equal((await upload(await grant(), { visitor: '192.0.2.30' })).status, 503);
       assert.equal(objects.size, before);
+      assert.equal((await upload(await grant(), { visitor: '192.0.2.30' })).status, 503);
+      assert.equal((await upload(await grant(), { visitor: '192.0.2.30' })).status, 429);
     });
     await t.test('request creation refuses stale doctrine, critical dates and authoritative invoice milestones', async () => {
       const args = { deal, owner: 'joe', due_on: '2026-11-15' };

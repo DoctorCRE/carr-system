@@ -112,6 +112,15 @@ export function docConversationListProjection(listed, ToolError) {
   };
 }
 
+// WR-000617: the two partners are the only askers whose requests notify. The
+// reason is a fixed sentence: it never carries request or answer text.
+const DOC_REQUEST_PARTNERS = ["joe", "dell"];
+const DOC_REQUEST_OUTCOMES = {
+  answered: { severity: "completion", reason: "Dr. CRE answered your request. Open the conversation to read the answer." },
+  failed: { severity: "failure", reason: "Dr. CRE could not finish your request. Open the conversation for details." },
+  refused: { severity: "failure", reason: "Dr. CRE declined your request. Open the conversation for details." },
+};
+
 export function docConversationTools({ withEnvelope, writeEvent, ToolError }) {
   return {
     "add-doc-conversation-turn": {
@@ -180,6 +189,107 @@ export function docConversationTools({ withEnvelope, writeEvent, ToolError }) {
           return { ok: true, deduplicated: result.deduplicated === true,
             conversation_id: args.conversation_id, sequence: result.sequence,
             msg_id: result.msg_id, origin_actor: result.origin_actor };
+        }),
+    },
+
+    // WR-000617 slice 7. Completion of a partner's request is recorded as ONE
+    // in-app notification through the existing ops.mint_notification door: no
+    // second request store and no second notification store. The request is the
+    // partner's own human turn; "in progress" is the absence of this call.
+    "complete-doc-request": {
+      write: true,
+      // The responder is the assistant side, same as add-doc-conversation-turn.
+      authorityOnly: true,
+      description: "Record that a partner's Doc request finished (answered, failed or refused) and notify the partner who asked, once. The request is that partner's own human turn; the asker is derived from the turn, never named by the caller. A repeat completion mints nothing further. Quiet hours hold the device push only, never the in-app item.",
+      inputSchema: { type: "object", additionalProperties: false, properties: {
+        idempotency_key: { type: "string" },
+        conversation_id: { type: "string" },
+        request_msg_id: { type: "string" },
+        outcome: { type: "string", enum: ["answered", "failed", "refused"] },
+        answer_msg_id: { type: "string" },
+      }, required: ["idempotency_key", "conversation_id", "request_msg_id", "outcome"] },
+      handler: async (c, actor, args) =>
+        withEnvelope(c, actor, "complete-doc-request", args, async () => {
+          if (!UUID.test(String(args.conversation_id || ""))) {
+            throw new ToolError({ error: "doc_conversation_id_invalid" });
+          }
+          if (!UUID.test(String(args.request_msg_id || ""))) {
+            throw new ToolError({ error: "doc_conversation_msg_id_invalid" });
+          }
+          if (!DOC_REQUEST_OUTCOMES[args.outcome]) {
+            throw new ToolError({ error: "doc_request_outcome_invalid" });
+          }
+          if (args.answer_msg_id !== undefined && !UUID.test(String(args.answer_msg_id))) {
+            throw new ToolError({ error: "doc_conversation_msg_id_invalid" });
+          }
+          // PostgreSQL resolves a uuid in either case to one row, so every text
+          // identity below (lock, event lookup, subject, dedupe key, link) is the
+          // lowercase spelling or a retry in another case would mint a second row.
+          const conversationId = args.conversation_id.toLowerCase();
+          const requestMsgId = args.request_msg_id.toLowerCase();
+          await c.query("select pg_advisory_xact_lock(hashtextextended('doc-request:' || $1, 0))",
+            [requestMsgId]);
+          // The first completion is the record. A retry, in any spelling and under
+          // any new key, answers from what was stored, never from its own arguments.
+          const eventQuery = `select id, new_value from event where subject_type='doc_conversation' and subject_id=$1
+               and verb='complete-doc-request' and field='request_outcome'
+               and new_value->>'request_msg_id'=$2 order by recorded_at desc, id desc limit 1`;
+          const eventArgs = [conversationId, requestMsgId];
+          let stored = (await c.query(eventQuery, eventArgs)).rows[0];
+          let outcomeName = stored?.new_value?.outcome ?? args.outcome;
+          let answerMsgId = stored ? (stored.new_value?.answer_msg_id ?? undefined) : args.answer_msg_id?.toLowerCase();
+          if (!DOC_REQUEST_OUTCOMES[outcomeName]) {
+            throw new ToolError({ error: "doc_request_outcome_invalid" });
+          }
+          if (!stored && outcomeName === "answered" && !answerMsgId) {
+            throw new ToolError({ error: "doc_request_answer_required",
+              hint: "an answered request names the turn that answers it" });
+          }
+          const outcome = DOC_REQUEST_OUTCOMES[outcomeName];
+          const turnOf = async (msgId) => (await c.query(
+            "select sequence, role, origin_actor from ops.doc_conversation_turn where conversation_id=$1::uuid and msg_id=$2::uuid",
+            [conversationId, msgId])).rows[0];
+          const request = await turnOf(requestMsgId);
+          if (!request || request.role !== "human") {
+            throw new ToolError({ error: "doc_request_not_found" });
+          }
+          if (!DOC_REQUEST_PARTNERS.includes(request.origin_actor)) {
+            throw new ToolError({ error: "doc_request_asker_not_a_partner" });
+          }
+          let targetMsgId = requestMsgId;
+          if (answerMsgId) {
+            const answer = await turnOf(answerMsgId);
+            if (!answer || answer.role === "human" || answer.sequence <= request.sequence) {
+              throw new ToolError({ error: "doc_request_answer_invalid",
+                hint: "the answer is an assistant or system turn after the request in the same conversation" });
+            }
+            targetMsgId = answerMsgId;
+          }
+          if (!stored) {
+            await writeEvent(c, actor, "complete-doc-request", "doc_conversation",
+              conversationId, {
+                field: "request_outcome",
+                new: { request_msg_id: requestMsgId, outcome: outcomeName,
+                  answer_msg_id: answerMsgId ?? null, recipient: request.origin_actor },
+                cause: "automation_job",
+                idempotency_key: args.idempotency_key,
+              });
+            stored = (await c.query(eventQuery, eventArgs)).rows[0];
+          }
+          const deepLink = `/doc/conversations/${conversationId}/turns/${targetMsgId}`;
+          const minted = (await c.query(
+            "select ops.mint_notification($1,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11) as result",
+            ["event", stored?.id, "doc_conversation_request", requestMsgId, outcome.reason,
+              outcome.severity, deepLink, `doc-request:${requestMsgId}`,
+              request.origin_actor, false, false])).rows[0]?.result;
+          if (!minted?.ok || !minted.notification_id) {
+            throw new ToolError({ error: "doc_request_notification_unavailable",
+              reason_id: minted?.reason_id });
+          }
+          return { ok: true, deduplicated: minted.deduplicated === true,
+            notification_id: minted.notification_id, recipient: request.origin_actor,
+            outcome: outcomeName, severity: outcome.severity, deep_link: deepLink,
+            request_msg_id: requestMsgId };
         }),
     },
 
