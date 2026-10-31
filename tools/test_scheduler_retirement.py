@@ -135,23 +135,26 @@ class SchedulerRetirementTests(unittest.TestCase):
         from scac_mutation_db_inventory import validate_current_catalog
         with tempfile.TemporaryDirectory(prefix='grant-merge-') as temp:
             repo = Path(temp)
+            from git_env import fixture_env
+            environment = fixture_env()
             git = lambda *args: subprocess.run(['git', '-c', 'core.hooksPath=/dev/null', *args], cwd=repo,
-                                               capture_output=True, text=True)
+                                               env=environment, capture_output=True, text=True)
             (repo / 'migrations').mkdir()
             (repo / 'migrations/.keep').write_text('')
             shutil.copy(ROOT / REGISTRY, repo / REGISTRY.split('/')[-1])
             git('init', '-q', '-b', 'main')
+            git('config', 'user.name', 'Synthetic fixture')
+            git('config', 'user.email', 'fixture@example.invalid')
             git('add', '.')
-            git('-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'base')
+            git('commit', '-qm', 'base')
             for name in ('a', 'b'):
                 git('checkout', '-q', '-b', name, 'main')
                 record_grant_migration(repo, name)
                 git('add', '.')
-                git('-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', name)
+                git('commit', '-qm', name)
             for first, second in (('a', 'b'), ('b', 'a')):
                 git('checkout', '-q', '-B', 'merged', first)
-                merged = git('-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid',
-                             'merge', '--no-edit', second)
+                merged = git('merge', '--no-edit', second)
                 self.assertEqual(merged.returncode, 0, f'{first} then {second}: {merged.stdout}{merged.stderr}')
             migrations = sorted((repo / 'migrations').glob('*.sql'))
             self.assertEqual([path.name for path in migrations], ['9001_grant_a.sql', '9002_grant_b.sql'])
