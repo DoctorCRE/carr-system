@@ -741,7 +741,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "confirm-email-next-step": {
     "ingress_key": "mcp-tool:confirm-email-next-step",
     "source_locator": "mcp-server/src/email-next-step.ts",
-    "schema_digest": "28abed1df7d49464dfb3df1fb1cb1a3a49c37500e81379e2202d345c6c5b4f3a",
+    "schema_digest": "c2cb99b28d003928440c388988d2f336917839c5feb2a9b0d1b96f276cb80b0e",
     "write": true,
     "human_only": true,
     "human_caller_only": true,
@@ -1371,6 +1371,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "list-deal-documents": {
+    "ingress_key": "mcp-tool:list-deal-documents",
+    "source_locator": "mcp-server/src/deal-files.js",
+    "schema_digest": "3600bc2b80820a44c2584c3f4e2296db8a3dadb6aa1364cc733d07c4a2688366",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "list-doc-conversations": {
     "ingress_key": "mcp-tool:list-doc-conversations",
     "source_locator": "mcp-server/src/doc-conversation.js",
@@ -1394,7 +1404,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "list-email-proposals": {
     "ingress_key": "mcp-tool:list-email-proposals",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "bb574ff2f070c15332dcebaf05b524ba694521d6b66d050feb10eb95ae0cfe5f",
+    "schema_digest": "f754b45461d4807dc5e62ac534490a434b92daf905275746dff5415f176db2ca",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -1415,6 +1425,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:list-fact-conflicts",
     "source_locator": "mcp-server/src/fact-observations.ts",
     "schema_digest": "fc8a1ff80543bb7a4fac294c21044da3990f1264c375e02aa9901df765f9449b",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "list-fact-review": {
+    "ingress_key": "mcp-tool:list-fact-review",
+    "source_locator": "mcp-server/src/fact-review.ts",
+    "schema_digest": "2eb8162d7a72a27311477f8dc60c85b41431c41d80f8bdc713e34ab2c6512c94",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -1445,6 +1465,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:list-my-codex-sessions",
     "source_locator": "mcp-server/src/codex-continuity.js",
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "list-practice-origination": {
+    "ingress_key": "mcp-tool:list-practice-origination",
+    "source_locator": "mcp-server/src/practice-origination.ts",
+    "schema_digest": "b8319b8bea15d7254ae39824845137dba10e60c4a815fe26974578446b30c646",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -1815,7 +1845,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "preview-email-next-step": {
     "ingress_key": "mcp-tool:preview-email-next-step",
     "source_locator": "mcp-server/src/email-next-step.ts",
-    "schema_digest": "722b7eb2945b75dabf92a52f9ba999c3d33c39dca8c1c5fe79635e3b819747e0",
+    "schema_digest": "7e20bb13f175d45e2b513ffe31535baf5bdc5271dcc7a995badacc3a38bc7831",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -2026,6 +2056,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:read-cre-lifecycle",
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
     "schema_digest": "fddc80850e615ad4b807d4418efb9d238855d357df22f922327a06e8db08ec27",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-deal-extraction-source": {
+    "ingress_key": "mcp-tool:read-deal-extraction-source",
+    "source_locator": "mcp-server/src/deal-extraction.js",
+    "schema_digest": "b5a22a2d82c40946035d8e254f39db463dc3a8683be2d6dcd710f4ef6ac38f10",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -2472,6 +2512,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "record-deal-extraction": {
+    "ingress_key": "mcp-tool:record-deal-extraction",
+    "source_locator": "mcp-server/src/deal-extraction.js",
+    "schema_digest": "f9f1bd1c147b39e3ab203454c5a7038bcdf3d73c0d5a28164d1a0a82b8889fe7",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "record-deal-invoice": {
     "ingress_key": "mcp-tool:record-deal-invoice",
     "source_locator": "mcp-server/src/invoice-automation.js",
@@ -2535,7 +2585,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-email-proposal": {
     "ingress_key": "mcp-tool:record-email-proposal",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "0297f00e583fc8d46da55786e5dfa9f52afdafc7f799e77a322ad8d75a94b0c5",
+    "schema_digest": "8aa27db5b3c8b8930e3c77718bb93309bb26ad43b104c75713622e57574c8b16",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -2588,6 +2638,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "d40bf3b21722663f73172b2b6ea7b48c97fc1176373c6e1903a067324a4636a7",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "record-human-fact": {
+    "ingress_key": "mcp-tool:record-human-fact",
+    "source_locator": "mcp-server/src/fact-review.ts",
+    "schema_digest": "10da9cff3fedb5238d429a8d8196dd8becc2de7d7035a5e8085d0f43933e80cc",
+    "write": true,
+    "human_only": true,
     "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
@@ -2680,6 +2740,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "human_only": true,
     "human_caller_only": true,
     "authority_only": true,
+    "delegates_to": []
+  },
+  "record-practice-origination-feed": {
+    "ingress_key": "mcp-tool:record-practice-origination-feed",
+    "source_locator": "mcp-server/src/practice-origination.ts",
+    "schema_digest": "2a56c673d765432e9da824371d464d7d340cdbeb9c520996c309d67bd702e2e7",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
     "delegates_to": []
   },
   "record-representation-agreement": {
@@ -2937,6 +3007,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "resolve-fact-review": {
+    "ingress_key": "mcp-tool:resolve-fact-review",
+    "source_locator": "mcp-server/src/fact-review.ts",
+    "schema_digest": "0e9b1abefa1d5ee93c002c990de12c06449dfef3a7e83df42d8c50a750d6dca8",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "resolve-post-call-candidate": {
     "ingress_key": "mcp-tool:resolve-post-call-candidate",
     "source_locator": "mcp-server/src/tools.js",
@@ -2974,6 +3054,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": true,
     "human_only": true,
     "human_caller_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "retitle-job": {
+    "ingress_key": "mcp-tool:retitle-job",
+    "source_locator": "mcp-server/src/work-queue.js",
+    "schema_digest": "23e5f33f54e36ea28cd0587150544bc9c221af3c75dbcb8f071cfe01d225afd1",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -3332,7 +3422,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "submit-email-draft": {
     "ingress_key": "mcp-tool:submit-email-draft",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "fd4aaaa359f7c9ac9f63a4422b47447804e4bc64d55b479ea5eaf141e779e3d7",
+    "schema_digest": "2daf2db280b7ff695d4a548fc889b7f4c5a74f6ddb1b8efac2f37818be27362f",
     "write": true,
     "human_only": true,
     "human_caller_only": true,
@@ -3736,6 +3826,51 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "ingress_key": "db-relation-acl:ops.work_request_slice:carr_writer:update",
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
+    },
+    {
+      "ingress_key": "db-relation-acl:public.phone_call_session:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "public.phone_call_session",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:public.phone_call_session:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation": "public.phone_call_session",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "update",
+      "grantable": false
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.practice_origination_feed",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.practice_origination_feed:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.practice_origination_feed",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.practice_origination_feed:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.practice_origination_event",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.practice_origination_event:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
     }
   ],
   "secdef_execute": [
@@ -3945,6 +4080,81 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.reap_expired_runs(p_service_id uuid, p_environment text, p_run_key text, p_limit integer)",
       "volatility": "v",
       "ingress_key": "db-function-acl:ops.reap_expired_runs(p_service_id uuid, p_environment text, p_run_key text, p_limit integer):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.record_human_fact(p_tenant text, p_actor_id uuid, p_idempotency_key uuid, p_entity_ref text, p_observation jsonb)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.record_human_fact(p_tenant text, p_actor_id uuid, p_idempotency_key uuid, p_entity_ref text, p_observation jsonb):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.list_fact_review(p_tenant text, p_entity_ref text, p_limit integer, p_cursor jsonb, p_include_resolved boolean)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.list_fact_review(p_tenant text, p_entity_ref text, p_limit integer, p_cursor jsonb, p_include_resolved boolean):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.resolve_fact_review(p_tenant text, p_actor_id uuid, p_args jsonb)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.resolve_fact_review(p_tenant text, p_actor_id uuid, p_args jsonb):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.read_deal_extraction_source(p_tenant text, p_actor_id uuid, p_contract jsonb)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.read_deal_extraction_source(p_tenant text, p_actor_id uuid, p_contract jsonb):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.record_deal_extraction(p_tenant text, p_actor_id uuid, p_args jsonb)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.record_deal_extraction(p_tenant text, p_actor_id uuid, p_args jsonb):carr_writer:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
