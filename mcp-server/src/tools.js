@@ -1,8 +1,11 @@
 // Register MCP tools and their shared write envelope.
+import censusInventoryFamily from "./tool-families/census-inventory.js";
+import practiceOriginationFamily from "./tool-families/practice-origination.js";
+import scheduleBoardFamily from "./tool-families/schedule-board.js";
+import vendorMeetingsFamily from "./tool-families/vendor-meetings.js";
+const toolFamilies = [censusInventoryFamily, practiceOriginationFamily, scheduleBoardFamily, vendorMeetingsFamily];
 import { homeInboxTools, HOME_INBOX_WRITES } from "./home-inbox.js";
 import { dealUpdateResolution } from "./deal-update-resolution.js";
-import { practiceOriginationTools } from "./practice-origination.ts";
-import { vendorMeetingTools } from "./vendor-meetings.js";
 import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.ts";
 import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.ts";
@@ -103,14 +106,12 @@ import { assuranceHealthStoreTools } from "./assurance-health-store.v5.ts";
 import { ruleContextRuntimeTools } from "./rule-context-runtime.v5.js";
 import { systemWorkTools } from "./system-work-census.v5.js";
 import { BOARD_ANSWER_WRITE_VERBS, boardAnswerTools } from "./board-answers.js";
-import { censusInventoryTools } from "./census-inventory.js";
 import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.ts";
 import { partyIdentityTools } from "./party-identity.js";
 import { partyDuplicateCandidateTools } from "./party-duplicate-candidates.js";
 import { briefQueuePage, readBriefLoops, briefLoopKey, briefNeedsJoeKey, briefAssuranceKey } from "./brief-queues.ts";
 import { readBriefAssurance } from "./brief-assurance.ts";
 import { readNeedsJoe } from "./needs-joe.js";
-import { scheduleBoardTools } from "./schedule-board.js";
 export { canExercisePartnerAuthority, partnerAuthoritySlugForActor };
 
 // ---------- envelope helpers ----------
@@ -6938,7 +6939,7 @@ export const TOOLS = {
   },
 
   "find-rule": {
-    description: "Find proposed, active, or retired rules by their words when the id is unknown. Matches a literal substring or all whitespace-separated words, case-insensitively. Returns bounded statement previews and full ids. Propose corrections or withdrawals as edits to CLAUDE.md, AGENTS.md or a skill in a PR; proposals bind nobody until merged. Read-only; status defaults to any.",
+    description: "Find proposed, active, or retired rules by their words when the id is unknown. Matches a literal substring or all whitespace-separated words, case-insensitively. Returns bounded statement previews and full ids. Retired rules include who retired them, why, and their retirement receipt. Propose rule retirement through a team-memory convention proposal for in-person adopt-rule approval. Read-only; status defaults to any.",
     inputSchema: { type: "object", properties: {
       text: { type: "string", minLength: 1 },
       status: { type: "string", enum: ["proposed", "active", "retired", "any"], default: "any" },
@@ -6958,7 +6959,7 @@ export const TOOLS = {
         throw new ToolError({ error: personalScope.error });
       const matches = await c.query(
         `select id, left(id::text,8) as short_id, status, version, created_at,
-                scope, left(statement,200) as statement
+                scope, left(statement,200) as statement, retirement
            from v_rule_lookup
           where (personal_to is null or personal_to=$5::text)
             and ($2='any' or status=$2)
@@ -7005,7 +7006,7 @@ export const TOOLS = {
       const rules = queue.pending_rule_approvals || [];
       const batches = queue.pending_guidance_import_batches || [];
       const proposals = queue.pending_retrieval_proposals || [];
-      const conventions = conventionProposals(queue.pending_convention_proposals);
+      const conventions = await conventionProposals(queue.pending_convention_proposals, c);
       return {
         ok: true,
         pending_convention_proposals: conventions,
@@ -9108,7 +9109,6 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "fact-generation": "mcp-server/src/fact-generation.ts",
   "deal-extraction": "mcp-server/src/deal-extraction.js",
   "fact-observations": "mcp-server/src/fact-observations.ts",
-  "practice-origination": "mcp-server/src/practice-origination.ts",
   "partner-room": "mcp-server/src/partner-room.js",
   "agent-profile": "mcp-server/src/agent-profiles.js",
   "client-portal": "mcp-server/src/client-portal.ts",
@@ -9145,23 +9145,22 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "rule-context-runtime": "mcp-server/src/rule-context-runtime.v5.js",
   "system-work-census": "mcp-server/src/system-work-census.v5.js",
   "board-answers": "mcp-server/src/board-answers.js",
-  "census-inventory": "mcp-server/src/census-inventory.js",
   "org-conventions": "mcp-server/src/org-conventions.js",
   "research-sites": "mcp-server/src/research-sites.ts",
   "party-identity": "mcp-server/src/party-identity.js",
   "party-duplicate-candidates": "mcp-server/src/party-duplicate-candidates.js",
-  "schedule-board": "mcp-server/src/schedule-board.js",
   "doc-suggestions": "mcp-server/src/doc-suggestions.ts",
   "whats-new": "mcp-server/src/whats-new.js",
   "invoice-tracker": "mcp-server/src/invoice-tracker.ts",
-  "vendor-meetings": "mcp-server/src/vendor-meetings.js",
 });
 
 function bindToolSource(tool, source) {
-  if (!tool || typeof tool !== "object" || !TOOL_REGISTRATION_SOURCE[source])
+  const locator = TOOL_REGISTRATION_SOURCE[source] ||
+    (/^mcp-server\/src\/[a-zA-Z0-9_./-]+\.(?:js|ts)$/.test(source) ? source : null);
+  if (!tool || typeof tool !== "object" || !locator)
     throw new Error(`missing reviewed tool source for ${source}`);
   Object.defineProperty(tool, "registrySource", {
-    value: TOOL_REGISTRATION_SOURCE[source], enumerable: false, writable: false, configurable: false,
+    value: locator, enumerable: false, writable: false, configurable: false,
   });
   deepFreezeToolContract(tool);
 }
@@ -10651,11 +10650,9 @@ registerTools(doctrineTools({ withEnvelope, writeEvent, ToolError }), "doctrine"
 registerTools(orgConventionTools({ withEnvelope, writeEvent }), "org-conventions");
 registerTools(systemWorkTools(), "system-work-census");
 registerTools(boardAnswerTools({ withEnvelope, writeEvent }), "board-answers");
-registerTools(censusInventoryTools({ withEnvelope }), "census-inventory");
 registerTools(researchSiteTools({ withEnvelope, writeEvent }), "research-sites");
 registerTools(partyIdentityTools({ withEnvelope, writeEvent, versionGuard, resolvePartyForWrite }), "party-identity");
 registerTools(partyDuplicateCandidateTools(), "party-duplicate-candidates");
-registerTools(scheduleBoardTools(), "schedule-board");
 registerTools(dealItemTools({ withEnvelope, writeEvent, resolveSubject,
   canExercisePartnerAuthority, partnerAuthoritySlugForActor }), "deal-items");
 registerTools(actionClosureTools({ withEnvelope, writeEvent, canExercisePartnerAuthority }), "action-closure");
@@ -10840,10 +10837,13 @@ registerTools(assuranceHealthStoreTools({ withEnvelope, ToolError }), "assurance
 // contract remains read-only and the SQL function is stable.
 registerTools(ruleContextRuntimeTools({ withEnvelope, ToolError }), "rule-context-runtime");
 
-registerTools(vendorMeetingTools(), "vendor-meetings");
 
 const overdueUpdates = dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds, lockDealField, dealNextStepStatus, ToolError });
 registerTools(overdueUpdates.tools, "deal-update-resolution");
-registerTools(practiceOriginationTools({ withEnvelope }), "practice-origination");
+
+for (const family of toolFamilies) {
+  registerTools(family.createTools({ withEnvelope, writeEvent, ToolError, resolveSubject,
+    versionGuard, executeRegisteredTool, canExercisePartnerAuthority, partnerAuthoritySlugForActor }), family.source);
+}
 
 Object.freeze(TOOLS);

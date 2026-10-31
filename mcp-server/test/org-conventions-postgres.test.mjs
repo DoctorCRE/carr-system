@@ -73,7 +73,7 @@ async function call(actor, name, args, as = 'carr_writer') {
   await c.query('begin');
   try {
     await c.query(as === 'carr_writer' ? 'set local role carr_writer' : `set local session authorization ${as}`);
-    const keyed = name === 'governance-queue' || name === 'rule-cards' ? args : { idempotency_key: randomUUID(), ...args };
+    const keyed = ['governance-queue', 'rule-cards', 'find-rule'].includes(name) ? args : { idempotency_key: randomUUID(), ...args };
     const result = await executeRegisteredTool(c, actor, name, keyed);
     await c.query('commit');
     return result;
@@ -255,4 +255,127 @@ test('a malformed proposal is refused and changes nothing', async () => {
 
 test('Dell\'s authority login is refused by the Joe-only approval chain (named gap)', async () => {
   await refused(adopt(dell, proposal('card-k02'), 'carr_authority_dell'), 'rule_adoption_requires_joe');
+});
+
+async function proposeText(slug, body_text) {
+  const { attach_id } = await call(joe, 'attach-memory', { surface: 'codex', access: 'read_write' });
+  const written = await call(joe, 'write-doctrine-section', { document: 'team-memory',
+    section_key: `conventions/proposed/${slug}`, body_text, base_version: 0, attach_id });
+  return { section_id: written.section_id, base_version: 1 };
+}
+
+async function adoptCard(slug, statement = 'Synthetic obsolete instruction.') {
+  const p = await proposeText(slug, `Convention: ${statement}\nCard: {"id":"${slug}","placement":"CORE"}`);
+  return adopt(joe, p, 'carr_authority_joe');
+}
+
+test('retirement-only adoption records who, why and the proposal without creating a rule', async () => {
+  const old = await adoptCard('retirement-only');
+  const p = await proposeText('retire-only', `Retires: ["${old.rule_id}"]\nWhy: Obsolete source.`);
+  const before = await ruleCount();
+  const out = await adopt(joe, p, 'carr_authority_joe', { reason: 'Use the current source.' });
+  assert.equal(out.rule_id, null);
+  assert.deepEqual(out.retired_rule_ids, [old.rule_id]);
+  assert.equal(await ruleCount(), before);
+  const found = (await call(joe, 'find-rule', { text: 'Synthetic obsolete instruction.' })).rules.find(r => r.id === old.rule_id);
+  assert.equal(found.status, 'retired');
+  assert.equal(found.retirement.retired_by, 'joe');
+  assert.match(found.retirement.reason, /Use the current source\./);
+  assert.ok(found.retirement.reason.includes(`${p.section_id}@1`));
+  const cards = await call(joe, 'rule-cards', {});
+  assert.ok(!cards.cards.some(card => card.rule_id === old.rule_id));
+  const pending = (await call(joe, 'governance-queue', {})).pending_convention_proposals;
+  assert.ok(!pending.some(row => row.section_id === p.section_id));
+});
+
+test('the governance queue describes retirement targets and optional replacement', async () => {
+  const old = await adoptCard('queue-retirement', 'Synthetic calendar instruction.');
+  const p = await proposeText('queue-retire', `Retires: ["${old.rule_id}"]`);
+  const row = (await call(joe, 'governance-queue', {})).pending_convention_proposals.find(r => r.section_id === p.section_id);
+  assert.equal(row.adoptable, true);
+  assert.deepEqual(row.retires, [old.rule_id]);
+  assert.equal(row.statement, `retires rule ${old.rule_id}: Synthetic calendar instruction.`);
+  assert.equal(row.replacement_statement, null);
+  assert.deepEqual(row.packs, []);
+});
+
+test('agents and connector sessions cannot adopt a retirement proposal', async () => {
+  const old = await adoptCard('agent-retirement');
+  const p = await proposeText('agent-retire', `Retires: ["${old.rule_id}"]`);
+  for (const actor of [claudeForJoe, joeLocal])
+    await refused(adopt(actor, p, 'carr_authority_joe'), 'human_only_verb_requires_verified_partner');
+  await refused(adopt({ ...joe, via: 'oauth-google' }, p, 'carr_authority_joe'), 'rule_adoption_requires_app_approval');
+  await refused(adopt(dell, p, 'carr_authority_dell'), 'rule_adoption_requires_joe');
+  assert.equal((await c.query('select status from rule where id=$1', [old.rule_id])).rows[0].status, 'active');
+});
+
+test('unknown, proposed and already-retired targets are refused without partial retirement', async () => {
+  const old = await adoptCard('invalid-target-retirement');
+  const proposed = (await c.query(`insert into rule(statement,taught_by) values ('Synthetic unadopted instruction.',$1) returning id`, [joe.id])).rows[0].id;
+  for (const [slug, id, code] of [
+    ['unknown', randomUUID(), 'convention_retirement_rule_not_found'],
+    ['proposed', proposed, 'convention_retirement_rule_not_active'],
+  ]) {
+    const p = await proposeText(`retire-${slug}`, `Retires: ${JSON.stringify([old.rule_id, id])}`);
+    const before = await ruleCount();
+    await refused(adopt(joe, p, 'carr_authority_joe'), code);
+    assert.equal(await ruleCount(), before);
+    assert.equal((await c.query('select status from rule where id=$1', [old.rule_id])).rows[0].status, 'active');
+    assert.equal((await c.query('select status from doctrine_section where id=$1', [p.section_id])).rows[0].status, 'active');
+  }
+  const retirement = await proposeText('retire-once', `Retires: ["${old.rule_id}"]`);
+  await adopt(joe, retirement, 'carr_authority_joe');
+  const again = await proposeText('retire-twice', `Retires: ["${old.rule_id}"]`);
+  await refused(adopt(joe, again, 'carr_authority_joe'), 'convention_retirement_rule_not_active');
+});
+
+test('replacement and multiple retirements reuse the card id in one adoption', async () => {
+  const first = await adoptCard('replacement-card', 'Synthetic first instruction.');
+  const second = await adoptCard('replacement-second', 'Synthetic second instruction.');
+  const p = await proposeText('replace-and-retire', `Convention: Synthetic replacement instruction.\nCard: {"id":"replacement-card","placement":"CORE"}\nRetires: ${JSON.stringify([second.rule_id, first.rule_id, first.rule_id])}`);
+  const out = await adopt(joe, p, 'carr_authority_joe');
+  assert.ok(out.rule_id);
+  assert.deepEqual(out.retired_rule_ids, [first.rule_id, second.rule_id].sort());
+  const retired = (await call(joe, 'find-rule', { text: 'Synthetic', status: 'retired' })).rules.filter(r => out.retired_rule_ids.includes(r.id));
+  assert.equal(retired.length, 2);
+  assert.ok(retired.every(r => r.retirement.superseded_by === out.rule_id));
+  const cards = (await call(joe, 'rule-cards', {})).cards;
+  assert.equal(cards.find(card => card.id === 'replacement-card').rule_id, out.rule_id);
+  assert.ok(!cards.some(card => card.rule_id === second.rule_id));
+});
+
+test('failed replacement approval rolls back retirement, receipt and proposal consumption', async () => {
+  const key = randomUUID();
+  const previous = await proposeText('approval-key-owner', 'Convention: Synthetic approval key owner.\nPacks: engineering-git');
+  await adopt(joe, previous, 'carr_authority_joe', { idempotency_key: key });
+  const old = await adoptCard('atomic-retirement');
+  const p = await proposeText('atomic-replacement', `Convention: Synthetic atomic replacement.\nPacks: engineering-git\nRetires: ["${old.rule_id}"]`);
+  const before = await ruleCount();
+  await c.query('begin');
+  try {
+    await c.query('set local session authorization carr_authority_joe');
+    await assert.rejects(c.query('select ops.adopt_rule($1,1,$2,$3)', [p.section_id, key, 'Synthetic reused approval key']), /idempotency|duplicate key/);
+  } finally { await c.query('rollback'); }
+  assert.equal(await ruleCount(), before);
+  assert.equal((await c.query('select status from rule where id=$1', [old.rule_id])).rows[0].status, 'active');
+  assert.equal((await c.query('select count(*) from ops.rule_retirement_receipt where rule_id=$1', [old.rule_id])).rows[0].count, '0');
+  assert.equal((await c.query('select status from doctrine_section where id=$1', [p.section_id])).rows[0].status, 'active');
+  const out = await adopt(joe, p, 'carr_authority_joe');
+  assert.ok(out.rule_id);
+});
+
+test('malformed retirement lists are non-adoptable and cannot retire rules', async () => {
+  const old = await adoptCard('malformed-retirement');
+  for (const [index, body] of [
+    'Retires: []', 'Retires: null', 'Retires: "not-an-array"', 'Retires: [null]',
+    'Retires: ["49533583"]', 'Retires: broken',
+    `Retires: ["${old.rule_id}"]\nRetires: ["${old.rule_id}"]`,
+    `Retires: ["${old.rule_id}"]\nPacks: engineering-git`,
+  ].entries()) {
+    const p = await proposeText(`malformed-retire-${index}`, body);
+    const row = (await call(joe, 'governance-queue', {})).pending_convention_proposals.find(r => r.section_id === p.section_id);
+    assert.equal(row.adoptable, false, body);
+    await refused(adopt(joe, p, 'carr_authority_joe'), 'convention_proposal_malformed');
+  }
+  assert.equal((await c.query('select status from rule where id=$1', [old.rule_id])).rows[0].status, 'active');
 });

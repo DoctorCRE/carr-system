@@ -170,8 +170,9 @@ or environment IDs. None are quoted in this public repo.
 - **Access.** Each attach grants `read_only` or `read_write` per store.
 - **Memory.** One section of `team-memory`. Its `section_key` is the path and
   its body is markdown.
-- **Convention.** One active `rule` row. It changes only by superseding: a new
-  row with `supersedes` set to the old row.
+- **Convention.** One active `rule` row. A partner can retire it through a
+  convention proposal, optionally adopting a replacement in the same transaction.
+  The immutable retirement receipt names the replacement in `superseded_by`.
 - **Proposal.** A team-memory section under `conventions/proposed/<slug>`,
   written by an agent. It binds nobody.
 - **Adoption.** Joe or Dell approves a proposal in person in the app's
@@ -222,6 +223,20 @@ prose, the private folder and briefs.
   `governance-queue` lists these sections beside its existing rule approvals.
   On adoption, `adopt-rule` writes the active row and retires the proposal
   section in one transaction.
+- **Retirement proposals (WR562.S4.J1).** Add one `Retires: ["<full rule UUID>", ...]`
+  line to the proposal's `body_text`. A retirement-only proposal starts with
+  that line and has no `Convention`, `Card`, or `Packs` line. A replacement
+  starts with `Convention: <statement>`, keeps the existing Card/Packs format,
+  and adds `Retires`. IDs are normalized and deduplicated; every target must
+  still be active at adoption. Unknown, proposed, or already-retired targets
+  refuse the entire transaction. The existing in-person app, authority, and
+  agent refusal checks apply unchanged, including the Joe-only database
+  approval/retirement chain (Dell remains refused by that existing chain).
+  The receipt reason includes the partner's reason and `Proposal: <section_id>@<version>`.
+  `find-rule` exposes the retirement actor, time, reason, receipt, and optional
+  replacement; `rule-cards` excludes retired rows. Retirement-only adoption
+  returns `rule_id: null` and `retired_rule_ids`; replacement adoption returns
+  both the new `rule_id` and `retired_rule_ids`.
 - **Card wording lives on the rule** (D16). `ops/sync-core-rule-cards.py` renders
   `ops/config/rule-cards.v1.json` and the CLAUDE.md and AGENTS.md block **from the store**.
 - **CLAUDE.md and AGENTS.md** hold only the generated core-card block and
