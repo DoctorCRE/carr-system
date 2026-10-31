@@ -124,14 +124,33 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
     if (args.work_request && !new RegExp(addressFormat.work_request_pattern).test(args.work_request)) refuse('invalid_work_request');
     if (args.idempotency_key && !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(args.idempotency_key)) refuse('invalid_idempotency_key');
   };
+  const suggestTitle = async (c, wr, args, current) => {
+    const words = (args.card_title.match(/[A-Za-z']+/g) || []).filter(word => /[A-Za-z]/.test(word));
+    const verb = cardVerbs.includes(words[0]) ? words.shift() : 'Build';
+    const subject = (words[0] || 'work').slice(0, 30);
+    const used = new Set((await c.query(`select card_title from ops.work_request_job where work_request_id=$1
+      and not (slice_ordinal=$2 and j_number=$3)`, [wr.id, current?.slice ?? 0, current?.job ?? 0])).rows.map(row => row.card_title.toLowerCase()));
+    let title = `${verb} ${subject}`;
+    for (let n = 0; used.has(title.toLowerCase()); n++) {
+      let suffix = '', value = n;
+      do { suffix = String.fromCharCode(97 + value % 26) + suffix; value = Math.floor(value / 26) - 1; } while (value >= 0);
+      title = `${verb} ${subject} ${suffix}`;
+    }
+    return title;
+  };
   const validateCopy = async (c, wr, args, current) => {
-    if (!/^[A-Za-z']+( [A-Za-z']+){1,2}$/.test(args.card_title)) refuse('invalid_card_title');
-    if (!cardVerbs.includes(args.card_title.split(' ')[0])) refuse('card_title_verb');
+    const titleRefusal = async error => { throw new ToolError({ error, suggested_card_title: await suggestTitle(c, wr, args, current) }); };
+    if (!/^[A-Za-z']+( [A-Za-z']+){1,2}$/.test(args.card_title)) await titleRefusal('invalid_card_title');
+    if (!cardVerbs.includes(args.card_title.split(' ')[0])) await titleRefusal('card_title_verb');
     if (args.description != null && (/[\r\n]/u.test(args.description) || args.description.trim().split(/[.!?](?:\s|$)/u).filter(Boolean).length !== 1
-      || !cardVerbs.includes(args.description.split(/\s/u)[0]))) refuse('invalid_job_description');
+      || !cardVerbs.includes(args.description.split(/\s/u)[0]))) {
+      const words = args.description.replace(/[.!?\r\n]+/gu, ' ').trim().split(/\s+/u);
+      const verb = cardVerbs.includes(words[0]) ? words.shift() : 'Build';
+      throw new ToolError({ error: 'invalid_job_description', suggested_description: `${verb} ${words.join(' ').slice(0, 490) || 'the work'}.` });
+    }
     if ((await c.query(`select 1 from ops.work_request_job where work_request_id=$1
       and lower(card_title)=lower($2) and not (slice_ordinal=$3 and j_number=$4)`,
-    [wr.id, args.card_title, current?.slice ?? 0, current?.job ?? 0])).rows.length) refuse('card_title_duplicate');
+    [wr.id, args.card_title, current?.slice ?? 0, current?.job ?? 0])).rows.length) await titleRefusal('card_title_duplicate');
   };
   const request = async (c, actor, ref) => {
     const row = (await c.query(`select w.id,w.ref,w.title,w.state from ops.work_request w
@@ -207,7 +226,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
       { slice, job: positive, runner_job_id: text(), repository: { ...text(), enum: repositories }, job_type: { ...text(), enum: jobTypes }, executor: text(), model: text(), effort: text(), card_title: text(80), description: text(500) },
       [], async (c, actor, args, wr) => {
         const starting = jobStart.some(key => Object.hasOwn(args, key));
-        if ((!starting || Object.hasOwn(args, 'job_type')) && !jobTypes.includes(args.job_type)) refuse('invalid_job_type');
+        if ((!starting || Object.hasOwn(args, 'job_type')) && !jobTypes.includes(args.job_type)) throw new ToolError({ error: 'invalid_job_type', allowed_values: jobTypes });
         if ((starting ? jobStart : jobFacts).some(key => args[key] == null)
           || (jobFacts.some(key => Object.hasOwn(args, key)) && jobFacts.some(key => args[key] == null))) refuse('invalid_work_queue_fields');
         if ((starting || Object.hasOwn(args, 'repository')) && !repositories.includes(args.repository)) refuse('invalid_work_queue_fields');
@@ -226,7 +245,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
             return { card_id: queueCardId(wr.ref, args.slice || 1, args.job), runner_job_id: args.runner_job_id };
           }
         }
-        if (!jobTypes.includes(args.job_type)) refuse('invalid_job_type');
+        if (!jobTypes.includes(args.job_type)) throw new ToolError({ error: 'invalid_job_type', allowed_values: jobTypes });
         await validateCopy(c, wr, args);
         const ordinal = args.slice || 1;
         if (!starting) await c.query(`insert into ops.work_request_slice (work_request_id,ordinal,title) select $1,1,$2
