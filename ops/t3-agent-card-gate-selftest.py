@@ -6,10 +6,11 @@ from pathlib import Path
 import re
 import runpy
 import subprocess
+from typing import Any
 import unittest
 
 REPO = Path(__file__).resolve().parent.parent
-AgentCardGate = runpy.run_path(str(REPO / 'ops/agent-card-gate-selftest.py'))['AgentCardGate']
+AgentCardGate: Any = runpy.run_path(str(REPO / 'ops/agent-card-gate-selftest.py'))['AgentCardGate']
 
 
 class T3AgentCardGate(AgentCardGate):
