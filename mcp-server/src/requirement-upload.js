@@ -91,9 +91,13 @@ export function createRequirementUploadHandler({ transaction, bucket, visitorSec
     } catch (error) {
       if (reserved) {
         try {
-          if (objectKey) await bucket.delete(objectKey);
-          await transaction(c => c.query(`update ops.requirement_upload_quota
-            set reserved_bytes=reserved_bytes-$1 where singleton`, [Number(length)]));
+          await transaction(async c => {
+            const receipt = await c.query('select id from ops.requirement_upload_receipt where grant_id=$1', [grant]);
+            if (receipt.rows.length) return;
+            if (objectKey) await bucket.delete(objectKey);
+            await c.query(`update ops.requirement_upload_quota
+              set reserved_bytes=reserved_bytes-$1 where singleton`, [Number(length)]);
+          });
         } catch { return json({ error: 'upload_unavailable' }, 503); }
       }
       if (error.message === 'upload_size_refused') return json({ error: 'upload_size_refused' }, 413);
