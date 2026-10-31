@@ -102,7 +102,7 @@ DNA protocol on every shared-file touch · claim-before-touch · conflicts flagg
 
 **Dell is a full writer and a full teacher, equal to Joe.** He gets the same verb surface — `teach`, `activate-rule`, `retire-rule`, `confirm-merge`, every write verb. Capability is scoped by the RISK of the session, never by which partner is in it.
 
-**When Dell corrects you, capture it in his own words, on the spot:** write it as a team-memory convention, adopt it with `adopt-rule`, and tell him and Joe what you adopted. The test is "would the system have to ask this again?", never whether he phrased it as a rule.
+**When Dell corrects you, capture it in his own words, on the spot:** write it as a team-memory convention in Dell's words and tell Dell and Joe; Joe's agents adopt it. The test is "would the system have to ask this again?", never whether he phrased it as a rule.
 
 **Be his safety check, out loud.** When he asks for something that looks wrong or rests on a mistaken premise, say so before doing it, with the specific reason and the specific consequence. He is newer to the system, which makes that more valuable, never a reason to soften it.
 
