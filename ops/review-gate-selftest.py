@@ -85,6 +85,20 @@ class ReviewGate(unittest.TestCase):
                     pr = {"changed_files": 0, "additions": additions, "deletions": 0, "head": {"sha": "abc"}}
                     self.assertEqual(gate.approved(pr, [], comments), expected)
 
+    def test_untrusted_diff_never_succeeds(self):
+        pr = {"body": "Card: WR575.S2.J1", "base": {"ref": "main", "sha": "base"},
+              "head": {"sha": "abc"}, "changed_files": 0, "additions": 0, "deletions": 0}
+        approval = [{"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok"}]
+        for changes, files in [({}, []), ({"changed_files": 1}, []),
+                               ({"changed_files": 0, "additions": 1}, [{"filename": "app.py"}]),
+                               ({"changed_files": 1}, [{"filename": "app.py"}])]:
+            for comments in ([], approval):
+                with self.subTest(changes=changes, files=files, comments=comments):
+                    current = {**pr, **changes}
+                    with patch.object(gate, "api", side_effect=[current, {}, files, comments, [], current, {}]) as api:
+                        self.assertEqual(gate.run({"number": 4}, "owner/repo"), 1)
+                        self.assertEqual(api.call_args.args[1]["state"], "failure")
+
     def test_event_adapter(self):
         pr = {"body": "Card: WR557.S3.J1", "base": {"ref": "main"}, "additions": 151, "deletions": 0, "head": {"sha": "abc"}, "changed_files": 1}
         for event in ({"number": 4}, {"issue": {"number": 4}}):
@@ -93,8 +107,12 @@ class ReviewGate(unittest.TestCase):
                 with patch.object(gate, "api", side_effect=[pr, {}, [{"filename": "safe"}], comments, [], pr, {}]) as api:
                     self.assertEqual(gate.run(event, "owner/repo"), 0 if approved else 1)
                     self.assertEqual(api.call_args.args[1]["state"], "success" if approved else "failure")
+        small = {**pr, "additions": 1}
+        with patch.object(gate, "api", side_effect=[small, {}, [{"filename": "app.py"}], [], [], small, {}]) as api:
+            self.assertEqual(gate.run({"number": 4}, "owner/repo"), 0)
+            self.assertEqual(api.call_args.args[1]["state"], "success")
         pr["additions"] = 0
-        for comments, expected in [([], "failure"), ([{"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok"}], "success")]:
+        for comments, expected in [([], "failure"), ([{"body": "VERDICT: APPROVE\nReviewed-SHA: abc\nReviewer: grok"}], "failure")]:
             with patch.object(gate, "api", side_effect=[pr, {}, [], comments, [], pr, {}]) as api:
                 gate.run({"number": 4}, "owner/repo")
                 self.assertEqual(api.call_args.args[1]["state"], expected)

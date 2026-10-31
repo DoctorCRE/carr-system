@@ -80,10 +80,13 @@ def run(event, repo):
     reviews = api(f"{root}/pulls/{number}/reviews?per_page=100")
     comments = sorted(comments + [r for r in reviews if r.get("state") not in ("DISMISSED", "PENDING")], key=lambda item: item.get("submitted_at") or item.get("created_at") or "")
     card_ok = card_allowed(pr, files)
-    passed = card_ok and approved(pr, files, comments)
+    diff_ready = bool(files) and pr["changed_files"] > 0 and (
+        pr["additions"] or pr["deletions"] or pr["head"]["sha"] == pr["base"]["sha"])
+    passed = bool(diff_ready) and card_ok and approved(pr, files, comments)
     latest = api(f"{root}/pulls/{number}")
     if latest["head"]["sha"] == sha and latest.get("body") == pr.get("body"):
-        description = ("No skip-CI title; small safe diff or current-head approval required" if card_ok else
+        description = ("Diff unavailable or incomplete" if not diff_ready else
+                       "No skip-CI title; small safe diff or current-head approval required" if card_ok else
                        "Missing PR body line: Card: WR<number>.S<number>.J<number>")
         status(sha, "success" if passed else "failure", description)
         print(description)
