@@ -34,6 +34,12 @@ on disposable PostgreSQL. It requires empty-database refusal without writes,
 then loads the snapshot, applies pending migrations, and compares the exact
 filename/checksum ledger with the source. A regression in either side fails CI.
 
+## Prove migrations locally
+
+Run `./run.sh local-db-ci --class migration` to prove migrations on disposable PostgreSQL.
+Run `python3 ops/migration-shadow.py --base origin/main` to rehearse a base-first upgrade.
+A pre-push migration result marked `skipped` is not a proof.
+
 ## Rules
 
 - **Forward-only, numbered.** `NNNN_name.sql`, applied in filename order by
@@ -187,3 +193,33 @@ while requiring every mapped forward file to remain present. Unrelated current
 files in the same numeric band—especially `0134_release_abandon_reason.sql`,
 `0135_situation_retrieval.sql`, and `0136_release_manifest_view_grant.sql`—are
 not aliases and receive no exemption.
+
+## Concurrent grant changes
+
+The migration runner must not derive expected grants from the live catalog it
+is about to validate. That would bless accidental privilege changes. Historical
+migration checksums, the sealed database registry and the exact installed grant
+contract remain enforced. Numeric migration identities still require allocation
+against main and open PRs; this change does not make colliding numbers safe.
+
+For a new additive grant migration, append its explicit rows to
+`ops.scac_current_grant_contract()` in the same transaction, as
+`0983_fact_store.sql` does. Preserve unrelated rows and retirement metadata.
+Replacing the entire function with a copied `$current_grants$` block can erase a
+concurrent migration's grants. Revocations and changes to the same grant need an
+explicit reviewed reconciliation; a blind JSON union cannot settle them.
+
+Refresh the complete reviewed grant contract from a disposable rehearsal after merging main.
+All three steps are required, from the repository root:
+
+1. Run `python3 ops/migration-shadow.py --artifact-dir .tmp-grant-rehearsal` to rehearse the combined migration set.
+2. Run `./run.sh regen registry --grant-contract .tmp-grant-rehearsal/schema.sql` to extract its literal contract.
+3. Run `node ops/scac-mutation-inventory.mjs` to verify the regenerated operation contracts.
+
+Review the change to `mcp-server/src/scac-mutation-registry.current.generated.js` before
+committing. The extractor also accepts a migration containing a literal
+`$current_grants$` contract. It parses SQL text without executing it and rejects
+nonliteral bodies or an incompatible registry version. It never queries
+production or silently changes expected grants during deployment. The committed contract
+may still need this explicit refresh when two grant-changing PRs overlap;
+ordinary verb additions change only generated operation rows.

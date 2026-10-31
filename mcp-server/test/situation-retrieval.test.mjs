@@ -95,9 +95,11 @@ test("registry exposes machine proposals and human-only approval/retirement", ()
   }
   for (const name of ["approve-retrieval-proposals", "retire-retrieval-curation"]) {
     assert.equal(tools[name].humanOnly, true, name);
-    assert.equal(tools[name].humanCallerOnly, true, name);
     assert.notEqual(tools[name].authorityOnly, true, name);
   }
+  // A sponsored agent approves curation; retirement still needs the human caller.
+  assert.notEqual(tools["approve-retrieval-proposals"].humanCallerOnly, true);
+  assert.equal(tools["retire-retrieval-curation"].humanCallerOnly, true);
 });
 
 

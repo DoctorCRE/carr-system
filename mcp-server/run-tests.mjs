@@ -1,33 +1,18 @@
 // Run MCP test suites in isolated batches.
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { discoverSuites } from './suite-discovery.mjs';
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const LAUNCH_REGRESSIONS = "chrome-launch.test.mjs";
-const PRIVATE_POSTGRES_SUITES = new Set([
-  "answer-blocks-postgres.test.mjs",
-  "home-inbox-postgres.test.mjs",
-  "practice-origination-postgres.test.mjs",
-  "phone-call-sessions-postgres.test.mjs",
-  "census-inventory-postgres.test.mjs",
-  "work-queue-postgres.test.mjs",
-  "whole-call-undo-postgres.test.mjs", "client-portal-postgres.test.mjs", "fact-store-postgres.test.mjs", "deal-extraction-postgres.test.mjs", "deal-schedules-postgres.test.mjs", "market-terms-postgres.test.mjs",
-  "deal-items-postgres.test.mjs", "vendor-meetings.test.mjs", "email-deal-progress-postgres.test.mjs", "email-lead-proposal-postgres.test.mjs",
-  "next-action-canonical.test.mjs", "record-closure-postgres.test.mjs", "deal-files-postgres.test.mjs",
-  "feature-switches-postgres.test.mjs",
-  "a02-rule-enforcement-postgres.test.mjs", "confirm-merge-schema.test.mjs",
-  "journey-one-clock-input-store.v5.test.mjs", "journey-one-clock-store.v5.test.mjs",
-  "lease-radar-postgres.test.mjs", "local-deals-ci-fixture.test.mjs", "local-deals-store.test.mjs", "whats-new-store.test.mjs",
-  "self-closing-records-sql.test.mjs", "tool-call-retention-postgres.test.mjs", "unused-index-drop-postgres.test.mjs",
-]);
 
-export function suiteBatches(files, browserFiles = []) {
+export function suiteBatches(files, browserFiles = [], postgresFiles = []) {
   const suites = files.filter((file) => /\.test\.(?:js|mjs)$/.test(file)).sort();
   const browsers = suites.filter((file) => file !== LAUNCH_REGRESSIONS
     && (browserFiles.includes(file) || /-browser\.test\.(?:js|mjs)$/.test(file)));
-  const postgres = suites.filter((file) => PRIVATE_POSTGRES_SUITES.has(file) && !browsers.includes(file));
+  const postgres = suites.filter((file) => (postgresFiles.includes(file) || /-postgres\.test\.(?:js|mjs)$/.test(file)) && !browsers.includes(file));
   return [suites.filter((file) => file === LAUNCH_REGRESSIONS),
     ...browsers.map((file) => [file]),
     ...postgres.map((file) => [file]),
@@ -41,34 +26,55 @@ async function main() {
   // Private PostgreSQL clusters also run alone: parallel postmasters can
   // exhaust the host's shared-memory IDs even with unique database paths.
   // Keep the serial batches; the bulk pool gives each suite its own result.
-  const files = await readdir(path.join(ROOT, "test"));
+  const inventory = JSON.parse(await readFile(path.join(ROOT, 'suite-inventory.json'), 'utf8'));
+  const files = await discoverSuites(path.join(ROOT, 'test'), inventory);
   const browserFiles = [];
+  const postgresFiles = [];
   for (const file of files.filter(file => /\.test\.(?:js|mjs)$/.test(file))) {
-    if ((await readFile(path.join(ROOT, "test", file), "utf8")).includes("chrome-launch.mjs")) browserFiles.push(file);
+    const source = await readFile(path.join(ROOT, "test", file), "utf8");
+    if (source.includes("chrome-launch.mjs")) browserFiles.push(file);
+    if (/disposable-postgres\.mjs|postgres-database\.mjs|initdb/.test(source)) postgresFiles.push(file);
   }
   const failures = [];
-  for (const batch of suiteBatches(files, browserFiles)) {
-    if (!batch.length) continue;
-    let cursor = 0;
-    const workers = Math.min(batch.length, Number(process.env.CARR_CI_NODE_JOBS || 4));
-    if (!Number.isInteger(workers) || workers < 1) throw new Error('invalid CARR_CI_NODE_JOBS');
-    await Promise.all(Array.from({ length: workers }, async () => {
-      while (cursor < batch.length) {
-        const file = batch[cursor++];
-        let output = '';
-        const code = await new Promise((resolve, reject) => {
-          const child = spawn(process.execPath, ['--test', path.join(ROOT, 'test', file)],
-            { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
-          for (const [stream, destination] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) {
-            stream.on('data', chunk => { output += chunk; destination.write(chunk); });
-          }
-          child.once('error', reject);
-          child.once('close', (exitCode) => resolve(exitCode ?? 1));
-        });
-        if (code !== 0) { process.exitCode = 1; failures.push({ file, output }); }
-      }
-    }));
-  }
+  let template;
+  let baselineTemplate;
+  try {
+    if (postgresFiles.length) {
+      const started = performance.now();
+      const { acquireDisposablePostgres } = await import('./test/helpers/disposable-postgres.mjs');
+      baselineTemplate = await acquireDisposablePostgres({ prefix: 'mcp-snapshot-', template: true, baseline: true });
+      template = await acquireDisposablePostgres({ prefix: 'mcp-snapshot-', template: true, sourceTemplate: baselineTemplate });
+      console.log(`suite-timing: snapshot-template ${(performance.now() - started).toFixed(0)}ms`);
+    }
+    for (const batch of suiteBatches(files, browserFiles, postgresFiles)) {
+      if (!batch.length) continue;
+      let cursor = 0;
+      const workers = Math.min(batch.length, Number(process.env.CARR_CI_NODE_JOBS || 4));
+      if (!Number.isInteger(workers) || workers < 1) throw new Error('invalid CARR_CI_NODE_JOBS');
+      await Promise.all(Array.from({ length: workers }, async () => {
+        while (cursor < batch.length) {
+          const file = batch[cursor++];
+          let output = '';
+          const started = performance.now();
+          const code = await new Promise((resolve, reject) => {
+            const child = spawn(process.execPath, ['--test', path.join(ROOT, 'test', file)],
+              { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'],
+                env: { ...process.env, ...(template && {
+                  CARR_TEST_PG_SNAPSHOT: template.snapshot, CARR_TEST_PG_SNAPSHOT_KEY: template.key,
+                  CARR_TEST_PG_SNAPSHOT_BASE: baselineTemplate.snapshot, CARR_TEST_PG_SNAPSHOT_BASE_KEY: baselineTemplate.key,
+                }) } });
+            for (const [stream, destination] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) {
+              stream.on('data', chunk => { output += chunk; destination.write(chunk); });
+            }
+            child.once('error', reject);
+            child.once('close', (exitCode) => resolve(exitCode ?? 1));
+          });
+          console.log(`suite-timing: ${file} ${(performance.now() - started).toFixed(0)}ms`);
+          if (code !== 0) { process.exitCode = 1; failures.push({ file, output }); }
+        }
+      }));
+    }
+  } finally { try { await template?.close(); } finally { await baselineTemplate?.close(); } }
   for (const { file, output } of failures) console.error(`FAILED SUITE ${file}\n${output}`);
   if (failures.length) console.error(`Failed suites: ${failures.map(({ file }) => file).join(", ")}`);
 }
