@@ -1049,6 +1049,43 @@ class PostCallTests(unittest.TestCase):
         self.assertNotIn("counterpart", candidates[1])
         self.assertEqual(candidates[2]["counterpart"], {"name": "Pat"})
 
+    def test_transcript_runs_normalize_case_punctuation_and_whitespace_in_every_field(self) -> None:
+        words = "amber birch cedar dawn elm fern grove hazel iris jade kelp leaf moss oak pine"
+        transcript = {"segments": [{"text": words}]}
+        self.assertIsNone(post_call.transcript_repeat_field({"summary": " ".join(words.split()[:14])}, transcript))
+        for path, report in (
+            ("report.summary", {"report": {"summary": words}}),
+            ("report.decisions[0]", {"report": {"decisions": [words]}}),
+            ("report.open_questions[0]", {"report": {"open_questions": [words]}}),
+            ("deal_updates[0].summary", {"deal_updates": [{"summary": words}]}),
+            ("draft_proposals[0].body", {"draft_proposals": [{"body": words}]}),
+            ("joe_tasks[0].title", {"joe_tasks": [{"title": words}]}),
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(post_call.transcript_repeat_field(report, transcript), path)
+        changed = " ,\n".join(words.upper().split())
+        self.assertEqual(post_call.transcript_repeat_field({"summary": changed}, transcript), "summary")
+        split_transcript = {"segments": [{"text": " ".join(words.split()[:7])},
+                                         {"text": " ".join(words.split()[7:])}]}
+        self.assertEqual(post_call.transcript_repeat_field({"summary": words}, split_transcript), "summary")
+
+    def test_fifteen_transcript_words_hold_session_without_posting_or_losing_audio(self) -> None:
+        words = "amber birch cedar dawn elm fern grove hazel iris jade kelp leaf moss oak pine"
+        post_call.store_context(self.session, self.context)
+        post_call.write_private(self.session / "transcript.json", {"segments": [{"text": words}]})
+        audio = self.session / "mic.caf"
+        audio.write_bytes(b"synthetic audio")
+        output = self.output(report={"summary": words, "decisions": [], "open_questions": []})
+        with patch.object(post_call.subprocess, "run") as external:
+            status = post_call.process_session(self.session, distiller=Mock(return_value=output))
+        self.assertEqual(status["state"], "held_review")
+        self.assertEqual(status["reason"], "summary_repeats_transcript")
+        self.assertEqual(status["field"], "report.summary")
+        self.assertNotIn(words, json.dumps(status))
+        external.assert_not_called()
+        self.assertFalse((self.session / post_call.REPORT_FILE).exists())
+        self.assertEqual(audio.read_bytes(), b"synthetic audio")
+
     def test_weekly_transcript_without_app_fetches_context_and_processes_once(self) -> None:
         call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
         replies = [
@@ -2509,6 +2546,22 @@ class CaptureBridgePostCallTests(unittest.TestCase):
             {"schema_version": 1, "session": self.session.name, "state": "ready_review"},
         )
         self.cfg = {"base_url": "https://worker.test", "device_id": "joe", "token": "device"}
+
+    def test_saved_report_repeating_transcript_cannot_publish_and_keeps_audio(self) -> None:
+        words = "amber birch cedar dawn elm fern grove hazel iris jade kelp leaf moss oak pine"
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        report["report"]["summary"] = words
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        post_call.write_private(self.session / "transcript.json", {"segments": [{"text": words}]})
+        audio = self.session / "mic.caf"
+        audio.write_bytes(b"synthetic audio")
+        with patch.object(capture_bridge, "http_request") as http:
+            self.assertNotEqual(capture_bridge.publish_cmd(self.cfg, self.session), 0)
+            self.assertNotEqual(capture_bridge.publish_cmd(self.cfg, self.session), 0)
+        http.assert_not_called()
+        self.assertEqual(post_call.read_json(self.session / post_call.STATUS_FILE)["field"], "report.summary")
+        self.assertIsNone(post_call.retention_ready(self.session, "b" * 64))
+        self.assertEqual(audio.read_bytes(), b"synthetic audio")
 
     def tearDown(self) -> None:
         self.tmp.cleanup()

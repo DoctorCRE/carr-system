@@ -104,10 +104,20 @@ class AgentCardGate(unittest.TestCase):
         self.register_fixture()
         for command in ("codex exec 'Card: WR557.S6.J1\nReview.'",
                         "timeout 30 /opt/bin/codex exec -c 'model=default' 'Card: WR557.S6.J1\nReview.'",
-                        "codex -m default exec --skip-git-repo-check 'Card: WR557.S6.J1\nReview.'"):
+                        "codex -m default exec --skip-git-repo-check 'Card: WR557.S6.J1\nReview.'",
+                        "codex cloud exec --env 6ae0a2a8 --branch main --attempts 2 'Card: WR557.S6.J1\nReview.'"):
             with self.subTest(command=command):
                 result = self.run_hook('Bash', command=command)
                 self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_codex_cloud_exec_needs_card(self):
+        result = self.run_hook('Bash', command="codex cloud exec --env 6ae0a2a8 --branch main 'Review.'")
+        self.assertEqual(result.returncode, 2, result.stderr)
+
+    def test_codex_help_is_not_a_launch(self):
+        for command in ('codex cloud exec --help', 'codex exec -h'):
+            with self.subTest(command=command):
+                self.assertEqual(self.run_hook('Bash', command=command).returncode, 0)
 
     def test_card_outside_launch_prompt_does_not_authorize(self):
         self.register_fixture()

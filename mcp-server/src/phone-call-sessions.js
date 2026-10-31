@@ -271,8 +271,10 @@ export function createPhoneCallHandler({ withWriter }) {
         if (request.method === 'GET' && !operation) {
           const result = view(row);
           if (result.state === 'pending' && env.PHONE_AUDIO_HANDOFF) {
-            const status = await handoffStatus(env, id);
-            if (['queued', 'expired'].includes(status.state)) result.state = status.state;
+            try {
+              const status = await handoffStatus(env, id);
+              if (['queued', 'expired'].includes(status.state)) result.state = status.state;
+            } catch { result.upload_state_unavailable = true; }
           }
           return json(result);
         }
