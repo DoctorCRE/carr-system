@@ -171,15 +171,15 @@ test('a runner adopts an unbound repository and records its start once without m
   const work_request = await request('WR-000017');
   const repository = 'DoctorCRE/carr-system';
   await command('dispatch-job', job(work_request));
-  const start = { work_request, slice: 1, job: 1, repository, runner_job_id: 'codex-job-synthetic', idempotency_key: randomUUID() };
+  const start = { work_request, slice: 1, job: 1, repository, runner_job_id: 't3-synthetic', idempotency_key: randomUUID() };
   const first = await command('dispatch-job', start);
   assert.equal(first.card_id, 'WR17.S1.J1');
-  assert.equal(first.runner_job_id, 'codex-job-synthetic');
+  assert.equal(first.runner_job_id, 't3-synthetic');
   assert.deepEqual(await command('dispatch-job', start), { ...first, replayed: true });
   const queued = (await command('work-queue')).jobs.filter(row => row.work_request === work_request);
   assert.equal(queued.length, 1);
   assert.equal(queued[0].repository, repository);
-  assert.equal(queued[0].runner_job_id, 'codex-job-synthetic');
+  assert.equal(queued[0].runner_job_id, 't3-synthetic');
   assert.ok(queued[0].started_at);
   await assert.rejects(command('dispatch-job', { ...start, runner_job_id: 'another-runner', idempotency_key: randomUUID() }),
     failure => { assert.equal(failure.message, 'job_already_started'); assert.equal(publicError(failure).error, 'job_already_started'); return true; });

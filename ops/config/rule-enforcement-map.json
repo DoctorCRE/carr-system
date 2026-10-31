@@ -370,12 +370,12 @@
       ]
     },
     "delegation_names_model_and_effort": {
-      "failure_mode": "Codex validates the configured model and effort; bin/codex-job inherits config defaults and passes explicit overrides",
+      "failure_mode": "T3 delegate_task accepts explicit provider, model and options; omitted model or effort may inherit. The agent-card gate checks dispatch card admission, not model or effort.",
       "implementation": [
-        "bin/codex-job"
+        "hooks/agent-card-gate.py"
       ],
       "test": [
-        "tools/test-codex-job.py"
+        "ops/agent-card-gate-selftest.py"
       ]
     },
     "egress_guard": {

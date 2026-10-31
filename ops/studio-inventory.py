@@ -125,8 +125,7 @@ def compare(root):
     folder = root / 'out/studio-failover'
     s, m = [json.loads((folder / (h + '.json')).read_text()) for h in ('studio', 'macbook')]
     labels = {p.removesuffix('.plist') for p in PRIMARY_ONLY}
-    captured = {'com.carr.cliproxyapi', 'local.carr-progress-board',
-                'local.ds4-flash-next'}
+    captured = {'com.carr.cliproxyapi', 'local.ds4-flash-next'}
     labels.update(captured)
     credentials = {
         'nightly-record-layer': ['db.env', 'tokens.env', 'healthchecks.env', 'age-key.txt'],

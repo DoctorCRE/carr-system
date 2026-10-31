@@ -123,7 +123,7 @@ def codex_operands(args):
         elif word in FLAG_OPTIONS:
             pass
         elif word.startswith('-') and word != '-':
-            raise ValueError('Cannot inspect Codex option; use bin/codex-job or a literal inline prompt.')
+            raise ValueError('Cannot inspect Codex option; use a literal inline prompt.')
         else:
             words.append(word)
             if words in (['exec', 'resume'], ['e', 'resume']):
