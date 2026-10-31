@@ -4,8 +4,8 @@
 WR-000562 S4 (docs/memory/team-memory-design.md D1, D16). Each of the 60 cards
 in ops/config/rule-cards.v1.json and each uncovered row of
 ops/config/convention-proposal-ledger.v1.json becomes one team-memory section
-under conventions/proposed/. Partners adopt them in person through
-governance-queue and adopt-rule; staging binds nobody.
+under conventions/proposed/. adopt-rule makes one an active rule; staging
+alone changes no rule.
 
     python3 ops/stage-convention-proposals.py --print
     python3 ops/stage-convention-proposals.py --apply --attach-id <attach_id>
@@ -25,8 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CARDS = ROOT / 'ops/config/rule-cards.v1.json'
 LEDGER = ROOT / 'ops/config/convention-proposal-ledger.v1.json'
 PREFIX = 'conventions/proposed/'
-STATUS = ('Status: a proposal. It binds nobody until a partner adopts it in person '
-          'through governance-queue (adopt-rule).')
+STATUS = 'Status: a proposal until adopt-rule makes it an active rule.'
 
 
 def body(statement, card=None, source='', packs=()):

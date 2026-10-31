@@ -54,6 +54,7 @@ export const EXCLUSION_REASONS = {
   waiting_on_others: "Waiting on a counterparty, an outside event or another piece of work, not on Joe.",
   system_decidable: "The verb that decides it carries no human-only or authority-only flag.",
   lead_outreach: "Lead outreach lives on the Lead Board, never on a glanceable list.",
+  agent_rule: "Agents adopt and retire rules themselves with adopt-rule and tell Joe (Joe, 2026-10-31).",
 };
 
 const TIER_RANK = { work: 0, capability: 1, pending: 2 };
@@ -235,13 +236,7 @@ export async function readNeedsJoe(c, actor, governance, { now = Date.now() } = 
     }),
     ...await source(sources, "governance", async () => {
       for (const _ of governance.pending_retrieval_proposals || []) exclude("system_decidable");
-      const rules = (governance.pending_rule_approvals || []).map(rule => item({
-        key: `rule:${rule.rule_id}`, source: "rule_approval",
-        title: `Approve or decline the proposed rule: ${String(rule.statement || "").slice(0, 160)}`,
-        why: "ruling", why_text: "A proposed rule binds nobody until Joe approves it.",
-        action: "Approve or decline the rule", since: rule.admitted_at || rule.taught_at,
-        blocks: { tier: "pending", text: "The rule binds nobody until it is decided" },
-      }, now));
+      for (const _ of governance.pending_rule_approvals || []) exclude("agent_rule");
       const batches = (governance.pending_guidance_import_batches || []).map(batch => item({
         key: `guidance-batch:${batch.batch_id}`, source: "guidance_batch",
         title: `Accept or reject a staged guidance import of ${batch.entry_count} entries${batch.reason ? `: ${batch.reason}` : ""}`,
@@ -249,7 +244,7 @@ export async function readNeedsJoe(c, actor, governance, { now = Date.now() } = 
         action: "Accept or reject the batch", since: batch.staged_at,
         blocks: { tier: "pending", text: "The guidance stays staged until it is decided" },
       }, now));
-      return { items: [...rules, ...batches] };
+      return { items: batches };
     }),
     ...await source(sources, "local", async () => {
       const row = (await c.query(

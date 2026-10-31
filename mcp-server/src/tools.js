@@ -1,8 +1,11 @@
 // Register MCP tools and their shared write envelope.
+import censusInventoryFamily from "./tool-families/census-inventory.js";
+import practiceOriginationFamily from "./tool-families/practice-origination.js";
+import scheduleBoardFamily from "./tool-families/schedule-board.js";
+import vendorMeetingsFamily from "./tool-families/vendor-meetings.js";
+const toolFamilies = [censusInventoryFamily, practiceOriginationFamily, scheduleBoardFamily, vendorMeetingsFamily];
 import { homeInboxTools, HOME_INBOX_WRITES } from "./home-inbox.js";
 import { dealUpdateResolution } from "./deal-update-resolution.js";
-import { practiceOriginationTools } from "./practice-origination.ts";
-import { vendorMeetingTools } from "./vendor-meetings.js";
 import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.ts";
 import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.ts";
@@ -104,14 +107,12 @@ import { assuranceHealthStoreTools } from "./assurance-health-store.v5.ts";
 import { ruleContextRuntimeTools } from "./rule-context-runtime.v5.js";
 import { systemWorkTools } from "./system-work-census.v5.js";
 import { BOARD_ANSWER_WRITE_VERBS, boardAnswerTools } from "./board-answers.js";
-import { censusInventoryTools } from "./census-inventory.js";
 import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.ts";
 import { partyIdentityTools } from "./party-identity.js";
 import { partyDuplicateCandidateTools } from "./party-duplicate-candidates.js";
 import { briefQueuePage, readBriefLoops, briefLoopKey, briefNeedsJoeKey, briefAssuranceKey } from "./brief-queues.ts";
 import { readBriefAssurance } from "./brief-assurance.ts";
 import { readNeedsJoe } from "./needs-joe.js";
-import { scheduleBoardTools } from "./schedule-board.js";
 export { canExercisePartnerAuthority, partnerAuthoritySlugForActor };
 
 // ---------- envelope helpers ----------
@@ -6939,7 +6940,7 @@ export const TOOLS = {
   },
 
   "find-rule": {
-    description: "Find proposed, active, or retired rules by their words when the id is unknown. Matches a literal substring or all whitespace-separated words, case-insensitively. Returns bounded statement previews and full ids. Propose corrections or withdrawals as edits to CLAUDE.md, AGENTS.md or a skill in a PR; proposals bind nobody until merged. Read-only; status defaults to any.",
+    description: "Find proposed, active, or retired rules by their words when the id is unknown. Matches a literal substring or all whitespace-separated words, case-insensitively. Returns bounded statement previews and full ids. Retired rules include who retired them, why, and their retirement receipt. Retire a rule through a team-memory convention proposal with a Retires line, adopted with adopt-rule. Read-only; status defaults to any.",
     inputSchema: { type: "object", properties: {
       text: { type: "string", minLength: 1 },
       status: { type: "string", enum: ["proposed", "active", "retired", "any"], default: "any" },
@@ -6959,7 +6960,7 @@ export const TOOLS = {
         throw new ToolError({ error: personalScope.error });
       const matches = await c.query(
         `select id, left(id::text,8) as short_id, status, version, created_at,
-                scope, left(statement,200) as statement
+                scope, left(statement,200) as statement, retirement
            from v_rule_lookup
           where (personal_to is null or personal_to=$5::text)
             and ($2='any' or status=$2)
@@ -6998,7 +6999,7 @@ export const TOOLS = {
   // multi-table read.
   "governance-queue": {
     write: false,
-    description: "Read every pending decision in one payload: team-memory convention proposals (conventions/proposed/<slug>) a partner adopts in person with adopt-rule (they bind nobody until adopted), legacy rule proposals and staged guidance imports (read-only), retrieval proposals awaiting approve-retrieval-proposals, and needs_joe — the ONE list of every open item waiting on Joe (action-required and Joe-owned loops, Work Requests in needs_joe, unanswered board questions, rule approvals, and the locally published PR and tabled items), each with a plain title, why only Joe can do it, the one action, link, age and what it blocks, ordered by what it blocks. Items the system can decide itself are excluded and counted by reason. Read-only; grants no authority and performs no decision itself.",
+    description: "Read every pending decision in one payload: team-memory convention proposals (conventions/proposed/<slug>) that agents adopt themselves with adopt-rule, legacy rule proposals and staged guidance imports (read-only), retrieval proposals awaiting approve-retrieval-proposals, and needs_joe — the ONE list of every open item waiting on Joe (action-required and Joe-owned loops, Work Requests in needs_joe, unanswered board questions, rule approvals, and the locally published PR and tabled items), each with a plain title, why only Joe can do it, the one action, link, age and what it blocks, ordered by what it blocks. Items the system can decide itself are excluded and counted by reason. Read-only; grants no authority and performs no decision itself.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c, actor, _args, { now } = {}) => {
       const row = (await c.query("select ops.read_governance_queue() as queue /* governance-queue */")).rows[0];
@@ -7006,7 +7007,7 @@ export const TOOLS = {
       const rules = queue.pending_rule_approvals || [];
       const batches = queue.pending_guidance_import_batches || [];
       const proposals = queue.pending_retrieval_proposals || [];
-      const conventions = conventionProposals(queue.pending_convention_proposals);
+      const conventions = await conventionProposals(queue.pending_convention_proposals, c);
       return {
         ok: true,
         pending_convention_proposals: conventions,
@@ -7093,7 +7094,7 @@ export const TOOLS = {
 
   "log-decision": {
     write: true,
-    description: "Record a SETTLED decision and its rationale — the thing that stops it being relitigated next session. Writes a decision event (subject_type='decision', verb='log-decision') that v_decision_entry reads and decision-history.md renders; never hand-edit that file. NOT the same as add-loop marker:'decision', which is an OPEN question awaiting a ruling, and standing guidance belongs in CLAUDE.md, AGENTS.md or a skill through a PR; proposals bind nobody until merged. Use this when a fork has been closed: what was decided, why, what lost. human_quote is Joe's or Dell's literal words when he said them — omit it and the entry is flagged quote_absent rather than paraphrase being passed off as a quote. PASS `about` WHENEVER THE RULING CONCERNS ONE RECORD: a decision without it is filed in decision-history and reachable from nothing, which is how 363 rulings ended up invisible to catch-me-up on the very deals they governed. PRICE IT WHEN THE RULING CHANGES HOW THE SYSTEM WORKS: cost_delta and quality_delta record what a build cost and what it bought, together or not at all, because a build with no before-and-after number can never be shown to have worked, only asserted to have. If the after-measure does not exist yet, log it unpriced and add both halves later with update-decision.",
+    description: "Record a SETTLED decision and its rationale — the thing that stops it being relitigated next session. Writes a decision event (subject_type='decision', verb='log-decision') that v_decision_entry reads and decision-history.md renders; never hand-edit that file. NOT the same as add-loop marker:'decision', which is an OPEN question awaiting a ruling, and a standing rule belongs in a team-memory convention the agent adopts with adopt-rule and reports to Joe. Use this when a fork has been closed: what was decided, why, what lost. human_quote is Joe's or Dell's literal words when he said them — omit it and the entry is flagged quote_absent rather than paraphrase being passed off as a quote. PASS `about` WHENEVER THE RULING CONCERNS ONE RECORD: a decision without it is filed in decision-history and reachable from nothing, which is how 363 rulings ended up invisible to catch-me-up on the very deals they governed. PRICE IT WHEN THE RULING CHANGES HOW THE SYSTEM WORKS: cost_delta and quality_delta record what a build cost and what it bought, together or not at all, because a build with no before-and-after number can never be shown to have worked, only asserted to have. If the after-measure does not exist yet, log it unpriced and add both halves later with update-decision.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" },
       title: { type: "string", description: "the decision itself, in one line, stated as settled" },
@@ -9110,7 +9111,6 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "fact-generation": "mcp-server/src/fact-generation.ts",
   "deal-extraction": "mcp-server/src/deal-extraction.js",
   "fact-observations": "mcp-server/src/fact-observations.ts",
-  "practice-origination": "mcp-server/src/practice-origination.ts",
   "partner-room": "mcp-server/src/partner-room.js",
   "agent-profile": "mcp-server/src/agent-profiles.js",
   "client-portal": "mcp-server/src/client-portal.ts",
@@ -9147,23 +9147,22 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "rule-context-runtime": "mcp-server/src/rule-context-runtime.v5.js",
   "system-work-census": "mcp-server/src/system-work-census.v5.js",
   "board-answers": "mcp-server/src/board-answers.js",
-  "census-inventory": "mcp-server/src/census-inventory.js",
   "org-conventions": "mcp-server/src/org-conventions.js",
   "research-sites": "mcp-server/src/research-sites.ts",
   "party-identity": "mcp-server/src/party-identity.js",
   "party-duplicate-candidates": "mcp-server/src/party-duplicate-candidates.js",
-  "schedule-board": "mcp-server/src/schedule-board.js",
   "doc-suggestions": "mcp-server/src/doc-suggestions.ts",
   "whats-new": "mcp-server/src/whats-new.js",
   "invoice-tracker": "mcp-server/src/invoice-tracker.ts",
-  "vendor-meetings": "mcp-server/src/vendor-meetings.js",
 });
 
 function bindToolSource(tool, source) {
-  if (!tool || typeof tool !== "object" || !TOOL_REGISTRATION_SOURCE[source])
+  const locator = TOOL_REGISTRATION_SOURCE[source] ||
+    (/^mcp-server\/src\/[a-zA-Z0-9_./-]+\.(?:js|ts)$/.test(source) ? source : null);
+  if (!tool || typeof tool !== "object" || !locator)
     throw new Error(`missing reviewed tool source for ${source}`);
   Object.defineProperty(tool, "registrySource", {
-    value: TOOL_REGISTRATION_SOURCE[source], enumerable: false, writable: false, configurable: false,
+    value: locator, enumerable: false, writable: false, configurable: false,
   });
   deepFreezeToolContract(tool);
 }
@@ -10032,7 +10031,7 @@ registerTools({
         hint: "this verb requires a partner or a server-verified Codex/Claude session sponsored by one" });
       const { candidate, resolution } = await prepareCaptureCandidate(c, actor, args, {
         table: "capture_post_call_candidate",
-        read: `select id,kind,deal_id,assignee_slug,action_description,to_jsonb(due_on)#>>'{}' as due_on,recipient_party_id,
+        read: `select id,kind,deal_id,assignee_slug,action_description,due_defaulted,to_jsonb(due_on)#>>'{}' as due_on,recipient_party_id,
                 recipient_ref,email_subject,body_sha256,status,resulting_ref,evidence_quote
            from capture_post_call_candidate where id=$1 for update
            /* capture:resolve-post-call-read */`,
@@ -10069,9 +10068,30 @@ registerTools({
         ...proposed.flatMap(i => i.bullets),
         ...shortFacts(candidate.evidence_quote).map(text => ({ date: null, kind: 'call', text })),
       ] });
-      const action = await c.query(
+      await c.query("select id from deal where id=$1 for update /* capture:followup-deal-lock */", [candidate.deal_id]);
+      const stepKey = candidate.action_description.trim().replace(/\s+/gu, ' ').toLowerCase();
+      const existing = (await c.query(
+        `select id,item_bullets,source from (
+           select id,item_bullets,'next_action' as source,created_at as ordered_at from next_action
+             where subject_type='deal' and subject_id=$1 and status='open' and owner_id=$3
+               and lower(regexp_replace(btrim(description), '\\s+', ' ', 'g'))=$2
+           union all
+           select id,item_bullets,'capture_post_call_action' as source,accepted_at as ordered_at from capture_post_call_action
+             where deal_id=$1 and status='open' and owner_id=$3 and item_title is not null
+               and lower(regexp_replace(btrim(description), '\\s+', ' ', 'g'))=$2
+         ) actions order by ordered_at,id limit 1 /* capture:followup-existing */`,
+        [candidate.deal_id, stepKey, assignee.rows[0].id])).rows[0];
+      const actionTable = existing?.source === 'next_action' ? 'next_action' : 'capture_post_call_action';
+      if (existing) await c.query(`select id from ${actionTable} where id=$1 for update`, [existing.id]);
+      const bullets = [...(existing?.item_bullets || []), ...item.bullets]
+        .filter((bullet, index, all) => all.findIndex(other => JSON.stringify(other) === JSON.stringify(bullet)) === index);
+      const action = existing ? await c.query(
+        `update ${actionTable} set due_on=case when $4 and $2::date is not null then $2::date else due_on end,
+          item_bullets=$3::jsonb,updated_at=clock_timestamp()
+          where id=$1 returning id,due_on::text as due_on /* capture:followup-merge */`,
+        [existing.id, candidate.due_on || null, JSON.stringify(bullets), candidate.due_defaulted === false]) : await c.query(
         `insert into capture_post_call_action (candidate_id,deal_id,owner_id,due_on,description,accepted_by,item_title,item_bullets,source_ref)
-         values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9) returning id
+         values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9) returning id,due_on::text as due_on
          /* capture:resolve-post-call-action */`,
         [candidate.id, candidate.deal_id, assignee.rows[0].id, candidate.due_on || null,
          candidate.action_description, actor.id, item.title, JSON.stringify(item.bullets), item.source_ref]);
@@ -10083,7 +10103,7 @@ registerTools({
       await writeEvent(c, actor, "resolve-post-call-candidate", "deal", candidate.deal_id, {
         field: "next_action", new: { next_action_id: action.rows[0].id,
           assignee: candidate.assignee_slug, description: candidate.action_description,
-          due_on: candidate.due_on || null }, idempotency_key: args.idempotency_key,
+          due_on: action.rows[0].due_on }, idempotency_key: args.idempotency_key,
       });
       return { ok: true, candidate_id: candidate.id, status: "confirmed",
         ref: String(action.rows[0].id), assignee: candidate.assignee_slug };
@@ -10632,11 +10652,9 @@ registerTools(doctrineTools({ withEnvelope, writeEvent, ToolError }), "doctrine"
 registerTools(orgConventionTools({ withEnvelope, writeEvent }), "org-conventions");
 registerTools(systemWorkTools(), "system-work-census");
 registerTools(boardAnswerTools({ withEnvelope, writeEvent }), "board-answers");
-registerTools(censusInventoryTools({ withEnvelope }), "census-inventory");
 registerTools(researchSiteTools({ withEnvelope, writeEvent }), "research-sites");
 registerTools(partyIdentityTools({ withEnvelope, writeEvent, versionGuard, resolvePartyForWrite }), "party-identity");
 registerTools(partyDuplicateCandidateTools(), "party-duplicate-candidates");
-registerTools(scheduleBoardTools(), "schedule-board");
 registerTools(dealItemTools({ withEnvelope, writeEvent, resolveSubject,
   canExercisePartnerAuthority, partnerAuthoritySlugForActor }), "deal-items");
 registerTools(actionClosureTools({ withEnvelope, writeEvent, canExercisePartnerAuthority }), "action-closure");
@@ -10822,10 +10840,13 @@ registerTools(assuranceHealthStoreTools({ withEnvelope, ToolError }), "assurance
 // contract remains read-only and the SQL function is stable.
 registerTools(ruleContextRuntimeTools({ withEnvelope, ToolError }), "rule-context-runtime");
 
-registerTools(vendorMeetingTools(), "vendor-meetings");
 
 const overdueUpdates = dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds, lockDealField, dealNextStepStatus, ToolError });
 registerTools(overdueUpdates.tools, "deal-update-resolution");
-registerTools(practiceOriginationTools({ withEnvelope }), "practice-origination");
+
+for (const family of toolFamilies) {
+  registerTools(family.createTools({ withEnvelope, writeEvent, ToolError, resolveSubject,
+    versionGuard, executeRegisteredTool, canExercisePartnerAuthority, partnerAuthoritySlugForActor }), family.source);
+}
 
 Object.freeze(TOOLS);

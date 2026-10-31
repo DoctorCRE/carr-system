@@ -1,5 +1,6 @@
 // Keep queued phone audio in transactional object storage until acknowledgement or alarm expiry.
 const TTL_MS = 15 * 60 * 1000;
+const UPLOAD_TIMEOUT_MS = 2 * 60 * 1000;
 const CAPACITY = 50 * 1024 * 1024;
 const CHUNK_BYTES = 1_900_000;
 const reply = (body, status = 200) => Response.json(body, {
@@ -78,7 +79,9 @@ export class PhoneAudioHandoff {
     const admitted = await this.storage.transaction(async tx => {
       const pending = await tx.get('pending') || {};
       let entry = pending[id];
-      if (entry && entry.expiresAt > Date.now()) {
+      const abandoned = entry?.state === 'uploading' &&
+        (entry.startedAt ?? entry.expiresAt - TTL_MS) + UPLOAD_TIMEOUT_MS <= Date.now();
+      if (entry && entry.expiresAt > Date.now() && !abandoned) {
         if (entry.metadata.sha256 !== metadata.sha256 || entry.metadata.byte_count !== size)
           return reply({ error: 'recording_mismatch' }, 409);
         return reply({ queued: entry.state === 'queued' }, entry.state === 'queued' ? 202 : 409);
@@ -88,6 +91,11 @@ export class PhoneAudioHandoff {
       if (recent.length >= 3) return Response.json({ error: 'upload_rate_limit' }, {
         status: 429, headers: { 'cache-control': 'no-store', 'retry-after': String(Math.ceil((recent[0] + 60000 - Date.now()) / 1000)) },
       });
+      if (abandoned) {
+        if (entry.chunks) await tx.delete(chunkKeys(id, entry));
+        delete pending[id];
+        entry = undefined;
+      }
       if (entry?.expiresAt <= Date.now()) {
         await tx.delete(chunkKeys(id, entry));
         delete pending[id];
@@ -99,7 +107,7 @@ export class PhoneAudioHandoff {
       const reserved = Object.values(pending).reduce((sum, e) => sum + e.metadata.byte_count, 0);
       if (reserved + size > CAPACITY) return reply({ error: 'handoff_full' }, 429);
       await tx.put(rateKey, [...recent, Date.now()]);
-      pending[id] = { metadata, state: 'uploading', reservation, expiresAt: Date.now() + TTL_MS };
+      pending[id] = { metadata, state: 'uploading', reservation, startedAt: Date.now(), expiresAt: Date.now() + TTL_MS };
       await tx.put('pending', pending);
       if (await tx.get(`expired:${id}`)) await tx.delete(`expired:${id}`);
       await this.schedule(tx, pending);

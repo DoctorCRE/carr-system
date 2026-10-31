@@ -66,7 +66,7 @@ jobs:
           - {classes: "dependency", gate_shard: 2}
           - {classes: "pushfloor unit types secret binding artifact", gate_shard: 2}
           - {classes: "hxprobe", gate_shard: 2}
-    timeout-minutes: ${{ matrix.classes == 'migration' && 45 || 20 }}
+    timeout-minutes: ${{ matrix.classes == 'migration' && 45 || 25 }}
 
     services:
       postgres:

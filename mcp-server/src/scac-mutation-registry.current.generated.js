@@ -179,10 +179,10 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "adopt-rule": {
     "ingress_key": "mcp-tool:adopt-rule",
     "source_locator": "mcp-server/src/org-conventions.js",
-    "schema_digest": "0707691984dd5b505e6ac3d4b99a8e08b70d1a772c44cca38c3e940629c5b516",
+    "schema_digest": "c99415ae17fef7250c52a316ddaa29b78852c47dbd72296c4eb24b3f8a97ee02",
     "write": true,
     "human_only": true,
-    "human_caller_only": true,
+    "human_caller_only": false,
     "authority_only": true,
     "delegates_to": []
   },
@@ -392,7 +392,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "87ecbaa9c95b2c975e799942c5885f84c4c11856e3e87a022d6fad90742ec923",
     "write": true,
     "human_only": true,
-    "human_caller_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -4152,31 +4152,31 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "relation_kind": "r"
     },
     {
+      "grantee": "carr_writer",
+      "relation": "ops.requirement_request",
+      "grantable": false,
+      "privilege": "update",
       "ingress_key": "db-relation-acl:ops.requirement_request:carr_writer:update",
       "ingress_kind": "db_relation_acl",
-      "relation": "ops.requirement_request",
-      "relation_kind": "r",
-      "grantee": "carr_writer",
-      "privilege": "update",
-      "grantable": false
+      "relation_kind": "r"
     },
     {
+      "grantee": "carr_writer",
+      "relation": "ops.requirement_reply_proposal",
+      "grantable": false,
+      "privilege": "insert",
       "ingress_key": "db-relation-acl:ops.requirement_reply_proposal:carr_writer:insert",
       "ingress_kind": "db_relation_acl",
-      "relation": "ops.requirement_reply_proposal",
-      "relation_kind": "r",
-      "grantee": "carr_writer",
-      "privilege": "insert",
-      "grantable": false
+      "relation_kind": "r"
     },
     {
+      "grantee": "carr_writer",
+      "relation": "ops.requirement_reply_proposal",
+      "grantable": false,
+      "privilege": "update",
       "ingress_key": "db-relation-acl:ops.requirement_reply_proposal:carr_writer:update",
       "ingress_kind": "db_relation_acl",
-      "relation": "ops.requirement_reply_proposal",
-      "relation_kind": "r",
-      "grantee": "carr_writer",
-      "privilege": "update",
-      "grantable": false
+      "relation_kind": "r"
     }
   ],
   "secdef_execute": [

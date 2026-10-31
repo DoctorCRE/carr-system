@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { assertCurrentContracts, sha256 } from "../../ops/scac-mutation-inventory.mjs";
 import { assertClosedTopLevel, assertRegisteredOperation, MutationRegistryRefusal, registeredOperation } from "../src/mutation-registry.js";
+import { assertAdmits } from "./helpers/registry-admission.mjs";
 import { TOOLS } from "../src/tools.js";
 test("current generated write contracts match every assembled handler", () => {
   assert.equal(assertCurrentContracts(TOOLS), true);
@@ -37,4 +38,8 @@ test("composites expose exact reviewed edges and generic dispatch stays default 
   assert.deepEqual(registeredOperation("call-verb").delegates_to, ["*registered_operation"]);
   assert.match(readFileSync(new URL("../src/tools.js", import.meta.url), "utf8"),
     /executeRegisteredTool\(c, actor, "log-activity"/);
+});
+
+test("lead workspace verbs remain available and admitted", async () => {
+  await assertAdmits(["find-rule", "record-lead-contact", "claim-lead", "link-lead-client", "update-lead", "lead-board", "unfinished-work"]);
 });
