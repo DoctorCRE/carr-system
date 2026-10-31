@@ -81,7 +81,7 @@ import sys
 
 reasons = frozenset("outside_window previous_run_active cleanup_failed store_missing carr_unreachable "
                     "decode_failed coverage_failed store_verification_low decoder_degraded calendar_decode_empty store_unchanged "
-                    "writes_failed model_failed processed nothing_new writes_deferred "
+                    "writes_failed model_failed processed nothing_new writes_deferred reconciled reconcile_failed "
                     "request_blocked full_disk_access_required contacts_empty contacts_read_failed timeout auth_refused "
                     "key_reuse transport_oversized no_acknowledgement reply_unreadable transport_error "
                     "invalid_request subject_unresolved database_refused setup_failed calendar_lifecycle_unsupported "
@@ -93,7 +93,7 @@ if sys.argv[3] != "outlook-intake":
         "folder_guide_missing folder_guide_not_0600 folder_pane_restore_failed move_failed move_failed_twice "
         "unread_row_selected unread_set_changed unread_set_unverified cua_driver_unavailable "
         "outlook_launch_failed outlook_not_running_after_launch outlook_quit_timeout preflight_command_timeout "
-        "compose_window_open".split())
+        "compose_window_open screen_locked".split())
 prefix = sys.argv[3] + "-receipt "
 # Count keys are code-built names; values carry the meaning. A snake_case name with a
 # bounded non-negative integer value cannot carry mail content, so no key list drifts.
