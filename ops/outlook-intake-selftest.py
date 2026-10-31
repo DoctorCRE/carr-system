@@ -251,8 +251,8 @@ class Fake:
         db_path.write_bytes(self.fixture.read_bytes())
         with closing(sqlite3.connect(db_path)) as con, con:
             con.execute("INSERT INTO folders VALUES(-1,7,'Sent Items','top',NULL)")
-            con.execute("INSERT INTO messages(id,sender,subject,body,body_kind,sent_unix,copy_key) "
-                        "VALUES(-1,?,'Binding evidence','Synthetic binding body','full',?,?)",
+            con.execute("INSERT INTO messages(id,sender,recipients,subject,body,body_kind,sent_unix,copy_key) "
+                        "VALUES(-1,?,'outside@example.test','Binding evidence','Synthetic binding body','full',?,?)",
                         (getattr(self.test, 'settings', None).account if hasattr(self.test, 'settings') else OWNER,
                          1, 'binding-evidence'))
             con.execute('INSERT INTO message_folders VALUES(-1,-1)')
@@ -359,9 +359,21 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(result.state, 'succeeded')
         run = json.loads(intake.receipt_line(result).split(' ', 1)[1])['counts']['run']
         self.assertEqual((run['coverage_checked'], run['coverage_failed']), (1, 0))
-        self.assertEqual([run[name] for name in intake.COVERAGE_SHORTFALLS], [0, 0, 0])
+        self.assertEqual([run[name] for name in intake.COVERAGE_SHORTFALLS], [0, 0, 0, 0, 0])
         again = intake.run(self.repo, self.home, self.fake.ports())
         self.assertNotIn('coverage_checked', again.counts, 'the verdict runs once a local day')
+
+    def test_daily_coverage_rejects_one_missing_sender_or_recipient(self):
+        for field in ('sender', 'recipients'):
+            with self.subTest(field=field):
+                message = mail('pat@example.test', -timedelta(hours=1), subject='Complete body')
+                message[field] = None
+                result = self.coverage_run([message])
+                self.assertEqual((result.state, result.reason), ('failed', 'coverage_failed'))
+                self.assertEqual(result.counts['coverage_' + field + '_shortfall'], 1)
+                state = json.loads((self.out() / intake.STATE).read_text())
+                state.pop('coverage_check_day', None)
+                (self.out() / intake.STATE).write_text(json.dumps(state))
 
     def test_daily_coverage_verdict_fails_loudly_with_the_shortfall_per_criterion(self):
         messages = [mail('pat@example.test', -timedelta(hours=1), subject='Complete'),
@@ -376,7 +388,8 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual((counts['run']['coverage_checked'], counts['run']['coverage_failed']), (1, 1))
         self.assertEqual({name: counts['run'][name] for name in intake.COVERAGE_SHORTFALLS},
                          {'coverage_messages_shortfall': 1, 'coverage_subjects_shortfall': 1,
-                          'coverage_text_shortfall': 1})
+                          'coverage_text_shortfall': 1, 'coverage_sender_shortfall': 0,
+                          'coverage_recipients_shortfall': 0})
         state, detail, args = self.scheduled(result)
         self.assertEqual((state, json.loads(detail)['reason']), ('failed', 'coverage_failed'),
                          'the scheduler records the failed verdict')
@@ -944,11 +957,11 @@ class IntakeTest(unittest.TestCase):
                 self.assertEqual(result.detail, detail)
                 self.assertEqual(self.fake.writes('log-activity'), [])
 
-    def cli_mail_fixture(self, records, folder_name='Drafts'):
+    def cli_mail_fixture(self, records, folder_name='Drafts', extra_folders=b''):
         helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
         crate = ROOT / 'vendor/hxprobe'
         REAL_RUN(['cargo', 'build', '--locked'], cwd=crate, check=True, capture_output=True)
-        folders = helpers['folder'](50, folder_name) + helpers['folder'](51, 'Sent Items')
+        folders = helpers['folder'](50, folder_name) + helpers['folder'](51, 'Sent Items') + extra_folders
         binding = helpers['message'](0x9999, sender=OWNER, sent=ts(-timedelta(days=60)), folder=51)
         self.store.write_bytes(helpers['STORE'](folders + b''.join(records) + binding))
 
@@ -1025,8 +1038,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(retry.counts['unresolved_messages'], 0)
         self.assertEqual(len(self.fake.writes('log-activity')), 1)
 
-    def test_cli_message_in_an_uncatalogued_folder_is_not_admitted(self):
-        # An Outbox revision: undated and in a folder the store does not catalogue.
+    def test_cli_message_in_a_typed_uncatalogued_folder_is_filed_once(self):
         helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
         complete = helpers['message'](71, sent=ts(-timedelta(hours=1)))
         incomplete = helpers['message'](71, sent=ts(-timedelta(hours=1)), folder=999,
@@ -1034,8 +1046,19 @@ class IntakeTest(unittest.TestCase):
         ports = self.cli_mail_fixture([incomplete, complete], folder_name='Inbox')
         result = intake.run(self.repo, self.home, ports)
         self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['emails'], 1)
+        self.assertEqual(result.counts['mail_account_unresolved'], 0)
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+        self.assertEqual(intake.run(self.repo, self.home, ports).counts['emails'], 0)
+
+    def test_cli_typed_reference_to_another_accounts_folder_is_not_admitted(self):
+        helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
+        message = helpers['message'](71, sent=ts(-timedelta(hours=1)), folder=52)
+        ports = self.cli_mail_fixture([message], folder_name='Inbox',
+                                      extra_folders=helpers['folder'](52, 'Inbox', account=8))
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.state, 'succeeded')
         self.assertEqual(result.counts['emails'], 0)
-        self.assertEqual(result.counts['mail_account_unresolved'], 1)
         self.assertEqual(self.fake.writes('log-activity'), [])
 
     def test_cli_complete_revision_settles_a_prior_incomplete_message(self):
@@ -2699,7 +2722,7 @@ class IntakeTest(unittest.TestCase):
         self.fake.calls.clear()
         first = self.run_intake(broken + [mail('pat@example.test', -timedelta(hours=1))])
         self.assertEqual((first.state, first.counts['decoder_alarm']), ('degraded', 1))
-        self.assertIn('recipients: 4.5%', self.report_text())
+        self.assertIn('recipients: 9.1%', self.report_text())
         self.assertIn('sent_time: 9.1%', self.report_text())
         self.assertIn('recipients', self.report_text().split('failing: ')[1].splitlines()[0])
         self.assertIn('sent_time', self.report_text().split('failing: ')[1].splitlines()[0])
@@ -2714,7 +2737,7 @@ class IntakeTest(unittest.TestCase):
         sample = [mail(OWNER, -timedelta(hours=1), subject=f'Synthetic {i}', recipients='pat@example.test')
                   for i in range(19)] + [mail(OWNER, -timedelta(hours=1), subject='', recipients=None)]
         expected = {'decoder_block_verification_bp': 9990, 'decoder_sender_bp': 10000,
-                    'decoder_subject_bp': 9500, 'decoder_recipients_bp': 9048, 'decoder_sent_time_bp': 10000,
+                    'decoder_subject_bp': 9500, 'decoder_recipients_bp': 9524, 'decoder_sent_time_bp': 10000,
                     'decoder_folder_bp': 10000}
         processed = self.run_intake(sample)
         self.assertEqual({k: v for k, v in processed.counts.items() if k.endswith('_bp')}, expected)
@@ -2794,7 +2817,7 @@ class IntakeTest(unittest.TestCase):
         result = self.run_intake(sample)
         self.assertEqual(result.state, 'succeeded')
         self.assertIn('subject: 0.0%', self.report_text())
-        self.assertIn('recipients: 0.0%', self.report_text())
+        self.assertIn('recipients: 50.0%', self.report_text())
         self.assertIn('failing: none', self.report_text())
 
     def test_low_verification_alarms_and_defers_writes(self):
@@ -3971,13 +3994,15 @@ class CoverageCounterTest(unittest.TestCase):
                          (1, 0, 0))
 
     def test_the_verdict_names_the_shortfall_per_criterion(self):
-        whole = dict.fromkeys(('stored', 'admitted', 'subject_decoded', 'body_complete'), 5)
+        whole = dict.fromkeys(('stored', 'admitted', 'subject_decoded', 'body_complete',
+                              'sender_decoded', 'recipients_decoded'), 5)
         self.assertEqual(intake.coverage_verdict({**whole, 'mail_account_unknown_not_stored': 0}),
                          dict.fromkeys(intake.COVERAGE_SHORTFALLS, 0))
         self.assertEqual(intake.coverage_verdict({**whole, 'stored': 6, 'mail_account_unknown_not_stored': 2,
                                                   'subject_decoded': 4, 'body_complete': 1}),
                          {'coverage_messages_shortfall': 3, 'coverage_subjects_shortfall': 1,
-                          'coverage_text_shortfall': 4})
+                          'coverage_text_shortfall': 4, 'coverage_sender_shortfall': 0,
+                          'coverage_recipients_shortfall': 0})
 
 
 class ScheduleTest(unittest.TestCase):
