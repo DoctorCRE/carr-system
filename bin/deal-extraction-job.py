@@ -13,6 +13,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 from lib.deal_extraction import ExtractionJob, MODELS, run_job
 from lib.model_call import ask_with_usage
+from lib.deal_ocr import ocr_regions
 from lib.record_call import call_verb
 from lib.r2_archive import BUCKET, wrangler_bin
 
@@ -66,7 +67,7 @@ def main():
     args = parser.parse_args()
     job = ExtractionJob(args.job_id, args.entity, args.document, args.document_type, args.model, args.max_budget_usd)
     try:
-        result = run_job(job, call=call, read_bytes=read_bytes, text_pages=text_pages, model=ask_with_usage)
+        result = run_job(job, call=call, read_bytes=read_bytes, text_pages=text_pages, model=ask_with_usage, ocr_regions=ocr_regions)
     except (ValueError, RuntimeError, OSError, subprocess.SubprocessError):
         print('Deal extraction failed; no success receipt. Retry with the same job ID.', file=sys.stderr)
         return 1
