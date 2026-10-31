@@ -1,0 +1,40 @@
+{
+  "synthetic_only": true,
+  "contract": "practice-origination.v1",
+  "records": {
+    "nppes": {
+      "record_key": "1234567890",
+      "npi": "1234567890",
+      "name": "Synthetic Dental",
+      "city": "Pensacola",
+      "state": "FL",
+      "evidence_date": "2026-10-20",
+      "date_basis": "registry_update",
+      "source_url": "https://npiregistry.cms.hhs.gov/provider-view/1234567890",
+      "facts": {
+        "address": "SYNTHETIC_ADDRESS_A"
+      }
+    },
+    "pecos": {
+      "record_key": "1234567891|I20200101000100",
+      "npi": "1234567891",
+      "name": "Synthetic Group",
+      "city": "",
+      "state": "AL",
+      "evidence_date": "2026-10-21",
+      "date_basis": "publication",
+      "source_url": "https://data.cms.gov/provider-characteristics/medicare-provider-supplier-enrollment/medicare-fee-for-service-public-provider-enrollment",
+      "facts": {
+        "enrollment_id": "I20200101000100",
+        "provider_type": "Dentist"
+      }
+    }
+  },
+  "expected": {
+    "nppes_replay_events": 1,
+    "pecos_unchanged_later_events": 1,
+    "pecos_correction_events": 2,
+    "pecos_reversion_events": 3,
+    "cards_per_source_record": 1
+  }
+}

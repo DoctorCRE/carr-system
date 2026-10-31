@@ -64,13 +64,15 @@ class Server:
         self.calls.append((verb, args))
         if verb == 'email-router-queue':
             rows = [e for e in self.emails if e['activity_id'] not in args['exclude']]
-            return {'emails': rows[:args['limit']], 'more': len(rows) > args['limit']}
+            return {'emails': rows[:args['limit']], 'more': len(rows) > args['limit'], 'open_deals': []}
+        if args.get('mode') == 'expire_blocked':
+            return {'ok': True, 'expired_count': 0}
         self.decide(args)
-        self.stored.setdefault((args['kind'], args['deal'], args['activity_id']), args)
+        self.stored.setdefault((args['kind'], args.get('deal'), args['activity_id']), args)
         return {'ok': True, 'proposal_id': 'p', 'status': 'pending', 'requires_confirmation': True}
 
     def recorded(self) -> list[dict]:
-        return [args for verb, args in self.calls if verb == 'record-email-proposal']
+        return [args for verb, args in self.calls if verb == 'record-email-proposal' and not args.get('mode')]
 
 
 def route(server, classify, state=None, clock=None):
@@ -78,6 +80,15 @@ def route(server, classify, state=None, clock=None):
 
 
 class RouterTests(unittest.TestCase):
+    def test_contact_only_email_keeps_next_step_for_partner_review(self):
+        source = dict(email('nondeal', ASK), deal=None, subject_name='Synthetic vendor')
+        server = Server([source])
+        counts = email_router.route(server, lambda e, d: BOTH, refusal_code, {}, NOW,
+            matching=lambda *args: email_matching.MatchDecision('contact_only'))
+        self.assertEqual(counts['recorded'], 1)
+        self.assertEqual(server.recorded()[0]['kind'], 'next_step')
+        self.assertNotIn('deal', server.recorded()[0])
+
     def test_outbound_next_step_requires_the_sending_account(self):
         source = dict(email('sent', ASK), kind='email_out', sender={'email': 'sender@example.test'}, mailbox_owner='dell')
         for account, expected in [('sender@example.test', 1), ('copy@example.test', 0)]:
@@ -115,7 +126,7 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(len({args['idempotency_key'] for args in filed}), 1)
         self.assertEqual(counts['abandoned'], 1)
 
-    def test_unfiled_intake_email_proposes_next_step_for_the_selected_deal(self):
+    def test_unconfirmed_filing_hint_keeps_next_step_on_the_contact(self):
         source = dict(email('unfiled', ASK), deal=None, kind='email_out',
                       sender={'email': 'sender@example.test'}, mailbox_owner='dell')
         calls = []
@@ -128,10 +139,10 @@ class RouterTests(unittest.TestCase):
         counts = email_router.route(carr, lambda e, d: BOTH, refusal_code, {}, NOW,
                     matching=lambda *args: email_matching.MatchDecision('file_to_deal', DEAL,
                         sender_role='client', confidence=0.95), account='sender@example.test')
-        written = [args for verb, args in calls if verb == 'record-email-proposal']
+        written = [args for verb, args in calls if verb == 'record-email-proposal' and not args.get('mode')]
         self.assertEqual([args['kind'] for args in written], ['file_to_deal', 'next_step'])
         self.assertEqual(counts['recorded'], 2)
-        self.assertEqual(written[1]['deal'], DEAL)
+        self.assertNotIn('deal', written[1])
         self.assertEqual(written[1]['owner'], 'dell')
 
     def test_receipt_counts_model_exception_types_without_messages(self):
@@ -341,6 +352,26 @@ class RouterTests(unittest.TestCase):
                 self.assertEqual(email_router.step(Path(folder), settings), 1)
             self.assertIn('"state": "failed"', stdout.getvalue())
 
+    def test_maintenance_resumes_pages_and_reports_failure_without_losing_its_place(self):
+        with tempfile.TemporaryDirectory() as folder:
+            out = Path(folder)
+            calls = []
+            fail = []
+            def carr(verb, args):
+                if verb == 'email-router-queue':
+                    return {'emails': []}
+                calls.append(args)
+                if fail:
+                    raise OSError('synthetic outage')
+                return {'expired_count': 1, 'next_cursor': 'page-two' if len(calls) == 1 else None}
+            self.assertEqual(email_router.run(out, carr, lambda *args: {}, refusal_code, NOW)[1]['expired_blocked'], 1)
+            fail.append(True)
+            self.assertEqual(email_router.run(out, carr, lambda *args: {}, refusal_code, NOW)[0], 'failed')
+            fail.clear()
+            self.assertEqual(email_router.run(out, carr, lambda *args: {}, refusal_code, NOW)[0], 'succeeded')
+            self.assertEqual([args.get('cursor') for args in calls], [None, 'page-two', 'page-two'])
+            self.assertIsNone(json.loads((out / 'state.json').read_text())['expiry_cursor'])
+
     def test_step_classifies_with_the_configured_model(self):
         seen = {}
 
@@ -466,22 +497,25 @@ class MatchingTests(unittest.TestCase):
         self.assertIn('Synthetic Vendor', request['questions']['deal'].criteria['80'])
         self.assertEqual(set(request['questions']), {'deal', 'existing', 'different', 'role'})
 
-    def test_router_records_new_matter_and_never_runs_phase_classifier(self):
+    def test_router_records_new_matter_and_also_classifies_next_steps(self):
         calls = []
         def carr(verb, args):
             calls.append((verb, args))
             if verb == 'email-router-queue':
                 return {'open_deals': [{'id': DEAL}], 'emails': [self.mail()]}
             return {'ok': True}
-        def forbidden(*args):
-            raise AssertionError('an unfiled email must not run phase classification')
-        counts = email_router.route(carr, forbidden, refusal_code, {}, NOW,
+        classified = []
+        def classify(source, today):
+            classified.append(source['activity_id'])
+            return {'proposals': []}
+        counts = email_router.route(carr, classify, refusal_code, {}, NOW,
                                     matching=lambda e, ds, hs: email_matching.match(e, ds, hs, client=FakeJev(0.1, 0.9)))
         self.assertEqual((counts['routed'], counts['recorded']), (1, 1))
         written = calls[1][1]
         self.assertEqual(written['kind'], 'possible_new_deal')
         self.assertNotIn('deal', written)
         self.assertIn('vendor@example.test', written['text'])
+        self.assertEqual(classified, [self.mail()['activity_id']])
 
     def test_router_persists_thread_inheritance_and_retries_failed_writes(self):
         writes = []

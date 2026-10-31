@@ -136,6 +136,10 @@ pub struct Index {
 type RecipientKey = (u32, String, Option<String>);
 
 /// One revision of a message object, or `None` when it does not follow the layout.
+pub(crate) fn is_revision(data: &[u8]) -> bool {
+    revision(0, data).is_some_and(|(_, r)| r.item_class.is_some())
+}
+
 fn revision(block: usize, data: &[u8]) -> Option<(u64, Revision)> {
     let o = Object::new(data, fixed(MESSAGE))?;
     let (key, account) = o.reference(0, MESSAGE.1, MESSAGE_KIND)?;
