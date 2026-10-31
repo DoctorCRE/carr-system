@@ -112,6 +112,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "record-deal-item",
     // WR-000529: J102 partner statements the store already refuses to machines.
     "record-evidence-subject-link",
+    "record-human-fact",
     // V5-J102: a lifecycle correction rewrites recorded history, so it is a
     // partner act on the authority connection.
     "record-lifecycle-correction",
@@ -121,9 +122,11 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "register-client-portal",
     "register-record-source-authority-policy",
     "resolve-critical-date",
+    "resolve-fact-review",
     "resolve-post-call-candidate",
     "retire-retrieval-curation",
     "review-and-triage",
+    "review-deal-update",
     "revoke-correspondence-adapter-consent",
     // V5-RW02: only a verified partner revokes Dell's Salesforce read consent.
     "revoke-salesforce-read-consent",

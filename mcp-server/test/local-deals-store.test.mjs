@@ -1017,7 +1017,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         } finally {
           release?.();
           await Promise.all(peers.map(peer=>peer.end()));
-          await c.query('truncate deal_vendor_assignment,activity,event,tool_call,vendor,deal,client,party');
+          await c.query('truncate ops.requirement_upload_receipt,ops.requirement_upload_grant,ops.requirement_request,deal_vendor_assignment,activity,event,tool_call,vendor,deal,client,capture_post_call_candidate,party');
         }
       });
     }
@@ -1458,6 +1458,12 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
             assert.equal(prior.schema_version,'deal-timeline.v1');
             assert.equal(prior.lease,null);
             assert.equal(prior.client_id,id(3));
+            assert.equal(prior.activities_truncated,false);
+            assert.equal(prior.thread_truncated,false);
+            assert.equal(prior.events_truncated,false);
+            delete prior.activities_truncated;
+            delete prior.thread_truncated;
+            delete prior.events_truncated;
             delete prior.client_id;
             delete prior.schema_version;
             delete prior.lease;

@@ -239,13 +239,20 @@ test('two proposals with one card id adopted concurrently: the second gets the n
       base_version: k03.base_version, reason: 'First of two' });
     await second.query('begin');
     await second.query('set local session authorization carr_authority_joe');
-    const racing = executeRegisteredTool(second, joe, 'adopt-rule', { idempotency_key: randomUUID(),
-      section_id: twin.section_id, base_version: 1, reason: 'Second of two' })
-      .finally(() => second.query('rollback'));
-    await new Promise(resolve => setTimeout(resolve, 300));
+    const racing = refused(executeRegisteredTool(second, joe, 'adopt-rule', { idempotency_key: randomUUID(),
+      section_id: twin.section_id, base_version: 1, reason: 'Second of two' }), 'convention_card_already_active');
+    const deadline = performance.now() + 60000;
+    while (!(await c.query(`select cardinality(pg_blocking_pids($1)) > 0 as blocked`,
+      [second.processID])).rows[0].blocked) {
+      assert.ok(performance.now() < deadline, 'second adoption must wait for the first transaction');
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
     await c.query('commit');
-    await refused(racing, 'convention_card_already_active');
-  } finally { await second.end(); }
+    await racing;
+    await second.query('rollback');
+    await refused(adopt(joe, { section_id: twin.section_id, base_version: 1 }, 'carr_authority_joe'),
+      'convention_card_already_active');
+  } finally { await c.query('rollback'); await second.end(); }
   assert.equal((await c.query(`select count(*) from rule where status='active' and card->>'id'='K03'`)).rows[0].count, '1');
 });
 

@@ -46,6 +46,7 @@ no third-party imports, so no venv is needed to run it.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -62,6 +63,9 @@ import post_call
 import speaker_split
 
 # --- constants ---------------------------------------------------------
+
+STATUS_FILE = ".transcription-status.json"
+MAX_ATTEMPTS = 3
 
 AFCONVERT_BIN = "/usr/bin/afconvert"
 WHISPER_CLI_BIN = "/opt/homebrew/bin/whisper-cli"
@@ -120,6 +124,7 @@ class TranscriptJson(TypedDict):
     speaker_labels: dict[str, str]
     speaker_method: str
     speaker_tracks: dict[str, TrackSpeakers]
+    missing_tracks: list[str]
     segments: list[Segment]
 
 
@@ -316,7 +321,8 @@ def parse_whisper_json(json_path: Path) -> list[RawSegment]:
 
 
 def run_whisper(
-    wav_path: Path, model_path: Path, prompt: str, out_dir: Path, log: LogFunc
+    wav_path: Path, model_path: Path, prompt: str, out_dir: Path, log: LogFunc,
+    *, timeout: int | None = None,
 ) -> list[RawSegment]:
     out_stem = out_dir / wav_path.stem
     cmd = [
@@ -332,7 +338,7 @@ def run_whisper(
         str(wav_path),
     ]
     log(f"WHISPER {wav_path.name} model={model_path.name}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     json_path = out_stem.with_suffix(".json")
     if result.returncode != 0 or not json_path.exists():
         raise TranscribeError(
@@ -442,6 +448,7 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
         "speaker_labels": speaker_labels,
         "speaker_method": speaker_method,
         "speaker_tracks": speaker_tracks,
+        "missing_tracks": missing_tracks,
         "segments": merged_segments,
     }
     write_outputs(session_dir, transcript)
@@ -454,7 +461,7 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
     )
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str], *, max_attempts: int | None = None) -> int:
     if len(argv) < 2:
         sys.stderr.write("usage: transcribe_session.py <session_dir>\n")
         return 2
@@ -463,11 +470,33 @@ def main(argv: list[str]) -> int:
     session_dir.mkdir(parents=True, exist_ok=True)
     log = Logger(session_dir / "transcribe.log")
 
-    try:
-        process_session(session_dir, log)
-    except Exception as exc:  # top-level guard: never crash without a trace
-        log(f"ERROR fatal: {type(exc).__name__}: {exc}")
-        return 1
+    with (session_dir / ".transcription.lock").open("a+") as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return 1
+        status_path = session_dir / STATUS_FILE
+        previous = post_call.read_json(status_path) or {}
+        if max_attempts is not None and previous.get("transcription_attempts", 0) >= max_attempts:
+            return 1
+        status = {
+            "state": "transcribing",
+            "transcription_attempts": previous.get("transcription_attempts", 0) + 1,
+            "updated_at": post_call.now(),
+        }
+        post_call.write_private(status_path, status)
+        try:
+            process_session(session_dir, log)
+        except Exception as exc:  # top-level guard: never crash without a trace
+            log(f"ERROR fatal: {type(exc).__name__}: {exc}")
+            if (session_dir / "transcript.json").exists():
+                status_path.unlink(missing_ok=True)
+                return 1
+            status.update({"state": "needs_attention", "updated_at": post_call.now(),
+                           "reason": "Transcription failed. The local recording is saved."})
+            post_call.write_private(status_path, status)
+            return 1
+        status_path.unlink(missing_ok=True)
     return 0
 
 

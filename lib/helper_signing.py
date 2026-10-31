@@ -36,9 +36,19 @@ def certificate_sha1() -> Optional[str]:
     return found.group(1).upper() if found else None
 
 
+def _requirement(identifier: str, sha1: str) -> str:
+    return f'designated => identifier "{identifier}" and certificate leaf = H"{sha1.lower()}"'
+
+
+def has_identity(path: Path, identifier: str, sha1: str) -> bool:
+    """Whether the installed helper carries the same stable designated requirement."""
+    shown = _run('codesign', '-d', '-r-', str(path))
+    return [line for line in shown.splitlines() if line.startswith('designated =>')] == [_requirement(identifier, sha1)]
+
+
 def sign(path: Path, identifier: str, sha1: str) -> None:
     """Sign with an explicit identifier-and-certificate requirement, verify it and print it."""
-    wanted = f'designated => identifier "{identifier}" and certificate leaf = H"{sha1.lower()}"'
+    wanted = _requirement(identifier, sha1)
     _run('codesign', '--force', '-s', sha1, '--identifier', identifier, f'-r={wanted}', str(path))
     _run('codesign', '--verify', '--strict', str(path))
     shown = _run('codesign', '-d', '-r-', str(path)).strip()

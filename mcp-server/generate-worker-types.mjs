@@ -13,6 +13,10 @@ const budgetNamespace = /^[\t ]*AI_NEURON_BUDGET: DurableObjectNamespace<import\
 if ([...declarations.matchAll(budgetNamespace)].length !== 2)
   throw new Error("AI budget namespace declarations changed; review the fetch-only binding.");
 declarations = declarations.replace(budgetNamespace, "AI_NEURON_BUDGET: DurableObjectNamespace;");
+const phoneNamespace = /^[\t ]*PHONE_AUDIO_HANDOFF: DurableObjectNamespace<import\("\.\.\/src\/index"\)\.PhoneAudioHandoff>;/gm;
+if ([...declarations.matchAll(phoneNamespace)].length !== 2)
+  throw new Error("Phone audio namespace declarations changed; review the fetch-only binding.");
+declarations = declarations.replace(phoneNamespace, "PHONE_AUDIO_HANDOFF: DurableObjectNamespace;");
 for (const [site, count] of [
   [/^[\t ]*VERB_REQUEST_BUDGET: DurableObjectNamespace<import\("\.\.\/src\/index"\)\.VerbRequestBudget>;/gm, 2],
   [/^[\t ]*OAUTH_CONSENT_STATE: DurableObjectNamespace<import\("\.\.\/src\/index"\)\.OAuthConsentState>;/gm, 2],

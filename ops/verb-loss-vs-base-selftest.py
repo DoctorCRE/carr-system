@@ -64,6 +64,19 @@ class VerbLossVsBase(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "2")
 
+    def test_base_registry_imports_shared_json(self):
+        shared = self.repo / "lib/example.json"
+        shared.parent.mkdir()
+        shared.write_text('{"name":"alpha"}')
+        self.write('import data from "../../lib/example.json" with { type: "json" };\n'
+                   'export const TOOLS = { [data.name]: {} };\n')
+        self.git("add", "mcp-server", "lib")
+        self.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "shared import")
+        self.base = self.git("rev-parse", "HEAD").strip()
+        result = self.run_guard()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "1")
+
     def test_unreadable_base_fails_closed(self):
         self.write(registry("alpha", "beta"))
         result = subprocess.run(["sh", str(SCRIPT), str(self.repo), "0" * 40],
