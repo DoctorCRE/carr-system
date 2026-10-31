@@ -24,7 +24,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
-import { applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { createCaptureHandler } from '../src/capture.js';
 import { agentActorForToken } from '../src/identity.js';
@@ -111,7 +110,10 @@ before(async () => {
     if (ciDsn) await run('psql', [connection.connectionString, ...restore], { maxBuffer: 4 * 1024 * 1024 });
     else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
   }
-  await applyPendingDealRoomReads(c);
+  const dsn = connection.connectionString
+    || `postgresql://carr_ci@localhost/carr_ci?host=${encodeURIComponent(fixture.root)}`;
+  await run(PYTHON, [path.join(REPO, 'tools/migrate.py'), '--apply', '--yes'],
+    { env: { ...process.env, DATABASE_URL: dsn }, maxBuffer: 4 * 1024 * 1024 });
   pool = new pg.Pool({ ...connection, max: 4 });
   for (const actor of [joe, joeLocal]) actor.id = (await c.query('select id from actor where slug=$1', [actor.slug])).rows[0].id;
 
@@ -271,7 +273,7 @@ test('a recorded weekly call updates every confidently discussed card and leaves
   // own call: whatever it did not apply must be waiting as an approval card.
   for (const [target, kind] of [[bayside, 'phase_move'], [bayside, 'next_step'], [harbor, 'next_step'], [gulf, 'next_step'], [magnolia, 'next_step']]) {
     if (applied(target.id, kind)) continue;
-    assert.ok(SONNET, `${kind} on ${target.id} should have applied: ${JSON.stringify(outcome)}`);
+    assert.ok(SONNET, `${kind} on ${target.id} should have applied: ${JSON.stringify(outcome)}\n${logs()}`);
     assert.ok(outcome.open_cards.some(card => card.deal_id === target.id && card.kind === kind), JSON.stringify(outcome.open_cards));
   }
   assert.ok(outcome.applied.length >= 1, 'the call applied nothing');

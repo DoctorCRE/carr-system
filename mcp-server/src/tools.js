@@ -1,4 +1,5 @@
 // Register MCP tools and their shared write envelope.
+import { practiceOriginationTools } from "./practice-origination.ts";
 import { vendorMeetingTools } from "./vendor-meetings.js";
 import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.ts";
 import { canonicalJson } from "./artifact-trust.js";
@@ -7,6 +8,7 @@ import { invoiceTrackerTools } from "./invoice-tracker.ts";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.ts";
+import { dealExtractionTools } from "./deal-extraction.js";
 import { factReviewTools } from "./fact-review.ts";
 import { factObservationTools } from "./fact-observations.ts";
 import { actionClosureTools } from "./action-closure.ts";
@@ -9079,7 +9081,9 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "work-request-intake": "mcp-server/src/work-request-intake.js",
   "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
   "fact-review": "mcp-server/src/fact-review.ts",
+  "deal-extraction": "mcp-server/src/deal-extraction.js",
   "fact-observations": "mcp-server/src/fact-observations.ts",
+  "practice-origination": "mcp-server/src/practice-origination.ts",
   "partner-room": "mcp-server/src/partner-room.js",
   "agent-profile": "mcp-server/src/agent-profiles.js",
   "client-portal": "mcp-server/src/client-portal.ts",
@@ -10681,6 +10685,7 @@ registerTools(workPortfolioTools({ ToolError }), "work-portfolio");
 registerTools(leaseTermComparisonTools({ ToolError }), "lease-term-comparison");
 registerTools(factObservationTools(), "fact-observations");
 registerTools(factReviewTools(), "fact-review");
+registerTools(dealExtractionTools(), "deal-extraction");
 
 // The partner room (Idea 78): shared AI-to-AI transcript both Macs poll; raw
 // turns, server-derived attribution, human-watchable. See src/partner-room.js.
@@ -10780,5 +10785,7 @@ registerTools(assuranceHealthStoreTools({ withEnvelope, ToolError }), "assurance
 registerTools(ruleContextRuntimeTools({ withEnvelope, ToolError }), "rule-context-runtime");
 
 registerTools(vendorMeetingTools(), "vendor-meetings");
+
+registerTools(practiceOriginationTools({ withEnvelope }), "practice-origination");
 
 Object.freeze(TOOLS);
