@@ -46,6 +46,20 @@ def main():
         shadow.run(["git", "clone", "--quiet", "--shared", ROOT, source], fixture_env(env),
                    "clone snapshot source", log)
         shutil.copyfile(ROOT / "bin/schema-snapshot.sh", source / "bin/schema-snapshot.sh")
+        def apply_pending(database):
+            shadow.run([sys.executable, source / "tools/migrate.py", "--apply", "--yes"],
+                       {**env, "DATABASE_URL": database}, "apply pending migrations", log)
+
+        apply_pending(dsn)
+        baseline = fixture.root / "baseline.sql"
+        run([source / "bin/schema-snapshot.sh", "--from-disposable-local", dsn,
+             "--output-candidate", baseline], "refresh pending-migration baseline")
+        admin = dsn.rsplit("/", 1)[0] + "/postgres"
+        sql(admin, "alter database carr_ci rename to seeded_baseline")
+        run([bindir / "createdb", "-h", "127.0.0.1", "-p", str(port), "-U", "carr_ci", "carr_ci"],
+            "createdb first independent regeneration")
+        run([bindir / "psql", dsn, "-Xq", "-v", "ON_ERROR_STOP=1", "-f", baseline],
+            "restore pending-migration baseline")
         migration = source / "migrations/9999_snapshot_regeneration_probe.sql"
         migration.write_text("create table public.snapshot_regeneration_probe(id integer primary key);\n")
         checksum = hashlib.sha256(migration.read_bytes()).hexdigest()
@@ -66,8 +80,8 @@ def main():
         run([bindir / "createdb", "-h", "127.0.0.1", "-p", str(port), "-U", "carr_ci", "reapplied"],
             "createdb independent regeneration")
         reapplied = dsn.rsplit("/", 1)[0] + "/reapplied"
-        run([bindir / "psql", reapplied, "-Xq", "-v", "ON_ERROR_STOP=1", "-f", ROOT / "db/schema.sql"],
-            "reload committed snapshot")
+        run([bindir / "psql", reapplied, "-Xq", "-v", "ON_ERROR_STOP=1", "-f", baseline],
+            "reload pending-migration baseline")
         apply_probe(reapplied)
         sql(reapplied, "update ops.job_definition set retry_policy=jsonb_set(retry_policy,'{base_seconds}','31') where key='engineering-slice' and version=1")
         applied_time = f"select applied_at from public.schema_migrations where filename='{migration.name}'"
