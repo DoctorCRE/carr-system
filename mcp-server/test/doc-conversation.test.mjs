@@ -113,7 +113,7 @@ test("DOC-ATTRIBUTION-SERVER-SIDE: the schema refuses a caller-named origin", ()
       `${forbidden} is nameable by a caller`);
   }
   assert.deepEqual(Object.keys(schema.properties).sort(),
-    ["body", "conversation_id", "idempotency_key", "msg_id", "role"]);
+    ["answer_blocks", "body", "comps_deals", "conversation_id", "idempotency_key", "msg_id", "role"]);
 });
 
 test("the read shaper refuses anything that is not the definer function's own shape", () => {

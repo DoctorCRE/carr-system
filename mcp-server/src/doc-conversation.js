@@ -34,6 +34,8 @@
 // nothing to record. Its schema has no `required` key at all and exactly three
 // optional fields, none of which names an actor, an offset or a sort.
 
+import { answerBlocksSchema, validateAnswerBlocks, recordedCompsTable } from './answer-blocks.js';
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
@@ -65,6 +67,7 @@ export function docConversationProjection(facts, ToolError) {
       origin_channel: turn.origin_channel,
       origin_actor: turn.origin_actor,
       at: turn.at,
+      ...(turn.answer_blocks?.length ? { answer_blocks: turn.answer_blocks } : {}),
     })),
     latest_sequence: facts.latest_sequence,
     more: facts.more === true,
@@ -122,6 +125,10 @@ export function docConversationTools({ withEnvelope, writeEvent, ToolError }) {
         role: { type: "string", enum: ["human", "assistant", "system"] },
         body: { type: "string" },
         msg_id: { type: "string" },
+        answer_blocks: answerBlocksSchema,
+        comps_deals: { type: "array", minItems: 1, maxItems: 20,
+          items: { type: "string" },
+          description: "Build a sourced proposed-rent table from these recorded deals. Cannot be combined with answer_blocks." },
       }, required: ["idempotency_key", "conversation_id", "role", "body"] },
       handler: async (c, actor, args) =>
         withEnvelope(c, actor, "add-doc-conversation-turn", args, async () => {
@@ -136,12 +143,27 @@ export function docConversationTools({ withEnvelope, writeEvent, ToolError }) {
           if (args.msg_id !== undefined && !UUID.test(String(args.msg_id))) {
             throw new ToolError({ error: "doc_conversation_msg_id_invalid" });
           }
+          let blocks = args.answer_blocks;
+          if (args.comps_deals !== undefined) {
+            if (blocks !== undefined || !Array.isArray(args.comps_deals) || !args.comps_deals.length
+              || args.comps_deals.length > 20 || args.comps_deals.some(id => !UUID.test(id))) {
+              throw new ToolError({ error: 'answer_blocks_invalid' });
+            }
+            blocks = [await recordedCompsTable(c, args.comps_deals)];
+          }
+          if (blocks !== undefined) {
+            if (args.role !== 'assistant') throw new ToolError({ error: 'answer_blocks_invalid' });
+            validateAnswerBlocks(blocks, ToolError);
+          }
           // Minted here when absent, exactly as add-room-turn mints one: the
           // transport identity is the server's to choose.
           const msgId = args.msg_id || crypto.randomUUID();
           const appended = await c.query(
-            "select ops.append_doc_conversation_turn($1::uuid,$2::text,$3::text,$4::uuid,$5::uuid) as appended",
-            [args.conversation_id, args.role, args.body, msgId, args.idempotency_key]);
+            blocks === undefined
+              ? "select ops.append_doc_conversation_turn($1::uuid,$2::text,$3::text,$4::uuid,$5::uuid) as appended"
+              : "select ops.append_doc_conversation_turn($1::uuid,$2::text,$3::text,$4::uuid,$5::uuid,$6::jsonb) as appended",
+            [args.conversation_id, args.role, args.body, msgId, args.idempotency_key,
+              ...(blocks === undefined ? [] : [JSON.stringify(blocks)])]);
           const result = appended.rows[0]?.appended;
           if (!result || result.ok !== true) {
             throw new ToolError({ error: result?.reason_id || "doc_conversation_append_refused",
