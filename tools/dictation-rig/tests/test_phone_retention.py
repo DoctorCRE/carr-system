@@ -17,7 +17,7 @@ class PhoneRetentionTests(unittest.TestCase):
             (home / 'Library/Logs').mkdir(parents=True)
             now = datetime.now(timezone.utc)
             files = ('imported.audio', 'imported.wav', 'imported.m4a', 'imported.mp3', 'imported.mp4',
-                     'imported.webm', 'mic.caf', 'system.caf', 'transcript.json', 'transcript.md')
+                     'imported.webm', 'post-call-held-draft.json', 'mic.caf', 'system.caf', 'transcript.json', 'transcript.md')
             for index, scenario in enumerate(('eligible', 'grace', 'unfiled', 'pending', 'unverified', 'legacy-marker', 'bad-time')):
                 session = home / 'Recordings' / f'phone-10000000-0000-0000-0000-{index:012d}'
                 session.mkdir(parents=True)
