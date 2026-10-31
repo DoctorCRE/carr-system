@@ -9,7 +9,9 @@ import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { publicError } from '../src/public-errors.ts';
 import { queueCardId } from '../src/work-queue.js';
-import { executeRegisteredTool } from '../src/tools.js';
+import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.current.generated.js';
+import { mcpInventory, assertCurrentContracts } from '../../ops/scac-mutation-inventory.mjs';
+import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 
 let fixture, admin, database, c, actor, connection;
 before(async () => {
@@ -53,6 +55,10 @@ before(async () => {
     await c.query(readFileSync(new URL('../../migrations/1061_work_request_job_type.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select 1 from schema_migrations where filename='1060_work_request_slice_outcome.sql'")).rows.length)
     await c.query(readFileSync(new URL('../../migrations/1060_work_request_slice_outcome.sql', import.meta.url), 'utf8'));
+  if (!(await c.query("select 1 from schema_migrations where filename='1062_work_request_job_version.sql'")).rows.length)
+    await c.query(readFileSync(new URL('../../migrations/1062_work_request_job_version.sql', import.meta.url), 'utf8'));
+  if (!(await c.query("select 1 from schema_migrations where filename='1063_validate_work_request_job_version.sql'")).rows.length)
+    await c.query(readFileSync(new URL('../../migrations/1063_validate_work_request_job_version.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => {
@@ -79,9 +85,15 @@ async function request(ref = 'WR-000014') {
     values ($1,'Synthetic queue work','joe','joe','carr-internal','carr-ai-engineering-suite-v1',$2) on conflict(ref) do nothing`, [ref, Number(ref.slice(3))]);
   return ref;
 }
+let titleNumber = 0;
 const job = (work_request, extra = {}) => ({ idempotency_key: randomUUID(), work_request,
-  job_type: 'bug-fix', executor: 'codex', model: 'synthetic-model', effort: 'high', card_title: 'Queue work',
-  description: 'Implement the synthetic queue behavior.', ...extra });
+  job_type: 'bug-fix', executor: 'codex', model: 'synthetic-model', effort: 'high', card_title: `Build work ${String.fromCharCode(97 + Math.floor(titleNumber / 26))}${String.fromCharCode(97 + titleNumber++ % 26)}`,
+  description: 'Build the synthetic queue behavior.', ...extra });
+
+test('job version constraint is valid after migrations', async () => {
+  const { rows } = await c.query("select convalidated from pg_constraint where conrelid='ops.work_request_job'::regclass and conname='work_request_job_version_positive'");
+  assert.deepEqual(rows, [{ convalidated: true }]);
+});
 
 test('dispatch mints a stable ID under implicit S1 and retries without another job', async () => {
   const work_request = await request();
@@ -91,7 +103,7 @@ test('dispatch mints a stable ID under implicit S1 and retries without another j
   assert.equal((await command('dispatch-job', args)).card_id, first.card_id);
   const queue = await command('work-queue', {});
   assert.deepEqual(queue.jobs.map(row => row.card_id), ['WR14.S1.J1']);
-  assert.equal(queue.jobs[0].card_title, 'Queue work');
+  assert.equal(queue.jobs[0].card_title, 'Build work aa');
   assert.equal(queue.jobs[0].work_request_title, 'Synthetic queue work');
   assert.deepEqual([queue.jobs[0].stage, queue.jobs[0].stale, queue.jobs[0].prs], ['queued', false, []]);
   assert.deepEqual(queue.github.map(source => source.reason), ['no_github_reader', 'no_github_reader', 'no_github_reader']);
@@ -128,6 +140,7 @@ test('refusals preserve the queue and name the rejected operation', async () => 
     ['plan-work-request-slices', { ...plan, slices: null }, 'invalid_slice_plan'],
     ['dispatch-job', job('WR-000014', { card_title: 'Too many card words' }), 'invalid_card_title'],
     ['dispatch-job', job('WR-000014', { description: 'First sentence. Second sentence.' }), 'invalid_job_description'],
+    ['dispatch-job', job('WR-000014', { description: 'Build cards\nwith tests.' }), 'invalid_job_description'],
     ['prioritize-job', { ...plan, job: 99, position: 1 }, 'job_not_found'],
     ['prioritize-job', { ...plan, job: 1, position: 99 }, 'priority_out_of_range'],
   ]) await assert.rejects(command(name, { ...args, idempotency_key: randomUUID() }), failure => { assert.equal(failure.message, error); assert.equal(publicError(failure).error, error); return true; });
@@ -158,15 +171,15 @@ test('a runner adopts an unbound repository and records its start once without m
   const work_request = await request('WR-000017');
   const repository = 'DoctorCRE/carr-system';
   await command('dispatch-job', job(work_request));
-  const start = { work_request, slice: 1, job: 1, repository, runner_job_id: 'codex-job-synthetic', idempotency_key: randomUUID() };
+  const start = { work_request, slice: 1, job: 1, repository, runner_job_id: 't3-synthetic', idempotency_key: randomUUID() };
   const first = await command('dispatch-job', start);
   assert.equal(first.card_id, 'WR17.S1.J1');
-  assert.equal(first.runner_job_id, 'codex-job-synthetic');
+  assert.equal(first.runner_job_id, 't3-synthetic');
   assert.deepEqual(await command('dispatch-job', start), { ...first, replayed: true });
   const queued = (await command('work-queue')).jobs.filter(row => row.work_request === work_request);
   assert.equal(queued.length, 1);
   assert.equal(queued[0].repository, repository);
-  assert.equal(queued[0].runner_job_id, 'codex-job-synthetic');
+  assert.equal(queued[0].runner_job_id, 't3-synthetic');
   assert.ok(queued[0].started_at);
   await assert.rejects(command('dispatch-job', { ...start, runner_job_id: 'another-runner', idempotency_key: randomUUID() }),
     failure => { assert.equal(failure.message, 'job_already_started'); assert.equal(publicError(failure).error, 'job_already_started'); return true; });
@@ -264,37 +277,32 @@ test('the Worker and board share exact IDs without numeric precision loss', asyn
 test('queue grants preserve the current catalog seal and reject wider grants', async () => {
   const current = async () => (await c.query('select ops.scac_mutation_catalog_v118_current() as current')).rows[0].current;
   assert.equal(await current(), true);
+  const installed = (await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract;
+  const jobGrants = contract => contract.relation_dml.filter(row => row.relation === 'ops.work_request_job');
+  assert.deepEqual(jobGrants(installed), jobGrants(SCAC_MUTATION_CURRENT_DB_GRANTS));
+  assert.equal(assertCurrentContracts(TOOLS), true);
+  const census = mcpInventory(TOOLS).filter(row => row.operation === 'retitle-job');
+  assert.equal(census.length, 1);
+  assert.equal(census[0].write, true);
   await c.query('begin');
   try { await c.query('grant delete on ops.work_request_job to carr_writer'); assert.equal(await current(), false); }
   finally { await c.query('rollback'); }
   assert.equal(await current(), true);
 });
 
-test('the read saves a finish once on the side connection, and later reads keep it after the PR leaves the window', async () => {
+test('queue reads never persist observed completion', async () => {
   const work_request = await request('WR-000061');
-  const done = (await command('dispatch-job', job(work_request, { executor: 'claude' }))).card_id;
-  await c.query("update ops.work_request_job set created_at=now()-interval '20 days' where work_request_id=(select id from ops.work_request where ref=$1)", [work_request]);
-  const pending = (await command('dispatch-job', job(work_request))).card_id;
-  await c.query("update ops.work_request_job set runner_job_id='pending-runner', started_at=now() where work_request_id=(select id from ops.work_request where ref=$1) and j_number=2", [work_request]);
-  const bounds = [], writes = [];
-  const merged = { repo: 'DoctorCRE/carr-system', number: 77, url: 'u77', title: 'PR 77', draft: false, state: 'merged', updated_at: '2026-10-27T12:00:00Z', cards: [done] };
-  const reader = sources => ({ query: (text, params) => c.query(text, params),
-    pullRequests: async (repos, since) => { bounds.push(since); return repos.map(repo => ({ repo, state: 'ok', prs: repo === merged.repo ? sources : [] })); },
-    sideWrite: (text, params) => { writes.push(params[2]); return c.query(text, params); } });
-  const first = await command('work-queue', {}, reader([merged]));
-  assert.equal(first.jobs.find(row => row.card_id === done).stage, 'merged');
-  assert.equal(writes.length, 1, 'one single-row write for the newly finished job');
-  await command('work-queue', {}, reader([merged]));
-  const later = await command('work-queue', {}, reader([]));
-  assert.equal(writes.length, 1, 'a saved finish is never written again');
-  const saved = later.jobs.find(row => row.card_id === done);
-  assert.deepEqual([saved.stage, saved.stale, saved.prs.map(pr => pr.card_id)], ['merged', false, [`${done}.carr#77`]]);
-  const open = later.jobs.find(row => row.card_id === pending);
-  assert.equal(open.stage, 'queued');
-  assert.equal(bounds[0], new Date(first.jobs.find(row => row.card_id === done).created_at).toISOString(), 'before the finish is saved, the old job bounds the window');
-  const unfinished = later.jobs.filter(row => row.card_id !== done && !row.finished && row.started_at).map(row => new Date(row.started_at).toISOString()).sort();
-  assert.equal(bounds.at(-1), unfinished[0], 'once saved, the window starts at the oldest unfinished job');
-  assert.ok(bounds.at(-1) > bounds[0] && bounds.at(-1) <= new Date(open.started_at).toISOString());
+  const card = (await command('dispatch-job', job(work_request, { executor: 'claude' }))).card_id;
+  const queries = [];
+  const merged = { repo: 'DoctorCRE/carr-system', number: 77, url: 'u77', title: 'PR 77', draft: false, state: 'merged', updated_at: '2026-10-27T12:00:00Z', cards: [card] };
+  const reader = { query: (text, params) => { queries.push(text); return c.query(text, params); },
+    pullRequests: async repos => repos.map(repo => ({ repo, state: 'ok', prs: repo === merged.repo ? [merged] : [] })),
+    sideWrite: () => { throw new Error('queue read attempted a write'); } };
+  const result = await command('work-queue', {}, reader);
+  assert.equal(result.jobs.find(row => row.card_id === card).stage, 'merged');
+  assert.ok(queries.every(sql => !/\b(insert|update|delete)\b/i.test(sql)));
+  const stored = (await c.query('select finished from ops.work_request_job where work_request_id=(select id from ops.work_request where ref=$1)', [work_request])).rows[0];
+  assert.equal(stored.finished, null);
 });
 
 test('launcher registers an exact card and start atomically, with registered slices only', async () => {
@@ -315,13 +323,26 @@ test('launcher registers an exact card and start atomically, with registered sli
 test('launcher starts a queued card with actual execution settings and preserves its copy', async () => {
   const work_request = await request('WR-000026');
   const repository = 'DoctorCRE/carr-system';
-  await command('dispatch-job', job(work_request, { repository }));
+  const minted = job(work_request, { repository, card_title: 'Build queued cards' });
+  await command('dispatch-job', minted);
   await command('dispatch-job', job(work_request, { repository, job: 1, runner_job_id: 'queued-launcher',
-    model: 'selected-model', effort: 'medium', card_title: 'Codex job' }));
+    model: 'selected-model', effort: 'medium', card_title: 'Review queued cards' }));
   const row = (await command('work-queue')).jobs.find(row => row.work_request === work_request);
   assert.equal(row.model, 'selected-model');
   assert.equal(row.effort, 'medium');
-  assert.equal(row.card_title, 'Queue work');
+  assert.equal(row.card_title, minted.card_title);
+});
+
+test('launcher starts an existing legacy card with its stored copy', async () => {
+  const work_request = await request('WR-000096');
+  const repository = 'DoctorCRE/carr-system';
+  await command('dispatch-job', job(work_request, { repository }));
+  await c.query(`update ops.work_request_job set card_title='Codex job', description='Execute the supplied job brief.'
+    where work_request_id=(select id from ops.work_request where ref=$1)`, [work_request]);
+  const queued = (await command('work-queue')).jobs.find(row => row.work_request === work_request);
+  await command('dispatch-job', job(work_request, { repository, job: 1, runner_job_id: 'legacy-runner',
+    card_title: queued.card_title, description: queued.description }));
+  assert.equal((await command('work-queue')).jobs.find(row => row.work_request === work_request).runner_job_id, 'legacy-runner');
 });
 
 
@@ -467,4 +488,148 @@ test('concurrent outcome writers with the same slice version cannot replace the 
     const winner = results.find(result => result.status === 'fulfilled').value;
     assert.equal((await command('work-request-card', { work_request })).slices[0].reason, winner.reason);
   } finally { await Promise.all(clients.map(client => client.end())); }
+});
+
+test('dispatch refusals provide usable copy suggestions and vocabulary', async () => {
+  const work_request = await request('WR-000097');
+  await command('dispatch-job', job(work_request, { card_title: 'Build readable cards' }));
+  for (const card_title of ['Bad 123 title', 'Queue cards', 'Build readable cards']) {
+    let suggestion;
+    await assert.rejects(command('dispatch-job', job(work_request, { card_title })), failure => {
+      const result = publicError(failure);
+      assert.match(result.suggested_card_title, /^(Add|Build|Fix|Remove|Rename|Review|Audit|Plan|Revise|Migrate|Move|Record|Require|Gate|Adopt|Rebind|Repin|Close|Install|Retire) [A-Za-z']+( [A-Za-z']+)?$/);
+      suggestion = result.suggested_card_title;
+      return true;
+    });
+    await command('dispatch-job', job(work_request, { card_title: suggestion }));
+  }
+  await assert.rejects(command('dispatch-job', job(work_request, { card_title: 'x'.repeat(81) })), failure => {
+    assert.equal(failure.message, 'invalid_work_queue_fields');
+    assert.ok(publicError(failure).suggested_card_title);
+    return true;
+  });
+  await assert.rejects(command('dispatch-job', job(work_request, { description: 'Implement useful cards. Another sentence.' })), failure => {
+    const result = publicError(failure);
+    assert.match(result.suggested_description, /^Build .+[.]$/);
+    return true;
+  });
+  await assert.rejects(command('dispatch-job', job(work_request, { job_type: 'unknown' })), failure => {
+    const result = publicError(failure, { inputSchema: TOOLS['dispatch-job'].inputSchema });
+    assert.ok(result.allowed_values.includes('bug-fix'));
+    return true;
+  });
+});
+
+test('mint refuses a title whose first word is outside the imperative vocabulary', async () => {
+  const work_request = await request('WR-000091');
+  await assert.rejects(command('dispatch-job', job(work_request, { card_title: 'Queue work' })), failure => {
+    assert.equal(failure.message, 'card_title_verb');
+    assert.match(publicError(failure).hint, /job-card-verbs[.]v1[.]json/);
+    return true;
+  });
+});
+
+test('titles are unique across slices of one Work Request and reusable in another', async () => {
+  const work_request = await request('WR-000092');
+  const other = await request('WR-000093');
+  await command('dispatch-job', job(work_request, { card_title: 'Build readable cards', description: 'Build readable cards.' }));
+  await command('plan-work-request-slices', { work_request, slices: ['Synthetic queue work', 'Other slice'], idempotency_key: randomUUID() });
+  for (const card_title of ['Build readable cards', 'Build Readable Cards'])
+    await assert.rejects(command('dispatch-job', job(work_request, { slice: 2, card_title, description: 'Build readable cards.' })), { message: 'card_title_duplicate' });
+  await command('dispatch-job', job(other, { card_title: 'Build readable cards', description: 'Build readable cards.' }));
+});
+
+test('retitle changes only labels, replays safely, and enforces mint refusals', async () => {
+  const work_request = await request('WR-000094');
+  const minted = await command('dispatch-job', job(work_request, { card_title: 'Build rename proof', description: 'Build a rename proof.' }));
+  const sibling = await command('dispatch-job', job(work_request, { card_title: 'Review rename proof', description: 'Review the rename proof.' }));
+  const read = async () => (await command('work-queue')).jobs.filter(row => row.work_request === work_request);
+  const before = await read();
+  const stored = async () => (await c.query('select j.* from ops.work_request_job j join ops.work_request w on w.id=j.work_request_id where w.ref=$1 order by j.j_number', [work_request])).rows;
+  const storedBefore = await stored();
+  const args = { base_version: 1, card_id: minted.card_id, card_title: 'Require readable titles', description: 'Require readable titles for every card.', idempotency_key: randomUUID() };
+  const result = await command('retitle-job', args);
+  assert.equal(result.card_id, minted.card_id);
+  assert.deepEqual(await command('retitle-job', args), { ...result, replayed: true });
+  const after = await read();
+  assert.deepEqual(await stored(), storedBefore.map(row => row.j_number === 1
+    ? { ...row, card_title: args.card_title, description: args.description, version: row.version + 1 } : row));
+  assert.deepEqual(after, before.map(row => row.card_id === minted.card_id
+    ? { ...row, card_title: args.card_title, description: args.description, version: row.version + 1 } : row));
+  for (const [changes, error] of [
+    [{ card_title: 'Queue work' }, 'card_title_verb'],
+    [{ card_title: 'Review rename proof' }, 'card_title_duplicate'],
+    [{ card_title: 'Require far too many words' }, 'invalid_card_title'],
+    [{ description: 'Build one. Review two.' }, 'invalid_job_description'],
+    [{ description: 'Build cards\nwith tests.' }, 'invalid_job_description'],
+    [{ description: 'Implement the change.' }, 'invalid_job_description'],
+    [{ card_id: 'WR94.S1.J999' }, 'job_not_found'],
+  ]) await assert.rejects(command('retitle-job', { ...args, base_version: 2, ...changes, idempotency_key: randomUUID() }), { message: error });
+  assert.deepEqual(await read(), after);
+  await command('retitle-job', { card_id: minted.card_id, card_title: args.card_title, base_version: 2, idempotency_key: randomUUID() });
+  assert.equal((await read()).find(row => row.card_id === minted.card_id).version, 3);
+  assert.equal(after.find(row => row.card_id === sibling.card_id).card_title, 'Review rename proof');
+});
+
+test('retitles reject a stale job version', async () => {
+  const work_request = await request('WR-000097');
+  const { card_id } = await command('dispatch-job', job(work_request));
+  const base_version = (await command('work-queue')).jobs.find(row => row.card_id === card_id).version;
+  const rename = card_title => command('retitle-job', { card_id, card_title, base_version, idempotency_key: randomUUID() });
+  await rename('Fix first title');
+  await assert.rejects(rename('Fix stale title'), error => {
+    assert.equal(error.message, 'version_conflict');
+    assert.equal(error.payload.current_version, base_version + 1);
+    return true;
+  });
+});
+
+test('concurrent retitles from one version preserve the winner', async () => {
+  const work_request = await request('WR-000099');
+  const { card_id } = await command('dispatch-job', job(work_request));
+  const base_version = (await command('work-queue')).jobs.find(row => row.card_id === card_id).version;
+  const clients = await Promise.all(Array.from({ length: 2 }, async () => { const client = new pg.Client(connection); await client.connect(); return client; }));
+  try {
+    const results = await Promise.allSettled(clients.map((client, i) => command('retitle-job',
+      { card_id, card_title: i ? 'Fix second title' : 'Fix first title', base_version, idempotency_key: randomUUID() }, client)));
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+    const rejected = results.find(result => result.status === 'rejected').reason;
+    assert.equal(rejected.message, 'version_conflict');
+    assert.equal(rejected.payload.current_version, base_version + 1);
+    assert.equal((await command('work-queue')).jobs.find(row => row.card_id === card_id).card_title,
+      results.find(result => result.status === 'fulfilled').value.card_title);
+  } finally { await Promise.all(clients.map(client => client.end())); }
+});
+
+test('retitle requires replacement for an invalid stored description', async () => {
+  const work_request = await request('WR-000098');
+  const { card_id } = await command('dispatch-job', job(work_request));
+  await c.query(`update ops.work_request_job set description='Execute the supplied job brief.'
+    where work_request_id=(select id from ops.work_request where ref=$1)`, [work_request]);
+  await assert.rejects(command('retitle-job', { card_id, card_title: 'Fix legacy description', base_version: 1, idempotency_key: randomUUID() }), error => {
+    assert.equal(error.message, 'invalid_job_description');
+    assert.match(publicError(error).hint, /new description/i);
+    return true;
+  });
+});
+
+test('concurrent duplicate mints admit one card and descriptions use the same vocabulary', async () => {
+  const work_request = await request('WR-000095');
+  await assert.rejects(command('dispatch-job', job(work_request, { card_title: 'Build concurrent proof', description: 'Implement concurrent proof.' })), { message: 'invalid_job_description' });
+  const clients = await Promise.all(Array.from({ length: 2 }, async () => { const client = new pg.Client(connection); await client.connect(); return client; }));
+  try {
+    const results = await Promise.allSettled(clients.map(client => command('dispatch-job', job(work_request, { card_title: 'Build concurrent proof', description: 'Build concurrent proof.' }), client)));
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+    assert.equal(results.find(result => result.status === 'rejected').reason.message, 'card_title_duplicate');
+    assert.equal((await command('work-queue')).jobs.filter(row => row.work_request === work_request).length, 1);
+  } finally { await Promise.all(clients.map(client => client.end())); }
+});
+
+test('launcher description fixtures are accepted at mint', async () => {
+  const descriptions = JSON.parse(readFileSync(new URL('../../tools/fixtures/job-descriptions.json', import.meta.url), 'utf8'));
+  const work_request = await request('WR-000101');
+  for (const description of descriptions) {
+    const result = await command('dispatch-job', job(work_request, { description }));
+    assert.ok(result.card_id);
+  }
 });

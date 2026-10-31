@@ -30,7 +30,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from lib.fence import DATA_SENTENCE  # noqa: E402
-from lib.record_call import call_command  # noqa: E402
+from lib.record_call import call_command, call_verb  # noqa: E402
 
 SCHEMA_VERSION = 1
 CONTEXT_FILE = "call-context.json"
@@ -68,11 +68,11 @@ def distiller_json_schema() -> dict[str, Any]:
                 "open_questions": string_array,
             }, ["summary", "decisions", "open_questions"]),
             "joe_tasks": {"type": "array", "items": item({
-                **common, "title": {"type": "string"},
+                **common, "counterpart": {"type": "string", "minLength": 1, "maxLength": 200}, "title": {"type": "string"},
                 "due_on": {"type": ["string", "null"], "format": "date"},
             }, ["title", "deal_id", "participant_ids", "evidence", "due_on"])},
             "dell_tasks": {"type": "array", "items": item({
-                **common, "title": {"type": "string"},
+                **common, "counterpart": {"type": "string", "minLength": 1, "maxLength": 200}, "title": {"type": "string"},
                 "due_on": {"type": ["string", "null"], "format": "date"},
             }, ["title", "deal_id", "participant_ids", "evidence", "due_on"])},
             "deal_updates": {"type": "array", "items": item({
@@ -89,7 +89,7 @@ def distiller_json_schema() -> dict[str, Any]:
                 }, ["text", "next_date", "needs_review"])]},
             }, ["deal_id", "summary", "participant_ids", "evidence", "next_step", "phase_move"])},
             "draft_proposals": {"type": "array", "items": item({
-                **common, "recipient_party_id": {"type": "string"},
+                **common, "counterpart": {"type": "string", "minLength": 1, "maxLength": 200}, "recipient_party_id": {"type": "string"},
                 "subject": {"type": "string"}, "body": {"type": "string"},
             }, ["recipient_party_id", "deal_id", "subject", "body", "participant_ids", "evidence"])},
             "review_questions": string_array,
@@ -143,13 +143,17 @@ def validate_context(value: Any, session: str) -> dict[str, Any]:
     """Validate Deal Room's exact index; IDs are opaque and never fuzzy-matched."""
     if not isinstance(value, dict):
         raise ContractError("call context must be an object")
-    _strict_keys(value, {"session", "workspace_kind", "generated_at", "deals"}, {"account_client_id"})
+    _strict_keys(value, {"session", "workspace_kind", "generated_at", "deals"}, {"account_client_id", "skipped_deals"})
     if _string(value["session"], "session") != session:
         raise ContractError("context session must equal the local session")
     for field in ("workspace_kind", "generated_at"):
         _string(value[field], field)
     if "account_client_id" in value:
         _string(value["account_client_id"], "account_client_id")
+    skipped = value.get("skipped_deals", [])
+    if not isinstance(skipped, list) or any(not isinstance(row, dict) or set(row) != {"id", "reason"}
+            or not all(isinstance(row[key], str) and row[key] for key in ("id", "reason")) for row in skipped):
+        raise ContractError("skipped_deals must name exact IDs and reasons")
     deals = value["deals"]
     if not isinstance(deals, list):
         raise ContractError("deals must be an array")
@@ -191,11 +195,11 @@ def shape_record_layer_context(value: Any) -> Any:
     returns ``email: null`` for a party with no address on file.  Any one of
     those failed ``validate_context`` and nothing was stored.
 
-    Only those three shapes are repaired, and nothing is inferred: a null text
+    Those text shapes are repaired without inference: a null text
     value becomes "", a participant without an exact party_id and ref is not a
     counterparty the distiller may address and is dropped, and one party named
     twice on a deal (two roles) is kept once with both roles.  IDs are never
-    matched by name, deals are never added or removed, and every other field
+    matched by name. Terminal deals are skipped with a reason; every other field
     still goes through the strict validation that follows.
     """
     if not isinstance(value, dict) or not isinstance(value.get("deals"), list):
@@ -207,6 +211,11 @@ def shape_record_layer_context(value: Any) -> Any:
             deals.append(deal)
             continue
         deal = dict(deal)
+        if deal.get("operating_state") in {"closed", "lost", "invoiced"}:
+            if "skipped_deals" not in shaped or shaped["skipped_deals"] is value.get("skipped_deals"):
+                shaped["skipped_deals"] = list(value.get("skipped_deals", []))
+            shaped["skipped_deals"].append({"id": deal["id"], "reason": f"Deal is {deal['operating_state']}."})
+            continue
         for field in ("name", "owner", "operating_state"):
             if field in deal and deal[field] is None:
                 deal[field] = ""
@@ -447,7 +456,11 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
             if not isinstance(item, dict):
                 raise ContractError(f"{list_name} item must be an object")
             is_action = list_name in {"joe_tasks", "dell_tasks"}
-            _strict_keys(item, required, {"due_on"} if is_action else {"next_step", "phase_move"} if list_name == "deal_updates" else set())
+            _strict_keys(item, required, {"due_on", "counterpart"} if is_action else {"next_step", "phase_move"} if list_name == "deal_updates" else {"counterpart"})
+            if "counterpart" in item:
+                name = _string(item["counterpart"], f"{list_name}.counterpart")
+                if len(name) > 200:
+                    raise ContractError(f"{list_name}.counterpart exceeds 200 characters")
             if is_action:
                 _calendar_date_or_none(item.setdefault("due_on", None), f"{list_name}.due_on")
             step = item.get("next_step") if list_name == "deal_updates" else None
@@ -492,6 +505,17 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
                         value["review_questions"].append(
                             f"{list_name} item {number} ({subject}): {resolved.review_reason}"
                         )
+            if is_action:
+                item["due_defaulted"] = item["due_on"] is None
+                if item["due_defaulted"]:
+                    anchor = date.fromisoformat(call_date) if call_date else datetime.fromisoformat(now().replace("Z", "+00:00")).astimezone(ZoneInfo(CALL_TIME_ZONE)).date()
+                    due = anchor + timedelta(days=1)
+                    while due.weekday() >= 5:
+                        due += timedelta(days=1)
+                    item["due_on"] = due.isoformat()
+                    value["review_questions"].append(
+                        f"{list_name} item {number}: Due date defaulted to {item['due_on']} (next business day)."
+                    )
             if _word_count(item["evidence"]) > 15:
                 # Retain the quoted timing inside the remote 15-word ceiling.
                 # Other evidence keeps its original leading words.
@@ -520,6 +544,17 @@ def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
     deal_ids = {deal["id"] for deal in context["deals"]}
     parties_by_deal = {deal["id"]: {party["party_id"]: party for party in deal["participants"]} for deal in context["deals"]}
     review = [{"id": _review_id(session, "model", n), "question": q, "resolved": False} for n, q in enumerate(raw["review_questions"], 1)]
+    review.extend({"id": _review_id(session, "skipped_deal", n),
+                   "question": f"Skipped deal {row['id']}: {row['reason']}", "resolved": False}
+                  for n, row in enumerate(context.get("skipped_deals", []), 1))
+    missing_tracks = (transcript or {}).get("missing_tracks", [])
+    labels = (transcript or {}).get("speaker_labels", {})
+    for number, track in enumerate(missing_tracks, 1):
+        review.append({
+            "id": _review_id(session, "missing_track", number), "resolved": False,
+            "question": f"Audio side {track} ({labels.get(track, track)}) is missing or failed. "
+                        "Recover the audio or confirm you knowingly file this partial call.",
+        })
 
     def clean(items: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
         good: list[dict[str, Any]] = []
@@ -551,7 +586,7 @@ def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
         "schema_version": SCHEMA_VERSION, "session": session, "generated_at": now(), "report": report,
         "joe_tasks": clean(raw["joe_tasks"], "joe_task"), "dell_tasks": clean(raw["dell_tasks"], "dell_task"),
         "deal_updates": clean(raw["deal_updates"], "deal_update"), "draft_proposals": clean(raw["draft_proposals"], "draft_proposal"),
-        "review_questions": review,
+        "review_questions": review, "missing_tracks": missing_tracks,
     }
     for index, draft in enumerate(result["draft_proposals"], 1):
         recipient = parties_by_deal[draft["deal_id"]].get(draft["recipient_party_id"])
@@ -597,6 +632,8 @@ def _distiller_instruction() -> str:
     return (
         "You distill a Joe-and-Dell weekly commercial-real-estate call. " + DATA_SENTENCE + " "
         "Use only exact deal_id and party_id values present in CONTEXT; never copy display names into ID fields. "
+        "For each task or draft, include counterpart only when the person outside the partnership it concerns is clear; "
+        "use their name exactly as said on the call, and never guess. "
         "Extract each distinct action once, with exactly one accountable owner in joe_tasks or dell_tasks. "
         "Assign it to the partner who explicitly commits to doing it, even if the other partner owns the deal. "
         "A shared 'we' commitment or repeated discussion of the same action is one task, never one per partner. "
@@ -686,10 +723,17 @@ def default_distiller(request: dict[str, Any]) -> dict[str, Any]:
 
 
 def call_record_command(verb: str, args: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
-    """Use the partner's existing local identity; rehearsals inject an offline route."""
+    """Use the partner's existing local identity; rehearsals inject an offline route.
+
+    The live route is `run.sh call`, whose reply is indented JSON with no `ok`
+    key, so it goes through call_verb; only the rehearsal route speaks the
+    one-line `ok: true` contract that call_command reads.
+    """
     command = os.environ.get("CARR_POST_CALL_VERB_COMMAND")
-    argv = shlex.split(command) if command else [sys.executable, str(Path(__file__).resolve().parents[3] / "tools" / "call-verb.py")]
-    return call_command(argv, verb, args, timeout=60)
+    if command:
+        return call_command(shlex.split(command), verb, args, timeout=60)
+    result = call_verb(verb, args, timeout=60)
+    return result.ok, result.reply if isinstance(result.reply, dict) else {}
 
 
 def fetch_context(session_dir: Path) -> dict[str, Any]:
@@ -699,17 +743,33 @@ def fetch_context(session_dir: Path) -> dict[str, Any]:
     if any(not isinstance(deal, dict) or not isinstance(deal.get("id"), str) or not deal["id"]
            for deal in board["deals"]):
         raise ContractError("deal-room-board returned invalid call context deal IDs")
-    ids = [deal["id"] for deal in board["deals"]
-           if deal.get("operating_state") == "active" and deal.get("outcome") is None
-           and not deal.get("closed_on") and not deal.get("invoiced_on")
-           and deal.get("phase") not in {"closed", "invoiced"}]
+    ids: list[str] = []
+    skipped: list[dict[str, str]] = []
+    for deal in board["deals"]:
+        if (deal.get("operating_state") != "active" or deal.get("outcome") is not None
+                or deal.get("closed_on") or deal.get("invoiced_on")
+                or deal.get("phase") in {"closed", "invoiced", "lost"}):
+            skipped.append({"id": deal["id"], "reason": "Deal is closed, lost, invoiced, or inactive."})
+        else:
+            ids.append(deal["id"])
     deals: list[dict[str, Any]] = []
     for start in range(0, len(ids), 50):
-        ok, reply = call_record_command("get-call-context", {"deal_ids": ids[start:start + 50]})
-        if not ok or not isinstance(reply.get("deals"), list):
-            raise ContractError("get-call-context unavailable while fetching call context")
-        deals.extend(reply["deals"])
-    return {"session": session_dir.name, "workspace_kind": "all", "generated_at": now(), "deals": deals}
+        pending = ids[start:start + 50]
+        while pending:
+            ok, reply = call_record_command("get-call-context", {"deal_ids": pending})
+            invalid = reply.get("invalid_deal_ids")
+            if (not ok and reply.get("error") == "invalid_call_context_deals"
+                    and isinstance(invalid, list) and invalid and set(invalid) <= set(pending)):
+                skipped.extend({"id": deal_id, "reason": "Deal became unavailable for active call context (closed, lost, parked, or removed)."}
+                               for deal_id in invalid)
+                pending = [deal_id for deal_id in pending if deal_id not in invalid]
+                continue
+            if not ok or not isinstance(reply.get("deals"), list):
+                raise ContractError("get-call-context unavailable while fetching call context")
+            deals.extend(reply["deals"])
+            break
+    return {"session": session_dir.name, "workspace_kind": "all", "generated_at": now(), "deals": deals,
+            **({"skipped_deals": skipped} if skipped else {})}
 
 
 def run_session(session_dir: Path, *, publish: bool = True) -> dict[str, Any]:
@@ -782,22 +842,38 @@ def hold_transcript_repeat(session_dir: Path, report: dict[str, Any]) -> dict[st
 
 
 @contextlib.contextmanager
-def session_lock(session_dir: Path):
+def session_lock(session_dir: Path, *, blocking: bool = True):
     lock_path = session_dir / LOCK_FILE
     lock_path.touch(exist_ok=True)
     lock_path.chmod(0o600)
     with lock_path.open("a+") as lock:
         try:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
         except BlockingIOError as exc:
             raise RuntimeError("post-call distillation already active for this session") from exc
         yield
 
 
+@contextlib.contextmanager
+def update_report(session_dir: Path, *, initial: dict[str, Any] | None = None,
+                  locked: bool = False, required: bool = True):
+    """Read and edit the latest report under the extraction/session lock."""
+    with contextlib.nullcontext() if locked else session_lock(session_dir):
+        report = read_json(session_dir / REPORT_FILE)
+        before = json.dumps(report, sort_keys=True)
+        if report is None:
+            report = initial
+        if report is None and required:
+            raise ContractError("post-call report is not ready")
+        yield report
+        if report is not None and json.dumps(report, sort_keys=True) != before:
+            write_private(session_dir / REPORT_FILE, report)
+
+
 def process_session(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]] = default_distiller, *,
-                    max_attempts: int = 3) -> dict[str, Any]:
-    with session_lock(session_dir):
-        return _process_session_locked(session_dir, distiller, max_attempts=min(max_attempts, len(EXTRACTION_RETRY_DELAYS) + 1))
+                    run_checks: bool = True, max_attempts: int = 3) -> dict[str, Any]:
+    with session_lock(session_dir, blocking=False):
+        return _process_session_locked(session_dir, distiller, run_checks=run_checks, max_attempts=min(max_attempts, len(EXTRACTION_RETRY_DELAYS) + 1))
 
 
 def _complete_session(session_dir: Path, report: dict[str, Any]) -> dict[str, Any]:
@@ -812,7 +888,7 @@ def _complete_session(session_dir: Path, report: dict[str, Any]) -> dict[str, An
 
 
 def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]], *,
-                            max_attempts: int = 3) -> dict[str, Any]:
+                            run_checks: bool = True, max_attempts: int = 3) -> dict[str, Any]:
     existing = read_json(session_dir / STATUS_FILE) or {}
     if existing.get("state") == "held_review":
         return existing
@@ -843,7 +919,11 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
     metadata = read_json(session_dir / CONTEXT_FILE) or {}
     transcript = read_json(session_dir / "transcript.json")
     reason = None
+    context_attempts = existing.get("context_attempts", 0)
     if context is None and transcript is not None and metadata.get("mode") == "weekly_deal_call":
+        if context_attempts >= len(EXTRACTION_RETRY_DELAYS) + 1:
+            return existing
+        context_attempts += 1
         try:
             context = store_context(session_dir, fetch_context(session_dir))
         except (ContractError, OSError, subprocess.SubprocessError) as exc:
@@ -853,6 +933,12 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         status = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "state": "awaiting_context", "updated_at": now(), "extraction_attempts": attempts, "next_attempt_at": None}
         if reason:
             status["reason"] = reason
+            status["context_attempts"] = context_attempts
+            if context_attempts <= len(EXTRACTION_RETRY_DELAYS):
+                status["next_attempt_at"] = (datetime.fromisoformat(now().replace("Z", "+00:00"))
+                    + timedelta(seconds=EXTRACTION_RETRY_DELAYS[context_attempts - 1])).strftime("%Y-%m-%dT%H:%M:%SZ")
+            else:
+                status["state"] = "needs_attention"
         write_private(session_dir / STATUS_FILE, status)
         return status
     if transcript is None:
@@ -888,6 +974,8 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
     speaker_context = {**context, "speaker_labels": stored_context.get("speaker_labels"),
                        "local_partner": stored_context.get("recorder")}
     try:
+        if not run_checks:
+            raise RuntimeError("Phone checks require an admitted Jev budget")
         import post_call_jev
 
         result = post_call_jev.check_distillation(
@@ -897,6 +985,12 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         exception_class = type(exc).__name__
         deal_check_status = {"status": "unavailable", "exception_class": exception_class}
         result["deal_check"] = deal_check_status
+        reason = f"Deal check unavailable ({exception_class}); review proposals manually."
+        for key in ("joe_tasks", "dell_tasks", "deal_updates", "draft_proposals"):
+            for item in result[key]:
+                item["checks"] = {"unavailable": True, "flagged": True, "reasons": [reason]}
+        result["review_questions"].append({"id": _review_id(session_dir.name, "jev_unavailable", 1),
+                                           "question": reason, "resolved": False})
         try:
             LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
             with LOG_PATH.open("a", encoding="utf-8") as handle:
@@ -905,7 +999,8 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         except OSError:
             pass
     result = mark_automatic(result, transcript, speaker_context)
-    write_private(session_dir / REPORT_FILE, result)
+    with update_report(session_dir, initial=result, locked=True):
+        pass
     return _complete_session(session_dir, result)
 
 
@@ -917,41 +1012,43 @@ def _report_candidates(report: dict[str, Any]) -> list[dict[str, Any]]:
 
 def apply_candidate_statuses(session_dir: Path, statuses: dict[str, str]) -> dict[str, Any]:
     """Persist CARR's human candidate dispositions; no backend write occurs here."""
-    report = read_json(session_dir / REPORT_FILE)
-    if report is None:
-        raise ContractError("post-call report is not ready")
-    known: dict[str, dict[str, Any]] = {}
-    for item in _report_candidates(report):
-        candidate_id = item.get("candidate_id")
-        if isinstance(candidate_id, str) and candidate_id:
-            known[candidate_id] = item
-    if not statuses or any(key not in known or value not in {"confirmed", "skipped", "rejected"} for key, value in statuses.items()):
-        raise ContractError("candidate dispositions must name known candidate IDs")
-    for candidate_id, status in statuses.items():
-        known[candidate_id]["candidate_status"] = status
-    write_private(session_dir / REPORT_FILE, report)
-    return {"updated": len(statuses)}
+    with update_report(session_dir) as report:
+        known: dict[str, dict[str, Any]] = {}
+        for item in _report_candidates(report):
+            candidate_id = item.get("candidate_id")
+            if isinstance(candidate_id, str) and candidate_id:
+                known[candidate_id] = item
+        if not statuses or any(key not in known or value not in {"confirmed", "skipped", "rejected"} for key, value in statuses.items()):
+            raise ContractError("candidate dispositions must name known candidate IDs")
+        for candidate_id, status in statuses.items():
+            known[candidate_id]["candidate_status"] = status
+        return {"updated": len(statuses)}
+
+
+def review_complete(report: dict[str, Any]) -> bool:
+    """Unresolved review questions keep the source recording recoverable."""
+    return all(question.get("resolved") is True for question in report.get("review_questions", []))
 
 
 def retention_ready(session_dir: Path, report_sha256: str) -> dict[str, Any] | None:
     """Return a purge-safe filing receipt only after every candidate is final."""
-    if (read_json(session_dir / STATUS_FILE) or {}).get("state") == "held_review":
-        return None
-    report = read_json(session_dir / REPORT_FILE)
-    if report is None or not isinstance(report_sha256, str) or re.fullmatch(r"[0-9a-fA-F]{64}", report_sha256) is None:
-        return None
-    if session_dir.name.startswith("phone-") and any(q.get("resolved") is not True for q in report.get("review_questions", [])):
-        return None
-    items = _report_candidates(report)
-    if any(item.get("candidate_status") not in {"confirmed", "skipped", "rejected"} for item in items):
-        return None
-    digest = hashlib.sha256(json.dumps(report, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-    report.update({"backend_report_sha256": report_sha256, "aggregate_report_hash": digest, "filed_at": now()})
-    write_private(session_dir / REPORT_FILE, report)
-    status = read_json(session_dir / STATUS_FILE) or {"schema_version": SCHEMA_VERSION, "session": session_dir.name}
-    status.update({"state": "filed", "updated_at": now(), "pending_items": 0, "aggregate_report_hash": digest})
-    write_private(session_dir / STATUS_FILE, status)
-    return {"aggregate_report_hash": digest, "backend_report_sha256": report_sha256, "pending_items": 0}
+    with session_lock(session_dir):
+        if (read_json(session_dir / STATUS_FILE) or {}).get("state") == "held_review":
+            return None
+        with update_report(session_dir, required=False, locked=True) as report:
+            if report is None or not isinstance(report_sha256, str) or re.fullmatch(r"[0-9a-fA-F]{64}", report_sha256) is None:
+                return None
+            if not review_complete(report):
+                return None
+            items = _report_candidates(report)
+            if any(item.get("candidate_status") not in {"confirmed", "skipped", "rejected"} for item in items):
+                return None
+            digest = hashlib.sha256(json.dumps(report, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+            report.update({"backend_report_sha256": report_sha256, "aggregate_report_hash": digest, "filed_at": now()})
+        status = read_json(session_dir / STATUS_FILE) or {"schema_version": SCHEMA_VERSION, "session": session_dir.name}
+        status.update({"state": "filed", "updated_at": now(), "pending_items": 0, "aggregate_report_hash": digest})
+        write_private(session_dir / STATUS_FILE, status)
+        return {"aggregate_report_hash": digest, "backend_report_sha256": report_sha256, "pending_items": 0}
 
 
 AUTOMATIC_FIELDS = ("next_step", "phase_move")
@@ -1144,24 +1241,21 @@ def automatic_candidates(session_dir: Path) -> list[dict[str, Any]]:
 
 def record_automatic(session_dir: Path, outcomes: dict[str, str | None]) -> dict[str, Any]:
     """Store which changes applied (None) and which stayed cards (the reason)."""
-    report = read_json(session_dir / REPORT_FILE)
-    if report is None:
-        raise ContractError("post-call report is not ready")
-    changes = [update[field] for update in report.get("deal_updates", []) for field in AUTOMATIC_FIELDS
-               if isinstance(update.get(field), dict)]
-    for value in changes:
-        if value.get("candidate_id") not in outcomes:
-            continue
-        reason = outcomes[value["candidate_id"]]
-        if reason is None:
-            value.update({"candidate_status": "confirmed", "applied_automatically": True})
-        else:
-            value.update({"apply": "review", "review_reason": reason})
-    report["automatic"] = {"finished_at": now(),
-                           "applied": sum(1 for value in changes if value.get("applied_automatically")),
-                           "kept_for_review": sum(1 for value in changes if value.get("apply") == "review")}
-    write_private(session_dir / REPORT_FILE, report)
-    return report["automatic"]
+    with update_report(session_dir) as report:
+        changes = [update[field] for update in report.get("deal_updates", []) for field in AUTOMATIC_FIELDS
+                   if isinstance(update.get(field), dict)]
+        for value in changes:
+            if value.get("candidate_id") not in outcomes:
+                continue
+            reason = outcomes[value["candidate_id"]]
+            if reason is None:
+                value.update({"candidate_status": "confirmed", "applied_automatically": True})
+            else:
+                value.update({"apply": "review", "review_reason": reason})
+        report["automatic"] = {"finished_at": now(),
+                               "applied": sum(1 for value in changes if value.get("applied_automatically")),
+                               "kept_for_review": sum(1 for value in changes if value.get("apply") == "review")}
+        return report["automatic"]
 
 
 def report_for_deal_room(session_dir: Path) -> dict[str, Any]:
@@ -1190,23 +1284,23 @@ def report_for_deal_room(session_dir: Path) -> dict[str, Any]:
         for draft in visible.get("draft_proposals", []):
             receipt = receipts.get(draft.get("draft_id"))
             if isinstance(receipt, dict) and receipt.get("content_hash") == draft.get("content_hash"):
-                draft["status"] = "created"
-                draft["created_at"] = receipt.get("created_at")
+                draft["status"] = "needs_attention" if receipt.get("state") == "intent" else "created"
+                if receipt.get("created_at"):
+                    draft["created_at"] = receipt["created_at"]
     return {"status": status, "report": visible}
 
 
 def resolve_question(session_dir: Path, question_id: str, resolution: str) -> dict[str, Any]:
-    report = read_json(session_dir / REPORT_FILE)
-    if report is None:
-        raise ContractError("post-call report is not ready")
-    _string(resolution, "resolution")
-    for question in report.get("review_questions", []):
-        if question.get("id") == question_id:
-            question["resolved"] = True
-            question["resolution"] = resolution
-            write_private(session_dir / REPORT_FILE, report)
-            return {"question_id": question_id, "resolved": True}
-    raise ContractError("unknown question id")
+    with update_report(session_dir) as report:
+        _string(resolution, "resolution")
+        for question in report.get("review_questions", []):
+            if question.get("id") == question_id:
+                if question.get("resolved") is True:
+                    raise ContractError("already_resolved")
+                question["resolved"] = True
+                question["resolution"] = resolution
+                return {"question_id": question_id, "resolved": True}
+        raise ContractError("unknown question id")
 
 
 def _candidate_binding(list_name: str, index: int, remote: str) -> dict[str, Any]:
@@ -1235,8 +1329,10 @@ def sanitized_candidates(session_dir: Path) -> dict[str, Any]:
                 continue
             post_call_items.append({
                 "kind": "assigned_action", "deal_id": task["deal_id"], "assignee": owner,
-                "action": task["title"], "due_on": task.get("due_on"), "evidence_quote": task["evidence"],
+                "action": task["title"], "due_on": task.get("due_on"),
+                "due_defaulted": task.get("due_defaulted"), "evidence_quote": task["evidence"],
                 "confidence": 0.5,
+                **({"counterpart": {"name": task["counterpart"]}} if task.get("counterpart") else {}),
             })
             bindings.append(_candidate_binding(list_name, index, "post_call"))
     for index, update in enumerate(report.get("deal_updates", [])):
@@ -1277,6 +1373,7 @@ def sanitized_candidates(session_dir: Path) -> dict[str, Any]:
             "recipient_party_id": draft["recipient_party_id"], "recipient_ref": recipient_ref,
             "subject": draft["subject"], "body_sha256": draft["content_hash"],
             "evidence_quote": draft["evidence"], "confidence": 0.5,
+            **({"counterpart": {"name": draft["counterpart"]}} if draft.get("counterpart") else {}),
         })
         bindings.append(_candidate_binding("draft_proposals", index, "post_call"))
     return {"schema_version": SCHEMA_VERSION, "session": session_dir.name,
@@ -1288,31 +1385,29 @@ def apply_candidate_ids(session_dir: Path, bindings: list[dict[str, Any]], candi
     """Atomically attach opaque Worker IDs to their private report items."""
     if len(bindings) != len(candidate_ids) or not all(isinstance(item, str) and item for item in candidate_ids):
         raise ContractError("candidate receipt does not match local proposal count")
-    report = read_json(session_dir / REPORT_FILE)
-    if report is None:
-        raise ContractError("post-call report is not ready")
-    for binding, candidate_id in zip(bindings, candidate_ids):
-        if not isinstance(binding, dict):
-            raise ContractError("candidate binding is invalid")
-        list_name = binding.get("list_name")
-        index = binding.get("index")
-        if list_name not in {"joe_tasks", "dell_tasks", "deal_updates", "draft_proposals"} or not isinstance(index, int):
-            raise ContractError("candidate binding is invalid")
-        items = report.get(list_name)
-        if not isinstance(items, list) or index < 0 or index >= len(items):
-            raise ContractError("candidate binding points outside the report")
-        target = items[index]
-        field = binding.get("field")
-        if field is not None:
-            if list_name != "deal_updates" or field not in {"next_step", "phase_move"} or not isinstance(target.get(field), dict):
+    with update_report(session_dir) as report:
+        for binding, candidate_id in zip(bindings, candidate_ids):
+            if not isinstance(binding, dict):
                 raise ContractError("candidate binding is invalid")
-            target = target[field]
-        if target.get("candidate_id") not in {None, candidate_id}:
-            raise ContractError("candidate binding conflicts with an existing receipt")
-        target["candidate_id"] = candidate_id
-        target["candidate_status"] = "pending"
-    write_private(session_dir / REPORT_FILE, report)
-    return {"updated": len(candidate_ids)}
+            list_name = binding.get("list_name")
+            index = binding.get("index")
+            if list_name not in {"joe_tasks", "dell_tasks", "deal_updates", "draft_proposals"} or not isinstance(index, int):
+                raise ContractError("candidate binding is invalid")
+            items = report.get(list_name)
+            if not isinstance(items, list) or index < 0 or index >= len(items):
+                raise ContractError("candidate binding points outside the report")
+            target = items[index]
+            field = binding.get("field")
+            if field is not None:
+                if list_name != "deal_updates" or field not in {"next_step", "phase_move"} or not isinstance(target.get(field), dict):
+                    raise ContractError("candidate binding is invalid")
+                target = target[field]
+            if target.get("candidate_id") not in {None, candidate_id}:
+                raise ContractError("candidate binding conflicts with an existing receipt")
+            if not target.get("candidate_id"):
+                target["candidate_id"] = candidate_id
+                target["candidate_status"] = "pending"
+        return {"updated": len(candidate_ids)}
 
 
 def report_sha256(session_dir: Path) -> str:
@@ -1322,34 +1417,58 @@ def report_sha256(session_dir: Path) -> str:
     return hashlib.sha256(json.dumps(report, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def resolve_outlook_intent(session_dir: Path, draft_id: str, exists: bool) -> dict[str, Any]:
+    if not isinstance(exists, bool):
+        raise ContractError("exists must be true or false")
+    with update_report(session_dir) as report:
+        draft = next((item for item in report.get("draft_proposals", []) if item.get("draft_id") == draft_id), None)
+        drafts = read_json(session_dir / DRAFTS_FILE) or {"drafts": {}}
+        intent = drafts["drafts"].get(draft_id)
+        if (draft is None or not isinstance(intent, dict) or intent.get("state") != "intent"
+                or intent.get("content_hash") != draft.get("content_hash")):
+            raise ContractError("draft has no matching intent marker")
+        if exists:
+            drafts["drafts"][draft_id] = {"content_hash": intent["content_hash"], "created_at": now()}
+        else:
+            del drafts["drafts"][draft_id]
+        write_private(session_dir / DRAFTS_FILE, drafts)
+        return {"draft_id": draft_id, "state": "created" if exists else "cleared"}
+
+
 def create_outlook_draft(session_dir: Path, draft_id: str, approved_content_hash: str, runner: Callable[..., Any] = subprocess.run) -> dict[str, Any]:
-    report = read_json(session_dir / REPORT_FILE)
-    if report is None:
-        raise ContractError("post-call report is not ready")
-    draft = next((item for item in report["draft_proposals"] if item["draft_id"] == draft_id), None)
-    if draft is None or approved_content_hash != draft["content_hash"]:
-        raise ContractError("explicit approval must name the current draft content hash")
-    if not draft.get("candidate_id") or draft.get("candidate_status") != "confirmed":
-        raise ContractError("Outlook draft requires an already-confirmed CARR email candidate")
-    drafts = read_json(session_dir / DRAFTS_FILE) or {"drafts": {}}
-    existing = drafts["drafts"].get(draft_id)
-    if isinstance(existing, dict) and existing.get("content_hash") == approved_content_hash:
-        return {"draft_id": draft_id, "content_hash": approved_content_hash, "idempotent": True}
-    # The address is retained only in the private report so consuming the index
-    # never leaks recipient data into the candidate push payload.
-    if not draft.get("recipient_email"):
-        raise ContractError("recipient email is unavailable for this proposal")
-    if outlook_draft_url_length(draft["recipient_email"], draft["subject"], draft["body"]) > OUTLOOK_URL_LIMIT:
-        raise ContractError("email draft exceeds the local Outlook draft size limit")
-    repo_root = Path(__file__).resolve().parents[3]
-    command = [str(repo_root / "bin" / "outlook-draft.py")]
-    payload = {"to": draft["recipient_email"], "subject": draft["subject"], "body": draft["body"]}
-    result = runner(command, input=json.dumps(payload), text=True, capture_output=True, timeout=45, check=False)
-    if result.returncode != 0:
-        raise RuntimeError("draft-only creator failed")
-    drafts["drafts"][draft_id] = {"content_hash": approved_content_hash, "created_at": now()}
-    write_private(session_dir / DRAFTS_FILE, drafts)
-    return {"draft_id": draft_id, "content_hash": approved_content_hash, "idempotent": False}
+    with session_lock(session_dir):
+        report = read_json(session_dir / REPORT_FILE)
+        if report is None:
+            raise ContractError("post-call report is not ready")
+        draft = next((item for item in report["draft_proposals"] if item["draft_id"] == draft_id), None)
+        if draft is None or approved_content_hash != draft["content_hash"]:
+            raise ContractError("explicit approval must name the current draft content hash")
+        if not draft.get("candidate_id") or draft.get("candidate_status") != "confirmed":
+            raise ContractError("Outlook draft requires an already-confirmed CARR email candidate")
+        drafts = read_json(session_dir / DRAFTS_FILE) or {"drafts": {}}
+        existing = drafts["drafts"].get(draft_id)
+        if isinstance(existing, dict) and existing.get("state") == "intent":
+            return {"draft_id": draft_id, "content_hash": approved_content_hash,
+                    "state": "needs_attention", "reason": "Outlook draft creation has an intent but no receipt"}
+        if isinstance(existing, dict) and existing.get("content_hash") == approved_content_hash:
+            return {"draft_id": draft_id, "content_hash": approved_content_hash, "idempotent": True}
+        # The address is retained only in the private report so consuming the index
+        # never leaks recipient data into the candidate push payload.
+        if not draft.get("recipient_email"):
+            raise ContractError("recipient email is unavailable for this proposal")
+        if outlook_draft_url_length(draft["recipient_email"], draft["subject"], draft["body"]) > OUTLOOK_URL_LIMIT:
+            raise ContractError("email draft exceeds the local Outlook draft size limit")
+        repo_root = Path(__file__).resolve().parents[3]
+        command = [str(repo_root / "bin" / "outlook-draft.py")]
+        payload = {"to": draft["recipient_email"], "subject": draft["subject"], "body": draft["body"]}
+        drafts["drafts"][draft_id] = {"content_hash": approved_content_hash, "state": "intent", "started_at": now()}
+        write_private(session_dir / DRAFTS_FILE, drafts)
+        result = runner(command, input=json.dumps(payload), text=True, capture_output=True, timeout=45, check=False)
+        if result.returncode != 0:
+            raise RuntimeError("draft-only creator failed")
+        drafts["drafts"][draft_id] = {"content_hash": approved_content_hash, "created_at": now()}
+        write_private(session_dir / DRAFTS_FILE, drafts)
+        return {"draft_id": draft_id, "content_hash": approved_content_hash, "idempotent": False}
 
 
 if __name__ == "__main__":

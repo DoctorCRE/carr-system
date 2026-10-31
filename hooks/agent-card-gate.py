@@ -15,7 +15,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.hook_runtime import Verdict, decision, run
 
 MINT = """Mint the job first, then put the returned card_id on its own Card: line in the prompt:
-./run.sh call dispatch-job '{"idempotency_key":"<fresh UUID>","work_request":"<work request ref>","slice":1,"executor":"claude","model":"<model>","effort":"<effort>","card_title":"Agent review","description":"Review the assigned change."}'"""
+./run.sh call dispatch-job '{"idempotency_key":"<fresh UUID>","work_request":"<work request ref>","slice":1,"executor":"claude","model":"<model>","effort":"<effort>","card_title":"Review assigned change","description":"Review the assigned change."}'"""
+
+
+T3_PROMPT_FIELDS = {
+    'mcp__t3-code__delegate_task': 'task',
+    'mcp__t3-code__t3_thread_launch': 'message',
+    'mcp__t3-code__t3_thread_send': 'message',
+    'mcp__t3-code__t3_thread_send_attachments': 'message',
+    'mcp__t3-code__schedule_task': 'prompt',
+}
 
 
 def refuse(reason):
@@ -27,7 +36,39 @@ def decide(event):
     if event.get('hook_event_name') != 'PreToolUse':
         return
     inputs = event.get('tool_input', {})
-    if event.get('tool_name') == 'Agent':
+    tool = event.get('tool_name')
+    if tool == 'mcp__t3-code__run_scheduled_task_now':
+        return refuse('Cannot inspect a stored T3 task prompt. Use a dispatch tool with an inline Card-bearing prompt.')
+    if tool == 'mcp__t3-code__t3_pending_request':
+        action = inputs.get('action')
+        if action in {'list', 'read'}:
+            return
+        if action != 'respond':
+            return refuse('Cannot inspect this T3 pending-request action.')
+        answers = inputs.get('answers')
+        if not isinstance(answers, dict) or not answers or not all(
+                isinstance(answer, str) for answer in answers.values()):
+            return refuse('A T3 response requires inspectable string answers with a Card.')
+        if len(answers) != 1:
+            return refuse('Cannot inspect which stored T3 questions consume these answers. Respond to one question with a Card-bearing answer.')
+        prompts = ['\n\n'.join(answers.values())]
+    elif tool == 'mcp__t3-code__t3_queue':
+        action = inputs.get('action')
+        if action == 'promote_to_steer':
+            return refuse('Cannot inspect a stored T3 queue prompt. Use t3_thread_send with an inline Card-bearing message.')
+        if action in {'list', 'read', 'cancel', 'reorder'}:
+            return
+        if action != 'edit':
+            return refuse('Cannot inspect this T3 queue action.')
+        prompts = [inputs.get('text', '')]
+    elif tool in T3_PROMPT_FIELDS:
+        prompts = [inputs.get(T3_PROMPT_FIELDS[tool], '')]
+    elif tool == 'mcp__t3-code__create_threads':
+        threads = inputs.get('threads')
+        if not isinstance(threads, list) or not threads:
+            return refuse('A T3 batch requires threads with Card-bearing prompts.')
+        prompts = [thread.get('prompt', '') for thread in threads]
+    elif tool == 'Agent':
         prompts = [inputs.get('prompt', '')]
     elif event.get('tool_name') == 'Bash':
         command = inputs.get('command', '')
@@ -82,7 +123,7 @@ def codex_operands(args):
         elif word in FLAG_OPTIONS:
             pass
         elif word.startswith('-') and word != '-':
-            raise ValueError('Cannot inspect Codex option; use bin/codex-job or a literal inline prompt.')
+            raise ValueError('Cannot inspect Codex option; use a literal inline prompt.')
         else:
             words.append(word)
             if words in (['exec', 'resume'], ['e', 'resume']):

@@ -15,8 +15,7 @@ export async function readBriefAssurance(c: Pick<ClientBase, "query">, sponsor: 
         on r.notification_id=n.id and r.recipient_actor=n.recipient_actor
      where n.recipient_actor=$1 and s.producer='v5-a05-delivery-cadence'
        and r.notification_id is null
-       and not exists (select 1 from ops.notification_delivery h
-         where h.notification_id=n.id and h.state='held_until_morning' and h.held_until>now())
+       and ops.notification_visible(n.id)
      order by case n.severity when 'failure' then 0 when 'action_required' then 1 else 2 end,
               n.created_at, n.id`, [recipient.id])).rows;
 }

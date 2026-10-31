@@ -319,7 +319,12 @@
           {
             "event": "PreToolUse",
             "tool_name_regex": "^Bash$",
-            "input_regex": "(?i)(?=.*(?:bin/codex-job|run\\.sh\\s+call\\s+(write-work-shape|report-problem)))"
+            "input_regex": "(?i)(?=.*(?:run\\.sh\\s+call\\s+(write-work-shape|report-problem)))"
+          },
+          {
+            "event": "PreToolUse",
+            "tool_name_regex": "^mcp__t3-code__delegate_task$",
+            "input_regex": ".*"
           }
         ]
       },
@@ -386,7 +391,12 @@
           {
             "event": "PreToolUse",
             "tool_name_regex": "^Bash$",
-            "input_regex": "(?i)(?=.*(?:bin/codex-job|run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:\\bnew\\b|first[- ]of[- ]kind|adopt|integrat|replace|workaround|missing capabilit|no way to))"
+            "input_regex": "(?i)(?=.*(?:run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:\\bnew\\b|first[- ]of[- ]kind|adopt|integrat|replace|workaround|missing capabilit|no way to))"
+          },
+          {
+            "event": "PreToolUse",
+            "tool_name_regex": "^mcp__t3-code__delegate_task$",
+            "input_regex": ".*"
           }
         ]
       },
@@ -460,7 +470,12 @@
           {
             "event": "PreToolUse",
             "tool_name_regex": "^Bash$",
-            "input_regex": "(?i)(?=.*(?:bin/codex-job|run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:implement|\\bbuild\\b|feature|gate|hook|validator|new (verb|endpoint|table|check)))"
+            "input_regex": "(?i)(?=.*(?:run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:implement|\\bbuild\\b|feature|gate|hook|validator|new (verb|endpoint|table|check)))"
+          },
+          {
+            "event": "PreToolUse",
+            "tool_name_regex": "^mcp__t3-code__delegate_task$",
+            "input_regex": ".*"
           }
         ]
       },
@@ -535,7 +550,12 @@
           {
             "event": "PreToolUse",
             "tool_name_regex": "^Bash$",
-            "input_regex": "(?i)(?=.*(?:bin/codex-job|run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:restructur|refactor|redesign|architect|schema|new table|split|consolidat|root cause|right fix))"
+            "input_regex": "(?i)(?=.*(?:run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:restructur|refactor|redesign|architect|schema|new table|split|consolidat|root cause|right fix))"
+          },
+          {
+            "event": "PreToolUse",
+            "tool_name_regex": "^mcp__t3-code__delegate_task$",
+            "input_regex": ".*"
           }
         ]
       },
@@ -608,7 +628,12 @@
           {
             "event": "PreToolUse",
             "tool_name_regex": "^Bash$",
-            "input_regex": "bin/codex-job|bin/dot-relay"
+            "input_regex": "bin/dot-relay"
+          },
+          {
+            "event": "PreToolUse",
+            "tool_name_regex": "^mcp__t3-code__delegate_task$",
+            "input_regex": ".*"
           }
         ]
       },
@@ -677,7 +702,12 @@
           {
             "event": "PreToolUse",
             "tool_name_regex": "^Bash$",
-            "input_regex": "(?i)(?=.*(?:bin/codex-job|run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:parallel|worktree|isolat|concurren|substrate|follow[- ]?up|at the same time))"
+            "input_regex": "(?i)(?=.*(?:run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:parallel|worktree|isolat|concurren|substrate|follow[- ]?up|at the same time))"
+          },
+          {
+            "event": "PreToolUse",
+            "tool_name_regex": "^mcp__t3-code__delegate_task$",
+            "input_regex": ".*"
           }
         ]
       },
@@ -744,7 +774,12 @@
           {
             "event": "PreToolUse",
             "tool_name_regex": "^Bash$",
-            "input_regex": "(?i)(?=.*(?:bin/codex-job|run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:council|red[- ]team|new table|verb family|mechanism|structural|should we|which approach))"
+            "input_regex": "(?i)(?=.*(?:run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:council|red[- ]team|new table|verb family|mechanism|structural|should we|which approach))"
+          },
+          {
+            "event": "PreToolUse",
+            "tool_name_regex": "^mcp__t3-code__delegate_task$",
+            "input_regex": ".*"
           }
         ]
       },
@@ -869,12 +904,17 @@
           {
             "event": "PreToolUse",
             "tool_name_regex": "^Bash$",
-            "input_regex": "(?i)(?=.*(?:bin/codex-job|run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:\\bverb\\b|record capabilit|no way to (record|write|store)|missing (verb|tool)))"
+            "input_regex": "(?i)(?=.*(?:run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:\\bverb\\b|record capabilit|no way to (record|write|store)|missing (verb|tool)))"
           },
           {
             "event": "PreToolUse",
             "tool_name_regex": "^(Edit|Write|MultiEdit)$",
             "input_regex": "mcp-server/src/tools\\.js"
+          },
+          {
+            "event": "PreToolUse",
+            "tool_name_regex": "^mcp__t3-code__delegate_task$",
+            "input_regex": ".*"
           }
         ]
       },
@@ -947,7 +987,12 @@
           {
             "event": "PreToolUse",
             "tool_name_regex": "^Bash$",
-            "input_regex": "(?i)(?=.*(?:bin/codex-job|run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:capacity|scale|throughput|architect|cloud|local|studio|phone|mobile|hosting))"
+            "input_regex": "(?i)(?=.*(?:run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:capacity|scale|throughput|architect|cloud|local|studio|phone|mobile|hosting))"
+          },
+          {
+            "event": "PreToolUse",
+            "tool_name_regex": "^mcp__t3-code__delegate_task$",
+            "input_regex": ".*"
           }
         ]
       },

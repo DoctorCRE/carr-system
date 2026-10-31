@@ -129,6 +129,29 @@ def _claude_user_text(record: object) -> str | None:
     return "".join(pieces)
 
 
+def grok_user_chunk(record: object, session_id: str | None) -> tuple[int, str] | None:
+    """A human prompt's index and chunk, including empty/image-only boundaries."""
+    if not isinstance(record, dict) or record.get("method") != "session/update":
+        return None
+    params = record.get("params")
+    if not isinstance(params, dict) or not session_id or params.get("sessionId") != session_id:
+        return None
+    update = params.get("update")
+    if (not isinstance(update, dict)
+            or update.get("sessionUpdate") != "user_message_chunk"):
+        return None
+    meta = update.get("_meta")
+    if (not isinstance(meta, dict) or type(meta.get("promptIndex")) is not int
+            or meta["promptIndex"] < 0 or meta.get("syntheticPrompt")
+            or meta.get("interjection") or meta.get("origin", "human") != "human"):
+        return None
+    content = update.get("content")
+    text = ""
+    if isinstance(content, dict) and content.get("type") == "text" and isinstance(content.get("text"), str):
+        text = content["text"]
+    return meta["promptIndex"], text
+
+
 def validate_lookup_receipt(row: object, *, repo: Path) -> bool:
     if not isinstance(row, dict):
         return False

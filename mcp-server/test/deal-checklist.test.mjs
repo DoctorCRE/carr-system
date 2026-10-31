@@ -71,3 +71,11 @@ test('several dates for the same milestone retain every deadline independently',
   ] });
   assert.deepEqual(result.due_items.map(item => item.id), ['critical-date:one', 'critical-date:two']);
 });
+
+test('requested deadlines enter the existing due list', () => {
+  const result = checklist({ requests: [
+    { id: 'one', row_key: 'requirements', owner: 'joe', due_on: '2026-10-19' },
+    { id: 'two', row_key: 'market_survey', owner: 'joe', due_on: '2026-10-20' },
+  ] });
+  assert.deepEqual(result.due_items.map(item => [item.id, item.status]), [['requirements', 'overdue'], ['market_survey', 'due']]);
+});

@@ -191,8 +191,8 @@ class FakeOutlook:
         if self.on_send == 'sends' and 'start' in form:
             self.mailbox.events.append(EventRow(form['subject'], int(datetime.fromisoformat(form['start']).timestamp())))
         elif self.on_send == 'sends':
-            self.mailbox.sent.append(SentRow(ACCOUNT, ', '.join(form['to'] + form['cc']), form['subject'],
-                                             int(self.clock.t) + 30))
+            self.mailbox.sent.append(SentRow(ACCOUNT, ', '.join(form['to'] + form['cc'] + form['bcc']), form['subject'],
+                                             int(self.clock.t) + 30, 'hxstore-key:42'))
 
     def presses(self) -> int:
         return self.press_count
@@ -264,12 +264,14 @@ def event(h, key='event-key', send_requested=True, **overrides):
 
 class SendTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch.object(ui, 'screen_locked', return_value=False))
         self.tmp = tempfile.TemporaryDirectory()
         self.out = Path(self.tmp.name) / 'out'
         self.home = Path(self.tmp.name) / 'home'
         self.config = write_settings(self.home, ROOT, account=ACCOUNT, internal_domain='company.test')
         self.enterContext(patch.object(send_mod, 'load_settings', lambda: load_settings(home=self.home)))
         self.enterContext(patch.object(ui, 'load_settings', lambda: load_settings(home=self.home)))
+        self.enterContext(patch.object(ui, 'screen_locked', return_value=False))
         self.dialog = self.enterContext(patch.object(send_mod.subprocess, 'run',
             return_value=subprocess.CompletedProcess(['osascript'], 0, 'true\n', '')))
 
@@ -539,6 +541,17 @@ class SendTests(unittest.TestCase):
         self.assertEqual((logged[0]['ref'], logged[0]['kind'], logged[0]['detail']),
                          ('C-1', 'email_out', MAIL['body']))
         self.assertEqual(result.logged, ('C-1',))
+        self.assertEqual(logged[0].get('email_identity'),
+                         {'mailbox_owner': 'fixture-owner', 'mailbox_account': ACCOUNT, 'item_id': 'hxstore-key:42'})
+
+    def test_send_waits_for_store_identity_before_logging(self):
+        h = Harness(self.out)
+        snapshot = h.mailbox.snapshot
+        h.mailbox.snapshot = lambda: replace(snapshot(),
+            sent=tuple(replace(row, item_id=None) for row in h.mailbox.sent))
+        result = h.send(record='client-001')
+        self.assertEqual(result.state, State.PRESSED_UNCONFIRMED)
+        self.assertFalse(any(verb == 'log-activity' for verb, _ in h.carr_calls))
 
     def test_field_read_back_mismatch_discards_and_never_presses(self):
         h = Harness(self.out, corrupt=('subject', 'subject-00'))
@@ -904,14 +917,16 @@ class SendTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(Path(command[2]).stat().st_mode), 0o600)
             con = sqlite3.connect(command[3])
             con.executescript("""
-                CREATE TABLE messages(id, sender, recipients, subject, sent_unix, message_id, local_keys);
+                CREATE TABLE messages(id, sender, recipients, subject, sent_unix, message_id, local_keys, body, body_kind);
                 CREATE TABLE message_folders(message_id, folder_id);
                 CREATE TABLE folders(id, name);
                 CREATE TABLE events(subject, start_unix);
                 INSERT INTO folders VALUES(1, 'Sent Items'), (2, 'Drafts');
-                INSERT INTO messages VALUES(1, 'sender@example.test', 'person-a@example.test', 'sent-001', 1800000000, '<sent-001@example.test>', '42'),
-                    (2, 'sender@example.test', 'person-a@example.test', 'draft-001', 1800000000, null, '43');
-                INSERT INTO message_folders VALUES(1, 1), (2, 2);
+                INSERT INTO messages VALUES(1, 'sender@example.test', 'person-a@example.test', 'sent-001', 1800000000, '<sent-001@example.test>', '42', 'Synthetic body', 'full'),
+                    (2, 'sender@example.test', 'person-a@example.test', 'draft-001', 1800000000, null, '43', null, 'preview'),
+                    (3, 'sender@example.test', 'person-a@example.test', 'sent-001', 1800000001, '<sent-001@example.test>', '44', 'Synthetic preview', 'preview'),
+                    (4, 'sender@example.test', 'person-a@example.test', 'header-001', 1800000000, '<header@example.test>', '45', null, null);
+                INSERT INTO message_folders VALUES(1, 1), (2, 2), (3, 1), (4, 1);
                 INSERT INTO events VALUES('event-001', 1893596400);
             """)
             con.close()
@@ -923,8 +938,15 @@ class SendTests(unittest.TestCase):
         with patch('lib.outlook_intake._snapshot', side_effect=copy) as copier, patch.object(send_mod.subprocess, 'run', decode):
             snap = send_mod.DecodedMailbox(home, repo).snapshot()
         copier.assert_called_once()
-        self.assertEqual([m.subject for m in snap.sent], ['sent-001'])
-        self.assertEqual(snap.sent[0].item_id, '<sent-001@example.test>')
+        self.assertEqual([m.subject for m in snap.sent], ['sent-001', 'sent-001', 'header-001'])
+        self.assertEqual([m.item_id for m in snap.sent], ['hxstore-key:42', 'hxstore-key:44', 'hxstore-key:45'])
+        self.assertEqual(snap.sent[0].body_fingerprint, send_mod.body_fingerprint('Synthetic body'))
+        self.assertIsNone(snap.sent[1].body_fingerprint)
+        self.assertIsNone(snap.sent[2].body_fingerprint)
+        mail = send_mod.Mail(('person-a@example.test',), (), (), 'sent-001', 'Synthetic body')
+        with patch.object(send_mod, 'account', return_value=ACCOUNT):
+            self.assertEqual(send_mod.confirmed_mail(snap, mail, NOW), 'hxstore-key:42')
+            self.assertEqual(send_mod.confirmed_mail(snap, mail, NOW + 1), 'hxstore-key:44')
         self.assertEqual(snap.events, (EventRow('event-001', 1893596400),))
         self.assertFalse(any(work.exists() for work in workspaces))
         self.assertEqual(list((repo / 'out/outlook-intake').iterdir()), [])
@@ -1029,6 +1051,7 @@ class SendTests(unittest.TestCase):
 
 class OutboxTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch.object(ui, 'screen_locked', return_value=False))
         from lib import outlook_outbox
         self.worker = outlook_outbox
         self.tmp = self.enterContext(tempfile.TemporaryDirectory())
@@ -1041,6 +1064,7 @@ class OutboxTests(unittest.TestCase):
         self.enterContext(patch.object(send_mod, 'load_settings', lambda: self.settings))
         self.mailbox = FakeMailbox()
         self.sent = []
+        self.sent_body_fingerprint = None
         self.calls = []
         self.draft = dict(proposal_id='11111111-2222-4333-8444-555555555555', version=2,
                           subject='Submitted subject', body='Submitted final text.',
@@ -1058,7 +1082,8 @@ class OutboxTests(unittest.TestCase):
                 def press(self, **kwargs):
                     test.sent.append(item)
                     test.mailbox.sent.append(SentRow(ACCOUNT, '; '.join(item.recipients),
-                                                    item.subject, int(NOW), 'sent-42'))
+                                                    item.subject, int(NOW), 'sent-42',
+                                                    test.sent_body_fingerprint))
                     return 'fake'
                 def closed(self):
                     return True
@@ -1077,13 +1102,62 @@ class OutboxTests(unittest.TestCase):
             return {'recipients': [{'email': e, 'blocked': False} for e in args['emails']]}
         return dict(ok=True, proposal_id=self.draft['proposal_id'], status=args.get('status'))
 
+    def test_every_send_outcome_is_classified(self):
+        outcomes = {
+            State.DRAFT: 'failed', State.DONE: 'sent', State.ACTIVITY_LOG_FAILED: 'failed',
+            State.PRESSED_UNCONFIRMED: 'failed', State.WINDOW_NOT_CLOSED: 'failed',
+            State.DUPLICATE_KEY: 'failed', State.ALREADY_IN_MAILBOX: 'failed',
+            State.FIELD_MISMATCH: 'failed', State.NOT_IDLE: 'deferred',
+            State.FAILED: 'failed', State.REFUSED: 'failed',
+        }
+        self.assertEqual(set(outcomes), set(State))
+        for state, expected in outcomes.items():
+            with self.subTest(state=state), patch.object(send_mod, 'send_submitted', return_value=send_mod.Result(
+                    state, 'synthetic', sent_item_id='sent-42', sent_at='2026-01-01T00:00:00+00:00')):
+                counts = self.worker.run(self.settings, self.ports)
+                self.assertEqual(counts[expected], 1)
+
+    def test_daily_cap_escalates_only_after_consecutive_runs_on_different_days(self):
+        result = send_mod.Result(State.REFUSED, 'daily_cap')
+        with patch.object(send_mod, 'send_submitted', return_value=result):
+            first = self.worker.run(self.settings, self.ports)
+            same_day = self.worker.run(self.settings, self.ports)
+            self.assertEqual((first['daily_cap_reached'], first['failed']), (1, 0))
+            self.assertEqual((same_day['daily_cap_reached'], same_day['failed']), (1, 0))
+            self.clock.t += 86400
+            second = self.worker.run(self.settings, self.ports)
+            self.assertEqual((second['daily_cap_reached'], second['failed']), (1, 1))
+            with patch.object(self.worker, 'load_settings', return_value=self.settings), \
+                    patch.object(type(self.settings), 'require_repo'), \
+                    patch.object(self.worker.send, 'default_ports', return_value=self.ports), \
+                    patch('sys.stdout', new_callable=StringIO) as output:
+                self.assertEqual(self.worker.main(), 1)
+            receipt = json.loads(output.getvalue().split('outlook-outbox-receipt ', 1)[1])
+            self.assertEqual(receipt['reason'], 'daily_cap_reached')
+
+    def test_cap_streak_resets_after_a_run_without_cap(self):
+        with patch.object(send_mod, 'send_submitted', return_value=send_mod.Result(State.REFUSED, 'daily_cap')):
+            self.worker.run(self.settings, self.ports)
+        with patch.object(send_mod, 'send_submitted', return_value=send_mod.Result(State.NOT_IDLE, 'user_active')):
+            self.worker.run(self.settings, self.ports)
+        self.clock.t += 86400
+        with patch.object(send_mod, 'send_submitted', return_value=send_mod.Result(State.REFUSED, 'daily_cap')):
+            counts = self.worker.run(self.settings, self.ports)
+        self.assertEqual((counts['daily_cap_reached'], counts['failed']), (1, 0))
+
+    def test_try_later_reasons_are_deferred(self):
+        for reason in ('daily_cap', 'another_write_running', 'compose_window_open'):
+            with self.subTest(reason=reason), patch.object(send_mod, 'send_submitted', return_value=send_mod.Result(State.REFUSED, reason)):
+                counts = self.worker.run(self.settings, self.ports)
+                self.assertEqual((counts['deferred'], counts['failed']), (1, 0))
+
     def test_unreadable_attachment_fails_one_draft_and_next_draft_still_sends(self):
         root = Path(self.tmp).resolve() / 'approved'
         root.mkdir()
         packet = root / 'synthetic-unreadable.pdf'
         packet.write_bytes(b'synthetic bytes')
         self.settings = replace(self.settings, attachment_root=root, attachment_max_bytes=1000)
-        self.draft['attachments'] = [dict(path=str(packet), sha256=send_mod._digest(packet))]
+        self.draft['attachments'] = [dict(path=str(packet), sha256=send_mod._digest(packet), size=packet.stat().st_size)]
         second = {**self.draft, 'proposal_id': '22222222-2222-4333-8444-555555555555', 'attachments': []}
         carr = self.ports.carr
         def two_drafts(verb, args):
@@ -1143,8 +1217,8 @@ class OutboxTests(unittest.TestCase):
                 counts = self.worker.run(self.settings, self.ports)
             finally:
                 logger.removeHandler(handler)
-            self.assertEqual(counts['failed'], 0)
-            self.assertEqual((counts['deferred'], counts['sent_unrecorded']), (1, 1))
+            self.assertEqual(counts['failed'], 1)
+            self.assertEqual((counts['deferred'], counts['sent_unrecorded']), (0, 1))
             self.assertIn('sent_time_unavailable', output.getvalue())
             for value in (self.draft['subject'], *self.draft['to'], *self.draft['cc']):
                 self.assertNotIn(value, output.getvalue())
@@ -1170,18 +1244,18 @@ class OutboxTests(unittest.TestCase):
         self.assertFalse(path.exists())
         self.assertEqual(self.sent, [])
 
-    def test_unconfirmed_submitted_files_defer_without_a_sent_receipt(self):
+    def test_unconfirmed_submitted_files_fail_without_a_sent_receipt(self):
         root = Path(self.tmp).resolve() / 'approved'
         root.mkdir()
         packet = root / 'synthetic-packet.pdf'
         packet.write_bytes(b'synthetic attachment')
         from dataclasses import replace
         self.settings = replace(self.settings, attachment_root=root, attachment_max_bytes=1000)
-        self.draft['attachments'] = [dict(path=str(packet), sha256=send_mod._digest(packet))]
+        self.draft['attachments'] = [dict(path=str(packet), sha256=send_mod._digest(packet), size=packet.stat().st_size)]
         self.ports.script_send = lambda mail: 'sent'
         with patch.object(send_mod, 'default_sender', lambda: f'{ACCOUNT}_ActiveSyncExchange_HxS'):
             counts = self.worker.run(self.settings, self.ports)
-        self.assertEqual(counts['deferred'], 1)
+        self.assertEqual(counts['failed'], 1)
         self.assertFalse(any(v == 'record-email-sent' for v, _ in self.calls))
 
     def test_approved_attachment_identity_cannot_change_before_sending(self):
@@ -1192,7 +1266,7 @@ class OutboxTests(unittest.TestCase):
         packet.write_bytes(b'original synthetic bytes')
         self.settings = replace(self.settings, attachment_root=root, attachment_max_bytes=1000)
         digest = send_mod._digest(packet)
-        self.draft['attachments'] = [dict(path=str(packet), sha256=digest)]
+        self.draft['attachments'] = [dict(path=str(packet), sha256=digest, size=packet.stat().st_size)]
         packet.write_bytes(b'changed synthetic bytes')
         counts = self.worker.run(self.settings, self.ports)
         self.assertEqual(counts['failed'], 1)
@@ -1200,9 +1274,64 @@ class OutboxTests(unittest.TestCase):
         packet.write_bytes(b'original synthetic bytes')
         alias = root / 'alias.pdf'
         alias.symlink_to(packet)
-        self.draft['attachments'] = [dict(path=str(alias), sha256=digest)]
+        self.draft['attachments'] = [dict(path=str(alias), sha256=digest, size=packet.stat().st_size)]
         with self.assertRaisesRegex(ValueError, '^submission_attachment_mismatch$'):
             self.worker.SubmittedDraft.parse(self.draft, self.settings)
+
+    def test_submitted_attachment_size_must_match_frozen_submission(self):
+        from dataclasses import replace
+        root = Path(self.tmp).resolve() / 'approved'
+        root.mkdir()
+        packet = root / 'synthetic.pdf'
+        packet.write_bytes(b'synthetic attachment')
+        self.settings = replace(self.settings, attachment_root=root, attachment_max_bytes=1000)
+        self.draft['attachments'] = [dict(path=str(packet), sha256=send_mod._digest(packet), size=20)]
+        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        self.assertEqual(draft.mail.attachments[0].size, 20)
+        for size in (19, True, -1, '20'):
+            with self.subTest(size=size):
+                self.draft['attachments'][0]['size'] = size
+                with self.assertRaisesRegex(ValueError, '^submission_attachment_mismatch$'):
+                    self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        del self.draft['attachments'][0]['size']
+        with self.assertRaisesRegex(ValueError, '^invalid_submission$'):
+            self.worker.SubmittedDraft.parse(self.draft, self.settings)
+
+    def test_confirmed_attachment_receipt_replays_after_file_changes(self):
+        root = Path(self.tmp).resolve() / 'approved'
+        root.mkdir()
+        packet = root / 'synthetic.pdf'
+        packet.write_bytes(b'abc')
+        digest = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
+        self.settings = replace(self.settings, attachment_root=root, attachment_max_bytes=1000)
+        self.draft['attachments'] = [dict(path=str(packet), sha256=digest, size=3)]
+        def dispatch(mail):
+            self.assertEqual(mail.attachments[0].path.read_bytes(), b'abc')
+            self.sent.append(mail)
+            self.mailbox.sent.append(SentRow(ACCOUNT, '; '.join(mail.recipients), mail.subject,
+                                             int(NOW), 'synthetic-changed-file'))
+            packet.write_bytes(b'changed after dispatch')
+            return 'sent'
+        self.ports.script_send = dispatch
+        carr = self.ports.carr
+        def offline_receipt(verb, args):
+            reply = carr(verb, args)
+            if verb == 'record-email-sent':
+                raise OSError('synthetic outage')
+            return reply
+        self.ports.carr = offline_receipt
+        with patch.object(send_mod, 'default_sender', lambda: f'{ACCOUNT}_ActiveSyncExchange_HxS'):
+            first = self.worker.run(self.settings, self.ports)
+        self.assertEqual((first['sent'], first['receipt_failed']), (1, 1))
+        self.ports.carr = carr
+        self.worker.run(self.settings, self.ports)
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual((self.sent[0].attachments[0].sha256, self.sent[0].attachments[0].size), (digest, 3))
+        receipts = [a for v, a in self.calls if v == 'record-email-sent']
+        self.assertEqual(len(receipts), 2)
+        self.assertEqual(receipts[0], receipts[1])
+        self.assertEqual(receipts[0]['status'], 'sent')
+        self.assertEqual(list((self.ports.out / 'outbox').glob('*.json')), [])
 
     def test_confirmed_files_keep_names_out_of_ledger_receipts_and_diagnostics(self):
         from dataclasses import replace
@@ -1214,7 +1343,7 @@ class OutboxTests(unittest.TestCase):
         for path in paths:
             path.write_bytes(b'synthetic attachment')
         self.settings = replace(self.settings, attachment_root=root, attachment_max_bytes=1000)
-        self.draft['attachments'] = [dict(path=str(p), sha256=send_mod._digest(p)) for p in paths]
+        self.draft['attachments'] = [dict(path=str(p), sha256=send_mod._digest(p), size=p.stat().st_size) for p in paths]
         def dispatch(mail):
             self.sent.append(mail)
             self.mailbox.sent.append(SentRow(ACCOUNT, '; '.join(mail.recipients), mail.subject,
@@ -1264,7 +1393,8 @@ class OutboxTests(unittest.TestCase):
                         quit_seconds=0, sync_seconds=0, new_window_seconds=0))
                     with patch.object(ui, 'cua', fake), \
                             patch.object(ui, 'outlook_pid', return_value=42), \
-                            patch.object(ui.subprocess, 'run') as command:
+                            patch.object(ui.subprocess, 'run', return_value=
+                                subprocess.CompletedProcess([], 1, b'', b'')) as command:
                         counts = self.worker.run(self.settings, self.ports)
                     self.assertEqual(counts['deferred'], 1)
                     self.assertEqual(counts['compose_window_open'], 1)
@@ -1274,6 +1404,13 @@ class OutboxTests(unittest.TestCase):
                     self.assertEqual(len(fake.forms), 1)
                     self.assertFalse(any(tool == 'invoke_menu' for tool, _ in fake.calls))
                     command.assert_not_called()
+
+    def test_locked_screen_defers_without_failure_receipt(self):
+        locked = send_mod.Result(send_mod.State.FAILED, 'screen_locked')
+        with patch.object(send_mod, 'send_submitted', return_value=locked):
+            counts = self.worker.run(self.settings, self.ports)
+        self.assertEqual((counts['deferred'], counts['failed'], counts['sent']), (1, 0, 0))
+        self.assertEqual([v for v, _ in self.calls if v == 'record-email-sent'], [])
 
     def test_invalid_rows_record_failure_and_do_not_block_later_draft(self):
         bad = dict(self.draft, cc=['wrong@example.test'])
@@ -1338,7 +1475,7 @@ class OutboxTests(unittest.TestCase):
         draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
         send_mod.Ledger(self.settings.send_state / send_mod.LEDGER).append(
             draft.key, 'send', 'pressing', send_mod.fingerprint(draft.mail), NOW)
-        self.assertEqual(self.worker.run(self.settings, self.ports)['deferred'], 1)
+        self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
         self.clock.t += send_mod.DUPLICATE_WINDOW
         self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
         [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
@@ -1355,7 +1492,7 @@ class OutboxTests(unittest.TestCase):
             form.closed = lambda: False
             return form
         self.ports.open_form = open_form
-        self.assertEqual(self.worker.run(self.settings, self.ports)['deferred'], 1)
+        self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
         self.clock.t += send_mod.DUPLICATE_WINDOW
         self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
         [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
@@ -1393,15 +1530,40 @@ class OutboxTests(unittest.TestCase):
         output = io.StringIO()
         with patch.object(self.worker, 'load_settings', return_value=self.settings), \
                 patch.object(type(self.settings), 'require_repo'), \
-                patch.object(self.worker, 'run', return_value=dict(sent=1, failed=1, deferred=0, receipt_failed=0)), \
+                patch.object(self.worker, 'run', return_value=dict(sent=1, failed=1, deferred=1, receipt_failed=0)), \
                 patch('sys.stdout', output):
             self.assertEqual(self.worker.main(), 1)
         receipt = json.loads(output.getvalue().split('outlook-outbox-receipt ', 1)[1])
         self.assertEqual((receipt['state'], receipt['reason']), ('failed', 'send_failed'))
 
+    def test_identityless_row_alerts_once_and_stays_quarantined(self):
+        row = {'subject': 'private malformed subject', 'to': ['private@example.test']}
+        carr = self.ports.carr
+        valid = [self.draft]
+        self.ports.carr = lambda verb, args: (dict(schema_version='email-outbox.v1', owner='joe',
+            drafts=[row, *valid]) if verb == 'outbox-for-sender' else carr(verb, args))
+        first = self.worker.run(self.settings, self.ports)
+        self.assertEqual((first['failed'], first.get('quarantined')), (1, 1))
+        self.assertEqual(first['sent'], 1)
+        valid.clear()
+        row = dict(reversed(list(row.items())))
+        second = self.worker.run(self.settings, self.ports)
+        self.assertEqual((second['failed'], second['quarantined']), (0, 1))
+        stored = ''.join(p.read_text() for p in (self.ports.out / 'outbox' / 'quarantine').iterdir())
+        self.assertNotIn('private', stored)
+        self.assertEqual(len(self.sent), 1)
+
     def test_main_reports_deferred(self):
-        with patch.object(self.worker, 'load_settings', return_value=self.settings), patch.object(self.settings.__class__, 'require_repo'), patch.object(self.worker, 'run', return_value=dict(sent=0, failed=0, deferred=1, receipt_failed=0)):
-            self.assertEqual(self.worker.main(), 1)
+        import io
+        output = io.StringIO()
+        with patch.object(self.worker, 'load_settings', return_value=self.settings), \
+                patch.object(type(self.settings), 'require_repo'), \
+                patch.object(self.worker, 'run', return_value=dict(sent=0, failed=0, deferred=1, receipt_failed=0)), \
+                patch('sys.stdout', output):
+            self.assertEqual(self.worker.main(), 78)
+        receipt = json.loads(output.getvalue().split('outlook-outbox-receipt ', 1)[1])
+        self.assertEqual((receipt['state'], receipt['reason']), ('skipped', 'deferred'))
+        self.assertEqual(receipt['counts']['deferred'], 1)
 
     def test_other_partner_identity_cannot_send_on_this_machine(self):
         carr = self.ports.carr
@@ -1461,19 +1623,74 @@ class OutboxTests(unittest.TestCase):
             draft.key, 'send', 'pressing', send_mod.fingerprint(draft.mail), NOW)
         self.mailbox.sent.append(SentRow(ACCOUNT, 'wrong@example.test; partner@example.test',
                                         draft.mail.subject, int(NOW), 'unrelated-42'))
-        self.assertEqual(self.worker.run(self.settings, self.ports)['deferred'], 1)
+        self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
         self.assertEqual(self.sent, [])
         self.assertFalse(any(verb == 'record-email-sent' for verb, _ in self.calls))
 
     def test_delayed_sent_items_visibility_reconciles_next_run_without_resending(self):
         self.ports.mailbox = FakeMailbox()
-        self.assertEqual(self.worker.run(self.settings, self.ports)['deferred'], 1)
+        self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
         self.ports.mailbox = self.mailbox
         self.assertFalse(any(verb == 'record-email-sent' for verb, _ in self.calls))
         self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
         self.assertEqual(len(self.sent), 1)
         [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
         self.assertEqual(receipt['sent_item_id'], 'sent-42')
+
+    def test_matching_sent_body_confirms_after_whitespace_normalization(self):
+        self.sent_body_fingerprint = send_mod.body_fingerprint('  Submitted\n final\ttext.  ')
+        self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
+        [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
+        self.assertEqual(receipt['status'], 'sent')
+        self.assertNotIn('reason', receipt)
+        ledger = (self.settings.send_state / send_mod.LEDGER).read_text()
+        self.assertIn('body_verified', ledger)
+        self.assertNotIn(self.draft['body'], ledger)
+
+    def test_preview_only_confirmation_receipt_survives_reconciliation(self):
+        self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
+        [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
+        self.assertEqual(receipt['reason'], 'body_unverified')
+        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        result = send_mod.send_submitted(draft, ports=self.ports)
+        self.assertEqual(draft.receipt(result), receipt)
+        self.assertNotIn(self.draft['body'], json.dumps(receipt))
+
+    def test_altered_body_confirms_without_resending_after_duplicate_window(self):
+        self.settings.send_state.mkdir(parents=True)
+        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        send_mod.Ledger(self.settings.send_state / send_mod.LEDGER).append(
+            draft.key, 'send', 'pressing', send_mod.fingerprint(draft.mail),
+            NOW - send_mod.DUPLICATE_WINDOW)
+        self.mailbox.sent.append(SentRow(
+            ACCOUNT, '; '.join(draft.mail.recipients), draft.mail.subject, int(NOW),
+            'sent-42', send_mod.body_fingerprint('Altered text.')))
+        self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
+        [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
+        self.assertEqual(receipt['reason'], 'body_mismatch')
+        self.assertEqual(self.sent, [])
+        self.assertNotIn('Altered text.', (self.settings.send_state / send_mod.LEDGER).read_text())
+
+    def test_short_body_with_decoder_preview_substitution_confirms(self):
+        self.draft['body'] = 'Thanks.'
+        self.draft['sha256'] = __import__('hashlib').sha256(json.dumps(
+            dict(subject=self.draft['subject'], body=self.draft['body']),
+            ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+        self.sent_body_fingerprint = send_mod.body_fingerprint('Thanks. Outlook preview footer')
+        self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
+        [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
+        self.assertEqual(receipt['reason'], 'body_mismatch')
+        self.assertEqual(len(self.sent), 1)
+
+    def test_existing_done_receipt_keeps_original_reason(self):
+        self.settings.send_state.mkdir(parents=True)
+        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        send_mod.Ledger(self.settings.send_state / send_mod.LEDGER).append(
+            draft.key, 'send', 'done', send_mod.fingerprint(draft.mail), NOW,
+            'sent-42', sent_at='2026-01-01T00:00:00Z')
+        result = send_mod.send_submitted(draft, ports=self.ports)
+        self.assertEqual(result.reason, 'confirmed_in_mailbox')
+        self.assertNotIn('reason', draft.receipt(result))
 
     def test_contact_policy_refusal_records_failed_receipt_without_sending(self):
         carr = self.ports.carr

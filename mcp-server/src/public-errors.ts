@@ -7,13 +7,21 @@ type PublicError = {
   error: string; correlation_id: string; hint: string;
   candidates?: Record<string, string | null>[]; retired_aliases?: Record<string, string | null>[];
   current_version?: number; fields?: unknown[]; invalid_deal_ids?: string[]; recorded_titles?: string[];
+  suggested_card_title?: string; suggested_description?: string; allowed_values?: string[];
 };
-type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSchema };
+type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSchema; enum?: unknown[] };
 
 // Public shapes are deliberately closed. Never copy messages, hints, wrapped
 // details, event rows, driver codes, or arbitrary properties from a refusal.
 const PUBLIC_ERRORS = new Map<unknown, string>([
+  ["comparison_fact_blocked", "Confirm the named deal field and refresh its canonical version before preparing the comparison."],
+  ["comparison_template_unavailable", "Register a reviewed LOI grid template matching the generation snapshot."],
+  ["invalid_snapshot", "Prepare a new confirmed-fact comparison draft."],
+  ["stale_snapshot", "The comparison evidence changed. Prepare a new draft."],
   ["email_draft_failure_not_resubmittable", "This failed draft cannot be resubmitted. Review the failure before creating a new draft."],
+  ["email_identity_owner_mismatch", "Use the authenticated partner as the mailbox owner."],
+  ["email_identity_account_mismatch", "Use the mailbox account recorded for the authenticated partner."],
+  ["email_identity_conflict", "The captured email belongs to another direction or submitted send. Re-read its record."],
   ["email_source_owner_mismatch", "Use the mailbox owner that matches the email source."],
   ["email_proposal_confidence_invalid", "Provide a confidence between zero and one."],
   ["email_proposal_fields_invalid", "Check the fields for the proposal kind."],
@@ -38,6 +46,8 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["next_action_conflict", "Re-read get-next-action with ref and owner. Review the current action before retrying set-next-action with its id and version, or null if absent, in expected_action."],
   ["needs_confirm", "Ask the human to confirm before resubmitting with confirm:true."],
   ["not_found", "The requested record was not found."],
+  ["action_link_not_found", "This link does not open a card for you. Sign in as the partner it was sent to, or ask for a fresh link."],
+  ["action_link_no_longer_actionable", "This card has already been handled or has changed. Open Home for what needs you now."],
   ["unsupported_decision_about", "The about field accepts lead, client, vendor, party, and deal references or names; Work Request references are not supported. Omit about and name the Work Request in the rationale."],
   ["decision_about_work_request_not_found", "The Work Request in the about field was not found. Check its reference, or omit about and name the Work Request in the rationale."],
   ["work_request_not_found", "Re-read the Work Request reference before retrying."],
@@ -69,6 +79,8 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["needs_disambiguation", "Choose an exact record reference from the candidates before retrying."],
   ["decline_claims_completion", "Use complete-work-request to close built work. Decline only work that will not be built."],
   ["loop_not_open", "Re-read the loop before choosing another action."],
+  ["action_not_found", "Re-read the action list. This action is unavailable in your organization."],
+  ["invalid_action_id", "Supply the action UUID from a fresh action list."],
   ["action_not_open", "Re-read the current action. It is already closed; review its status before choosing another action."],
   ["critical_date_not_open", "Re-read the current critical date. It is already resolved; review its status before choosing another action."],
   ["personal_doc_not_owner", "This personal doctrine belongs to another owner."],
@@ -130,7 +142,9 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["work_request_open_slices", "Finish or retire every open slice before completing the Work Request."],
   ["slice_not_found", "Choose a slice from the recorded plan."],
   ["invalid_card_title", "Supply a card title of two or three plain words."],
-  ["invalid_job_description", "Describe the job in one sentence."],
+  ["card_title_verb", "Start the title with an imperative from mcp-server/src/job-card-verbs.v1.json."],
+  ["card_title_duplicate", "Choose a title not already used by another job in this Work Request."],
+  ["invalid_job_description", "Supply a new description as one sentence starting with an imperative from mcp-server/src/job-card-verbs.v1.json."],
   ["job_already_started", "This job already has a runner; choose the next unstarted queue job."],
   ["job_repository_mismatch", "Start this job in its recorded repository."],
   ["job_not_found", "Choose an existing job under this Work Request and slice."],
@@ -242,6 +256,8 @@ export function publicError(error: unknown, { env, inputSchema, fallback = "unha
   const code = PUBLIC_ERRORS.has(payload?.error) ? payload!.error : fallback;
   const result: PublicError = { error: code, correlation_id: correlationId,
     hint: PUBLIC_ERRORS.get(code) || "The operation failed. Quote the correlation_id when reporting it." };
+  if (code === "comparison_fact_blocked" && ["base_rent_per_sf", "landlord_ti_per_sf", "term_months", "free_rent_months"].includes(String(payload?.field)))
+    result.fields = [payload!.field];
   if (["unsupported_decision_about", "decision_about_work_request_not_found"].includes(code) &&
       typeof payload?.ref === "string" && /^WR-(?:[0-9]{1,12}|AI-[0-9]{3}|SIEP-[0-9A-Z]{2,3})$/i.test(payload.ref))
     result.hint += ` Reference: ${payload.ref}.`;
@@ -257,6 +273,17 @@ export function publicError(error: unknown, { env, inputSchema, fallback = "unha
       && payload.recorded_titles.length <= 100
       && payload.recorded_titles.every(title => typeof title === "string" && title.trim() && title.length <= 200))
     result.recorded_titles = payload.recorded_titles;
+  if (["invalid_card_title", "card_title_verb", "card_title_duplicate", "invalid_work_queue_fields"].includes(code) && typeof payload?.suggested_card_title === "string")
+    result.suggested_card_title = payload.suggested_card_title;
+  if (["invalid_job_description", "invalid_work_queue_fields"].includes(code) && typeof payload?.suggested_description === "string")
+    result.suggested_description = payload.suggested_description;
+  if (code === "invalid_job_type" && Array.isArray(payload?.allowed_values))
+    result.allowed_values = payload.allowed_values.filter((value): value is string => typeof value === "string");
+  if (code === "value_not_in_declared_vocabulary" && typeof payload?.field === "string") {
+    const spec = inputSchema?.properties?.[payload.field];
+    const values = spec?.enum ?? spec?.items?.enum;
+    if (Array.isArray(values) && values.every(value => typeof value === "string")) result.allowed_values = values as string[];
+  }
   if (code === "version_conflict" && Number.isSafeInteger(payload?.current_version) && (payload!.current_version as number) >= 0)
     result.current_version = payload!.current_version as number;
   if (["invalid_idempotency_key", "invalid_report_problem", "invalid_report_problem_fields", "caller_authority_field_forbidden", "invalid_acceptance_criteria", "current_situation_source_not_found", "invalid_field_value", "validation_error", "value_not_in_declared_vocabulary", "unregistered_operation_fields", "missing_required", "invalid_boolean", "invalid_number", "tool_call_markup_in_value"].includes(code)) {

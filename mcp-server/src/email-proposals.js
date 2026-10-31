@@ -1,4 +1,5 @@
 // Expose and resolve email-derived proposals.
+import { lockEmailIdentity, capturedEmail } from './email-identity.js';
 import { sha256 } from './sha256.ts';
 import { mailboxOwnerForActor, partnerAuthoritySlugForActor } from './partner-authority.js';
 import { suspected } from './untrusted-text.js';
@@ -19,6 +20,25 @@ const KINDS = {
 };
 const sender = summary => /^Email from (.+?): (.*)$/s.exec(summary ?? '');
 
+export function resolveContact(person = {}, people, { call = false } = {}) {
+  const email = (person.email ?? '').trim().toLowerCase();
+  const phoneDigits = value => (value ?? '').replace(/[^0-9]/g, '').replace(/^1(?=\d{10}$)/, '');
+  const phone = phoneDigits(person.phone);
+  const hits = people.filter(p => email
+    ? ((p.email ?? '').toLowerCase().match(/[^\s<>@,;]+@[^\s<>@,;]+/g) ?? []).includes(email)
+    : call && (phone ? phone.length >= 10 && [p.phone, p.cell].some(value =>
+      phoneDigits(value) === phone)
+      : Boolean(person.name?.trim()) && p.name?.trim().toLowerCase() === person.name.trim().toLowerCase()));
+  const match = hits.length === 1 ? hits[0] : null;
+  return { ...person, email, name: match?.name ?? person.name ?? null,
+    party_id: match?.party_id ?? null, client_id: match?.client_id ?? null, client: match?.client ?? null,
+    role: match?.client_id ? 'client' : match?.vendor_category
+      ? (/attorney|legal|law/i.test(match.vendor_category) ? 'attorney'
+        : /lend|loan|bank|financ/i.test(match.vendor_category) ? 'lender'
+        : /landlord|listing/i.test(match.vendor_category) ? 'landlord_side' : 'other_vendor') : null,
+    unknown: !match, internal: person.internal === true };
+}
+
 export function emailProposalTools({ ToolError, withEnvelope, writeEvent, preview }) {
   const fail = (error, extra = {}) => { throw new ToolError({ error, ...extra }); };
   const previewArgs = row => ({ deal: row.deal_id, activity_id: row.activity_id,
@@ -31,23 +51,11 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
       left join vendor v on v.party_id=p.id and v.merged_into is null
       where p.merged_into is null and p.deleted_at is null and p.email is not null`)).rows;
   }
-  function resolve(person = {}, people) {
-    const email = (person.email ?? '').toLowerCase();
-    const hits = people.filter(p => (p.email.toLowerCase().match(/[^\s<>@,;]+@[^\s<>@,;]+/g) ?? []).includes(email));
-    const match = hits.length === 1 ? hits[0] : null;
-    return { ...person, email, name: match?.name ?? person.name ?? null,
-      party_id: match?.party_id ?? null, client_id: match?.client_id ?? null, client: match?.client ?? null,
-      role: match?.client_id ? 'client' : match?.vendor_category
-        ? (/attorney|legal|law/i.test(match.vendor_category) ? 'attorney'
-          : /lend|loan|bank|financ/i.test(match.vendor_category) ? 'lender'
-          : /landlord|listing/i.test(match.vendor_category) ? 'landlord_side' : 'other_vendor') : null,
-      unknown: !match, internal: person.internal === true };
-  }
   function evidence(row, people) {
     const context = row.email_context ?? {};
     return { ...row, subject: context.subject ?? sender(row.summary)?.[2] ?? row.summary,
-      conversation_id: context.conversation_id ?? null, participant_evidence_missing: !row.email_context, sender: context.sender ? resolve(context.sender, people) : row.recorded_sender ?? resolve({}, people),
-      recipients: (context.recipients ?? []).map(p => resolve(p, people)),
+      conversation_id: context.conversation_id ?? null, participant_evidence_missing: !row.email_context, sender: context.sender ? resolveContact(context.sender, people) : row.recorded_sender ?? resolveContact({}, people),
+      recipients: (context.recipients ?? []).map(p => resolveContact(p, people)),
       occurred_at: new Date(row.occurred_at).toISOString() };
   }
   async function matchingPreview(c, row) {
@@ -241,16 +249,17 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'submit-email-draft': {
       write: true, humanOnly: true, humanCallerOnly: true,
-      description: 'The owning partner submits the exact final subject, body and displayed to/cc arrays from a review card. Missing or changed recipients refuse email_draft_recipients_mismatch. Approval freezes the original sender as recipient, the other partner actor.email as cc, and the supplied attachment paths and sha256. Paths must be canonical absolute paths under the local attachment root. Missing copy address refuses. Enqueues for that partner’s Mac; does not send mail.',
+      description: 'The owning partner submits the exact final subject, body and displayed to/cc arrays from a review card. Missing or changed recipients refuse email_draft_recipients_mismatch. Approval freezes the original sender as recipient, the other partner actor.email as cc, and the supplied attachment paths, sha256 and byte sizes. Paths must be canonical absolute paths under the local attachment root. Missing copy address refuses. Enqueues for that partner’s Mac; does not send mail.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: [...Object.keys(draftProperties), 'subject', 'body'], properties: { ...draftProperties,
           subject: { type: 'string', minLength: 1, maxLength: 998 }, body: { type: 'string', maxLength: 20000 },
           to: { type: 'array', minItems: 1, maxItems: 1, items: { type: 'string', format: 'email' } },
           cc: { type: 'array', minItems: 1, maxItems: 1, items: { type: 'string', format: 'email' } },
           attachments: { type: 'array', maxItems: 50, items: { type: 'object', additionalProperties: false,
-            required: ['path', 'sha256'], properties: {
+            required: ['path', 'sha256', 'size'], properties: {
               path: { type: 'string', minLength: 2, maxLength: 4096, pattern: '^/(?:[^/\\u0000]+/)*[^/\\u0000]+$' },
-              sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' } } } } } },
+              sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              size: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER } } } } } },
       handler: async (c, actor, args) => {
         if (actor.human !== true || !['joe', 'dell'].includes(actor.slug)) fail('email_draft_not_owner');
         await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
@@ -267,6 +276,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
               args[field][0] !== recipients[field][0])) fail('email_draft_recipients_mismatch');
           if ((args.attachments ?? []).some(a => a.path.split('/').some(part => part === '.' || part === '..')))
             fail('email_draft_attachment_path_invalid');
+          if ((args.attachments ?? []).some(a => !Number.isSafeInteger(a.size) || a.size < 0))
+            fail('email_draft_attachment_size_invalid');
           const submitted = { subject: args.subject, body: args.body,
             sha256: sha256(JSON.stringify({ subject: args.subject, body: args.body })), ...recipients,
             attachments: args.attachments ?? [] };
@@ -275,7 +286,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             send_result=null,result_recorded_at=null where id=$1`,
           [row.id, JSON.stringify(submitted), actor.id]);
           await writeEvent(c, actor, 'submit-email-draft', 'deal', row.deal_id, {
-            new: { proposal_id: row.id, sha256: submitted.sha256, to: submitted.to, cc: submitted.cc },
+            new: { proposal_id: row.id, sha256: submitted.sha256, recipient_binding: {
+              sha256: sha256(JSON.stringify(recipients)), cc_owner: row.owner === 'joe' ? 'dell' : 'joe',
+              cc_sha256: sha256(recipients.cc[0]) } },
             cause: 'human_stated', idempotency_key: args.idempotency_key });
           const { attachments, ...shown } = submitted;
           return { ok: true, proposal_id: row.id, status: 'approved_to_send', version: row.version + 1, ...shown,
@@ -298,7 +311,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'record-email-sent': {
       write: true,
-      description: 'The owning partner’s Mac records sent only after Sent Items confirms, or failed with a reason. Requires submitted text sha256 and base_version. Sent results also require the observed sent_at and sender_account matching the owning partner. Atomically appends email_out correspondence with frozen recipients and attachment names and hashes; retries of that send identity do not duplicate it. A failed result leaves the outbox to prevent ambiguous automatic resend. Never sends mail.',
+      description: 'The owning partner’s Mac records sent only after Sent Items confirms, or failed with a reason. Requires submitted text sha256 and base_version. Sent results also require the observed sent_at and sender_account matching the owning partner. Atomically appends email_out correspondence with frozen recipients and attachment names, hashes and byte sizes; retries of that send identity do not duplicate it. A failed result leaves the outbox to prevent ambiguous automatic resend. Never sends mail.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: [...Object.keys(draftProperties), 'status', 'sha256'], properties: { ...draftProperties,
           status: { type: 'string', enum: ['sent', 'failed'] },
@@ -337,12 +350,24 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
                 ...row.submitted_email.cc.map(email => ({ email, kind: 'cc', internal: true })),
               ], send_id: row.id, sent_item_id: args.sent_item_id,
               sent_at: args.sent_at, attachments: (row.submitted_email.attachments ?? []).map(a => ({
-                file_name: a.path.split('/').at(-1), sha256: a.sha256 })) };
-            await c.query(`insert into activity(occurred_at,actor_id,kind,summary,deal_id,source,email_context)
-              values($1,$2,'email_out','Partner-submitted email sent',$3,'outlook',$4::jsonb)`,
-            [args.sent_at, partner.id, row.deal_id, JSON.stringify(context)]);
+                file_name: a.path.split('/').at(-1), sha256: a.sha256, size: a.size })) };
+            const identity = await lockEmailIdentity(c, owner, args.sender_account, args.sent_item_id);
+            const existing = await capturedEmail(c, identity);
+            if (existing) {
+              if (existing.kind !== 'email_out' || (existing.email_context?.send_id && existing.email_context.send_id !== row.id))
+                fail('email_identity_conflict');
+              await c.query(`update activity set occurred_at=$2,actor_id=$3,deal_id=$4,email_context=$5::jsonb,
+                version=version+1,updated_by=$3,updated_at=now() where id=$1`,
+              [existing.id, args.sent_at, partner.id, row.deal_id, JSON.stringify(context)]);
+            } else {
+              await c.query(`insert into activity(occurred_at,actor_id,kind,summary,deal_id,source,email_context,email_identity)
+                values($1,$2,'email_out','Partner-submitted email sent',$3,'outlook',$4::jsonb,$5::jsonb)`,
+              [args.sent_at, partner.id, row.deal_id, JSON.stringify(context),
+                JSON.stringify({ ...identity, subject: row.deal_id })]);
+            }
           }
-          const result = args.status === 'sent' ? { status: 'sent', sent_item_id: args.sent_item_id, sender_account: args.sender_account, sent_at: args.sent_at }
+          const result = args.status === 'sent' ? { status: 'sent', sent_item_id: args.sent_item_id, sender_account: args.sender_account, sent_at: args.sent_at,
+            ...(['body_unverified', 'body_mismatch'].includes(args.reason) ? { reason: args.reason } : {}) }
             : { status: 'failed', reason: args.reason };
           await c.query(`update email_proposal set status=$2,version=version+1,send_result=$3::jsonb,result_recorded_at=now()
             where id=$1`, [row.id, args.status, JSON.stringify(result)]);
@@ -662,7 +687,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'dismiss-email-proposal': {
       write: true, humanOnly: true, humanCallerOnly: true,
-      description: 'Joe or Dell dismisses one pending email proposal at the version they read, with a reason kept in deal history. The router never re-creates a dismissed proposal for the same deal, email and kind. If Joe later confirms the same proposal through its confirm verb, the confirmation wins and the row becomes confirmed with the dismissal kept as a note. Changes nothing else.',
+      description: 'Joe or Dell dismisses one pending email proposal at the version they read, with a reason kept in deal history. Only the mailbox owner can dismiss a reply draft. The router never re-creates a dismissed proposal for the same deal, email and kind. If Joe later confirms the same proposal through its confirm verb, the confirmation wins and the row becomes confirmed with the dismissal kept as a note. Changes nothing else.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: ['idempotency_key', 'proposal_id', 'base_version', 'reason'],
         properties: {
@@ -675,9 +700,10 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         if (actor.human !== true || !['joe', 'dell'].includes(actor.slug)) fail('partner_dismissal_required');
         return withEnvelope(c, actor, 'dismiss-email-proposal', args, async () => {
           if (!args.reason?.trim()) fail('email_proposal_reason_required');
-          const row = (await c.query(`select id,kind,deal_id,activity_id,status,version from email_proposal
+          const row = (await c.query(`select id,kind,deal_id,activity_id,status,version,owner from email_proposal
             where id=$1 for update`, [args.proposal_id])).rows[0];
           if (!row) fail('email_proposal_not_found');
+          if (row.kind === 'reply_draft' && row.owner !== actor.slug) fail('email_draft_not_owner');
           if (row.status !== 'pending') fail('email_proposal_not_pending', { status: row.status });
           if (row.version !== args.base_version)
             fail('version_conflict', { current_version: row.version, hint: 'surface this to the human and re-read; NEVER auto-retry' });
