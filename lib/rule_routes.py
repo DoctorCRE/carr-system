@@ -44,7 +44,7 @@ KNOWN_CONNECTOR_TOOLS = frozenset({
     "create_scheduled_task", "update_scheduled_task",
     # Claude Code Remote connector: the two calls that launch cloud work, where
     # rule ede4b241 (cloud model choice) is put in front of the session
-    "create_session", "create_trigger",
+    "create_session", "create_trigger", "delegate_task",
 })
 CONNECTOR_GLOB = re.compile(r"^mcp__(\*|[A-Za-z0-9_-]+)__([A-Za-z0-9_-]+)$")
 

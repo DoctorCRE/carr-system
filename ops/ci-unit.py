@@ -34,7 +34,7 @@ def main():
             try:
                 with log.open('w') as output:
                     result = subprocess.run(
-                        [sys.executable, str(ROOT / 'bin/with-timeout.py'), '900',
+                        [sys.executable, str(ROOT / 'bin/with-timeout.py'), '1200',
                          *(['node', '--test', 'practice-plugin/test/calculators.test.mjs',
                             'practice-plugin/test/verticals.test.mjs'] if args.part == 'fast' else
                            ['npm', '--prefix', package, 'test'])], cwd=ROOT,

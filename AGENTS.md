@@ -9,7 +9,7 @@ To find a script and its purpose, run `./run.sh map` for a fresh path-and-descri
 ## Always-on rules
 
 <!-- Generated from mcp-server/src/doctrine.js and ops/config/rule-cards.v1.json by ops/sync-core-rule-cards.py. -->
-OPENING ACT, every session: call attach-memory once, first, with surface claude_code for a Claude Code session (terminal or Desktop) or codex for a Codex job (pass the job log named on the brief's first line as transcript_ref); a claude.ai or other chat app does not attach and calls standing-context instead. Check its team-memory index before starting, read any section that bears on your task with doctrine-sections, and skip work a current section records as done or ruled out, citing it; as you learn or rule something out, write it with write-doctrine-section document=team-memory and your attach_id.
+OPENING ACT, every session: call attach-memory once, first, with surface claude_code for a Claude Code session (terminal or Desktop) or codex for a Codex session (pass transcript_ref if known); a claude.ai or other chat app does not attach and calls standing-context instead. Check its team-memory index before starting, read any section that bears on your task with doctrine-sections, and skip work a current section records as done or ruled out, citing it; as you learn or rule something out, write it with write-doctrine-section document=team-memory and your attach_id.
 
 These twelve core cards are loaded natively with this file.
 Before acting when a card applies, answer one line with applies yes/no and the action or reason.
@@ -100,9 +100,9 @@ behavior, and CARR records. Do not ask for a separate Jev-specific approval or
 exclude a review merely because its category is not prelisted. Preserve source
 evidence, required checks, and any distinct reviewer-of-record requirement.
 
-## Run a Codex job
+## Dispatch work
 
-Launch `bin/codex-job <owner/repo> <new-branch> "<brief>" [-c model_reasoning_effort=high]` as a tracked background task and read its printed result; use several tasks for parallel work. Model and default effort come from `~/.codex/config.toml`.
+Use T3 `delegate_task` with worktree isolation and the task's provider and model. Completion wakes the parent; never poll. Watch PRs with `watch_pull_request`.
 
 ## Authorized code homes and repository boundaries
 
@@ -232,25 +232,7 @@ when claiming an improvement. Current cases and scorers live in `evals/`.
 ## Progress board
 
 Keep human notes and questions with `tools/progress_board.py`. Local mutations
-save `out/boards/<project>.json` under a per-board lock. The scheduled renderer
-reads GitHub and release facts and publishes independently. Board writes and
-publication never gate source delivery. The only board UI is
-https://app.doctorcre.com/progress-board (`?board=<project>` or `?board=all-repos`).
-A failed scheduled publish keeps local notes and questions for the next render.
-`PROGRESS_BOARD_LOCAL_ONLY=1` skips publishing
-and says so. There is no static HTML copy. The launchd job runs
-`ops/progress-board-render.sh` from a repository checkout, which binds
-`CARR_REPO_ROOT` and the repo's `.venv` Python; never run an extracted copy.
-Install from the canonical checkout on main with
-`./run.sh config install-progress-board --apply`; verify the canonical runtime
-path with `./run.sh config verify-progress-board` and
-`./run.sh config check-launchd-main-paths`. After moving that checkout, rerun
-the explicit installer.
-`install-progress-board --apply` and `verify-progress-board` preserve canonical
-`out/boards/<project>.json`; `--repo` accepts only that checkout. Feature worktrees are refused,
-including pre-merge verification. `check-launchd-main-paths` audits installed
-WorkingDirectory and program paths for non-main worktrees without changing
-plists.
+save `out/boards/<project>.json` under a per-board lock. Publication is unscheduled. The board UI is https://app.doctorcre.com/progress-board (`?board=<project>` or `?board=all-repos`). Board writes never gate source delivery.
 A `done` card with no PR is Live (complete). A project card with a merged PR
 stays Merged until production shows it: only `--delivery-target worker`
 (carr-system) or `app` (doctorcre-app) completes from the release readback;
@@ -274,6 +256,8 @@ Several sessions run against this one checkout at the same time.
 - Leave any modified file you did not write, and say so.
 
 ## Guidance changes
+
+A PR that retires a homemade piece in favor of a T3 feature updates CLAUDE.md in the same PR.
 
 Capture durable corrections as team-memory convention proposals, with the
 trade-off; they bind nobody until Joe or Dell adopts them in the app
