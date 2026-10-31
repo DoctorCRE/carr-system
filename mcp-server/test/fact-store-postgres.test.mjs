@@ -58,6 +58,7 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
     await c.query(await readFile(new URL('../../migrations/1099_fact_review.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(new URL('../../migrations/1102_fact_review_matching_promotion.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(new URL('../../migrations/1103_deal_extraction.sql', import.meta.url), 'utf8'));
+    await c.query(await readFile(new URL('../../migrations/1109_deal_schedules.sql', import.meta.url), 'utf8'));
     await c.query("update system_config set value='true'::jsonb where key='facts.automatic_promotion_enabled'");
     await c.query('create table v_ref_index(subject_id uuid, subject_type text)');
     await c.query(await readFile(new URL('../../migrations/1086_deal_documents.sql', import.meta.url), 'utf8'));
