@@ -1371,6 +1371,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "list-deal-documents": {
+    "ingress_key": "mcp-tool:list-deal-documents",
+    "source_locator": "mcp-server/src/deal-files.js",
+    "schema_digest": "3600bc2b80820a44c2584c3f4e2296db8a3dadb6aa1364cc733d07c4a2688366",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "list-doc-conversations": {
     "ingress_key": "mcp-tool:list-doc-conversations",
     "source_locator": "mcp-server/src/doc-conversation.js",

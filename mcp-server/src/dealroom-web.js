@@ -54,6 +54,7 @@ const SYSTEM_WORK_MAX_BODY = 16 * 1024;
 const SYSTEM_WORK_PREFIX = "/api/system-work";
 const COMMAND_CENTER_API_PREFIX = "/api/v1/";
 export const FACT_REVIEW_ROUTES = new Map([
+  ["/api/v1/fact-review/documents", "list-deal-documents"],
   ["/api/v1/fact-review/list", "list-fact-review"],
   ["/api/v1/fact-review/record", "record-human-fact"],
   ["/api/v1/fact-review/resolve", "resolve-fact-review"],
