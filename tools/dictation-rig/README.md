@@ -323,3 +323,5 @@ In order, on his Mac:
 9. Consent still ships: Alabama is one-party consent but Florida is
    all-party, the territory spans both, and the announcement layer plus the
    ask-first habit are non-negotiable either way (Addendum 5).
+
+If a session is held for repeating the transcript, edit its private `post-call-held-draft.json` (or `post-call-report.json` for a saved report), then run `bin/call-mode.py release <session>`. The command checks the current transcript again and reports the failing field without printing its text.
