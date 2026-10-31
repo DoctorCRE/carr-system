@@ -43,12 +43,13 @@ class PreflightTests(unittest.TestCase):
     def test_missing_or_duplicated_hosted_class_is_red(self):
         original = (ROOT / '.github/workflows/ci.yml').read_text()
         canary = (ROOT / '.github/workflows/main-canary.yml').read_text()
-        for replacement in ('pushfloor types', 'pushfloor unit unit types'):
+        for replacement in ('', '          - "unit unit"\n'):
             with self.subTest(replacement=replacement), tempfile.TemporaryDirectory() as directory:
                 root = pathlib.Path(directory)
                 (root / '.github/workflows').mkdir(parents=True)
-                (root / '.github/workflows/ci.yml').write_text(
-                    original.replace('pushfloor unit types', replacement))
+                mutated = original.replace('          - "unit"\n', replacement, 1)
+                self.assertNotEqual(mutated, original, 'the fixture must remove or duplicate the unit class')
+                (root / '.github/workflows/ci.yml').write_text(mutated)
                 (root / '.github/workflows/main-canary.yml').write_text(canary)
                 mod = load('ci_membership', 'ci-selftest.py')
                 with patch.object(mod, 'REPO', root), contextlib.redirect_stdout(io.StringIO()):

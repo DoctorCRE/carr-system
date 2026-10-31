@@ -58,19 +58,32 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
         return json.loads(result.stdout)
     main, pr = workflow(CANARY), workflow(CI_YML)
     classes = main['jobs']['classes']
-    migration_half = {'classes': 'migration', 'gate_shard': 2}
-    check('main has the PR class set and adds only the migration fixtures half',
-          sorted(classes['strategy']['matrix']['classes']) == sorted(pr['jobs']['classes']['strategy']['matrix']['classes'])
-          and classes['strategy']['matrix']['gate_shard'] == [1, 2]
-          and migration_half in pr['jobs']['classes']['strategy']['matrix']['exclude']
-          and classes['strategy']['matrix']['exclude']
-          == [row for row in pr['jobs']['classes']['strategy']['matrix']['exclude'] if row != migration_half])
-    check('main names each shard distinctly and otherwise as PR CI',
+    from collections import Counter
+    def execution_counts(job):
+        matrix = job['strategy']['matrix']
+        return Counter(name for group in matrix['classes'] for shard in matrix['gate_shard']
+                       if {'classes': group, 'gate_shard': shard} not in matrix['exclude']
+                       for name in group.split())
+    main_counts = execution_counts(classes)
+    full_counts = execution_counts(pr['jobs']['classes'])
+    check('main and full CI cover the same classes with only gates and main migration duplicated',
+          {'unit', 'gates', 'migration'} <= set(main_counts) == set(full_counts)
+          and all(count == (2 if name in ('gates', 'migration') else 1) for name, count in main_counts.items())
+          and all(count == (2 if name == 'gates' else 1) for name, count in full_counts.items()))
+    main_names = classes['strategy']['matrix']['job_names'][0]
+    full_names = pr['jobs']['classes']['strategy']['matrix']['job_names'][0]
+    check('shared class groups keep their names and main names its migration fixture shard distinctly',
           "format('{0}_shard_2', matrix.classes)" in classes['name']
-          and classes['strategy']['matrix']['job_names'][0]
-          == dict(pr['jobs']['classes']['strategy']['matrix']['job_names'][0],
-                  migration_shard_2={'name': 'ops/ci.sh --strict --only migration --migration-part fixtures',
-                                     'classes': 'migration'}))
+          and all(main_names[key] == full_names[key] for key in main_names.keys() & full_names.keys())
+          and len({row['name'] for row in main_names.values()}) == len(main_names)
+          and main_names['migration_shard_2'] == {
+              'name': 'ops/ci.sh --strict --only migration --migration-part fixtures', 'classes': 'migration'})
+    check('full CI splits MCP shards from practice-plugin while main retains all package tests',
+          pr['jobs']['unit']['strategy']['matrix']['shard'] == [1, 2, 3, 4]
+          and pr['jobs']['unit-coverage']['needs'] == 'unit'
+          and 'unit-coverage' in pr['jobs']['checks']['needs']
+          and any('--unit-part practice' in step.get('run', '') for step in pr['jobs']['classes']['steps'])
+          and all('--unit-part' not in step.get('run', '') for step in classes['steps']))
     check('all classes run unless exact-tree proof succeeded',
           classes.get('if') == "${{ always() && (needs.evidence.result != 'success' || needs.evidence.outputs.reused != 'true') }}")
     main_steps = classes['steps']
@@ -164,7 +177,7 @@ def test_role_migration_fixtures_have_postgresql_17_server_binaries():
         install_text = (REPO / 'ops/ci-postgres.sh').read_text() if installer in y else y
         install = y.find(installer if installer in y else "sudo apt-get install -y -qq postgresql-17")
         check(f"{path.name} installs PG17 for owned role-migration fixtures",
-              install >= 0 and "sudo apt-get install -y -qq postgresql-17" in install_text)
+              install >= 0 and re.search(r"(?m)^\s*sudo apt-get\b[^\n]*\binstall\b[^\n]*\bpostgresql-17(?=\s|$)", install_text) is not None)
         check(f"{path.name} exposes PG17 binaries to the shared discovery helper",
               'echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"' in install_text)
         check(f"{path.name} provisions PG17 before check execution",

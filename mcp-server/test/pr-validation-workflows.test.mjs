@@ -10,6 +10,8 @@ import test from "node:test";
 
 const yaml = createRequire(import.meta.url)("js-yaml");
 const files = ["ci.yml", "doc-drift.yml"];
+const CI_PR_JOBS = ["fast", "unit", "unit-coverage", "checks"];
+const CI_FULL_JOBS = ["scope", "unit", "unit-coverage", "classes", "migration-fixtures", "checks"];
 const read = name => yaml.load(readFileSync(new URL("../../.github/workflows/" + name, import.meta.url), "utf8"));
 // Evaluate the workflows' scalar policy expressions, not a synthetic scheduler.
 // Unknown expressions fail closed; these tests make no claims about runner time.
@@ -46,7 +48,7 @@ function policy(workflow, event, success = true, inputs = { shard_trial: false }
 }
 for (const file of files) {
   const workflow = read(file);
-  const validationJobs = file === "ci.yml" ? Object.keys(workflow.jobs) : ["check", "verdict"];
+  const validationJobs = file === "ci.yml" ? CI_PR_JOBS : ["check", "verdict"];
   test(`${file}: close is unsubscribed and cannot publish skipped replacement checks`, () => {
     const closed = policy(workflow, context("pull_request", "closed"));
     assert.equal(closed.triggers, false, "close must start no workflow, not a workflow of skipped jobs");
@@ -84,7 +86,7 @@ for (const file of files) {
       assert.equal(one.cancel, false);
       assert.notEqual(one.group, current.group);
       assert.notEqual(one.group, two.group, "pending non-PR verdicts must not replace each other");
-      assert.deepEqual(one.runnable, event === "schedule" ? one.jobs : validationJobs);
+      assert.deepEqual(one.runnable, file === "ci.yml" ? CI_FULL_JOBS : validationJobs);
     }
   });
   test(`${file}: unsubscribed push events never count as validation`, () => {
@@ -96,8 +98,12 @@ for (const file of files) {
 
 test("expensive proof jobs survive scope failure but stop when superseded", () => {
   const ci = read("ci.yml");
-  assert.deepEqual(policy(ci, context(), false).runnable, Object.keys(ci.jobs));
-  assert.deepEqual(policy(ci, context(), true, { shard_trial: false }, true).runnable, ["checks"]);
+  for (const [event, jobs] of [["pull_request", CI_PR_JOBS], ["merge_group", CI_FULL_JOBS]]) {
+    assert.deepEqual(policy(ci, context(event), false).runnable, jobs);
+    assert.deepEqual(policy(ci, context(event), true, { shard_trial: false }, true).runnable, ["checks"]);
+  }
+  assert.deepEqual(Object.keys(ci.jobs).sort(), [...new Set([...CI_PR_JOBS, ...CI_FULL_JOBS])].sort(),
+    "every job belongs to the PR lane, full lane, or both");
 });
 
 test("only unit fixtures provision the shared PostgreSQL service", () => {
@@ -134,24 +140,37 @@ test("metadata edits start no validation workflow, so no skipped suite replaces 
 test("strict aggregate runs after failed classes and requires complete successful evidence", () => {
   const ci = read("ci.yml"), gate = ci.jobs.checks;
   assert.equal(gate.name, "ops/ci.sh --strict", "the required context name must be a literal");
-  assert.deepEqual(gate.needs, ["scope", "classes", "migration-fixtures"]);
+  assert.deepEqual(gate.needs, ["fast", "unit-coverage", "scope", "classes", "migration-fixtures"]);
+  assert.equal(ci.jobs["unit-coverage"].needs, "unit", "coverage must wait for the entire shard matrix");
+  assert.deepEqual(ci.jobs.unit.strategy.matrix.shard, [1, 2, 3, 4]);
   assert.ok(policy(ci, context(), false).runnable.includes("checks"), "always() must override implicit success()");
   const step = gate.steps.find(step => step.name === "Fail unless every class group succeeded");
   assert.match(step.run, /python3 ops\/ci-evidence.py verdict/);
   const fixture = mkdtempSync(join(tmpdir(), "ci-verdict-test-"));
   try {
     assert.equal(step.env.CI_NEEDS, "${{ toJSON(needs) }}");
-    for (const classes of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
-      for (const fixtures of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
+    assert.equal(step.env.CI_EVENT, "${{ github.event_name }}");
+    for (const [event, active] of [["pull_request", ["fast", "unit-coverage"]],
+                                  ["merge_group", ["scope", "classes", "migration-fixtures", "unit-coverage"]]]) {
+      const needs = Object.fromEntries(gate.needs.map(name => [name, { result: active.includes(name) ? "success" : "skipped" }]));
+      needs.scope.outputs = { full: "true" };
+      const verdict = current => {
         const output = spawnSync("bash", ["-e", "-c", step.run], {
           cwd: new URL("../../", import.meta.url),
-          env: { PATH: process.env.PATH, CI_DRAFT: "false",
-            CI_NEEDS: JSON.stringify({ scope: { result: "success", outputs: { full: "true" } },
-              classes: { result: classes }, "migration-fixtures": { result: fixtures } }),
-            GITHUB_STEP_SUMMARY: join(fixture, "summary") },
+          env: { PATH: process.env.PATH, CI_DRAFT: "false", CI_EVENT: event,
+            CI_NEEDS: JSON.stringify(current), GITHUB_STEP_SUMMARY: join(fixture, "summary") },
           encoding: "utf8", timeout: 5000 });
         assert.ifError(output.error);
-        assert.equal(output.status === 0, classes === "success" && fixtures === "success", output.stdout + output.stderr);
+        return output;
+      };
+      const passing = verdict(needs);
+      assert.equal(passing.status, 0, `${event}: inactive jobs may skip; ${passing.stdout}${passing.stderr}`);
+      for (const lane of active) for (const state of ["failure", "cancelled", "skipped", "unknown", "", "missing"]) {
+        const broken = structuredClone(needs);
+        if (state === "missing") delete broken[lane];
+        else broken[lane].result = state;
+        const output = verdict(broken);
+        assert.notEqual(output.status, 0, `${event}: ${lane}=${state} must block success`);
       }
     }
   } finally { rmSync(fixture, { recursive: true, force: true }); }
