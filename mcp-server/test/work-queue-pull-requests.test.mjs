@@ -242,3 +242,37 @@ test('a started job without a PR is running rather than waiting in the queue', (
     [{ repo: 'DoctorCRE/carr-system', state: 'ok', prs: [] }], at);
   assert.deepEqual(view.jobs.map(job => job.stage), ['running', 'queued']);
 });
+
+test('production status requires the merged commit to be in the deployed release', async () => {
+  const { createProductionSource } = await import('../src/work-queue.js');
+  const merge = 'a'.repeat(40), release = 'b'.repeat(40);
+  const calls = [];
+  const fetchImpl = async url => {
+    calls.push(url);
+    if (url === 'https://api.doctorcre.com/release') return Response.json({ git_sha: { value: release } });
+    if (url.includes('/pulls/')) return Response.json({ merge_commit_sha: merge });
+    if (url.includes('/compare/')) return Response.json({ status: 'ahead' });
+    throw new Error('unexpected URL');
+  };
+  const read = createProductionSource({ token: 'synthetic', fetchImpl });
+  const prs = [{ repo: 'DoctorCRE/carr-system', number: 3, state: 'merged' }];
+  assert.deepEqual(await read(prs), [true]);
+  assert.deepEqual(await read(prs), [true]);
+  assert.equal(calls.length, 3);
+});
+
+test('production status remains unknown when ancestry cannot be verified', async () => {
+  const { createProductionSource } = await import('../src/work-queue.js');
+  const read = createProductionSource({ token: 'synthetic', fetchImpl: async () => new Response('', { status: 503 }) });
+  assert.deepEqual(await read([{ repo: 'DoctorCRE/carr-system', number: 1, state: 'merged' }]), [null]);
+});
+
+test('the work queue returns production verification on each merged PR', async () => {
+  const merged = livePr(21, ['WR557.S1.J1'], { state: 'merged' });
+  const result = await workQueueTools({})['work-queue'].handler({
+    query: async sql => ({ rows: sql.includes('select s.*') ? [] : [jobRow(1)] }),
+    pullRequests: async repos => repos.map(repo => ({ repo, state: 'ok', prs: repo === merged.repo ? [merged] : [] })),
+    production: async prs => prs.map(() => true),
+  }, 'joe', {});
+  assert.equal(result.jobs[0].prs[0].production_live, true);
+});

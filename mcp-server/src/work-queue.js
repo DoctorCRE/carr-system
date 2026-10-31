@@ -76,6 +76,61 @@ export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...
   }));
 }
 
+
+const RELEASE_URLS = {
+  'DoctorCRE/carr-system': 'https://api.doctorcre.com/release',
+  'jbookout/doctorcre-app': 'https://app.doctorcre.com/app-release',
+};
+const SHA = /^[0-9a-f]{40}$/i;
+
+// Cache successful and failed observations alike so opening the board never starts a poller.
+export function createProductionSource({ token, fetchImpl = (...args) => fetch(...args), now = Date.now }) {
+  const cache = new Map();
+  const cached = (key, load, ttl = PULL_REQUEST_TTL_MS) => {
+    const hit = cache.get(key);
+    if (hit && now() - hit.at < hit.ttl) return hit.value;
+    const entry = { at: now(), ttl, value: null };
+    entry.value = Promise.resolve().then(load).catch(() => null).then(result => {
+      if (result === null) entry.ttl = PULL_REQUEST_TTL_MS;
+      return result;
+    });
+    if (cache.size >= 2000) cache.delete(cache.keys().next().value);
+    cache.set(key, entry);
+    return entry.value;
+  };
+  const json = async (url, headers = {}) => {
+    const response = await fetchImpl(url, { headers });
+    if (!response.ok) throw new Error('read failed');
+    return response.json();
+  };
+  const headers = { accept: 'application/vnd.github+json', authorization: `Bearer ${token}`, 'user-agent': 'carr-mcp-work-queue' };
+  return async prs => Promise.all(prs.map(async pr => {
+    if (pr.state !== 'merged' || !token || !RELEASE_URLS[pr.repo] || !Number.isSafeInteger(pr.number) || pr.number < 1) return null;
+    const release = await cached(`release:${pr.repo}`, async () => {
+      const data = await json(RELEASE_URLS[pr.repo]);
+      const sha = pr.repo === 'DoctorCRE/carr-system' ? data.git_sha?.value : data.environment === 'production' ? data.source_commit : null;
+      return SHA.test(sha || '') ? sha : null;
+    });
+    if (!release) return null;
+    return cached(`ancestry:${pr.repo}:${pr.number}:${release}`, async () => {
+      const detail = await json(`https://api.github.com/repos/${pr.repo}/pulls/${pr.number}`, headers);
+      const merge = detail.merge_commit_sha;
+      if (!SHA.test(merge || '')) return null;
+      if (merge === release) return true;
+      const comparison = await json(`https://api.github.com/repos/${pr.repo}/compare/${merge}...${release}`, headers);
+      if (comparison.status === 'ahead' || comparison.status === 'identical') return true;
+      if (comparison.status === 'behind' || comparison.status === 'diverged') return false;
+      return null;
+    }, 24 * 60 * 60_000);
+  }));
+}
+
+let productionSource;
+export function isolateProduction(token) {
+  if (!productionSource || productionSource.token !== token) productionSource = { token, read: createProductionSource({ token }) };
+  return productionSource.read;
+}
+
 let isolateSource;
 export function isolatePullRequests(token) {
   if (!isolateSource || isolateSource.token !== token) isolateSource = { token, read: createPullRequestSource({ token }) };
@@ -279,6 +334,9 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         const sources = await (c.pullRequests ?? unavailablePullRequests)(Object.keys(addressFormat.repositories),
           Number.isFinite(oldest) ? new Date(oldest).toISOString() : undefined);
         const { finishes, ...view } = queueView(rows, sources, Date.now());
+        const prs = view.jobs.flatMap(job => job.prs);
+        const live = c.production ? await c.production(prs) : prs.map(() => null);
+        prs.forEach((pr, index) => { pr.production_live = live[index]; });
         // One conditional single-row update per newly finished job, on the reader route's optional side connection:
         // it runs only on the first observation, writes no audit row, and a lost write is redone by the next read.
         for (const { key, finished } of finishes) c.sideWrite?.(`update ops.work_request_job set finished=$4::jsonb
