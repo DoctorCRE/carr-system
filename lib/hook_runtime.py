@@ -105,9 +105,13 @@ GROK_KEYS = (('session_id', 'sessionId'), ('transcript_path', 'transcriptPath'),
              ('last_assistant_message', 'lastAssistantMessage'))
 
 
+def _is_grok(payload):
+    return isinstance(payload.get('hookEventName'), str) and 'workspaceRoot' in payload
+
+
 def from_grok(payload):
     """Claude's view of a Grok hook payload; any other payload is returned as is."""
-    if not (isinstance(payload.get('hookEventName'), str) and 'workspaceRoot' in payload):
+    if not _is_grok(payload):
         return payload
     event = dict(payload)
     for snake, camel in GROK_KEYS:
@@ -144,7 +148,12 @@ def decision(function=None, *, on_error=None, failure="open"):
     def decorate(function):
         @wraps(function)
         def decide(event):
-            if isinstance(event, dict) and not isinstance(event, Event):
+            if isinstance(event, dict):
+                if (_is_grok(event)
+                        and event['hookEventName'].replace('_', '').lower() == 'pretooluse'
+                        and event.get('toolInputTruncated') is not False):
+                    return Verdict.refuse('Grok tool input is truncated or its completeness is unconfirmed; '
+                                          'toolInputTruncated must be false.')
                 event = Event(from_grok(event))
             out, err = io.StringIO(), io.StringIO()
             code = 0

@@ -5,7 +5,7 @@
  "workspaceRoot": "/repo",
  "timestamp":"2026-10-31T00:00:00+00:00",
  "transcriptPath": "/home/example/.grok/sessions/%2Frepo%2F.grok-capture/00000000-0000-4000-8000-0000000000a1/updates.jsonl",
- "promptId": "22796816-b942-4ffe-8ad6-229bbfaa109d",
+ "promptId": "00000000-0000-4000-8000-0000000000b1",
  "permissionMode": "bypassPermissions",
  "reason": "end_turn",
  "stopHookActive": false,

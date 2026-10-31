@@ -31,6 +31,7 @@ spec.loader.exec_module(rule_hook)
 def fixture(name, **changes):
     payload = json.loads((FIXTURES / f'{name}.json').read_text())
     payload['transcript_path'] = payload['transcriptPath'] = str(FIXTURES / 'updates.jsonl')
+    payload['session_id'] = payload['sessionId'] = '00000000-0000-4000-8000-0000000000a1'
     payload.update(changes)
     return payload
 
@@ -109,7 +110,54 @@ class RuleDelivery(unittest.TestCase):
             rows.append(json.dumps({'method': 'session/update', 'params': {'update': {
                 'sessionUpdate': 'agent_message_chunk', 'content': {'type': 'text', 'text': 'reply'}}}}))
             path.write_text('\n'.join(rows) + '\n')
-            self.assertEqual(rule_hook.task_text({'transcript_path': str(path)}), 'first half, second half')
+            self.assertEqual(rule_hook.task_text({'transcript_path': str(path),
+                                                  'session_id': chunk['params']['sessionId']}), 'first half, second half')
+
+    def prompt_chunk(self, index, text, *, session=None, meta=None):
+        chunk = json.loads((FIXTURES / 'updates.jsonl').read_text().splitlines()[1])
+        if session is not None:
+            chunk['params']['sessionId'] = session
+        update = chunk['params']['update']
+        update['_meta'] = dict(promptIndex=index, **(meta or {}))
+        update['content'] = text if isinstance(text, dict) else {'type': 'text', 'text': text}
+        return chunk
+
+    def read_prompt(self, chunks):
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / 'updates.jsonl'
+            path.write_text(''.join(json.dumps(chunk) + '\n' for chunk in chunks))
+            payload = fixture('pre_tool_use.run_terminal_command', transcript_path=str(path))
+            return rule_hook.task_text(payload)
+
+    def test_adjacent_prompt_indexes_are_not_joined(self):
+        self.assertEqual(self.read_prompt([self.prompt_chunk(0, 'old'),
+                                          self.prompt_chunk(1, 'new')]), 'new')
+
+    def test_prompt_index_zero_chunks_survive_interleaved_updates(self):
+        self.assertEqual(self.read_prompt([
+            self.prompt_chunk(0, 'first '),
+            {'method': 'session/update', 'params': {'update': {'sessionUpdate': 'agent_message_chunk'}}},
+            self.prompt_chunk(0, 'second')]), 'first second')
+
+    def test_newest_prompt_is_selected_by_index(self):
+        self.assertEqual(self.read_prompt([self.prompt_chunk(2, 'new'),
+                                          self.prompt_chunk(1, 'old')]), 'new')
+
+    def test_foreign_session_chunk_is_excluded(self):
+        self.assertEqual(self.read_prompt([self.prompt_chunk(0, 'human'),
+                                          self.prompt_chunk(1, 'foreign', session='foreign-session')]), 'human')
+
+    def test_host_and_interjection_chunks_are_excluded(self):
+        for meta in ({'syntheticPrompt': True}, {'interjection': True}, {'origin': 'host'}):
+            with self.subTest(meta=meta):
+                self.assertEqual(self.read_prompt([self.prompt_chunk(0, 'human'),
+                                                  self.prompt_chunk(1, 'host', meta=meta)]), 'human')
+
+    def test_empty_newest_prompt_is_a_boundary(self):
+        for content in ('', {'type': 'image', 'data': 'fixture'}):
+            with self.subTest(content=content):
+                self.assertEqual(self.read_prompt([self.prompt_chunk(0, 'old'),
+                                                  self.prompt_chunk(1, content)]), '')
 
     def test_grok_shell_call_gets_rule_delivery_not_refusal(self):
         rule = dict(id='11111111', statement='Inspect the diff.', scope={'tools': ['Bash']}, personal_to=None)
@@ -163,6 +211,35 @@ class SafetyGuards(unittest.TestCase):
         result = self.hook('guard-unattended.py', self.shell(
             'curl -X POST -d probe=1 https://unlisted-api-host.example/api/auth.test'))
         self.assertEqual(result.returncode, 2, result.stderr)
+
+    def test_guard_unattended_denies_truncated_grok_shell_input(self):
+        payload = self.shell('echo ' + 'A' * 5000 + ' [truncated]')
+        payload['toolInputTruncated'] = True
+        result = self.hook('guard-unattended.py', payload)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('truncat', result.stderr.lower())
+
+    def test_record_home_gate_denies_truncated_grok_write_input(self):
+        payload = fixture('pre_tool_use.write', toolInputTruncated=True)
+        result = self.hook('record-home-gate.py', payload)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('truncat', result.stderr.lower())
+
+    def test_all_decorated_gates_deny_unconfirmed_grok_input(self):
+        for flag in (True, None, 'false', 0):
+            payload = self.shell('git log --oneline -1')
+            if flag is not None:
+                payload['toolInputTruncated'] = flag
+            else:
+                payload.pop('toolInputTruncated', None)
+            for event in (payload, Event(payload)):
+                with self.subTest(flag=flag, event_type=type(event).__name__):
+                    @decision(on_error=lambda exc: 0)
+                    def allow(event):
+                        return 0
+                    verdict = allow(event)
+                    self.assertEqual(verdict.decision, 'deny')
+                    self.assertIn('truncat', verdict.stderr.lower())
 
     def test_guard_unattended_allows_a_grok_read_only_command(self):
         result = self.hook('guard-unattended.py', self.shell('git log --oneline -1'))

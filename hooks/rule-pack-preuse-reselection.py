@@ -71,19 +71,23 @@ def task_text(payload):
                 raise ValueError('agent_transcript_mismatch')
         elif path.name != child_name:
             path = path.with_suffix('') / 'subagents' / child_name
-    grok_chunks = []  # newest first; a Grok prompt can span consecutive chunk records
+    session_id = payload.get('session_id') or payload.get('sessionId')
+    grok_index = None
+    grok_chunks = []
     for line in _transcript_lines(path):
         if not line.strip():
             continue
         record = json.loads(line)
-        chunk = grok_user_chunk(record)
+        chunk = grok_user_chunk(record, session_id)
         if chunk is not None:
-            grok_chunks.append(chunk)
+            index, text = chunk
+            if grok_index is None or index > grok_index:
+                grok_index, grok_chunks = index, [text]
+            elif index == grok_index:
+                grok_chunks.append(text)
             continue
-        if grok_chunks:
-            text, grok_chunks = ''.join(reversed(grok_chunks)), []
-            if text:
-                return _bounded(text)
+        if grok_index is not None or 'workspaceRoot' in payload:
+            continue
         text = _claude_user_text(record)
         part = record.get('payload', {})
         if record.get('type') == 'event_msg' and part.get('type') == 'user_message':
@@ -94,7 +98,7 @@ def task_text(payload):
                              if isinstance(c, dict) and c.get('type') == 'input_text')
         if isinstance(text, str) and text:
             return _bounded(text)
-    if ''.join(grok_chunks):
+    if grok_index is not None:
         return _bounded(''.join(reversed(grok_chunks)))
     raise ValueError('task_context_unavailable')
 
