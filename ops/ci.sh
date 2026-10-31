@@ -219,6 +219,11 @@ tree_fingerprint() {
 }
 
 check_gates() {
+  if ! run_quiet "$LOGDIR/registry-check.log" node ops/scac-mutation-inventory.mjs; then
+    fail_tail "$LOGDIR/registry-check.log"
+    bad gates "committed registry differs from source; run ./run.sh regen registry"
+    return
+  fi
   export CARR_HOOK_FIXTURE=1
   local rc summary
   "$PY" ops/ci-gates.py --logdir "$LOGDIR" --result "$LOGDIR/gates-result" \

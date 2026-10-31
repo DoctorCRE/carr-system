@@ -1,7 +1,8 @@
 // P1 S4 proof (docs/memory/team-memory-design.md §9): the staged convention
-// proposals, governance-queue's proposal lane, adopt-rule's refusals and one
-// in-person adoption, against a disposable PostgreSQL built as deploy builds
-// it: db/schema.sql, then every migration missing from its ledger.
+// proposals, governance-queue's proposal lane, adopt-rule's refusals and
+// adoption by partners and their sponsored agents, against a disposable
+// PostgreSQL built as deploy builds it: db/schema.sql, then every migration
+// missing from its ledger.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -19,9 +20,9 @@ const PLAN = JSON.parse(execFileSync('python3', [`${REPO}ops/stage-convention-pr
 
 // The connector Claude session and the local machine door, both sponsored by
 // Joe and both holding partner authority for ordinary humanOnly verbs.
-const claudeForJoe = { id: '10000000-0000-0000-0000-000000000011', slug: 'claude', human: false,
+const claudeForJoe = { slug: 'claude', human: false,
   sponsoring_human_slug: 'joe', native_agent_verified: true, via: 'oauth-agent', client_id: 'claude-client' };
-const joeLocal = { id: '10000000-0000-0000-0000-000000000010', slug: 'joe-local', human: false,
+const joeLocal = { slug: 'joe-local', human: false,
   sponsoring_human_slug: 'joe', native_agent_verified: true, via: 'local-token', client_id: 'local-verb' };
 
 let fixture, c, joe, dell;
@@ -41,6 +42,10 @@ before(async () => {
     via: 'dealroom-cookie', client_id: 'dealroom-pwa' });
   joe = await partner('joe');
   dell = await partner('dell');
+  // The dispatcher refuses an unprovisioned actor before any handler runs.
+  for (const agent of [claudeForJoe, joeLocal])
+    agent.id = (await c.query(`insert into actor(slug,kind,display_name) values($1,'automation','Synthetic agent')
+      on conflict(slug) do update set active=true returning id`, [agent.slug])).rows[0].id;
   await seedDeliveredRule();
 });
 
@@ -73,7 +78,7 @@ async function call(actor, name, args, as = 'carr_writer') {
   await c.query('begin');
   try {
     await c.query(as === 'carr_writer' ? 'set local role carr_writer' : `set local session authorization ${as}`);
-    const keyed = name === 'governance-queue' || name === 'rule-cards' ? args : { idempotency_key: randomUUID(), ...args };
+    const keyed = ['governance-queue', 'rule-cards', 'find-rule'].includes(name) ? args : { idempotency_key: randomUUID(), ...args };
     const result = await executeRegisteredTool(c, actor, name, keyed);
     await c.query('commit');
     return result;
@@ -90,7 +95,7 @@ async function refused(promise, code) {
 
 const ruleCount = async () => Number((await c.query('select count(*) from rule')).rows[0].count);
 const adopt = (actor, proposal, as, extra = {}) => call(actor, 'adopt-rule', { section_id: proposal.section_id,
-  base_version: proposal.base_version, reason: 'Synthetic in-person adoption', ...extra }, as);
+  base_version: proposal.base_version, reason: 'Synthetic adoption', ...extra }, as);
 
 let queue;
 test('the staging plan writes every proposal through the team-memory gates, and no proposal touches rule', async () => {
@@ -107,16 +112,9 @@ test('the staging plan writes every proposal through the team-memory gates, and 
 
 const proposal = key => queue.find(p => p.section_key === `conventions/proposed/${key}`);
 
-test('adopt-rule refuses a claude-sponsored connector session and the local machine door', async () => {
-  for (const actor of [claudeForJoe, joeLocal])
-    await refused(adopt(actor, proposal('card-k01'), 'carr_authority_joe'), 'human_only_verb_requires_verified_partner');
+test('adopt-rule refuses the unattended runner', async () => {
   await refused(adopt({ ...joe, unattended: true }, proposal('card-k01'), 'carr_authority_joe'),
     'unattended_runner_authority_not_admitted');
-});
-
-test('adopt-rule refuses Joe\'s own claude.ai connector session: adoption is app-only', async () => {
-  const connector = { ...joe, via: 'oauth-google', client_id: 'claude-ai-connector' };
-  await refused(adopt(connector, proposal('card-k01'), 'carr_authority_joe'), 'rule_adoption_requires_app_approval');
   assert.equal((await c.query('select count(*) from rule where card is not null')).rows[0].count, '0');
 });
 
@@ -255,4 +253,170 @@ test('a malformed proposal is refused and changes nothing', async () => {
 
 test('Dell\'s authority login is refused by the Joe-only approval chain (named gap)', async () => {
   await refused(adopt(dell, proposal('card-k02'), 'carr_authority_dell'), 'rule_adoption_requires_joe');
+});
+
+async function proposeText(slug, body_text) {
+  const { attach_id } = await call(joe, 'attach-memory', { surface: 'codex', access: 'read_write' });
+  const written = await call(joe, 'write-doctrine-section', { document: 'team-memory',
+    section_key: `conventions/proposed/${slug}`, body_text, base_version: 0, attach_id });
+  return { section_id: written.section_id, base_version: 1 };
+}
+
+async function adoptCard(slug, statement = 'Synthetic obsolete instruction.') {
+  const p = await proposeText(slug, `Convention: ${statement}\nCard: {"id":"${slug}","placement":"CORE"}`);
+  return adopt(joe, p, 'carr_authority_joe');
+}
+
+test('retirement-only adoption records who, why and the proposal without creating a rule', async () => {
+  const old = await adoptCard('retirement-only');
+  const p = await proposeText('retire-only', `Retires: ["${old.rule_id}"]\nWhy: Obsolete source.`);
+  const before = await ruleCount();
+  const out = await adopt(joe, p, 'carr_authority_joe', { reason: 'Use the current source.' });
+  assert.equal(out.rule_id, null);
+  assert.deepEqual(out.retired_rule_ids, [old.rule_id]);
+  assert.equal(await ruleCount(), before);
+  const found = (await call(joe, 'find-rule', { text: 'Synthetic obsolete instruction.' })).rules.find(r => r.id === old.rule_id);
+  assert.equal(found.status, 'retired');
+  assert.equal(found.retirement.retired_by, 'joe');
+  assert.match(found.retirement.reason, /Use the current source\./);
+  assert.ok(found.retirement.reason.includes(`${p.section_id}@1`));
+  const cards = await call(joe, 'rule-cards', {});
+  assert.ok(!cards.cards.some(card => card.rule_id === old.rule_id));
+  const pending = (await call(joe, 'governance-queue', {})).pending_convention_proposals;
+  assert.ok(!pending.some(row => row.section_id === p.section_id));
+});
+
+test('the governance queue describes retirement targets and optional replacement', async () => {
+  const old = await adoptCard('queue-retirement', 'Synthetic calendar instruction.');
+  const p = await proposeText('queue-retire', `Retires: ["${old.rule_id}"]`);
+  const row = (await call(joe, 'governance-queue', {})).pending_convention_proposals.find(r => r.section_id === p.section_id);
+  assert.equal(row.adoptable, true);
+  assert.deepEqual(row.retires, [old.rule_id]);
+  assert.equal(row.statement, `retires rule ${old.rule_id}: Synthetic calendar instruction.`);
+  assert.equal(row.replacement_statement, null);
+  assert.deepEqual(row.packs, []);
+});
+
+// Joe, 2026-10-31: "If you think a rule is needed you just make it a rule and
+// tell me you did it." The event row names the agent that adopted.
+test('Joe-sponsored agents and connector sessions adopt and retire rules themselves', async () => {
+  const connector = { ...joe, via: 'oauth-google', client_id: 'claude-ai-connector' };
+  for (const [i, actor] of [claudeForJoe, joeLocal, connector].entries()) {
+    const p = await proposeText(`agent-card-${i}`, `Convention: Synthetic agent rule ${i}.\nCard: {"id":"agent-card-${i}","placement":"CORE"}`);
+    const made = await adopt(actor, p, 'carr_authority_joe', { reason: 'The agent judged this rule useful.' });
+    assert.equal((await c.query('select status from rule where id=$1', [made.rule_id])).rows[0].status, 'active');
+    const r = await proposeText(`agent-retire-${i}`, `Retires: ["${made.rule_id}"]`);
+    const out = await adopt(actor, r, 'carr_authority_joe', { reason: 'The agent judged this rule obsolete.' });
+    assert.deepEqual(out.retired_rule_ids, [made.rule_id]);
+    assert.equal((await c.query('select status from rule where id=$1', [made.rule_id])).rows[0].status, 'retired');
+    const events = (await c.query(`select actor_id, via from event where verb='adopt-rule' and subject_id in ($1::uuid,$2::uuid)
+      order by recorded_at`, [made.rule_id, r.section_id])).rows;
+    assert.deepEqual(events, [{ actor_id: actor.id, via: actor.via }, { actor_id: actor.id, via: actor.via }]);
+  }
+});
+
+test('Dell\'s authority login still cannot retire through the Joe-only chain', async () => {
+  const old = await adoptCard('dell-retirement');
+  const p = await proposeText('dell-retire', `Retires: ["${old.rule_id}"]`);
+  await refused(adopt(dell, p, 'carr_authority_dell'), 'rule_adoption_requires_joe');
+  assert.equal((await c.query('select status from rule where id=$1', [old.rule_id])).rows[0].status, 'active');
+});
+
+// WR631.S1.J3: the rule-lookup hook reported missing_scope for every rule
+// adopt-rule made, because adoption stored scope {}.
+test('an adopted convention carries a scope the hook selector accepts', async () => {
+  const p = await proposeText('scoped-convention', 'Convention: When a synthetic moment arrives, do the synthetic thing.\nPacks: governance-rules');
+  const out = await adopt(claudeForJoe, p, 'carr_authority_joe');
+  const rule = (await c.query('select scope from rule where id=$1', [out.rule_id])).rows[0];
+  assert.deepEqual(rule.scope, { moment: 'When a synthetic moment arrives, do the synthetic thing.' });
+  const catalog = await executeRegisteredTool(c, claudeForJoe, 'standing-context', { detail: 'scopes' });
+  const selection = JSON.parse(execFileSync('python3', ['-c',
+    'import json,sys; from lib.rule_scope_lookup import select_rules; print(json.dumps(select_rules(json.load(sys.stdin), {"tool_name": "Bash", "tool_input": {"command": "true"}})))'],
+    { cwd: REPO, input: JSON.stringify(catalog), encoding: 'utf8' }));
+  assert.ok(catalog.rules.some(r => r.id === out.rule_id), 'the hook catalog carries the adopted rule');
+  assert.deepEqual(selection.data_defects.filter(d => d.rule_id === out.rule_id), []);
+});
+
+// A legacy proposed rule closes the same way: the agent adopts its current
+// wording as a replacement and the proposal row retires, superseded by it.
+test('a proposed rule retires into its adopted replacement', async () => {
+  const proposed = (await c.query(`insert into rule(statement,taught_by) values ('Synthetic stale proposal.',$1) returning id`, [joe.id])).rows[0].id;
+  const p = await proposeText('replace-proposed', `Convention: Synthetic current proposal.\nPacks: governance-rules\nRetires: ["${proposed}"]`);
+  const row = (await call(joe, 'governance-queue', {})).pending_convention_proposals.find(r => r.section_id === p.section_id);
+  assert.equal(row.adoptable, true);
+  const out = await adopt(joe, p, 'carr_authority_joe');
+  assert.deepEqual(out.retired_rule_ids, [proposed]);
+  const old = (await call(joe, 'find-rule', { text: 'Synthetic stale proposal.' })).rules.find(r => r.id === proposed);
+  assert.equal(old.status, 'retired');
+  assert.equal(old.retirement.superseded_by, out.rule_id);
+  assert.equal((await c.query('select status from rule where id=$1', [out.rule_id])).rows[0].status, 'active');
+});
+
+test('unknown and already-retired targets are refused without partial retirement', async () => {
+  const old = await adoptCard('invalid-target-retirement');
+  for (const [slug, id, code] of [
+    ['unknown', randomUUID(), 'convention_retirement_rule_not_found'],
+  ]) {
+    const p = await proposeText(`retire-${slug}`, `Retires: ${JSON.stringify([old.rule_id, id])}`);
+    const before = await ruleCount();
+    await refused(adopt(joe, p, 'carr_authority_joe'), code);
+    assert.equal(await ruleCount(), before);
+    assert.equal((await c.query('select status from rule where id=$1', [old.rule_id])).rows[0].status, 'active');
+    assert.equal((await c.query('select status from doctrine_section where id=$1', [p.section_id])).rows[0].status, 'active');
+  }
+  const retirement = await proposeText('retire-once', `Retires: ["${old.rule_id}"]`);
+  await adopt(joe, retirement, 'carr_authority_joe');
+  const again = await proposeText('retire-twice', `Retires: ["${old.rule_id}"]`);
+  await refused(adopt(joe, again, 'carr_authority_joe'), 'convention_retirement_rule_not_active');
+});
+
+test('replacement and multiple retirements reuse the card id in one adoption', async () => {
+  const first = await adoptCard('replacement-card', 'Synthetic first instruction.');
+  const second = await adoptCard('replacement-second', 'Synthetic second instruction.');
+  const p = await proposeText('replace-and-retire', `Convention: Synthetic replacement instruction.\nCard: {"id":"replacement-card","placement":"CORE"}\nRetires: ${JSON.stringify([second.rule_id, first.rule_id, first.rule_id])}`);
+  const out = await adopt(joe, p, 'carr_authority_joe');
+  assert.ok(out.rule_id);
+  assert.deepEqual(out.retired_rule_ids, [first.rule_id, second.rule_id].sort());
+  const retired = (await call(joe, 'find-rule', { text: 'Synthetic', status: 'retired' })).rules.filter(r => out.retired_rule_ids.includes(r.id));
+  assert.equal(retired.length, 2);
+  assert.ok(retired.every(r => r.retirement.superseded_by === out.rule_id));
+  const cards = (await call(joe, 'rule-cards', {})).cards;
+  assert.equal(cards.find(card => card.id === 'replacement-card').rule_id, out.rule_id);
+  assert.ok(!cards.some(card => card.rule_id === second.rule_id));
+});
+
+test('failed replacement approval rolls back retirement, receipt and proposal consumption', async () => {
+  const key = randomUUID();
+  const previous = await proposeText('approval-key-owner', 'Convention: Synthetic approval key owner.\nPacks: engineering-git');
+  await adopt(joe, previous, 'carr_authority_joe', { idempotency_key: key });
+  const old = await adoptCard('atomic-retirement');
+  const p = await proposeText('atomic-replacement', `Convention: Synthetic atomic replacement.\nPacks: engineering-git\nRetires: ["${old.rule_id}"]`);
+  const before = await ruleCount();
+  await c.query('begin');
+  try {
+    await c.query('set local session authorization carr_authority_joe');
+    await assert.rejects(c.query('select ops.adopt_rule($1,1,$2,$3)', [p.section_id, key, 'Synthetic reused approval key']), /idempotency|duplicate key/);
+  } finally { await c.query('rollback'); }
+  assert.equal(await ruleCount(), before);
+  assert.equal((await c.query('select status from rule where id=$1', [old.rule_id])).rows[0].status, 'active');
+  assert.equal((await c.query('select count(*) from ops.rule_retirement_receipt where rule_id=$1', [old.rule_id])).rows[0].count, '0');
+  assert.equal((await c.query('select status from doctrine_section where id=$1', [p.section_id])).rows[0].status, 'active');
+  const out = await adopt(joe, p, 'carr_authority_joe');
+  assert.ok(out.rule_id);
+});
+
+test('malformed retirement lists are non-adoptable and cannot retire rules', async () => {
+  const old = await adoptCard('malformed-retirement');
+  for (const [index, body] of [
+    'Retires: []', 'Retires: null', 'Retires: "not-an-array"', 'Retires: [null]',
+    'Retires: ["49533583"]', 'Retires: broken',
+    `Retires: ["${old.rule_id}"]\nRetires: ["${old.rule_id}"]`,
+    `Retires: ["${old.rule_id}"]\nPacks: engineering-git`,
+  ].entries()) {
+    const p = await proposeText(`malformed-retire-${index}`, body);
+    const row = (await call(joe, 'governance-queue', {})).pending_convention_proposals.find(r => r.section_id === p.section_id);
+    assert.equal(row.adoptable, false, body);
+    await refused(adopt(joe, p, 'carr_authority_joe'), 'convention_proposal_malformed');
+  }
+  assert.equal((await c.query('select status from rule where id=$1', [old.rule_id])).rows[0].status, 'active');
 });

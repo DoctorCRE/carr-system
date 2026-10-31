@@ -794,6 +794,46 @@ def run_session(session_dir: Path, *, publish: bool = True) -> dict[str, Any]:
     return status
 
 
+def transcript_repeat_field(report: Any, transcript: dict[str, Any]) -> str | None:
+    """Return only the field path of a 15-word transcript run, never its text."""
+    words = re.findall(r"[^\W_]+", " ".join(
+        segment.get("text", "") for segment in transcript.get("segments", [])).casefold())
+    shingles = {tuple(words[i:i + 15]) for i in range(len(words) - 14)}
+
+    def find(value: Any, path: str) -> str | None:
+        if isinstance(value, str):
+            tokens = re.findall(r"[^\W_]+", value.casefold())
+            if any(tuple(tokens[i:i + 15]) in shingles for i in range(len(tokens) - 14)):
+                return path
+        elif isinstance(value, dict):
+            for key, child in value.items():
+                if key in {"evidence", "evidence_quote"}:
+                    continue
+                found = find(child, f"{path}.{key}" if path else key)
+                if found is not None:
+                    return found
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                found = find(child, f"{path}[{index}]")
+                if found is not None:
+                    return found
+        return None
+
+    return find(report, "")
+
+
+def hold_transcript_repeat(session_dir: Path, report: dict[str, Any]) -> dict[str, Any] | None:
+    transcript = read_json(session_dir / "transcript.json")
+    field = transcript_repeat_field(report, transcript) if transcript is not None else None
+    if field is None:
+        return None
+    status = read_json(session_dir / STATUS_FILE) or {"schema_version": SCHEMA_VERSION, "session": session_dir.name}
+    status.update(state="held_review", reason="summary_repeats_transcript", field=field,
+                  updated_at=now(), next_attempt_at=None)
+    write_private(session_dir / STATUS_FILE, status)
+    return status
+
+
 @contextlib.contextmanager
 def session_lock(session_dir: Path, *, blocking: bool = True):
     lock_path = session_dir / LOCK_FILE
@@ -842,9 +882,15 @@ def _complete_session(session_dir: Path, report: dict[str, Any]) -> dict[str, An
 
 def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]], *,
                             run_checks: bool = True, max_attempts: int = 3) -> dict[str, Any]:
+    existing = read_json(session_dir / STATUS_FILE) or {}
+    if existing.get("state") == "held_review":
+        return existing
     if (session_dir / REPORT_FILE).exists():
-        existing = read_json(session_dir / STATUS_FILE)
-        if existing is not None and existing.get("state") in {"ready_review", "filed"}:
+        held = hold_transcript_repeat(session_dir, read_json(session_dir / REPORT_FILE) or {})
+        if held is not None:
+            return held
+        existing = read_json(session_dir / STATUS_FILE) or {}
+        if existing.get("state") in {"ready_review", "filed"}:
             return existing
         report = read_json(session_dir / REPORT_FILE)
         if report is None:
@@ -898,7 +944,11 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
               "extraction_attempts": attempts, "next_attempt_at": next_attempt_at, "reason": "Extraction attempt did not finish."}
     write_private(session_dir / STATUS_FILE, status)
     try:
-        result = normalize_distillation(distiller(request), context, session_dir.name,
+        raw = distiller(request)
+        held = hold_transcript_repeat(session_dir, raw)
+        if held is not None:
+            return held
+        result = normalize_distillation(raw, context, session_dir.name,
                                        call_date=call_date, transcript=transcript)
     except (RuntimeError, ContractError, OSError, subprocess.SubprocessError) as exc:
         failed_at = now()
@@ -972,6 +1022,8 @@ def review_complete(report: dict[str, Any]) -> bool:
 def retention_ready(session_dir: Path, report_sha256: str) -> dict[str, Any] | None:
     """Return a purge-safe filing receipt only after every candidate is final."""
     with session_lock(session_dir):
+        if (read_json(session_dir / STATUS_FILE) or {}).get("state") == "held_review":
+            return None
         with update_report(session_dir, required=False, locked=True) as report:
             if report is None or not isinstance(report_sha256, str) or re.fullmatch(r"[0-9a-fA-F]{64}", report_sha256) is None:
                 return None

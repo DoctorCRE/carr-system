@@ -98,9 +98,12 @@ test('all direct snapshot callers use distinct databases on their actual CI-serv
     if (file === 'snapshot-service-postgres.test.mjs' || !/\.test\.(?:js|mjs)$/.test(file)) continue;
     const source = await readFile(new URL(file, import.meta.url), 'utf8');
     const match = source.match(/acquireDisposablePostgres\(\{\s*prefix:\s*'([^']+)'[^}]*\bsnapshot:\s*true/);
-    if (match) suites.push({ file, prefix: match[1] });
+    if (/\bsnapshot:\s*true/.test(source)) {
+      assert.ok(match, `${file} must participate in the connection proof`);
+      suites.push({ file, prefix: match[1] });
+    }
   }
-  assert.ok(suites.length >= 17, 'retain the original snapshot callers in the connection proof');
+  assert.ok(suites.length > 0, 'snapshot callers must participate in the connection proof');
   const service = await postgresDatabase('callers-ci-');
   const directory = await mkdtemp(path.join(tmpdir(), 'snapshot-callers-'));
   const savedUrl = process.env.CARR_CI_DATABASE_URL;
