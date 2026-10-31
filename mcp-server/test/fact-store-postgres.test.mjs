@@ -103,6 +103,15 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
       });
     });
 
+    await t.test('comparison refuses missing canonical terms', async () => {
+      await assert.rejects(() => as('carr_reader', partner, 'draft-terms-comparison',
+        { entity_refs: ['synthetic-a', 'synthetic-b'] }), error => {
+        assert.equal(error.payload.error, 'unresolved_facts');
+        assert(error.payload.facts.some(f => f.entity_ref === 'synthetic-a' && f.fact_key === 'base_rent_per_sf' && f.reason === 'missing_canonical'));
+        return true;
+      });
+    });
+
     await t.test('comparison renders permitted confirmed versions with internal lineage', async () => {
       await c.query('grant select on system_config,attachment,deal,doc_template,document,tool_call,event to carr_writer; grant update on system_config,attachment,doc_template to carr_writer; grant insert on document,event,tool_call to carr_writer; grant usage,select on all sequences in schema public to carr_writer');
       const deal = randomUUID(), doc = randomUUID(), client = randomUUID(), party = randomUUID();
@@ -240,6 +249,67 @@ assert len(os.listdir(root+'/output'))==1
       for (const item of pending.items) await as('carr_writer',partner,'resolve-fact-review',{
         idempotency_key:randomUUID(),entity_ref:deal,fact_key:item.fact_key,base_version:item.canonical_version,
         review_version:item.review_version,decision:'reject',reason:'Synthetic fixture settled',
+      });
+    });
+
+    await t.test('comparison renders only sourced canonical terms and refuses reopened fields', async () => {
+      const refs = ['comparison-a', 'comparison-b'];
+      const schedule = Object.fromEntries(Object.entries({ start_month: 1, end_month: 12, rate: '24', unit: 'USD/SF/year', expense_basis: 'nnn', escalation_percent: null }).map(([key, value]) => [key, { value, source: { page: 1, region_id: 'row-1', method: 'text_layer' } }]));
+      const terms = [
+        { fact_key: 'base_rent_per_sf', value: '24', unit: 'USD/SF/year', expense_basis: 'nnn' },
+        { fact_key: 'landlord_ti_per_sf', value: '30', unit: 'USD/SF' },
+        { fact_key: 'term_months', value: '60', unit: 'months' },
+        { fact_key: 'free_rent_months', value: '2', unit: 'months' },
+        { fact_key: 'rent_schedule', value: [schedule], unit: 'schedule' },
+      ];
+      const expected = new Map();
+      for (const entity_ref of refs) {
+        for (const term of terms) {
+          const input = observation(term.fact_key, term);
+          if (term.fact_key !== 'base_rent_per_sf') delete input.expense_basis;
+          const batch = await record(entity_ref, [input]);
+          const promoted = await promote(entity_ref, ids(batch), { fact_key: term.fact_key, basis: 'human_review' }, partner);
+          expected.set(`${entity_ref}:${term.fact_key}`, promoted.canonical_fact);
+        }
+      }
+      const draft = await as('carr_reader', partner, 'draft-terms-comparison', { entity_refs: refs });
+      assert.equal(draft.draft, true);
+      assert.equal(draft.deals.length, 2);
+      const lines = draft.text.split('\n').filter(Boolean);
+      assert.equal(lines.length, 12, 'the draft contains exactly five fact lines per deal');
+      for (const [index, entity_ref] of refs.entries()) {
+        assert.equal(lines[index * 6], entity_ref);
+        for (const [offset, term] of [terms[0], terms[1], terms[2], terms[4], terms[3]].entries()) {
+          const fact = expected.get(`${entity_ref}:${term.fact_key}`);
+          const value = fact.normalized_schedule ?? fact.normalized_value;
+          const prefix = `${term.fact_key}: ${JSON.stringify(value)} ${fact.canonical_unit}${fact.expense_basis ? ` (${fact.expense_basis})` : ''} [fact ${fact.id} v${fact.version}; sources `;
+          assert.ok(lines[index * 6 + offset + 1].startsWith(prefix));
+          const line = lines[index * 6 + offset + 1];
+          assert.ok(line.endsWith(']'));
+          assert.deepEqual(JSON.parse(line.slice(prefix.length, -1)), draft.deals[index].fields[offset].citations);
+        }
+      }
+      for (const deal of draft.deals) {
+        assert.equal(deal.fields.length, 5);
+        for (const field of deal.fields) {
+          const fact = expected.get(`${deal.entity_ref}:${field.fact_key}`);
+          assert.ok(fact, 'every rendered field matches a canonical fact');
+          assert.equal(field.fact_id, fact.id);
+          assert.ok(draft.text.includes(`[fact ${fact.id} v${fact.version}; sources `));
+          assert.ok(draft.text.includes(JSON.stringify(field.value)));
+          assert.equal(field.version, fact.version);
+          assert.deepEqual(field.value, fact.normalized_schedule ?? fact.normalized_value);
+          assert.ok(field.citations[0].document_ref);
+        }
+      }
+      await record(refs[0], [observation('conflict', { value: '99' })]);
+      const pending = observation('pending', { fact_key: 'term_months', value: '60', unit: 'months', confidence_tier: 'verify_band' });
+      delete pending.expense_basis;
+      await record(refs[1], [pending]);
+      await assert.rejects(() => as('carr_reader', partner, 'draft-terms-comparison', { entity_refs: refs }), e => {
+        assert(e.payload.facts.some(f => f.entity_ref === refs[0] && f.fact_key === 'base_rent_per_sf' && f.reason === 'open_conflict'));
+        assert(e.payload.facts.some(f => f.entity_ref === refs[1] && f.fact_key === 'term_months' && f.reason === 'pending_review'));
+        return true;
       });
     });
 

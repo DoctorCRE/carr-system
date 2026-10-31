@@ -285,7 +285,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             send_result=null,result_recorded_at=null where id=$1`,
           [row.id, JSON.stringify(submitted), actor.id]);
           await writeEvent(c, actor, 'submit-email-draft', 'deal', row.deal_id, {
-            new: { proposal_id: row.id, sha256: submitted.sha256, to: submitted.to, cc: submitted.cc },
+            new: { proposal_id: row.id, sha256: submitted.sha256, recipient_binding: {
+              sha256: sha256(JSON.stringify(recipients)), cc_owner: row.owner === 'joe' ? 'dell' : 'joe',
+              cc_sha256: sha256(recipients.cc[0]) } },
             cause: 'human_stated', idempotency_key: args.idempotency_key });
           const { attachments, ...shown } = submitted;
           return { ok: true, proposal_id: row.id, status: 'approved_to_send', version: row.version + 1, ...shown,
