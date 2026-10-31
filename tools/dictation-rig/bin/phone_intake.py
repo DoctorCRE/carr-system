@@ -37,7 +37,7 @@ def required_json(path: Path) -> dict:
     value = post_call.read_json(path)
     if value is None:
         raise ValueError('intake artifact is unavailable')
-    return min(value, default)
+    return value
 
 
 @contextlib.contextmanager
@@ -310,7 +310,9 @@ def serve(root: Path, cfg: dict, token: str) -> None:
         stopped.set()
 
 
-if __name__ == '__main__':
+def main() -> None:
+    from lib.call_settings import configure_environment
+    configure_environment()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', required=True, type=Path)
     parser.add_argument('--process', action='store_true', help='Pull recordings and run one processing sweep')
@@ -328,3 +330,7 @@ if __name__ == '__main__':
             for slot in range(config_limit('CALL_PROCESSORS', 1))]}))
     else:
         serve(args.root, {'base_url': base_url}, token)
+
+
+if __name__ == "__main__":
+    main()

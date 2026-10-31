@@ -554,6 +554,8 @@ def serve(host: str = HOST, port: int = PORT) -> None:
 
 
 def main() -> int:
+    from lib.call_settings import configure_environment
+    configure_environment()
     parser = argparse.ArgumentParser(description="CARR Deal Room Call Mode companion")
     sub = parser.add_subparsers(dest="command", required=True)
     serve_parser = sub.add_parser("serve")

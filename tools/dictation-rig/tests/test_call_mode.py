@@ -62,8 +62,8 @@ _CLIENT_PATCHES = (
 
 
 _LOG_DIR = tempfile.TemporaryDirectory()
+_BUDGET_ENV = patch.dict(os.environ, {'CALL_JEV_DAILY_DOLLARS': '100'})
 _LOG_PATCHES = (
-    patch.dict(os.environ, {'CALL_JEV_DAILY_DOLLARS': '100'}),
     patch.object(post_call_jev, 'BUDGET_LEDGER', Path(_LOG_DIR.name) / 'budget.json'),
     patch.object(runtime_jev, 'BUDGET_LEDGER', Path(_LOG_DIR.name) / 'budget.json'),
     patch.object(post_call, 'LOG_PATH', Path(_LOG_DIR.name) / 'post-call.log'),
@@ -78,6 +78,7 @@ def setUpModule() -> None:
     # Injected ask functions and loopback distiller fakes still run normally.
     for client_patch in _CLIENT_PATCHES:
         client_patch.start()
+    _BUDGET_ENV.start()
     for log_patch in _LOG_PATCHES:
         log_patch.start()
 
@@ -85,6 +86,7 @@ def setUpModule() -> None:
 def tearDownModule() -> None:
     for log_patch in reversed(_LOG_PATCHES):
         log_patch.stop()
+    _BUDGET_ENV.stop()
     for client_patch in reversed(_CLIENT_PATCHES):
         client_patch.stop()
 

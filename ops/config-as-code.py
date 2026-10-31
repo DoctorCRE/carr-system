@@ -416,6 +416,9 @@ def portable(text):
 
 
 def concrete(text):
+    if '{{CALL_JEV_DAILY_DOLLARS}}' in text:
+        from lib.call_settings import daily_dollars
+        text = text.replace('{{CALL_JEV_DAILY_DOLLARS}}', escape(daily_dollars()))
     if '{{COPY_HELPER}}' in text or '{{EXECUTABLE_PATH}}' in text:
         from lib.outlook_settings import load_settings
         settings = load_settings(Path(HOME))

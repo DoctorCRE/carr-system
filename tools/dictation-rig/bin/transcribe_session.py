@@ -458,6 +458,8 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
 
 
 def main(argv: list[str]) -> int:
+    from lib.call_settings import configure_environment
+    configure_environment()
     if len(argv) < 2:
         sys.stderr.write("usage: transcribe_session.py <session_dir>\n")
         return 2
