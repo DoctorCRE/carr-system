@@ -333,13 +333,14 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                     if not publish_status(session, cfg, token, bridge):
                         counts['pending'] += 1
                         continue
-                    if (session / 'ingested.json').exists() or previous.get('state') in {'needs_attention', 'held_review'}:
+                    if (session / 'ingested.json').exists() or previous.get('state') in {'needs_attention', 'held_review', 'filed'}:
                         if previous.get('transient_since') and previous.get('state') != 'needs_attention':
                             previous.pop('transient_since', None)
                             previous.pop('transient_count', None)
+                            previous.pop('transient_expired', None)
                             previous['next_attempt_at'] = None
                             post_call.write_private(session / post_call.STATUS_FILE, previous)
-                        if (session / 'ingested.json').exists():
+                        if (session / 'ingested.json').exists() or previous.get('state') == 'filed':
                             continue
                     if previous.get('state') in {'needs_attention', 'held_review'}:
                         counts['pending'] += 1
@@ -378,6 +379,7 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                     if previous.get('transient_since'):
                         previous.pop('transient_since', None)
                         previous.pop('transient_count', None)
+                        previous.pop('transient_expired', None)
                         previous['next_attempt_at'] = None
                         post_call.write_private(session / post_call.STATUS_FILE, previous)
 
@@ -390,14 +392,16 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                     elapsed = current - datetime.fromisoformat(since.replace('Z', '+00:00'))
                     count = previous.get('transient_count', 0) + 1
                     expired = elapsed >= timedelta(hours=24)
+                    preserve_state = previous.get('state') in {'needs_attention', 'held_review', 'filed'}
                     delay = min(30 * 2 ** min(count - 1, 5), 900)
                     previous.update({'schema_version': post_call.SCHEMA_VERSION, 'session': session.name,
-                                     'state': 'needs_attention' if expired else (previous.get('state') if previous.get('state') in {'needs_attention', 'held_review', 'filed'} else 'blocked'), 'updated_at': timestamp,
+                                     'state': previous.get('state') if preserve_state else ('needs_attention' if expired else 'blocked'), 'updated_at': timestamp,
                                      'transient_since': since, 'transient_count': count,
+                                     'transient_expired': expired,
                                      'next_attempt_at': None if expired else (current + timedelta(seconds=delay)).strftime('%Y-%m-%dT%H:%M:%SZ'),
-                                     'reason': (previous.get('reason') if not expired and previous.get('state') in {'needs_attention', 'held_review', 'filed'}
+                                     'reason': (previous.get('reason') if preserve_state
                                                 else f'Transient network error{" for 24 hours" if expired else ""}: {exc}')})
-                    if expired:
+                    if expired and not preserve_state:
                         previous['reason_code'] = 'transient_ceiling'
                     post_call.write_private(session / post_call.STATUS_FILE, previous)
                     counts['pending'] += 1
@@ -405,6 +409,7 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                     previous = post_call.read_json(session / post_call.STATUS_FILE) or {}
                     previous.pop('transient_since', None)
                     previous.pop('transient_count', None)
+                    previous.pop('transient_expired', None)
                     attempts = previous.get('extraction_attempts', 0) + 1
                     previous.update({'schema_version': post_call.SCHEMA_VERSION, 'session': session.name,
                                      'state': 'needs_attention' if attempts >= config_limit('CALL_EXTRACTION_ATTEMPTS', 3) else 'blocked',
