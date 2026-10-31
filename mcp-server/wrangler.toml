@@ -347,3 +347,15 @@ simple = { limit = 120, period = 60 }
 name = "VERB_REQUEST_BUDGET_AGENT"
 namespace_id = "56404"
 simple = { limit = 2400, period = 60 }
+
+[[durable_objects.bindings]]
+name = "PHONE_AUDIO_HANDOFF"
+class_name = "PhoneAudioHandoff"
+
+[[env.staging.durable_objects.bindings]]
+name = "PHONE_AUDIO_HANDOFF"
+class_name = "PhoneAudioHandoff"
+
+[[migrations]]
+tag = "phone-audio-handoff-v1"
+new_sqlite_classes = ["PhoneAudioHandoff"]

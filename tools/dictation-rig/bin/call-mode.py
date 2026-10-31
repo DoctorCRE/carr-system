@@ -12,7 +12,9 @@ POST /api/start {mode}       mode = weekly_deal_call | other_call
 POST /api/stop               stop the active Quill recording
 POST /api/call-context       exact active-deal/participant index
 POST /api/post-call/sync     verify Cloudflare candidate dispositions
+POST /api/post-call/questions/<id>/resolve   resolve with partner text and sync
 POST /api/post-call/drafts/<id>/create   create an Outlook draft, never send
+POST /api/post-call/drafts/<id>/checked  record whether the partner found it in Outlook
 GET  /                       standalone Call Mode control surface
 
 Security boundary:
@@ -410,9 +412,10 @@ header{background:var(--deep);color:white;padding:18px 22px;display:flex;align-i
 <section class="stage" id="stage"><div class="orb">●</div><div class="timer" id="timer">Ready</div><div class="status" id="status">Quill is ready on this Mac.</div><div class="speakers" id="speakers">Separate tracks identify the local partner and the other side without a third-party voiceprint.</div></section>
 <section class="actions"><label id="consentRow" style="display:flex;gap:10px;align-items:flex-start;font-size:12px;color:var(--muted);line-height:1.4"><input id="consent" type="checkbox" style="margin-top:2px">I have told everyone on this call that it will be recorded.</label><div class="row" id="startRow"><button class="primary" data-start="weekly_deal_call">Start weekly deal call</button><button data-start="other_call">Start another call</button></div><button class="danger" id="stop" hidden>Stop and process</button></section>
 <section class="actions" aria-label="Unfiled calls"><h2>Unfiled calls</h2><ul id="sessions"></ul><p id="hiddenOlder"></p></section>
+<section class="actions" id="review" hidden><h2>Review questions</h2><div id="questions"></div></section>
 <p class="note">The audible recording announcement remains part of Quill. Stopping the call starts local transcription. Next steps and phases stated plainly update the cards, each listed with Undo; anything unsettled waits for Joe or Dell. Emails stay drafts.</p></main>
 <script>
-const $=(s)=>document.querySelector(s);let snapshot={state:'idle'};
+const $=(s)=>document.querySelector(s);let snapshot={state:'idle'},reviewSession='',questionVersion='';
 const elapsed=(iso)=>{if(!iso)return'0:00';const n=Math.max(0,Math.floor((Date.now()-Date.parse(iso))/1000));return Math.floor(n/60)+':'+String(n%60).padStart(2,'0')};
 function paint(s){snapshot=s;const rec=s.state==='recording';$('#stage').classList.toggle('recording',rec);$('#startRow').hidden=rec;$('#consentRow').hidden=rec;$('#stop').hidden=!rec;
   $('#timer').textContent=rec?elapsed(s.started_at):({idle:'Ready',transcribing:'Processing',ready_to_extract:'Transcript ready',filed:'Summary saved',state_unknown:'Check Quill',needs_attention:'Needs attention'}[s.state]||s.state.replaceAll('_',' '));
@@ -420,15 +423,31 @@ function paint(s){snapshot=s;const rec=s.state==='recording';$('#stage').classLi
   $('#sessions').replaceChildren(...(s.sessions||[]).map(item=>{const row=document.createElement('li');row.textContent=item.session+' · '+item.status_text;return row}));
   $('#hiddenOlder').textContent=s.hidden_older_count?`${s.hidden_older_count} older unfiled calls hidden.`:'';
   const l=s.speaker_labels||{};$('#speakers').innerHTML=l.mic?'<b>'+l.mic+'</b> on the microphone · <b>'+l.system+'</b> on system audio':'Separate tracks identify the local partner and the other side without a third-party voiceprint.'}
-async function api(path,body){const r=await fetch('/api/'+path,{method:body?'POST':'GET',headers:body?{'content-type':'application/json','X-CARR-Call-Mode':'deal-room-v1'}:{},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw new Error(d.error||'Call Mode failed');return d}
-async function refresh(){try{paint(await api('state'))}catch(e){$('#status').textContent=e.message}}
-document.addEventListener('click',async(e)=>{const b=e.target.closest('[data-start]');try{if(b){if(!$('#consent').checked)throw new Error('Confirm that everyone has been told before recording.');b.disabled=true;paint(await api('start',{mode:b.dataset.start,consent_confirmed:true}))}if(e.target.id==='stop'){e.target.disabled=true;paint(await api('stop',{}))}}catch(err){alert(err.message)}finally{document.querySelectorAll('button').forEach((button)=>{button.disabled=false});refresh()}});
+async function api(path,body){const r=await fetch('/api/'+path,{method:body?'POST':'GET',headers:{'X-CARR-Call-Mode':'deal-room-v1',...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw new Error(d.error||'Call Mode failed');return d}
+function paintQuestions(session,d){const questions=d.report?.review_questions||[];const version=JSON.stringify([session,questions]);if(version===questionVersion)return;questionVersion=version;reviewSession=session;$('#review').hidden=!questions.length;$('#questions').replaceChildren();
+  for(const q of questions){const card=document.createElement('div');const text=document.createElement('p');text.textContent=q.question;card.append(text);
+    if(q.resolved){const resolution=document.createElement('p');resolution.textContent='Resolved: '+q.resolution;card.append(resolution)}
+    else{const input=document.createElement('textarea');input.setAttribute('aria-label','Resolution for '+q.question);input.placeholder='Explain how to file this call';input.rows=3;input.style.width='100%';const button=document.createElement('button');button.textContent='Resolve';button.dataset.question=q.id;card.append(input,button)}$('#questions').append(card)}}
+async function refresh(){try{const s=await api('state');paint(s);if(s.session&&s.state!=='recording'){paintQuestions(s.session,await api('post-call?session='+encodeURIComponent(s.session)))}else{paintQuestions('',{})}}catch(e){$('#status').textContent=e.message}}
+document.addEventListener('click',async(e)=>{const b=e.target.closest('[data-start]');try{const resolve=e.target.closest('[data-question]');if(resolve){const resolution=resolve.parentElement.querySelector('textarea').value.trim();if(!resolution)throw new Error('Enter a resolution before resolving.');resolve.disabled=true;const session=reviewSession;const d=await api('post-call/questions/'+encodeURIComponent(resolve.dataset.question)+'/resolve',{session,resolution});paintQuestions(session,d)}if(b){if(!$('#consent').checked)throw new Error('Confirm that everyone has been told before recording.');b.disabled=true;paint(await api('start',{mode:b.dataset.start,consent_confirmed:true}))}if(e.target.id==='stop'){e.target.disabled=true;paint(await api('stop',{}))}}catch(err){alert(err.message)}finally{document.querySelectorAll('button').forEach((button)=>{button.disabled=false});refresh()}});
 setInterval(()=>{if(snapshot.state==='recording')$('#timer').textContent=elapsed(snapshot.started_at)},250);setInterval(refresh,1200);refresh();
 </script></body></html>'''
 
 
 class CallModeHandler(BaseHTTPRequestHandler):
+    server: ThreadingHTTPServer
     server_version = "CARRCallMode/1.0"
+
+    def parse_request(self) -> bool:
+        if not super().parse_request():
+            return False
+        port = self.server.server_port
+        hosts = self.headers.get_all("Host", [])
+        if len(hosts) != 1 or hosts[0] not in {f"127.0.0.1:{port}", f"localhost:{port}"}:
+            self.send_json({"error": "host_not_allowed"}, 403)
+            self.close_connection = True
+            return False
+        return True
 
     def log_message(self, fmt: str, *args: Any) -> None:
         log("HTTP " + (fmt % args))
@@ -492,7 +511,10 @@ class CallModeHandler(BaseHTTPRequestHandler):
             self.send_json(current_state())
             return
         if path == "/api/post-call":
-            if not self.require_deal_room():
+            # Same-origin browser GETs omit Origin; Fetch Metadata still identifies the local page.
+            local_read = (self.headers.get("Sec-Fetch-Site") == "same-origin"
+                          and self.headers.get(POST_HEADER) == POST_HEADER_VALUE)
+            if not local_read and not self.require_deal_room():
                 return
             try:
                 session = (parse_qs(parsed.query).get("session") or [""])[0]
@@ -538,6 +560,11 @@ class CallModeHandler(BaseHTTPRequestHandler):
                 self.send_json(sync_post_call(target))
                 return
             parts = path.split("/")
+            if len(parts) == 6 and parts[1:4] == ["api", "post-call", "questions"] and parts[5] == "resolve":
+                target = session_path(str(body.get("session") or ""))
+                post_call.resolve_question(target, unquote(parts[4]), body.get("resolution", ""))
+                self.send_json(sync_post_call(target))
+                return
             if len(parts) == 6 and parts[1:4] == ["api", "post-call", "drafts"] and parts[5] == "create":
                 target = session_path(str(body.get("session") or ""))
                 sync_post_call(target)
@@ -546,10 +573,18 @@ class CallModeHandler(BaseHTTPRequestHandler):
                 )
                 self.send_json(result)
                 return
+            if len(parts) == 6 and parts[1:4] == ["api", "post-call", "drafts"] and parts[5] == "checked":
+                target = session_path(str(body.get("session") or ""))
+                exists = body.get("exists")
+                if not isinstance(exists, bool):
+                    raise post_call.ContractError("exists must be true or false")
+                self.send_json(post_call.resolve_outlook_intent(target, unquote(parts[4]), exists))
+                return
             self.send_json({"error": "not_found"}, 404)
         except post_call.ContractError as exc:
             log(f"ERROR {type(exc).__name__}: {exc}")
-            self.send_json({"error": str(exc)}, 400)
+            status = {"unknown question id": 404, "already_resolved": 409}.get(str(exc), 400)
+            self.send_json({"error": str(exc)}, status)
         except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as exc:
             log(f"ERROR {type(exc).__name__}: {exc}")
             self.send_json({"error": str(exc)}, 409)
