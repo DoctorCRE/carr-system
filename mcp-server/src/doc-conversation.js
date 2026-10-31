@@ -195,59 +195,71 @@ export function docConversationTools({ withEnvelope, writeEvent, ToolError }) {
           if (!UUID.test(String(args.request_msg_id || ""))) {
             throw new ToolError({ error: "doc_conversation_msg_id_invalid" });
           }
-          const outcome = DOC_REQUEST_OUTCOMES[args.outcome];
-          if (!outcome) throw new ToolError({ error: "doc_request_outcome_invalid" });
+          if (!DOC_REQUEST_OUTCOMES[args.outcome]) {
+            throw new ToolError({ error: "doc_request_outcome_invalid" });
+          }
           if (args.answer_msg_id !== undefined && !UUID.test(String(args.answer_msg_id))) {
             throw new ToolError({ error: "doc_conversation_msg_id_invalid" });
           }
-          if (args.outcome === "answered" && !args.answer_msg_id) {
+          // PostgreSQL resolves a uuid in either case to one row, so every text
+          // identity below (lock, event lookup, subject, dedupe key, link) is the
+          // lowercase spelling or a retry in another case would mint a second row.
+          const conversationId = args.conversation_id.toLowerCase();
+          const requestMsgId = args.request_msg_id.toLowerCase();
+          await c.query("select pg_advisory_xact_lock(hashtextextended('doc-request:' || $1, 0))",
+            [requestMsgId]);
+          // The first completion is the record. A retry, in any spelling and under
+          // any new key, answers from what was stored, never from its own arguments.
+          const eventQuery = `select id, new_value from event where subject_type='doc_conversation' and subject_id=$1
+               and verb='complete-doc-request' and field='request_outcome'
+               and new_value->>'request_msg_id'=$2 order by recorded_at desc, id desc limit 1`;
+          const eventArgs = [conversationId, requestMsgId];
+          let stored = (await c.query(eventQuery, eventArgs)).rows[0];
+          let outcomeName = stored?.new_value?.outcome ?? args.outcome;
+          let answerMsgId = stored ? (stored.new_value?.answer_msg_id ?? undefined) : args.answer_msg_id?.toLowerCase();
+          if (!DOC_REQUEST_OUTCOMES[outcomeName]) {
+            throw new ToolError({ error: "doc_request_outcome_invalid" });
+          }
+          if (!stored && outcomeName === "answered" && !answerMsgId) {
             throw new ToolError({ error: "doc_request_answer_required",
               hint: "an answered request names the turn that answers it" });
           }
+          const outcome = DOC_REQUEST_OUTCOMES[outcomeName];
           const turnOf = async (msgId) => (await c.query(
             "select sequence, role, origin_actor from ops.doc_conversation_turn where conversation_id=$1::uuid and msg_id=$2::uuid",
-            [args.conversation_id, msgId])).rows[0];
-          const request = await turnOf(args.request_msg_id);
+            [conversationId, msgId])).rows[0];
+          const request = await turnOf(requestMsgId);
           if (!request || request.role !== "human") {
             throw new ToolError({ error: "doc_request_not_found" });
           }
           if (!DOC_REQUEST_PARTNERS.includes(request.origin_actor)) {
             throw new ToolError({ error: "doc_request_asker_not_a_partner" });
           }
-          let target = request;
-          let targetMsgId = args.request_msg_id;
-          if (args.answer_msg_id) {
-            const answer = await turnOf(args.answer_msg_id);
+          let targetMsgId = requestMsgId;
+          if (answerMsgId) {
+            const answer = await turnOf(answerMsgId);
             if (!answer || answer.role === "human" || answer.sequence <= request.sequence) {
               throw new ToolError({ error: "doc_request_answer_invalid",
                 hint: "the answer is an assistant or system turn after the request in the same conversation" });
             }
-            target = answer;
-            targetMsgId = args.answer_msg_id;
+            targetMsgId = answerMsgId;
           }
-          await c.query("select pg_advisory_xact_lock(hashtextextended('doc-request:' || $1, 0))",
-            [args.request_msg_id]);
-          const eventQuery = `select id from event where subject_type='doc_conversation' and subject_id=$1
-               and verb='complete-doc-request' and field='request_outcome'
-               and new_value->>'request_msg_id'=$2 order by recorded_at desc, id desc limit 1`;
-          const eventArgs = [args.conversation_id, args.request_msg_id];
-          let eventId = (await c.query(eventQuery, eventArgs)).rows[0]?.id;
-          if (!eventId) {
+          if (!stored) {
             await writeEvent(c, actor, "complete-doc-request", "doc_conversation",
-              args.conversation_id, {
+              conversationId, {
                 field: "request_outcome",
-                new: { request_msg_id: args.request_msg_id, outcome: args.outcome,
-                  answer_msg_id: args.answer_msg_id ?? null, recipient: request.origin_actor },
+                new: { request_msg_id: requestMsgId, outcome: outcomeName,
+                  answer_msg_id: answerMsgId ?? null, recipient: request.origin_actor },
                 cause: "automation_job",
                 idempotency_key: args.idempotency_key,
               });
-            eventId = (await c.query(eventQuery, eventArgs)).rows[0]?.id;
+            stored = (await c.query(eventQuery, eventArgs)).rows[0];
           }
-          const deepLink = `/doc/conversations/${args.conversation_id}/turns/${targetMsgId}`;
+          const deepLink = `/doc/conversations/${conversationId}/turns/${targetMsgId}`;
           const minted = (await c.query(
             "select ops.mint_notification($1,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11) as result",
-            ["event", eventId, "doc_conversation_request", args.request_msg_id, outcome.reason,
-              outcome.severity, deepLink, `doc-request:${args.request_msg_id}`,
+            ["event", stored?.id, "doc_conversation_request", requestMsgId, outcome.reason,
+              outcome.severity, deepLink, `doc-request:${requestMsgId}`,
               request.origin_actor, false, false])).rows[0]?.result;
           if (!minted?.ok || !minted.notification_id) {
             throw new ToolError({ error: "doc_request_notification_unavailable",
@@ -255,8 +267,8 @@ export function docConversationTools({ withEnvelope, writeEvent, ToolError }) {
           }
           return { ok: true, deduplicated: minted.deduplicated === true,
             notification_id: minted.notification_id, recipient: request.origin_actor,
-            outcome: args.outcome, severity: outcome.severity, deep_link: deepLink,
-            request_msg_id: args.request_msg_id };
+            outcome: outcomeName, severity: outcome.severity, deep_link: deepLink,
+            request_msg_id: requestMsgId };
         }),
     },
 

@@ -40,7 +40,7 @@ function store() {
       if (text.includes("pg_advisory_xact_lock")) return { rows: [] };
       if (text.includes("from event where")) {
         const hit = events.find(e => e.new.request_msg_id === values[1]);
-        return { rows: hit ? [{ id: hit.id }] : [] };
+        return { rows: hit ? [{ id: hit.id, new_value: hit.new }] : [] };
       }
       if (text.includes("ops.mint_notification")) {
         const [source, eventRef, subjectType, subjectRef, reason, severity, deepLink, dedupeKey, slug, bypass, hold] = values;
@@ -151,4 +151,30 @@ test("an answer must follow the request and an answered request must name it", a
   await assert.rejects(() => s.complete({ request_msg_id: JOE_ASK, outcome: "finished" }),
     { error: "doc_request_outcome_invalid" });
   assert.equal(s.notifications.length, 0);
+});
+
+test("a conflicting retry returns the first completion, not its own arguments", async () => {
+  const s = store();
+  const first = await s.complete({ request_msg_id: JOE_ASK, outcome: "answered", answer_msg_id: ANSWER });
+  const retry = await s.complete({ request_msg_id: JOE_ASK, outcome: "failed" });
+  assert.equal(s.notifications.length, 1);
+  assert.deepEqual({ ...retry, deduplicated: false }, first);
+  assert.equal(retry.deduplicated, true);
+  assert.equal(retry.outcome, "answered");
+  assert.equal(retry.severity, "completion");
+  assert.equal(retry.deep_link, `/doc/conversations/${CONVERSATION}/turns/${ANSWER}`);
+});
+
+test("the same request in another letter case is the same request", async () => {
+  const s = store();
+  const first = await s.complete({ request_msg_id: JOE_ASK, outcome: "answered", answer_msg_id: ANSWER });
+  const upper = await s.complete({
+    conversation_id: CONVERSATION.toUpperCase(), request_msg_id: JOE_ASK.toUpperCase(),
+    outcome: "answered", answer_msg_id: ANSWER.toUpperCase() });
+  assert.equal(s.notifications.length, 1);
+  assert.equal(s.events.length, 1);
+  assert.equal(upper.deduplicated, true);
+  assert.equal(upper.notification_id, first.notification_id);
+  assert.equal(s.notifications[0].subjectRef, JOE_ASK);
+  assert.equal(s.notifications[0].dedupe_key, `doc-request:${JOE_ASK}`);
 });
