@@ -1867,7 +1867,8 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
             if not request['acknowledged'] and request.get('disposition') != 'calendar_unsupported':
                 args = json.loads(request['payload'])
                 work.write(request['verb'], args, 'pending write')
-        work.emails(mails, matcher, since)
+        # Outlook can expose a message after its sent time has left the watermark overlap.
+        work.emails(mails, matcher, min(since, int((now - BACKFILL).timestamp())))
         work.counts['legacy_unmatched'] = _legacy_unmatched(state)
         work.observe_flags(complete_mails, matcher)
         work.leads(matcher)

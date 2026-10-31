@@ -2082,6 +2082,18 @@ class IntakeTest(unittest.TestCase):
                          mail('lee@example.test', -timedelta(hours=2), subject='Delivered late')])
         self.assertEqual([a['ref'] for _, a in self.fake.writes('log-activity')], ['C-901', 'L-902'])
 
+    def test_late_synced_mail_keeps_the_48_hour_recovery_window_after_watermark_advances(self):
+        first = mail('pat@example.test', -timedelta(hours=1))
+        delayed = mail('lee@example.test', -timedelta(hours=30), subject='Delivered a day late')
+        too_old = mail('lee@example.test', -timedelta(hours=49), subject='Outside recovery window')
+        self.run_intake([first])
+        self.fake.now = NOW + timedelta(minutes=30)
+        for _ in range(2):
+            self.run_intake([first, delayed, too_old])
+        activities = [a for _, a in self.fake.writes('log-activity')]
+        self.assertEqual([a['ref'] for a in activities], ['C-901', 'L-902'])
+        self.assertEqual(activities[-1]['occurred_at'], intake._iso(delayed['sent_unix']))
+
     def test_unmatched_people_are_reported_by_name_and_domain_only(self):
         self.run_intake([mail('stranger@example.test', -timedelta(hours=1), name='Sam Stranger')])
         self.assertEqual([(v, a.get('applies_to')) for v, a in self.fake.writes()],
