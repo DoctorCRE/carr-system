@@ -4141,7 +4141,7 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
     },
     {
       "config": [
-        "search_path=pg_catalog, ops, public"
+        "search_path=pg_catalog, ops, public, pg_temp"
       ],
       "grantee": "carr_authority",
       "parallel": "u",
@@ -12545,7 +12545,7 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
     },
     {
       "config": [
-        "search_path=pg_catalog, ops, public"
+        "search_path=pg_catalog, ops, public, pg_temp"
       ],
       "grantee": "carr_authority",
       "parallel": "u",

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import pg from 'pg';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres, acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
 import { readMigration } from './migration-source.testhelper.mjs';
 import { docConversationTools } from '../src/doc-conversation.js';
 
@@ -16,9 +16,10 @@ class ToolError extends Error {
 
 test('recorded proposed-rent comps persist through the sole append door and read back on PG18',
   { skip: !bin && 'PostgreSQL 18 unavailable' }, async t => {
+    const release = await acquirePostgresFixtureGroup();
     const fixture = await acquireDisposablePostgres({ prefix: 'answer-blocks-', pgCtl: path.join(bin, 'pg_ctl') });
     let c;
-    t.after(async () => { await c?.end(); await fixture.close(); });
+    t.after(async () => { try { await c?.end(); await fixture.close(); } finally { await release(); } });
     const data = path.join(fixture.root, 'data');
     await fixture.run(path.join(bin, 'initdb'), ['-D', data, '-U', 'fixture', '--auth=trust', '--no-locale']);
     await fixture.run(path.join(bin, 'pg_ctl'), ['-D', data, '-l', path.join(fixture.root, 'server.log'),

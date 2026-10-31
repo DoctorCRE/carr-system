@@ -13,7 +13,7 @@ drop function ops.append_doc_conversation_turn(uuid,text,text,uuid,uuid);
 
 create or replace function ops.append_doc_conversation_turn(
   p_conversation uuid, p_role text, p_body text, p_msg_id uuid, p_idempotency_key uuid, p_answer_blocks jsonb default '[]'::jsonb)
-returns jsonb language plpgsql security definer set search_path=pg_catalog,ops,public
+returns jsonb language plpgsql security definer set search_path=pg_catalog,ops,public,pg_temp
 as $$
 declare v_actor uuid; v_slug text; v_id bigint; v_sequence integer; v_prior ops.doc_conversation_turn%rowtype;
 begin
@@ -80,7 +80,7 @@ comment on function ops.append_doc_conversation_turn(uuid,text,text,uuid,uuid,js
 
 create or replace function ops.doc_conversation_facts(
   p_conversation_id uuid, p_actor_id text, p_after_sequence integer, p_limit integer)
-returns jsonb language plpgsql stable security definer set search_path=pg_catalog,ops,public
+returns jsonb language plpgsql stable security definer set search_path=pg_catalog,ops,public,pg_temp
 as $$
 declare v_actor uuid; v_row ops.doc_conversation%rowtype; v_limit integer; v_after integer;
         v_turns jsonb; v_latest integer; v_more boolean; v_grants jsonb; v_visible integer;
