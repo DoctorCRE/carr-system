@@ -19,6 +19,25 @@ const KINDS = {
 };
 const sender = summary => /^Email from (.+?): (.*)$/s.exec(summary ?? '');
 
+export function resolveContact(person = {}, people, { call = false } = {}) {
+  const email = (person.email ?? '').trim().toLowerCase();
+  const phoneDigits = value => (value ?? '').replace(/[^0-9]/g, '').replace(/^1(?=\d{10}$)/, '');
+  const phone = phoneDigits(person.phone);
+  const hits = people.filter(p => email
+    ? ((p.email ?? '').toLowerCase().match(/[^\s<>@,;]+@[^\s<>@,;]+/g) ?? []).includes(email)
+    : call && (phone ? phone.length >= 10 && [p.phone, p.cell].some(value =>
+      phoneDigits(value) === phone)
+      : Boolean(person.name?.trim()) && p.name?.trim().toLowerCase() === person.name.trim().toLowerCase()));
+  const match = hits.length === 1 ? hits[0] : null;
+  return { ...person, email, name: match?.name ?? person.name ?? null,
+    party_id: match?.party_id ?? null, client_id: match?.client_id ?? null, client: match?.client ?? null,
+    role: match?.client_id ? 'client' : match?.vendor_category
+      ? (/attorney|legal|law/i.test(match.vendor_category) ? 'attorney'
+        : /lend|loan|bank|financ/i.test(match.vendor_category) ? 'lender'
+        : /landlord|listing/i.test(match.vendor_category) ? 'landlord_side' : 'other_vendor') : null,
+    unknown: !match, internal: person.internal === true };
+}
+
 export function emailProposalTools({ ToolError, withEnvelope, writeEvent, preview }) {
   const fail = (error, extra = {}) => { throw new ToolError({ error, ...extra }); };
   const previewArgs = row => ({ deal: row.deal_id, activity_id: row.activity_id,
@@ -31,23 +50,11 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
       left join vendor v on v.party_id=p.id and v.merged_into is null
       where p.merged_into is null and p.deleted_at is null and p.email is not null`)).rows;
   }
-  function resolve(person = {}, people) {
-    const email = (person.email ?? '').toLowerCase();
-    const hits = people.filter(p => (p.email.toLowerCase().match(/[^\s<>@,;]+@[^\s<>@,;]+/g) ?? []).includes(email));
-    const match = hits.length === 1 ? hits[0] : null;
-    return { ...person, email, name: match?.name ?? person.name ?? null,
-      party_id: match?.party_id ?? null, client_id: match?.client_id ?? null, client: match?.client ?? null,
-      role: match?.client_id ? 'client' : match?.vendor_category
-        ? (/attorney|legal|law/i.test(match.vendor_category) ? 'attorney'
-          : /lend|loan|bank|financ/i.test(match.vendor_category) ? 'lender'
-          : /landlord|listing/i.test(match.vendor_category) ? 'landlord_side' : 'other_vendor') : null,
-      unknown: !match, internal: person.internal === true };
-  }
   function evidence(row, people) {
     const context = row.email_context ?? {};
     return { ...row, subject: context.subject ?? sender(row.summary)?.[2] ?? row.summary,
-      conversation_id: context.conversation_id ?? null, participant_evidence_missing: !row.email_context, sender: context.sender ? resolve(context.sender, people) : row.recorded_sender ?? resolve({}, people),
-      recipients: (context.recipients ?? []).map(p => resolve(p, people)),
+      conversation_id: context.conversation_id ?? null, participant_evidence_missing: !row.email_context, sender: context.sender ? resolveContact(context.sender, people) : row.recorded_sender ?? resolveContact({}, people),
+      recipients: (context.recipients ?? []).map(p => resolveContact(p, people)),
       occurred_at: new Date(row.occurred_at).toISOString() };
   }
   async function matchingPreview(c, row) {
