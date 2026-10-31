@@ -77,7 +77,9 @@ async function main() {
             child.once('close', (exitCode) => resolve(exitCode ?? 1));
           });
           console.log(`suite-timing: ${file} ${(performance.now() - started).toFixed(0)}ms`);
-          console.log(`suite-completed: ${JSON.stringify(file)}`);
+          const summary = output.split('\n').filter(line => /^(?:#|ℹ) (?:tests|pass|fail|cancelled|skipped|todo) \d+\s*$/.test(line)
+            || /^(?:# )?CARR_TEST_FILE [01]\s*$/.test(line)).join('\n');
+          console.log(`suite-result: ${JSON.stringify({ file, code, summary })}`);
           if (code !== 0) { process.exitCode = 1; failures.push({ file, output }); }
         }
       }));

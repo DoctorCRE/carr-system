@@ -54,7 +54,7 @@ class Controls(unittest.TestCase):
             for lock in locks:
                 self.assertIn(lock, key)
             self.assertNotIn('restore-keys', step['with'])
-        for filename in ('ci.yml', 'main-canary.yml'):
+        for filename in ('ci.yml', 'main-canary.yml', 'unit-shards.yml'):
             for job in workflow(filename)['jobs'].values():
                 steps = job.get('steps', [])
                 setups = [step for step in steps if 'actions/setup-node@' in step.get('uses', '')

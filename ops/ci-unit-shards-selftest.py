@@ -35,10 +35,11 @@ class ShardCoverage(unittest.TestCase):
             result = subprocess.run(command, text=True, capture_output=True, check=True)
             shards = json.loads(result.stdout)
             self.assertEqual(sorted(sum(records[file]['milliseconds'] for file in shard) for shard in shards), [100] * 4)
-            (tests / 'new.test.mjs').touch()
-            self.inventory(root, 9)
+            original_floor = (root / 'mcp-server/suite-inventory.json').read_bytes()
+            (tests / 'new.test.mjs').write_text("import test from 'node:test'; test('extra suite', () => {});")
             result = subprocess.run(command, text=True, capture_output=True, check=True)
             self.assertEqual(sorted(file for shard in json.loads(result.stdout) for file in shard), sorted([*records, 'new.test.mjs']))
+            self.assertEqual((root / 'mcp-server/suite-inventory.json').read_bytes(), original_floor)
             log = root / 'incomplete.log'
             log.write_text('suite-timing: 0.test.mjs 90ms\n')
             result = subprocess.run([sys.executable, str(ROOT / 'ops/ci_unit_shards.py'), '--root', str(root),

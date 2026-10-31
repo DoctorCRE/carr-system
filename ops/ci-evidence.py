@@ -72,10 +72,25 @@ def hosted_verdict(*, drift=False):
     return 0 if all(result in allowed[name] for name, result in results.items()) else 1
 
 
+def canary_verdict():
+    evidence, reused = os.environ['EVIDENCE'], os.environ['REUSED']
+    classes, coverage = os.environ['CLASSES'], os.environ['COVERAGE']
+    complete = classes == coverage == 'success'
+    reused_complete = evidence == 'success' and reused == 'true' and classes == coverage == 'skipped'
+    if complete or reused_complete:
+        print('main-canary-green: identical-tree evidence or classes and shard coverage passed')
+        return 0
+    message = f'MAIN IS RED: evidence={evidence} classes={classes} coverage={coverage} reused={reused}'
+    print(message)
+    with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+        summary.write(message + '\n')
+    return 1
+
+
 def contract_digest(root=ROOT):
     digest = hashlib.sha256()
     for name in ('.github/workflows/ci.yml', 'ops/ci-evidence.py', 'ops/ci.sh', 'ops/ci-unit.py',
-                 'mcp-server/suite-discovery.mjs', 'mcp-server/suite-inventory.json', 'ops/config/ci-unit-durations.json', 'ops/ci_unit_shards.py', 'mcp-server/run-tests.mjs', 'ops/ci-pushfloor.py', 'ops/ci-migration.py', 'ops/ci-gates.py', 'ops/ci-secret.py',
+                 '.github/workflows/unit-shards.yml', 'mcp-server/suite-discovery.mjs', 'mcp-server/suite-inventory.json', 'ops/config/ci-unit-durations.json', 'ops/ci_unit_shards.py', 'mcp-server/run-tests.mjs', 'ops/ci-pushfloor.py', 'ops/ci-migration.py', 'ops/ci-gates.py', 'ops/ci-secret.py',
                  'ops/node_test_summary.py',
                  'ops/ci-node-file.mjs',
                  'requirements.lock',
@@ -181,7 +196,7 @@ def git(value, root=ROOT):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['record', 'resolve', 'verdict', 'drift-verdict', 'programs'])
+    parser.add_argument('action', choices=['record', 'resolve', 'verdict', 'drift-verdict', 'canary-verdict', 'programs'])
     parser.add_argument('--output')
     parser.add_argument('--rows', type=Path)
     args = parser.parse_args()
@@ -190,6 +205,8 @@ def main():
             parser.error('programs needs --rows and --output')
         program_records(args.rows, Path(args.output))
         return 0
+    if args.action == 'canary-verdict':
+        return canary_verdict()
     if args.action in ('verdict', 'drift-verdict'):
         try:
             return hosted_verdict(drift=args.action == 'drift-verdict')

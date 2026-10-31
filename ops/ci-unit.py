@@ -55,19 +55,31 @@ def main():
                 for line in output.splitlines():
                     if line.startswith('suite-timing: '):
                         print(line)
-                completed = [json.loads(line.removeprefix('suite-completed: '))
-                             for line in output.splitlines() if line.startswith('suite-completed: ')]
+                completed = []
+                suite_error = None
+                for line in output.splitlines():
+                    if not line.startswith('suite-result: '):
+                        continue
+                    suite = json.loads(line.removeprefix('suite-result: '))
+                    executed = test_counts(suite['summary'])
+                    if (suite['code'] or executed is None or executed['pass'] == 0
+                            or executed['fail'] or executed['cancelled'] or executed['todo']):
+                        suite_error = f"suite {suite['file']}: zero passing tests or incomplete execution"
+                    else:
+                        completed.append(suite['file'])
                 counts = test_counts(output)
                 if result.returncode:
                     reason = f'command exited {result.returncode}'
-                elif selected is not None and sorted(completed) != sorted(selected):
-                    reason = 'shard coverage mismatch; not every assigned suite completed'
                 elif counts is None:
                     reason = 'no complete test counts; required check did not report execution'
                 elif counts['pass'] == 0:
                     reason = 'zero passing tests; required check was empty or skipped'
                 elif counts['fail'] or counts['cancelled'] or counts['todo']:
                     reason = 'required tests failed, were cancelled, or remain todo'
+                elif suite_error:
+                    reason = suite_error
+                elif selected is not None and sorted(completed) != sorted(selected):
+                    reason = 'shard coverage mismatch; not every assigned suite completed'
                 else:
                     if selected is not None:
                         destination = Path(os.environ['CARR_CI_UNIT_RECEIPT'])

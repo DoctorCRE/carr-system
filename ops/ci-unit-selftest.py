@@ -172,6 +172,18 @@ class UnitClassTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(json.loads(receipt.read_text())['suites'])
         self.assertEqual(deadline.read_text(), '600')
+        first = mcp / 'test' / json.loads(receipt.read_text())['suites'][0]
+        original = first.read_text()
+        for body in ("import test from 'node:test'; test.skip('not executed', () => {});", ""):
+            receipt.unlink()
+            first.write_text(body)
+            result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(result.returncode, 0, 'one skipped or unstarted suite must fail even beside passing suites')
+            self.assertFalse(receipt.exists(), 'unexecuted suites must never produce a shard receipt')
+            first.write_text(original)
+            (mcp / 'run-tests.mjs').write_text(runner)
+            result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         receipt.unlink()
         (mcp / 'run-tests.mjs').write_text(runner.replace('const files = selected || discovered;',
                                                          'const files = (selected || discovered).slice(1);'))
