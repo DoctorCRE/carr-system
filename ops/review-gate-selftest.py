@@ -2,9 +2,13 @@
 import importlib.util
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from git_env import fixture_env
 
 spec = importlib.util.spec_from_file_location('gate', Path(__file__).with_name('review-gate.py'))
 assert spec is not None and spec.loader is not None
@@ -81,7 +85,7 @@ class MergeHistory(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             def git(*args):
-                return subprocess.check_output(['git', '-C', raw, *args], text=True, stderr=subprocess.DEVNULL).strip()
+                return subprocess.check_output(['git', '-C', raw, *args], text=True, stderr=subprocess.DEVNULL, env=fixture_env()).strip()
             git('init', '-b', 'main')
             git('config', 'user.name', 'Test')
             git('config', 'user.email', 'test@example.com')

@@ -4,9 +4,13 @@ import re
 import json
 import os
 import subprocess
+import sys
 import time
 import tempfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from git_env import fixture_env
 
 RISKY = ("*launchagents*", "*.plist", "install-*.sh", "*/install-*.sh",
          "*outlook*", "*hxstore*", "*hxprobe*", "*calendar*",
@@ -52,7 +56,7 @@ def approved(pr, files, reviews, reviewer_login, preserved=lambda sha: False):
 
 def unchanged_merges(git_dir, base, reviewed, head):
     def git(*args):
-        return subprocess.check_output(["git", "-C", git_dir, *args], stderr=subprocess.DEVNULL, timeout=120)
+        return subprocess.check_output(["git", "-C", git_dir, *args], stderr=subprocess.DEVNULL, timeout=120, env=fixture_env())
     try:
         commits = git("rev-list", "--first-parent", "--parents", f"{reviewed}..{head}").decode().splitlines()
         expected = head
@@ -81,10 +85,10 @@ def preserved_review(repo, number, base, reviewed, head):
         return False
     try:
         with tempfile.TemporaryDirectory(prefix="review-gate-") as directory:
-            subprocess.run(["git", "init", "--bare", "-q", directory], check=True, capture_output=True, timeout=30)
+            subprocess.run(["git", "init", "--bare", "-q", directory], check=True, capture_output=True, timeout=30, env=fixture_env())
             subprocess.run(["git", "-C", directory, "fetch", "--quiet", "--no-tags",
                             f"https://github.com/{repo}.git", "refs/heads/main", f"refs/pull/{int(number)}/head"],
-                           check=True, capture_output=True, timeout=150)
+                           check=True, capture_output=True, timeout=150, env=fixture_env())
             return unchanged_merges(directory, base, reviewed, head)
     except (subprocess.SubprocessError, OSError, ValueError):
         return False
