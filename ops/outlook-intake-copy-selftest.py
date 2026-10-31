@@ -436,15 +436,14 @@ class InstallerTest(unittest.TestCase):
                          'ops/launchd/com.carr.outlook-outbox.plist',
                          'ops/launchd/com.carr.outlook-triage.plist'):
             shutil.copyfile(ROOT / relative, self.repo / relative)
-        shutil.copytree(ROOT / 'lib', self.repo / 'lib', dirs_exist_ok=True,
-                        ignore=shutil.ignore_patterns('__pycache__'))
+        shutil.copytree(ROOT / 'lib', self.repo / 'lib', dirs_exist_ok=True)
         shutil.copyfile(ROOT / 'ops/config-as-code.py', self.repo / 'ops/config-as-code.py')
         shutil.copyfile(ROOT / 'ops/git_env.py', self.repo / 'ops/git_env.py')
         shutil.copytree(ROOT / 'ops/config', self.repo / 'ops/config')
         for relative in ('vendor/hxprobe/Cargo.toml', 'spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py'):
             (self.repo / relative).write_text('synthetic decoder source\n')
         (self.repo / '.venv/bin/python').symlink_to(sys.executable)
-        (self.repo / '.gitignore').write_text('.venv/\nout\n')
+        (self.repo / '.gitignore').write_text('.venv/\nout\n__pycache__/\n')
         self.git(self.repo, 'init', '--quiet')
         self.git(self.repo, 'add', '-A')
         self.git(self.repo, 'commit', '--quiet', '-m', 'fixture')
