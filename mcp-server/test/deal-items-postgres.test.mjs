@@ -454,10 +454,10 @@ test('Home discovers pending call follow-ups through existing grants without exe
     const result = await read();
     for (const candidate of result.candidates) candidate.created_at = new Date(candidate.created_at).toISOString();
     assert.deepEqual(result, { schema_version:'post-call-followups.v1', send:false, candidates:[
-      { id:first, session_id:session, kind:'assigned_action', deal_id:deal, deal_name:'Synthetic coastal purchase',
+      { id:first, session_id:session, kind:'assigned_action', deal_id:deal, deal_name:'Synthetic coastal purchase', contact_name:null,
         payload:{deal_id:deal,assignee:'dell',action:'Call the synthetic lender',due_on:null},
         evidence_quote:'Dell will call the lender',created_at:'2026-10-20T12:00:00.000Z' },
-      { id:second, session_id:session, kind:'email_draft', deal_id:deal, deal_name:'Synthetic coastal purchase',
+      { id:second, session_id:session, kind:'email_draft', deal_id:deal, deal_name:'Synthetic coastal purchase', contact_name:'Synthetic vendor contact',
         payload:{deal_id:deal,recipient_party_id:recipient.id,recipient_ref:recipient.ref,subject:'Synthetic vendor follow-up',body_sha256:'a'.repeat(64)},
         evidence_quote:'Draft a vendor follow-up',created_at:'2026-10-20T12:00:00.000Z' },
     ] });

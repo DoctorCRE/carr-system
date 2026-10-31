@@ -1371,6 +1371,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "list-deal-documents": {
+    "ingress_key": "mcp-tool:list-deal-documents",
+    "source_locator": "mcp-server/src/deal-files.js",
+    "schema_digest": "3600bc2b80820a44c2584c3f4e2296db8a3dadb6aa1364cc733d07c4a2688366",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "list-doc-conversations": {
     "ingress_key": "mcp-tool:list-doc-conversations",
     "source_locator": "mcp-server/src/doc-conversation.js",
@@ -1415,6 +1425,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:list-fact-conflicts",
     "source_locator": "mcp-server/src/fact-observations.ts",
     "schema_digest": "fc8a1ff80543bb7a4fac294c21044da3990f1264c375e02aa9901df765f9449b",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "list-fact-review": {
+    "ingress_key": "mcp-tool:list-fact-review",
+    "source_locator": "mcp-server/src/fact-review.ts",
+    "schema_digest": "2eb8162d7a72a27311477f8dc60c85b41431c41d80f8bdc713e34ab2c6512c94",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -2582,6 +2602,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "record-human-fact": {
+    "ingress_key": "mcp-tool:record-human-fact",
+    "source_locator": "mcp-server/src/fact-review.ts",
+    "schema_digest": "10da9cff3fedb5238d429a8d8196dd8becc2de7d7035a5e8085d0f43933e80cc",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "record-lead-contact": {
     "ingress_key": "mcp-tool:record-lead-contact",
     "source_locator": "mcp-server/src/lead-automation.js",
@@ -2923,6 +2953,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "ef5027b786a7f59b13b9abaf0da32b1ad4796dafd60c7590d57f70eb51df096e",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "resolve-fact-review": {
+    "ingress_key": "mcp-tool:resolve-fact-review",
+    "source_locator": "mcp-server/src/fact-review.ts",
+    "schema_digest": "0e9b1abefa1d5ee93c002c990de12c06449dfef3a7e83df42d8c50a750d6dca8",
+    "write": true,
+    "human_only": true,
     "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
@@ -3953,6 +3993,51 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.reap_expired_runs(p_service_id uuid, p_environment text, p_run_key text, p_limit integer)",
       "volatility": "v",
       "ingress_key": "db-function-acl:ops.reap_expired_runs(p_service_id uuid, p_environment text, p_run_key text, p_limit integer):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.record_human_fact(p_tenant text, p_actor_id uuid, p_idempotency_key uuid, p_entity_ref text, p_observation jsonb)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.record_human_fact(p_tenant text, p_actor_id uuid, p_idempotency_key uuid, p_entity_ref text, p_observation jsonb):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.list_fact_review(p_tenant text, p_entity_ref text, p_limit integer, p_cursor jsonb, p_include_resolved boolean)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.list_fact_review(p_tenant text, p_entity_ref text, p_limit integer, p_cursor jsonb, p_include_resolved boolean):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.resolve_fact_review(p_tenant text, p_actor_id uuid, p_args jsonb)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.resolve_fact_review(p_tenant text, p_actor_id uuid, p_args jsonb):carr_writer:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
