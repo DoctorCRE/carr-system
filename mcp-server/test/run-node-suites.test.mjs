@@ -28,7 +28,7 @@ test("private PostgreSQL clusters run alone without dropping or duplicating suit
     "self-closing-records-sql.test.mjs"];
   const files = ["chrome-launch.test.mjs",
     "ordinary.test.mjs", ...postgres];
-  const batches = suiteBatches(files);
+  const batches = suiteBatches(files, [], postgres);
   for (const file of postgres) assert.deepEqual(batches.find(batch => batch.includes(file)), [file]);
   assert.deepEqual(batches.flat().sort(), files.sort());
 });
@@ -51,4 +51,12 @@ test("Fallow sees exactly the suites loaded dynamically by the Node runner", asy
   for (const file of ["future.test.js", "future.test.mjs"]) assert.equal(matches(file), true, file);
   for (const file of ["helper.mjs", "future.js", "nested/future.test.mjs", "../src/unused.js"])
     assert.equal(matches(file), false, file);
+});
+
+test("new PostgreSQL suites need no runner list entry", () => {
+  const files = ["future-postgres.test.mjs", "ordinary.test.mjs", "new-store.test.mjs"];
+  const batches = suiteBatches(files, [], ["new-store.test.mjs"]);
+  assert.deepEqual(batches.find(batch => batch.includes("future-postgres.test.mjs")), ["future-postgres.test.mjs"]);
+  assert.deepEqual(batches.find(batch => batch.includes("new-store.test.mjs")), ["new-store.test.mjs"]);
+  assert.deepEqual(batches.flat().sort(), files.sort());
 });

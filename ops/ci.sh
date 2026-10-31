@@ -212,6 +212,11 @@ tree_fingerprint() {
 }
 
 check_gates() {
+  if ! run_quiet "$LOGDIR/registry-build.log" "$PY" tools/regen.py registry; then
+    fail_tail "$LOGDIR/registry-build.log"
+    bad gates "registry build failed"
+    return
+  fi
   export CARR_HOOK_FIXTURE=1
   local rc summary
   "$PY" ops/ci-gates.py --logdir "$LOGDIR" --result "$LOGDIR/gates-result" \
