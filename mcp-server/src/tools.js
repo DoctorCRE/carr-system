@@ -9372,7 +9372,7 @@ registerTools({
   },
 
   "read-home-agenda": {
-    description: "Read one bounded Home agenda snapshot across active team and national-account deals: scope, dates, open actions including holds, short deal names and stored deal-items.v1 checklists. No deal detail or history. Refuses rather than truncates above 1000 deals, 10000 dates or 10000 open actions or 10000 checklist items; owner and workspace filtering remain with the viewer.",
+    description: "Read one bounded Home agenda snapshot across active team and national-account deals: scope, dates, open actions including holds, short deal names and stored deal-items.v1 checklists. Each deal carries needs_next_action: past pending with no open ordinary action (held counts, checklist items do not); missing_next_action lists those deal ids by owner, for a partner to set with set-next-action. No deal detail or history. Refuses rather than truncates above 1000 deals, 10000 dates or 10000 open actions or 10000 checklist items; owner and workspace filtering remain with the viewer.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c, actor) => {
       const { rows: [snapshot] } = await c.query(`
@@ -9385,7 +9385,10 @@ registerTools({
                  to_jsonb(b.last_review_at)#>>'{}' as last_review_at,
                  b.workspace_kind, b.account_client_id, b.operating_state, b.outcome,
                  to_jsonb(b.closed_on)#>>'{}' as closed_on,
-                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on
+                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on,
+                 b.phase <> 'pending' and not exists (
+                   select 1 from v_deal_room_action a
+                    where a.deal_id = b.id and a.status = 'open' and a.item_title is null) as needs_next_action
             from v_open_deal_room_board b
             join v_client_engagement_status ce on ce.client_id = b.client_id
            where b.operating_state = 'active'
@@ -9434,9 +9437,15 @@ registerTools({
                ), '[]'::jsonb) end as deals from bounds`);
       if (snapshot.overflow) throw new ToolError({ error: "agenda_limit_exceeded",
         limits: { deals: 1000, critical_dates: 10000, open_actions: 10000, checklist_items: 10000 } });
+      // A partner sets the missing ball with set-next-action on the deal id;
+      // this read only names the gap and never fills it.
+      const missing = new Map();
+      for (const deal of snapshot.deals.filter(deal => deal.needs_next_action))
+        missing.set(deal.owner, [...(missing.get(deal.owner) || []), deal.id]);
       return { schema_version: "home-agenda.v1", actor: actor.slug, deals: snapshot.deals.map(({ client_name, market, ...deal }) => ({
         ...deal, short_name: shortDealHeading({ ...deal, client_name, market }),
-      })) };
+      })), missing_next_action: [...missing].map(([owner, deal_ids]) => ({ owner, deal_ids }))
+        .sort((a, b) => a.owner === null ? 1 : b.owner === null ? -1 : a.owner.localeCompare(b.owner)) };
     },
   },
 
