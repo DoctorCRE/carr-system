@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('gate', Path(__file__).with_name('review-gate.py'))
+assert spec is not None and spec.loader is not None
 gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
@@ -21,6 +22,14 @@ class ReviewGate(unittest.TestCase):
         self.assertFalse(gate.approved(self.pr, [{'filename': 'migrations/a'}], [], 'reviewer'))
         self.assertFalse(gate.approved(self.pr, [{'filename': 'safe', 'previous_filename': 'db/a'}], [], 'reviewer'))
         self.assertFalse(gate.approved(self.pr, [], [], "reviewer"))
+
+    def test_risky_paths_and_renames(self):
+        paths = ['LaunchAgents/job', 'a/job.plist', 'ops/install-job.sh', 'outlook/a', 'hxstore/a', 'hxprobe/a', 'calendar.js', '.github/workflows/deploy.yml', 'migrations/a', 'db/a', 'wrangler.toml', 'tools/migrate.py']
+        for path in paths:
+            for key in ('filename', 'previous_filename'):
+                with self.subTest(path=path, key=key):
+                    self.assertFalse(gate.approved(self.pr, [{key: path}], [], 'reviewer'))
+        self.assertFalse(gate.approved(self.pr, [{'filename': 'ops/new.py', 'status': 'added'}], [], 'reviewer'))
 
     def test_armed_safe_requires_review(self):
         armed = {**self.pr, 'auto_merge': {'enabled_by': {'login': 'author'}}}
