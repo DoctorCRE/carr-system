@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { validateAnswerBlocks } from '../src/answer-blocks.js';
 import { docConversationTools } from '../src/doc-conversation.js';
 import { ToolError as PublicToolError } from '../src/tool-error.ts';
 import { publicError } from '../src/public-errors.ts';
@@ -37,45 +38,34 @@ function harness() {
   return { append, read };
 }
 
-test('a sourced typed table round-trips through the existing turn verbs', async () => {
-  const h = harness();
-  await h.append({ answer_blocks: [table()] });
-  assert.deepEqual((await h.read()).turns[0].answer_blocks, [table()]);
-});
-
 test('numeric cells require a record or a versioned canonical fact source', async () => {
-  const h = harness();
   const block = table();
   delete block.rows[0].rent.source;
-  await assert.rejects(h.append({ answer_blocks: [block] }), /answer_blocks_invalid/);
+  assert.throws(() => validateAnswerBlocks([block], ToolError), /answer_blocks_invalid/);
   block.rows[0].rent.source = { fact_id: record };
-  await assert.rejects(h.append({ answer_blocks: [block] }), /answer_blocks_invalid/);
+  assert.throws(() => validateAnswerBlocks([block], ToolError), /answer_blocks_invalid/);
   block.rows[0].rent.source.version = 2;
-  await h.append({ answer_blocks: [block] });
-  assert.deepEqual((await h.read()).turns[0].answer_blocks[0].rows[0].rent.source,
-    { fact_id: record, version: 2 });
+  assert.doesNotThrow(() => validateAnswerBlocks([block], ToolError));
 });
 
 test('row, column, block and payload caps refuse oversize answers', async () => {
-  const h = harness();
   const block = table();
   block.rows = Array.from({ length: 201 }, () => table().rows[0]);
-  await assert.rejects(h.append({ answer_blocks: [block] }), /answer_blocks_invalid/);
+  assert.throws(() => validateAnswerBlocks([block], ToolError), /answer_blocks_invalid/);
   block.rows = [];
   block.columns = Array.from({ length: 21 }, (_, i) => ({ key: `c${i}`, label: 'C', type: 'number' }));
-  await assert.rejects(h.append({ answer_blocks: [block] }), /answer_blocks_invalid/);
-  await assert.rejects(h.append({ answer_blocks: Array.from({ length: 9 }, table) }), /answer_blocks_invalid/);
+  assert.throws(() => validateAnswerBlocks([block], ToolError), /answer_blocks_invalid/);
+  assert.throws(() => validateAnswerBlocks(Array.from({ length: 9 }, table), ToolError), /answer_blocks_invalid/);
   const large = table();
   large.rows = Array.from({ length: 200 }, () => ({ ...table().rows[0], side: { value: 'x'.repeat(2000) } }));
-  await assert.rejects(h.append({ answer_blocks: [large] }), /answer_blocks_invalid/);
+  assert.throws(() => validateAnswerBlocks([large], ToolError), /answer_blocks_invalid/);
 });
 
 test('unknown block and column types refuse', async () => {
-  const h = harness();
-  await assert.rejects(h.append({ answer_blocks: [{ ...table(), type: 'table.v2' }] }), /answer_blocks_invalid/);
+  assert.throws(() => validateAnswerBlocks([{ ...table(), type: 'table.v2' }], ToolError), /answer_blocks_invalid/);
   const block = table();
   block.columns[1].type = 'money';
-  await assert.rejects(h.append({ answer_blocks: [block] }), /answer_blocks_invalid/);
+  assert.throws(() => validateAnswerBlocks([block], ToolError), /answer_blocks_invalid/);
 });
 
 test('plain text answer readback is unchanged', async () => {
@@ -87,22 +77,18 @@ test('plain text answer readback is unchanged', async () => {
 });
 
 test('a chart references numeric columns of its table and carries no free numbers', async () => {
-  const h = harness();
   const chart = { type: 'chart.v1', id: 'rent_chart', table_id: 'comps', kind: 'bar', x: 'side', y: 'rent' };
-  await h.append({ answer_blocks: [table(), chart] });
-  assert.deepEqual((await h.read()).turns[0].answer_blocks[1], chart);
+  assert.doesNotThrow(() => validateAnswerBlocks([table(), chart], ToolError));
   for (const invalid of [{ ...chart, table_id: 'missing' }, { ...chart, y: 'side' }, { ...chart, values: [32] }]) {
-    await assert.rejects(h.append({ answer_blocks: [table(), invalid] }), /answer_blocks_invalid/);
+    assert.throws(() => validateAnswerBlocks([table(), invalid], ToolError), /answer_blocks_invalid/);
   }
 });
 
-test('typed rows, unique keys and assistant-only blocks refuse malformed answers', async () => {
-  const h = harness();
+test('typed rows and unique keys refuse malformed answers', async () => {
   const block = table();
   block.rows[0].rent.value = '32';
-  await assert.rejects(h.append({ answer_blocks: [block] }), /answer_blocks_invalid/);
-  await assert.rejects(h.append({ answer_blocks: [table(), table()] }), /answer_blocks_invalid/);
-  await assert.rejects(h.append({ role: 'human', answer_blocks: [table()] }), /answer_blocks_invalid/);
+  assert.throws(() => validateAnswerBlocks([block], ToolError), /answer_blocks_invalid/);
+  assert.throws(() => validateAnswerBlocks([table(), table()], ToolError), /answer_blocks_invalid/);
 });
 
 test('answer validation refusals have a public error code and useful limits', () => {

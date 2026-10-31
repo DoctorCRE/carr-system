@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import pg from 'pg';
+import { Validator } from '@cfworker/json-schema';
 import { acquireDisposablePostgres, acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
 import { readMigration } from './migration-source.testhelper.mjs';
 import { docConversationTools } from '../src/doc-conversation.js';
@@ -40,6 +41,7 @@ test('recorded proposed-rent comps persist through the sole append door and read
       alter table ops.doc_conversation_turn add unique (msg_id);
       alter table ops.doc_conversation_turn alter column id add generated always as identity;
       alter table ops.doc_conversation_turn drop column if exists answer_blocks;
+      create table public.deal (id uuid primary key);
       create function ops.portfolio_writer_actor_id() returns uuid language sql as
         $$ select '${id(1)}'::uuid $$;`);
     const old = readMigration('0520_doc_conversation_store.sql');
@@ -53,14 +55,24 @@ test('recorded proposed-rent comps persist through the sole append door and read
       `, [id(1)]);
     await c.query('insert into ops.doc_conversation(id,title,created_by_actor) values ($1,$2,$3)',
       [id(2), 'Synthetic comps', id(1)]);
+    await c.query('insert into public.deal(id) values ($1)', [id(4)]);
     await c.query(`insert into negotiation_round(id,deal_id,round_no,side,proposed_on,rate_amount,rate_basis,created_by)
       values ($1,$2,1,'landlord','2026-10-01',2.5,'usd_sf_mo',$3)`, [id(3), id(4), id(1)]);
     await c.query('grant usage on schema ops to carr_authority; set role carr_authority');
     const tools = docConversationTools({ ToolError,
-      withEnvelope: async (_c, _a, _v, _args, fn) => fn(), writeEvent: async () => {} });
+      withEnvelope: async (client, _a, _v, _args, fn) => {
+        await client.query('begin');
+        try { const result = await fn(); await client.query('commit'); return result; }
+        catch (error) { await client.query('rollback'); throw error; }
+      }, writeEvent: async () => {} });
     const actor = { id: id(1) };
     const args = { conversation_id: id(2), idempotency_key: id(5), msg_id: id(6),
       role: 'assistant', body: 'Recorded proposed-rent comparisons', comps_deals: [id(4)] };
+    for (const deals of [[id(7)], [id(4), id(7)]]) {
+      await assert.rejects(tools['add-doc-conversation-turn'].handler(c, actor, { ...args, comps_deals: deals }), /answer_blocks_invalid/);
+    }
+    const schema = tools['add-doc-conversation-turn'].inputSchema;
+    assert.equal(new Validator(schema).validate({ ...args, answer_blocks: [] }).valid, false);
     const append = () => tools['add-doc-conversation-turn'].handler(c, actor, args);
     assert.equal((await append()).deduplicated, false);
     assert.equal((await append()).deduplicated, true);
@@ -69,7 +81,7 @@ test('recorded proposed-rent comps persist through the sole append door and read
     assert.deepEqual(read.turns[0].answer_blocks[0].rows, [{ deal: { value: id(4) },
       side: { value: 'landlord' }, rent: { value: 30, source: { record_id: id(3) } } }]);
     args.comps_deals = [id(7)];
-    await assert.rejects(append(), /doc_conversation_msg_id_reuse/);
+    await assert.rejects(append(), /answer_blocks_invalid/);
     await tools['add-doc-conversation-turn'].handler(c, actor, { ...args,
       msg_id: id(8), idempotency_key: id(9), comps_deals: undefined, body: 'Plain text' });
     const text = await tools['read-doc-conversation'].handler(c, actor, { conversation_id: id(2) });

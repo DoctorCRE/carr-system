@@ -3,7 +3,7 @@
 -- lock-review: a constant JSONB default avoids a rewrite; bound the metadata lock to five seconds.
 set local lock_timeout = '5s';
 
-grant select on public.v_deal_room_negotiation to carr_authority;
+grant select on public.deal, public.v_deal_room_negotiation to carr_authority;
 
 -- WR617.S10.J2: sourced answer blocks stay on the canonical immutable turn.
 alter table ops.doc_conversation_turn
@@ -78,7 +78,7 @@ grant execute on function ops.append_doc_conversation_turn(uuid,text,text,uuid,u
   to carr_authority;
 
 comment on function ops.append_doc_conversation_turn(uuid,text,text,uuid,uuid,jsonb) is
-  'Sole Doc turn writer. Optional answer_blocks are validated at the registered verb; replay compares the complete answer.';
+  'Sole Doc turn writer. Server-built answer_blocks are validated at the registered verb; replay compares the complete answer.';
 
 create or replace function ops.doc_conversation_facts(
   p_conversation_id uuid, p_actor_id text, p_after_sequence integer, p_limit integer)
