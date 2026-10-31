@@ -314,3 +314,11 @@ test('250 merged PRs have a bounded request and concurrency budget', async () =>
   assert.equal(peak, 4, 'comparison concurrency is capped');
   assert.ok(result.some(value => value === null), 'unverified work remains unknown');
 });
+
+test('GitHub rate limits leave production status unknown', async () => {
+  const { createProductionSource } = await import('../src/work-queue.js');
+  const read = createProductionSource({ token: 'synthetic', fetchImpl: async url => url.includes('/release')
+    ? Response.json({ env: { value: 'production' }, git_sha: { value: 'b'.repeat(40) } })
+    : new Response('', { status: 429 }) });
+  assert.deepEqual(await read([{ repo: 'DoctorCRE/carr-system', number: 1, state: 'merged' }]), [null]);
+});
