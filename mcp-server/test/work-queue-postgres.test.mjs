@@ -293,7 +293,7 @@ test('queue grants preserve the current catalog seal and reject wider grants', a
 test('the read saves a finish once on the side connection, and later reads keep it after the PR leaves the window', async () => {
   const work_request = await request('WR-000061');
   const done = (await command('dispatch-job', job(work_request, { executor: 'claude' }))).card_id;
-  await c.query("update ops.work_request_job set created_at='2026-10-01T00:00:00Z', started_at='2026-10-02T00:00:00Z' where work_request_id=(select id from ops.work_request where ref=$1)", [work_request]);
+  await c.query("update ops.work_request_job set created_at='2026-10-01T00:00:00Z', runner_job_id='done-runner', started_at='2026-10-02T00:00:00Z' where work_request_id=(select id from ops.work_request where ref=$1)", [work_request]);
   const pending = (await command('dispatch-job', job(work_request))).card_id;
   await c.query("update ops.work_request_job set runner_job_id='pending-runner', started_at='2026-10-20T00:00:00Z' where work_request_id=(select id from ops.work_request where ref=$1) and j_number=2", [work_request]);
   const bounds = [], writes = [];
