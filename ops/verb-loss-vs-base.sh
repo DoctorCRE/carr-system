@@ -18,6 +18,9 @@ BASE_TREE="$(mktemp -d "${TMPDIR:-/tmp}/verb-loss-base.XXXXXX")"
 trap 'rm -rf "$BASE_TREE"' EXIT HUP INT TERM
 git -C "$REPO" archive "$BASE" mcp-server | tar -x -C "$BASE_TREE" \
   || { echo "verb-loss-vs-base: cannot read mcp-server at $BASE" >&2; exit 1; }
+if git -C "$REPO" cat-file -e "$BASE:lib" 2>/dev/null; then
+  git -C "$REPO" archive "$BASE" lib | tar -x -C "$BASE_TREE"
+fi
 
 BASE_NAMES="$(sh "$OPS/verb-count.sh" "$BASE_TREE/mcp-server" --names)"
 BASE_REGISTRY="$(printf '%s' "$BASE_NAMES" | "$PY" -c \
