@@ -90,6 +90,62 @@ test('a stated phase applies automatically once and remains undoable', async () 
   assert.equal((await command('get-deal-room', { deal })).phase, 'site_selection');
 });
 
+test('expired pending-only calls remain visible until reviewed', async () => {
+  const { session, id } = await filePhase('...');
+  await c.query("update capture_session set expires_at=now()-interval '1 day' where id=$1", [session]);
+  const outcome = (await command('read-call-outcomes')).calls.find(call => call.session_id === session);
+  assert.ok(outcome, 'expired call with pending work must remain listed');
+  assert.deepEqual(outcome.applied, []);
+  assert.ok(outcome.open_cards.some(card => card.candidate_id === id));
+});
+
+test('only the owning device can renew an unfinished expired capture', async () => {
+  const { session, id, deal } = await filePhase('...');
+  const token = randomUUID();
+  await c.query(`update capture_session set device_id='fixture-device',session_token_hash=$2,
+    expires_at=now()-interval '1 day' where id=$1`,
+  [session, createHash('sha256').update(token).digest('hex')]);
+  const handler = createCaptureHandler({ withWriter: fn => transaction(fn, 'carr_writer') });
+  const environment = { CAPTURE_TOKENS: JSON.stringify({ 'fixture-device': 'fixture-device-proof', other: 'other-proof' }) };
+  const read = () => handler.fetch(new Request('https://worker.test/capture/session', {
+    headers: { authorization: `Bearer ${token}` },
+  }), environment);
+  const renew = (proof = 'fixture-device-proof') => handler.fetch(new Request('https://worker.test/capture/renew', {
+    method: 'POST', headers: { authorization: `Bearer ${proof}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ session_token: token }),
+  }), environment);
+  const expired = await read();
+  assert.equal(expired.status, 401);
+  assert.equal((await expired.json()).error, 'session_token_expired');
+  assert.equal((await renew('wrong')).status, 401);
+  assert.equal((await renew('other-proof')).status, 401);
+  assert.equal((await read()).status, 401);
+  assert.equal((await renew()).status, 200);
+  assert.equal((await read()).status, 200);
+  const payload = { session_token: token, idempotency_key: randomUUID(), items: [{
+    kind: 'activity', payload: { ref: deal, kind: 'note', summary: 'Discussed the call.' },
+    evidence_quote: 'Discussed the call.', confidence: 0.5,
+  }] };
+  const publish = () => handler.fetch(new Request('https://worker.test/capture/candidates', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
+  }), environment);
+  const first = await publish();
+  assert.equal(first.status, 200);
+  const receipt = await first.json();
+  assert.deepEqual(await (await publish()).json(), receipt);
+  assert.ok((await (await read()).json()).candidate_statuses.some(row => row.id === id));
+  for (const state of ['done', 'failed']) {
+    await c.query("update capture_session set state=$2,expires_at=now()-interval '1 day' where id=$1", [session, state]);
+    assert.equal((await renew()).status, 409);
+    assert.equal((await read()).status, 401);
+  }
+  await c.query("update capture_session set state='distilling' where id=$1", [session]);
+  await c.query(`insert into capture_post_call_report(session_id,idempotency_key,report_sha256,candidate_count)
+    values($1,$2,$3,2)`, [session, randomUUID(), 'a'.repeat(64)]);
+  assert.equal((await renew()).status, 409);
+  assert.equal((await read()).status, 401);
+});
+
 for (const [name, options] of [
   ['a client-only phase statement', { speaker: 'client' }],
   ['a quote missing from the stored transcript receipt', { storedQuote: 'We discussed a synthetic purchase without moving phase' }],
