@@ -55,11 +55,21 @@ def approved(pr, files, reviews, reviewer_login, preserved=lambda sha: False):
 
 
 def review_delta(diff):
-    sections = diff.split(b"diff --git ")
-    return b"diff --git ".join(
-        section if b"GIT binary patch\n" in section else
-        b"".join(line for line in section.splitlines(keepends=True) if not line.startswith(b"index "))
-        for section in sections)
+    sections = re.split(rb"(?m)^(?=diff --git )", diff)
+    normalized = []
+    for section in sections:
+        lines = section.splitlines(keepends=True)
+        binary = any(line.startswith((b"GIT binary patch", b"Binary files ")) for line in lines)
+        in_header = True
+        output = []
+        for line in lines:
+            if line.startswith((b"@@ ", b"@@@ ", b"GIT binary patch", b"Binary files ")):
+                in_header = False
+            if not binary and in_header and line.startswith(b"index "):
+                continue
+            output.append(line)
+        normalized.append(b"".join(output))
+    return b"".join(normalized)
 
 
 def unchanged_merges(git_dir, base, reviewed, head):
@@ -135,7 +145,7 @@ def run(event, repo):
     passed = card_ok and approved(pr, files, reviews, os.environ.get("CARR_REVIEW_APP_LOGIN", ""),
         lambda reviewed: preserved_review(repo, number, pr["base"]["sha"], reviewed, sha))
     latest = api(f"{root}/pulls/{number}")
-    if latest["head"]["sha"] == sha and all(latest.get(k) == pr.get(k) for k in ("body", "title", "auto_merge", "base")):
+    if latest["head"]["sha"] == sha and all(latest.get(k) == pr.get(k) for k in ("body", "title", "base")):
         description = ("No skip-CI title; small safe diff or current-head approval required" if card_ok else
                        "Missing PR body line: Card: WR<number>.S<number>.J<number>")
         status(sha, "success" if passed else "failure", description)

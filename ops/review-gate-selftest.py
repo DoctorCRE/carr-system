@@ -75,12 +75,23 @@ class ReviewGate(unittest.TestCase):
             self.assertEqual(api.call_args.args[0], 'repos/owner/repo/statuses/head')
             self.assertEqual(api.call_args.args[1]['state'], 'success')
 
+    def test_arming_during_run_still_publishes_status(self):
+        latest = {**self.pr, "auto_merge": {"enabled_by": {"login": "author"}}}
+        with patch.object(gate, "api", side_effect=[self.pr, {}, self.files, [], latest, {}]) as api:
+            self.assertEqual(gate.run({"number": 4}, "owner/repo"), 0)
+            self.assertEqual(api.call_args.args[1]["state"], "success")
+
     def test_adapter_checks_head_and_metadata(self):
         with patch.object(gate, 'api', side_effect=[self.pr, {}, self.files, [], {**self.pr, 'title': 'changed'}]) as api:
             gate.run({'number': 4}, 'owner/repo')
             self.assertEqual(api.call_count, 5)
 
 class MergeHistory(unittest.TestCase):
+    def test_index_at_start_of_hunk_is_preserved(self):
+        before = b"diff --git a/f b/f\nindex old..new 100644\n@@ -1 +1 @@\nindex safe\n"
+        after = before.replace(b"index safe", b"index evil")
+        self.assertNotEqual(gate.review_delta(before), gate.review_delta(after))
+
     def test_text_blob_ids_are_ignored_but_binary_ids_are_not(self):
         self.assertEqual(gate.review_delta(b"diff --git a/f b/f\nindex old..new 100644\n+x\n"), gate.review_delta(b"diff --git a/f b/f\nindex other..next 100644\n+x\n"))
         self.assertNotEqual(gate.review_delta(b"diff --git a/f b/f\nindex old..new\nGIT binary patch\n"), gate.review_delta(b"diff --git a/f b/f\nindex old..next\nGIT binary patch\n"))
@@ -100,6 +111,20 @@ class MergeHistory(unittest.TestCase):
             (root / 'shared').write_text(''.join(lines)); git('add', 'shared'); git('commit', '-m', 'main')
             base = git('rev-parse', 'HEAD'); git('checkout', 'feature'); git('merge', '--no-edit', 'main')
             self.assertTrue(gate.unchanged_merges(raw, base, old, git('rev-parse', 'HEAD')))
+
+    def test_diff_markers_inside_content_cannot_hide_merge_edits(self):
+        for original, changed in [('msg = "diff --git index "; ok()\n', 'msg = "diff --git index "; evil()\n'), ("# diff --git index  ok\n", "# diff --git index  evil\n"), ("index safe\n", "index evil\n")]:
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as raw:
+                root = Path(raw)
+                def git(*args):
+                    return subprocess.check_output(["git", "-C", raw, *args], text=True, stderr=subprocess.DEVNULL, env=fixture_env()).strip()
+                git("init", "-b", "main"); git("config", "user.name", "Test"); git("config", "user.email", "test@example.com")
+                (root / "base").write_text("base\n"); git("add", "base"); git("commit", "-m", "base")
+                git("checkout", "-b", "feature"); (root / "run.py").write_text(original); git("add", "run.py"); git("commit", "-m", "reviewed")
+                old = git("rev-parse", "HEAD"); git("checkout", "main"); (root / "base").write_text("main moved\n"); git("add", "base"); git("commit", "-m", "main")
+                base = git("rev-parse", "HEAD"); git("checkout", "feature"); git("merge", "--no-commit", "--no-ff", "main")
+                (root / "run.py").write_text(changed); git("add", "run.py"); git("commit", "-m", "merge")
+                self.assertFalse(gate.unchanged_merges(raw, base, old, git("rev-parse", "HEAD")))
 
     def test_only_unchanged_main_merge_preserves_review(self):
         with tempfile.TemporaryDirectory() as raw:
