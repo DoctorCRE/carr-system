@@ -169,6 +169,13 @@ jobs:
         timeout-minutes: 5
         run: bash ops/ci-postgres.sh
 
+      - name: Install document export dependencies
+        if: contains(matrix.classes, 'unit') || matrix.classes == 'gates'
+        timeout-minutes: 5
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libreoffice-calc poppler-utils
+
       - name: Verify edge incident delivery
         # Gate shard 1 owns it, like the other repository-wide invariants.
         if: matrix.classes == 'gates' && matrix.gate_shard == 1

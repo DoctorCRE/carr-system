@@ -1,4 +1,5 @@
 // Expose and resolve email-derived proposals.
+import { lockEmailIdentity, capturedEmail } from './email-identity.js';
 import { sha256 } from './sha256.ts';
 import { mailboxOwnerForActor, partnerAuthoritySlugForActor } from './partner-authority.js';
 import { suspected } from './untrusted-text.js';
@@ -285,7 +286,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             send_result=null,result_recorded_at=null where id=$1`,
           [row.id, JSON.stringify(submitted), actor.id]);
           await writeEvent(c, actor, 'submit-email-draft', 'deal', row.deal_id, {
-            new: { proposal_id: row.id, sha256: submitted.sha256, to: submitted.to, cc: submitted.cc },
+            new: { proposal_id: row.id, sha256: submitted.sha256, recipient_binding: {
+              sha256: sha256(JSON.stringify(recipients)), cc_owner: row.owner === 'joe' ? 'dell' : 'joe',
+              cc_sha256: sha256(recipients.cc[0]) } },
             cause: 'human_stated', idempotency_key: args.idempotency_key });
           const { attachments, ...shown } = submitted;
           return { ok: true, proposal_id: row.id, status: 'approved_to_send', version: row.version + 1, ...shown,
@@ -348,9 +351,20 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
               ], send_id: row.id, sent_item_id: args.sent_item_id,
               sent_at: args.sent_at, attachments: (row.submitted_email.attachments ?? []).map(a => ({
                 file_name: a.path.split('/').at(-1), sha256: a.sha256, size: a.size })) };
-            await c.query(`insert into activity(occurred_at,actor_id,kind,summary,deal_id,source,email_context)
-              values($1,$2,'email_out','Partner-submitted email sent',$3,'outlook',$4::jsonb)`,
-            [args.sent_at, partner.id, row.deal_id, JSON.stringify(context)]);
+            const identity = await lockEmailIdentity(c, owner, args.sender_account, args.sent_item_id);
+            const existing = await capturedEmail(c, identity);
+            if (existing) {
+              if (existing.kind !== 'email_out' || (existing.email_context?.send_id && existing.email_context.send_id !== row.id))
+                fail('email_identity_conflict');
+              await c.query(`update activity set occurred_at=$2,actor_id=$3,deal_id=$4,email_context=$5::jsonb,
+                version=version+1,updated_by=$3,updated_at=now() where id=$1`,
+              [existing.id, args.sent_at, partner.id, row.deal_id, JSON.stringify(context)]);
+            } else {
+              await c.query(`insert into activity(occurred_at,actor_id,kind,summary,deal_id,source,email_context,email_identity)
+                values($1,$2,'email_out','Partner-submitted email sent',$3,'outlook',$4::jsonb,$5::jsonb)`,
+              [args.sent_at, partner.id, row.deal_id, JSON.stringify(context),
+                JSON.stringify({ ...identity, subject: row.deal_id })]);
+            }
           }
           const result = args.status === 'sent' ? { status: 'sent', sent_item_id: args.sent_item_id, sender_account: args.sender_account, sent_at: args.sent_at }
             : { status: 'failed', reason: args.reason };

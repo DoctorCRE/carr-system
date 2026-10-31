@@ -34,6 +34,13 @@ const engineeringAdmissionLiteralClassified = literal =>
   ENGINEERING_ADMISSION_LITERAL_PATTERNS.some(pattern => pattern.test(literal));
 const submittedDraftCopyLiteralClassified = literal =>
   literal.slice(1, -1) === "select email from actor where slug=$1 and kind='human' and active for share";
+// Capture handlers use captureWriter, including their session reads. Classify
+// only these revocation checks so unrelated actor reads remain visible.
+const captureActorLiteralClassified = literal => {
+  const sql = literal.slice(1, -1).replace(/\s+/g, " ").trim();
+  return sql === "select id, active from actor where slug=$1 /* capture:device-actor */" ||
+    sql === `select s.id, s.state, s.post_call, to_jsonb(s.state_at)#>>'{}' as state_at, s.expires_at <= now() as expired, a.active as actor_active from capture_session s join actor a on a.id=s.actor_id where s.session_token_hash=$1 ${'${lock ? "for update of s" : ""}'} /* capture:session-auth */`;
+};
 
 test("registered search-doctrine resolves joe-local sponsorship to Joe's human actor", async () => {
   const calls = [];
@@ -232,6 +239,7 @@ test("no read verb filters the actor table on a column carr_reader cannot read",
       (f.name === "relationship-network.ts" && /join public\.actor a on a\.id=/.test(f.literal) && !/\ba\.(?:kind|active)\b/.test(f.literal)) ||
       (f.name === "memory.js" && memoryWriteLiteralClassified(f.literal)) ||
       (f.name === "email-proposals.js" && submittedDraftCopyLiteralClassified(f.literal)) ||
+      (f.name === "capture.js" && captureActorLiteralClassified(f.literal)) ||
       // undo-lead-move is a partner-only writer. Its predecessor association
       // must authenticate the historical approver; no read handler uses this SQL.
       (f.name === "lead-automation.js" &&
@@ -247,6 +255,11 @@ test("no read verb filters the actor table on a column carr_reader cannot read",
   // The read path specifically must never appear here at all.
   assert.equal(found.some(f => f.name === "situation-retrieval.js"), false,
     "doctrine search must resolve its sponsor through retrieval_visibility_actor_id, not the table");
+});
+
+test("capture actor classification rejects unrelated reads", () => {
+  assert.equal(captureActorLiteralClassified('"select id, active from actor where slug=$1 /* capture:device-actor */"'), true);
+  assert.equal(captureActorLiteralClassified('"select id, active from actor where slug=$1 /* capture:other */"'), false);
 });
 
 test("memory actor classification is literal-specific, not filename-wide", () => {

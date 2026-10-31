@@ -54,6 +54,8 @@ const SYSTEM_WORK_MAX_BODY = 16 * 1024;
 const SYSTEM_WORK_PREFIX = "/api/system-work";
 const COMMAND_CENTER_API_PREFIX = "/api/v1/";
 export const APP_FACT_ROUTES = new Map([
+  ["/api/v1/fact-review/comparison", "prepare-terms-comparison"],
+  ["/api/v1/fact-review/comparison/validate", "validate-terms-comparison"],
   ["/api/v1/fact-review/documents", "list-deal-documents"],
   ["/api/v1/fact-review/list", "list-fact-review"],
   ["/api/v1/market-terms/read", "read-market-terms"],
@@ -920,6 +922,7 @@ async function appFactResponse(request, env, session, dependencies) {
   } catch (error) {
     const code = error?.payload?.error;
     return json({ error: typeof code === "string" ? code : "DEPENDENCY_UNAVAILABLE",
+      ...(code === "comparison_fact_blocked" ? { field: error.payload.field, reason: error.payload.reason } : {}),
       ...(code === "version_conflict" ? { current_version: error.payload.current_version } : {}) },
     code === "version_conflict" ? 409 : code ? 400 : 503);
   }

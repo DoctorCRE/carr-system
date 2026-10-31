@@ -23,12 +23,16 @@ transcript, never the full recorded-deal list, never a draft or email body.
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
+import call_budget
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 import re
 from typing import Any
 
-from typesafe_sdk import Choice, Noul, TypeSafeClient, TypeSafeError
+from typesafe_sdk import Choice, Noul, RetryPolicy, TypeSafeClient, TypeSafeError
+
+BUDGET_LEDGER = Path.home() / 'Recordings' / '.jev-budget.json'
 
 CHECKS_SCHEMA = "post-call-jev-checks/v1"
 
@@ -258,7 +262,7 @@ def _review_id(session: str, tag: str) -> str:
 
 def check_distillation(result: dict[str, Any], context: dict[str, Any],
                         transcript: dict[str, Any], *,
-                        client: Any = None) -> dict[str, Any]:
+                        client: Any = None, budget_ledger: Path | None = None) -> dict[str, Any]:
     """Attach Jev's RIGHT DEAL / RIGHT SPEAKER / RIGHT DETAILS checks in place.
 
     `result` is normalize_distillation's already-normalized return value.
@@ -267,7 +271,9 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
     `speaker_labels` and `local_partner` the way call-mode.py's
     write_call_context records them, used to resolve "Me"/"Other participant"
     segments to Joe or Dell. `transcript` is the session's transcript.json.
-    `client` may supply an SDK client for offline tests.
+    `client` may supply an SDK client for offline tests. Dollar reservations
+    share the Studio ledger, including failed requests. A budget hold is visible
+    in the narrative and holds automatic application for the entire pack.
 
     Mutates and returns `result`. A missing Jev key or SDK request failure never blocks the
     review pack. Every affected item instead gets
@@ -299,26 +305,30 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
         def judge(entry: tuple[dict[str, Any], dict[str, Any], dict[str, Any]]) -> None:
             item, local_state, local_questions = entry
             try:
-                response = sdk.system_one(state=local_state, questions=local_questions)
+                call_budget.reserve(budget_ledger if budget_ledger is not None else BUDGET_LEDGER)
+                with nullcontext(client) if client is not None else TypeSafeClient(model=call_budget.MODEL) as sdk:
+                    response = sdk.system_one(state=local_state, questions=local_questions,
+                                              model=call_budget.MODEL, retry=RetryPolicy(max_retries=0))
                 item["checks"] = _item_checks(item, {name: response.answers[name]
                                                     for name in local_questions})
+            except call_budget.BudgetHold as exc:
+                item["checks"] = {"unavailable": True, "reason": str(exc)}
             except TypeSafeError:
                 item["checks"] = _unavailable()
 
-        # One call per item: unrelated items sharing a state hurt accuracy.
-        try:
-            with nullcontext(client) if client is not None else TypeSafeClient(model="jev-latest") as sdk:
-                with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CALLS) as pool:
-                    list(pool.map(judge, pending))
-        except TypeSafeError:  # no key, or the client could not open
-            for item, _, _ in pending:
-                item["checks"] = _unavailable()
+        with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CALLS) as pool:
+            list(pool.map(judge, pending))
         any_unavailable = any(item["checks"].get("unavailable") for item, _, _ in pending)
 
+    holds = sorted({item['checks']['reason'] for item, _, _ in pending if item['checks'].get('reason')})
+    if holds:
+        result['checks_hold'] = ' '.join(holds)
+        result.setdefault('report', {}).setdefault('open_questions', []).append(result['checks_hold'])
     if any_unavailable:
         result.setdefault("review_questions", []).append({
             "id": _review_id(session, "jev_partial_unavailable"),
-            "question": "Automatic Jev checks did not run for one or more items in this pack.",
+            "question": "Automatic Jev checks did not run for one or more items in this pack. " +
+                " ".join(holds),
             "resolved": False,
         })
     return result

@@ -420,7 +420,7 @@ def _classify(tool_name, tool_input, cwd=None):
         if verb == "standing-context":
             return ("fetch", _page_of(tool_input), True)
         return ("readonly", None, True)
-    if name in ("Bash", "run_terminal_command") and isinstance(tool_input, dict):
+    if name == "Bash" and isinstance(tool_input, dict):
         parsed = parse_bash_fetch(tool_input.get("command"), cwd)
         if parsed:
             return ("fetch", _page_of(parsed[0]), parsed[1])
