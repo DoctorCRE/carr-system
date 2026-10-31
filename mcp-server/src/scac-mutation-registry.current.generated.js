@@ -978,6 +978,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "draft-terms-comparison": {
+    "ingress_key": "mcp-tool:draft-terms-comparison",
+    "source_locator": "mcp-server/src/fact-review.ts",
+    "schema_digest": "5a91e5723d17f1aa0ec05d6104a082c26267db1aa0cc774521228d05fc111897",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "drop-action": {
     "ingress_key": "mcp-tool:drop-action",
     "source_locator": "mcp-server/src/action-closure.ts",
