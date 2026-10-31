@@ -270,3 +270,18 @@ for (const explicit of [false,true]) {
     await verify('request-checklist-document',{deal,row_key:'title_commitment',owner:'joe',due_on:'2026-11-04'},explicit);
   });
 }
+
+test('accepting a factual capture does not invent future work',async()=>{
+  await businessRecords();
+  const nonce=randomUUID();
+  const session=(await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,consent_announced_at,session_token_hash,expires_at,state_at)
+    values($1,'synthetic-device',$2,'meeting',now(),now(),$1,now()+interval '1 hour',now()) returning id`,[nonce,actor.id])).rows[0].id;
+  const candidate=(await c.query(`insert into capture_candidate(session_id,idempotency_key,batch_hash,item_index,kind,payload,evidence_quote,confidence)
+    values($1,$2,'synthetic',0,'activity',$3::jsonb,'We spoke about synthetic space',0.9) returning id`,[session,randomUUID(),JSON.stringify({ref:syntheticDeal,kind:'call',summary:'Discussed the synthetic space'})])).rows[0].id;
+  const before=(await c.query('select count(*) from ops.work_request')).rows[0].count;
+  const args={candidate_id:candidate,accept:true,idempotency_key:randomUUID()};
+  const out=await command('resolve-candidate',args,actor,'carr_writer');
+  assert.equal(out.work_request,undefined);
+  assert.equal((await c.query('select count(*) from ops.work_request')).rows[0].count,before);
+  assert.equal((await command('resolve-candidate',args,actor,'carr_writer')).work_request,undefined);
+});

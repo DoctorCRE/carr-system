@@ -1,4 +1,3 @@
-import { validSliceChange, readyToClose } from './work-request-readiness.js';
 // Store lean Work Request slice and job facts with stable IDs and priority order.
 import cardVerbs from './job-card-verbs.v1.json' with { type: 'json' };
 import jobTypes from './job-types.v1.json' with { type: 'json' };
@@ -27,6 +26,18 @@ export const PULL_REQUEST_TTL_MS = 60_000;
 // and review and merge wait on others, so none of those is ever stale.
 export const STALE_AFTER_MS = 24 * 3_600_000;
 const CARD_LINE = /^Card:[ \t]*(WR\d+\.S\d+\.J\d+)\b/gmu;
+
+// Readiness is derived from the recorded plan; it grants no completion authority.
+const validSliceChange = change => change && typeof change === 'object' && Object.keys(change).length === 2
+  && typeof change.pr_url === 'string' && typeof change.merge_commit_sha === 'string'
+  && /^https:\/\/github[.]com\/(DoctorCRE\/carr-system|jbookout\/(doctorcre-app|software-factory))\/pull\/[1-9][0-9]*$/.test(change.pr_url)
+  && /^[0-9a-fA-F]{40}$/.test(change.merge_commit_sha);
+export function readyToClose(state, slices) {
+  if (['confirmed_closed','declined','superseded','failed'].includes(state) || !slices.length) return false;
+  return slices.every(slice => slice.outcome === 'retired' ||
+    (slice.outcome === 'done' && Array.isArray(slice.change_refs) && slice.change_refs.length > 0 && slice.change_refs.every(validSliceChange)))
+    && slices.some(slice => slice.outcome === 'done');
+}
 
 const unavailablePullRequests = async repos => repos.map(repo => ({ repo, state: 'unavailable', reason: 'no_github_reader', prs: [] }));
 

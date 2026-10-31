@@ -67,6 +67,8 @@ export async function linkFutureWork(c, actor, verb, args, result, writeEvent) {
   const tenant = organizationTenantForActor(actor);
   const links = [];
   for (const record of records(verb, args, result, actor)) {
+    if (verb === 'resolve-candidate' && !(await c.query(
+      "select 1 from capture_candidate where id=$1 and kind='next_step'", [args.candidate_id])).rows.length) continue;
     if (record.section_id && !(await c.query(`select 1 from doctrine_section s join doctrine_document d on d.id=s.document_id
       where s.id=$1 and d.slug='team-memory' and s.status='active' and s.section_key like 'conventions/proposed/%'`, [record.section_id])).rows.length) continue;
     const ref = record.ref;

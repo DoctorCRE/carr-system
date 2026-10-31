@@ -1,4 +1,4 @@
-import { readyToClose } from './work-request-readiness.js';
+import { readyToClose } from './work-queue.js';
 // The deliberately small Program 6 bridge: source a problem from the current
 // deterministic situation index, capture it, and expose a safe read card. It
 // does not own a lifecycle transition, an executor, or an approval.
