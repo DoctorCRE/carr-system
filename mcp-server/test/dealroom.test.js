@@ -110,6 +110,7 @@ class FakeClient {
       return { rows: [{ next_date: deal.next_date, overdue: !!deal.next_date && deal.next_date < this.now.toISOString().slice(0,10),
         owner: deal.owner, action_id: action?.id ?? null, next_step: action?.description ?? null }] };
     }
+    if (sql.includes("deal-update:preserved")) return { rows: [] };
     if (sql.includes("dealroom:supersede-overdue")) return { rows: [] };
 
     if (sql.includes("dealroom:close-lead") || sql.includes("dealroom:open-lead")) return { rows: [] };
@@ -347,7 +348,7 @@ class FakeClient {
         parked_at: deal.parked_at, parked_by: deal.parked_by,
         salesforce_id: deal.salesforce_id, base_version: deal.version }] : [] };
     }
-    if (sql.includes('checklist:doctrine') || sql.includes('checklist:commissions')) return { rows: [] };
+    if (sql.includes('checklist:doctrine') || sql.includes('checklist:commissions') || sql.includes('checklist:requests')) return { rows: [] };
     if (sql.includes("from v_deal_room_current_lease where deal_id=$1")) return { rows: this.currentLease ? [this.currentLease] : [] };
     if (sql.includes("from v_deal_room_note")) {
       const rows = this.notes.filter(n => n.deal_id === params[0])
