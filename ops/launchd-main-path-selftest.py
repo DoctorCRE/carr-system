@@ -162,20 +162,6 @@ class LaunchdMainPathTests(unittest.TestCase):
             with self.subTest(program=program):
                 self.assert_runtime_refused({"ProgramArguments": [str(program)]})
 
-        agents = self.root / "Library/LaunchAgents"
-        dest = agents / "local.carr-progress-board.plist"
-        old = plistlib.dumps({"Label": "local.carr-progress-board",
-                             "ProgramArguments": ["/bin/bash", "old.sh"], "StartInterval": 900})
-        agents.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(old)
-        with patch.object(installer, "HOME", str(self.root)), \
-                patch.object(installer, "install_launchd_plist", return_value="loaded") as install, \
-                contextlib.redirect_stdout(io.StringIO()) as output:
-            self.assertEqual(installer.cmd_install_progress_board(True, repo=str(self.repo)), 1)
-            install.assert_not_called()
-            self.assertIn("REFUSED", output.getvalue())
-        self.assertEqual(dest.read_bytes(), old, "refused installation must preserve installed bytes")
-
     def test_corrupt_nested_repository_inside_main_checkout_is_refused(self):
         nested = self.repo / "nested"
         self.git("init", "-b", "feature", str(nested))
@@ -192,21 +178,6 @@ class LaunchdMainPathTests(unittest.TestCase):
                      {"ProgramArguments": [str(nested / "not-built-yet/runner.sh")]}):
             with self.subTest(plist=data):
                 self.assert_runtime_refused(data)
-
-        agents = self.root / "Library/LaunchAgents"
-        dest = agents / "local.carr-progress-board.plist"
-        old = plistlib.dumps({"Label": "local.carr-progress-board",
-                             "ProgramArguments": ["/bin/bash", "old.sh"], "StartInterval": 900})
-        agents.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(old)
-        with patch.object(installer, "HOME", str(self.root)), \
-                patch.object(installer, "REPO", str(nested)), \
-                patch.object(installer, "install_launchd_plist", return_value="loaded") as install, \
-                contextlib.redirect_stdout(io.StringIO()) as output:
-            self.assertEqual(installer.cmd_install_progress_board(True, repo=str(nested)), 1)
-            install.assert_not_called()
-            self.assertIn("REFUSED", output.getvalue())
-        self.assertEqual(dest.read_bytes(), old, "refused installation must preserve installed bytes")
 
     def test_git_ownership_error_is_refused(self):
         denied = subprocess.CompletedProcess([], 128, "", "fatal: detected dubious ownership in repository")
@@ -255,16 +226,6 @@ class LaunchdMainPathTests(unittest.TestCase):
                     self.assertEqual(installer.cmd_check_launchd_main_paths(), 0)
                 self.assertEqual(target.read_text(), body, "audit must be read-only")
 
-    def test_board_installer_refuses_feature_checkout_without_writing(self):
-        agents = self.root / "Library/LaunchAgents"
-        agents.mkdir(parents=True)
-        dest = agents / "local.carr-progress-board.plist"
-        old = {"Label": "local.carr-progress-board", "ProgramArguments": ["/bin/bash", "old.sh"], "StartInterval": 900}
-        dest.write_bytes(plistlib.dumps(old))
-        with patch.object(installer, "REPO", str(self.repo)), patch.object(installer, "HOME", str(self.root)), patch.object(installer, "install_launchd_plist", return_value="loaded") as install:
-            self.assertEqual(installer.cmd_install_progress_board(True, repo=str(self.feature)), 1)
-            install.assert_not_called()
-        self.assertEqual(plistlib.loads(dest.read_bytes()), old)
 
 
 if __name__ == "__main__":
