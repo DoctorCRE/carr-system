@@ -56,9 +56,10 @@ class T3AgentCardGate(AgentCardGate):
                                               {'action': 'respond', 'answers': answers})
                 self.assertEqual(result.returncode, 2, result.stderr)
 
-    def test_pending_request_validates_joined_answer_text(self):
+    def test_pending_request_multi_answers_fail_closed(self):
         self.register_fixture()
-        for answers, code in [({'q': 'Card: WR557.S6.J1', 'next': 'Review.'}, 0),
+        for answers, code in [({'q': 'Card: WR557.S6.J1', 'next': 'Review.'}, 2),
+                              ({'q': 'Review.', 'unused': 'Card: WR557.S6.J1'}, 2),
                               ({'q': 'Card: WR557.S6.J1',
                                 'next': 'Card: WR557.S6.J1'}, 2),
                               ({'q': '', 'next': 'Review.'}, 2)]:

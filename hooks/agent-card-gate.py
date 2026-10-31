@@ -49,6 +49,8 @@ def decide(event):
         if not isinstance(answers, dict) or not answers or not all(
                 isinstance(answer, str) for answer in answers.values()):
             return refuse('A T3 response requires inspectable string answers with a Card.')
+        if len(answers) != 1:
+            return refuse('Cannot inspect which stored T3 questions consume these answers. Respond to one question with a Card-bearing answer.')
         prompts = ['\n\n'.join(answers.values())]
     elif tool == 'mcp__t3-code__t3_queue':
         action = inputs.get('action')
