@@ -102,6 +102,17 @@ SQL dependencies still matter. A migration that needs another PR must name that
 dependency and land after it. Grant migrations need no extra resync step when
 they append to the installed contract (see Concurrent grant changes). A migration
 that embeds a whole `$current_grants$` literal must describe the combined grants.
+
+One-time step for a PR opened before #2835 that still edits the removed
+`SCAC_MUTATION_CURRENT_DB_GRANTS` section: `./run.sh regen registry` refuses
+that merge conflict ("registry conflict includes sealed metadata"). During the
+merge, take main's copy and rebuild the operations, all steps required:
+
+1. Run `git checkout origin/main -- mcp-server/src/scac-mutation-registry.current.generated.js`.
+2. Run `./run.sh regen registry`, then `git add` that file.
+3. Delete any test import of `SCAC_MUTATION_CURRENT_DB_GRANTS`; assert against `ops.scac_current_grant_contract()` instead.
+
+The PR's grants survive because its migration already appends them to the installed contract.
 Applied rows cannot be updated, deleted, or truncated. Each successful migration
 and its checksum commit in the same runner-owned transaction.
 
