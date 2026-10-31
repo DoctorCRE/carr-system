@@ -106,6 +106,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await c.query(readMigration('1004_phase_start_undo.sql'));
     // The portal table is reached only through ops functions; stub the grant contract the migration extends.
     await c.query('create schema if not exists ops; create extension if not exists pgcrypto');
+    await c.query(readMigration('1068_email_identity.sql'));
     await c.query(schema.match(/CREATE TABLE ops\.client_portal \([\s\S]*?\n\);/)[0]);
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable as $$select '{"secdef_execute":[]}'::jsonb$$`);
     await c.query(readMigration('1013_register_client_portal.sql'));

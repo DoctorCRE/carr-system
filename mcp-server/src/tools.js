@@ -56,6 +56,7 @@ import { emailDealProgressTools } from "./email-deal-progress.ts";
 import { derivedIdempotencyKey } from "./derived-key.ts";
 import { DURABLE_KEY_SHAPES, REPLAY_WINDOW, durableReceipt, replayReceipt } from "./replay-receipt.ts";
 import { emailNextStepTools } from "./email-next-step.ts";
+import { EMAIL_IDENTITY_SCHEMA, lockEmailIdentity, capturedEmail } from "./email-identity.js";
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
 import { clearTheDeckTools } from "./clear-the-deck.js";
 import { addCalendarMeetingPrep } from "./calendar-meeting-prep.js";
@@ -4370,6 +4371,7 @@ export const TOOLS = {
             required: ['email', 'kind', 'internal'], properties: { email: { type: 'string' },
               name: { type: ['string', 'null'] }, kind: { enum: ['to', 'cc'] }, internal: { type: 'boolean' } } } },
         } },
+      email_identity: EMAIL_IDENTITY_SCHEMA,
       email_source: { type: "object", additionalProperties: false, required: ["sender_email", "mailbox_owner"],
         properties: { sender_email: { type: "string", format: "email", maxLength: 254 },
           mailbox_owner: { type: "string", enum: ["joe", "dell"] } } },
@@ -4424,6 +4426,21 @@ export const TOOLS = {
           args.email_source.mailbox_owner !== partnerAuthoritySlugForActor(actor)))
         throw new ToolError({ error: 'email_source_owner_mismatch' });
       const s = await resolveSubject(c, args.ref);
+      let emailIdentity = null;
+      if (args.email_identity) {
+        if (!['email_in', 'email_out'].includes(args.kind) ||
+            args.email_identity.mailbox_owner !== partnerAuthoritySlugForActor(actor))
+          throw new ToolError({ error: 'email_identity_owner_mismatch' });
+        const account = (await c.query('select email from actor where slug=$1', [args.email_identity.mailbox_owner])).rows[0]?.email;
+        if (args.email_identity.mailbox_account !== account)
+          throw new ToolError({ error: 'email_identity_account_mismatch' });
+        emailIdentity = await lockEmailIdentity(c, args.email_identity.mailbox_owner, account, args.email_identity.item_id);
+        const existing = await capturedEmail(c, emailIdentity, s.id);
+        if (existing) {
+          if (existing.kind !== args.kind) throw new ToolError({ error: 'email_identity_conflict' });
+          return { ok: true, activity_id: existing.id, subject: s };
+        }
+      }
       const assignments = [];
       if (args.vendor_assignments !== undefined) {
         if (s.type !== 'deal' || !Array.isArray(args.vendor_assignments) || !args.vendor_assignments.length || args.vendor_assignments.length > 30)
@@ -4449,15 +4466,13 @@ export const TOOLS = {
         for (const vendorId of versions.keys())
           await c.query('update vendor set updated_by=$1 where id=$2',[actor.id,vendorId]);
       }
-      if (args.email_source !== undefined && (args.kind !== 'email_in' ||
-          args.email_source.mailbox_owner !== partnerAuthoritySlugForActor(actor)))
-        throw new ToolError({ error: 'email_source_owner_mismatch' });
       const r = await c.query(
-        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_context, email_source)
-         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb, $9::jsonb) returning id, occurred_at`,
+        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_context, email_source, email_identity)
+         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb, $9::jsonb, $10::jsonb) returning id, occurred_at`,
         [args.occurred_at || null, actor.id, args.kind, args.summary, args.detail || null, args.owed || null, s.id,
           args.email_context ? JSON.stringify(args.email_context) : null,
-          args.email_source ? JSON.stringify(args.email_source) : null]);
+          args.email_source ? JSON.stringify(args.email_source) : null,
+          emailIdentity ? JSON.stringify({ ...emailIdentity, subject: s.id }) : null]);
       await writeEvent(c, actor, "log-activity", s.type, s.id,
         { new: { activity: r.rows[0].id, kind: args.kind }, human_quote: args.human_quote, idempotency_key: args.idempotency_key });
       const links = args.links && args.links.length

@@ -191,8 +191,8 @@ class FakeOutlook:
         if self.on_send == 'sends' and 'start' in form:
             self.mailbox.events.append(EventRow(form['subject'], int(datetime.fromisoformat(form['start']).timestamp())))
         elif self.on_send == 'sends':
-            self.mailbox.sent.append(SentRow(ACCOUNT, ', '.join(form['to'] + form['cc']), form['subject'],
-                                             int(self.clock.t) + 30))
+            self.mailbox.sent.append(SentRow(ACCOUNT, ', '.join(form['to'] + form['cc'] + form['bcc']), form['subject'],
+                                             int(self.clock.t) + 30, 'hxstore-key:42'))
 
     def presses(self) -> int:
         return self.press_count
@@ -541,6 +541,17 @@ class SendTests(unittest.TestCase):
         self.assertEqual((logged[0]['ref'], logged[0]['kind'], logged[0]['detail']),
                          ('C-1', 'email_out', MAIL['body']))
         self.assertEqual(result.logged, ('C-1',))
+        self.assertEqual(logged[0].get('email_identity'),
+                         {'mailbox_owner': 'fixture-owner', 'mailbox_account': ACCOUNT, 'item_id': 'hxstore-key:42'})
+
+    def test_send_waits_for_store_identity_before_logging(self):
+        h = Harness(self.out)
+        snapshot = h.mailbox.snapshot
+        h.mailbox.snapshot = lambda: replace(snapshot(),
+            sent=tuple(replace(row, item_id=None) for row in h.mailbox.sent))
+        result = h.send(record='client-001')
+        self.assertEqual(result.state, State.PRESSED_UNCONFIRMED)
+        self.assertFalse(any(verb == 'log-activity' for verb, _ in h.carr_calls))
 
     def test_field_read_back_mismatch_discards_and_never_presses(self):
         h = Harness(self.out, corrupt=('subject', 'subject-00'))
@@ -912,8 +923,9 @@ class SendTests(unittest.TestCase):
                 CREATE TABLE events(subject, start_unix);
                 INSERT INTO folders VALUES(1, 'Sent Items'), (2, 'Drafts');
                 INSERT INTO messages VALUES(1, 'sender@example.test', 'person-a@example.test', 'sent-001', 1800000000, '<sent-001@example.test>', '42'),
-                    (2, 'sender@example.test', 'person-a@example.test', 'draft-001', 1800000000, null, '43');
-                INSERT INTO message_folders VALUES(1, 1), (2, 2);
+                    (2, 'sender@example.test', 'person-a@example.test', 'draft-001', 1800000000, null, '43'),
+                    (3, 'sender@example.test', 'person-a@example.test', 'sent-001', 1800000001, '<sent-001@example.test>', '44');
+                INSERT INTO message_folders VALUES(1, 1), (2, 2), (3, 1);
                 INSERT INTO events VALUES('event-001', 1893596400);
             """)
             con.close()
@@ -925,8 +937,8 @@ class SendTests(unittest.TestCase):
         with patch('lib.outlook_intake._snapshot', side_effect=copy) as copier, patch.object(send_mod.subprocess, 'run', decode):
             snap = send_mod.DecodedMailbox(home, repo).snapshot()
         copier.assert_called_once()
-        self.assertEqual([m.subject for m in snap.sent], ['sent-001'])
-        self.assertEqual(snap.sent[0].item_id, '<sent-001@example.test>')
+        self.assertEqual([m.subject for m in snap.sent], ['sent-001', 'sent-001'])
+        self.assertEqual([m.item_id for m in snap.sent], ['hxstore-key:42', 'hxstore-key:44'])
         self.assertEqual(snap.events, (EventRow('event-001', 1893596400),))
         self.assertFalse(any(work.exists() for work in workspaces))
         self.assertEqual(list((repo / 'out/outlook-intake').iterdir()), [])
