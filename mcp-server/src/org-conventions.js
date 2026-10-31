@@ -5,7 +5,7 @@
 // conventions/proposed/<slug>. governance-queue lists those sections, and a
 // partner or their sponsored agent calls adopt-rule, which hands the section to
 // ops.adopt_rule: one transaction activates any replacement through the
-// existing Joe-authority approval chain, retires the named active rules and
+// existing Joe-authority approval chain, retires the named rules and
 // consumes the proposal. rule-cards reads the adopted cards back for
 // ops/sync-core-rule-cards.py --from-store.
 import { ToolError } from "./tool-error.ts";
@@ -62,7 +62,7 @@ export async function conventionProposals(rows = [], c) {
       const rule = rules.find(r => r.id === id);
       return { rule_id: id, statement: rule?.statement ?? null, status: rule?.status ?? null };
     });
-    const problem = retirements.some(r => r.status !== "active") ? "every retirement target must be an active rule" : parsed.problem;
+    const problem = retirements.some(r => !["proposed", "active"].includes(r.status)) ? "every retirement target must be a proposed or active rule" : parsed.problem;
     const adoptable = parsed.adoptable && !problem;
     const statement = [...retirements.map(r => `retires rule ${r.rule_id}: ${r.statement}`),
       ...(parsed.statement ? [parsed.statement] : [])].join("\n");
@@ -114,7 +114,7 @@ export function orgConventionTools({ withEnvelope, writeEvent }) {
       // and tell me you did it." humanOnly admits a partner or the agent they
       // sponsor; the event row records which actor adopted.
       write: true, humanOnly: true, authorityOnly: true,
-      description: "Adopt a team-memory convention proposal (conventions/proposed/<slug>, listed by governance-queue) through Joe's existing authority chain. A partner or the agent they sponsor adopts directly and tells Joe what it adopted. A Retires JSON-array line retires named active rules with the reason and proposal reference. Convention with Card or Packs creates an optional replacement. Retirement-only adoption creates no rule. All effects and proposal consumption are atomic.",
+      description: "Adopt a team-memory convention proposal (conventions/proposed/<slug>, listed by governance-queue) through Joe's existing authority chain. A partner or the agent they sponsor adopts directly and tells Joe what it adopted. A Retires JSON-array line retires named proposed or active rules with the reason and proposal reference. Convention with Card or Packs creates an optional replacement, scoped by its own statement as the moment; retiring a pending proposed rule into a replacement is how an agent activates its current wording. Retirement-only adoption creates no rule. All effects and proposal consumption are atomic.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
         idempotency_key: { type: "string" },
         section_id: { type: "string", description: "the proposal section from governance-queue pending_convention_proposals" },
