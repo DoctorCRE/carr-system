@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
-import { migrationNames, readMigration } from './migration-source.testhelper.mjs';
+import { migrationNames } from './migration-source.testhelper.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 import { publicError } from '../src/public-errors.ts';
 import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.current.generated.js';
@@ -19,15 +19,9 @@ let fixture, c, actor;
 before(async () => {
   assert.ok(MIGRATION, 'the S2 migration exists');
   fixture = await acquireDisposablePostgres({ prefix: 'team-memory-', snapshot: true });
-  c = new pg.Client({ host: fixture.root, user: 'carr_ci', database: 'carr_ci' });
+  c = new pg.Client(fixture.connection);
   await c.connect();
 
-  // The snapshot can lag main: newer migrations (such as other grant-contract
-  // registrations) are applied here exactly as tools/migrate.py would.
-  const applied = new Set((await c.query('select filename from schema_migrations')).rows.map(r => r.filename));
-  const pending = migrationNames().filter(name => !applied.has(name)).sort();
-  assert.ok(pending.includes(MIGRATION), 'the S2 migration is pending over the snapshot');
-  for (const name of pending) await c.query(readMigration(name));
   actor = { ...(await c.query(`insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner')
     on conflict(slug) do update set active=true returning id,slug`)).rows[0], human: true, client_id: 'synthetic-client' };
 });

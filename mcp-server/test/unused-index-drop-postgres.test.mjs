@@ -30,8 +30,8 @@ const KEPT = [
 
 let fixture, c;
 before(async () => {
-  fixture = await acquireDisposablePostgres({ prefix: 'unused-index-', snapshot: true });
-  const connection = { host: fixture.root, user: 'carr_ci', database: 'carr_ci' };
+  fixture = await acquireDisposablePostgres({ prefix: 'unused-index-', snapshot: true, baseline: true });
+  const connection = fixture.connection;
   c = new pg.Client(connection);
   await c.connect();
 });

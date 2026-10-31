@@ -15,8 +15,8 @@ const MIGRATION = migrationNames().find(name => /^\d{4}_tool_call_retention\.sql
 let fixture, c, actor;
 before(async () => {
   assert.ok(MIGRATION, 'the retention migration exists');
-  fixture = await acquireDisposablePostgres({ prefix: 'tool-call-retention-', snapshot: true });
-  c = new pg.Client({ host: fixture.root, user: 'carr_ci', database: 'carr_ci' });
+  fixture = await acquireDisposablePostgres({ prefix: 'tool-call-retention-', snapshot: true, baseline: true });
+  c = new pg.Client(fixture.connection);
   await c.connect();
 
   const applied = new Set((await c.query('select filename from schema_migrations')).rows.map(r => r.filename));

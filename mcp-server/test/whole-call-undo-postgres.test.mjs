@@ -6,7 +6,6 @@ import { randomUUID, createHash } from 'node:crypto';
 import { createCaptureHandler } from '../src/capture.js';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
-import { applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { createDealroomHandler } from '../src/dealroom-web.js';
 import { allowedIn, profileForActor } from '../src/mcp.js';
@@ -15,10 +14,9 @@ import { publicError } from '../src/public-errors.ts';
 let fixture, c, actor, deal, clientRef, connection;
 before(async () => {
   fixture = await acquireDisposablePostgres({ prefix: 'whole-call-undo-', snapshot: true });
-  connection = { host: fixture.root, user: 'carr_ci', database: 'carr_ci' };
+  connection = fixture.connection;
   c = new pg.Client(connection);
   await c.connect();
-  await applyPendingDealRoomReads(c);
   if (process.env.CARR_CALL_UNDO_PHASE_MIGRATION)
     await c.query(readFileSync(process.env.CARR_CALL_UNDO_PHASE_MIGRATION,'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };

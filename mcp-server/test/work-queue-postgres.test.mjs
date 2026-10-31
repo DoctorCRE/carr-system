@@ -16,23 +16,9 @@ import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 let fixture, c, actor, connection;
 before(async () => {
   fixture = await acquireDisposablePostgres({ prefix: 'work-queue-', snapshot: true });
-  connection = { host: fixture.root, user: 'carr_ci', database: 'carr_ci' };
+  connection = fixture.connection;
   c = new pg.Client(connection);
   await c.connect();
-  if (!(await c.query("select 1 from schema_migrations where filename='1017_work_request_queue.sql'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1017_work_request_queue.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select 1 from schema_migrations where filename='1024_work_request_job_start.sql'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1024_work_request_job_start.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select 1 from schema_migrations where filename='1025_work_request_job_finished.sql'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1025_work_request_job_finished.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select 1 from information_schema.columns where table_schema='ops' and table_name='work_request_job' and column_name='job_type'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1061_work_request_job_type.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select 1 from schema_migrations where filename='1060_work_request_slice_outcome.sql'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1060_work_request_slice_outcome.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select 1 from schema_migrations where filename='1062_work_request_job_version.sql'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1062_work_request_job_version.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select 1 from schema_migrations where filename='1063_validate_work_request_job_version.sql'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1063_validate_work_request_job_version.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => {
@@ -281,10 +267,10 @@ test('the read saves a finish once on the side connection, and later reads keep 
   assert.deepEqual([saved.stage, saved.stale, saved.prs.map(pr => pr.card_id)], ['merged', false, [`${done}.carr#77`]]);
   const open = later.jobs.find(row => row.card_id === pending);
   assert.equal(open.stage, 'queued');
-  assert.equal(bounds[0], new Date(first.jobs.find(row => row.card_id === done).created_at).toISOString(), 'before the finish is saved, the old job bounds the window');
-  const unfinished = later.jobs.filter(row => row.card_id !== done && !row.finished && row.started_at).map(row => new Date(row.started_at).toISOString()).sort();
+  assert.equal(bounds[0], Temporal.Instant.from(first.jobs.find(row => row.card_id === done).created_at).toString({ fractionalSecondDigits: 3 }), 'before the finish is saved, the old job bounds the window');
+  const unfinished = later.jobs.filter(row => row.card_id !== done && !row.finished && row.started_at).map(row => row.started_at.toISOString()).sort();
   assert.equal(bounds.at(-1), unfinished[0], 'once saved, the window starts at the oldest unfinished job');
-  assert.ok(bounds.at(-1) > bounds[0] && bounds.at(-1) <= new Date(open.started_at).toISOString());
+  assert.ok(bounds.at(-1) > bounds[0] && bounds.at(-1) <= open.started_at.toISOString());
 });
 
 test('launcher registers an exact card and start atomically, with registered slices only', async () => {

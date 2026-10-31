@@ -10,11 +10,9 @@ import {executeRegisteredTool} from '../src/tools.js';
 let fixture,c,actor;
 before(async () => {
   fixture = await acquireDisposablePostgres({ prefix: 'practice-origination-', snapshot: true });
-  c=new pg.Client({host:fixture.root,user:'carr_ci',database:'carr_ci'});
+  c=new pg.Client(fixture.connection);
   await c.connect();
 
-  await c.query(readFileSync(new URL('../../migrations/1100_practice_origination.sql',import.meta.url),'utf8'));
-  await c.query(readFileSync(new URL('../../migrations/1108_practice_address_key.sql',import.meta.url),'utf8'));
   actor={...(await c.query("select id,slug from actor where slug='joe'")).rows[0],human:true};
 });
 after(async()=>{try {await c?.end();} finally {await fixture?.close();}});

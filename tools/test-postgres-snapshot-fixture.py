@@ -3,14 +3,37 @@
 import sys
 from pathlib import Path
 import unittest
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib.disposable_pg_fixture import DisposablePostgres, postgres_bin_dir, postgres_fixture_group
-from lib.postgres_snapshot_fixture import start_snapshot
+from lib.postgres_snapshot_fixture import start_snapshot, snapshot_key
 
 
 class SnapshotIsolation(unittest.TestCase):
+    def test_key_covers_schema_and_migration_contents_and_inventory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'db').mkdir()
+            (root / 'migrations').mkdir()
+            schema = root / 'db/schema.sql'
+            schema.write_text('select 1;')
+            original = snapshot_key(schema)
+            original_baseline = snapshot_key(schema, baseline=True)
+            migration = root / 'migrations/9999_probe.sql'
+            migration.write_text('select 2;')
+            added = snapshot_key(schema)
+            self.assertNotEqual(original, added)
+            self.assertNotEqual(original_baseline, snapshot_key(schema, baseline=True))
+            migration.write_text('select 3;')
+            self.assertNotEqual(added, snapshot_key(schema))
+            migration.unlink()
+            self.assertEqual(original, snapshot_key(schema))
+            schema.write_text('select 4;')
+            self.assertNotEqual(original, snapshot_key(schema))
+            self.assertNotEqual(snapshot_key(schema), snapshot_key(schema, baseline=True))
+
     def test_copies_have_independent_roles_memberships_grants_and_data(self):
         binaries = postgres_bin_dir()
         with postgres_fixture_group(), DisposablePostgres('snapshot-proof-', binaries / 'pg_ctl') as template:

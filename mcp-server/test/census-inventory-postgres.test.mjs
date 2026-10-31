@@ -14,13 +14,13 @@ import { executeRegisteredTool } from '../src/tools.js';
 
 let fixture, c, actor, connection;
 before(async () => {
-  fixture = await acquireDisposablePostgres({ prefix: 'census-inventory-', snapshot: true });
-  connection = { host: fixture.root, user: 'carr_ci', database: 'carr_ci' };
+  fixture = await acquireDisposablePostgres({ prefix: 'census-inventory-', snapshot: true, baseline: true });
+  connection = fixture.connection;
   c = new pg.Client(connection);
   await c.connect();
   const migrations = readdirSync(new URL('../../migrations/', import.meta.url))
     .filter(name => /^\d{4}_.*\.sql$/.test(name) && name < MIGRATION_NAME).sort();
-  const dsn = `postgresql://carr_ci@localhost/carr_ci?host=${encodeURIComponent(fixture.root)}`;
+  const dsn = fixture.dsn;
   const python = new URL('../../.venv/bin/python', import.meta.url).pathname;
   await promisify(execFile)(existsSync(python) ? python : 'python3',
     [new URL('../../tools/migrate.py', import.meta.url).pathname, '--apply', '--yes', '--through', migrations.at(-1)],
@@ -99,7 +99,7 @@ async function censusWith(manifest, now = OBSERVED_AT) {
   await c.query('begin');
   try {
     await c.query('set local role carr_reader');
-    return await readSystemWorkCensus({ client: c, actor, kinds: 'pull_request', now: () => new Date(now) });
+    return await readSystemWorkCensus({ client: c, actor, kinds: 'pull_request', now: () => ({ valueOf: () => Date.parse(now), toISOString: () => now }) });
   } finally { await c.query('rollback'); }
 }
 

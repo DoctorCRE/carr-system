@@ -15,14 +15,10 @@ import { publicError } from '../src/public-errors.ts';
 let fixture, c, actor, connection;
 before(async () => {
   fixture = await acquireDisposablePostgres({ prefix: 'complete-wr-', snapshot: true });
-  connection = { host: fixture.root, user: 'carr_ci', database: 'carr_ci' };
+  connection = fixture.connection;
   c = new pg.Client(connection);
   await c.connect();
 
-  await c.query(readFileSync(new URL('../../migrations/1006_complete_work_request.sql', import.meta.url), 'utf8'));
-  for (const name of ['1017_work_request_queue.sql', '1025_work_request_job_finished.sql', '1060_work_request_slice_outcome.sql'])
-    if (!(await c.query('select 1 from schema_migrations where filename=$1', [name])).rows.length)
-      await c.query(readFileSync(new URL('../../migrations/' + name, import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => { try { await c?.end(); } finally { await fixture?.close(); } });

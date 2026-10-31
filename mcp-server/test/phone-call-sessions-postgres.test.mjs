@@ -1,7 +1,6 @@
 // Verify phone session SQL, concurrency, and grants on disposable PostgreSQL.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
 import pg from 'pg';
 import { createServer } from 'node:http';
 import { Readable } from 'node:stream';
@@ -12,7 +11,6 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { handoffState } from './helpers/phone-handoff-state.mjs';
 import { PhoneAudioHandoff } from '../src/phone-audio-handoff.js';
-import { execFileSync } from 'node:child_process';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { createPhoneCallHandler } from '../src/phone-call-sessions.js';
 import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.current.generated.js';
@@ -21,7 +19,7 @@ let fixture, pool, actor, handler;
 const clients = new Map();
 before(async () => {
   fixture = await acquireDisposablePostgres({ prefix: 'phone-call-', snapshot: true });
-  pool = new pg.Pool({ host: fixture.root, user: 'carr_ci', database: 'carr_ci' });
+  pool = new pg.Pool(fixture.connection);
   pool.on('connect', client => {
     let closed;
     const done = new Promise(resolve => { closed = resolve; });
@@ -29,10 +27,6 @@ before(async () => {
   });
   pool.on('remove', client => { clients.get(client).closed(); clients.delete(client); });
 
-  const python = new URL('../../.venv/bin/python', import.meta.url).pathname;
-  execFileSync(existsSync(python) ? python : 'python3',
-    [new URL('../../tools/migrate.py', import.meta.url).pathname, '--apply', '--yes'],
-    { env: { ...process.env, DATABASE_URL: `postgresql://carr_ci@/carr_ci?host=${fixture.root}` }, timeout: 180000 });
   actor = { ...(await pool.query("select id,slug from actor where slug='joe'")).rows[0], human: true };
   assert.ok(actor.id);
   handler = createPhoneCallHandler({ withWriter: async fn => {

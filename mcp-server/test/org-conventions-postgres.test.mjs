@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
-import { migrationNames, readMigration } from './migration-source.testhelper.mjs';
+import { migrationNames } from './migration-source.testhelper.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 import { publicError } from '../src/public-errors.ts';
 
@@ -28,13 +28,9 @@ let fixture, c, joe, dell;
 before(async () => {
   assert.ok(MIGRATION, 'the S4 migration exists');
   fixture = await acquireDisposablePostgres({ prefix: 'org-conventions-', snapshot: true });
-  c = new pg.Client({ host: fixture.root, user: 'carr_ci', database: 'carr_ci' });
+  c = new pg.Client(fixture.connection);
   await c.connect();
 
-  const applied = new Set((await c.query('select filename from schema_migrations')).rows.map(r => r.filename));
-  const pending = migrationNames().filter(name => !applied.has(name)).sort();
-  assert.ok(pending.includes(MIGRATION), 'the S4 migration is pending over the snapshot');
-  for (const name of pending) await c.query(readMigration(name));
   await c.query(`do $roles$ begin
     if not exists (select 1 from pg_roles where rolname='carr_authority_joe') then create role carr_authority_joe login; end if;
     if not exists (select 1 from pg_roles where rolname='carr_authority_dell') then create role carr_authority_dell login; end if;
@@ -221,7 +217,7 @@ test('two proposals with one card id adopted concurrently: the second gets the n
     join doctrine_revision r on r.id=s.current_revision_id where s.id=$1`, [k03.section_id])).rows[0].t;
   const twin = await call(joe, 'write-doctrine-section', { document: 'team-memory',
     section_key: 'conventions/proposed/card-k03-twin', body_text: twinText, base_version: 0, attach_id });
-  const second = new pg.Client({ host: fixture.root, user: 'carr_ci', database: 'carr_ci' });
+  const second = new pg.Client(fixture.connection);
   await second.connect();
   try {
     await c.query('begin');

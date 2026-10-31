@@ -10,7 +10,7 @@ import { publicError } from '../src/public-errors.ts';
 let fixture, c, actor, connection;
 before(async () => {
   fixture = await acquireDisposablePostgres({ prefix: 'decision-about-', snapshot: true });
-  connection = { host: fixture.root, user: 'carr_ci', database: 'carr_ci' };
+  connection = fixture.connection;
   c = new pg.Client(connection);
   await c.connect();
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
