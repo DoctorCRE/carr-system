@@ -1,6 +1,6 @@
 Never run env, printenv or ps eww or print environment variables.
 
-Briefs require one Type: <type> line in the header before any blank line or task-data fence. Use a type from ops/config/job-workflows.v1.yaml. Follow the ## Required skills block supplied by bin/codex-job. Size first: tiny -> build now; one session -> grill-with-docs; bigger -> wayfinder. PR body must include a "Skills used:" line.
+Briefs require one Type: <type> line in the header before any blank line or task-data fence. Use a type from ops/config/job-workflows.v1.yaml. Use the skills required by the task. Size first: tiny -> build now; one session -> grill-with-docs; bigger -> wayfinder. PR body must include a "Skills used:" line.
 
 Pre-approved: decide test seams, interfaces and design forks yourself; nobody is available to confirm, so never pause for confirmation or message /root/orchestrator. Put every decision in the PR body and your final reply.
 
