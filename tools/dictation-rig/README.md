@@ -6,6 +6,21 @@ The CARR dictation rig. Phase A: meeting mode. Phase B: desk dictation
 build plan: `specs/dictation-rig-build-plan-2026-08-07.md`; Phase B ruled design:
 loop #243 / decision f799fd49.
 
+## Phone session status
+
+The Studio posts `state`, `reason`, and `open_questions` to
+`POST /capture/phone/v1/call-sessions/<id>/status` with the existing Studio bearer.
+Only fixed codes and an unresolved local review-question count leave the Studio.
+The processor retries failed posts and keeps a private receipt to deduplicate unchanged status.
+
+`GET /api/v1/call-sessions/<id>` and its `/report` read return `reason` (a code or
+`null`) and `open_questions` (a nonnegative integer). Active Studio states
+`needs_attention` and `held_review` take precedence over the normal derived state.
+Reasons are `extraction_failed`, `transient_ceiling`, `summary_repeats_transcript`,
+`transcript_unavailable`, or `open_review_questions`. Open review questions alone
+produce `held_review` with `open_review_questions`. A status update with
+`{"state":null,"reason":null,"open_questions":0}` clears the override.
+
 ## Two modes, one hard boundary
 
 - **Meeting mode** (quill, Phase A): a counterparty exists, so the consent

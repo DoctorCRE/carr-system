@@ -243,6 +243,36 @@ def bridge_module():
     return module
 
 
+def publish_status(session: Path, cfg: dict, token: str, bridge) -> bool:
+    """Send only allowlisted codes and counts; keep the receipt for retry deduplication."""
+    status = post_call.read_json(session / post_call.STATUS_FILE) or {}
+    report = post_call.read_json(session / post_call.REPORT_FILE) or {}
+    count = sum(not question.get('resolved', False) for question in report.get('review_questions', []))
+    state, reason = status.get('state'), status.get('reason_code', status.get('reason'))
+    if state == 'needs_attention':
+        if reason not in {'extraction_failed', 'transcript_unavailable', 'transient_ceiling'}:
+            reason = 'extraction_failed'
+    elif state == 'held_review':
+        if reason not in {'summary_repeats_transcript', 'transcript_unavailable'}:
+            reason = 'summary_repeats_transcript'
+    elif count:
+        state, reason = 'held_review', 'open_review_questions'
+    else:
+        state, reason = None, None
+    payload = {'state': state, 'reason': reason, 'open_questions': count}
+    receipt = session / 'phone-status.json'
+    if post_call.read_json(receipt) == payload:
+        return True
+    metadata = required_json(session / 'phone.json')
+    code, reply = bridge.http_request('POST',
+        f"{cfg['base_url']}/capture/phone/v1/call-sessions/{metadata['session_id']}/status",
+        payload, {'Authorization': f'Bearer {token}'})
+    if code != 200 or reply.get('ok') is not True:
+        return False
+    post_call.write_private(receipt, payload)
+    return True
+
+
 def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict:
     """One bounded sweep. The processor lock also excludes another invocation."""
     from transcribe_session import TranscribeError
@@ -257,7 +287,16 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                 if not (session / 'transfer.json').exists():
                     continue
                 try:
+                    if int(session.name.removeprefix('phone-').replace('-', ''), 16) % config_limit('CALL_PROCESSORS', 1) != slot:
+                        continue
+                    if not publish_status(session, cfg, token, bridge):
+                        counts['pending'] += 1
+                        continue
                     if (session / 'ingested.json').exists():
+                        continue
+                    local = post_call.read_json(session / post_call.STATUS_FILE) or {}
+                    if local.get('state') in {'needs_attention', 'held_review'}:
+                        counts['pending'] += 1
                         continue
                     metadata = required_json(session / 'phone.json')
                     code, lease = bridge.http_request('POST',
@@ -268,10 +307,14 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                         continue
                     post_call.write_private(session / '.capture.json', {'session_token': lease['session_token']})
                     status = extract(session, decoder=os.environ.get('CALL_AUDIO_DECODER', '/opt/homebrew/bin/ffmpeg'))
+                    if not publish_status(session, cfg, token, bridge):
+                        counts['pending'] += 1
+                        continue
                     if status.get('state') not in {'ready_review', 'filed'}:
                         counts['pending'] += 1
                         continue
                     if bridge.publish_cmd(cfg, session) != 0:
+                        publish_status(session, cfg, token, bridge)
                         counts['pending'] += 1
                         continue
                     report = required_json(session / post_call.REPORT_FILE)
@@ -282,6 +325,9 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                         counts['pending'] += 1
                         continue
                     bridge.poll_cmd(cfg, session)
+                    if not publish_status(session, cfg, token, bridge):
+                        counts['pending'] += 1
+                        continue
                     counts['ready'] += 1
                 except (ValueError, OSError, RuntimeError, subprocess.SubprocessError, bridge.BridgeNetworkError, TranscribeError):
                     counts['pending'] += 1

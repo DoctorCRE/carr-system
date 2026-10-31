@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any
 
 import post_call
+import transcribe_session
 from post_call import call_record_command
 
 # --- constants -------------------------------------------------------------
@@ -587,6 +588,14 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
     if not session_token:
         log_line(f"ERROR poll capture-marker-missing-token session={name}")
         return Outcome.UNAVAILABLE
+
+    transcription = read_json(session_dir / transcribe_session.STATUS_FILE) or {}
+    if transcription.get("state") == "needs_attention" and not (session_dir / "transcript.json").exists():
+        if transcription.get("transcription_attempts", 0) < transcribe_session.MAX_ATTEMPTS:
+            transcribe_session.main(["transcribe_session.py", str(session_dir)],
+                                    max_attempts=transcribe_session.MAX_ATTEMPTS)
+        if not (session_dir / "transcript.json").exists():
+            return Outcome.UNAVAILABLE
 
     metadata = read_json(session_dir / post_call.CONTEXT_FILE) or {}
     if (metadata.get("mode") == "weekly_deal_call" and (session_dir / "transcript.json").exists()

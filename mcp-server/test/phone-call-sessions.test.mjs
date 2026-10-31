@@ -61,6 +61,28 @@ test('phone sessions refuse anonymous and machine actors before reading input or
   }
 });
 
+test('Studio status refuses content and oversized bodies without logging them', async t => {
+  const { handler, send } = rig();
+  const session = (await send('', 'POST', recording)).body;
+  const url = `https://api.example.test/capture/phone/v1/call-sessions/${session.session_id}/status`;
+  const logs = [];
+  for (const method of ['log', 'warn', 'error']) t.mock.method(console, method, (...args) => logs.push(args));
+  for (const body of [
+    { state: 'held_review', reason: 'private transcript', open_questions: 0 },
+    { state: 'needs_attention', reason: 'extraction_failed', open_questions: 0, summary: 'private summary' },
+    { state: 'held_review', reason: 'summary_repeats_transcript', open_questions: 'private question' },
+  ]) {
+    const response = await handler.studioFetch(new Request(url, { method: 'POST',
+      headers: { authorization: `Bearer ${environment.CALL_STUDIO_TOKEN}` }, body: JSON.stringify(body) }), environment);
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: 'invalid_studio_status' });
+  }
+  const response = await handler.studioFetch(new Request(url, { method: 'POST',
+    headers: { authorization: `Bearer ${environment.CALL_STUDIO_TOKEN}` }, body: 'private transcript'.repeat(100) }), environment);
+  assert.equal(response.status, 413);
+  assert.deepEqual(logs, []);
+});
+
 test('Studio reports reject transcript fields and leases preserve the session capability', async () => {
   const { send, handler } = rig();
   const { body: session } = await send('', 'POST', recording);
