@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Execute every required Node package and refuse unmeasured success."""
 import argparse
+import json
+from ci_unit_shards import plan
 import os
 from pathlib import Path
 import subprocess
@@ -14,12 +16,20 @@ PACKAGES = ('mcp-server', 'practice-plugin')
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--part", choices=("all", "fast"), default="all")
+    parser.add_argument("--part", choices=("all", "fast", "mcp", "practice"), default="all")
     args = parser.parse_args()
+    shard = os.environ.get('CARR_CI_UNIT_SHARD')
+    selected = None
+    if shard:
+        if args.part != 'mcp' or shard not in ('1', '2', '3', '4'):
+            parser.error('CARR_CI_UNIT_SHARD requires --part mcp and shard 1 through 4')
+        selected = plan()[int(shard) - 1]
+    packages = {'fast': ('practice-plugin',), 'mcp': ('mcp-server',),
+                'practice': ('practice-plugin',), 'all': PACKAGES}[args.part]
     failed = False
     totals = dict.fromkeys(FIELDS, 0)
     with tempfile.TemporaryDirectory(prefix='carr-ci-unit-') as directory:
-        for package in (("practice-plugin",) if args.part == "fast" else PACKAGES):
+        for package in packages:
             manifest = ROOT / package / 'package.json'
             if not manifest.is_file():
                 print(f'FAIL unit {package}: required package.json is missing')
@@ -30,6 +40,8 @@ def main():
             env['NODE_OPTIONS'] = f"{env.get('NODE_OPTIONS', '')} --import={preload}"
             if package == 'mcp-server':
                 env['F03_PARITY_REQUIRE_PYTHON'] = '1'
+                if selected is not None:
+                    env['CARR_CI_UNIT_SUITES'] = json.dumps(selected)
             log = Path(directory) / f'{package}.log'
             try:
                 with log.open('w') as output:
@@ -40,9 +52,16 @@ def main():
                            ['npm', '--prefix', package, 'test'])], cwd=ROOT,
                         env=env, stdout=output, stderr=subprocess.STDOUT)
                 output = log.read_text(errors='replace')
+                for line in output.splitlines():
+                    if line.startswith('suite-timing: '):
+                        print(line)
+                completed = [json.loads(line.removeprefix('suite-completed: '))
+                             for line in output.splitlines() if line.startswith('suite-completed: ')]
                 counts = test_counts(output)
                 if result.returncode:
                     reason = f'command exited {result.returncode}'
+                elif selected is not None and sorted(completed) != sorted(selected):
+                    reason = 'shard coverage mismatch; not every assigned suite completed'
                 elif counts is None:
                     reason = 'no complete test counts; required check did not report execution'
                 elif counts['pass'] == 0:
@@ -50,6 +69,9 @@ def main():
                 elif counts['fail'] or counts['cancelled'] or counts['todo']:
                     reason = 'required tests failed, were cancelled, or remain todo'
                 else:
+                    if selected is not None:
+                        destination = Path(os.environ['CARR_CI_UNIT_RECEIPT'])
+                        destination.write_text(json.dumps({'shard': int(shard), 'suites': completed}))
                     for name in FIELDS:
                         totals[name] += counts[name]
                     print(f"OK unit {package}: {counts['tests']} tests, "

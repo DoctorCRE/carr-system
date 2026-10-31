@@ -43,14 +43,14 @@ while [ "$#" -gt 0 ]; do
     --migration-part) MIGRATION_PART="${2:-}"; shift ;;
     --list)   LIST=1 ;;
     --gate-programs) GATE_PROGRAMS=1 ;;
-    -h|--help) echo "Usage: ops/ci.sh [--strict] [--only classes] [--migration-part all|core|proofs|gates|acceptance|fixtures|reconstruction|equivalence|shadow] [--unit-part all|fast] [--gate-shard 1/2|2/2] [--list] [--gate-programs]"; exit 0 ;;
+    -h|--help) echo "Usage: ops/ci.sh [--strict] [--only classes] [--migration-part all|core|proofs|gates|acceptance|fixtures|reconstruction|equivalence|shadow] [--unit-part all|fast|mcp|practice] [--gate-shard 1/2|2/2] [--list] [--gate-programs]"; exit 0 ;;
     *) echo "ci.sh: unknown argument: $1" >&2; exit 64 ;;
   esac
   shift
 done
 
 case "$UNIT_PART" in
-  all|fast) ;;
+  all|fast|mcp|practice) ;;
   *) echo "ci.sh: unknown unit part" >&2; exit 64 ;;
 esac
 

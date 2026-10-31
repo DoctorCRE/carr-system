@@ -22,7 +22,7 @@ class UnitClassTests(unittest.TestCase):
         (self.root / 'bin').mkdir()
         shutil.copy2(ROOT / 'bin/with-timeout.py', self.root / 'bin/with-timeout.py')
         for name in ('ci.sh', 'git_env.py', 'ci-unit.py', 'node_test_summary.py',
-                     'ci-secret-scan.py', 'pii_guard.py', 'ci-node-file.mjs'):
+                     'ci_unit_shards.py', 'ci-secret-scan.py', 'pii_guard.py', 'ci-node-file.mjs'):
             source = ROOT / 'ops' / name
             if source.exists():
                 shutil.copy2(source, self.root / 'ops' / name)
@@ -140,6 +140,36 @@ class UnitClassTests(unittest.TestCase):
         result = self.run_class()
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn('original diagnostic', result.stderr)
+
+    def test_shard_refuses_hidden_suite_and_zero_executed_tests(self):
+        self.package('mcp-server')
+        mcp = self.root / 'mcp-server'
+        runner = (ROOT / 'mcp-server/run-tests.mjs').read_text()
+        for n in range(32):
+            (mcp / f'test/extra{n}.test.mjs').write_text(
+                "import test from 'node:test'; test('executes', () => {});")
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
+        command = ['bash', str(self.root / 'ops/ci.sh'), '--strict', '--only', 'unit', '--unit-part', 'mcp']
+        receipt = self.root / 'receipt.json'
+        shard_env = {**self.env, 'CARR_CI_UNIT_SHARD': '1', 'CARR_CI_UNIT_RECEIPT': str(receipt)}
+        (mcp / 'run-tests.mjs').write_text(runner)
+        result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(json.loads(receipt.read_text())['suites'])
+        receipt.unlink()
+        (mcp / 'run-tests.mjs').write_text(runner.replace('const files = selected || discovered;',
+                                                         'const files = (selected || discovered).slice(1);'))
+        result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('shard coverage mismatch', result.stderr)
+        self.assertFalse(receipt.exists())
+        (mcp / 'run-tests.mjs').write_text(runner)
+        for suite in (mcp / 'test').glob('*.test.mjs'):
+            suite.write_text("import test from 'node:test'; test.skip('not executed', () => {});")
+        result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('zero passing tests', result.stderr)
+        self.assertFalse(receipt.exists())
 
     def test_package_skip_exit_is_red(self):
         self.all_packages()

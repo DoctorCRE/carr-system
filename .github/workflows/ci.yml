@@ -31,9 +31,15 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            mcp-server/package-lock.json
+            practice-plugin/package-lock.json
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements.lock
       - run: python -m pip install -r requirements.lock
       - run: npm --prefix mcp-server ci --no-audit
       - run: npm --prefix practice-plugin ci --no-audit
@@ -51,15 +57,16 @@ jobs:
           ZSH_RETRY_BACKOFF: "5"
           ZSH_ARCHIVE_DIR: ${{ runner.temp }}/zsh-debs
         run: ops/ci-zsh.sh
-      - run: sudo apt-get update -qq && sudo apt-get install -y poppler-utils libreoffice-calc
-      - run: bash ops/ci-postgres.sh
+      - uses: ./.github/actions/ci-apt
+        with:
+          packages: --postgres --documents
       - name: Fast checks
         env:
           CARR_CI_PORTABLE_ONLY: "1"
           GH_TOKEN: ${{ github.token }}
           CARR_LOCAL_PG_ALLOW_HOSTED: "1"
           CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
-        run: ops/ci.sh --strict --only "pushfloor unit types secret gates" --unit-part fast
+        run: ops/ci.sh --strict --only "pushfloor unit types secret binding artifact gates" --unit-part fast
 
   scope:
     if: ${{ !cancelled() && github.event_name != 'pull_request' }}
@@ -80,6 +87,104 @@ jobs:
           path: db-scope.json
           if-no-files-found: error
 
+  unit:
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    name: MCP unit shard ${{ matrix.shard }} of 4
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.7-pg17-trixie@sha256:7a7e9f22015b67edb4bef5c59daeebcd7e74bfa570df6ce60ae01237c8648a84
+        env:
+          POSTGRES_USER: carr_ci
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: carr_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U carr_ci -d carr_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: mcp-server/package-lock.json
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements.lock
+      - run: python -m pip install -r requirements.lock
+      - run: npm --prefix mcp-server ci --no-audit
+      - name: Identify the runner image for the zsh archive
+        id: zsh-image
+        run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
+      - name: Restore zsh package archives
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ runner.temp }}/zsh-debs/*.deb
+          key: zsh-ubuntu24-${{ runner.arch }}-${{ steps.zsh-image.outputs.version }}-${{ hashFiles('ops/ci-zsh.sh') }}
+      - name: Install zsh
+        timeout-minutes: 12
+        env:
+          ZSH_RETRY_BACKOFF: "5"
+          ZSH_ARCHIVE_DIR: ${{ runner.temp }}/zsh-debs
+        run: ops/ci-zsh.sh
+      - uses: ./.github/actions/ci-apt
+        with:
+          packages: --postgres --documents
+      - name: Run assigned MCP suites
+        env:
+          CARR_CI_DATABASE_URL: postgres://carr_ci:postgres@127.0.0.1:5432/carr_ci # ci-secret-scan: allow - disposable loopback fixture
+          CARR_CI_PORTABLE_ONLY: "1"
+          CARR_LOCAL_PG_ALLOW_HOSTED: "1"
+          CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
+          CARR_CI_UNIT_SHARD: ${{ matrix.shard }}
+          CARR_CI_UNIT_RECEIPT: ${{ runner.temp }}/unit-${{ matrix.shard }}.json
+          LC_ALL: C
+        run: ops/ci.sh --strict --only unit --unit-part mcp
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: unit-receipt-${{ matrix.shard }}
+          path: ${{ runner.temp }}/unit-${{ matrix.shard }}.json
+          if-no-files-found: error
+      - name: Retain failed shard diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: unit-diagnostics-${{ matrix.shard }}
+          path: ${{ runner.temp }}/carr-ci.*/*.log.redacted
+          if-no-files-found: ignore
+
+
+  unit-coverage:
+    needs: unit
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: unit-receipt-*
+          merge-multiple: true
+          path: unit-receipts
+      - name: Prove exact suite coverage and missing-suite failure
+        run: |
+          python3 ops/ci-unit-shards-selftest.py
+          python3 ops/ci_unit_shards.py verify unit-receipts/*.json
+
   classes:
     # The full class matrix runs on merge groups and scheduled/manual checks.
     if: ${{ !cancelled() && github.event_name != 'pull_request' }}
@@ -89,27 +194,28 @@ jobs:
       fail-fast: false
       matrix:
         gate_shard: [1, 2]
-        # 2026-10-01 run 36928008916: this combined group took 310s (unit
-        # 228s, types 36s, secret 33s, other classes 13s), below ten minutes.
-        # Keep gates and migration in separate jobs. Every class
-        # must appear in exactly one group (ops/ci-selftest.py verifies this).
+        # MCP suites run in the unit matrix; this unit group owns practice-plugin.
+        # Every class appears once here (ops/ci-selftest.py verifies this).
         classes:
           - "migration"
-          - "pushfloor unit types secret binding artifact"
+          - "pushfloor types secret binding artifact"
+          - "unit"
           - "gates"
           - "hxprobe"
           - "dependency"
         job_names:
           - migration: {name: "ops/ci.sh --strict --only migration", classes: "migration"}
-            "pushfloor unit types secret binding artifact": {name: "ops/ci.sh --strict --only pushfloor unit types secret binding artifact", classes: "pushfloor unit types secret binding artifact"}
+            "pushfloor types secret binding artifact": {name: "ops/ci.sh --strict --only pushfloor types secret binding artifact", classes: "pushfloor types secret binding artifact"}
+            unit: {name: "ops/ci.sh --strict --only unit", classes: "unit"}
             gates: {name: "ops/ci.sh --strict --only gates", classes: "gates"}
             gates_shard_2: {name: "Gates selftests shard 2 of 2", classes: "gates"}
             hxprobe: {name: "ops/ci.sh --strict --only hxprobe", classes: "hxprobe"}
             dependency: {name: "ops/ci.sh --strict --only dependency", classes: "dependency"}
         # The second dimension partitions only gates; ready runs keep every class.
         exclude:
+          - {classes: "unit", gate_shard: 2}
           - {classes: "dependency", gate_shard: 2}
-          - {classes: "pushfloor unit types secret binding artifact", gate_shard: 2}
+          - {classes: "pushfloor types secret binding artifact", gate_shard: 2}
           - {classes: "migration", gate_shard: 2}
           - {classes: "hxprobe", gate_shard: 2}
     timeout-minutes: ${{ matrix.classes == 'migration' && 45 || 20 }}
@@ -245,7 +351,7 @@ jobs:
             if [ "${{ matrix.classes }}" = gates ]; then
               ops/ci.sh --strict --only gates --gate-shard "${{ matrix.gate_shard }}/2"
             else
-              ops/ci.sh --strict --only "${{ matrix.classes }}"
+              ops/ci.sh --strict --only "${{ matrix.classes }}" --unit-part practice
             fi
           fi
 
@@ -356,7 +462,7 @@ jobs:
     # the merge silently instead of saying why.
     name: ops/ci.sh --strict
     runs-on: ubuntu-24.04
-    needs: [fast, scope, classes, migration-fixtures]
+    needs: [fast, unit-coverage, scope, classes, migration-fixtures]
     permissions:
       contents: read
     if: ${{ always() }}

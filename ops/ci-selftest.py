@@ -354,7 +354,7 @@ def test_hosted_migration_ownership():
                                     env={**scrubbed_env(), "PATH": str(pathlib.Path(sys.executable).parent) + os.pathsep + os.environ["PATH"],
                                          "CI_DRAFT": draft, "GITHUB_STEP_SUMMARY": str(pathlib.Path(directory) / "summary"),
                                          "CI_NEEDS": json.dumps({"scope": {"result": "success", "outputs": {"full": full}},
-                                                                 "classes": {"result": classes},
+                                                                 "unit-coverage": {"result": "success"}, "classes": {"result": classes},
                                                                  "migration-fixtures": {"result": fixtures}})})
             check(f"aggregate scope={full!r} fixtures={fixtures} classes={classes}", result.returncode == expected)
     record = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Record the tested tree and class contract")
@@ -1068,7 +1068,7 @@ def test_hosted_draft_lifecycle():
             ["node", "-e", script, json.dumps([expression, context])], text=True))
 
     for filename, lanes, verdict_name, command in (
-            ("ci.yml", ("fast", "scope", "classes", "migration-fixtures"),
+            ("ci.yml", ("fast", "unit-coverage", "scope", "classes", "migration-fixtures"),
              "checks", "verdict"),
             ("doc-drift.yml", ("check",), "verdict", "drift-verdict")):
         wf = _hosted_workflow(filename)
@@ -1119,7 +1119,7 @@ def test_hosted_draft_lifecycle():
                 ctx = context(draft=draft, action=action, sha=sha)
                 groups.append(evaluate(wf["concurrency"]["group"], ctx))
                 check(f"{filename}: {action} draft={draft} SHA={sha[:7]} schedules correct lanes",
-                      all(bool(evaluate(jobs[name].get("if", "true"), ctx)) == ((not draft) if filename != "ci.yml" or name == "fast" else False)
+                      all(bool(evaluate(jobs[name].get("if", "true"), ctx)) == ((not draft) if filename != "ci.yml" or name in ("fast", "unit-coverage") else False)
                           for name in lanes))
                 result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=REPO,
                     env={**scrubbed_env(), "CI_NEEDS": json.dumps(needs),

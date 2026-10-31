@@ -91,10 +91,16 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            mcp-server/package-lock.json
+            practice-plugin/package-lock.json
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements.lock
 
       - name: Install Python dependencies from the lock
         if: matrix.classes != 'dependency'
@@ -143,8 +149,14 @@ jobs:
           sudo install -d /etc/postgresql-common/createcluster.d
           echo "create_main_cluster = false" | sudo tee /etc/postgresql-common/createcluster.d/no-main-cluster.conf > /dev/null
 
+      - name: Seed main system dependency archives
+        if: contains(matrix.classes, 'unit')
+        uses: ./.github/actions/ci-apt
+        with:
+          packages: --postgres --documents
+
       - name: Install PostgreSQL 17
-        if: contains(matrix.classes, 'unit') || contains(matrix.classes, 'gates') || matrix.classes == 'migration'
+        if: contains(matrix.classes, 'gates') || matrix.classes == 'migration'
         timeout-minutes: 5
         run: bash ops/ci-postgres.sh
 

@@ -1,0 +1,20 @@
+name: Cached CI system dependencies
+description: Reuse runner packages and main-seeded apt archives.
+inputs:
+  packages:
+    description: PostgreSQL and document dependency switches
+    required: true
+runs:
+  using: composite
+  steps:
+    - id: image
+      shell: bash
+      run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+      with:
+        path: ${{ runner.temp }}/apt-debs/*.deb
+        key: apt-ubuntu24-${{ runner.arch }}-${{ steps.image.outputs.version }}-${{ inputs.packages }}-${{ hashFiles('ops/ci-postgres.sh', 'ops/ci-apt.py') }}
+    - shell: bash
+      env:
+        CARR_CI_APT_ARCHIVES: ${{ runner.temp }}/apt-debs
+      run: python3 ops/ci-apt.py ${{ inputs.packages }}
