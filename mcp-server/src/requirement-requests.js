@@ -23,6 +23,7 @@ export function requirementRequestTools({ withEnvelope, writeEvent, resolveSubje
   return {
     'request-checklist-document': write('request-checklist-document', {
       deal: { type: 'string' }, row_key: { type: 'string', maxLength: 80 },
+      recipient_email: { type: 'string', format: 'email', maxLength: 254 }, thread_activity_id: uuid,
       owner: { type: 'string', minLength: 1, maxLength: 100 }, due_on: { type: 'string', format: 'date' },
     }, ['deal', 'row_key', 'owner', 'due_on'],
     'Request a document for one current doctrine checklist row. Copies its document type and doctrine evidence, with an explicit owner and due date. Existing critical dates, lease and invoice milestones retain their own authority. Repeating a row with different details refuses. Receiving a document never satisfies a requirement.',
@@ -32,16 +33,21 @@ export function requirementRequestTools({ withEnvelope, writeEvent, resolveSubje
       if (subject.type !== 'deal') refuse('not_a_deal');
       const record = (await c.query('select id, deal_type as type, owner from deal where id=$1', [subject.id])).rows[0];
       if (!record) refuse('deal_not_found');
+      if (args.thread_activity_id && !(await c.query(`select id from activity where id=$1 and deal_id=$2
+        and kind in ('email_in','email_out')`, [args.thread_activity_id, record.id])).rows.length)
+        refuse('requirement_thread_invalid');
+      const recipient = args.recipient_email?.trim().toLowerCase() ?? null;
       const checklist = await readDealChecklist(c, record);
       const row = checklist.phases.flatMap(p => p.items).find(item => item.id === args.row_key);
       if (checklist.template_state !== 'current' || !row?.document_type) refuse('row_not_requestable');
       const request = (await c.query(`insert into ops.requirement_request
-        (organization_tenant_id,deal_id,row_key,owner,due_on,document_type,source,created_by)
-        values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(organization_tenant_id,deal_id,row_key) do nothing returning *, to_char(due_on,'YYYY-MM-DD') as due_on`,
-      [tenant, record.id, row.id, args.owner.trim(), args.due_on, row.document_type, JSON.stringify(row.source), actor.id])).rows[0]
+        (organization_tenant_id,deal_id,row_key,owner,due_on,document_type,source,created_by,recipient_email,thread_activity_id)
+        values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) on conflict(organization_tenant_id,deal_id,row_key) do nothing returning *, to_char(due_on,'YYYY-MM-DD') as due_on`,
+      [tenant, record.id, row.id, args.owner.trim(), args.due_on, row.document_type, JSON.stringify(row.source), actor.id, recipient, args.thread_activity_id ?? null])).rows[0]
         || (await c.query("select *,to_char(due_on,'YYYY-MM-DD') as due_on from ops.requirement_request where organization_tenant_id=$1 and deal_id=$2 and row_key=$3",
           [tenant, record.id, row.id])).rows[0];
-      if (request.owner !== args.owner.trim() || request.due_on !== args.due_on)
+      if (request.owner !== args.owner.trim() || request.due_on !== args.due_on ||
+          request.recipient_email !== recipient || request.thread_activity_id !== (args.thread_activity_id ?? null))
         refuse('requirement_already_requested');
       return { deal_id: record.id, request };
     }),

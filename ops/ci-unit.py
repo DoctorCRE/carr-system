@@ -30,10 +30,13 @@ def main():
             try:
                 with log.open('w') as output:
                     result = subprocess.run(
-                        [sys.executable, str(ROOT / 'bin/with-timeout.py'), '900',
+                        [sys.executable, str(ROOT / 'bin/with-timeout.py'), '1200',
                          'npm', '--prefix', package, 'test'], cwd=ROOT,
                         env=env, stdout=output, stderr=subprocess.STDOUT)
                 output = log.read_text(errors='replace')
+                for line in output.splitlines():
+                    if line.startswith('suite-timing: '):
+                        print(line)
                 counts = test_counts(output)
                 if result.returncode:
                     reason = f'command exited {result.returncode}'

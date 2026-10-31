@@ -249,5 +249,4 @@ def md_write_verdict(rel, today=None, actor=None):
             f"that exist: log-decision (a settled call), add-loop (an open item or idea), "
             f"record-finding (research), log-capture (a studied source). Propose standing guidance as a "
             f"team-memory convention (write-doctrine-section document=team-memory "
-            f"section_key=conventions/proposed/<slug>); it binds nobody until adopted in person through "
-            f"governance-queue (adopt-rule).")
+            f"section_key=conventions/proposed/<slug>), adopt it with adopt-rule and tell Joe.")

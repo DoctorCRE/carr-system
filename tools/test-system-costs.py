@@ -6,7 +6,7 @@ import tempfile
 import sys
 import subprocess
 from unittest.mock import patch
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 SPEC = importlib.util.spec_from_file_location('system_costs', Path(__file__).with_name('system_costs.py'))
@@ -424,6 +424,17 @@ class ReviewRegressions(unittest.TestCase):
                                now=datetime(2026, 8, 31, tzinfo=timezone.utc))
         self.assertEqual(report['providers'][0]['state'], 'partial')
         self.assertIn('retention', report['providers'][0]['reason'])
+
+    def test_12b_neon_daily_start_stays_inside_the_last_60_days_at_request_time(self):
+        # Neon refused from=2026-09-01T00:00Z for a run at 2026-10-31T07:11Z (HTTP 406).
+        import urllib.parse
+        now = datetime(2026, 10, 31, 7, 11, tzinfo=timezone.utc)
+        def fetch(url, headers):
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+            start = datetime.fromisoformat(query['from'][0].replace('Z', '+00:00'))
+            self.assertGreaterEqual(start, now - timedelta(days=60))
+            return {'projects': []}
+        costs.collect(self.config('neon'), {'NEON_API_KEY': 'synthetic'}, fetch, now=now)
 
     def test_13_invoices_are_not_daily_usage_or_duplicate_fixed_fees(self):
         for invoiced, fixed, expected in ((50, 0, 50), (5, 5, 5)):

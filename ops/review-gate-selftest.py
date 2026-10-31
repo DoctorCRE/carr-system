@@ -39,7 +39,7 @@ class ReviewGate(unittest.TestCase):
 
     def test_added_machinery(self):
         pr = {"changed_files": 1, "additions": 1, "deletions": 0, "head": {"sha": "abc"}}
-        for path, status, expected in [("bin/foo", "added", False), ("bin/codex-job", "modified", True), ("docs/x.md", "added", True)]:
+        for path, status, expected in [("bin/foo", "added", False), ("bin/existing", "modified", True), ("docs/x.md", "added", True)]:
             with self.subTest(path=path, status=status):
                 self.assertEqual(gate.approved(pr, [{"filename": path, "status": status}], []), expected)
 
