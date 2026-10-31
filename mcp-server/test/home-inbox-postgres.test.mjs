@@ -40,7 +40,7 @@ test('Home inbox is an actor-scoped bounded snapshot over canonical records', as
   await c.query('grant select,insert on tool_call to carr_writer');
   await c.query('insert into actor(id,slug) values($1,\'joe\'),($2,\'dell\')', [joe.id,dell.id]);
   await c.query("select set_config('carr.acting_actor_slug','joe',false),set_config('carr.verified_human_actor_slug','joe',false)");
-  await c.query(readFileSync(new URL('../../migrations/1110_home_inbox.sql', import.meta.url),'utf8'));
+  await c.query(readFileSync(new URL('../../migrations/1111_home_inbox.sql', import.meta.url),'utf8'));
   await c.query(`insert into next_action values
     ($1,$2,'Synthetic open task','open',1,'2026-10-29','2026-10-29','2026-11-02'),
     ($3,$2,'Synthetic done task','done',2,'2026-10-28','2026-10-29',null),
