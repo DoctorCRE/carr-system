@@ -51,7 +51,10 @@ test('Local Deals CI fixture provisions missing roles on a fresh cluster and pre
       assert.deepEqual((await admin.query("select datname from pg_database where datname like 'local_deals_%'")).rows, [], 'isolated fixture database is removed');
     };
     await run();
-    assert.deepEqual((await roles()).rows.map(row => row.rolname), ['carr_reader', 'carr_writer']);
+    assert.deepEqual((await roles()).rows, [
+      {rolname: 'carr_reader', rolcanlogin: false, rolcreatedb: false, rolsuper: false},
+      {rolname: 'carr_writer', rolcanlogin: false, rolcreatedb: false, rolsuper: false},
+    ], 'fixture leaves application roles without login or elevated privileges');
     await admin.query('alter role carr_reader createdb');
     const before = (await roles()).rows;
     await run();

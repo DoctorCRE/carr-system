@@ -678,6 +678,42 @@
       "rule": "client-data",
       "reason": "Pushed PR history (e9e50256..913d2ade) named a synthetic fixture deal whose words collide with a client fingerprint; renamed at the next commit, so only these historical blobs carry it.",
       "value_sha256": "b5d8dfb4d92c397df16cda0399e543925f248f2e1172876a39bd40d4812dc1ab"
+    },
+    {
+      "path": "evals/lead-dedup/origination.v1.json",
+      "sha256": "cf544792038929dda88696664ae7f83c7e5f04146d5cca22c01b98292ac5b6d2",
+      "rule": "pii-address",
+      "reason": "WR39.S8.J1 synthetic-only origination fixture, authored in this job with no business data. Earlier fixture blobs contained invented address-shaped values and repeated-digit NPI placeholders; replaced by neutral values in 32a0dbc2. History is retained under the never-rebase/never-force-push rule."
+    },
+    {
+      "path": "evals/lead-dedup/origination.v1.json",
+      "sha256": "cf544792038929dda88696664ae7f83c7e5f04146d5cca22c01b98292ac5b6d2",
+      "rule": "pii-phone",
+      "reason": "WR39.S8.J1 synthetic-only origination fixture, authored in this job with no business data. Earlier fixture blobs contained invented address-shaped values and repeated-digit NPI placeholders; replaced by neutral values in 32a0dbc2. History is retained under the never-rebase/never-force-push rule."
+    },
+    {
+      "path": "mcp-server/test/practice-origination-postgres.test.mjs",
+      "sha256": "c95f37857cd8950839573326d3c69c2d9ea704717790276a81d3b1e8f89749d8",
+      "rule": "pii-address",
+      "reason": "WR39.S8.J1 synthetic-only origination fixture, authored in this job with no business data. Earlier fixture blobs contained invented address-shaped values and repeated-digit NPI placeholders; replaced by neutral values in 32a0dbc2. History is retained under the never-rebase/never-force-push rule."
+    },
+    {
+      "path": "evals/lead-dedup/origination.v1.json",
+      "sha256": "2ec44114a3294b01ec6eb217d4b82bb49c89c7036383767c04d2ab7efed14d93",
+      "rule": "pii-address",
+      "reason": "WR39.S8.J1 synthetic-only origination fixture, authored in this job with no business data. Earlier fixture blobs contained invented address-shaped values and repeated-digit NPI placeholders; replaced by neutral values in 32a0dbc2. History is retained under the never-rebase/never-force-push rule."
+    },
+    {
+      "path": "evals/lead-dedup/origination.v1.json",
+      "sha256": "2ec44114a3294b01ec6eb217d4b82bb49c89c7036383767c04d2ab7efed14d93",
+      "rule": "pii-phone",
+      "reason": "WR39.S8.J1 synthetic-only origination fixture, authored in this job with no business data. Earlier fixture blobs contained invented address-shaped values and repeated-digit NPI placeholders; replaced by neutral values in 32a0dbc2. History is retained under the never-rebase/never-force-push rule."
+    },
+    {
+      "path": "mcp-server/test/practice-origination-postgres.test.mjs",
+      "sha256": "b7f5522d0b1b8bcfc3d7af2ad2f37d3dd92b45aad8e6b1305bf61cd317bd4c14",
+      "rule": "pii-address",
+      "reason": "WR39.S8.J1 synthetic-only origination fixture, authored in this job with no business data. Earlier fixture blobs contained invented address-shaped values and repeated-digit NPI placeholders; replaced by neutral values in 32a0dbc2. History is retained under the never-rebase/never-force-push rule."
     }
   ]
 }

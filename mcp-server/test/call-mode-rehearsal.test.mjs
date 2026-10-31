@@ -110,6 +110,10 @@ before(async () => {
     if (ciDsn) await run('psql', [connection.connectionString, ...restore], { maxBuffer: 4 * 1024 * 1024 });
     else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
   }
+  const dsn = connection.connectionString
+    || `postgresql://carr_ci@localhost/carr_ci?host=${encodeURIComponent(fixture.root)}`;
+  await run(PYTHON, [path.join(REPO, 'tools/migrate.py'), '--apply', '--yes'],
+    { env: { ...process.env, DATABASE_URL: dsn }, maxBuffer: 4 * 1024 * 1024 });
   pool = new pg.Pool({ ...connection, max: 4 });
   for (const actor of [joe, joeLocal]) actor.id = (await c.query('select id from actor where slug=$1', [actor.slug])).rows[0].id;
 
@@ -204,7 +208,7 @@ test('a recorded weekly call updates every confidently discussed card and leaves
   const env = { ...process.env, CARR_RECORDINGS_DIR: recordings, CARR_CAPTURE_CONFIG: path.join(root, 'capture.json'),
     CARR_CAPTURE_LOG: path.join(root, 'capture-bridge.log'), CARR_CALL_MODE_LOG: path.join(root, 'call-mode.log'), CARR_POST_CALL_PYTHON: PYTHON,
     CARR_POST_CALL_VERB_COMMAND: `node ${fileURLToPath(new URL('./helpers/rehearsal-verb.mjs', import.meta.url))} ${baseUrl}/rehearsal/verb`,
-    HOME: process.env.HOME };
+    HOME: root };
   if (!SONNET) {
     env.CARR_POST_CALL_DISTILLER_COMMAND = `${PYTHON} ${path.join(REPO, 'tools/dictation-rig/tests/fixtures/rehearsal_distiller.py')}`;
     env.CARR_POST_CALL_JEV_FIXTURE = path.join(REPO, 'tools/dictation-rig/tests/fixtures/rehearsal_jev.py');
@@ -269,7 +273,7 @@ test('a recorded weekly call updates every confidently discussed card and leaves
   // own call: whatever it did not apply must be waiting as an approval card.
   for (const [target, kind] of [[bayside, 'phase_move'], [bayside, 'next_step'], [harbor, 'next_step'], [gulf, 'next_step'], [magnolia, 'next_step']]) {
     if (applied(target.id, kind)) continue;
-    assert.ok(SONNET, `${kind} on ${target.id} should have applied: ${JSON.stringify(outcome)}`);
+    assert.ok(SONNET, `${kind} on ${target.id} should have applied: ${JSON.stringify(outcome)}\n${logs()}`);
     assert.ok(outcome.open_cards.some(card => card.deal_id === target.id && card.kind === kind), JSON.stringify(outcome.open_cards));
   }
   assert.ok(outcome.applied.length >= 1, 'the call applied nothing');
@@ -310,13 +314,12 @@ test('a recorded weekly call updates every confidently discussed card and leaves
     [`capture_candidate:${candidateId}`])).rows;
   const gulfStep = applied(gulf.id, 'next_step');
   if (gulfStep) {
-    // The call's step superseded Joe's overdue Gulf step; undo puts that ball back.
     const undo = { candidate_id: gulfStep.candidate_id, base_version: (await deal('Synthetic Gulf Imaging Center')).version };
-    const result = await verb(joe, 'undo-call-change', undo);
+    await verb(joe, 'undo-call-change', undo);
     const restored = await deal('Synthetic Gulf Imaging Center');
     assert.equal(restored.next_step, 'Old Gulf step');
     assert.equal(restored.next_date, '2026-10-01');
-    assert.ok(result.reverted.reopened_action_ids.length >= 1, JSON.stringify(result));
+    assert.equal((await c.query("select status from next_action where subject_id=$1 and description='Old Gulf step'", [gulf.id])).rows[0].status, 'open');
     assert.ok((await items(gulfStep.candidate_id)).every(i => i.status === 'dropped'));
     // A second undo of the same change is a no-op, not a second write.
     assert.equal((await verb(joe, 'undo-call-change', { ...undo, base_version: restored.version })).already, 'undone');
