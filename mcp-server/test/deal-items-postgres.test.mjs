@@ -604,6 +604,32 @@ test('same-text post-call follow-ups keep each partner owner', async () => {
 });
 
 
+test('a defaulted follow-up stays separate from a legacy action with a real future date', async () => {
+  await c.query('begin');
+  try {
+    const nonce = randomUUID();
+    const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,
+      consent_announced_at,session_token_hash,expires_at,state_at)
+      values($1,'synthetic-device',$2,'meeting',now(),now(),$1,now()+interval '1 hour',now()) returning id`, [nonce, actor.id])).rows[0].id;
+    await c.query("select set_config('carr.acting_actor_slug','joe',true), set_config('carr.verified_human_actor_slug','joe',true)");
+    const accept = async (due, defaulted) => {
+      const candidate = (await c.query(`insert into capture_post_call_candidate(session_id,idempotency_key,batch_hash,
+        item_index,kind,deal_id,assignee_slug,action_description,due_on,due_defaulted,evidence_quote,confidence)
+        values($1,$2,'synthetic',0,'assigned_action',$3,'joe','Call legacy vendor',$4,$5,'Joe will call vendor',0.9) returning id`,
+      [session, randomUUID(), deal, due, defaulted])).rows[0].id;
+      return executeRegisteredTool(c, actor, 'resolve-post-call-candidate', { candidate_id: candidate, accept: true, idempotency_key: randomUUID() });
+    };
+    const prior = await accept('2099-11-03', false);
+    await c.query("update capture_post_call_action set item_title=null,item_bullets='[]'::jsonb,source_ref=null where id=$1", [prior.ref]);
+    const incoming = await accept('2000-11-02', true);
+    assert.notEqual(incoming.ref, prior.ref);
+    const actions = (await c.query('select id,due_on::text,status from capture_post_call_action where id=any($1::uuid[])', [[prior.ref, incoming.ref]])).rows;
+    assert.equal(actions.find(action => action.id === prior.ref).due_on, '2099-11-03');
+    assert.equal(actions.find(action => action.id === prior.ref).status, 'open');
+    assert.equal(actions.find(action => action.id === incoming.ref).due_on, '2000-11-02');
+  } finally { await c.query('rollback'); }
+});
+
 test('post-call merges keep partner dates unless the incoming date is stated', async () => {
   await c.query('begin');
   try {

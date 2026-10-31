@@ -10046,7 +10046,7 @@ registerTools({
                and lower(regexp_replace(btrim(description), '\\s+', ' ', 'g'))=$2
            union all
            select id,item_bullets,'capture_post_call_action' as source,accepted_at as ordered_at from capture_post_call_action
-             where deal_id=$1 and status='open' and owner_id=$3
+             where deal_id=$1 and status='open' and owner_id=$3 and item_title is not null
                and lower(regexp_replace(btrim(description), '\\s+', ' ', 'g'))=$2
          ) actions order by ordered_at,id limit 1 /* capture:followup-existing */`,
         [candidate.deal_id, stepKey, assignee.rows[0].id])).rows[0];
