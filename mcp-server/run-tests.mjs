@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const LAUNCH_REGRESSIONS = "chrome-launch.test.mjs";
 const PRIVATE_POSTGRES_SUITES = new Set([
+  "home-inbox-postgres.test.mjs",
   "practice-origination-postgres.test.mjs",
   "phone-call-sessions-postgres.test.mjs",
   "census-inventory-postgres.test.mjs",
