@@ -1023,7 +1023,7 @@ class DecodedMailbox:
             os.chmod(db, 0o600)
             con = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
             try:
-                sent = tuple(SentRow(*row[:5], body_fingerprint(row[5])
+                sent = tuple(SentRow(row[0], row[1], row[2], row[3], row[4], body_fingerprint(row[5])
                                      if row[6] == 'full' and (row[5] or '').strip() else None)
                              for row in con.execute(
                     'SELECT DISTINCT m.sender, m.recipients, m.subject, m.sent_unix, '
