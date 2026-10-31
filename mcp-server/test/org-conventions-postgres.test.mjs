@@ -322,12 +322,40 @@ test('Dell\'s authority login still cannot retire through the Joe-only chain', a
   assert.equal((await c.query('select status from rule where id=$1', [old.rule_id])).rows[0].status, 'active');
 });
 
-test('unknown, proposed and already-retired targets are refused without partial retirement', async () => {
+// WR631.S1.J3: the rule-lookup hook reported missing_scope for every rule
+// adopt-rule made, because adoption stored scope {}.
+test('an adopted convention carries a scope the hook selector accepts', async () => {
+  const p = await proposeText('scoped-convention', 'Convention: When a synthetic moment arrives, do the synthetic thing.\nPacks: governance-rules');
+  const out = await adopt(claudeForJoe, p, 'carr_authority_joe');
+  const rule = (await c.query('select scope from rule where id=$1', [out.rule_id])).rows[0];
+  assert.deepEqual(rule.scope, { moment: 'When a synthetic moment arrives, do the synthetic thing.' });
+  const catalog = await executeRegisteredTool(c, claudeForJoe, 'standing-context', { detail: 'scopes' });
+  const selection = JSON.parse(execFileSync('python3', ['-c',
+    'import json,sys; from lib.rule_scope_lookup import select_rules; print(json.dumps(select_rules(json.load(sys.stdin), {"tool_name": "Bash", "tool_input": {"command": "true"}})))'],
+    { cwd: REPO, input: JSON.stringify(catalog), encoding: 'utf8' }));
+  assert.ok(catalog.rules.some(r => r.id === out.rule_id), 'the hook catalog carries the adopted rule');
+  assert.deepEqual(selection.data_defects.filter(d => d.rule_id === out.rule_id), []);
+});
+
+// A legacy proposed rule closes the same way: the agent adopts its current
+// wording as a replacement and the proposal row retires, superseded by it.
+test('a proposed rule retires into its adopted replacement', async () => {
+  const proposed = (await c.query(`insert into rule(statement,taught_by) values ('Synthetic stale proposal.',$1) returning id`, [joe.id])).rows[0].id;
+  const p = await proposeText('replace-proposed', `Convention: Synthetic current proposal.\nPacks: governance-rules\nRetires: ["${proposed}"]`);
+  const row = (await call(joe, 'governance-queue', {})).pending_convention_proposals.find(r => r.section_id === p.section_id);
+  assert.equal(row.adoptable, true);
+  const out = await adopt(joe, p, 'carr_authority_joe');
+  assert.deepEqual(out.retired_rule_ids, [proposed]);
+  const old = (await call(joe, 'find-rule', { text: 'Synthetic stale proposal.' })).rules.find(r => r.id === proposed);
+  assert.equal(old.status, 'retired');
+  assert.equal(old.retirement.superseded_by, out.rule_id);
+  assert.equal((await c.query('select status from rule where id=$1', [out.rule_id])).rows[0].status, 'active');
+});
+
+test('unknown and already-retired targets are refused without partial retirement', async () => {
   const old = await adoptCard('invalid-target-retirement');
-  const proposed = (await c.query(`insert into rule(statement,taught_by) values ('Synthetic unadopted instruction.',$1) returning id`, [joe.id])).rows[0].id;
   for (const [slug, id, code] of [
     ['unknown', randomUUID(), 'convention_retirement_rule_not_found'],
-    ['proposed', proposed, 'convention_retirement_rule_not_active'],
   ]) {
     const p = await proposeText(`retire-${slug}`, `Retires: ${JSON.stringify([old.rule_id, id])}`);
     const before = await ruleCount();

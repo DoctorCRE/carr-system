@@ -392,7 +392,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "87ecbaa9c95b2c975e799942c5885f84c4c11856e3e87a022d6fad90742ec923",
     "write": true,
     "human_only": true,
-    "human_caller_only": true,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },

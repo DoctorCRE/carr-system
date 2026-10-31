@@ -238,8 +238,11 @@ prose, the private folder and briefs.
   that line and has no `Convention`, `Card`, or `Packs` line. A replacement
   starts with `Convention: <statement>`, keeps the existing Card/Packs format,
   and adds `Retires`. IDs are normalized and deduplicated; every target must
-  still be active at adoption. Unknown, proposed, or already-retired targets
-  refuse the entire transaction. Retirement uses the same `adopt-rule` door as
+  still be proposed or active at adoption. Unknown or already-retired targets
+  refuse the entire transaction. A replacement that retires a pending proposed
+  rule is how an agent activates that rule's current wording (WR631.S1.J3).
+  An adopted rule's scope is `{"moment": <statement>}`, the shape the rule-lookup
+  hook requires of every active rule. Retirement uses the same `adopt-rule` door as
   adoption, so a partner or the agent they sponsor retires and tells Joe. The
   Joe-only database approval/retirement chain still applies (Dell remains
   refused by it).
