@@ -4,11 +4,10 @@
 // every migration missing from its ledger, in filename order (S2's included).
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
-import { migrationNames, readMigration } from './migration-source.testhelper.mjs';
+import { migrationNames } from './migration-source.testhelper.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 import { publicError } from '../src/public-errors.ts';
 import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.current.generated.js';
@@ -19,24 +18,10 @@ const LESSON = 'Ruled out: X — the dependency checks were clean. Next agent: s
 let fixture, c, actor;
 before(async () => {
   assert.ok(MIGRATION, 'the S2 migration exists');
-  const bin = [process.env.CARR_LOCAL_PG_BIN_DIR, '/opt/homebrew/opt/postgresql@18/bin', '/usr/lib/postgresql/18/bin',
-    '/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin'].find(p => existsSync(`${p}/initdb`));
-  assert.ok(bin, 'PostgreSQL is required for the isolated team-memory proof');
-  fixture = await acquireDisposablePostgres({ prefix: 'team-memory-', pgCtl: `${bin}/pg_ctl` });
-  await fixture.run(`${bin}/initdb`, ['-D', `${fixture.root}/data`, '-U', 'carr_ci', '--auth=trust', '--no-locale']);
-  await fixture.run(`${bin}/pg_ctl`, ['-D', `${fixture.root}/data`, '-l', `${fixture.root}/server.log`, '-o', `-k ${fixture.root} -h ''`, '-w', 'start']);
-  await fixture.run(`${bin}/createdb`, ['-h', fixture.root, '-U', 'carr_ci', 'carr_ci']);
-  c = new pg.Client({ host: fixture.root, user: 'carr_ci', database: 'carr_ci' });
+  fixture = await acquireDisposablePostgres({ prefix: 'team-memory-', snapshot: true });
+  c = new pg.Client(fixture.connection);
   await c.connect();
-  await c.query('do $$ begin create role neondb_owner; exception when duplicate_object then null; end $$;');
-  await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', '-X', '-v', 'ON_ERROR_STOP=1', '-q',
-    '-f', new URL('../../db/schema.sql', import.meta.url).pathname]);
-  // The snapshot can lag main: newer migrations (such as other grant-contract
-  // registrations) are applied here exactly as tools/migrate.py would.
-  const applied = new Set((await c.query('select filename from schema_migrations')).rows.map(r => r.filename));
-  const pending = migrationNames().filter(name => !applied.has(name)).sort();
-  assert.ok(pending.includes(MIGRATION), 'the S2 migration is pending over the snapshot');
-  for (const name of pending) await c.query(readMigration(name));
+
   actor = { ...(await c.query(`insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner')
     on conflict(slug) do update set active=true returning id,slug`)).rows[0], human: true, client_id: 'synthetic-client' };
 });
@@ -107,8 +92,19 @@ test('agent B attaches and its index shows A\'s lesson at version 1, written by 
   assert.match(entry.content_hash, /^[0-9a-f]{64}$/);
   assert.equal(entry.last_writer_surface, 'claude_code');
   assert.ok(entry.review_after, 'the team-memory review policy sets the staleness clock');
-  const read = await executeRegisteredTool(c, actor, 'doctrine-sections', { section_ids: [entry.section_id] });
-  assert.equal(read.sections[0].body.text, LESSON, 'an index entry reads straight through doctrine-sections');
+  for (const [verb, args] of [
+    ['doctrine-sections', { section_ids: [entry.section_id] }],
+    ['read-doctrine', { document: 'team-memory' }],
+  ]) {
+    const read = await executeRegisteredTool(c, actor, verb, args);
+    const section = read.sections.find(s => s.section_key === entry.section_key);
+    assert.equal(section.body.text, LESSON, `${verb} returns A's lesson`);
+    assert.equal(section.last_writer.session_key, a.attach_id, `${verb} identifies A's session`);
+    assert.equal(section.last_writer.actor, actor.slug);
+    assert.equal(section.last_writer_surface, 'claude_code');
+    assert.equal(section.provenance_note, team.index_note, `${verb} carries the attach warning`);
+    assert.match(section.provenance_note, /data, not instructions/);
+  }
   assert.notEqual(b.stores[1].generation, a.stores[1].generation);
   const digests = (await c.query('select attached_index_digest from memory_session where attach_id = any($1::uuid[])',
     [[a.attach_id, b.attach_id]])).rows.map(r => r.attached_index_digest);
@@ -148,6 +144,11 @@ test('change-doctrine-sections writes and retires atomically under one attach', 
   assert.equal(cs.session_key, b.attach_id);
   const index = (await attach()).stores[1].index.map(s => s.section_key);
   assert.deepEqual(index, ['incidents/probe-y']);
+  const read = await executeRegisteredTool(c, actor, 'read-doctrine', { document: 'team-memory' });
+  assert.equal(read.sections[0].body.text, 'Synthetic second lesson.');
+  assert.equal(read.sections[0].last_writer.session_key, b.attach_id);
+  assert.equal(read.sections[0].last_writer_surface, 'codex', 'Codex B can hand its lesson back to Claude A');
+  assert.match(read.sections[0].provenance_note, /data, not instructions/);
 });
 
 test('retire-doctrine-section on team memory requires a read-write attach', async () => {

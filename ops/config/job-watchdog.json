@@ -4,11 +4,13 @@
     "scan_seconds": 120,
     "scan_grace_seconds": 300,
     "command_timeout_seconds": 30,
-    "log_tail_bytes": 16384
+    "log_tail_bytes": 16384,
+    "reminder_seconds": 86400
   },
   "paths": {
     "findings": "out/watchdog/findings.jsonl",
     "scan_lock": "out/watchdog/scan.lock",
-    "scan_ledger": "out/watchdog/runs.jsonl"
+    "scan_ledger": "out/watchdog/runs.jsonl",
+    "orchestrator_inbox": "out/watchdog/orchestrator-inbox.jsonl"
   }
 }
