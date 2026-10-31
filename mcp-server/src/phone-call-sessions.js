@@ -58,9 +58,20 @@ function validAdmission(body, env) {
 }
 
 function view(row) {
+  const status = row.studio_status;
   return { schema_version: 1, session_id: row.id,
-    state: row.state === 'done' ? 'filed' : row.projection ? 'ready_review' : row.transferred_at ? 'transferred' : 'pending',
+    state: status?.state ?? (row.state === 'done' ? 'filed' : row.projection ? 'ready_review' : row.transferred_at ? 'transferred' : 'pending'),
+    reason: status?.reason ?? null, open_questions: status?.open_questions ?? 0,
     filed: row.state === 'done', transferred: !!row.transferred_at };
+}
+
+function validStudioStatus(value) {
+  if (!value || Object.keys(value).sort().join(',') !== 'open_questions,reason,state' ||
+      !Number.isSafeInteger(value.open_questions) || value.open_questions < 0) return false;
+  if (value.state === null) return value.reason === null && value.open_questions === 0;
+  if (value.state === 'needs_attention') return ['extraction_failed', 'transcript_unavailable', 'transient_ceiling'].includes(value.reason);
+  return value.state === 'held_review' && (['summary_repeats_transcript', 'transcript_unavailable'].includes(value.reason) ||
+    (value.reason === 'open_review_questions' && value.open_questions > 0));
 }
 
 async function handoffStatus(env, id) {
@@ -87,13 +98,29 @@ export function createPhoneCallHandler({ withWriter }) {
         try { return await audioHandoff(env); }
         catch { return json({ error: 'phone_intake_unavailable' }, 503); }
       }
-      const match = path.slice(PHONE_STUDIO_PREFIX.length).match(/^\/([^/]+)\/(report|lease|audio|ack)$/);
+      const match = path.slice(PHONE_STUDIO_PREFIX.length).match(/^\/([^/]+)\/(report|lease|audio|ack|status)$/);
       if (!path.startsWith(PHONE_STUDIO_PREFIX + '/') || !match || !UUID.test(match[1])) return json({ error: 'not_found' }, 404);
       if (match[2] === 'audio' && request.method === 'GET') {
         try { return await audioHandoff(env, match[1]); }
         catch { return json({ error: 'phone_intake_unavailable' }, 503); }
       }
       if (request.method !== 'POST' || match[2] === 'audio') return json({ error: 'method_not_allowed' }, 405);
+      if (match[2] === 'status') {
+        const text = await boundedText(request, 512);
+        if (text === null) return json({ error: 'status_too_large' }, 413);
+        let status;
+        try { status = JSON.parse(text); } catch { return json({ error: 'invalid_json' }, 400); }
+        if (!validStudioStatus(status)) return json({ error: 'invalid_studio_status' }, 400);
+        try {
+          return await withWriter(async client => {
+            if (!await readSession(client, match[1], null)) return json({ error: 'not_found' }, 404);
+            const updated = await client.query(`update phone_call_session set studio_status=$2::jsonb
+              where id=$1 and studio_status is distinct from $2::jsonb returning id /* phone:status */`,
+            [match[1], JSON.stringify(status)]);
+            return json({ ok: true, session_id: match[1], changed: updated.rows.length > 0 });
+          });
+        } catch { return json({ error: 'phone_intake_unavailable' }, 503); }
+      }
       if (match[2] === 'ack') {
         const text = await boundedText(request, 256);
         if (text === null) return json({ error: 'receipt_too_large' }, 413);
