@@ -36,10 +36,10 @@ test('Home agenda real SQL preserves eligibility, nullable dates, holds and read
       create view v_client_engagement_status as select 'aa000000-0000-4000-8000-000000000100'::uuid as client_id, 'prospect'::text as client_status, 'active'::text as prospect_engagement_status;
       create table actor (id uuid primary key, slug text);
       create table next_action (id uuid primary key, subject_type text, subject_id uuid, owner_id uuid,
-        description text, due_on date, status text, updated_at timestamptz, hold_until date,
+        description text, due_on date, status text, version integer default 1, updated_at timestamptz, hold_until date,
         item_title text, item_bullets jsonb, source_ref text, created_at timestamptz);
       create table capture_post_call_action (id uuid primary key, deal_id uuid, owner_id uuid,
-        description text, due_on date, status text, updated_at timestamptz,
+        description text, due_on date, status text, version integer default 1, updated_at timestamptz,
         item_title text, item_bullets jsonb, source_ref text, accepted_at timestamptz);
       create table dates_source (id uuid primary key, deal_id uuid, kind text, due_on date, note text, status text);
       create view v_deal_room_critical_date as select * from dates_source;
@@ -50,8 +50,8 @@ test('Home agenda real SQL preserves eligibility, nullable dates, holds and read
       grant select on v_deal_room_board, v_open_deal_room_board, v_client_engagement_status, v_deal_room_critical_date, v_deal_room_action to carr_reader;
     `);
     await c.query(readFileSync(new URL('../../migrations/0927_deal_action_hold_date.sql', import.meta.url), 'utf8'));
-    const actionView = readFileSync(new URL('../../db/schema.sql', import.meta.url), 'utf8').match(/CREATE VIEW public\.v_deal_room_action AS[\s\S]*?;/)[0];
-    await c.query(actionView.replace('CREATE VIEW', 'CREATE OR REPLACE VIEW'));
+    const actionView = readFileSync(new URL('../../migrations/1079_single_action_completion.sql', import.meta.url), 'utf8').match(/CREATE OR REPLACE VIEW public\.v_deal_room_action AS[\s\S]*?;/)[0];
+    await c.query(actionView);
     await c.query("insert into actor values ($1,'dell')", [id(100)]);
     const read = async () => {
       let queries = 0;
@@ -81,6 +81,7 @@ test('Home agenda real SQL preserves eligibility, nullable dates, holds and read
       assert.equal(account.workspace_kind, 'national_account');
       assert.equal(account.account_client_id, id(100));
       assert.deepEqual(account.critical_dates.map(d => [d.id,d.due_on,d.status]), [[id(102),'2026-10-22','open'],[id(101),null,'settled']]);
+      assert.ok(account.next_actions.every(a => a.version === 1));
       assert.deepEqual(account.next_actions.map(a => [a.id,a.due_on,a.hold_until]), [[id(103),null,'2026-10-25'],[id(105),'2026-10-23',null]]);
       assert.deepEqual(result.deals[0].critical_dates, []);
       assert.deepEqual(result.deals[0].next_actions, []);

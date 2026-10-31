@@ -53,7 +53,9 @@ const governance = {
     { rule_id: "7d9b1a2c-0000-0000-0000-000000000001", statement: "Name the deal in every question box.",
       admitted_at: "2026-10-02T12:00:00Z" },
   ],
-  pending_guidance_import_batches: [],
+  pending_guidance_import_batches: [
+    { batch_id: "b-1", entry_count: 2, reason: "Vault guidance", staged_at: "2026-10-02T12:00:00Z" },
+  ],
   pending_retrieval_proposals: [
     { proposal_id: "p-1", proposal_type: "phrase", reason: "synonym", proposed_at: "2026-10-01T00:00:00Z" },
   ],
@@ -108,7 +110,7 @@ test("every source contributes, each item carries the six fields Joe needs", asy
   assert.equal(list.state, "ready");
   const sources = new Set(list.items.map(item => item.source));
   for (const source of ["action_required", "loop", "work_request", "board_question",
-    "rule_approval", "pull_request", "tabled"])
+    "pull_request", "tabled"])
     assert.ok(sources.has(source), `missing source ${source}`);
   for (const item of list.items) {
     for (const field of ["title", "why", "action", "age_days", "blocks"])
@@ -130,7 +132,6 @@ test("human-only classes come from the existing gates, most specific first", asy
   assert.equal(byKey["pr:DoctorCRE/carr-system#1244"].why.class, "money");
   assert.equal(byKey["tabled:sign in to Codex and xAI on the Studio"].why.class, "credential");
   assert.equal(byKey["work-request:WR-000201"].why.class, "ruling");
-  assert.equal(byKey["rule:7d9b1a2c-0000-0000-0000-000000000001"].why.class, "ruling");
   assert.equal(classifyHumanOnly("Log in to the Neon console"), "credential");
   assert.equal(classifyHumanOnly("Confirm with Face ID"), "credential");
   assert.equal(classifyHumanOnly("Force-push the release branch"), "irreversible");
@@ -147,9 +148,10 @@ test("what the system can decide is excluded, counted, and explained", async () 
   assert.ok(!keys.includes("pr:jbookout/doctorcre-app#131"), "waiting on another PR, not on Joe");
   assert.ok(!keys.includes("loop:416"), "lead outreach lives on the Lead Board, never this list");
   assert.ok(!keys.includes("loop:417"), "an unflagged loop is internal work even when its text mentions a credential");
-  assert.equal(list.excluded.count, 6);
+  assert.ok(!keys.some(key => key.startsWith("rule:")), "agents adopt and retire rules themselves");
+  assert.equal(list.excluded.count, 7);
   assert.deepEqual(list.excluded.by_reason, {
-    internal: 2, waiting_on_others: 2, system_decidable: 1, lead_outreach: 1,
+    internal: 2, waiting_on_others: 2, system_decidable: 1, lead_outreach: 1, agent_rule: 1,
   });
   for (const reason of Object.keys(list.excluded.by_reason))
     assert.ok(list.excluded.reasons[reason], `reason ${reason} is explained`);
@@ -170,7 +172,7 @@ test("ordered by what it blocks: live work, then capabilities, then pending appr
   assert.deepEqual(tiers, [...tiers].sort((a, b) => rank[a] - rank[b]));
   const work = list.items.filter(item => item.blocks.tier === "work");
   assert.deepEqual(work.map(item => item.age_days), [...work.map(item => item.age_days)].sort((a, b) => b - a));
-  assert.equal(list.items.at(-1).key, "rule:7d9b1a2c-0000-0000-0000-000000000001");
+  assert.equal(list.items.at(-1).key, "guidance-batch:b-1");
   const pr = list.items.find(item => item.source === "pull_request");
   assert.equal(pr.link, "https://github.com/DoctorCRE/carr-system/pull/1244");
   assert.match(pr.blocks.text, /Route typed calls through TypeSafe/);
@@ -212,8 +214,8 @@ test("the existing governance lanes are unchanged", async () => {
   const { result } = await read();
   assert.deepEqual(result.pending_rule_approvals, governance.pending_rule_approvals);
   assert.deepEqual(result.counts, {
-    pending_convention_proposals: 0, pending_rule_approvals: 1, pending_guidance_import_batches: 0,
-    pending_retrieval_proposals: 1, total: 2,
+    pending_convention_proposals: 0, pending_rule_approvals: 1, pending_guidance_import_batches: 1,
+    pending_retrieval_proposals: 1, total: 3,
   });
 });
 

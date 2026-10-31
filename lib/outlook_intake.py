@@ -54,6 +54,10 @@ Each decoded email carries its observed folder paths (Inbox, Sent Items, user
 subfolders such as Active Deals/<deal>) as `folders`; matched client attachments use them to resolve one deal.
 Attachment metadata travels as `attachments` with id, name, size, content_type and
 nullable content_id. Cache paths and bytes stay in the private decoder output.
+Attachment routing failures have client, folder and deal counters, counted per
+unfinished attachment. attachments_uncached means a valid cache path has no file;
+attachments_path_conflict means decoded revisions disagree on that path. Conflicts,
+refused paths and read failures count as attachments_unresolved and stay pending.
 Mail enters intake through membership in the configured folder account, including
 all user subfolders. Decoded recipients provide context, never admission evidence.
 
@@ -93,6 +97,7 @@ OUT = Path('out/outlook-intake')
 STATE = 'state.json'
 WORK_PREFIX = 'work-'
 WINDOW = (time(7, 0), time(19, 30))
+COVERAGE_HELD_RECIPIENTS_LIMIT = 20  # More held Sent items require human attention.
 COVERAGE_CHECK_AT = time(18, 0)  # the first successful run from here judges the day's coverage once
 WRITE_VERBS = frozenset({'log-activity', 'publish-board-snapshot', 'propose-email-lead', 'attach-deal-file',
                          'record-deal-item', 'complete-deal-item', 'drop-action'})
@@ -215,7 +220,7 @@ FOLDER_CLASSES = {
     'deleted': ('deleted items', 'deleted', 'trash'), 'junk': ('junk email', 'junk', 'spam'),
     'drafts': ('drafts',), 'user': (), 'unknown': (),
 }
-MAIL_STORE_COUNTERS = ('decoder_rejected', 'mail_outside_selected_account', 'mail_account_ambiguous', 'mail_account_unresolved',
+MAIL_STORE_COUNTERS = ('decoder_rejected', 'decoder_details_rejected', 'mail_outside_selected_account', 'mail_account_ambiguous', 'mail_account_unresolved',
                        'stored', 'admitted', 'stored_multi_class', 'mail_account_unknown_not_stored', 'body_complete',
                        'stored_not_admitted_account_ambiguous',
                        'stored_not_admitted_account_unresolved',
@@ -234,6 +239,8 @@ BACKLOG_COUNTS = frozenset((
     'calendar_follow_up_reviews', 'calendar_follow_up_trimmed', 'calendar_agenda_items'))
 BACKLOG_PREFIXES = ('mapping_', 'error_')
 RECEIPT_NAMES = {'calendar_lifecycle_unsupported': 'calendar_copies_in_store',
+                 'calendar_lifecycle_canceled': 'calendar_canceled_copies_in_store',
+                 'calendar_requests_quarantined': 'calendar_write_requests_held',
                  'calendar_unresolved_expired': 'calendar_expired_total'}
 LEAD_OUTCOMES = {'proposed': 'lead_proposed', 'known_party': 'lead_known_party', 'refused': 'lead_refused'}
 
@@ -540,6 +547,7 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
         rejected = int(meta.get('messages_rejected') or 0)
         meta.update(dict.fromkeys(MAIL_STORE_COUNTERS, 0))
         meta['decoder_rejected'] = rejected
+        meta['decoder_details_rejected'] = int(meta.get('details_rejected') or 0)
         admitted = []
         for m in mails:
             owners = ownership.get(m['id'], {None})
@@ -610,6 +618,8 @@ def _decoder_health(meta: dict, since: int, now: datetime, baseline: dict) -> di
     # Rejected messages never reach the sampled rows, so this failure follows the counter alone.
     if meta.get('decoder_rejected'):
         failing.append('message_layout')
+    if meta.get('decoder_details_rejected'):
+        failing.append('detail_layout')
     return {'rates': rates, 'samples': samples, 'eligible': eligible, 'failing': failing, 'messages': len(rows),
             'store_messages': len(store_rows)}
 
@@ -1026,6 +1036,9 @@ class Run:
                 'summary': f'{label}: {m["subject"] or "(no subject)"}', 'detail': m['text'],
                 'occurred_at': _iso(m['sent_unix']),
                 'email_context': email_context(m, self.settings.internal_domain),
+                **({'email_identity': {'mailbox_owner': self.settings.owner, 'mailbox_account': self.settings.account,
+                     'item_id': 'hxstore-key:' + ','.join(_store_keys(m['local_keys']))}}
+                   if _store_keys(m['local_keys']) else {}),
                 **({'email_source': {'sender_email': m['sender'].lower(), 'mailbox_owner': self.settings.owner}}
                    if not outbound else {})}, who, '' if m['full'] else 'preview_only') for ref in refs]
             completed.extend(ref for ref, ok in zip(refs, results) if ok)
@@ -1169,6 +1182,9 @@ class Run:
         for mail in mails:
             if not mail.get('attachments') or not (self.now - UNRESOLVED_DAYS).timestamp() <= mail['sent_unix'] <= self.now.timestamp() + 300:
                 continue
+            pending = sum(f"{mail['ident']}/{a['id']}" not in done for a in mail['attachments'])
+            if not pending:
+                continue
             parties = (_addresses(mail['recipients']) if _internal(mail['sender'], self.settings.internal_domain)
                        else [mail['sender']])
             refs = {matcher.ref(a) for a in parties if not _internal(a, self.settings.internal_domain)} - {None}
@@ -1177,10 +1193,11 @@ class Run:
                      if part.casefold() == 'active deals'}
             if not refs:
                 continue
-            if len(refs) != 1 or len(names) != 1:
-                self.counts['attachments_unresolved'] = self.counts.get('attachments_unresolved', 0) + 1
-                continue
-            if all(f"{mail['ident']}/{a['id']}" in done for a in mail['attachments']):
+            reason = ('client_ambiguous' if len(refs) != 1 else
+                      'folder_missing' if not names else 'folder_ambiguous' if len(names) != 1 else None)
+            if reason:
+                counter = 'attachments_' + reason
+                self.counts[counter] = self.counts.get(counter, 0) + pending
                 continue
             candidates.append((mail, next(iter(refs)), next(iter(names))))
         if not candidates:
@@ -1191,18 +1208,15 @@ class Run:
             for mail, ref, name in candidates:
                 matches = [d for d in deals if d['client_ref'] == ref and d['name'].casefold() == name.casefold()]
                 if len(matches) != 1:
-                    self.counts['attachments_unresolved'] = self.counts.get('attachments_unresolved', 0) + 1
+                    counter = 'attachments_deal_missing' if not matches else 'attachments_deal_ambiguous'
+                    self.counts[counter] = self.counts.get(counter, 0) + sum(
+                        f"{mail['ident']}/{a['id']}" not in done for a in mail['attachments'])
                     continue
                 for row_id in mail['row_ids']:
                     selected[row_id] = (mail, matches[0])
             pending_ids = {a['id'] for mail, _ in selected.values() for a in mail['attachments']
                            if f"{mail['ident']}/{a['id']}" not in done}
             rows = [a for a in att.rows(db) if a['message'] in selected and a['attachment'] in pending_ids]
-            for row in rows:
-                if not row['path']:
-                    mail, _ = selected[row['message']]
-                    uncached[f"{mail['ident']}/{row['attachment']}"] = mail['sent_unix']
-                    self.counts['attachments_uncached'] = self.counts.get('attachments_uncached', 0) + 1
             paths = sorted({a['path'] for a in rows if a['path'] and att.CACHE_PATH.fullmatch(a['path'])
                             and not any(ord(c) < 32 or ord(c) == 127 for c in a['path'])})
             if paths:
@@ -1214,7 +1228,6 @@ class Run:
                         capture_output=True, text=True, timeout=900)
                     if copied.returncode:
                         raise OSError('attachment copy failed')
-            pending_ids -= {a['attachment'] for a in rows if not a['path']}
             for result in att.extract(db, files, files.parent / 'extracted', messages=set(selected), attachments=pending_ids):
                 mail, deal = selected[result['message']]
                 source = f"{mail['ident']}/{result['attachment']}"
@@ -1231,9 +1244,12 @@ class Run:
                     done[source] = int(self.now.timestamp())
                     continue
                 if result['status'] != 'stored':
+                    if result['status'] in ('path_conflict', 'path_refused', 'unreadable', 'error'):
+                        self.counts['attachments_unresolved'] = self.counts.get('attachments_unresolved', 0) + 1
                     self.state['attachments_pending'] = True
                     continue
-                prepared.append((mail['ident'], deal, result, Path(result['stored']).read_bytes()))
+                prepared.append((mail['ident'], deal, {**result, 'requires_activity': not _internal(mail['sender'], self.settings.internal_domain)},
+                                 Path(result['stored']).read_bytes()))
         except (CarrError, OSError, KeyError, sqlite3.Error, subprocess.TimeoutExpired):
             self.state['attachments_pending'] = True
             self.counts['attachments_failed'] = self.counts.get('attachments_failed', 0) + 1
@@ -1245,9 +1261,19 @@ class Run:
         done = self.state.setdefault('attachments_done', {})
         put = self.ports.put_object or filing.r2_put_object()
         for ident, deal, result, data in prepared:
+            activity_id = None
+            for ref in (deal['id'], deal['client_ref']):
+                request = self.state.get('requests', {}).get(self.activity_key(ref, ident), {})
+                if request.get('activity_id') and json.loads(request['payload']).get('kind') == 'email_in':
+                    activity_id = request['activity_id']
+                    break
+            if result.get('requires_activity') and not activity_id:
+                self.state['attachments_pending'] = True
+                self.counts['attachments_source_pending'] = self.counts.get('attachments_source_pending', 0) + 1
+                continue
             reply = filing.file_attachment(deal['id'], {'id': result['attachment'], 'name': result['name']},
                 data, message_id=ident, client_ref=f"{deal['client_ref']}.{deal['id']}",
-                put_object=put, carr=self.ports.carr)
+                put_object=put, carr=self.ports.carr, activity_id=activity_id)
             status = reply['status']
             self.counts['attachments_' + status] = self.counts.get('attachments_' + status, 0) + 1
             if status in ('stored', 'existing'):
@@ -1658,43 +1684,23 @@ def _quarantine_calendar_requests(state: dict) -> None:
 
 
 
-def reconcile_only(repo: Path, home: Path, ports: Ports) -> Outcome:
-    """Record Message-IDs for saved state from the installed decoder's rows, filing nothing.
-
-    The installer runs this once, with the old decoder, before replacing it, so `mail_ids` exists when
-    the new decoder's identities arrive. State that already has `mail_ids` is left alone.
-    """
-    settings = load_settings(home)
-    settings.require_repo(repo)
-    out = repo / OUT
-    if not (out / STATE).exists():
-        return Outcome('succeeded', 'no_state')
-    account_id = settings.folder_account_id
-    if account_id is None:
+def _reconcile(out: Path, home: Path, ports: Ports, settings: OutlookSettings, state: dict) -> Outcome:
+    """Save old decoder identities under the intake lock before any filing or window gate."""
+    if settings.folder_account_id is None:
         return Outcome('failed', 'reconcile_failed', detail='folder_account_id_required')
-    # The intake lock covers the read, the check and the save, so a concurrent run's state is never lost.
-    fd = _private_fd(out / 'lock', os.O_RDWR)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        state = json.loads((out / STATE).read_text())
-        if 'mail_ids' in state:
-            return Outcome('succeeded', 'already_reconciled')
-        with _decode(home, out, ports.decode, account_id, settings.account) as (_, mails, _, _, _):
+        with _decode(home, out, ports.decode, settings.folder_account_id, settings.account) as (_, mails, _, _, _):
             work = Run(ports, state, ports.now(), out, settings)
             work.reconcile([m for m in _best_copies(mails, state) if not m['metadata_incomplete']])
         _save(out, state)
     except (FullDiskAccessRequired, DecodeError, sqlite3.Error, OSError, ValueError) as error:
         return Outcome('failed', 'reconcile_failed', detail=type(error).__name__)
-    finally:
-        os.close(fd)
     return Outcome('succeeded', 'reconciled', {**work.counts, 'mail_ids': len(state['mail_ids'])})
 
 
 def run(repo: Path, home: Path, ports: Ports) -> Outcome:
     settings = load_settings(home)
     settings.require_repo(repo)
-    if not in_window(ports.now()):
-        return Outcome('skipped', 'outside_window')
     out = repo / OUT
     out.mkdir(parents=True, exist_ok=True)
     os.chmod(out, 0o700)
@@ -1705,9 +1711,18 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
         except OSError:
             return Outcome('skipped', 'previous_run_active')
         try:
+            try:
+                state = json.loads((out / STATE).read_text())
+            except (OSError, ValueError):
+                state = {}
+            reconcile = (out / STATE).is_file() and 'mail_ids' not in state and os.access(settings.decoder, os.X_OK)
+            if not reconcile and not in_window(ports.now()):
+                return Outcome('skipped', 'outside_window')
             for stale in out.glob(WORK_PREFIX + '*'):
                 _remove(stale)
-            outcome = _run(out, home, ports)
+            if reconcile:
+                return _reconcile(out, home, ports, settings, state)
+            outcome = _run(out, home, ports, state)
             if outcome.state != 'succeeded':
                 return outcome
             state = json.loads((out / STATE).read_text())
@@ -1730,14 +1745,25 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
             if work.counts['links_filed']:
                 outcome.reason = 'processed'
             local = ports.now().astimezone(settings.timezone)
-            if local.time() >= COVERAGE_CHECK_AT and state.get('coverage_check_day') != local.date().isoformat():
-                state['coverage_check_day'] = local.date().isoformat()
-                _save(out, state)
+            today = local.date()
+            previous_day = (today - timedelta(days=1)).isoformat()
+            last_run = state.get('coverage_run_day') or state.get('coverage_check_day')
+            missed = bool(last_run and last_run <= previous_day and state.get('coverage_check_day', '') < previous_day)
+            state['coverage_run_day'] = today.isoformat()
+            if local.time() >= COVERAGE_CHECK_AT and state.get('coverage_check_day') != today.isoformat():
+                state['coverage_check_day'] = today.isoformat()
                 shortfalls = coverage_verdict(outcome.counts)
-                failed = any(shortfalls.values())
-                outcome.counts.update(shortfalls, coverage_checked=1, coverage_failed=int(failed))
-                if failed:
-                    outcome.state, outcome.reason = 'failed', 'coverage_failed'
+                held = int(outcome.counts.get('unresolved_recipients_unknown', 0) > COVERAGE_HELD_RECIPIENTS_LIMIT)
+                failed = any(shortfalls.values()) or held or missed
+                outcome.counts.update(shortfalls, coverage_checked=1, coverage_failed=int(failed),
+                                      coverage_held_recipients_over_limit=held)
+            else:
+                failed = missed
+            if missed:
+                outcome.counts.update(coverage_missed_verdict=1, coverage_failed=1)
+            _save(out, state)
+            if failed:
+                outcome.state, outcome.reason = 'failed', 'coverage_failed'
             return outcome
         except CleanupError:
             return Outcome('failed', 'cleanup_failed')
@@ -1749,7 +1775,7 @@ def _save(out: Path, state: dict) -> None:
     _private_write(out / STATE, json.dumps(state))
 
 
-def _run(out: Path, home: Path, ports: Ports) -> Outcome:
+def _run(out: Path, home: Path, ports: Ports, state: dict) -> Outcome:
     settings = load_settings(home)
     if settings.folder_account_id is None:
         return Outcome('failed', 'folder_account_id_required')
@@ -1757,14 +1783,14 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         store = resolve_store(home)
     except FileNotFoundError:
         return Outcome('failed', 'store_missing')
-    try:
-        state = json.loads((out / STATE).read_text())
-    except (OSError, ValueError):
-        state = {}
     if _retire_email_steps(state):
         _save(out, state)
     info = store.stat()
-    signature = [info.st_mtime_ns, info.st_size]
+    try:
+        decoder_identity = json.loads((settings.vendor / '.carr-build.json').read_text()).get('binary_sha256')
+    except (OSError, ValueError, AttributeError):
+        decoder_identity = None
+    signature = [info.st_mtime_ns, info.st_size, decoder_identity]
     now = ports.now()
     matcher = None
     if state.get('mail_unresolved') or state.get('calendar_unresolved'):
@@ -1778,7 +1804,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     hydration_due = bool(state.get('pending_full')) and now.timestamp() >= state.get('hydration_check_at', 0)
     review_due = 'calendar_review_at' not in state or (state['calendar_review_at'] is not None
                                                       and now.timestamp() >= state['calendar_review_at'])
-    if state.get('account_binding') == _hash(settings.account.strip().lower()) and not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and all(name in state for name in MAIL_STORE_COUNTERS) and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('attachment_policy') == 1 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due'):
+    if state.get('account_binding') == _hash(settings.account.strip().lower()) and not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and all(name in state for name in MAIL_STORE_COUNTERS) and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('attachment_policy') == 2 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due'):
         if state.get('pending_full'):
             Run(ports, state, now, out, settings).full_text([])
             _save(out, state)
@@ -1812,7 +1838,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
                   'eligible': {}, 'failing': [], 'messages': 0}
     state['decoder_health'] = health
     prior_failures = state.get('decoder_failures', [])
-    unresolved = [name for name in prior_failures if name not in health['eligible'] and name != 'message_layout']
+    unresolved = [name for name in prior_failures if name not in health['eligible'] and name not in ('message_layout', 'detail_layout')]
     alarm = int(bool(health['failing']) and not state.get('decoder_alarm_delivered', False))
     state['decoder_failures'] = list(dict.fromkeys(health['failing'] + unresolved))
     state['decoder_degraded'] = bool(state['decoder_failures'])
@@ -1852,7 +1878,6 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         complete_mails = [m for m in mails if not m['metadata_incomplete']]
         prepared = work.prepare_attachments(complete_mails, matcher, db, files)
         _remove(files.parent)
-        work.file_attachments(prepared)
         _quarantine_calendar_requests(state)
         _save(out, state)
         for request in list(state.get('requests', {}).values()):
@@ -1862,6 +1887,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
                 args = json.loads(request['payload'])
                 work.write(request['verb'], args, 'pending write')
         work.emails(mails, matcher, since)
+        work.file_attachments(prepared)
         work.counts['legacy_unmatched'] = _legacy_unmatched(state)
         work.observe_flags(complete_mails, matcher)
         work.leads(matcher)
@@ -1902,7 +1928,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     if failed:
         _save(out, state)
         return Outcome('failed', failed, counts)
-    state.update(store=signature, high_water=int(now.timestamp()), contact_map=matcher.fingerprint(), attachment_policy=1,
+    state.update(store=signature, high_water=int(now.timestamp()), contact_map=matcher.fingerprint(), attachment_policy=2,
                  **{name: meta[name] for name in MAIL_STORE_COUNTERS},
                  folder_account_id=settings.folder_account_id, account_binding=_hash(settings.account.strip().lower()),
                  mail_rows_reusing_prior_identity=work.counts['mail_rows_reusing_prior_identity'])
@@ -1994,14 +2020,10 @@ def main() -> int:
                   decode=_decoder(home), now=lambda: datetime.now(timezone.utc),
                   read_unresolved=lambda mail, today, deals, parties: unresolved_email.ask(
                       mail, today, deals, parties, settings.model))
-    if sys.argv[1:] == ['--reconcile-only']:
-        outcome = reconcile_only(repo, home, ports)
-        print(status_line(outcome))
-        return EXIT[outcome.state]
     outcome = run(repo, home, ports)
     print(status_line(outcome))
     print(receipt_line(outcome, settings.repo))
-    if outcome.reason not in ('outside_window', 'previous_run_active'):
+    if outcome.reason not in ('outside_window', 'previous_run_active', 'reconciled', 'reconcile_failed'):
         try:
             from lib import email_router
             email_router.step(repo, settings)

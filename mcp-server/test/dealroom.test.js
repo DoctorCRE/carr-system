@@ -348,7 +348,7 @@ class FakeClient {
         parked_at: deal.parked_at, parked_by: deal.parked_by,
         salesforce_id: deal.salesforce_id, base_version: deal.version }] : [] };
     }
-    if (sql.includes('checklist:doctrine') || sql.includes('checklist:commissions')) return { rows: [] };
+    if (sql.includes('checklist:doctrine') || sql.includes('checklist:commissions') || sql.includes('checklist:requests')) return { rows: [] };
     if (sql.includes("from v_deal_room_current_lease where deal_id=$1")) return { rows: this.currentLease ? [this.currentLease] : [] };
     if (sql.includes("from v_deal_room_note")) {
       const rows = this.notes.filter(n => n.deal_id === params[0])

@@ -13,6 +13,15 @@ from lib.outlook_settings import OutlookSettings, SettingsError
 IDENTIFIER = 'com.carr.outlook-intake-copy'
 
 
+def _regrant_notice(helper: Path) -> str:
+    return (f'install-outlook-intake: helper replacements need a Full Disk Access re-grant for {helper}\n'
+            'All re-grant steps are required:\n'
+            '  1. Open System Settings > Privacy & Security > Full Disk Access.\n'
+            f'  2. Remove the old entry and add {helper} again, with access enabled.\n'
+            '  3. After re-granting access, run the launch commands printed by the installer.\n'
+            '  4. Check that the next scheduled intake run succeeds.')
+
+
 def install_helper(settings: OutlookSettings, *, rebuild_helper: bool = False) -> None:
     repo = settings.repo
     source = repo / 'tools/outlook-intake-copy.c'
@@ -34,12 +43,14 @@ def install_helper(settings: OutlookSettings, *, rebuild_helper: bool = False) -
     wanted = hashlib.sha256(source.read_bytes() + json.dumps(signer).encode()).hexdigest()
     helper.parent.mkdir(parents=True, exist_ok=True)
     if not (helper.is_file() and os.access(helper, os.X_OK) and pin.is_file() and pin.read_text() == wanted):
-        # A stably signed rebuild keeps Full Disk Access, so only an ad-hoc one needs consent.
-        if helper.exists() and not rebuild_helper and not sha1:
+        try:
+            regrant = not sha1 or (helper.exists() and not helper_signing.has_identity(helper, IDENTIFIER, sha1))
+        except helper_signing.SigningError as error:
+            raise SettingsError(str(error)) from error
+        if helper.exists() and not rebuild_helper and regrant:
             raise SettingsError(f'refusing to replace Outlook helper {helper}; '
-                                'rerun bin/install-outlook-intake.sh --rebuild-helper explicitly. '
-                                'Replacing an ad-hoc-signed helper loses Full Disk Access; '
-                                'be ready to re-grant it in System Settings.')
+                                'rerun bin/install-outlook-intake.sh --rebuild-helper explicitly.\n'
+                                + _regrant_notice(helper))
         with tempfile.TemporaryDirectory(dir=helper.parent) as temp:
             built = Path(temp) / helper.name
             subprocess.run(['/usr/bin/cc', *flags, str(source), '-o', str(built)], check=True)
@@ -57,11 +68,7 @@ def install_helper(settings: OutlookSettings, *, rebuild_helper: bool = False) -
                     raise SettingsError("cannot sign Outlook helper with '-'; "
                                         f'check that the code-signing identity is in this Mac keychain: {error.stderr}') from error
             os.replace(built, helper)
-            if not sha1:
-                print(f'install-outlook-intake: ad-hoc helper rebuilds need a Full Disk Access re-grant for {helper}', flush=True)
-                print('All re-grant steps are required:')
-                print('  1. Open System Settings > Privacy & Security > Full Disk Access.')
-                print(f'  2. Remove the old entry and add {helper} again, with access enabled.')
-                print('  3. Check that the next scheduled intake run succeeds.')
+            if regrant:
+                print(_regrant_notice(helper), flush=True)
         pin.write_text(wanted)
     settings.verify_helper()

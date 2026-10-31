@@ -14,6 +14,7 @@
 #
 # Env:
 #   CARR_RECORDINGS_DIR  — override the recordings root (default: ~/Recordings)
+#   CARR_CAPTURE_LOG     — override the capture log
 #
 # Empty queues succeed. Failed children remain visible after the full sweep.
 #
@@ -27,7 +28,7 @@ TOOL_DIR="$(cd "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd)"
 BRIDGE_PY="$TOOL_DIR/bin/capture-bridge.py"
 
 RECORDINGS_DIR="${CARR_RECORDINGS_DIR:-$HOME/Recordings}"
-LOG_FILE="$HOME/Library/Logs/capture-bridge.log"
+LOG_FILE="${CARR_CAPTURE_LOG:-$HOME/Library/Logs/capture-bridge.log}"
 
 log_line() {
     local ts

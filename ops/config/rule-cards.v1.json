@@ -148,8 +148,8 @@
     {
       "id": "K12",
       "title": "Capture durable corrections now",
-      "wording": "When a partner corrects or overrules you, or states a preference that would recur, propose it this turn as a team-memory convention with the trade-off; it binds nobody until Joe or Dell adopts it in the app. A how-to the same partner explains twice: quote both, offer a skill.",
-      "word_count": 49,
+      "wording": "When a partner corrects or overrules you, or states a preference that would recur, write it this turn as a team-memory convention, adopt it with adopt-rule, and tell Joe in one line what you adopted. A how-to the same partner explains twice: quote both, offer a skill.",
+      "word_count": 47,
       "placement": "CORE",
       "merged_from_drafts": [
         "G01",
@@ -319,7 +319,12 @@
           {
             "event": "PreToolUse",
             "tool_name_regex": "^Bash$",
-            "input_regex": "(?i)(?=.*(?:bin/codex-job|run\\.sh\\s+call\\s+(write-work-shape|report-problem)))"
+            "input_regex": "(?i)(?=.*(?:run\\.sh\\s+call\\s+(write-work-shape|report-problem)))"
+          },
+          {
+            "event": "PreToolUse",
+            "tool_name_regex": "^mcp__t3-code__delegate_task$",
+            "input_regex": ".*"
           }
         ]
       },
@@ -386,7 +391,12 @@
           {
             "event": "PreToolUse",
             "tool_name_regex": "^Bash$",
-            "input_regex": "(?i)(?=.*(?:bin/codex-job|run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:\\bnew\\b|first[- ]of[- ]kind|adopt|integrat|replace|workaround|missing capabilit|no way to))"
+            "input_regex": "(?i)(?=.*(?:run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:\\bnew\\b|first[- ]of[- ]kind|adopt|integrat|replace|workaround|missing capabilit|no way to))"
+          },
+          {
+            "event": "PreToolUse",
+            "tool_name_regex": "^mcp__t3-code__delegate_task$",
+            "input_regex": ".*"
           }
         ]
       },
@@ -460,7 +470,12 @@
           {
             "event": "PreToolUse",
             "tool_name_regex": "^Bash$",
-            "input_regex": "(?i)(?=.*(?:bin/codex-job|run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:implement|\\bbuild\\b|feature|gate|hook|validator|new (verb|endpoint|table|check)))"
+            "input_regex": "(?i)(?=.*(?:run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:implement|\\bbuild\\b|feature|gate|hook|validator|new (verb|endpoint|table|check)))"
+          },
+          {
+            "event": "PreToolUse",
+            "tool_name_regex": "^mcp__t3-code__delegate_task$",
+            "input_regex": ".*"
           }
         ]
       },
@@ -535,7 +550,12 @@
           {
             "event": "PreToolUse",
             "tool_name_regex": "^Bash$",
-            "input_regex": "(?i)(?=.*(?:bin/codex-job|run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:restructur|refactor|redesign|architect|schema|new table|split|consolidat|root cause|right fix))"
+            "input_regex": "(?i)(?=.*(?:run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:restructur|refactor|redesign|architect|schema|new table|split|consolidat|root cause|right fix))"
+          },
+          {
+            "event": "PreToolUse",
+            "tool_name_regex": "^mcp__t3-code__delegate_task$",
+            "input_regex": ".*"
           }
         ]
       },
@@ -608,7 +628,12 @@
           {
             "event": "PreToolUse",
             "tool_name_regex": "^Bash$",
-            "input_regex": "bin/codex-job|bin/dot-relay"
+            "input_regex": "bin/dot-relay"
+          },
+          {
+            "event": "PreToolUse",
+            "tool_name_regex": "^mcp__t3-code__delegate_task$",
+            "input_regex": ".*"
           }
         ]
       },
@@ -677,7 +702,12 @@
           {
             "event": "PreToolUse",
             "tool_name_regex": "^Bash$",
-            "input_regex": "(?i)(?=.*(?:bin/codex-job|run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:parallel|worktree|isolat|concurren|substrate|follow[- ]?up|at the same time))"
+            "input_regex": "(?i)(?=.*(?:run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:parallel|worktree|isolat|concurren|substrate|follow[- ]?up|at the same time))"
+          },
+          {
+            "event": "PreToolUse",
+            "tool_name_regex": "^mcp__t3-code__delegate_task$",
+            "input_regex": ".*"
           }
         ]
       },
@@ -744,7 +774,12 @@
           {
             "event": "PreToolUse",
             "tool_name_regex": "^Bash$",
-            "input_regex": "(?i)(?=.*(?:bin/codex-job|run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:council|red[- ]team|new table|verb family|mechanism|structural|should we|which approach))"
+            "input_regex": "(?i)(?=.*(?:run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:council|red[- ]team|new table|verb family|mechanism|structural|should we|which approach))"
+          },
+          {
+            "event": "PreToolUse",
+            "tool_name_regex": "^mcp__t3-code__delegate_task$",
+            "input_regex": ".*"
           }
         ]
       },
@@ -869,12 +904,17 @@
           {
             "event": "PreToolUse",
             "tool_name_regex": "^Bash$",
-            "input_regex": "(?i)(?=.*(?:bin/codex-job|run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:\\bverb\\b|record capabilit|no way to (record|write|store)|missing (verb|tool)))"
+            "input_regex": "(?i)(?=.*(?:run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:\\bverb\\b|record capabilit|no way to (record|write|store)|missing (verb|tool)))"
           },
           {
             "event": "PreToolUse",
             "tool_name_regex": "^(Edit|Write|MultiEdit)$",
             "input_regex": "mcp-server/src/tools\\.js"
+          },
+          {
+            "event": "PreToolUse",
+            "tool_name_regex": "^mcp__t3-code__delegate_task$",
+            "input_regex": ".*"
           }
         ]
       },
@@ -947,7 +987,12 @@
           {
             "event": "PreToolUse",
             "tool_name_regex": "^Bash$",
-            "input_regex": "(?i)(?=.*(?:bin/codex-job|run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:capacity|scale|throughput|architect|cloud|local|studio|phone|mobile|hosting))"
+            "input_regex": "(?i)(?=.*(?:run\\.sh\\s+call\\s+(write-work-shape|report-problem)))(?=.*(?:capacity|scale|throughput|architect|cloud|local|studio|phone|mobile|hosting))"
+          },
+          {
+            "event": "PreToolUse",
+            "tool_name_regex": "^mcp__t3-code__delegate_task$",
+            "input_regex": ".*"
           }
         ]
       },
@@ -1434,8 +1479,8 @@
     {
       "id": "A10",
       "title": "Sweep learning at real boundaries",
-      "wording": "When committing, deploying, checkpointing, or handing off, sweep the exchanges since the last sweep: propose uncaptured rulings as team-memory conventions; they bind nobody until Joe or Dell adopts them in the app. Record partner adoption needs as action_required, and tell Joe in one line.",
-      "word_count": 44,
+      "wording": "When committing, deploying, checkpointing, or handing off, sweep the exchanges since the last sweep: write each uncaptured ruling as a team-memory convention, adopt it with adopt-rule, and tell Joe in one line what you adopted.",
+      "word_count": 35,
       "placement": "TOOL",
       "merged_from_drafts": [
         "T03",

@@ -82,15 +82,6 @@
       "enabled": true
     },
     {
-      "label": "local.carr-progress-board",
-      "source": "ops/launchd/local.carr-progress-board.plist",
-      "credentials": [],
-      "state": [
-        "~/carr-system/out/boards"
-      ],
-      "enabled": true
-    },
-    {
       "label": "local.ds4-flash-next",
       "source": "ops/launchd/local.ds4-flash-next.plist",
       "credentials": [],

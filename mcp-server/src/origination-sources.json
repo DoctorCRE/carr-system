@@ -1,0 +1,25 @@
+[
+  {
+    "source": "nppes",
+    "enabled": true,
+    "coverage": "AL/FL practices in the existing NPPES territory filter; recent enumeration and registry updates only",
+    "terms_url": "https://www.cms.gov/medicare/regulations-guidance/administrative-simplification/data-dissemination",
+    "access_terms": "CMS publishes FOIA-disclosable downloadable data without charge. Exclude deactivated NPI details. Enumeration and updates do not prove practice opening.",
+    "rate_control": "Local published-file import only; at most 100 records per transaction, sequential batches. No network fetching by this API.",
+    "recovery": "Echo the read checkpoint; atomic batch and checkpoint, content deduplication on retry."
+  },
+  {
+    "source": "pecos",
+    "enabled": true,
+    "coverage": "AL/FL Medicare public provider enrollment observations; not all healthcare practices",
+    "terms_url": "https://www.cms.gov/newsroom/fact-sheets/public-provider-and-supplier-enrollment-files",
+    "access_terms": "CMS releases quarterly public provider enrollment files. Observation dates are publication dates, not inferred enrollment or practice opening dates. Enrollment IDs are identifiers, not verified effective dates.",
+    "rate_control": "Local published-file import only; at most 100 records per transaction, sequential batches. No network fetching by this API.",
+    "recovery": "Echo the read checkpoint; atomic batch and checkpoint, content deduplication on retry."
+  },
+  {"source":"formation-al","enabled":false,"coverage":"unavailable","reason":"Alabama formation adapter and public automated-access terms have not been reviewed."},
+  {"source":"formation-fl","enabled":false,"coverage":"unavailable","reason":"Florida formation adapter and public automated-access terms have not been reviewed."},
+  {"source":"recorder-escambia-fl","enabled":false,"coverage":"unavailable","reason":"Escambia County, Florida is in launch scope; adapter and public automated-access terms remain unverified."},
+  {"source":"recorder-baldwin-al","enabled":false,"coverage":"unavailable","reason":"Baldwin County, Alabama is in launch scope; adapter and public automated-access terms remain unverified."},
+  {"source":"recorder-other","enabled":false,"coverage":"uncovered","reason":"All other counties are outside the approved recorder launch scope."}
+]

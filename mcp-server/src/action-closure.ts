@@ -1,4 +1,5 @@
 // Close partner-directed actions and critical dates with recorded reasons.
+import { organizationTenantForActor } from './identity.js';
 import { ToolError } from './tool-error.ts';
 import type { Actor, Db, VerbInputs, WithEnvelope, WriteEvent } from './verb-contract.ts';
 
@@ -26,6 +27,57 @@ export function actionClosureTools({ withEnvelope, writeEvent, canExercisePartne
   canExercisePartnerAuthority: (actor: Actor) => boolean;
 }) {
   return {
+    'complete-one-action': {
+      write: true,
+      humanOnly: true,
+      description: "Complete exactly one open Home action by ID, including a call-created task. Requires partner authority and the action's current base_version. Leaves sibling actions and the deal plan unchanged. Refuses stale, closed, missing, or other-tenant actions. Retries reuse the same idempotency_key.",
+      inputSchema: { type: 'object', additionalProperties: false, properties: {
+        idempotency_key: { type: 'string' },
+        action_id: { type: 'string', format: 'uuid' },
+        base_version: { type: 'integer', minimum: 1 },
+      }, required: ['idempotency_key', 'action_id', 'base_version'] },
+      handler: async (c: Db, actor: Actor, args: VerbInputs['complete-one-action']) => {
+        if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: 'partner_required' });
+        if (!args.idempotency_key) throw new ToolError({ error: 'missing_idempotency_key' });
+        await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
+        return withEnvelope(c, actor, 'complete-one-action', args, async () => {
+          if (typeof args.action_id !== 'string' || !UUID.test(args.action_id))
+            throw new ToolError({ error: 'invalid_action_id' });
+          if (!Number.isSafeInteger(args.base_version) || args.base_version < 1)
+            throw new ToolError({ error: 'invalid_base_version' });
+          const tenant = organizationTenantForActor(actor);
+          const matches = (await c.query<Pick<ActionRow, 'subject_type' | 'subject_id'> & { source: 'next_action' | 'capture_post_call_action' }>(
+            `select subject_type,subject_id,'next_action' as source
+               from next_action where id=$1 and organization_tenant_id=$2
+             union all
+             select 'deal',deal_id,'capture_post_call_action'
+               from capture_post_call_action where id=$1 and organization_tenant_id=$2`,
+            [args.action_id, tenant])).rows;
+          if (matches.length !== 1) throw new ToolError({ error: 'action_not_found' });
+          const match = matches[0];
+          if (match.subject_type === 'deal')
+            await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0))", [match.subject_id]);
+          const row = (await c.query<Pick<ActionRow, 'id' | 'owner_id' | 'status' | 'version'> & { description: string }>(
+            `select id,owner_id,status,version,description from ${match.source}
+              where id=$1 and organization_tenant_id=$2 for update`, [args.action_id, tenant])).rows[0];
+          if (!row) throw new ToolError({ error: 'action_not_found' });
+          if (row.version !== args.base_version)
+            throw new ToolError({ error: 'version_conflict', current_version: row.version });
+          if (row.status !== 'open') throw new ToolError({ error: 'action_not_open', status: row.status });
+          const postCall = match.source === 'capture_post_call_action';
+          const saved = (await c.query<{ version: number }>(
+            `update ${match.source} set status='done',${postCall ? 'completed_at=clock_timestamp()' : 'updated_by=$2'}
+              where id=$1 returning version`, postCall ? [row.id] : [row.id, actor.id])).rows[0];
+          await writeEvent(c, actor, 'complete-one-action', match.subject_type, match.subject_id, {
+            field: 'status', old: { status: 'open', owner_id: row.owner_id, version: row.version },
+            new: { [postCall ? 'post_call_action_id' : 'next_action_id']: row.id,
+              [postCall ? 'post_call_action' : 'next_action']: row.description, status: 'done', outcome: null, owner_id: row.owner_id, version: saved.version },
+            idempotency_key: args.idempotency_key,
+          });
+          return { ok: true, action_id: row.id, status: 'done', version: saved.version };
+        });
+      },
+    },
     'drop-action': {
       write: true,
       humanOnly: true,
