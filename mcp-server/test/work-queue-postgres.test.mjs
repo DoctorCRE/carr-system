@@ -1,7 +1,7 @@
 // Exercise queue commands through the real transaction envelope and PostgreSQL.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
@@ -13,60 +13,16 @@ import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.c
 import { mcpInventory, assertCurrentContracts } from '../../ops/scac-mutation-inventory.mjs';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 
-let fixture, admin, database, c, actor, connection;
+let fixture, c, actor, connection;
 before(async () => {
-  const ciDsn = process.env.CARR_CI_DATABASE_URL;
-  let bin;
-  if (ciDsn) {
-    const url = new URL(ciDsn);
-    assert.ok(['postgres:', 'postgresql:'].includes(url.protocol));
-    assert.ok(['127.0.0.1', 'localhost'].includes(url.hostname), 'fixture requires disposable loopback PostgreSQL');
-    assert.equal(url.search, '', 'fixture connection must not override its loopback host');
-    admin = new pg.Client({ connectionString: ciDsn });
-    await admin.connect();
-    const name = `work_queue_${randomUUID().replaceAll('-', '')}`;
-    await admin.query(`create database "${name}" template template0`);
-    database = name;
-    url.pathname = `/${database}`;
-    connection = { connectionString: url.href };
-  } else {
-    bin = ['/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin',
-      '/opt/homebrew/opt/postgresql@18/bin', '/usr/lib/postgresql/18/bin'].find(p => existsSync(`${p}/initdb`));
-    assert.ok(bin, 'PostgreSQL is required for the isolated record-layer proof');
-    fixture = await acquireDisposablePostgres({ prefix: 'work-queue-', pgCtl: `${bin}/pg_ctl` });
-    await fixture.run(`${bin}/initdb`, ['-D', `${fixture.root}/data`, '-U', 'carr_ci', '--auth=trust', '--no-locale']);
-    await fixture.run(`${bin}/pg_ctl`, ['-D', `${fixture.root}/data`, '-l', `${fixture.root}/server.log`, '-o', `-k ${fixture.root} -h ''`, '-w', 'start']);
-    await fixture.run(`${bin}/createdb`, ['-h', fixture.root, '-U', 'carr_ci', 'carr_ci']);
-    connection = { host: fixture.root, user: 'carr_ci', database: 'carr_ci' };
-  }
+  fixture = await acquireDisposablePostgres({ prefix: 'work-queue-', snapshot: true });
+  connection = fixture.connection;
   c = new pg.Client(connection);
   await c.connect();
-  await c.query('do $$ begin create role neondb_owner; exception when duplicate_object then null; end $$;');
-  const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
-  if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
-  else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
-  if (!(await c.query("select 1 from schema_migrations where filename='1017_work_request_queue.sql'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1017_work_request_queue.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select 1 from schema_migrations where filename='1024_work_request_job_start.sql'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1024_work_request_job_start.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select 1 from schema_migrations where filename='1025_work_request_job_finished.sql'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1025_work_request_job_finished.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select 1 from information_schema.columns where table_schema='ops' and table_name='work_request_job' and column_name='job_type'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1061_work_request_job_type.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select 1 from schema_migrations where filename='1060_work_request_slice_outcome.sql'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1060_work_request_slice_outcome.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select 1 from schema_migrations where filename='1062_work_request_job_version.sql'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1062_work_request_job_version.sql', import.meta.url), 'utf8'));
-  if (!(await c.query("select 1 from schema_migrations where filename='1063_validate_work_request_job_version.sql'")).rows.length)
-    await c.query(readFileSync(new URL('../../migrations/1063_validate_work_request_job_version.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => {
-  try { await c?.end(); }
-  finally {
-    try { if (database) await admin.query(`drop database "${database}"`); }
-    finally { await Promise.all([admin?.end(), fixture?.close()]); }
-  }
+  try { await c?.end(); } finally { await fixture?.close(); }
 });
 
 async function command(name, args = {}, client = c, role = name === 'work-request-card' ? 'carr_reader' : 'carr_writer') {
@@ -171,15 +127,15 @@ test('a runner adopts an unbound repository and records its start once without m
   const work_request = await request('WR-000017');
   const repository = 'DoctorCRE/carr-system';
   await command('dispatch-job', job(work_request));
-  const start = { work_request, slice: 1, job: 1, repository, runner_job_id: 'codex-job-synthetic', idempotency_key: randomUUID() };
+  const start = { work_request, slice: 1, job: 1, repository, runner_job_id: 't3-synthetic', idempotency_key: randomUUID() };
   const first = await command('dispatch-job', start);
   assert.equal(first.card_id, 'WR17.S1.J1');
-  assert.equal(first.runner_job_id, 'codex-job-synthetic');
+  assert.equal(first.runner_job_id, 't3-synthetic');
   assert.deepEqual(await command('dispatch-job', start), { ...first, replayed: true });
   const queued = (await command('work-queue')).jobs.filter(row => row.work_request === work_request);
   assert.equal(queued.length, 1);
   assert.equal(queued[0].repository, repository);
-  assert.equal(queued[0].runner_job_id, 'codex-job-synthetic');
+  assert.equal(queued[0].runner_job_id, 't3-synthetic');
   assert.ok(queued[0].started_at);
   await assert.rejects(command('dispatch-job', { ...start, runner_job_id: 'another-runner', idempotency_key: randomUUID() }),
     failure => { assert.equal(failure.message, 'job_already_started'); assert.equal(publicError(failure).error, 'job_already_started'); return true; });
@@ -290,31 +246,19 @@ test('queue grants preserve the current catalog seal and reject wider grants', a
   assert.equal(await current(), true);
 });
 
-test('the read saves a finish once on the side connection, and later reads keep it after the PR leaves the window', async () => {
+test('queue reads never persist observed completion', async () => {
   const work_request = await request('WR-000061');
-  const done = (await command('dispatch-job', job(work_request, { executor: 'claude' }))).card_id;
-  await c.query("update ops.work_request_job set created_at=now()-interval '20 days' where work_request_id=(select id from ops.work_request where ref=$1)", [work_request]);
-  const pending = (await command('dispatch-job', job(work_request))).card_id;
-  await c.query("update ops.work_request_job set runner_job_id='pending-runner', started_at=now() where work_request_id=(select id from ops.work_request where ref=$1) and j_number=2", [work_request]);
-  const bounds = [], writes = [];
-  const merged = { repo: 'DoctorCRE/carr-system', number: 77, url: 'u77', title: 'PR 77', draft: false, state: 'merged', updated_at: '2026-10-27T12:00:00Z', cards: [done] };
-  const reader = sources => ({ query: (text, params) => c.query(text, params),
-    pullRequests: async (repos, since) => { bounds.push(since); return repos.map(repo => ({ repo, state: 'ok', prs: repo === merged.repo ? sources : [] })); },
-    sideWrite: (text, params) => { writes.push(params[2]); return c.query(text, params); } });
-  const first = await command('work-queue', {}, reader([merged]));
-  assert.equal(first.jobs.find(row => row.card_id === done).stage, 'merged');
-  assert.equal(writes.length, 1, 'one single-row write for the newly finished job');
-  await command('work-queue', {}, reader([merged]));
-  const later = await command('work-queue', {}, reader([]));
-  assert.equal(writes.length, 1, 'a saved finish is never written again');
-  const saved = later.jobs.find(row => row.card_id === done);
-  assert.deepEqual([saved.stage, saved.stale, saved.prs.map(pr => pr.card_id)], ['merged', false, [`${done}.carr#77`]]);
-  const open = later.jobs.find(row => row.card_id === pending);
-  assert.equal(open.stage, 'queued');
-  assert.equal(bounds[0], new Date(first.jobs.find(row => row.card_id === done).created_at).toISOString(), 'before the finish is saved, the old job bounds the window');
-  const unfinished = later.jobs.filter(row => row.card_id !== done && !row.finished && row.started_at).map(row => new Date(row.started_at).toISOString()).sort();
-  assert.equal(bounds.at(-1), unfinished[0], 'once saved, the window starts at the oldest unfinished job');
-  assert.ok(bounds.at(-1) > bounds[0] && bounds.at(-1) <= new Date(open.started_at).toISOString());
+  const card = (await command('dispatch-job', job(work_request, { executor: 'claude' }))).card_id;
+  const queries = [];
+  const merged = { repo: 'DoctorCRE/carr-system', number: 77, url: 'u77', title: 'PR 77', draft: false, state: 'merged', updated_at: '2026-10-27T12:00:00Z', cards: [card] };
+  const reader = { query: (text, params) => { queries.push(text); return c.query(text, params); },
+    pullRequests: async repos => repos.map(repo => ({ repo, state: 'ok', prs: repo === merged.repo ? [merged] : [] })),
+    sideWrite: () => { throw new Error('queue read attempted a write'); } };
+  const result = await command('work-queue', {}, reader);
+  assert.equal(result.jobs.find(row => row.card_id === card).stage, 'merged');
+  assert.ok(queries.every(sql => !/\b(insert|update|delete)\b/i.test(sql)));
+  const stored = (await c.query('select finished from ops.work_request_job where work_request_id=(select id from ops.work_request where ref=$1)', [work_request])).rows[0];
+  assert.equal(stored.finished, null);
 });
 
 test('launcher registers an exact card and start atomically, with registered slices only', async () => {
@@ -500,6 +444,36 @@ test('concurrent outcome writers with the same slice version cannot replace the 
     const winner = results.find(result => result.status === 'fulfilled').value;
     assert.equal((await command('work-request-card', { work_request })).slices[0].reason, winner.reason);
   } finally { await Promise.all(clients.map(client => client.end())); }
+});
+
+test('dispatch refusals provide usable copy suggestions and vocabulary', async () => {
+  const work_request = await request('WR-000097');
+  await command('dispatch-job', job(work_request, { card_title: 'Build readable cards' }));
+  for (const card_title of ['Bad 123 title', 'Queue cards', 'Build readable cards']) {
+    let suggestion;
+    await assert.rejects(command('dispatch-job', job(work_request, { card_title })), failure => {
+      const result = publicError(failure);
+      assert.match(result.suggested_card_title, /^(Add|Build|Fix|Remove|Rename|Review|Audit|Plan|Revise|Migrate|Move|Record|Require|Gate|Adopt|Rebind|Repin|Close|Install|Retire) [A-Za-z']+( [A-Za-z']+)?$/);
+      suggestion = result.suggested_card_title;
+      return true;
+    });
+    await command('dispatch-job', job(work_request, { card_title: suggestion }));
+  }
+  await assert.rejects(command('dispatch-job', job(work_request, { card_title: 'x'.repeat(81) })), failure => {
+    assert.equal(failure.message, 'invalid_work_queue_fields');
+    assert.ok(publicError(failure).suggested_card_title);
+    return true;
+  });
+  await assert.rejects(command('dispatch-job', job(work_request, { description: 'Implement useful cards. Another sentence.' })), failure => {
+    const result = publicError(failure);
+    assert.match(result.suggested_description, /^Build .+[.]$/);
+    return true;
+  });
+  await assert.rejects(command('dispatch-job', job(work_request, { job_type: 'unknown' })), failure => {
+    const result = publicError(failure, { inputSchema: TOOLS['dispatch-job'].inputSchema });
+    assert.ok(result.allowed_values.includes('bug-fix'));
+    return true;
+  });
 });
 
 test('mint refuses a title whose first word is outside the imperative vocabulary', async () => {

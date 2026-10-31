@@ -93,6 +93,21 @@ class BudgetTests(unittest.TestCase):
         self.assertIn('unconfigured', checked['joe_tasks'][0]['checks']['reason'])
         self.assertTrue(checked['review_questions'])
 
+    def test_client_open_failure_records_reason_after_reservation(self):
+        import post_call_jev
+        result = {'session': 'synthetic', 'joe_tasks': [
+            {'title': 'Review', 'evidence': 'Review proposal'}]}
+        with patch.dict('os.environ', {'CALL_JEV_DAILY_DOLLARS': '0.002753'}), \
+             patch.object(post_call_jev, 'TypeSafeClient', side_effect=RuntimeError('no key')):
+            checked = post_call_jev.check_distillation(result, {}, {}, budget_ledger=self.ledger)
+        checks = checked['joe_tasks'][0]['checks']
+        self.assertTrue(checks['unavailable'])
+        self.assertIn('RuntimeError, missing key', checks['reasons'][0])
+        question = checked['review_questions'][0]['question']
+        self.assertTrue(question.startswith('Automatic Jev checks did not run'))
+        self.assertIn(checks['reasons'][0], question)
+        self.assertTrue(self.ledger.exists())
+
     def test_failed_request_keeps_reservation_and_disables_hidden_retries(self):
         import post_call_jev
         from typesafe_sdk import TypeSafeError

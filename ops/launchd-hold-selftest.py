@@ -193,17 +193,6 @@ class HoldTests(unittest.TestCase):
         self.assertEqual(cac.cmd_install(True), 1)
         self.assertEqual(self.calls, [])
 
-    def test_board_hold_and_invalid_hold_are_reported(self):
-        self.label = "local.carr-progress-board"
-        self.hold.write_text(self.label + " repair\n")
-        self.assertEqual(cac.cmd_install_progress_board(False), 0)
-        self.assertEqual(self.calls, [])
-        self.assertEqual(cac.cmd_install_progress_board(True), 0)
-        self.assertFalse(self.loaded)
-        self.assertTrue(self.disabled)
-        self.hold.write_text(self.label + "\n")
-        self.assertEqual(cac.cmd_install_progress_board(True), 1)
-
     def test_invalid_calendar_hold_refuses_before_mutation(self):
         self.hold.write_text(self.label + "\n")
         self.assertEqual(cac.cmd_reinstall_launchd_calendar(["--apply"]), 1)

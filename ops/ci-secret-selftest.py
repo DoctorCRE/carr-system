@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import re
+import runpy
 import subprocess
 import unittest
 
@@ -11,6 +12,49 @@ spec = importlib.util.spec_from_file_location('ci_fixture', Path(__file__).with_
 assert spec is not None and spec.loader is not None
 ci = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ci)
+
+
+class RedactionTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.scanner = runpy.run_path(str(ci.REPO / 'ops/ci-secret-scan.py'))
+
+    def test_private_blocks_are_removed_in_full_including_truncated_blocks(self):
+        for kind in ('PRIVATE KEY', 'RSA PRIVATE KEY', 'EC PRIVATE KEY', 'DSA PRIVATE KEY',
+                     'ENCRYPTED PRIVATE KEY', 'OPENSSH PRIVATE KEY', 'PGP PRIVATE KEY BLOCK'):
+            for truncated in (False, True):
+                with self.subTest(kind=kind, truncated=truncated):
+                    begin = '-----' + 'BEGIN ' + kind + '-----'
+                    end = '-----' + 'END ' + kind + '-----'
+                    text = 'before\n' + begin + '\nSYNTHETIC_BODY\n'
+                    if not truncated: text += end + '\nafter'
+                    redacted = self.scanner['redact'](text)
+                    self.assertNotIn('SYNTHETIC_BODY', redacted)
+                    self.assertNotIn(begin, redacted)
+                    self.assertNotIn(end, redacted)
+                    self.assertIn('before', redacted)
+                    self.assertEqual('after' in redacted, not truncated)
+
+    def test_private_blocks_stay_redacted_at_every_chunk_split(self):
+        for kind in ('RSA PRIVATE KEY', 'OPENSSH PRIVATE KEY', 'PGP PRIVATE KEY BLOCK'):
+            begin = '-----' + 'BEGIN ' + kind + '-----'
+            end = '-----' + 'END ' + kind + '-----'
+            text = 'before\n' + begin + '\nSYNTHETIC_BODY\n' + end + '\nafter'
+            for split in range(1, len(text)):
+                with self.subTest(kind=kind, split=split):
+                    redactor = self.scanner['Redactor']()
+                    redacted = redactor.redact(text[:split]) + redactor.redact(text[split:])
+                    self.assertNotIn('SYNTHETIC_BODY', redacted)
+                    self.assertNotIn(begin, redacted)
+                    self.assertNotIn(end, redacted)
+                    self.assertIn('before', redacted)
+                    self.assertIn('after', redacted)
+
+    def test_standard_pgp_private_block_is_detected_even_with_inline_exemption(self):
+        text = '-----' + 'BEGIN PGP PRIVATE KEY BLOCK----- ci-secret-scan: allow'
+        findings = self.scanner['scan']([('synthetic.txt', text)])
+        self.assertEqual([(name, line, pattern) for name, line, pattern, _ in findings],
+                         [('synthetic.txt', 1, 'private-key-block')])
 
 
 class SecretTest(unittest.TestCase):

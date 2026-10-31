@@ -7,8 +7,9 @@ type PublicError = {
   error: string; correlation_id: string; hint: string;
   candidates?: Record<string, string | null>[]; retired_aliases?: Record<string, string | null>[];
   current_version?: number; fields?: unknown[]; invalid_deal_ids?: string[]; recorded_titles?: string[];
+  suggested_card_title?: string; suggested_description?: string; allowed_values?: string[];
 };
-type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSchema };
+type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSchema; enum?: unknown[] };
 
 // Public shapes are deliberately closed. Never copy messages, hints, wrapped
 // details, event rows, driver codes, or arbitrary properties from a refusal.
@@ -61,11 +62,12 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["memory_attach_required", "Call attach-memory first, then pass the attach_id it returned to this actor when writing or retiring team-memory."],
   ["memory_read_only", "This attach is read_only. Call attach-memory with access read_write, then retry with the new attach_id."],
   ["convention_proposal_not_found", "Choose an active proposal from governance-queue pending_convention_proposals."],
-  ["convention_proposal_malformed", "Rewrite the proposal so its first line is 'Convention: <statement>' with an optional 'Card: <json>' line, then adopt it."],
-  ["convention_card_already_active", "An active rule already carries this card id; retire it before adopting a replacement."],
+  ["convention_proposal_malformed", "Use 'Convention: <statement>' with Card or Packs, or 'Retires: [<full rule UUID>, ...]' for retirement only. A replacement may also name Retires."],
+  ["convention_retirement_rule_not_found", "A retirement target does not exist. Re-read find-rule and use its full rule UUID."],
+  ["convention_retirement_rule_not_active", "A retirement target is no longer active. Re-read find-rule and review the proposal before adopting."],
+  ["convention_card_already_active", "An active rule already carries this card id. Name it in Retires when replacing the card, or use another card id."],
   ["convention_pack_unknown", "The proposal names a pack outside the existing pack index; name only packs listed by standing-context."],
-  ["rule_adoption_requires_app_approval", "Adopt conventions in the DoctorCRE app's approval queue; chat and agent sessions cannot adopt them."],
-  ["rule_adoption_requires_joe","Rule activation runs on Joe's approval chain; Joe adopts this proposal in person."],
+  ["rule_adoption_requires_joe","Rule activation runs on Joe's approval chain; Joe or an agent he sponsors adopts this proposal."],
   ["rule_id_required", "Supply a rule ID."],
   ["rule_id_malformed", "Supply a full rule UUID or a valid short rule ID."],
   ["rule_not_found", "Choose an existing rule ID."],
@@ -272,6 +274,17 @@ export function publicError(error: unknown, { env, inputSchema, fallback = "unha
       && payload.recorded_titles.length <= 100
       && payload.recorded_titles.every(title => typeof title === "string" && title.trim() && title.length <= 200))
     result.recorded_titles = payload.recorded_titles;
+  if (["invalid_card_title", "card_title_verb", "card_title_duplicate", "invalid_work_queue_fields"].includes(code) && typeof payload?.suggested_card_title === "string")
+    result.suggested_card_title = payload.suggested_card_title;
+  if (["invalid_job_description", "invalid_work_queue_fields"].includes(code) && typeof payload?.suggested_description === "string")
+    result.suggested_description = payload.suggested_description;
+  if (code === "invalid_job_type" && Array.isArray(payload?.allowed_values))
+    result.allowed_values = payload.allowed_values.filter((value): value is string => typeof value === "string");
+  if (code === "value_not_in_declared_vocabulary" && typeof payload?.field === "string") {
+    const spec = inputSchema?.properties?.[payload.field];
+    const values = spec?.enum ?? spec?.items?.enum;
+    if (Array.isArray(values) && values.every(value => typeof value === "string")) result.allowed_values = values as string[];
+  }
   if (code === "version_conflict" && Number.isSafeInteger(payload?.current_version) && (payload!.current_version as number) >= 0)
     result.current_version = payload!.current_version as number;
   if (["invalid_idempotency_key", "invalid_report_problem", "invalid_report_problem_fields", "caller_authority_field_forbidden", "invalid_acceptance_criteria", "current_situation_source_not_found", "invalid_field_value", "validation_error", "value_not_in_declared_vocabulary", "unregistered_operation_fields", "missing_required", "invalid_boolean", "invalid_number", "tool_call_markup_in_value"].includes(code)) {

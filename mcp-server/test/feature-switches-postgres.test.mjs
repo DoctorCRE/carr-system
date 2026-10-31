@@ -29,7 +29,12 @@ test('Feature switch reads and scheduled health on disposable PostgreSQL', { ski
   const ciDsn = process.env.CARR_CI_DATABASE_URL;
   let postgresFixture, dir;
   let admin;
-  let database;
+  let beforeCluster;
+  const clusterState = async () => ({
+    roles: (await admin.query("select rolname,rolsuper,rolinherit,rolcreaterole,rolcreatedb,rolcanlogin,rolreplication,rolbypassrls,rolconnlimit,rolconfig from pg_roles order by rolname")).rows,
+    databases: (await admin.query("select datname from pg_database order by datname")).rows,
+    memberships: (await admin.query("select roleid,member,grantor,admin_option,inherit_option,set_option from pg_auth_members order by roleid,member,grantor")).rows,
+  });
   let c;
   // A provided CI cluster is owned and budgeted by its caller.
   const releaseBudget = ciDsn ? async () => {} : await acquirePostgresFixtureGroup();
@@ -41,11 +46,9 @@ test('Feature switch reads and scheduled health on disposable PostgreSQL', { ski
       assert.ok(['127.0.0.1', 'localhost'].includes(url.hostname), 'fixture requires disposable loopback PostgreSQL');
       admin = new pg.Client({ connectionString: ciDsn });
       await admin.connect();
-      const name = `feature_switches_${randomUUID().replaceAll('-', '')}`;
-      await admin.query(`create database "${name}" template template0`);
-      database = name;
-      url.pathname = `/${database}`;
-      connection = { connectionString: url.href };
+      beforeCluster = await clusterState();
+      postgresFixture = await acquireDisposablePostgres({ prefix: 'feature-switches-', service: true });
+      connection = postgresFixture.connection;
     } else {
       postgresFixture = await acquireDisposablePostgres({ prefix: 'feature-switches-', pgCtl: path.join(bin, 'pg_ctl'), dataName: '.' });
       dir = postgresFixture.root;
@@ -141,9 +144,12 @@ test('Feature switch reads and scheduled health on disposable PostgreSQL', { ski
     assert.equal((await invoke('list-feature-switches',{name:input.name})).switches[0].available,false);
     await assert.rejects(requireFeature(c,{...actor,slug:'dell'},input.name), /feature_disabled/);
   } finally {
-    if(c) await c.end();
-    if(admin) await admin.end();
-    try { await postgresFixture?.close(); }
-    finally { await releaseBudget(); }
+    const errors = [];
+    for (const cleanup of [() => c?.end(), () => postgresFixture?.close(), async () => {
+      if (beforeCluster) assert.deepEqual(await clusterState(), beforeCluster, 'CI-service roles, attributes, memberships and database lists are unchanged after the suite');
+    }, () => admin?.end(), releaseBudget]) {
+      try { await cleanup(); } catch (error) { errors.push(error); }
+    }
+    if (errors.length) throw new AggregateError(errors, 'feature-switches fixture cleanup failed');
   }
 });
