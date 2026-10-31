@@ -1877,18 +1877,13 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query(`do $$ begin
         begin create role carr_jobs; exception when duplicate_object then null; end;
         begin create role carr_authority; exception when duplicate_object then null; end;
-      end $$; alter role carr_writer login;
+      end $$;
       grant select,insert,update,delete on all tables in schema public to carr_writer;
       grant usage,select on all sequences in schema public to carr_writer`);
-      const writerConnection = {...connection, user: 'carr_writer'};
-      if (writerConnection.connectionString) {
-        const url = new URL(writerConnection.connectionString);
-        url.username = 'carr_writer';
-        writerConnection.connectionString = url.href;
-      }
-      const writer = new pg.Client({...writerConnection,
+      const writer = new pg.Client({...connection,
         types: {getTypeParser: (oid, format) => oid === 1184 ? value => value : pg.types.getTypeParser(oid, format)}});
       await writer.connect();
+      await writer.query('set session authorization carr_writer');
       let released = false;
       const adapter = { query: writer.query.bind(writer), release() { released = true; },
         jevClient: {systemOne: async request => {
