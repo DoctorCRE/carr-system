@@ -1616,7 +1616,7 @@ test('sent receipt preserves the body mismatch reason on the proposal', async ()
   const proposal = await draftFor();
   const submitted = await submitDraft(proposal);
   await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
-    base_version: 2, status: 'sent', sent_item_id: 'synthetic-sent-item', sha256: submitted.sha256,
+    base_version: 2, status: 'sent', sent_item_id: 'synthetic-mismatch-sent-item', sha256: submitted.sha256,
     reason: 'body_mismatch' }, machineFor('joe'), 'carr_writer');
   const sent = (await command('list-email-proposals', { status: 'sent' }, actor, 'carr_reader')).proposals[0];
   assert.equal(sent.send_result.reason, 'body_mismatch');
