@@ -21,7 +21,9 @@ def _deal(check):
 
 
 class _Client:
-    def system_one(self, *, state, questions):
+    def system_one(self, *, state, questions, model, retry):
+        assert model == "jev-1.14.0", "rehearsal requires the budgeted model"
+        assert retry.max_retries == 0, "rehearsal requires one provider attempt"
         answers = {}
         for key in questions:
             if key == "deal_match":
