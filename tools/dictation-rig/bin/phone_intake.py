@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Receive phone recordings privately on the Studio, then reuse post-call processing."""
+"""Pull phone recordings privately onto the Studio, then reuse post-call processing."""
 from __future__ import annotations
 
 import argparse
 import contextlib
 import fcntl
 import hashlib
-import hmac
 import importlib.util
 import json
 import os
@@ -18,7 +17,8 @@ import threading
 import wave
 from typing import BinaryIO
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import urllib.error
+import urllib.request
 
 import post_call
 
@@ -125,42 +125,58 @@ def receive(root: Path, metadata: dict, source: BinaryIO) -> dict:
             incoming.unlink(missing_ok=True)
 
 
-def handler_for(root: Path, token: str):
-    class IntakeHandler(BaseHTTPRequestHandler):
-        def log_message(self, *_args):
-            pass
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
-        def do_PUT(self):
-            self.connection.settimeout(120)
-            try:
-                auth = self.headers.get('Authorization', '')
-                if not token or not hmac.compare_digest(auth, f'Bearer {token}'):
-                    self.respond(401, {'error': 'unauthorized'})
-                    return
-                match = re.fullmatch(r'/v1/call-sessions/([^/]+)/transfer', self.path)
-                metadata = json.loads(self.headers.get('X-Carr-Call', ''))
-                validate_metadata(metadata)
-                if (not match or match[1] != metadata['session_id'] or self.headers.get('Transfer-Encoding')
-                        or self.headers.get('Content-Type') != metadata['mime_type']
-                        or int(self.headers.get('Content-Length', '0')) != metadata['byte_count']):
-                    raise ValueError('invalid transfer framing')
-                self.respond(200, receive(root, metadata, self.rfile))
-            except (ValueError, TypeError, KeyError):
-                self.respond(400, {'error': 'invalid_transfer'})
-            except (OSError, TimeoutError):
-                self.respond(503, {'error': 'transfer_unavailable'})
 
-        def respond(self, status, body):
-            self.close_connection = True
-            data = json.dumps(body).encode()
-            self.send_response(status)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Cache-Control', 'no-store')
-            self.send_header('Content-Length', str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-
-    return IntakeHandler
+def pull_pending(root: Path, cfg: dict, token: str) -> dict:
+    """Download and fsync each recording before acknowledging cloud removal."""
+    counts = {'received': 0, 'pending': 0}
+    endpoint = cfg['base_url'].rstrip('/') + '/capture/phone/v1/call-sessions'
+    opener = urllib.request.build_opener(NoRedirect())
+    headers = {'Authorization': f'Bearer {token}', 'User-Agent': 'carr-quill-dictate/1.0 (phone-intake)'}
+    try:
+        with exclusive(root / '.phone-pull.lock', blocking=False):
+            with opener.open(urllib.request.Request(endpoint, headers=headers), timeout=120) as response:
+                listing = json.load(response)
+            for metadata in listing['sessions']:
+                try:
+                    validate_metadata(metadata)
+                    url = endpoint + '/' + metadata['session_id']
+                    with opener.open(urllib.request.Request(url + '/audio', headers=headers), timeout=120) as response:
+                        receive(root, metadata, response)
+                except (ValueError, OSError, KeyError, TypeError) as exc:
+                    if isinstance(exc, urllib.error.HTTPError):
+                        exc.close()
+                    counts['pending'] += 1
+            for session in sorted(root.glob('phone-*')):
+                if not (session / 'transfer.json').exists() or (session / 'handoff-ack.json').exists():
+                    continue
+                try:
+                    metadata = required_json(session / 'phone.json')
+                    validate_metadata(metadata)
+                    receipt = required_json(session / 'transfer.json')
+                    url = endpoint + '/' + metadata['session_id']
+                    request = urllib.request.Request(url + '/ack',
+                        data=json.dumps({'sha256': receipt['sha256']}).encode(),
+                        headers={**headers, 'Content-Type': 'application/json'}, method='POST')
+                    with opener.open(request, timeout=120) as response:
+                        if json.load(response).get('ok') is not True:
+                            raise ValueError('invalid handoff acknowledgement')
+                    post_call.write_private(session / 'handoff-ack.json', {'ok': True})
+                    counts['received'] += 1
+                except (ValueError, OSError, KeyError, TypeError) as exc:
+                    if isinstance(exc, urllib.error.HTTPError):
+                        exc.close()
+                    counts['pending'] += 1
+    except BlockingIOError:
+        return {'busy': True}
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        if isinstance(exc, urllib.error.HTTPError):
+            exc.close()
+        counts['pending'] += 1
+    return counts
 
 
 def extract(session: Path, *, decoder: str = '/opt/homebrew/bin/ffmpeg',
@@ -254,7 +270,7 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
     return counts
 
 
-def serve(root: Path, port: int, cfg: dict, token: str) -> None:
+def serve(root: Path, cfg: dict, token: str) -> None:
     stopped = threading.Event()
 
     def processor(slot):
@@ -262,22 +278,22 @@ def serve(root: Path, port: int, cfg: dict, token: str) -> None:
             process_pending(root, cfg, token, slot=slot)
             stopped.wait(30)
 
-    server = ThreadingHTTPServer(('127.0.0.1', port), handler_for(root, token))
-    server.daemon_threads = True
-    for slot in range(config_limit('CALL_PROCESSORS', 1)):
-        threading.Thread(target=processor, args=(slot,), daemon=True).start()
+    threads = [threading.Thread(target=processor, args=(slot,), daemon=True)
+               for slot in range(config_limit('CALL_PROCESSORS', 1))]
+    for thread in threads:
+        thread.start()
     try:
-        server.serve_forever()
+        while not stopped.is_set():
+            pull_pending(root, cfg, token)
+            stopped.wait(30)
     finally:
         stopped.set()
-        server.server_close()
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', required=True, type=Path)
-    parser.add_argument('--port', type=int, default=4683)
-    parser.add_argument('--process', action='store_true', help='Run one processing sweep instead of serving transfers')
+    parser.add_argument('--process', action='store_true', help='Pull recordings and run one processing sweep')
     args = parser.parse_args()
     token = os.environ.get('CALL_STUDIO_TOKEN', '')
     if not token:
@@ -286,7 +302,9 @@ if __name__ == '__main__':
     if not base_url.startswith('https://'):
         parser.error('CARR_CAPTURE_BASE_URL must use HTTPS')
     if args.process:
-        print(json.dumps([process_pending(args.root, {'base_url': base_url}, token, slot=slot)
-                          for slot in range(config_limit('CALL_PROCESSORS', 1))]))
+        intake = pull_pending(args.root, {'base_url': base_url}, token)
+        print(json.dumps({'intake': intake, 'processors': [
+            process_pending(args.root, {'base_url': base_url}, token, slot=slot)
+            for slot in range(config_limit('CALL_PROCESSORS', 1))]}))
     else:
-        serve(args.root, args.port, {'base_url': base_url}, token)
+        serve(args.root, {'base_url': base_url}, token)
