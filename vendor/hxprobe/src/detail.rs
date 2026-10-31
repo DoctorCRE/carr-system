@@ -67,6 +67,7 @@ pub struct Index {
     /// Newest revision per message key.
     pub details: BTreeMap<u64, (u32, Detail)>,
     pub objects: usize,
+    pub rejected: usize,
 }
 
 fn date(object: &[u8], at: usize) -> Option<Option<i64>> {
@@ -151,8 +152,9 @@ fn agree<T: PartialEq>(held: &mut Option<T>, new: Option<T>) {
 impl Index {
     pub fn observe(&mut self, data: &[u8]) {
         for (_, object) in envelopes(data, DETAIL) {
+            if crate::message::is_revision(object) { continue; }
             self.objects += 1;
-            let Some((key, revision, new)) = parse(object) else { continue };
+            let Some((key, revision, new)) = parse(object) else { self.rejected += 1; continue };
             match self.details.get_mut(&key) {
                 Some((held_rev, _)) if *held_rev > revision => {}
                 Some((held_rev, held)) if *held_rev == revision => {
@@ -296,6 +298,7 @@ mod tests {
         let mut index = Index::default();
         index.observe(&layout);
         assert!(index.details.is_empty());
+        assert_eq!(index.rejected, 1);
         let mut kind = good.clone();
         kind[10 + 18] = 0xd5;
         let mut index = Index::default();

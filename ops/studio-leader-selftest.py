@@ -4,14 +4,13 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib.studio_failover import Leader
-from lib.disposable_pg_fixture import postgres_bin_dir
+from lib.disposable_pg_fixture import DisposablePostgres, postgres_bin_dir
 
 
 class PostgresLeaderTests(unittest.TestCase):
@@ -25,22 +24,18 @@ class PostgresLeaderTests(unittest.TestCase):
         except FileNotFoundError:
             raise unittest.SkipTest('disposable PostgreSQL binaries unavailable')
         if os.getuid() == 0: raise unittest.SkipTest('initdb requires non-root fixture user')
-        cls.temp = tempfile.TemporaryDirectory(prefix='carr-failover-pg-', dir='/tmp')
-        cls.base = Path(cls.temp.name)
+        cls.fixture = DisposablePostgres('carr-failover-pg-', pg_ctl)
+        cls.addClassCleanup(cls.fixture.close)
+        cls.base = cls.fixture.root
         cls.data, cls.socket = cls.base / 'data', cls.base / 'socket'
         cls.socket.mkdir(mode=0o700)
-        cls.pg_ctl = pg_ctl
-        cls.addClassCleanup(cls.temp.cleanup)
-        cls.addClassCleanup(lambda: subprocess.run(
-            [cls.pg_ctl, '-D', str(cls.data), '-m', 'immediate', '-w', 'stop'],
-            check=True, capture_output=True, timeout=15) if (cls.data / 'postmaster.pid').exists() else None)
         pg_bin = Path(pg_ctl).parent
         # macOS postmaster refuses to start without a valid locale ("became multithreaded").
         env = {**os.environ, 'LC_ALL': 'C'}
-        subprocess.run([str(pg_bin / 'initdb'), '-D', str(cls.data), '-A', 'trust', '-U', 'fixture', '-E', 'UTF8'],
+        cls.fixture.run([str(pg_bin / 'initdb'), '-D', str(cls.data), '-A', 'trust', '-U', 'fixture', '-E', 'UTF8'],
                        check=True, capture_output=True, timeout=30, env=env)
         # Unix-only, private owned socket directory, no inherited DSN or production host.
-        subprocess.run([pg_ctl, '-D', str(cls.data), '-l', str(cls.base / 'postgres.log'),
+        cls.fixture.run([pg_ctl, '-D', str(cls.data), '-l', str(cls.base / 'postgres.log'),
                         '-o', "-h '' -k " + str(cls.socket), '-w', 'start'],
                        check=True, capture_output=True, timeout=30, env=env)
         cls.dsn = dict(host=str(cls.socket), user='fixture', dbname='postgres', autocommit=True)
