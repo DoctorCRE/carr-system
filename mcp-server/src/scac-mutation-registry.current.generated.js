@@ -651,7 +651,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "compare-fact-observations": {
     "ingress_key": "mcp-tool:compare-fact-observations",
     "source_locator": "mcp-server/src/fact-observations.ts",
-    "schema_digest": "361ab3e2f12dd524f23f96410eaa6507e72339f6494ca585082ef456bb9c598f",
+    "schema_digest": "20b9ad0b103dba9c2d81172a1bca73ed516e78661864e4d948c1630d9895c300",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -688,6 +688,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "complete-doc-request": {
+    "ingress_key": "mcp-tool:complete-doc-request",
+    "source_locator": "mcp-server/src/doc-conversation.js",
+    "schema_digest": "f5d22efcb23aba6708c8ba222ad067ba628f7d4a7d8cc5807fdb2a06fecbfb03",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": true,
+    "delegates_to": []
+  },
   "complete-doc-suggestion-scan": {
     "ingress_key": "mcp-tool:complete-doc-suggestion-scan",
     "source_locator": "mcp-server/src/doc-suggestions.ts",
@@ -696,6 +706,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "human_only": false,
     "human_caller_only": false,
     "authority_only": true,
+    "delegates_to": []
+  },
+  "complete-one-action": {
+    "ingress_key": "mcp-tool:complete-one-action",
+    "source_locator": "mcp-server/src/action-closure.ts",
+    "schema_digest": "cad31050e271f9b1e5f989214d57bb6716c31e6aeaf8dec331b3b8cb200717f6",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
     "delegates_to": []
   },
   "complete-work-request": {
@@ -741,7 +761,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "confirm-email-next-step": {
     "ingress_key": "mcp-tool:confirm-email-next-step",
     "source_locator": "mcp-server/src/email-next-step.ts",
-    "schema_digest": "28abed1df7d49464dfb3df1fb1cb1a3a49c37500e81379e2202d345c6c5b4f3a",
+    "schema_digest": "c2cb99b28d003928440c388988d2f336917839c5feb2a9b0d1b96f276cb80b0e",
     "write": true,
     "human_only": true,
     "human_caller_only": true,
@@ -972,6 +992,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:doctrine-sections",
     "source_locator": "mcp-server/src/doctrine.js",
     "schema_digest": "3349ced71bfc99614bd4556faba56a6e647a94e7d27140c21eda8427a50072a7",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "draft-terms-comparison": {
+    "ingress_key": "mcp-tool:draft-terms-comparison",
+    "source_locator": "mcp-server/src/fact-review.ts",
+    "schema_digest": "5a91e5723d17f1aa0ec05d6104a082c26267db1aa0cc774521228d05fc111897",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -1261,6 +1291,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "issue-requirement-upload": {
+    "ingress_key": "mcp-tool:issue-requirement-upload",
+    "source_locator": "mcp-server/src/requirement-requests.js",
+    "schema_digest": "1719221eab60a995637a428f3e131cd8c6fc3128f32556ae046832f7d3a67c50",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": true,
+    "delegates_to": []
+  },
   "issue-tour-share-grant": {
     "ingress_key": "mcp-tool:issue-tour-share-grant",
     "source_locator": "mcp-server/src/tour-sharing.js",
@@ -1371,6 +1411,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "list-deal-documents": {
+    "ingress_key": "mcp-tool:list-deal-documents",
+    "source_locator": "mcp-server/src/deal-files.js",
+    "schema_digest": "3600bc2b80820a44c2584c3f4e2296db8a3dadb6aa1364cc733d07c4a2688366",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "list-doc-conversations": {
     "ingress_key": "mcp-tool:list-doc-conversations",
     "source_locator": "mcp-server/src/doc-conversation.js",
@@ -1394,7 +1444,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "list-email-proposals": {
     "ingress_key": "mcp-tool:list-email-proposals",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "bb574ff2f070c15332dcebaf05b524ba694521d6b66d050feb10eb95ae0cfe5f",
+    "schema_digest": "f754b45461d4807dc5e62ac534490a434b92daf905275746dff5415f176db2ca",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -1415,6 +1465,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:list-fact-conflicts",
     "source_locator": "mcp-server/src/fact-observations.ts",
     "schema_digest": "fc8a1ff80543bb7a4fac294c21044da3990f1264c375e02aa9901df765f9449b",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "list-fact-review": {
+    "ingress_key": "mcp-tool:list-fact-review",
+    "source_locator": "mcp-server/src/fact-review.ts",
+    "schema_digest": "2eb8162d7a72a27311477f8dc60c85b41431c41d80f8bdc713e34ab2c6512c94",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -1451,10 +1511,30 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "list-practice-origination": {
+    "ingress_key": "mcp-tool:list-practice-origination",
+    "source_locator": "mcp-server/src/practice-origination.ts",
+    "schema_digest": "b8319b8bea15d7254ae39824845137dba10e60c4a815fe26974578446b30c646",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "list-progress-boards": {
     "ingress_key": "mcp-tool:list-progress-boards",
     "source_locator": "mcp-server/src/board-answers.js",
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "list-requirement-requests": {
+    "ingress_key": "mcp-tool:list-requirement-requests",
+    "source_locator": "mcp-server/src/requirement-requests.js",
+    "schema_digest": "6090673a493e5225d9d0fa948e3ba6f8191dbef5560bff4696dcb8a86fbbb5a6",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -1494,7 +1574,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "log-activity": {
     "ingress_key": "mcp-tool:log-activity",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "007833d9bc988d15629f78d26e387ab3f340a1aba83b59c17af7571bc2d4d152",
+    "schema_digest": "db04624ca7394165a6ec8d0cc269ac292f7fde02c7834b3a7b6d18da8e532e82",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -1782,6 +1862,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "prepare-terms-comparison": {
+    "ingress_key": "mcp-tool:prepare-terms-comparison",
+    "source_locator": "mcp-server/src/fact-generation.ts",
+    "schema_digest": "a4a685b6cbd90a9e378441a59fe51b319c9c55f8465300d85247502dc84bd774",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "prepare-tour-route-version": {
     "ingress_key": "mcp-tool:prepare-tour-route-version",
     "source_locator": "mcp-server/src/tour-domain.js",
@@ -1815,7 +1905,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "preview-email-next-step": {
     "ingress_key": "mcp-tool:preview-email-next-step",
     "source_locator": "mcp-server/src/email-next-step.ts",
-    "schema_digest": "722b7eb2945b75dabf92a52f9ba999c3d33c39dca8c1c5fe79635e3b819747e0",
+    "schema_digest": "7e20bb13f175d45e2b513ffe31535baf5bdc5271dcc7a995badacc3a38bc7831",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -1835,7 +1925,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "promote-fact": {
     "ingress_key": "mcp-tool:promote-fact",
     "source_locator": "mcp-server/src/fact-observations.ts",
-    "schema_digest": "5976b93047ba504a919ec7770d0dac843953d7059ac284832ed3d56e20e9f9a9",
+    "schema_digest": "1ccf57205ceea669f9543384f5963cc521d96e1a0a8868ea37603d9d6425bc31",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -2032,6 +2122,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-deal-extraction-source": {
+    "ingress_key": "mcp-tool:read-deal-extraction-source",
+    "source_locator": "mcp-server/src/deal-extraction.js",
+    "schema_digest": "dea18d62c4d0d7540e62126001e36ff80807d968599261b03e56a705b2c1e9a6",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-deal-reconciliation": {
     "ingress_key": "mcp-tool:read-deal-reconciliation",
     "source_locator": "mcp-server/src/tools.js",
@@ -2132,6 +2232,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-home-inbox": {
+    "ingress_key": "mcp-tool:read-home-inbox",
+    "source_locator": "mcp-server/src/home-inbox.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-invoice-tracker": {
     "ingress_key": "mcp-tool:read-invoice-tracker",
     "source_locator": "mcp-server/src/invoice-tracker.ts",
@@ -2146,6 +2256,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:read-loop",
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "9d499f26dbc68f347fc2eb1d1095f0d3fb277cabd410b3154f727a4b722fe4d3",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-market-terms": {
+    "ingress_key": "mcp-tool:read-market-terms",
+    "source_locator": "mcp-server/src/market-terms.ts",
+    "schema_digest": "6a271f2f2d87a5457274108e3fdb7ea11b5820985b6286d6a1198972e4b9abcd",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -2472,6 +2592,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "record-deal-extraction": {
+    "ingress_key": "mcp-tool:record-deal-extraction",
+    "source_locator": "mcp-server/src/deal-extraction.js",
+    "schema_digest": "07439bbcaf9b067794bf3a6f43ab4b637a70579e4768336b473b8b97dae83259",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "record-deal-invoice": {
     "ingress_key": "mcp-tool:record-deal-invoice",
     "source_locator": "mcp-server/src/invoice-automation.js",
@@ -2535,7 +2665,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-email-proposal": {
     "ingress_key": "mcp-tool:record-email-proposal",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "0297f00e583fc8d46da55786e5dfa9f52afdafc7f799e77a322ad8d75a94b0c5",
+    "schema_digest": "8aa27db5b3c8b8930e3c77718bb93309bb26ad43b104c75713622e57574c8b16",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -2575,7 +2705,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-fact-observations": {
     "ingress_key": "mcp-tool:record-fact-observations",
     "source_locator": "mcp-server/src/fact-observations.ts",
-    "schema_digest": "ffc4b25e1062de68b6fe937d51d4559f32bf2b5ca3a64a7a5f820b946de96a19",
+    "schema_digest": "ef62b8a358d922a010b6a9c4f8fe397c169f3b9df1533a43c0ea7c19713d57f3",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -2588,6 +2718,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "d40bf3b21722663f73172b2b6ea7b48c97fc1176373c6e1903a067324a4636a7",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "record-human-fact": {
+    "ingress_key": "mcp-tool:record-human-fact",
+    "source_locator": "mcp-server/src/fact-review.ts",
+    "schema_digest": "0cd1ec8b6b4e47bf8c061bfa0dddae92c0d57637f6b98f8bd8f2b5dd32b1b2fd",
+    "write": true,
+    "human_only": true,
     "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
@@ -2680,6 +2820,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "human_only": true,
     "human_caller_only": true,
     "authority_only": true,
+    "delegates_to": []
+  },
+  "record-practice-origination-feed": {
+    "ingress_key": "mcp-tool:record-practice-origination-feed",
+    "source_locator": "mcp-server/src/practice-origination.ts",
+    "schema_digest": "2a56c673d765432e9da824371d464d7d340cdbeb9c520996c309d67bd702e2e7",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
     "delegates_to": []
   },
   "record-representation-agreement": {
@@ -2882,11 +3032,31 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "request-checklist-document": {
+    "ingress_key": "mcp-tool:request-checklist-document",
+    "source_locator": "mcp-server/src/requirement-requests.js",
+    "schema_digest": "f32f9485f4a830d935b8ec2faa6891c86af22f0aee06fe7febae8de9ef886117",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "request-tour-pdf-render": {
     "ingress_key": "mcp-tool:request-tour-pdf-render",
     "source_locator": "mcp-server/src/tour-artifacts.js",
     "schema_digest": "5b6e02034b697de9d2743c5c2158fe8ab685d22918161ffcddf8b8617fb2dc43",
     "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "resolve-action-link": {
+    "ingress_key": "mcp-tool:resolve-action-link",
+    "source_locator": "mcp-server/src/action-links.js",
+    "schema_digest": "c62d641eb925ed921cf03a27f05c6d9e8c28aecbb6ef50be14b2f93b4d7d1efa",
+    "write": false,
     "human_only": false,
     "human_caller_only": false,
     "authority_only": false,
@@ -2937,6 +3107,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "resolve-fact-review": {
+    "ingress_key": "mcp-tool:resolve-fact-review",
+    "source_locator": "mcp-server/src/fact-review.ts",
+    "schema_digest": "7d8d4a0e16d1d0a77fa6f6fa9959d929c8d64c49309df0fba057205bcd300fd6",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "resolve-post-call-candidate": {
     "ingress_key": "mcp-tool:resolve-post-call-candidate",
     "source_locator": "mcp-server/src/tools.js",
@@ -2974,6 +3154,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": true,
     "human_only": true,
     "human_caller_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "retitle-job": {
+    "ingress_key": "mcp-tool:retitle-job",
+    "source_locator": "mcp-server/src/work-queue.js",
+    "schema_digest": "23e5f33f54e36ea28cd0587150544bc9c221af3c75dbcb8f071cfe01d225afd1",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
   },
@@ -3045,6 +3235,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "human_only": true,
     "human_caller_only": false,
     "authority_only": false,
+    "delegates_to": []
+  },
+  "revoke-requirement-upload": {
+    "ingress_key": "mcp-tool:revoke-requirement-upload",
+    "source_locator": "mcp-server/src/requirement-requests.js",
+    "schema_digest": "fb1e2483a8d6da867a4fc7d161872a598a38efa47900eb71af2068932d06e141",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": true,
     "delegates_to": []
   },
   "revoke-salesforce-read-consent": {
@@ -3247,10 +3447,30 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "settle-home-inbox": {
+    "ingress_key": "mcp-tool:settle-home-inbox",
+    "source_locator": "mcp-server/src/home-inbox.js",
+    "schema_digest": "901e2b1be80531b1549d9f691024c25e6cd586518eee2a81cd55651237e57688",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "share-doc-conversation": {
     "ingress_key": "mcp-tool:share-doc-conversation",
     "source_locator": "mcp-server/src/doc-conversation.js",
     "schema_digest": "963a81eda4e537fd27b9a7ddd27afccd6ea1da64cc37afeffc435796afe0f0dd",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "snooze-home-inbox": {
+    "ingress_key": "mcp-tool:snooze-home-inbox",
+    "source_locator": "mcp-server/src/home-inbox.js",
+    "schema_digest": "46a4b8a3edb5aa1dc6d8c780df2e762c7765a6e8b81d9a45957047f0e4ad18f6",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -3332,7 +3552,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "submit-email-draft": {
     "ingress_key": "mcp-tool:submit-email-draft",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "fd4aaaa359f7c9ac9f63a4422b47447804e4bc64d55b479ea5eaf141e779e3d7",
+    "schema_digest": "2daf2db280b7ff695d4a548fc889b7f4c5a74f6ddb1b8efac2f37818be27362f",
     "write": true,
     "human_only": true,
     "human_caller_only": true,
@@ -3449,6 +3669,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "unsettle-home-inbox": {
+    "ingress_key": "mcp-tool:unsettle-home-inbox",
+    "source_locator": "mcp-server/src/home-inbox.js",
+    "schema_digest": "901e2b1be80531b1549d9f691024c25e6cd586518eee2a81cd55651237e57688",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "update-deal": {
     "ingress_key": "mcp-tool:update-deal",
     "source_locator": "mcp-server/src/tools.js",
@@ -3524,6 +3754,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "a46d9164f4f25becd07e3db36d52617a35ada87d78338b7ffd1eab2ce674f0e5",
     "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "validate-terms-comparison": {
+    "ingress_key": "mcp-tool:validate-terms-comparison",
+    "source_locator": "mcp-server/src/fact-generation.ts",
+    "schema_digest": "b6fadbaee48596a2ed5696e9abec887f2547c662dabd967b15af7d3e92331e3a",
+    "write": false,
     "human_only": false,
     "human_caller_only": false,
     "authority_only": false,
@@ -3736,6 +3976,150 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "ingress_key": "db-relation-acl:ops.work_request_slice:carr_writer:update",
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.phone_call_session",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.phone_call_session:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.phone_call_session",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.phone_call_session:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.practice_origination_feed",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.practice_origination_feed:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.practice_origination_feed",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.practice_origination_feed:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.practice_origination_event",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.practice_origination_event:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "ops.requirement_upload_quota",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:ops.requirement_upload_quota:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "ops.requirement_request",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:ops.requirement_request:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "ops.requirement_upload_receipt",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:ops.requirement_upload_receipt:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "ops.requirement_upload_grant",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:ops.requirement_upload_grant:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "ops.requirement_upload_grant",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:ops.requirement_upload_grant:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "ops.requirement_upload_visitor",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:ops.requirement_upload_visitor:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "ops.requirement_upload_visitor",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:ops.requirement_upload_visitor:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_authority",
+      "relation": "ops.requirement_upload_grant",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:ops.requirement_upload_grant:carr_authority:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_authority",
+      "relation": "ops.requirement_upload_grant",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:ops.requirement_upload_grant:carr_authority:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "ops.requirement_upload_quota",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:ops.requirement_upload_quota:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "ops.requirement_upload_visitor",
+      "grantable": false,
+      "privilege": "delete",
+      "ingress_key": "db-relation-acl:ops.requirement_upload_visitor:carr_writer:delete",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
     }
   ],
   "secdef_execute": [
@@ -3945,6 +4329,141 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.reap_expired_runs(p_service_id uuid, p_environment text, p_run_key text, p_limit integer)",
       "volatility": "v",
       "ingress_key": "db-function-acl:ops.reap_expired_runs(p_service_id uuid, p_environment text, p_run_key text, p_limit integer):carr_jobs:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.record_human_fact(p_tenant text, p_actor_id uuid, p_idempotency_key uuid, p_entity_ref text, p_observation jsonb)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.record_human_fact(p_tenant text, p_actor_id uuid, p_idempotency_key uuid, p_entity_ref text, p_observation jsonb):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.list_fact_review(p_tenant text, p_entity_ref text, p_limit integer, p_cursor jsonb, p_include_resolved boolean)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.list_fact_review(p_tenant text, p_entity_ref text, p_limit integer, p_cursor jsonb, p_include_resolved boolean):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.resolve_fact_review(p_tenant text, p_actor_id uuid, p_args jsonb)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.resolve_fact_review(p_tenant text, p_actor_id uuid, p_args jsonb):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.read_deal_extraction_source(p_tenant text, p_actor_id uuid, p_contract jsonb)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.read_deal_extraction_source(p_tenant text, p_actor_id uuid, p_contract jsonb):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.record_deal_extraction(p_tenant text, p_actor_id uuid, p_args jsonb)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.record_deal_extraction(p_tenant text, p_actor_id uuid, p_args jsonb):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.list_fact_review(p_tenant text, p_entity_ref text, p_limit integer, p_cursor jsonb, p_include_resolved boolean)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.list_fact_review(p_tenant text, p_entity_ref text, p_limit integer, p_cursor jsonb, p_include_resolved boolean):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.market_terms_snapshot(p_tenant text)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.market_terms_snapshot(p_tenant text):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.change_home_inbox(p_key uuid, p_command text, p_items jsonb, p_until timestamp with time zone)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.change_home_inbox(p_key uuid, p_command text, p_items jsonb, p_until timestamp with time zone):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.read_home_inbox()",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.read_home_inbox():carr_writer:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true

@@ -7,25 +7,54 @@
   "consumer_adoption": "The Home renderer must consume read-deal-update-reviews and render this new proposal kind. This backend contract does not change the existing app renderer.",
   "record": {
     "verb": "add-deal-note",
-    "candidate_verb": "resolve-candidate",
-    "judgment": "After the update commits, callTool returns its pending assessment immediately and schedules assessment with ctx.waitUntil. Across at most two requests, at most two Jev attempts run, each bounded to 11 seconds within a 25-second assessment budget. Transient 5xx and timeout failures can retry immediately; 429 waits for a later run. No database lock is held during Jev.",
+    "judgment": "Only the calling partner's overdue ordinary and accepted post-call actions are assessed. Structured checklist items and other partners' actions remain separate. After the update commits, callTool returns its pending assessment immediately and schedules assessment with ctx.waitUntil. Across at most two requests, at most two Jev attempts run, each bounded to 11 seconds within a 25-second assessment budget. Transient 5xx and timeout failures can retry immediately; 429 waits for a later run. No database lock is held during Jev.",
     "automatic_resolution": "yes, confidence at least 0.9, valid choice distribution, and the shared #2449 evidence bar including four quoted words. The 0.9 numeric threshold is additional to #2449's deterministic evidence bar.",
     "evidence": "Each immutable overdue_assessment event retains the action snapshot, note ID, complete update, exact selected quote, verdict, confidence, reason, and completion stamp. Call requests retain candidate_id, candidate_kind and the originating verb.",
     "failure": "The update, overdue_assessment_pending request and per-action overdue_assessment_fallback proposals commit together. Immutable overdue_assessment_status events expose attempts, failure reasons, completion or version conflict in the deal timeline. A background failure never changes the committed save response. Failed assessments can retry on the next update for that deal by the same partner, including replay, with at most three lifetime attempts. Missing credentials, over-budget inputs and other non-retryable failures stop further attempts. A database-clock 45-second lease protects running work. Home shows failed or expired unfinished assessments, including interrupted third attempts, for manual resolution or dismissal. Manual review supersedes automatic processing of that request.",
-    "plan": "A supplied next_step and next_date are saved together. Call next steps become checklist items while the prior overdue action remains available for assessment. A retained overdue action never replaces the accepted call plan in the board projection. A separate set-next-step command can replace a call plan and invalidate its candidate assessments. Note assessments retain the existing preservation rules. Without a new plan, a resolved current action from add-deal-note clears the obsolete plan and prompts for its replacement."
+    "plan": "A supplied next_step and next_date are saved together. Call next steps become checklist items while the prior overdue action remains available for assessment. A retained overdue action never replaces the accepted call plan in the board projection. A separate set-next-step command can replace a call plan and invalidate its candidate assessments. Note assessments retain the existing preservation rules. Without a new plan, a resolved current action from add-deal-note clears the obsolete plan and prompts for its replacement.",
+    "candidate_verb": "resolve-candidate"
   },
   "read": {
     "verb": "read-deal-update-reviews",
     "arguments": {},
-    "result": { "schema_version": "deal-update-reviews.v1", "proposals": [] },
-    "proposal_fields": ["assessment_id", "deal_id", "deal_name", "assessment", "confirm_verb"],
+    "result": {
+      "schema_version": "deal-update-reviews.v1",
+      "proposals": [],
+      "automatic_resolutions": []
+    },
+    "proposal_fields": [
+      "assessment_id",
+      "deal_id",
+      "deal_name",
+      "assessment",
+      "confirm_verb"
+    ],
     "membership": "Latest uncertain or low-confidence assessment, or fallback for an unfinished assessment that failed or passed its database-clock lease, for an open action visible in the authenticated actor’s tenant and personal scope, not already reviewed. Stale running work reports interrupted. Fallback proposals use the existing assessment_id and review-deal-update contract.",
-    "limit": "Above 200 pending proposals the read refuses instead of silently truncating."
+    "limit": "Above 200 pending proposals the read refuses instead of silently truncating.",
+    "automatic_resolution_fields": [
+      "assessment_id",
+      "deal_id",
+      "deal_name",
+      "action_title",
+      "quote",
+      "resolved_at",
+      "undo_possible"
+    ],
+    "automatic_resolution_membership": "Automatic resolutions from the last seven days for actions owned by the caller, excluding reviewed assessments. undo_possible reflects whether the coupled actions and plan remain unchanged. Call assessment Undo checks only the reviewed action and preserves the accepted call plan and checklist."
   },
   "review": {
     "verb": "review-deal-update",
-    "arguments": ["idempotency_key", "assessment_id", "decision", "reason"],
-    "decisions": { "resolve": "Complete the exact unchanged action after partner review.", "dismiss": "Remove the proposal while leaving its action open.", "undo": "Reopen an unchanged automatic completion. For call assessments, only the reviewed overdue action reopens; the accepted call plan and checklist remain unchanged. For note assessments, reverse the coupled plan while no newer plan change exists." },
+    "arguments": [
+      "idempotency_key",
+      "assessment_id",
+      "decision",
+      "reason"
+    ],
+    "decisions": {
+      "resolve": "Complete the exact unchanged action after partner review.",
+      "dismiss": "Remove the proposal while leaving its action open.",
+      "undo": "Reopen an unchanged automatic completion. For call assessments, only the reviewed overdue action reopens; the accepted call plan and checklist remain unchanged. For note assessments, reverse the coupled plan while no newer plan change exists."
+    },
     "replay": "Retry with the original key. A changed action or newer coupled note plan refuses rather than overwriting subsequent work. An already-undone call assessment returns success after either assessment Undo or call Undo."
   }
 }

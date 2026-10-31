@@ -109,6 +109,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await c.query(readMigration('1004_phase_start_undo.sql'));
     // The portal table is reached only through ops functions; stub the grant contract the migration extends.
     await c.query('create schema if not exists ops; create extension if not exists pgcrypto');
+    await c.query(readMigration('1068_email_identity.sql'));
     await c.query(schema.match(/CREATE TABLE ops\.client_portal \([\s\S]*?\n\);/)[0]);
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable as $$select '{"secdef_execute":[]}'::jsonb$$`);
     await c.query(readMigration('1013_register_client_portal.sql'));
@@ -268,10 +269,24 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal(value.deals[0].last_step.kind, 'call');
       assert.equal(value.deals[0].last_step.summary, 'Synthetic call');
       assert.equal(new Date(value.deals[0].last_step.occurred_at).toISOString(), '2026-01-02T12:00:00.000Z');
+      await TOOLS['complete-one-action'].handler(c, actor, {idempotency_key:randomUUID(),action_id:id(11),base_version:1});
+      value = await board();
+      assert.equal(value.deals[0].last_step.kind, 'completed_action');
+      assert.equal(value.deals[0].last_step.summary, 'Earlier action');
       await TOOLS['complete-action'].handler(c, actor, {idempotency_key:randomUUID(),ref:id(4),outcome:'Synthetic outcome'});
       value = await board();
       assert.equal(value.deals[0].last_step.kind, 'completed_action');
       assert.equal(value.deals[0].last_step.summary, 'Synthetic outcome');
+    }));
+
+    await t.test('board chooses the later recorded completion when timestamps match', async () => transaction(async () => {
+      await fixture(false);
+      await c.query(`insert into event(id, occurred_at, actor_id, verb, subject_type, subject_id, new_value, cause)
+        values ($1, now(), $3, 'complete-one-action', 'deal', $4, '{"status":"done","outcome":"First"}', 'system'),
+               ($2, now(), $3, 'complete-one-action', 'deal', $4, '{"status":"done","outcome":"Second"}', 'system')`,
+        [id(90), id(89), actor.id, id(4)]);
+      const value = await TOOLS['deal-room-board'].handler(c, actor, {workspace:'team'});
+      assert.equal(value.deals[0].last_step.summary, 'Second');
     }));
 
     await t.test('unavailable Jev leaves the overdue action open with an assessment receipt', async () => transaction(async () => {
@@ -329,10 +344,15 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         const reviews = await executeRegisteredTool(c, actor, 'read-deal-update-reviews', {});
         assert.equal(reviews.proposals.length, !failure && (verdict === 'unclear' || confidence < 0.9) ? 1 : 0);
         if (resolved) {
+          assert.equal(reviews.automatic_resolutions.length, 1);
+          assert.equal(reviews.automatic_resolutions[0].assessment_id, assessment.id);
+          assert.equal(reviews.automatic_resolutions[0].quote, args.text);
+          assert.equal(reviews.automatic_resolutions[0].undo_possible, true);
           const undone = await executeRegisteredTool(c, actor, 'review-deal-update', {
             idempotency_key: randomUUID(), assessment_id: assessment.id, decision: 'undo', reason: 'Synthetic correction',
           });
           assert.equal(undone.decision, 'undo');
+          assert.equal((await executeRegisteredTool(c, actor, 'read-deal-update-reviews', {})).automatic_resolutions.length, 0);
           const after = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
           assert.equal(after.next_actions.find(a => a.id === prior.next_action_id).status, 'open');
           assert.equal(after.next_date, '2020-01-01', 'undo restores the coupled prior plan');
@@ -340,6 +360,33 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
           assert.equal(after.next_actions.find(a => a.id === result.next_action_id).status, 'dropped');
         }
       }));
+
+    await t.test('automatic resolutions respect ownership, age and newer changes', async () => transaction(async () => {
+      await fixture(false);
+      const dell = {...actor, id: id(7), slug: 'dell'};
+      await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'dell','Synthetic Partner Two','human',true)", [dell.id]);
+      await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      c.jevClient = jevStub('yes');
+      await addNote(c, actor, {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord sent the revised terms.'});
+      await c.query("update event set personal_scope='none' where field='overdue_assessment'");
+      const read = () => executeRegisteredTool(c, actor, 'read-deal-update-reviews', {});
+      let reviews = await read();
+      assert.equal(reviews.schema_version, 'deal-update-reviews.v1');
+      assert.deepEqual(reviews.proposals, []);
+      assert.equal(reviews.automatic_resolutions[0].action_title, 'Request revised terms');
+      assert.equal((await executeRegisteredTool(c, dell, 'read-deal-update-reviews', {})).automatic_resolutions.length, 0);
+      await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'New plan', next_date: '2030-01-01',
+      });
+      reviews = await read();
+      assert.equal(reviews.automatic_resolutions[0].undo_possible, false);
+      await c.query("update event set recorded_at=current_timestamp - interval '8 days' where field='overdue_assessment'");
+      assert.deepEqual((await read()).automatic_resolutions, []);
+    }));
 
     await t.test('overdue proposals belong only to the action owner', async () => transaction(async () => {
       await fixture(false);
@@ -1034,7 +1081,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         } finally {
           release?.();
           await Promise.all(peers.map(peer=>peer.end()));
-          await c.query('truncate deal_vendor_assignment,activity,event,tool_call,vendor,deal,client,party');
+          await c.query('truncate ops.requirement_upload_receipt,ops.requirement_upload_grant,ops.requirement_request,deal_vendor_assignment,activity,event,tool_call,vendor,deal,client,capture_post_call_candidate,party');
         }
       });
     }
@@ -1475,6 +1522,12 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
             assert.equal(prior.schema_version,'deal-timeline.v1');
             assert.equal(prior.lease,null);
             assert.equal(prior.client_id,id(3));
+            assert.equal(prior.activities_truncated,false);
+            assert.equal(prior.thread_truncated,false);
+            assert.equal(prior.events_truncated,false);
+            delete prior.activities_truncated;
+            delete prior.thread_truncated;
+            delete prior.events_truncated;
             delete prior.client_id;
             delete prior.schema_version;
             delete prior.lease;
@@ -1824,12 +1877,13 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query(`do $$ begin
         begin create role carr_jobs; exception when duplicate_object then null; end;
         begin create role carr_authority; exception when duplicate_object then null; end;
-      end $$; alter role carr_writer login;
+      end $$;
       grant select,insert,update,delete on all tables in schema public to carr_writer;
       grant usage,select on all sequences in schema public to carr_writer`);
-      const writer = new pg.Client({...connection, user: 'carr_writer',
+      const writer = new pg.Client({...connection,
         types: {getTypeParser: (oid, format) => oid === 1184 ? value => value : pg.types.getTypeParser(oid, format)}});
       await writer.connect();
+      await writer.query('set session authorization carr_writer');
       let released = false;
       const adapter = { query: writer.query.bind(writer), release() { released = true; },
         jevClient: {systemOne: async request => {

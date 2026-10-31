@@ -20,6 +20,8 @@ class RegistryMergeTests(unittest.TestCase):
         self.environment = fixture_env()
         (self.repo / 'ops').mkdir()
         (self.repo / 'tools').mkdir()
+        (self.repo / 'lib').mkdir()
+        shutil.copy(ROOT / 'lib/deal_schedule.schema.json', self.repo / 'lib')
         shutil.copytree(ROOT / 'mcp-server/src', self.repo / 'mcp-server/src')
         shutil.copy(ROOT / 'mcp-server/package.json', self.repo / 'mcp-server/package.json')
         (self.repo / 'mcp-server/node_modules').symlink_to(ROOT / 'mcp-server/node_modules')

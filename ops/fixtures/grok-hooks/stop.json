@@ -1,0 +1,21 @@
+{
+ "hookEventName": "stop",
+ "sessionId": "00000000-0000-4000-8000-0000000000a1",
+ "cwd": "/repo/.grok-capture",
+ "workspaceRoot": "/repo",
+ "timestamp":"2026-10-31T00:00:00+00:00",
+ "transcriptPath": "/home/example/.grok/sessions/%2Frepo%2F.grok-capture/00000000-0000-4000-8000-0000000000a1/updates.jsonl",
+ "promptId": "00000000-0000-4000-8000-0000000000b1",
+ "permissionMode": "bypassPermissions",
+ "reason": "end_turn",
+ "stopHookActive": false,
+ "lastAssistantMessage": "The latest commit is `21fdbbc52 feat: extract cited deal terms into partner review (#2752)`.",
+ "backgroundTasks": [],
+ "sessionCrons": [],
+ "hook_event_name": "Stop",
+ "session_id": "00000000-0000-4000-8000-0000000000a1",
+ "transcript_path": "/home/example/.grok/sessions/%2Frepo%2F.grok-capture/00000000-0000-4000-8000-0000000000a1/updates.jsonl",
+ "permission_mode": "bypassPermissions",
+ "stop_hook_active": false,
+ "last_assistant_message": "The latest commit is `21fdbbc52 feat: extract cited deal terms into partner review (#2752)`."
+}
