@@ -141,6 +141,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["slice_outcome_already_recorded", "The recorded outcome and its evidence are final. Plan a new slice for further work."],
   ["slice_reason_required", "Explain why the slice is retired."],
   ["slice_merged_change_required", "Supply at least one merged PR URL and its full merge commit SHA."],
+  ["slice_independent_review_required", "Each shipped PR needs a current-head APPROVE comment from a reviewer Card different from its author Card."],
   ["invalid_slice_successor", "Only a retired slice may name a different recorded slice as its replacement."],
   ["work_request_open_slices", "Finish or retire every open slice before completing the Work Request."],
   ["slice_not_found", "Choose a slice from the recorded plan."],

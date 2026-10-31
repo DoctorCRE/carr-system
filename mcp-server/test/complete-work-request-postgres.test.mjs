@@ -11,6 +11,7 @@ import { promisify } from 'node:util';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 import { publicError } from '../src/public-errors.ts';
+import { createPullRequestSource, queueCardId } from '../src/work-queue.js';
 
 let fixture, c, actor, connection;
 before(async () => {
@@ -59,16 +60,6 @@ function completion(ref) {
   return { idempotency_key: randomUUID(), human_ref: ref, base_version: 1,
     change_refs: [{ pr_url: 'https://github.com/DoctorCRE/carr-system/pull/123', merge_commit_sha: 'a'.repeat(40) }],
     criterion_evidence: [{ id: 'AC-1', evidence: 'Synthetic passing check' }], user_facing: false };
-}
-async function attestedRequest(ref, patch = {}) {
-  const attestor=(await c.query("insert into actor(slug,kind,display_name) values('dell','human','Synthetic independent attestor') on conflict(slug) do update set active=true returning id")).rows[0].id;
-  const {idempotency_key,human_ref,base_version,...baseEvidence}=completion(ref);
-  const evidence={...baseEvidence,...patch};
-  const capsule={...evidence,acceptance_predicates:['AC-1: Synthetic passing check'],
-    change_ref:evidence.change_refs.map(change=>`${change.pr_url}#${change.merge_commit_sha}`).join('\n'),attested_by:patch.attested_by ?? attestor};
-  await c.query(`insert into ops.work_request(ref,title,state,requester_actor,owner_actor,organization_tenant_id,capture_idempotency_key,sourced_capture_sequence,origin_ref,acceptance_criteria,completion_evidence,verification_accepted_at)
-    values($1,'Synthetic attested work','captured','joe','joe','carr-internal',$3,$4,$5,'[{"id":"AC-1","text":"Synthetic criterion"}]',$2::jsonb,now())`,[ref,JSON.stringify(capsule),randomUUID(),Number(ref.slice(3)),'record:loop:'+ref]);
-  return {attestor,evidence};
 }
 test('complete-work-request closes built work and replays without a second event', async () => {
   await request('WR-999001');
@@ -201,10 +192,10 @@ test('completion refuses open slices and accepts an all-retired plan', async () 
       error => publicError(error).error === 'work_request_terminal_state');
 });
 
-for (const preverified of [false,true]) test(`close command discovers merged Cards with ${preverified ? 'stored attestation' : 'manual attestation'}`, async () => {
-  const ref = preverified ? 'WR-999071' : 'WR-999070';
-  const shipped=[1,2].map(n=>({pr_url:`https://github.com/DoctorCRE/carr-system/pull/${120+n}`,merge_commit_sha:String(n).repeat(40)}));
-  if (preverified) await attestedRequest(ref,{change_refs:shipped}); else await sourcedRequest(ref);
+test('close command discovers merged Cards and completes through real verbs', async () => {
+  const {work_request:ref} = await command('record-defect',{idempotency_key:randomUUID(),
+    defect_class:'synthetic-cli-completion',claimed:'Finished WR',actual:'Open follow-up',detected_by:'self'},actor,'carr_writer');
+  const criterion=(await command('work-request-card',{work_request:ref},actor,'carr_reader')).acceptance_criteria[0].id;
   await command('plan-work-request-slices', { work_request: ref, idempotency_key: randomUUID(), slices: ['First', 'Second'] });
   const root = await mkdtemp(path.join(tmpdir(), 'close-wr-cli-'));
   try {
@@ -215,12 +206,19 @@ for (const preverified of [false,true]) test(`close command discovers merged Car
     await writeFile(path.join(root, 'adapter.mjs'), `
 const { executeRegisteredTool } = await import(${JSON.stringify(new URL('../src/tools.js', import.meta.url).href)});
 const { default: pg } = await import(${JSON.stringify(new URL('../node_modules/pg/lib/index.js', import.meta.url).href)});
+const { createPullRequestSource, queueCardId } = await import(${JSON.stringify(new URL('../src/work-queue.js', import.meta.url).href)});
 const { appendFileSync } = await import('node:fs');
 if (process.argv[2] !== 'call') throw new Error('expected call');
 const verb = process.argv[3], args = JSON.parse(process.argv[4]);
 appendFileSync(${JSON.stringify(path.join(root, 'calls.jsonl'))}, JSON.stringify({ verb, args }) + '\\n');
 const client = new pg.Client(${JSON.stringify(connection)});
 await client.connect();
+client.reviewedChange = createPullRequestSource({token:'synthetic',fetchImpl:async url=>{
+  const n=Number(/[/](?:pulls|issues)[/](\\d+)/.exec(url)[1])-120;
+  const pr='https://github.com/DoctorCRE/carr-system/pull/'+(120+n),sha='c'.repeat(40);
+  return Response.json(/[/]pulls[/]\\d+$/.test(url)?{merged:true,merge_commit_sha:String(n).repeat(40),head:{sha},body:'Card: '+queueCardId(${JSON.stringify(ref)},n,1)}:
+    url.includes('/comments?')?[{body:'VERDICT: APPROVE\\nReviewed-SHA: '+sha+'\\nReviewer: '+queueCardId(${JSON.stringify(ref)},n,26),html_url:pr+'#issuecomment-1'}]:[]);
+}}).reviewedChange;
 try {
   await client.query('begin');
   await client.query('set local role ' + (verb === 'work-request-card' ? 'carr_reader' : 'carr_writer'));
@@ -244,20 +242,20 @@ print(pathlib.Path(${JSON.stringify(root)}, 'prs.json').read_text() if sys.argv[
     await chmod(path.join(root, 'run.sh'), 0o755);
     await chmod(path.join(root, 'bin/gh'), 0o755);
     await writeFile(path.join(root, 'evidence.json'), JSON.stringify({ user_facing: false,
-      criterion_evidence: [{ id: 'AC-1', evidence: 'Synthetic closure exercised through the command and real registered verbs' }] }));
+      criterion_evidence: [{ id: criterion, evidence: 'Synthetic closure exercised through the command and real registered verbs' }] }));
     const cli = (...args) => promisify(execFile)('python3', [path.join(root, 'bin/close-work-request'), ref,
       '--completion-evidence', path.join(root, 'evidence.json'), ...args], {
       env: { ...process.env, PATH: path.join(root, 'bin') + path.delimiter + process.env.PATH },
     });
     const seen = () => readFileSync(path.join(root, 'calls.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line).verb);
     const preview = JSON.parse((await cli()).stdout);
-    assert.deepEqual(preview.calls.map(call => call.verb), ['close-work-request-slice', 'close-work-request-slice', 'complete-work-request']);
+    assert.deepEqual(preview.calls.map(call => call.verb), ['close-work-request-slice', 'close-work-request-slice']);
     assert.deepEqual(seen(), ['work-request-card']);
     assert.ok((await command('work-request-card', { work_request: ref })).slices.every(slice => slice.outcome === 'open'));
     const applied = (await cli('--apply')).stdout;
     const last=JSON.parse(applied.trim().split('\n').at(-1)).result;
     assert.equal(last.state ?? last.work_request_state, 'confirmed_closed');
-    assert.deepEqual(seen().slice(1), ['work-request-card', 'close-work-request-slice', 'close-work-request-slice', ...(preverified?[]:['complete-work-request'])]);
+    assert.deepEqual(seen().slice(1), ['work-request-card', 'close-work-request-slice', 'close-work-request-slice']);
     const card = await command('work-request-card', { work_request: ref });
     assert.equal(card.state, 'confirmed_closed');
     assert.ok(card.slices.every(slice => slice.outcome === 'done'));
@@ -268,7 +266,7 @@ print(pathlib.Path(${JSON.stringify(root)}, 'prs.json').read_text() if sys.argv[
   }
 });
 
-test('last merged slice awaits independent attestation when none is recorded', async () => {
+test('last merged slice without completion facts remains ready for attestation', async () => {
   const ref = 'WR-999080';
   await sourcedRequest(ref);
   await command('plan-work-request-slices', {work_request:ref,slices:['First','Last'],idempotency_key:randomUUID()},actor,'carr_writer');
@@ -319,43 +317,60 @@ test('shipped in-progress work is listed for closure while completion keeps its 
   await assert.rejects(command('complete-work-request',{...completion(ref),base_version:card.version},actor,'carr_writer'),e=>e.payload?.error==='work_request_not_completable');
 });
 
-test('last merged slice auto-closes an independently attested WR in the slice transaction',async()=>{
-  const ref='WR-999083';
-  const {attestor,evidence}=await attestedRequest(ref);
+test('real verbs close a newly captured WR using the merged PR review-gate approval',async()=>{
+  const captured=await command('record-defect',{idempotency_key:randomUUID(),defect_class:'synthetic-reachable-closure',
+    claimed:'The follow-up closes automatically',actual:'The follow-up still needs delivery',detected_by:'self'},actor,'carr_writer');
+  const ref=captured.work_request;
   await command('plan-work-request-slices',{work_request:ref,slices:['First','Last'],idempotency_key:randomUUID()},actor,'carr_writer');
-  const close=slice=>({work_request:ref,slice,base_version:1,outcome:'done',change_refs:evidence.change_refs,idempotency_key:randomUUID()});
-  await command('close-work-request-slice',close(1),actor,'carr_writer');
-  assert.equal((await command('work-request-card',{work_request:ref},actor,'carr_reader')).state,'captured');
-  const args=close(2);
-  let inside;
-  await c.query('begin');
+  const card=()=>command('work-request-card',{work_request:ref},actor,'carr_reader');
+  const initial=await card();
+  const completionFacts={criterion_evidence:initial.acceptance_criteria.map(row=>({id:row.id,evidence:'Registered capture and both slice writes exercised in the independent PR review.'})),user_facing:false};
+  const changes=[1,2].map(n=>({pr_url:`https://github.com/DoctorCRE/carr-system/pull/${810+n}`,merge_commit_sha:String(n).repeat(40)}));
+  const heads=['b'.repeat(40),'c'.repeat(40)];
+  const fetches=[];
+  let reviewerJob=26;
+  const source=createPullRequestSource({token:'synthetic',fetchImpl:async url=>{
+    fetches.push(url);
+    const index=Number(/\/(?:pulls|issues)\/(\d+)/.exec(url)[1])-811;
+    assert.ok(index===0 || index===1);
+    const author=queueCardId(ref,index+1,1),reviewer=queueCardId(ref,index+1,reviewerJob);
+    const data=/\/pulls\/\d+$/.test(url)?{merged:true,html_url:changes[index].pr_url,merge_commit_sha:changes[index].merge_commit_sha,
+      head:{sha:heads[index]},body:`Card: ${author}`,user:{login:'jbookout'}}:
+      url.includes('/comments?')?[{body:`VERDICT: APPROVE\nReviewed-SHA: ${heads[index]}\nReviewer: ${reviewer}`,
+        user:{login:'jbookout'},html_url:changes[index].pr_url+'#issuecomment-123'}]:[];
+    return Response.json(data);
+  }});
+  c.reviewedChange=source.reviewedChange;
   try {
-    await c.query('set local role carr_writer');
-    await executeRegisteredTool(c,actor,'close-work-request-slice',args);
-    inside=(await c.query('select state,completion_evidence from ops.work_request where ref=$1',[ref])).rows[0];
-  } finally {await c.query('rollback');}
-  assert.equal(inside.state,'confirmed_closed');
-  assert.equal(inside.completion_evidence.attested_by,attestor);
-  const rolledBack=await command('work-request-card',{work_request:ref},actor,'carr_reader');
-  assert.equal(rolledBack.state,'captured');
-  assert.equal(rolledBack.slices[1].outcome,'open');
-  await command('close-work-request-slice',args,actor,'carr_writer');
-  const finished=(await c.query('select state,version,completion_kind,completion_evidence from ops.work_request where ref=$1',[ref])).rows[0];
-  assert.equal(finished.state,'confirmed_closed');assert.equal(finished.completion_kind,'built');
-  assert.equal(finished.completion_evidence.attested_by,attestor);
-  assert.deepEqual(finished.completion_evidence.criterion_evidence,evidence.criterion_evidence);
-  await command('close-work-request-slice',args,actor,'carr_writer');
-  assert.equal((await c.query('select version from ops.work_request where ref=$1',[ref])).rows[0].version,finished.version);
+    await command('close-work-request-slice',{work_request:ref,slice:1,base_version:1,outcome:'done',change_refs:[changes[0]],idempotency_key:randomUUID()},actor,'carr_writer');
+    assert.equal((await card()).state,'captured');
+    const args={work_request:ref,slice:2,base_version:1,outcome:'done',change_refs:[changes[1]],completion:completionFacts,idempotency_key:randomUUID()};
+    reviewerJob=1;
+    await assert.rejects(command('close-work-request-slice',args,actor,'carr_writer'),e=>e.payload?.error==='slice_independent_review_required');
+    assert.equal((await card()).slices[1].outcome,'open');
+    reviewerJob=26;
+    for (const [completion,error] of [
+      [{...completionFacts,criterion_evidence:[]},'missing_criterion_evidence'],
+      [{...completionFacts,user_facing:true},'missing_user_journey_ref'],
+    ]) {
+      await assert.rejects(command('close-work-request-slice',{...args,completion,idempotency_key:randomUUID()},actor,'carr_writer'),e=>e.payload?.error===error);
+      const unchanged=await card();assert.equal(unchanged.state,'captured');assert.equal(unchanged.slices[1].outcome,'open');
+    }
+    let inside;
+    await c.query('begin');
+    try {
+      await c.query('set local role carr_writer');
+      await executeRegisteredTool(c,actor,'close-work-request-slice',args);
+      await c.query('set local role carr_reader');
+      inside=await executeRegisteredTool(c,actor,'work-request-card',{work_request:ref});
+    } finally {await c.query('rollback');}
+    assert.equal(inside.state,'confirmed_closed');
+    assert.equal((await card()).slices[1].outcome,'open');
+    const closed=await command('close-work-request-slice',args,actor,'carr_writer');
+    assert.equal(closed.work_request_state,'confirmed_closed');
+    const result=await card();assert.equal(result.state,'confirmed_closed');
+    const requests=fetches.length;
+    await command('close-work-request-slice',args,actor,'carr_writer');
+    assert.equal(fetches.length,requests);assert.equal((await card()).version,result.version);
+  } finally {delete c.reviewedChange;}
 });
-
-for(const [label,ref,error] of [['self-attestation','WR-999084','completion_capsule_refused'],['missing criterion evidence','WR-999085','missing_criterion_evidence']]) {
-  test(`automatic slice completion preserves the refusal for ${label}`,async()=>{
-    const {evidence}=await attestedRequest(ref,label==='self-attestation'?{attested_by:actor.id}:{criterion_evidence:[]});
-    await command('plan-work-request-slices',{work_request:ref,slices:['Only'],idempotency_key:randomUUID()},actor,'carr_writer');
-    const args={work_request:ref,slice:1,base_version:1,outcome:'done',change_refs:evidence.change_refs,idempotency_key:randomUUID()};
-    await assert.rejects(command('close-work-request-slice',args,actor,'carr_writer'),e=>e.payload?.error===error);
-    const card=await command('work-request-card',{work_request:ref},actor,'carr_reader');
-    assert.equal(card.state,'captured');assert.equal(card.slices[0].outcome,'open');
-    assert.equal((await c.query('select count(*) from tool_call where idempotency_key=$1',[args.idempotency_key])).rows[0].count,'0');
-  });
-}

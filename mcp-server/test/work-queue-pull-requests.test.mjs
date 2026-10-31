@@ -4,6 +4,54 @@ import assert from 'node:assert/strict';
 import { createPullRequestSource, isolatePullRequests, queueView, jobStage, workQueueTools, PULL_REQUEST_TTL_MS, STALE_AFTER_MS } from '../src/work-queue.js';
 
 const REPOS = ['DoctorCRE/carr-system', 'jbookout/doctorcre-app'];
+
+test('merged review attestation uses the shared comment grammar and distinct Cards, not GitHub logins', async () => {
+  const change = { pr_url: 'https://github.com/DoctorCRE/carr-system/pull/811', merge_commit_sha: 'a'.repeat(40) };
+  const sha = 'b'.repeat(40);
+  const approval = { body: `VERDICT: APPROVE\nReviewed-SHA: ${sha}\nReviewer: WR628.S1.J26 (Codex)`,
+    user: { login: 'jbookout' }, html_url: change.pr_url + '#issuecomment-123' };
+  for (const [label, patch, comments, reviews, ok] of [
+    ['same login, different cards', {}, [approval], [], true],
+    ['formal agent review', {}, [], [{ ...approval, state: 'APPROVED' }], true],
+    ['self card', {}, [{ ...approval, body: approval.body.replace('J26', 'J1') }], [], false],
+    ['zero-padded self card', {}, [{ ...approval, body: approval.body.replace('WR628.S1.J26', 'WR000628.S01.J01') }], [], false],
+    ['stale SHA', {}, [{ ...approval, body: approval.body.replace(sha, 'c'.repeat(40)) }], [], false],
+    ['different merge', { merge_commit_sha: 'c'.repeat(40) }, [approval], [], false],
+    ['unmerged', { merged: false }, [approval], [], false],
+    ['unrelated slice', { body: 'Card: WR628.S2.J1' }, [approval], [], false],
+    ['no reviewer card', {}, [{ ...approval, body: approval.body.replace('WR628.S1.J26', 'Codex') }], [], false],
+    ['changes veto', {}, [approval, { ...approval, body: approval.body.replace('APPROVE', 'CHANGES') }], [], false],
+    ['dismissed approval', {}, [], [{ ...approval, state: 'DISMISSED' }], false],
+    ['no approval', {}, [], [], false],
+  ]) {
+    const source = createPullRequestSource({ token: 'synthetic', fetchImpl: async url => Response.json(
+      /\/pulls\/811$/.test(url) ? { merged: true, merge_commit_sha: change.merge_commit_sha, head: { sha },
+        body: 'Card: WR628.S1.J1', user: { login: 'jbookout' }, ...patch } : url.includes('/comments?') ? comments : reviews) });
+    const result = await source.reviewedChange(change, 'WR628.S1');
+    assert.equal(Boolean(result), ok, label);
+    if (ok) assert.deepEqual(result, { ...change, head_sha: sha, author_card: 'WR628.S1.J1',
+      reviewer_card: 'WR628.S1.J26', review_url: approval.html_url });
+  }
+});
+
+test('approval reads all comment pages and fails closed on unavailable GitHub evidence', async () => {
+  const change = { pr_url: 'https://github.com/DoctorCRE/carr-system/pull/811', merge_commit_sha: 'a'.repeat(40) };
+  const sha = 'b'.repeat(40), calls = [];
+  const fetchImpl = async url => {
+    calls.push(url);
+    if (/\/pulls\/811$/.test(url)) return Response.json({ merged: true, merge_commit_sha: change.merge_commit_sha, head: { sha }, body: 'Card: WR628.S1.J1' });
+    if (url.includes('/reviews?')) return Response.json([]);
+    return Response.json(url.endsWith('page=1') ? Array.from({ length: 100 }, () => ({ body: 'Discussion' })) :
+      [{ body: `VERDICT: APPROVE\nReviewed-SHA: ${sha}\nReviewer: WR628.S1.J26`, html_url: change.pr_url + '#issuecomment-1' }]);
+  };
+  const source = createPullRequestSource({ token: 'synthetic', fetchImpl });
+  assert.equal((await source.reviewedChange(change, 'WR628.S1')).reviewer_card, 'WR628.S1.J26');
+  assert.ok(calls.some(url => url.endsWith('page=2')));
+  for (const token of [undefined, 'synthetic']) {
+    const unavailable = createPullRequestSource({ token, fetchImpl: async () => new Response('', { status: 403 }) });
+    assert.equal(await unavailable.reviewedChange(change, 'WR628.S1'), null);
+  }
+});
 const item = (number, body, extra = {}) => ({ number, body, title: `PR ${number}`, html_url: `https://github.com/x/y/pull/${number}`,
   state: 'open', draft: false, updated_at: '2026-10-27T12:00:00Z', pull_request: { merged_at: null }, ...extra });
 function github(itemsByRepo, status = 200) {

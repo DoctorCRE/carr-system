@@ -1,5 +1,5 @@
 // The deliberately small Program 6 bridge: source a problem from the current
-import { readyToClose } from './work-queue.js';
+import { readyToClose, completionFields } from './work-queue.js';
 // deterministic situation index, capture it, and expose a safe read card. It
 // does not own a lifecycle transition, an executor, or an approval.
 import { WORK_REQUEST_PROJECTION_STATE, WORK_REQUEST_READ_STATES, readableWorkRequestSql } from "./work-request-read.ts";
@@ -775,12 +775,10 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
         change_refs: { type: "array", minItems: 1, items: { type: "object", additionalProperties: false,
           properties: { pr_url: { type: "string", pattern: "^https://github\\.com/(DoctorCRE/carr-system|jbookout/doctorcre-app)/pull/[1-9][0-9]*$" },
             merge_commit_sha: { type: "string", pattern: "^[0-9a-fA-F]{40}$" } }, required: ["pr_url", "merge_commit_sha"] } },
-        criterion_evidence: { type: "array", items: { type: "object", additionalProperties: false,
-          properties: { id: { type: "string", minLength: 1 }, evidence: { type: "string", minLength: 1 } }, required: ["id", "evidence"] } },
-        user_facing: { type: "boolean" }, user_journey_ref: { type: "string", minLength: 1 },
+        ...completionFields,
       }, required: ["idempotency_key", "human_ref", "base_version", "change_refs", "criterion_evidence", "user_facing"] },
-      // Slice closure may reuse an attestor from stored evidence; this is never an MCP input.
-      handler: async (c, actor, args, recordedAttestor = null) => {
+      // Only the server's GitHub reader can supply a review-gate attestation; never an MCP input.
+      handler: async (c, actor, args, reviewAttestation = null) => {
         const fields = new Set(["idempotency_key", "human_ref", "base_version", "change_refs", "criterion_evidence", "user_facing", "user_journey_ref"]);
         if (Object.keys(args).some(key => !fields.has(key)) || !UUID.test(args.idempotency_key || "") ||
             !/^WR-[0-9]{1,12}$/.test(args.human_ref || "") || !Number.isInteger(args.base_version) || args.base_version < 1 ||
@@ -812,7 +810,8 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
               /^[0-9a-fA-F]{40}$/.test(change?.merge_commit_sha || "")) ? args.change_refs
               .map(change => `${change.pr_url}#${change.merge_commit_sha}`).join("\n") : "",
             criterion_evidence: args.criterion_evidence, change_refs: args.change_refs,
-            user_facing: args.user_facing, user_journey_ref: args.user_journey_ref, attested_by: recordedAttestor ?? actor.id,
+            user_facing: args.user_facing, user_journey_ref: args.user_journey_ref, attested_by: reviewAttestation?.reviewer_card ?? actor.id,
+            ...(reviewAttestation ? { review_gate_approvals: reviewAttestation.approvals } : {}),
           };
           if (capsule.acceptance_predicates.some(line => !line) || args.criterion_evidence?.length !== current.acceptance_criteria.length)
             capsule.acceptance_predicates = [];

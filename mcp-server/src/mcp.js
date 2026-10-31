@@ -870,6 +870,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
   }
   client.ai = budgetedAi(env);
   client.jevApiKey = env.TYPESAFE_API_KEY;
+  client.reviewedChange = isolatePullRequests(env.GITHUB_TOKEN).reviewedChange;
   const writerRead = tool.writerConnection === true && !tool.write;
   let readOk = true;
   let backgroundOwnsConnection = false;
