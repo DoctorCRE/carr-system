@@ -130,11 +130,13 @@ class PushFloorTests(RepositoryFixture):
         self.write("ops/example-selftest.py", "from pathlib import Path\n"
                    "with Path('calls').open('a') as log:\n    log.write('paired\\n')\n")
         self.write("mcp-server/src/scac-mutation-registry.current.generated.js", "// baseline\n")
+        self.write("mcp-server/src/tool-families/fixture.js", "// reviewed family\n")
         self.commit("ops/ci.sh", "ops/ci-pushfloor.py", "ops/node_test_summary.py",
                     "ops/no-client-deliverables-gate.py",
                     "ops/hook-deletion-check.py", "ops/ci-selftest.py", "bin/type-check.sh",
                     "bin/node", "hooks/example.py", "ops/example-selftest.py",
-                    "mcp-server/src/scac-mutation-registry.current.generated.js")
+                    "mcp-server/src/scac-mutation-registry.current.generated.js",
+                    "mcp-server/src/tool-families/fixture.js")
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
 
     def run_floor(self, *changed):
@@ -153,6 +155,12 @@ class PushFloorTests(RepositoryFixture):
         self.assertEqual(self.calls(), ["--test mcp-server/test/atlas-inventory-graph-read.test.mjs "
                                        "mcp-server/test/atlas-inventory-graph-web.test.mjs"])
         self.assertIn("scac-atlas", result.stdout + result.stderr)
+
+    def test_family_descriptor_selects_atlas(self):
+        result = self.run_floor("mcp-server/src/tool-families/fixture.js")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("scac-atlas", result.stdout + result.stderr)
+        self.assertIn("atlas-inventory-graph-read.test.mjs", self.calls()[0])
 
     def test_hook_and_paired_test_changes_run_pair_once(self):
         result = self.run_floor("hooks/example.py", "ops/example-selftest.py")
