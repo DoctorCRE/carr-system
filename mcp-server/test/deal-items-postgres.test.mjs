@@ -1,51 +1,19 @@
 // Test persisted deal items, board projections, and item-level writes in PostgreSQL.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
-import { applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { readDealItems } from '../src/deal-items.ts';
 import { CHECKLIST_SOURCES } from '../src/deal-checklist.ts';
 
-let fixture, admin, database, c, actor, deal;
+let fixture, c, actor, deal;
 before(async () => {
-  const ciDsn = process.env.CARR_CI_DATABASE_URL;
-  let bin, connection;
-  if (ciDsn) {
-    const url = new URL(ciDsn);
-    assert.ok(['postgres:', 'postgresql:'].includes(url.protocol));
-    assert.ok(['127.0.0.1', 'localhost'].includes(url.hostname), 'fixture requires disposable loopback PostgreSQL');
-    assert.equal(url.search, '', 'fixture connection must not override its loopback host');
-    admin = new pg.Client({ connectionString: ciDsn });
-    await admin.connect();
-    const name = `deal_items_${randomUUID().replaceAll('-', '')}`;
-    await admin.query(`create database "${name}" template template0`);
-    database = name;
-    url.pathname = `/${database}`;
-    connection = { connectionString: url.href };
-  } else {
-    bin = ['/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin',
-      '/opt/homebrew/opt/postgresql@18/bin', '/usr/lib/postgresql/18/bin'].find(p => existsSync(`${p}/initdb`));
-    assert.ok(bin, 'PostgreSQL is required for the isolated record-layer proof');
-    fixture = await acquireDisposablePostgres({ prefix: 'deal-items-', pgCtl: `${bin}/pg_ctl` });
-    await fixture.run(`${bin}/initdb`, ['-D', `${fixture.root}/data`, '-U', 'carr_ci', '--auth=trust', '--no-locale']);
-    await fixture.run(`${bin}/pg_ctl`, ['-D', `${fixture.root}/data`, '-l', `${fixture.root}/server.log`, '-o', `-k ${fixture.root} -h ''`, '-w', 'start']);
-    await fixture.run(`${bin}/createdb`, ['-h', fixture.root, '-U', 'carr_ci', 'carr_ci']);
-    connection = { host: fixture.root, user: 'carr_ci', database: 'carr_ci' };
-  }
+  fixture = await acquireDisposablePostgres({ prefix: 'deal-items-', snapshot: true });
+  const connection = fixture.connection;
   c = new pg.Client(connection);
   await c.connect();
-  await c.query('do $$ begin create role neondb_owner; exception when duplicate_object then null; end $$;');
-  const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
-  if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
-  else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
-  await applyPendingDealRoomReads(c);
-  await c.query(readFileSync(new URL('../../migrations/1003_notification_morning_midnight.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic physician',$1,$1) returning id", [actor.id])).rows[0].id;
   await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
@@ -53,11 +21,7 @@ before(async () => {
   deal = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic coastal purchase',$1,'purchase','research','joe',$2,$2) returning id", [client, actor.id])).rows[0].id;
 });
 after(async () => {
-  try { await c?.end(); }
-  finally {
-    try { if (database) await admin.query(`drop database "${database}"`); }
-    finally { await Promise.all([admin?.end(), fixture?.close()]); }
-  }
+  try { await c?.end(); } finally { await fixture?.close(); }
 });
 
 test('the record proof uses an isolated database on the provided CI service', async () => {
@@ -482,7 +446,7 @@ test('Home discovers pending call follow-ups through existing grants without exe
   };
   await t.test('task and email metadata retain exact refs and local-body hash in stable order', async () => {
     const result = await read();
-    for (const candidate of result.candidates) candidate.created_at = new Date(candidate.created_at).toISOString();
+    for (const candidate of result.candidates) candidate.created_at = Temporal.Instant.from(candidate.created_at).toString({ fractionalSecondDigits: 3 });
     assert.deepEqual(result, { schema_version:'post-call-followups.v1', send:false, candidates:[
       { id:first, session_id:session, kind:'assigned_action', deal_id:deal, deal_name:'Synthetic coastal purchase', contact_name:null,
         payload:{deal_id:deal,assignee:'dell',action:'Call the synthetic lender',due_on:null},
@@ -539,4 +503,131 @@ test('Home discovers pending call follow-ups through existing grants without exe
       values($1,'synthetic-limit','synthetic',1001,'assigned_action',$2,'joe','Synthetic overflow','Call the vendor',0.5)`,[session,deal]);
     await assert.rejects(read,e=>e.payload.error==='post_call_followups_limit_exceeded' && e.payload.limit===1000);
   });
+});
+
+test('post-call follow-ups merge into existing open steps through the writer role', async () => {
+  await c.query('begin');
+  try {
+    const prior = await executeRegisteredTool(c, actor, 'record-deal-item', {
+      deal, ...item('Call synthetic duplicate vendor'), idempotency_key: randomUUID(),
+    });
+    const nonce = randomUUID();
+    const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,
+      consent_announced_at,session_token_hash,expires_at,state_at)
+      values($1,'synthetic-device',$2,'meeting',now(),now(),$1,now()+interval '1 hour',now()) returning id`, [nonce, actor.id])).rows[0].id;
+    await c.query("select set_config('carr.acting_actor_slug','joe',true), set_config('carr.verified_human_actor_slug','joe',true)");
+    for (const [index, description] of ['Call synthetic duplicate vendor', 'Call another synthetic vendor', '  CALL   another synthetic vendor  '].entries()) {
+      const candidate = (await c.query(`insert into capture_post_call_candidate(session_id,idempotency_key,batch_hash,
+        item_index,kind,deal_id,assignee_slug,action_description,due_on,due_defaulted,evidence_quote,confidence)
+        values($1,$2,'synthetic',0,'assigned_action',$3,'joe',$4,'2026-11-02',false,'Joe will call this vendor',0.9) returning id`,
+      [session, randomUUID(), deal, description])).rows[0].id;
+      await c.query('set local role carr_writer');
+      const result = await executeRegisteredTool(c, actor, 'resolve-post-call-candidate', {
+        candidate_id: candidate, accept: true, idempotency_key: randomUUID(),
+      });
+      await c.query('reset role');
+      if (index === 0) assert.equal(result.ref, prior.item.id);
+    }
+    const actions = (await c.query("select * from capture_post_call_action where deal_id=$1 and description='Call another synthetic vendor'", [deal])).rows;
+    assert.equal(actions.length, 1);
+    assert.equal((await c.query("select due_on::text from next_action where id=$1", [prior.item.id])).rows[0].due_on, '2026-11-02');
+    assert.equal((await c.query("select count(*)::int as n from capture_post_call_candidate where session_id=$1 and status='confirmed'", [session])).rows[0].n, 3);
+  } finally { await c.query('rollback'); }
+});
+
+test('same-text post-call follow-ups keep each partner owner', async () => {
+  await c.query('begin');
+  try {
+    const dell = (await c.query("insert into actor(slug,kind,display_name) values('dell','human','Synthetic Dell') on conflict(slug) do update set active=true returning id")).rows[0].id;
+    const nonce = randomUUID();
+    const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,
+      consent_announced_at,session_token_hash,expires_at,state_at)
+      values($1,'synthetic-device',$2,'meeting',now(),now(),$1,now()+interval '1 hour',now()) returning id`, [nonce, actor.id])).rows[0].id;
+    await c.query("select set_config('carr.acting_actor_slug','joe',true), set_config('carr.verified_human_actor_slug','joe',true)");
+    for (const source of ['next_action', 'capture_post_call_action']) {
+      const description = source === 'next_action' ? 'Send probe LOI' : 'Send second probe LOI';
+      const propose = async assignee => (await c.query(`insert into capture_post_call_candidate(session_id,idempotency_key,batch_hash,
+        item_index,kind,deal_id,assignee_slug,action_description,due_on,evidence_quote,confidence)
+        values($1,$2,'synthetic',0,'assigned_action',$3,$4,$5,'2026-11-02','Send the probe LOI',0.9) returning id`,
+      [session, randomUUID(), deal, assignee, description])).rows[0].id;
+      const accept = async candidate => {
+        await c.query('set local role carr_writer');
+        try { return await executeRegisteredTool(c, actor, 'resolve-post-call-candidate', {
+          candidate_id: candidate, accept: true, idempotency_key: randomUUID(),
+        }); } finally { await c.query('reset role'); }
+      };
+      const prior = source === 'next_action'
+        ? (await executeRegisteredTool(c, actor, 'record-deal-item', { deal, ...item(description), idempotency_key: randomUUID() })).item.id
+        : (await accept(await propose('joe'))).ref;
+      const accepted = await accept(await propose('dell'));
+      assert.notEqual(accepted.ref, prior, source);
+      assert.equal((await c.query(`select owner_id from ${source} where id=$1`, [prior])).rows[0].owner_id, actor.id);
+      assert.equal((await c.query('select owner_id from capture_post_call_action where id=$1', [accepted.ref])).rows[0].owner_id, dell);
+    }
+  } finally { await c.query('rollback'); }
+});
+
+
+test('a defaulted follow-up stays separate from a legacy action with a real future date', async () => {
+  await c.query('begin');
+  try {
+    const nonce = randomUUID();
+    const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,
+      consent_announced_at,session_token_hash,expires_at,state_at)
+      values($1,'synthetic-device',$2,'meeting',now(),now(),$1,now()+interval '1 hour',now()) returning id`, [nonce, actor.id])).rows[0].id;
+    await c.query("select set_config('carr.acting_actor_slug','joe',true), set_config('carr.verified_human_actor_slug','joe',true)");
+    const accept = async (due, defaulted) => {
+      const candidate = (await c.query(`insert into capture_post_call_candidate(session_id,idempotency_key,batch_hash,
+        item_index,kind,deal_id,assignee_slug,action_description,due_on,due_defaulted,evidence_quote,confidence)
+        values($1,$2,'synthetic',0,'assigned_action',$3,'joe','Call legacy vendor',$4,$5,'Joe will call vendor',0.9) returning id`,
+      [session, randomUUID(), deal, due, defaulted])).rows[0].id;
+      return executeRegisteredTool(c, actor, 'resolve-post-call-candidate', { candidate_id: candidate, accept: true, idempotency_key: randomUUID() });
+    };
+    const prior = await accept('2099-11-03', false);
+    await c.query("update capture_post_call_action set item_title=null,item_bullets='[]'::jsonb,source_ref=null where id=$1", [prior.ref]);
+    const incoming = await accept('2000-11-02', true);
+    assert.notEqual(incoming.ref, prior.ref);
+    const actions = (await c.query('select id,due_on::text,status from capture_post_call_action where id=any($1::uuid[])', [[prior.ref, incoming.ref]])).rows;
+    assert.equal(actions.find(action => action.id === prior.ref).due_on, '2099-11-03');
+    assert.equal(actions.find(action => action.id === prior.ref).status, 'open');
+    assert.equal(actions.find(action => action.id === incoming.ref).due_on, '2000-11-02');
+  } finally { await c.query('rollback'); }
+});
+
+test('post-call merges keep partner dates unless the incoming date is stated', async () => {
+  await c.query('begin');
+  try {
+    const nonce = randomUUID();
+    const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,
+      consent_announced_at,session_token_hash,expires_at,state_at)
+      values($1,'synthetic-device',$2,'meeting',now(),now(),$1,now()+interval '1 hour',now()) returning id`, [nonce, actor.id])).rows[0].id;
+    await c.query("select set_config('carr.acting_actor_slug','joe',true), set_config('carr.verified_human_actor_slug','joe',true)");
+    for (const source of ['next_action', 'capture_post_call_action']) {
+      const description = source === 'next_action' ? 'Call dated vendor' : 'Call second dated vendor';
+      const accept = async (due, defaulted) => {
+        const candidate = (await c.query(`insert into capture_post_call_candidate(session_id,idempotency_key,batch_hash,
+          item_index,kind,deal_id,assignee_slug,action_description,due_on,due_defaulted,evidence_quote,confidence)
+          values($1,$2,'synthetic',0,'assigned_action',$3,'joe',$4,$5,$6,'Joe will call vendor',0.9) returning id`,
+        [session, randomUUID(), deal, description, due, defaulted])).rows[0].id;
+        await c.query('set local role carr_writer');
+        try { return await executeRegisteredTool(c, actor, 'resolve-post-call-candidate', {
+          candidate_id: candidate, accept: true, idempotency_key: randomUUID(),
+        }); } finally { await c.query('reset role'); }
+      };
+      const prior = source === 'next_action'
+        ? (await executeRegisteredTool(c, actor, 'record-deal-item', { deal, ...item(description), idempotency_key: randomUUID() })).item.id
+        : (await accept('2026-10-23', false)).ref;
+      for (const [due, defaulted, expected] of [
+        ['2026-11-02', true, '2026-10-23'],
+        ['2026-11-03', false, '2026-11-03'],
+        ['2026-11-04', true, '2026-11-03'],
+        ['2026-11-05', null, '2026-11-03'],
+        [null, false, '2026-11-03'],
+      ]) {
+        assert.equal((await accept(due, defaulted)).ref, prior);
+        assert.equal((await c.query(`select due_on::text from ${source} where id=$1`, [prior])).rows[0].due_on, expected, `${source}: ${due}/${defaulted}`);
+        assert.equal((await c.query("select new_value->>'due_on' as due_on from event where verb='resolve-post-call-candidate' and new_value->>'next_action_id'=$1 order by mutation_order desc limit 1", [prior])).rows[0].due_on, expected);
+      }
+    }
+  } finally { await c.query('rollback'); }
 });

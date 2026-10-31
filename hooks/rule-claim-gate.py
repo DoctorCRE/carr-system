@@ -5,7 +5,6 @@ import fcntl
 import hashlib
 from pathlib import Path
 import re
-import shlex
 import subprocess
 import sys
 
@@ -132,35 +131,6 @@ def enforcement_path(path):
     return ''
 
 
-def background_build(command, cwd):
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n')
-    lexer.whitespace = ' \t\r'
-    lexer.whitespace_split = True
-    segments, segment = [], []
-    for token in lexer:
-        if token and all(c in ';&|\n' for c in token):
-            segments.append(segment)
-            segment = []
-        else:
-            segment.append(token)
-    segments.append(segment)
-    for args in segments:
-        if len(args) == 2 and args[0] == 'cd':
-            cwd = (Path(cwd) / Path(args[1]).expanduser()).resolve()
-            continue
-        if args and re.fullmatch(r'python(?:3(?:\.\d+)?)?', Path(args[0]).name):
-            args = args[1:]
-        if len(args) < 4:
-            continue
-        if (Path(cwd) / args[0]).resolve() != (Path(cwd) / 'bin/codex-job').resolve():
-            continue
-        if re.search(
-            r'\b(?:build|add|create|implement|write)\b[^.!?]*\b(?:hook|gate|test|CI check)\b',
-            args[3], re.I):
-            return True
-    return False
-
-
 def log(event, action, **details):
     row = json.dumps({'event': action, 'session': event.get('session_id'), **details})
     try:
@@ -244,11 +214,6 @@ def check_turn(event, records):
             continue
         content = record['message']['content']
         for block in content if isinstance(content, list) else []:
-            if (block.get('type') == 'tool_use' and block.get('name') == 'Bash'
-                    and re.search(r'\b(?:running|started)\b', text, re.I)
-                    and re.search(r'\bnot (?:yet )?enforced\b', text, re.I)
-                    and background_build(block['input'].get('command', ''), event['cwd'])):
-                return
             if block.get('type') != 'tool_use' or block.get('name') not in {'Edit', 'Write'}:
                 continue
             path = Path(block['input'].get('file_path', ''))
@@ -268,8 +233,7 @@ def check_turn(event, records):
     return Verdict.block('Rule claim lacks enforcement evidence: ' + claims[0]
                          + '\nEdit/Write non-Markdown enforcement code in hooks/, tools/, tests/, '
                          '.github/workflows/, .claude/settings.json or mcp-server/src/; '
-                         'launch bin/codex-job with a build brief for a hook, gate, test '
-                         'or CI check and say running and not yet enforced; or say not enforced '
+                         'or say not enforced '
                          'and explain why it cannot be checked mechanically. '
                          'Guidance files and skills document judgment; machine-enforceable requirements need the relevant code and CI checks in their PR.')
 

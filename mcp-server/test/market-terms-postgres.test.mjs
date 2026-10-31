@@ -140,7 +140,10 @@ test('market terms project confirmed history with explicit coverage', async t =>
       const after = await read({ submarket });
       assert.deepEqual(after.rows, []);
       assert.equal(after.coverage.unclassified_receipts, before.coverage.unclassified_receipts + 1);
-      assert.equal(after.coverage.unsupported_receipts, before.coverage.unsupported_receipts + 1);
+      assert.equal(after.coverage.unsupported_receipts, before.coverage.unsupported_receipts);
+      assert.equal(after.coverage.superseded_without_context, before.coverage.superseded_without_context + 1);
+      assert.equal(after.coverage.classified_receipts, after.coverage.eligible_receipts
+        + after.coverage.unsupported_receipts + after.coverage.superseded_without_context);
     });
 
     await t.test('extractor quarantine recomputes support while preserving human review and unaffected independent evidence', async () => {
