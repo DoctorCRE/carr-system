@@ -105,8 +105,8 @@ def call_verb(verb: str, args: Mapping[str, Any], *, timeout: float | None = 120
         return " ".join(lines[-1].split())[-DETAIL_LIMIT:] if lines else ""
 
     try:
-        proc = runner([str(RUN_SH), "call", verb, json.dumps(args)], cwd=str(REPO), env=child_env,
-                      stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
+        proc = runner([str(RUN_SH), "call", verb, "-"], cwd=str(REPO), env=child_env,
+                      input=json.dumps(args), capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return VerbResult(verb, TRANSIENT, detail=f"timed out after {timeout:g}s")
     except OSError as exc:
@@ -137,12 +137,12 @@ def call_verb(verb: str, args: Mapping[str, Any], *, timeout: float | None = 120
     return VerbResult(verb, OK, reply=body)
 
 
-def _run_process(argv, *, cwd, env, stdin, capture_output, text, timeout):
-    with subprocess.Popen(argv, cwd=cwd, env=env, stdin=stdin,
+def _run_process(argv, *, cwd, env, input, capture_output, text, timeout):
+    with subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.PIPE,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                           text=text, start_new_session=True) as proc:
         try:
-            stdout, stderr = proc.communicate(timeout=timeout)
+            stdout, stderr = proc.communicate(input=input, timeout=timeout)
         except BaseException:
             _stop_process_group(proc)
             raise
