@@ -2162,6 +2162,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-home-inbox": {
+    "ingress_key": "mcp-tool:read-home-inbox",
+    "source_locator": "mcp-server/src/home-inbox.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-invoice-tracker": {
     "ingress_key": "mcp-tool:read-invoice-tracker",
     "source_locator": "mcp-server/src/invoice-tracker.ts",
@@ -3317,10 +3327,30 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "settle-home-inbox": {
+    "ingress_key": "mcp-tool:settle-home-inbox",
+    "source_locator": "mcp-server/src/home-inbox.js",
+    "schema_digest": "901e2b1be80531b1549d9f691024c25e6cd586518eee2a81cd55651237e57688",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "share-doc-conversation": {
     "ingress_key": "mcp-tool:share-doc-conversation",
     "source_locator": "mcp-server/src/doc-conversation.js",
     "schema_digest": "963a81eda4e537fd27b9a7ddd27afccd6ea1da64cc37afeffc435796afe0f0dd",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "snooze-home-inbox": {
+    "ingress_key": "mcp-tool:snooze-home-inbox",
+    "source_locator": "mcp-server/src/home-inbox.js",
+    "schema_digest": "46a4b8a3edb5aa1dc6d8c780df2e762c7765a6e8b81d9a45957047f0e4ad18f6",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -3514,6 +3544,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/system-work-census.v5.js",
     "schema_digest": "126ebd4723150468d305a554501dcf6d3f15023849350468d33e1bb0d9154fb6",
     "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "unsettle-home-inbox": {
+    "ingress_key": "mcp-tool:unsettle-home-inbox",
+    "source_locator": "mcp-server/src/home-inbox.js",
+    "schema_digest": "901e2b1be80531b1549d9f691024c25e6cd586518eee2a81cd55651237e57688",
+    "write": true,
     "human_only": false,
     "human_caller_only": false,
     "authority_only": false,
@@ -4135,6 +4175,36 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.record_deal_extraction(p_tenant text, p_actor_id uuid, p_args jsonb)",
       "volatility": "v",
       "ingress_key": "db-function-acl:ops.record_deal_extraction(p_tenant text, p_actor_id uuid, p_args jsonb):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.change_home_inbox(p_key uuid, p_command text, p_items jsonb, p_until timestamp with time zone)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.change_home_inbox(p_key uuid, p_command text, p_items jsonb, p_until timestamp with time zone):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.read_home_inbox()",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.read_home_inbox():carr_writer:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
