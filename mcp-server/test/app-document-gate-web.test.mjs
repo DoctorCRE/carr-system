@@ -5,7 +5,7 @@ import { ALLOW_LIST } from "../src/identity.js";
 import { createDealroomHandler, isDealroomRequest } from "../src/dealroom-web.js";
 
 const HOST = "dealroom.doctorcre.com";
-const FACT_ROUTES = [['list', 'list-fact-review'], ['record', 'record-human-fact'], ['resolve', 'resolve-fact-review']];
+const FACT_ROUTES = [['documents', 'list-deal-documents'], ['list', 'list-fact-review'], ['record', 'record-human-fact'], ['resolve', 'resolve-fact-review']];
 const APP_PAGES = ["/work-inventory", "/tasks", "/business", "/pipeline", "/control-room", "/incidents", "/notifications", "/conversations"];
 
 class Kv {
@@ -68,7 +68,7 @@ test('fact review routes require a session and CSRF and dispatch their bound ver
     assert.deepEqual(calls.at(-1).args, { limit: 1 });
   }
   assert.equal((await handler.fetch(post('record-fact-observations'), environment, {})).status, 404);
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
 });
 
 test("every DoctorCRE app page route is a Deal Room request; an unlisted page is not", () => {
