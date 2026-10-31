@@ -15,8 +15,8 @@ export async function applyPendingDealRoomReads(client) {
   if (!(await client.query("select to_regclass('public.v_requirement_request') as view")).rows[0].view)
     await client.query(readFileSync(new URL('../../../migrations/1105_requirement_requests.sql', import.meta.url), 'utf8'));
   await client.query(readFileSync(new URL('../../../migrations/1064_deal_sent_correspondence.sql', import.meta.url), 'utf8'));
-  await client.query(readFileSync(new URL('../../../migrations/1077_preserve_call_plan_projection.sql', import.meta.url), 'utf8'));
-  await client.query(readFileSync(new URL('../../../migrations/1090_closed_current_step_projection.sql', import.meta.url), 'utf8'));
+  await client.query(readFileSync(new URL('../../../migrations/1117_preserve_call_plan_projection.sql', import.meta.url), 'utf8'));
+  await client.query(readFileSync(new URL('../../../migrations/1123_closed_current_step_projection.sql', import.meta.url), 'utf8'));
   await client.query(readFileSync(new URL('../../../migrations/1065_call_followup_contact.sql', import.meta.url), 'utf8'));
   await client.query(readFileSync(new URL('../../../migrations/1079_single_action_completion.sql', import.meta.url), 'utf8'));
 }
