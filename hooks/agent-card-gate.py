@@ -39,7 +39,18 @@ def decide(event):
     tool = event.get('tool_name')
     if tool == 'mcp__t3-code__run_scheduled_task_now':
         return refuse('Cannot inspect a stored T3 task prompt. Use a dispatch tool with an inline Card-bearing prompt.')
-    if tool == 'mcp__t3-code__t3_queue':
+    if tool == 'mcp__t3-code__t3_pending_request':
+        action = inputs.get('action')
+        if action in {'list', 'read'}:
+            return
+        if action != 'respond':
+            return refuse('Cannot inspect this T3 pending-request action.')
+        answers = inputs.get('answers')
+        if not isinstance(answers, dict) or not answers or not all(
+                isinstance(answer, str) for answer in answers.values()):
+            return refuse('A T3 response requires inspectable string answers with a Card.')
+        prompts = ['\n\n'.join(answers.values())]
+    elif tool == 'mcp__t3-code__t3_queue':
         action = inputs.get('action')
         if action == 'promote_to_steer':
             return refuse('Cannot inspect a stored T3 queue prompt. Use t3_thread_send with an inline Card-bearing message.')

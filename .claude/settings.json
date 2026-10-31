@@ -4,7 +4,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Agent|Bash|mcp__t3-code__delegate_task|mcp__t3-code__t3_thread_launch|mcp__t3-code__create_threads|mcp__t3-code__t3_thread_send|mcp__t3-code__schedule_task|mcp__t3-code__run_scheduled_task_now|mcp__t3-code__t3_queue|mcp__t3-code__t3_thread_send_attachments",
+        "matcher": "Agent|Bash|mcp__t3-code__delegate_task|mcp__t3-code__t3_thread_launch|mcp__t3-code__create_threads|mcp__t3-code__t3_thread_send|mcp__t3-code__schedule_task|mcp__t3-code__run_scheduled_task_now|mcp__t3-code__t3_pending_request|mcp__t3-code__t3_queue|mcp__t3-code__t3_thread_send_attachments",
         "hooks": [
           {
             "type": "command",
