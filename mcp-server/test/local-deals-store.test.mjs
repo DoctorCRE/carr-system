@@ -327,10 +327,15 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         const reviews = await executeRegisteredTool(c, actor, 'read-deal-update-reviews', {});
         assert.equal(reviews.proposals.length, !failure && (verdict === 'unclear' || confidence < 0.9) ? 1 : 0);
         if (resolved) {
+          assert.equal(reviews.automatic_resolutions.length, 1);
+          assert.equal(reviews.automatic_resolutions[0].assessment_id, assessment.id);
+          assert.equal(reviews.automatic_resolutions[0].quote, args.text);
+          assert.equal(reviews.automatic_resolutions[0].undo_possible, true);
           const undone = await executeRegisteredTool(c, actor, 'review-deal-update', {
             idempotency_key: randomUUID(), assessment_id: assessment.id, decision: 'undo', reason: 'Synthetic correction',
           });
           assert.equal(undone.decision, 'undo');
+          assert.equal((await executeRegisteredTool(c, actor, 'read-deal-update-reviews', {})).automatic_resolutions.length, 0);
           const after = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
           assert.equal(after.next_actions.find(a => a.id === prior.next_action_id).status, 'open');
           assert.equal(after.next_date, '2020-01-01', 'undo restores the coupled prior plan');
@@ -338,6 +343,33 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
           assert.equal(after.next_actions.find(a => a.id === result.next_action_id).status, 'dropped');
         }
       }));
+
+    await t.test('automatic resolutions respect ownership, age and newer changes', async () => transaction(async () => {
+      await fixture(false);
+      const dell = {...actor, id: id(7), slug: 'dell'};
+      await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'dell','Synthetic Partner Two','human',true)", [dell.id]);
+      await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      c.jevClient = jevStub('yes');
+      await TOOLS['add-deal-note'].handler(c, actor, {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord sent the revised terms.'});
+      await c.query("update event set personal_scope='none' where field='overdue_assessment'");
+      const read = () => executeRegisteredTool(c, actor, 'read-deal-update-reviews', {});
+      let reviews = await read();
+      assert.equal(reviews.schema_version, 'deal-update-reviews.v1');
+      assert.deepEqual(reviews.proposals, []);
+      assert.equal(reviews.automatic_resolutions[0].action_title, 'Request revised terms');
+      assert.equal((await executeRegisteredTool(c, dell, 'read-deal-update-reviews', {})).automatic_resolutions.length, 0);
+      await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'New plan', next_date: '2030-01-01',
+      });
+      reviews = await read();
+      assert.equal(reviews.automatic_resolutions[0].undo_possible, false);
+      await c.query("update event set recorded_at=current_timestamp - interval '8 days' where field='overdue_assessment'");
+      assert.deepEqual((await read()).automatic_resolutions, []);
+    }));
 
     await t.test('overdue proposals belong only to the action owner', async () => transaction(async () => {
       await fixture(false);
