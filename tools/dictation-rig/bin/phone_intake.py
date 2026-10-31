@@ -244,10 +244,12 @@ def bridge_module():
 
 
 def publish_status(session: Path, cfg: dict, token: str, bridge) -> bool:
-    """Send only allowlisted codes and counts; keep the receipt for retry deduplication."""
+    """Exchange review questions and answers through the authenticated status report."""
     status = post_call.read_json(session / post_call.STATUS_FILE) or {}
     report = post_call.read_json(session / post_call.REPORT_FILE) or {}
-    count = sum(not question.get('resolved', False) for question in report.get('review_questions', []))
+    questions = [{'id': question['id'], 'question': question['question']}
+                 for question in report.get('review_questions', []) if not question.get('resolved', False)]
+    count = len(questions)
     state, reason = status.get('state'), status.get('reason_code', status.get('reason'))
     if state == 'needs_attention':
         if reason not in {'extraction_failed', 'transcript_unavailable', 'transient_ceiling'}:
@@ -260,8 +262,10 @@ def publish_status(session: Path, cfg: dict, token: str, bridge) -> bool:
     else:
         state, reason = None, None
     payload = {'state': state, 'reason': reason, 'open_questions': count}
+    if 'review_questions' in report:
+        payload['review_questions'] = questions
     receipt = session / 'phone-status.json'
-    if post_call.read_json(receipt) == payload:
+    if not count and post_call.read_json(receipt) == payload:
         return True
     metadata = required_json(session / 'phone.json')
     code, reply = bridge.http_request('POST',
@@ -269,6 +273,9 @@ def publish_status(session: Path, cfg: dict, token: str, bridge) -> bool:
         payload, {'Authorization': f'Bearer {token}'})
     if code != 200 or reply.get('ok') is not True:
         return False
+    for answer in reply.get('question_answers', []):
+        if any(question['id'] == answer['question_id'] for question in questions):
+            post_call.resolve_question(session, answer['question_id'], answer['answer'])
     post_call.write_private(receipt, payload)
     return True
 

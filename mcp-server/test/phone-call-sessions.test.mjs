@@ -71,6 +71,14 @@ test('Studio status refuses content and oversized bodies without logging them', 
     { state: 'held_review', reason: 'private transcript', open_questions: 0 },
     { state: 'needs_attention', reason: 'extraction_failed', open_questions: 0, summary: 'private summary' },
     { state: 'held_review', reason: 'summary_repeats_transcript', open_questions: 'private question' },
+    { state: 'held_review', reason: 'open_review_questions', open_questions: 1,
+      review_questions: [{ id: 'q1', question: 'Review?', answer: 'confirm' }] },
+    { state: 'held_review', reason: 'open_review_questions', open_questions: 1,
+      review_questions: [{ id: 'q1', question: 'Review?', transcript: 'private transcript' }] },
+    { state: 'held_review', reason: 'open_review_questions', open_questions: 2,
+      review_questions: [{ id: 'q1', question: 'Review?' }] },
+    { state: 'held_review', reason: 'open_review_questions', open_questions: 2,
+      review_questions: [{ id: 'q1', question: 'Review?' }, { id: 'q1', question: 'Duplicate?' }] },
   ]) {
     const response = await handler.studioFetch(new Request(url, { method: 'POST',
       headers: { authorization: `Bearer ${environment.CALL_STUDIO_TOKEN}` }, body: JSON.stringify(body) }), environment);
@@ -78,7 +86,7 @@ test('Studio status refuses content and oversized bodies without logging them', 
     assert.deepEqual(await response.json(), { error: 'invalid_studio_status' });
   }
   const response = await handler.studioFetch(new Request(url, { method: 'POST',
-    headers: { authorization: `Bearer ${environment.CALL_STUDIO_TOKEN}` }, body: 'private transcript'.repeat(100) }), environment);
+    headers: { authorization: `Bearer ${environment.CALL_STUDIO_TOKEN}` }, body: 'private transcript'.repeat(4000) }), environment);
   assert.equal(response.status, 413);
   assert.deepEqual(logs, []);
 });
