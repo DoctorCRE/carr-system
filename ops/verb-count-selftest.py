@@ -18,8 +18,6 @@ with tempfile.TemporaryDirectory(prefix="verb-count-selftest-") as tmp:
     shutil.copytree(SOURCE, worker, ignore=shutil.ignore_patterns("node_modules"))
     (Path(tmp) / "lib").mkdir()
     shutil.copy(ROOT / "lib/deal_schedule.schema.json", Path(tmp) / "lib")
-    for name in ("scac-mutation-registry.current.generated.js", "tool-families.generated.js"):
-        (worker / "src" / name).unlink(missing_ok=True)
     assert not (worker / "node_modules").exists(), "fixture must have no dependencies"
     baseline = subprocess.run(["sh", str(COUNT), str(SOURCE)], cwd=ROOT,
                               capture_output=True, text=True, check=False)

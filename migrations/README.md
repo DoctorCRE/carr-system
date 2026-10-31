@@ -203,17 +203,17 @@ Replacing the entire function with a copied `$current_grants$` block can erase a
 concurrent migration's grants. Revocations and changes to the same grant need an
 explicit reviewed reconciliation; a blind JSON union cannot settle them.
 
-Refresh the complete build input from a disposable rehearsal after merging main.
+Refresh the complete reviewed grant contract from a disposable rehearsal after merging main.
 All three steps are required, from the repository root:
 
 1. Run `python3 ops/migration-shadow.py --artifact-dir .tmp-grant-rehearsal` to rehearse the combined migration set.
 2. Run `./run.sh regen registry --grant-contract .tmp-grant-rehearsal/schema.sql` to extract its literal contract.
 3. Run `node ops/scac-mutation-inventory.mjs` to verify the regenerated operation contracts.
 
-Review the change to `mcp-server/src/scac-mutation-registry.inputs.js` before
+Review the change to `mcp-server/src/scac-mutation-registry.current.generated.js` before
 committing. The extractor also accepts a migration containing a literal
 `$current_grants$` contract. It parses SQL text without executing it and rejects
 nonliteral bodies or an incompatible registry version. It never queries
-production or silently changes expected grants during deployment. Full contract
-inputs may still need this explicit refresh when two grant-changing PRs overlap;
-ordinary verb additions do not change them.
+production or silently changes expected grants during deployment. The committed contract
+may still need this explicit refresh when two grant-changing PRs overlap;
+ordinary verb additions change only generated operation rows.

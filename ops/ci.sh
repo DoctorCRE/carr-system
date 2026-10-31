@@ -212,9 +212,9 @@ tree_fingerprint() {
 }
 
 check_gates() {
-  if ! run_quiet "$LOGDIR/registry-build.log" "$PY" tools/regen.py registry; then
-    fail_tail "$LOGDIR/registry-build.log"
-    bad gates "registry build failed"
+  if ! run_quiet "$LOGDIR/registry-check.log" node ops/scac-mutation-inventory.mjs; then
+    fail_tail "$LOGDIR/registry-check.log"
+    bad gates "committed registry differs from source; run ./run.sh regen registry"
     return
   fi
   export CARR_HOOK_FIXTURE=1

@@ -1,5 +1,9 @@
 // Register MCP tools and their shared write envelope.
-import toolFamilies from "./tool-families.generated.js";
+import censusInventoryFamily from "./tool-families/census-inventory.js";
+import practiceOriginationFamily from "./tool-families/practice-origination.js";
+import scheduleBoardFamily from "./tool-families/schedule-board.js";
+import vendorMeetingsFamily from "./tool-families/vendor-meetings.js";
+const toolFamilies = [censusInventoryFamily, practiceOriginationFamily, scheduleBoardFamily, vendorMeetingsFamily];
 import { homeInboxTools, HOME_INBOX_WRITES } from "./home-inbox.js";
 import { dealUpdateResolution } from "./deal-update-resolution.js";
 import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.ts";

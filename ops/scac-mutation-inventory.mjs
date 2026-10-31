@@ -557,6 +557,10 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     console.log("current MCP source contracts regenerated; DB registry and grants preserved");
   } else {
     assertCurrentContracts(TOOLS);
+    const path = resolve(REPO_ROOT, "mcp-server/src/scac-mutation-registry.current.generated.js");
+    const source = readFileSync(path, "utf8");
+    if (renderCurrentContracts(TOOLS, source) !== source)
+      throw new Error("committed registry differs from regeneration; run ./run.sh regen registry");
     console.log("current MCP contracts: OK");
   }
 }
