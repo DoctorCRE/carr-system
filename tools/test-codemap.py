@@ -230,6 +230,7 @@ class CodemapTests(unittest.TestCase):
         shutil.copyfile(ROOT / "ops/ci-gates.py", self.repo / "ops/ci-gates.py")
         shutil.copyfile(ROOT / "ops/ci-secret-scan.py", self.repo / "ops/ci-secret-scan.py")
         (self.repo / "hooks/gate-integrity.py").write_text("raise SystemExit(0)\n")
+        self.track("tools/regen.py", "# Build the synthetic registry.\n")
         self.baseline()
         missing = self.track("tools/missing.py", "print('missing')\n")
         for content, expected in (("print('missing')\n", 1),

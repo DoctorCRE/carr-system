@@ -548,7 +548,7 @@ export function assertCurrentContracts(tools) {
   return true;
 }
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
-  if (process.argv[2] && process.argv[2] !== "--write-current")
+  if (process.argv[2] && !["--write-current", "--check-source-inventory-frontier"].includes(process.argv[2]))
     throw new Error("use tools/regen.py registry --grant-contract for reviewed grant inputs");
   const { TOOLS } = await import("../mcp-server/src/tools.js");
   if (process.argv[2] === "--write-current") {
