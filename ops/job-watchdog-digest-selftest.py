@@ -17,97 +17,38 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class HookTests(unittest.TestCase):
-    def test_social_batch_failure_reaches_the_digest_and_success_clears_it(self):
+    def test_findings_reach_inbox_once_until_content_changes_or_reminder_is_due(self):
+        config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            command = [sys.executable, str(ROOT / "tools/job-watchdog.py"),
-                       "--root", directory, "social-batch-result"]
+            facts = {"jobs": [{"label": "fixture", "exit_code": 7, "log_line": "first error"}],
+                     "disk_free_percent": 50}
+            inbox = root / "out/watchdog/orchestrator-inbox.jsonl"
+            def scan(now):
+                with patch.object(watchdog, "collect", return_value=facts), patch.object(watchdog.time, "time", return_value=now):
+                    self.assertEqual(watchdog.scan(root, config), 0)
+                return [json.loads(line) for line in inbox.read_text().splitlines()] if inbox.exists() else []
+            first = scan(1000)
+            self.assertEqual(len(first), 1)
+            self.assertEqual(first[0]["owner"], "orchestrator")
+            self.assertIn("first error", first[0]["finding"]["reason"])
+            self.assertEqual(scan(1001), first)
+            facts["jobs"][0]["log_line"] = "changed error"
+            changed = scan(1002)
+            self.assertEqual(len(changed), 2)
+            self.assertIn("changed error", changed[-1]["finding"]["reason"])
+            age = 86400
+            self.assertEqual(len(scan(1002 + age - 1)), 2)
+            self.assertEqual(len(scan(1002 + age)), 3)
+            facts["jobs"][0]["exit_code"] = 0
+            self.assertEqual(len(scan(1003 + age)), 3)
+            facts["jobs"][0]["exit_code"] = 7
+            self.assertEqual(len(scan(1004 + age)), 4)
 
-            failed = subprocess.run(command + ["--week-start", "2026-11-02",
-                                               "--queue-count", "0", "--queue-complete"],
-                                    text=True, capture_output=True)
-            self.assertEqual(failed.returncode, 1, failed.stderr)
-            digest = subprocess.run([sys.executable, str(ROOT / "hooks/job-watchdog-digest.py")],
-                                    input="{}", text=True, capture_output=True,
-                                    env=dict(os.environ, CARR_JOB_ROOT=directory))
-            self.assertEqual(digest.returncode, 0, digest.stderr)
-            context = json.loads(digest.stdout)["hookSpecificOutput"]["additionalContext"]
-            self.assertIn("social-batch-weekly", context)
-            self.assertIn("zero drafts", context)
-
-            source = root / "source"
-            (source / "ops/launchd").mkdir(parents=True)
-            with patch.object(watchdog, "SOURCE", source):
-                config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
-                watchdog.reconcile(root, config, [], set(), now=1)
-            self.assertIn("zero drafts", watchdog.digest(root, config))
-
-            for reason, expected in (("zero_duration", "zero duration"), ("no_output", "no batch output")):
-                failed = subprocess.run(command + ["--week-start", "2026-11-02",
-                                                   "--failure", reason],
-                                        text=True, capture_output=True)
-                self.assertEqual(failed.returncode, 1, failed.stderr)
-                self.assertIn(expected, watchdog.digest(root, config))
-
-            incomplete = subprocess.run(command + ["--week-start", "2026-11-02",
-                                                   "--queue-count", "9"],
-                                        text=True, capture_output=True)
-            self.assertEqual(incomplete.returncode, 2)
-            self.assertIn("no batch output", watchdog.digest(root, config))
-
-            cleared = subprocess.run(command + ["--week-start", "2026-11-02",
-                                                "--queue-count", "9", "--queue-complete"],
-                                     text=True, capture_output=True)
-            self.assertEqual(cleared.returncode, 0, cleared.stderr)
-            digest = subprocess.run([sys.executable, str(ROOT / "hooks/job-watchdog-digest.py")],
-                                    input="{}", text=True, capture_output=True,
-                                    env=dict(os.environ, CARR_JOB_ROOT=directory))
-            self.assertEqual(digest.returncode, 0, digest.stderr)
-            self.assertEqual(digest.stdout, "")
-
-    def test_digest_hook_and_registration(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "out/watchdog/findings.jsonl"
-            path.parent.mkdir(parents=True)
-            path.write_text(json.dumps({"key": "job_failed:fixture:exit_7", "kind": "job_failed", "exit_code": 7, "reason": "fixture exit 7: last error",
-                                        "next_action": "inspect log", "cleared_at": None}) + "\n")
-            result = subprocess.run([sys.executable, str(ROOT / "hooks/job-watchdog-digest.py")],
-                                    input="{}", text=True, capture_output=True,
-                                    env=dict(os.environ, CARR_JOB_ROOT=directory))
-            self.assertEqual(result.returncode, 0, result.stderr)
-            payload = json.loads(result.stdout)
-            self.assertIn("last error", payload["hookSpecificOutput"]["additionalContext"])
+    def test_partner_prompt_has_no_watchdog_hook(self):
         hooks = json.loads((ROOT / "ops/config/hooks.json").read_text())
-        self.assertTrue(any("job-watchdog-digest.py" in h["command"] for entry in hooks["UserPromptSubmit"] for h in entry["hooks"]))
-
-    def test_banner_only_repeats_after_findings_change_in_each_session(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "out/watchdog/findings.jsonl"
-            path.parent.mkdir(parents=True)
-            row = {"key": "job_failed:fixture:exit_7", "kind": "job_failed", "exit_code": 7, "reason": "fixture exit 7: last error",
-                   "next_action": "inspect log", "cleared_at": None, "last_seen": 1}
-            def invoke(session):
-                result = subprocess.run([sys.executable, str(ROOT / "hooks/job-watchdog-digest.py")],
-                    input=json.dumps({"session_id": session}), text=True, capture_output=True,
-                    env=dict(os.environ, CARR_JOB_ROOT=directory))
-                self.assertEqual(result.returncode, 0, result.stderr)
-                return result.stdout
-            path.write_text(json.dumps(row) + "\n")
-            self.assertIn("last error", invoke("one"))
-            self.assertEqual(invoke("one"), "")
-            row["last_seen"] = 2
-            path.write_text(json.dumps(row) + "\n")
-            self.assertEqual(invoke("one"), "")
-            self.assertIn("last error", invoke("two"))
-            row["reason"] = "process exited"
-            path.write_text(json.dumps(row) + "\n")
-            self.assertIn("process exited", invoke("one"))
-            row["cleared_at"] = 3
-            path.write_text(json.dumps(row) + "\n")
-            self.assertEqual(invoke("one"), "")
-            row["cleared_at"] = None
-            path.write_text(json.dumps(row) + "\n")
-            self.assertIn("process exited", invoke("one"))
+        self.assertFalse(any("job-watchdog-digest.py" in h["command"] for entry in hooks["UserPromptSubmit"] for h in entry["hooks"]))
+        self.assertFalse((ROOT / "hooks/job-watchdog-digest.py").exists())
 
     def test_digest_is_five_lines_and_ignores_retired_findings(self):
         config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")

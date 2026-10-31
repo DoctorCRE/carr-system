@@ -12,7 +12,7 @@ import sys
 import time
 from datetime import date
 
-from local_jobs import append, command, locked, path_at, read_latest, stamp, tail
+from local_jobs import append, command, epoch, locked, path_at, read_latest, stamp, tail
 
 SOURCE = Path(__file__).resolve().parents[1]
 KINDS = {"job_failed", "job_degraded", "disk_low"}
@@ -208,19 +208,29 @@ def report_social_batch(root, config, *, week_start, queue_count=None,
             "queue_complete": queue_complete, "failure_class": failure_class}
 
 
-def digest(root, config, *, session_id=None):
-    active = sorted((f for f in read_latest(path_at(root, config["paths"]["findings"])).values()
-                     if f.get("kind") in KINDS and (f["kind"] != "job_failed" or "exit_code" in f)
-                     and not f.get("cleared_at")), key=lambda f: f["key"])
-    view = [{k: f.get(k) for k in ("key", "reason")} for f in active]
-    if session_id:
-        signature = hashlib.sha256(json.dumps(view, sort_keys=True).encode()).hexdigest()
-        session = hashlib.sha256(session_id.encode()).hexdigest()
-        path = root / "out/watchdog/banner-sessions" / (session + ".digest")
-        with locked(path.with_suffix(".lock")):
-            if path.exists() and path.read_text() == signature:
-                return ""
-            path.write_text(signature)
+def active_findings(root, config):
+    return sorted((f for f in read_latest(path_at(root, config["paths"]["findings"])).values()
+                   if f.get("kind") in KINDS and (f["kind"] != "job_failed" or "exit_code" in f)
+                   and not f.get("cleared_at")), key=lambda f: f["key"])
+
+
+def deliver_findings(root, config, now):
+    inbox = path_at(root, config["paths"]["orchestrator_inbox"])
+    with locked(inbox.with_suffix(".lock")):
+        previous = read_latest(inbox)
+        for finding in active_findings(root, config):
+            content = {k: v for k, v in finding.items() if k not in {"last_seen", "cleared_at"}}
+            signature = hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
+            prior = previous.get(finding["key"], {})
+            if (prior.get("signature") == signature
+                    and now - epoch(prior["delivered_at"]) < config["thresholds"]["reminder_seconds"]):
+                continue
+            append(inbox, {"key": finding["key"], "owner": "orchestrator", "signature": signature,
+                           "delivered_at": stamp(now), "finding": finding})
+
+
+def digest(root, config):
+    active = active_findings(root, config)
     if not active:
         return ""
     lines = [f"Orchestrator watchdog: {len(active)} open finding(s)."]
@@ -245,6 +255,7 @@ def scan(root, config):
                 print(f"Watchdog scan failed: {exc}", file=sys.stderr)
                 return 1
             reconcile(root, config, found, {job["label"] for job in facts["jobs"]}, now)
+            deliver_findings(root, config, now)
             append(ledger, {"key": "scan", "status": "completed", "at": stamp(), "findings": len(found)})
             return 0
     except BlockingIOError:
