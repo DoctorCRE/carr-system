@@ -2,7 +2,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-export async function discoverSuites(directory, { minimum, external = [] }) {
+export async function discoverSuites(directory, { expected, external = [] }) {
   const files = [];
   const omitted = [];
   async function visit(relative = '') {
@@ -21,8 +21,8 @@ export async function discoverSuites(directory, { minimum, external = [] }) {
   }
   await visit();
   if (omitted.length) throw new Error(`Unit discovery would omit ${omitted.sort().join(', ')}; put unit suites directly in test/ and name them *.test.mjs or *.test.js.`);
-  if (!Number.isInteger(minimum) || minimum < 1) throw new Error('Invalid checked-in unit suite minimum');
-  if (files.length < minimum)
-    throw new Error(`Unit suite discovery dropped to ${files.length}; checked-in minimum ${minimum}, drop ${minimum - files.length}. Check deleted, renamed or nested suites.`);
+  if (!Number.isInteger(expected) || expected < 1) throw new Error('Invalid checked-in unit suite count');
+  if (files.length !== expected)
+    throw new Error(`Unit suite inventory mismatch: found ${files.length}, expected ${expected}; ${files.length < expected ? 'drop' : 'increase'} ${Math.abs(expected - files.length)}. Check deleted, renamed or nested suites and update the checked-in count deliberately.`);
   return files.sort();
 }
