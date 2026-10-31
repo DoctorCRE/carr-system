@@ -198,7 +198,7 @@ check("checkout-pull fast-forwards every five minutes and at load",
       pull["StartCalendarInterval"] == [{"Minute": m} for m in range(0, 60, 5)]
       and pull.get("RunAtLoad") is True, pull)
 check("checkout-pull uses the installed plain Git command",
-      pull["ProgramArguments"] == ["/usr/bin/git", "-C", "{{REPO}}", "pull", "--ff-only", "--quiet"],
+      pull["ProgramArguments"] == ["/usr/bin/git", "-C", "{{REPO}}", "pull", "--ff-only", "--quiet", "origin", "main"],
       pull["ProgramArguments"])
 
 by_name: dict[str, list[Path]] = {}

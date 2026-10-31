@@ -44,7 +44,7 @@ test('a participant document reply proposes its open request without fulfilling 
     await c.query(`create table activity(id uuid primary key,client_id uuid,deal_id uuid,kind text,email_context jsonb,detail text,version integer default 1,occurred_at timestamptz default now());
       create table party(id uuid primary key,email text,deleted_at timestamptz,merged_into uuid);
       create table deal_participant(deal_id uuid,party_id uuid,to_at timestamptz);`);
-    await c.query(readFileSync(new URL('../../migrations/1107_requirement_document_replies.sql', import.meta.url),'utf8'));
+    await c.query(readFileSync(new URL('../../migrations/1116_requirement_document_replies.sql', import.meta.url),'utf8'));
     const requested = await call('request-checklist-document', { deal, row_key: 'title_commitment', owner: 'joe', due_on: '2026-11-15' });
     assert.equal(requested.request.document_type, 'title_commitment');
     assert.equal(requested.request.source.section_id, CHECKLIST_SOURCES[2].section_id);

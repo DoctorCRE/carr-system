@@ -10,7 +10,7 @@ type ChecklistItem = { id: string; label: string; status: string; due_on: string
   evidence_ref: string | null; owner: string | null; document_type: string | null; request?: RequirementRequest; source: object };
 type ChecklistPhase = { id: string; label: string; items: ChecklistItem[] };
 /** The deal fields the checklist reads; tools.js passes its full Deal Room record. */
-type ChecklistDeal = { id: string; owner?: string | null; type?: string | null; invoiced_on?: string | null;
+type ChecklistDeal = { requests?: RequirementRequest[]; id: string; owner?: string | null; type?: string | null; invoiced_on?: string | null;
   lease?: { status?: string; evidence_ref?: string; executed_on?: string; expiration_on?: string } | null;
   critical_dates?: { id: string; kind: string; status: string; source?: string | null; due_on: string }[] | null;
   commissions?: { commission_id: string; status: string; received_on: string | null }[] };
@@ -112,6 +112,13 @@ export function deriveDealChecklist(record: ChecklistDeal, sources: SourceRow[],
   const commissions = record.commissions || [];
   complete('commission_received', commissions.length > 0 && commissions.every(row =>
     row.status === 'received' && isCalendarDate(row.received_on)) && commissions.map(row => `commission:${row.commission_id}`).join(', '));
+  for (const item of items) {
+    const request = record.requests?.find(row => row.row_key === item.id);
+    if (request) {
+      Object.assign(item, { request, owner: request.owner, due_on: request.due_on });
+      if (item.status !== 'complete') item.status = request.due_on < today ? 'overdue' : request.due_on === today ? 'due' : 'upcoming';
+    }
+  }
   result.due_items = items
     .filter(item => ['due', 'overdue'].includes(item.status))
     .sort((a, b) => a.due_on!.localeCompare(b.due_on!) || a.id.localeCompare(b.id));
@@ -121,7 +128,7 @@ export function deriveDealChecklist(record: ChecklistDeal, sources: SourceRow[],
 let storageUnavailableLogged = false;
 
 export async function readDealChecklist(client: Db, record: ChecklistDeal, now = new Date()) {
-  let sources, commissions;
+  let sources, commissions, requests;
   try {
     sources = await client.query(
       `select id, status, body_hash from doctrine_section where id = any($1::uuid[]) /* checklist:doctrine */`,
@@ -137,14 +144,11 @@ export async function readDealChecklist(client: Db, record: ChecklistDeal, now =
     }
     return { schema_version: 'deal-checklist.v1', template_state: 'unavailable', phases: [], due_items: [] };
   }
-  const requests = await client.query(`select id,row_key,owner,to_char(due_on,'YYYY-MM-DD') as due_on,
+  const available = await client.query("select to_regclass('v_requirement_request') as relation /* checklist:requests-available */");
+  requests = available.rows[0]?.relation ? await client.query(`select id,row_key,owner,to_char(due_on,'YYYY-MM-DD') as due_on,
     document_type,satisfied,receipts from v_requirement_request
-    where organization_tenant_id='carr-internal' and deal_id=$1 order by row_key /* checklist:requests */`, [record.id]);
+    where organization_tenant_id='carr-internal' and deal_id=$1 order by row_key /* checklist:requests */`, [record.id]) : null;
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
-  const checklist = deriveDealChecklist({ ...record, commissions: commissions.rows }, sources.rows, today);
-  for (const phase of checklist.phases) for (const item of phase.items) {
-    const request = requests.rows.find((row: RequirementRequest) => row.row_key === item.id);
-    if (request) Object.assign(item, { request, owner: request.owner, due_on: request.due_on });
-  }
-  return checklist;
+  return { ...deriveDealChecklist({ ...record, commissions: commissions.rows, requests: requests?.rows }, sources.rows, today),
+    requests_state: requests ? 'current' : 'unavailable' };
 }
