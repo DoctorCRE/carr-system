@@ -11,7 +11,7 @@ import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.c
 // WR-000039 E09a. Synthetic tenants, entities, documents, and actors only.
 const partner = { id: '00000000-0000-4000-8000-000000000001', slug: 'joe', human: true };
 const job = { id: '00000000-0000-4000-8000-000000000002', slug: 'codex', human: false, sponsoring_human_slug: 'joe' };
-const FACT_FUNCTIONS = /^ops\.(record_fact_observations|promote_fact|list_fact_conflicts)\(/;
+const FACT_FUNCTIONS = /^ops\.(record_fact_observations|promote_fact|list_fact_conflicts|record_human_fact|list_fact_review|resolve_fact_review)\(/;
 const hash = n => n.toString(16).padStart(64, '0');
 
 const observation = (id, patch = {}) => {
@@ -49,7 +49,143 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
       secdef_execute: SCAC_MUTATION_CURRENT_DB_GRANTS.secdef_execute.filter(g => !FACT_FUNCTIONS.test(g.signature) && !LATER_FUNCTIONS.test(g.signature)) };
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as $f$select ${c.escapeLiteral(JSON.stringify(predecessor))}::jsonb$f$`);
     await c.query(await readFile(new URL('../../migrations/0983_fact_store.sql', import.meta.url), 'utf8'));
+    await c.query(await readFile(new URL('../../migrations/1099_fact_review.sql', import.meta.url), 'utf8'));
+    await c.query('create table v_ref_index(subject_id uuid, subject_type text)');
+    await c.query(await readFile(new URL('../../migrations/1086_deal_documents.sql', import.meta.url), 'utf8'));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner'),($2,'codex','automation','Synthetic job')", [partner.id, job.id]);
+
+    await t.test('partners record a sourced term from an existing deal attachment', async () => {
+      const deal = randomUUID(), document = randomUUID();
+      await c.query("insert into v_ref_index values($1,'deal')", [deal]);
+      await c.query("insert into attachment(id,subject_type,subject_id,r2_key,filename,mime,sha256,bytes,created_by) values($1,'deal',$2,$3,'synthetic.pdf','application/pdf',$4,100,$5)",
+        [document, deal, `synthetic/${document}`, hash(39), partner.id]);
+      const out = await as('carr_writer', partner, 'record-human-fact', {
+        idempotency_key: randomUUID(), entity_ref: deal,
+        observation: { fact_key: 'base_rent_per_sf', value: '24', unit: 'USD/SF/year', expense_basis: 'nnn', source: { document_ref: document, page_start: 1, page_end: 1, cited_text: 'Synthetic clause.' } },
+      });
+      assert.equal(out.ok, true);
+      const listed = await as('carr_reader', partner, 'list-deal-documents', { deal_id: deal });
+      assert.equal(listed.documents[0].id, out.observation.source.document_ref);
+      assert.equal(listed.documents[0].display_name, 'synthetic.pdf');
+      assert.equal(out.observation.method, 'human');
+      assert.equal(out.observation.source.content_hash, hash(39));
+    });
+
+    await t.test('review queue pages every pending field once, including single review tiers', async () => {
+      for (const [entity, inputs] of [
+        ['queue-a', [observation('a', { confidence_tier: 'verify_band' })]],
+        ['queue-b', [observation('a', { confidence_tier: 'human_review' })]],
+        ['queue-c', [observation('a'), observation('b', { value: '30' }), observation('c', { value: '31' })]],
+        ['queue-d', [observation('a', { method: 'ocr' })]],
+        ['queue-e', [observation('a')]],
+      ]) await record(entity, inputs);
+      const seen = [];
+      let cursor;
+      do {
+        const page = await as('carr_reader', partner, 'list-fact-review', { limit: 1, ...(cursor ? { cursor } : {}) });
+        seen.push(...page.items.map(i => i.entity_ref));
+        cursor = page.next_cursor;
+      } while (cursor);
+      assert.deepEqual(seen.filter(e => e.startsWith('queue-')), ['queue-a', 'queue-b', 'queue-c', 'queue-d']);
+      assert.equal(new Set(seen).size, seen.length);
+      const page = await as('carr_reader', partner, 'list-fact-review', { entity_ref: 'queue-c' });
+      assert.equal(page.items.length, 1);
+      assert.equal(page.items[0].observations.length, 3);
+      assert.deepEqual(page.items[0].reasons, ['conflict']);
+    });
+
+    await t.test('approve, correct and reject retain evidence, receipts and stale guards', async () => {
+      const deal = randomUUID(), document = randomUUID();
+      await c.query("insert into attachment(id,subject_type,subject_id,r2_key,filename,mime,sha256,bytes,created_by) values($1,'deal',$2,$3,'synthetic.pdf','application/pdf',$4,100,$5)",
+        [document, deal, `synthetic/${document}`, hash(40), partner.id]);
+      const inputs = [observation('lease'), observation('counter', { value: '25' }), observation('amendment', { value: '26' })];
+      await record(deal, inputs);
+      const read = async () => (await as('carr_reader', partner, 'list-fact-review', { entity_ref: deal, include_resolved: true })).items[0];
+      const resolve = (item, patch = {}, actor = partner) => as('carr_writer', actor, 'resolve-fact-review', {
+        idempotency_key: randomUUID(), entity_ref: deal, fact_key: item.fact_key,
+        base_version: item.canonical_version, review_version: item.review_version,
+        decision: 'approve', observation_id: item.observations[2].id, reason: 'Synthetic partner review.', ...patch });
+      const initial = await read();
+      const approved = await resolve(initial);
+      assert.equal(approved.canonical_fact.normalized_value, '26');
+      const settled = await read();
+      assert.equal(settled.pending, false);
+      assert.equal(settled.observations.length, 3);
+      assert.equal(settled.review_history[0].decision, 'approve');
+      await assert.rejects(resolve(initial), e => e.payload.error === 'version_conflict');
+      const correction = { fact_key: 'base_rent_per_sf', value: '27', unit: 'USD/SF/year', expense_basis: 'nnn',
+        source: { document_ref: document, page_start: 3, page_end: 3, cited_text: 'Synthetic corrected clause.' } };
+      const key = randomUUID();
+      const corrected = await resolve(settled, { idempotency_key: key, decision: 'correct', observation_id: undefined, correction });
+      assert.equal(corrected.canonical_fact.normalized_value, '27');
+      assert.equal((await resolve(settled, { idempotency_key: key, decision: 'correct', observation_id: undefined, correction })).replayed, true);
+      const after = await read();
+      assert.equal(after.observations.length, 4);
+      assert.equal(after.observations.find(o => o.id === corrected.canonical_fact.observation_ids[0]).method, 'human');
+      assert.deepEqual(after.canonical_history.map(h => h.normalized_value), ['26', '27']);
+      assert.deepEqual(after.review_history.map(h => h.decision), ['approve', 'correct']);
+      await record(deal, [observation('later', { value: '28' })]);
+      await assert.rejects(resolve(after, { decision: 'reject', observation_id: undefined }), e => e.payload.error === 'version_conflict');
+      const reopened = await read();
+      assert.equal(reopened.pending, true);
+      const rejected = await resolve(reopened, { decision: 'reject', observation_id: undefined });
+      assert.equal(rejected.ok, true);
+      const final = await read();
+      assert.equal(final.pending, false);
+      assert.deepEqual((await conflicts({ entity_ref: deal })).conflicts, []);
+      assert.equal(final.observations.length, 5);
+      assert.equal(final.canonical_fact.normalized_value, '27');
+      assert.deepEqual(final.review_history.map(h => h.decision), ['approve', 'correct', 'reject']);
+      await assert.rejects(resolve(reopened, {}, job), e => /human_only/.test(e.payload.error));
+      for (const sql of ['delete from ops.fact_review_decision', "update ops.fact_review_decision set reason='changed'"])
+        await assert.rejects(c.query(sql), { code: '23514' });
+    });
+
+    await t.test('human entries refuse another deal, tenant, deleted document and stale review evidence', async () => {
+      const deal = randomUUID(), document = randomUUID();
+      await c.query("insert into attachment(id,subject_type,subject_id,r2_key,filename,mime,sha256,bytes,created_by) values($1,'deal',$2,$3,'synthetic.pdf','application/pdf',$4,100,$5)",
+        [document, deal, `synthetic/${document}`, hash(41), partner.id]);
+      const observation = { fact_key: 'term_months', value: '5', unit: 'years',
+        source: { document_ref: document, page_start: 1, page_end: 1, cited_text: 'Synthetic term.' } };
+      const entry = entity_ref => as('carr_writer', partner, 'record-human-fact', { idempotency_key: randomUUID(), entity_ref, observation });
+      await assert.rejects(entry(randomUUID()), e => e.payload.error === 'document_not_found');
+      const foreign = (await c.query('select ops.record_human_fact($1,$2,$3,$4,$5::jsonb) r',
+        ['other-tenant', partner.id, randomUUID(), deal, JSON.stringify(observation)])).rows[0].r;
+      assert.equal(foreign.error, 'document_not_found');
+      const first = await entry(deal);
+      const item = (await as('carr_reader', partner, 'list-fact-review', { entity_ref: deal })).items[0];
+      const approved = await as('carr_writer', partner, 'resolve-fact-review', { idempotency_key: randomUUID(), entity_ref: deal,
+        fact_key: 'term_months', base_version: 0, review_version: item.review_version, decision: 'approve',
+        observation_id: first.observation.id, reason: 'Synthetic approval.' });
+      assert.equal(approved.canonical_fact.normalized_value, '60');
+      await c.query('update attachment set deleted_at=now() where id=$1', [document]);
+      await assert.rejects(entry(deal), e => e.payload.error === 'document_not_found');
+    });
+
+    await t.test('concurrent rejections admit one receipt and citation expiry stays honest', async () => {
+      await record('review-race', [observation('a', { confidence_tier: 'verify_band' })]);
+      await c.query("set session_replication_role=replica; update ops.fact_observation set cited_text_expires_at=now()-interval '1 second' where entity_ref='review-race'; set session_replication_role=origin");
+      const item = (await as('carr_reader', partner, 'list-fact-review', { entity_ref: 'review-race' })).items[0];
+      assert.equal(item.observations[0].source.cited_text, null);
+      assert.match(item.observations[0].source.cited_text_sha256, /^[a-f0-9]{64}$/);
+      const outcomes = await Promise.allSettled(Array.from({ length: 3 }, async () => {
+        const { default: pg } = await import('pg');
+        const other = new pg.Client(c.connectionParameters);
+        await other.connect();
+        try {
+          await other.query('set role carr_writer');
+          return await executeRegisteredTool(other, partner, 'resolve-fact-review', { idempotency_key: randomUUID(),
+            entity_ref: 'review-race', fact_key: item.fact_key, base_version: 0, review_version: item.review_version,
+            decision: 'reject', reason: 'Synthetic rejection.' });
+        } finally { await other.end(); }
+      }));
+      assert.equal(outcomes.filter(o => o.status === 'fulfilled' && o.value.ok).length, 1);
+      assert.equal(outcomes.filter(o => o.status === 'rejected' && o.reason.payload.error === 'version_conflict').length, 2);
+      const page = await as('carr_reader', partner, 'list-fact-review', { limit: 1, include_resolved: true });
+      await assert.rejects(as('carr_reader', partner, 'list-fact-review', { cursor: page.next_cursor }), e => e.payload.error === 'invalid_cursor');
+      await assert.rejects(as('carr_reader', partner, 'list-fact-review', { cursor: 'invalid' }), e => e.payload.error === 'invalid_cursor');
+      await assert.rejects(as('carr_reader', partner, 'list-fact-review', { cursor: 'null' }), e => e.payload.error === 'invalid_cursor');
+    });
 
     await t.test('the SQL normalization contract equals the comparison contract', async () => {
       const rows = (await c.query('select * from ops.fact_key_contract order by fact_key')).rows;
@@ -60,7 +196,8 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
     await t.test('the grant contract registers exactly the installed fact-store definers', async () => {
       const installedContract = (await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract;
       installedContract.secdef_execute.push(...SCAC_MUTATION_CURRENT_DB_GRANTS.secdef_execute.filter(g => LATER_FUNCTIONS.test(g.signature)));
-      assert.deepEqual(installedContract, SCAC_MUTATION_CURRENT_DB_GRANTS);
+      assert.deepEqual({ ...installedContract, secdef_execute: [...installedContract.secdef_execute].sort((a,b) => a.signature.localeCompare(b.signature)) },
+        { ...SCAC_MUTATION_CURRENT_DB_GRANTS, secdef_execute: [...SCAC_MUTATION_CURRENT_DB_GRANTS.secdef_execute].sort((a,b) => a.signature.localeCompare(b.signature)) });
       const installed = (await c.query(`select p.oid::regprocedure::text sig,
           n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')' signature,
           p.proconfig,p.provolatile,acl.grantee::regrole::text grantee
@@ -106,7 +243,7 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
       await assert.rejects(record('idem-deal', [observation('a', { value: '25' })], job, key), e => e.payload.error === 'key_reuse');
       await assert.rejects(record('idem-deal', [observation('c')], partner), e => e.payload.error === 'not_in_profile');
       assert.equal((await c.query("select count(*)::int n from ops.fact_observation where entity_ref='idem-deal'")).rows[0].n, 2);
-      assert.equal((await c.query('select count(*)::int n from ops.canonical_fact')).rows[0].n, 0);
+      assert.equal((await c.query("select count(*)::int n from ops.canonical_fact where entity_ref='idem-deal'")).rows[0].n, 0);
     });
 
     await t.test('two proven-independent agreeing observations promote with a receipt', async () => {

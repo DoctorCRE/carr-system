@@ -520,6 +520,14 @@ def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
     deal_ids = {deal["id"] for deal in context["deals"]}
     parties_by_deal = {deal["id"]: {party["party_id"]: party for party in deal["participants"]} for deal in context["deals"]}
     review = [{"id": _review_id(session, "model", n), "question": q, "resolved": False} for n, q in enumerate(raw["review_questions"], 1)]
+    missing_tracks = (transcript or {}).get("missing_tracks", [])
+    labels = (transcript or {}).get("speaker_labels", {})
+    for number, track in enumerate(missing_tracks, 1):
+        review.append({
+            "id": _review_id(session, "missing_track", number), "resolved": False,
+            "question": f"Audio side {track} ({labels.get(track, track)}) is missing or failed. "
+                        "Recover the audio or confirm you knowingly file this partial call.",
+        })
 
     def clean(items: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
         good: list[dict[str, Any]] = []
@@ -551,7 +559,7 @@ def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
         "schema_version": SCHEMA_VERSION, "session": session, "generated_at": now(), "report": report,
         "joe_tasks": clean(raw["joe_tasks"], "joe_task"), "dell_tasks": clean(raw["dell_tasks"], "dell_task"),
         "deal_updates": clean(raw["deal_updates"], "deal_update"), "draft_proposals": clean(raw["draft_proposals"], "draft_proposal"),
-        "review_questions": review,
+        "review_questions": review, "missing_tracks": missing_tracks,
     }
     for index, draft in enumerate(result["draft_proposals"], 1):
         recipient = parties_by_deal[draft["deal_id"]].get(draft["recipient_party_id"])
@@ -893,11 +901,18 @@ def apply_candidate_statuses(session_dir: Path, statuses: dict[str, str]) -> dic
         return {"updated": len(statuses)}
 
 
+def review_complete(report: dict[str, Any]) -> bool:
+    """Unresolved review questions keep the source recording recoverable."""
+    return all(question.get("resolved") is True for question in report.get("review_questions", []))
+
+
 def retention_ready(session_dir: Path, report_sha256: str) -> dict[str, Any] | None:
     """Return a purge-safe filing receipt only after every candidate is final."""
     with session_lock(session_dir):
         with update_report(session_dir, required=False, locked=True) as report:
             if report is None or not isinstance(report_sha256, str) or re.fullmatch(r"[0-9a-fA-F]{64}", report_sha256) is None:
+                return None
+            if not review_complete(report):
                 return None
             items = _report_candidates(report)
             if any(item.get("candidate_status") not in {"confirmed", "skipped", "rejected"} for item in items):
@@ -1152,6 +1167,8 @@ def resolve_question(session_dir: Path, question_id: str, resolution: str) -> di
         _string(resolution, "resolution")
         for question in report.get("review_questions", []):
             if question.get("id") == question_id:
+                if question.get("resolved") is True:
+                    raise ContractError("already_resolved")
                 question["resolved"] = True
                 question["resolution"] = resolution
                 return {"question_id": question_id, "resolved": True}
@@ -1267,6 +1284,24 @@ def report_sha256(session_dir: Path) -> str:
     if report is None:
         raise ContractError("post-call report is not ready")
     return hashlib.sha256(json.dumps(report, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def resolve_outlook_intent(session_dir: Path, draft_id: str, exists: bool) -> dict[str, Any]:
+    if not isinstance(exists, bool):
+        raise ContractError("exists must be true or false")
+    with update_report(session_dir) as report:
+        draft = next((item for item in report.get("draft_proposals", []) if item.get("draft_id") == draft_id), None)
+        drafts = read_json(session_dir / DRAFTS_FILE) or {"drafts": {}}
+        intent = drafts["drafts"].get(draft_id)
+        if (draft is None or not isinstance(intent, dict) or intent.get("state") != "intent"
+                or intent.get("content_hash") != draft.get("content_hash")):
+            raise ContractError("draft has no matching intent marker")
+        if exists:
+            drafts["drafts"][draft_id] = {"content_hash": intent["content_hash"], "created_at": now()}
+        else:
+            del drafts["drafts"][draft_id]
+        write_private(session_dir / DRAFTS_FILE, drafts)
+        return {"draft_id": draft_id, "state": "created" if exists else "cleared"}
 
 
 def create_outlook_draft(session_dir: Path, draft_id: str, approved_content_hash: str, runner: Callable[..., Any] = subprocess.run) -> dict[str, Any]:

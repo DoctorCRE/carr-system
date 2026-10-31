@@ -797,7 +797,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         } finally {
           release?.();
           await Promise.all(peers.map(peer=>peer.end()));
-          await c.query('truncate deal_vendor_assignment,activity,event,tool_call,vendor,deal,client,party');
+          await c.query('truncate deal_vendor_assignment,activity,event,tool_call,vendor,deal,client,capture_post_call_candidate,party');
         }
       });
     }
