@@ -137,6 +137,14 @@ class ExtractTest(unittest.TestCase):
         self.assertIsNone(found['big.pdf']['sha256'])
         self.assertEqual(found['later.pdf']['status'], 'not_cached')
 
+    def test_conflicting_cache_paths_are_not_reported_as_not_downloaded(self):
+        self.add('conflict.pdf', None, write=False)
+        with sqlite3.connect(self.db) as con:
+            con.execute('UPDATE attachments SET path = NULL WHERE id = 1')
+        [result] = att.extract(self.db, self.files, self.root / 'out', messages={1})
+        self.assertEqual(result['status'], 'path_conflict')
+        self.assertIsNone(result['stored'])
+
     def test_paths_cannot_leave_the_files_copy(self):
         outside = self.root / 'secret.pdf'
         outside.write_bytes(PDF)

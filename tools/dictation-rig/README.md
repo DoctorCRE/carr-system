@@ -6,6 +6,45 @@ The CARR dictation rig. Phase A: meeting mode. Phase B: desk dictation
 build plan: `specs/dictation-rig-build-plan-2026-08-07.md`; Phase B ruled design:
 loop #243 / decision f799fd49.
 
+## Phone session status
+
+The Studio posts `state`, `reason`, `open_questions`, and `review_questions` to
+`POST /capture/phone/v1/call-sessions/<id>/status` with the existing Studio bearer.
+Each review question contains only `id` and `question`. This exchange sends no
+transcript or narrative summary. The existing processor repeats the exchange
+while questions remain open, and deduplicates unchanged status when none remain.
+
+`GET /api/v1/call-sessions/<id>` and its `/report` read return `reason` (a code or
+`null`), `open_questions` (a nonnegative integer), and `review_questions` (an array
+of unanswered `{id, question}` objects). Only the owning partner can read these.
+Active Studio states
+`needs_attention` and `held_review` take precedence over the normal derived state.
+Reasons are `extraction_failed`, `transient_ceiling`, `summary_repeats_transcript`,
+`transcript_unavailable`, or `open_review_questions`. Open review questions alone
+produce `held_review` with `open_review_questions`. A status update with
+`{"state":null,"reason":null,"open_questions":0,"review_questions":[]}` clears the override.
+
+The owning partner answers with `POST /api/v1/call-sessions/<id>/answers` and
+`{idempotency_key, session_id, question_id, answer}`. `answer` is a nonempty string
+of at most 1000 characters, including `confirm`, `dismiss`, or a written answer.
+A successful response is `{ok:true, session_id, question_id, answer}`. Replaying
+the same key and payload returns its receipt, including a later pickup outcome. Reusing the key with a
+different payload or answering a resolved question with a new key returns 409.
+An unknown question or another partner's session returns 404.
+
+Answers remove questions from the partner read and reduce its count immediately.
+The status response returns `question_answers` as `{question_id, answer}` objects.
+The Studio applies them through local `post_call.resolve_question` and reports
+`answer_outcomes` as `{question_id, outcome}` on the next status exchange.
+The outcome is `applied`, or `already_resolved` when Call Mode resolved it first.
+Session reads expose `answer_outcomes` for `already_resolved` answers so the app
+can explain the result. Acknowledged answers stop appearing in `question_answers`.
+The existing local status receipt carries outcomes until the exchange succeeds.
+Studio reports are authoritative for open questions. Omitting `review_questions`
+clears old unanswered questions while preserving answer receipts. Answer receipts stay in the existing
+`studio_status` JSON so a delayed report cannot reopen an answered question.
+The Studio hold clears after local pickup and the cleared status report.
+
 ## Two modes, one hard boundary
 
 - **Meeting mode** (quill, Phase A): a counterparty exists, so the consent

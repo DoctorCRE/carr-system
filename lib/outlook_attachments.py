@@ -66,9 +66,11 @@ def detect(data: bytes) -> str | None:
     return None
 
 
-def _read(files: Path, path: str, cap: int) -> tuple[str, bytes | None]:
+def _read(files: Path, path: str | None, cap: int) -> tuple[str, bytes | None]:
     """Read one cached file inside `files`, refusing links and anything over `cap`."""
-    match = CACHE_PATH.fullmatch(path or '')
+    if path is None:
+        return 'path_conflict', None
+    match = CACHE_PATH.fullmatch(path)
     if not match or match.group(3) in ('.', '..'):
         return 'path_refused', None
     store, slot, name = match.groups()
