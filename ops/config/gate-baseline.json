@@ -19,7 +19,7 @@
     "session-brief.py": "9df9928e64598ac469492abcc4af2452a25238c8b6978cd8871bf4c200684850",
     "turn_origin.py": "7fe75beaec283cd3ce3a3c8a109ef36e44999eb1b27dcebbffafff590a261f7e",
     "worktree-self-plumb.py": "f7eac9fc2956f932787211d4fd638350ffb4df5a251f7d49afbd1bf707d3bc33",
-    "agent-card-gate.py": "25efb0a53cd062d57c552e90ed7442af7cd29c94bc75befb91871c997548c025"
+    "agent-card-gate.py": "a792483e427eda337576173e53d8721f6910784ffa7ce2e55d867fc7f6fb3d86"
   },
   "contracts": {
     "hook_runtime.py": "617416d669ccf046041eac9798551932c63e10d6df5cb7b2c0da8a13b373a422",

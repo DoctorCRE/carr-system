@@ -79,7 +79,11 @@ def decide(event):
         for executable, args in invocations(command):
             if executable != 'codex' or not any(arg in {'exec', 'e'} for arg in args):
                 continue
+            if '--help' in args or '-h' in args:
+                continue
             words = codex_operands(args)
+            if words[:2] == ['cloud', 'exec']:
+                words = words[1:]
             if words in (['exec', 'resume'], ['e', 'resume']):
                 continue
             if words and words[0] in {'exec', 'e'}:
@@ -96,7 +100,7 @@ VALUE_OPTIONS = frozenset({
     '-s', '--sandbox', '-C', '--cd', '--add-dir', '-a', '--ask-for-approval',
     '--local-provider', '--remote', '--remote-auth-token-env', '--thread-source',
     '--cyber-access-program', '--output-schema', '--color', '-o', '--output-last-message',
-    '-i', '--image',
+    '-i', '--image', '--env', '--branch', '--attempts',
 })
 FLAG_OPTIONS = frozenset({
     '--oss', '--strict-config', '--approve-for-me', '--dangerously-bypass-approvals-and-sandbox',
