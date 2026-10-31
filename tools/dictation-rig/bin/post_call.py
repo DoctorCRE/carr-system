@@ -828,7 +828,7 @@ def hold_transcript_repeat(session_dir: Path, report: dict[str, Any]) -> dict[st
     available = isinstance(segments, list) and all(
         isinstance(segment, dict) and isinstance(segment.get("text"), str) for segment in segments
     )
-    field = transcript_repeat_field(report, transcript) if available else None
+    field = transcript_repeat_field(report, transcript) if available and transcript else None
     if available and field is None:
         return None
     status = read_json(session_dir / STATUS_FILE) or {"schema_version": SCHEMA_VERSION, "session": session_dir.name}
