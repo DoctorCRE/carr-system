@@ -33,6 +33,7 @@ test('Home inbox is an actor-scoped bounded snapshot over canonical records', as
     create table public.email_proposal(id uuid primary key,kind text,owner text,activity_id uuid,version integer,
       status text,draft_subject text,created_at timestamptz,submitted_at timestamptz,result_recorded_at timestamptz);
     create table ops.notification_read(notification_id uuid,recipient_actor uuid,read_at timestamptz);
+    create table ops.notification_delivery(notification_id uuid,channel text,state text,held_until timestamptz);
   `);
   const schema=readFileSync(new URL('../../db/schema.sql',import.meta.url),'utf8');
   await c.query(schema.match(/CREATE FUNCTION ops\.portfolio_writer_actor_id\(\)[\s\S]*?\n\$\$;/)[0]);
@@ -42,6 +43,8 @@ test('Home inbox is an actor-scoped bounded snapshot over canonical records', as
   await c.query('grant select,insert on tool_call to carr_writer');
   await c.query('insert into actor(id,slug) values($1,\'joe\'),($2,\'dell\')', [joe.id,dell.id]);
   await c.query("select set_config('carr.acting_actor_slug','joe',false),set_config('carr.verified_human_actor_slug','joe',false)");
+  const cadence=readFileSync(new URL('../../migrations/0617_delivery_cadence_a05.sql', import.meta.url),'utf8');
+  await c.query(cadence.match(/create or replace function ops\.notification_feed_facts\(p_after timestamptz, p_limit integer\)[\s\S]*?end \$\$;/)[0]);
   await c.query(readFileSync(new URL('../../migrations/1111_home_inbox.sql', import.meta.url),'utf8'));
   await c.query(`insert into next_action values
     ($1,$2,'Synthetic open task','open',1,'2026-10-29','2026-10-29','2026-11-02'),
@@ -64,6 +67,22 @@ test('Home inbox is an actor-scoped bounded snapshot over canonical records', as
   assert.equal(new Set(first.items.map(i=>i.item_id)).size,2);
   assert.deepEqual(await read(),first);
   assert.deepEqual((await read(dell)).items.map(i=>i.source_id),[id(12)]);
+  await t.test('held notifications follow the feed until their hold expires',async()=>{
+    await c.query(`insert into ops.notification values
+      ($1,$3,'deal','held','info','held',null,now()),
+      ($2,$3,'deal','normal','info','normal',null,now())`,[id(20),id(21),joe.id]);
+    await c.query("insert into ops.notification_delivery values ($1,'in_app','held_until_morning',now()+interval '1 day')",[id(20)]);
+    const visible=async()=> (await read()).items.filter(i=>i.source_type==='notification').map(i=>i.title).sort();
+    await read();
+    const feed=async()=> (await c.query('select ops.notification_feed_facts(null,50) as result')).rows[0].result.notifications.map(n=>n.id).sort();
+    assert.deepEqual(await feed(),[id(21)]);
+    assert.deepEqual(await visible(),['normal']);
+    await c.query("update ops.notification_delivery set held_until=now()-interval '1 second' where notification_id=$1",[id(20)]);
+    assert.deepEqual(await feed(),[id(20),id(21)]);
+    assert.deepEqual(await visible(),['held','normal']);
+    await c.query('delete from ops.notification_delivery where notification_id=$1',[id(20)]);
+    await c.query('delete from ops.notification where id in ($1,$2)',[id(20),id(21)]);
+  });
   let key=100;
   const change=async(verb,items,extra={},actor=joe,requestKey=id(key++))=>{
     await c.query("select set_config('carr.acting_actor_slug',$1,false),set_config('carr.verified_human_actor_slug',$1,false)",[actor.slug]);

@@ -1,3 +1,47 @@
+create function ops.notification_visible(p_notification uuid)
+returns boolean language sql stable set search_path=pg_catalog,ops as $$
+  select not exists (select 1 from ops.notification_delivery h
+    where h.notification_id=p_notification and h.state='held_until_morning' and h.held_until>now())
+$$;
+
+create or replace function ops.notification_feed_facts(p_after timestamptz, p_limit integer)
+returns jsonb language plpgsql stable security definer set search_path=pg_catalog,ops,public
+as $$
+declare v_actor uuid; v_limit integer; v_rows jsonb; v_unread integer;
+begin
+  if not (pg_has_role(current_user, 'carr_writer', 'member')
+       or pg_has_role(current_user, 'carr_authority', 'member')) then
+    raise exception using errcode = '42501',
+      message = 'reading the notification feed requires the writer or authority capability';
+  end if;
+  v_actor := ops.portfolio_writer_actor_id();
+  v_limit := least(greatest(coalesce(p_limit, 50), 1), 200);
+
+  select coalesce(jsonb_agg(to_jsonb(f) order by f.created_at desc), '[]'::jsonb) into v_rows
+    from (
+      select n.id, n.severity, n.reason, n.subject_type, n.subject_ref, n.deep_link,
+             n.created_at, r.read_at,
+             coalesce((select jsonb_agg(jsonb_build_object('channel', d.channel, 'state', d.state)
+                                        order by d.channel)
+                         from ops.notification_delivery d where d.notification_id = n.id),
+                      '[]'::jsonb) as delivery
+        from ops.notification n
+        left join ops.notification_read r
+          on r.notification_id = n.id and r.recipient_actor = n.recipient_actor
+       where n.recipient_actor = v_actor
+         and (p_after is null or n.created_at > p_after)
+         and ops.notification_visible(n.id)
+       order by n.created_at desc limit v_limit) f;
+
+  select count(*) into v_unread from ops.notification n
+   where n.recipient_actor = v_actor
+     and not exists (select 1 from ops.notification_read r
+                      where r.notification_id = n.id and r.recipient_actor = v_actor)
+     and ops.notification_visible(n.id);
+
+  return jsonb_build_object('ok', true, 'unread_count', v_unread, 'notifications', v_rows);
+end $$;
+
 -- rollback: remove Home inbox verbs before dropping these additive disposition objects.
 -- lock-review: new tables and functions only; canonical work and notification tables stay unchanged.
 create table ops.home_inbox_disposition (
@@ -40,7 +84,7 @@ language sql stable set search_path=pg_catalog,pg_temp as $$
       where p.kind='reply_draft' and e.email_source->>'mailbox_owner'=a.slug
       order by p.id limit 1001
   ), notifications as materialized (
-    select n.* from ops.notification n where recipient_actor=p_actor order by created_at desc,id limit 10001
+    select n.* from ops.notification n where recipient_actor=p_actor and ops.notification_visible(n.id) order by created_at desc,id limit 10001
   ), groups as (
     select subject_type,subject_ref,
       jsonb_agg(to_jsonb(n) order by created_at desc,id desc)->0 latest,
