@@ -28,7 +28,7 @@ for i in range(1, 5):
 (root / 'stale.md').unlink()
 confirmed = root / 'confirmed.md'
 confirmed.write_text(confirmed.read_text() + '\nVerified from session synthetic-a.\n')
-notes = [{'sections': [f'duplicate/{i}'], 'sessions': ['synthetic-a'], 'note': 'duplicate'} for i in range(1, 5)]
+notes: list[dict] = [{'sections': [f'duplicate/{i}'], 'sessions': ['synthetic-a'], 'note': 'duplicate'} for i in range(1, 5)]
 notes += [{'sections': ['stale'], 'sessions': ['synthetic-b'], 'note': 'obsolete'},
           {'sections': ['confirmed'], 'sessions': ['synthetic-c'], 'note': 'confirmed'}]
 observations = {}

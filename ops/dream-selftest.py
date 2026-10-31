@@ -168,7 +168,8 @@ class DreamTest(unittest.TestCase):
         store, report = self.run_fixture(moved=True)
         self.assertIn('duplicate/1', store.sections)
         self.assertNotIn('duplicate/2', store.sections)
-        self.assertEqual([unit['sections'] for unit in report['dropped']], [['duplicate/1']])
+        self.assertEqual([{k: v for k, v in unit.items() if k != 'claims'} for unit in report['dropped']],
+                         [{'sections': ['duplicate/1'], 'sessions': ['a'], 'note': 'duplicate'}])
         self.assertEqual(store.logs[0]['dropped'], report['dropped'])
     def test_case_colliding_keys_are_refused_and_logged(self):
         store = Store()
