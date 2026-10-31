@@ -44,6 +44,13 @@ ACCEPTANCE_ENV = {
 
 PROOFS = (
     Proof(
+        "mcp-server/test/fact-review-installed-postgres.test.mjs",
+        "installed fact-review behavior regressed; reconcile the later function body with the earlier behavior and update the proof",
+        log="migration-fact-review",
+        env={"CARR_FACT_REVIEW_DATABASE_URL": "{dsn}"},
+        tail=80,
+    ),
+    Proof(
         "mcp-server/test/find-rule-supersedes.test.mjs",
         "rule lookup or historical supersession SQL database proof failed",
         log="migration-rule-supersession",
