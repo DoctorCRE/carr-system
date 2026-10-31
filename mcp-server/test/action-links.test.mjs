@@ -13,7 +13,7 @@ const leadId = '20000000-0000-4000-8000-0000000000e1';
 const row = (over = {}) => ({
   id: draftId, lead_id: leadId, owner_id: joe.id, revision: 3, approved_at: null,
   subject: 'Synthetic subject', body: 'Synthetic body', scheduled_for: '2026-11-03T14:00:00.000Z',
-  time_zone: 'America/Chicago', stage: 'qualified', suppressed: false, party_merged: false, party_suppressed: false, ...over,
+  time_zone: 'America/Chicago', eligible: true, ...over,
 });
 const client = rows => ({ calls: [], async query(sql, params) { this.calls.push({ sql, params }); return { rows }; } });
 const resolve = (db, actor, ref) => TOOLS['resolve-action-link'].handler(db, actor, { ref });
@@ -85,10 +85,9 @@ test('a settled card refuses as no longer actionable', async () => {
     { error: 'action_link_no_longer_actionable' });
 });
 
-test('a stale card (lead moved, suppressed or party merged) refuses as no longer actionable', async () => {
+test('an ineligible card refuses as no longer actionable', async () => {
   const { ref } = buildActionLink({ kind: 'lead_draft', id: draftId });
-  for (const over of [{ stage: 'engaged' }, { suppressed: true }, { party_merged: true }, { party_suppressed: true }])
-    assert.deepEqual(await refusal(client([row(over)]), joe, ref), { error: 'action_link_no_longer_actionable' }, JSON.stringify(over));
+  assert.deepEqual(await refusal(client([row({ eligible: false })]), joe, ref), { error: 'action_link_no_longer_actionable' });
 });
 
 test('an unknown or malformed reference refuses without touching the database', async () => {
