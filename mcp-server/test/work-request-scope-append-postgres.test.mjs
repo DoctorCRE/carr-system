@@ -1,6 +1,5 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
@@ -12,9 +11,6 @@ before(async () => {
   fixture = await acquireDisposablePostgres({ prefix: 'scope-append-wr-', snapshot: true });
   c = new pg.Client(fixture.connection);
   await c.connect();
-  await c.query('begin');
-  await c.query(readFileSync(new URL('../../migrations/1121_append_work_request_scope.sql', import.meta.url), 'utf8'));
-  await c.query('commit');
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => { try { await c?.end(); } finally { await fixture?.close(); } });
@@ -80,23 +76,40 @@ test('an addendum on a request with no desired outcome becomes the whole outcome
 // A receipt forged by the database owner, so the guard's other checks are tested alone.
 async function receipt(ref, appended) {
   const w = (await c.query('select id,version from ops.work_request where ref=$1', [ref])).rows[0];
-  await c.query(`insert into event(occurred_at,actor_id,verb,subject_type,subject_id,field,new_value,cause,idempotency_key)
-    values(now(),$1,'append-work-request-scope','ops_work_request',$2,'acceptance_criteria',$3,'system',$4)`,
-    [actor.id, w.id, { version: w.version + 1, appended, outcome_addendum: null }, randomUUID()]);
+  await c.query(`insert into ops.work_request_scope_append_receipt
+    (idempotency_key,work_request_id,base_version,result_version,appended,outcome_addendum,source_ref,appended_by_actor_id)
+    values($1,$2,$3,$3+1,$4,null,'record:ROW-forged',$5)`, [randomUUID(), w.id, w.version, JSON.stringify(appended), actor.id]);
 }
-
-test('the sourced guard refuses a direct append with no matching receipt', async () => {
-  await sourcedRequest('WR-998004', 1);
-  const append1 = `update ops.work_request set version=version+1,
-    acceptance_criteria=acceptance_criteria || '[{"id":"BF-1","text":"New"}]' where ref='WR-998004'`;
+// Run statements as the plain database writer, then roll back.
+async function asWriter(fn) {
   await c.query('begin');
-  try {
-    await c.query('set local role carr_writer');
-    await assert.rejects(c.query(append1), /sourced Program 6 Work Requests permit only/);
-  } finally { await c.query('rollback'); }
-  await receipt('WR-998004', [{ id: 'BF-1', text: 'Different' }]);
-  await assert.rejects(c.query(append1), /sourced Program 6 Work Requests permit only/);
+  try { await c.query('set local role carr_writer'); return await fn(); } finally { await c.query('rollback'); }
+}
+const directAppend = ref => `update ops.work_request set version=version+1,
+    acceptance_criteria=acceptance_criteria || '[{"id":"BF-1","text":"New"}]' where ref='${ref}'`;
+
+test('the sourced guard refuses a direct append with no receipt', async () => {
+  await sourcedRequest('WR-998004', 1);
+  await asWriter(() => assert.rejects(c.query(directAppend('WR-998004')), /sourced Program 6 Work Requests permit only/));
   assert.equal((await row('WR-998004')).version, 1);
+});
+
+test('a database writer cannot forge the receipt through public.event or the receipt table', async () => {
+  await sourcedRequest('WR-998008', 1);
+  const w = (await c.query("select id from ops.work_request where ref='WR-998008'")).rows[0];
+  await asWriter(async () => {
+    await c.query(`insert into event(occurred_at,actor_id,verb,subject_type,subject_id,field,new_value,cause,idempotency_key)
+      values(now(),$1,'append-work-request-scope','ops_work_request',$2,'acceptance_criteria',$3,'system',$4)`,
+      [actor.id, w.id, { version: 2, appended: [{ id: 'BF-1', text: 'New' }], outcome_addendum: null }, randomUUID()]);
+    await assert.rejects(c.query(directAppend('WR-998008')), /sourced Program 6 Work Requests permit only/);
+  });
+  await asWriter(() => assert.rejects(c.query(`insert into ops.work_request_scope_append_receipt
+    (idempotency_key,work_request_id,base_version,result_version,appended,source_ref,appended_by_actor_id)
+    values($1,$2,1,2,'[{"id":"BF-1","text":"New"}]','record:ROW-forged',$3)`, [randomUUID(), w.id, actor.id]), /permission denied/));
+  await asWriter(() => assert.rejects(c.query(`insert into ops.work_request_scope_append_receipt
+    (idempotency_key,work_request_id,base_version,result_version,appended,source_ref,appended_by_actor_id)
+    values($1,$2,1,2,'[]','x',$3)`, [randomUUID(), w.id, actor.id]), /permission denied/));
+  assert.equal((await row('WR-998008')).version, 1);
 });
 
 for (const [label, bad] of [['numeric text', { id: 'BF-1', text: 123 }], ['object text', { id: 'BF-1', text: { a: 1 } }], ['numeric id', { id: 7, text: 'Seven' }]]) {
@@ -149,3 +162,24 @@ for (const [label, ref, setup, modify, expected] of [
     assert.equal((await c.query('select count(*) from tool_call where idempotency_key=$1', [args.idempotency_key])).rows[0].count, '0');
   });
 }
+
+test('the definer function replays its key, refuses stale versions and unsponsored automation', async () => {
+  await sourcedRequest('WR-998009', 1);
+  const key = randomUUID();
+  const call = (base, slug = 'joe', k = key, text = 'Direct') => c.query(
+    `select * from ops.append_work_request_scope('WR-998009',$1,$2::jsonb,null,'record:ROW-direct',$3,$4)`,
+    [base, JSON.stringify([{ id: 'BF-1', text }]), slug, k]);
+  await c.query('begin'); await c.query('set local role carr_writer');
+  try {
+    assert.deepEqual((await call(1)).rows[0], { ref: 'WR-998009', state: 'captured', version: 2, criteria_count: 2, replayed: false });
+    assert.equal((await call(1)).rows[0].replayed, true);
+    await c.query('savepoint s');
+    await assert.rejects(call(1, 'joe', randomUUID()), /work_request_version_conflict:/);
+    await c.query('rollback to savepoint s');
+    await assert.rejects(call(1, 'joe', key, 'Other'), /scope_append_receipt_conflict:/);
+    await c.query('rollback to savepoint s');
+    await c.query("insert into actor(slug,kind,display_name) values('synthetic-bot','automation','Synthetic bot') on conflict(slug) do nothing");
+    await assert.rejects(call(2, 'synthetic-bot', randomUUID()), /sponsored_actor_required:/);
+  } finally { await c.query('rollback'); }
+  assert.equal((await row('WR-998009')).version, 1);
+});

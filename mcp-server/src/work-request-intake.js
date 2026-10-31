@@ -799,17 +799,23 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
           if (outcome !== null && outcome.length > 4000)
             throw new ToolError({ error: "invalid_scope_append", hint: "The desired outcome would pass 4000 characters; shorten outcome_addendum." });
           const criteria = args.criteria.map(item => ({ id: item.id, text: item.text.trim() }));
-          // The event is the receipt the sourced guard requires, so it is written first.
+          let row;
+          try {
+            // The definer function writes the receipt the sourced guard requires and performs the append.
+            row = (await c.query(`select * from ops.append_work_request_scope($1::text, $2::integer, $3::jsonb, $4::text, $5::text, $6::text, $7::uuid)
+              /* work-request-intake:append-scope */`,
+              [args.human_ref, args.base_version, JSON.stringify(criteria), addendum, args.source_ref, actor.slug, args.idempotency_key])).rows[0];
+          } catch (error) {
+            const name = /^([a-z_]+):/.exec(String(error?.message || ""))?.[1];
+            if (name === "work_request_version_conflict") throw new ToolError({ error: "version_conflict" });
+            if (name === "sponsored_actor_required") throw new ToolError({ error: "sponsored_actor_required" });
+            throw error;
+          }
           await writeEvent(c, actor, "append-work-request-scope", "ops_work_request", current.id, {
             field: "acceptance_criteria", old: { version: args.base_version, criteria_count: current.acceptance_criteria.length },
-            new: { version: args.base_version + 1, appended: criteria, outcome_addendum: addendum, source_ref: args.source_ref },
+            new: { version: Number(row.version), appended: criteria, outcome_addendum: addendum, source_ref: args.source_ref },
             idempotency_key: args.idempotency_key,
           });
-          const row = (await c.query(`update ops.work_request set acceptance_criteria=acceptance_criteria || $3::jsonb,
-            desired_outcome=$4, version=version+1, updated_at=now()
-            where id=$1 and version=$2 returning ref, state, version /* work-request-intake:append-scope */`,
-            [current.id, args.base_version, JSON.stringify(criteria), outcome])).rows[0];
-          if (!row) throw new ToolError({ error: "version_conflict" });
           return { ok: true, human_ref: row.ref, state: row.state, version: Number(row.version), appended: criteria.map(item => item.id), criteria_count: ids.length };
         });
       },
