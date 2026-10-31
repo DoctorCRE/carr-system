@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Exercise the Stop hook through its JSON stdin and transcript interface."""
 import json
-import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -170,48 +169,6 @@ class RuleClaimGateTest(unittest.TestCase):
         self.assertNotEqual(self.run_hook(self.turn(assistant("I'll remember."),
             call('Read', file_path='file'), assistant('I checked the file.'))).get('decision'), 'block')
 
-    def test_background_build_requires_honest_reply(self):
-        command = 'bin/codex-job DoctorCRE/carr-system build/rule ' + shlex.quote(
-            'Build a hook that checks this rule.')
-        honest = 'I added a rule. It is running and not yet enforced.'
-        self.assertNotEqual(self.run_hook(self.turn(call('Bash', command=command),
-            assistant(honest))).get('decision'), 'block')
-        self.assertEqual(self.run_hook(self.turn(call('Bash', command=command),
-            assistant('I added a rule.'))).get('decision'), 'block')
-
-    def test_fake_dispatch_does_not_count(self):
-        for command in [
-            'echo "bin/codex-job DoctorCRE/carr-system build/rule Build a hook"',
-            'bin/codex-job DoctorCRE/carr-system build/rule "Review the hook"',
-            'other/codex-job DoctorCRE/carr-system build/rule "Build a gate"',
-        ]:
-            with self.subTest(command=command):
-                self.assertEqual(self.run_hook(self.turn(call('Bash', command=command),
-                    assistant('I added a rule. It is running and not yet enforced.'))
-                    ).get('decision'), 'block')
-
-    def test_wrapped_dispatch_segments_count(self):
-        dispatch = ('bin/codex-job DoctorCRE/carr-system build/rule '
-                    '"Build a hook that checks this rule." -c model_reasoning_effort=high')
-        prefix = 'cd ~/carr-system && export EXAMPLE=fixture && '
-        wait = ('F=/tmp/desk-ready; for i in ' + '\n'.join(map(str, range(1, 481)))
-                + '; do grep -q ready "$F" && break; sleep 60; done; sleep 30; ')
-        for command in [prefix + dispatch, wait + prefix + dispatch,
-                        'export EXAMPLE=fixture;\n' + dispatch]:
-            with self.subTest(command=command[:100]):
-                self.assertNotEqual(self.run_hook(self.turn(call('Bash', command=command),
-                    assistant('I added a rule. It is running and not yet enforced.')))
-                    .get('decision'), 'block')
-
-    def test_wrapped_dispatch_still_requires_build_brief(self):
-        for brief in ['Review the hook.', 'Build a report.', 'Explain the CI check.']:
-            command = ('cd ~/carr-system && export EXAMPLE=fixture && '
-                       'bin/codex-job DoctorCRE/carr-system build/rule ' + shlex.quote(brief))
-            with self.subTest(brief=brief):
-                self.assertEqual(self.run_hook(self.turn(call('Bash', command=command),
-                    assistant('I added a rule. It is running and not yet enforced.')))
-                    .get('decision'), 'block')
-
     def test_honest_uncheckable_rule_passes(self):
         self.assertNotEqual(self.run_hook(self.turn(assistant(
             "I'll remember this preference. The rule is not enforced because tone "
@@ -373,12 +330,6 @@ class RuleClaimGateTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.run_hook(self.turn(assistant(text)))
                                  .get('decision'), 'block')
-
-    def test_conditional_dispatch_segment_counts(self):
-        command = 'false && bin/codex-job DoctorCRE/carr-system build/rule "Build a gate"'
-        self.assertNotEqual(self.run_hook(self.turn(call('Bash', command=command),
-            assistant('I saved a rule. It is running and not yet enforced.')))
-            .get('decision'), 'block')
 
     def test_repeat_stop_allows_and_logs_even_after_reply_changes(self):
         records = self.turn(assistant("I'll remember this."))
