@@ -9947,7 +9947,8 @@ registerTools({
       };
       const verb = verbByKind[candidate.kind];
       if (!verb) throw new ToolError({ error: "unknown_candidate_kind", kind: candidate.kind });
-      const innerArgs = { ...candidate.payload, idempotency_key: captureKey(candidate.id) };
+      const innerArgs = { ...candidate.payload, idempotency_key: captureKey(candidate.id),
+        ...(FUTURE_WORK_WRITES[verb] && args.work_request ? { work_request: args.work_request } : {}) };
       delete innerArgs.plan_base;
       delete innerArgs.evidence_source;
       if (candidate.kind === "meeting_record") innerArgs.kind = "meeting";
@@ -9993,7 +9994,7 @@ registerTools({
           `capture_candidate:${candidate.id}`).entries()) {
           const { status, ...facts } = item;
           const stored = await executeRegisteredTool(c, actor, 'record-deal-item', {
-            ...facts, deal: result.deal_id,
+            ...facts, deal: result.deal_id, ...(args.work_request ? { work_request: args.work_request } : {}),
             idempotency_key: derivedIdempotencyKey("capture-candidate-item", `${candidate.id}:${index}`),
           });
           result.items.push(stored.item);

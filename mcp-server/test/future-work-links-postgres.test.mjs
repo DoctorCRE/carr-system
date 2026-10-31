@@ -6,13 +6,14 @@ import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
 import { publicError } from '../src/public-errors.ts';
 
-let fixture, c, actor, connection;
+let fixture, c, actor, dell, connection;
 before(async () => {
   fixture = await acquireDisposablePostgres({ prefix: 'future-work-', snapshot: true });
   connection = fixture.connection;
   c = new pg.Client(connection);
   await c.connect();
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
+  dell = { ...(await c.query("insert into actor(slug,kind,display_name) values('dell','human','Synthetic other partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => { try { await c?.end(); } finally { await fixture?.close(); } });
 
@@ -87,7 +88,10 @@ for (const explicit of [false,true]) {
         ...(kind==='open_loop'?{blocker:'other_lane',blocker_detail:'Synthetic dependency WR628.S2'}:{})};
       const out=await verify('add-loop',args,explicit);
       const stored=(await c.query('select tier,personal_to,version from loop_item where id=$1',[out.loop_id])).rows[0];
-      if (['open_loop','idea'].includes(kind)) { assert.equal(stored.tier,'personal'); assert.equal(stored.personal_to,actor.id); }
+      if (['open_loop','idea'].includes(kind)) {
+        assert.equal(stored.tier,'personal'); assert.equal(stored.personal_to,actor.id);
+        assert.equal((await command('work-request-card',{work_request:out.work_request},dell,'carr_reader')).state,'captured');
+      }
       const edited=await verify('update-loop',{loop_id:out.loop_id,base_version:Number(stored.version),body:'Deliver and verify the amended synthetic behavior',work_request:out.work_request});
       assert.equal(edited.work_request,out.work_request);
     });
