@@ -14,6 +14,10 @@ import subprocess
 import tempfile
 
 
+class ModelBudgetExceeded(RuntimeError):
+    """The CLI stopped at its configured spending cap."""
+
+
 def command(model: str, schema: dict, system_prompt: str) -> list[str]:
     return ['claude', '-p', '--model', model, '--no-session-persistence', '--tools', '',
             '--setting-sources', '', '--strict-mcp-config', '--disable-slash-commands',
@@ -21,16 +25,45 @@ def command(model: str, schema: dict, system_prompt: str) -> list[str]:
             '--json-schema', json.dumps(schema), '--system-prompt', system_prompt]
 
 
-def ask(prompt: str, *, model: str, schema: dict, system_prompt: str, timeout: int = 180) -> dict:
+def _reply(prompt: str, *, model: str, schema: dict, system_prompt: str, timeout: int = 180,
+           max_budget_usd: str | None = None) -> dict:
     """Return the reply's structured output; raise on a failed run or a reply without one."""
     env = {k: v for k, v in os.environ.items() if k not in ('ANTHROPIC_API_KEY', 'CLAUDECODE')}
+    args = command(model, schema, system_prompt)
+    if max_budget_usd is not None:
+        args += ['--max-budget-usd', max_budget_usd]
     with tempfile.TemporaryDirectory() as empty:
-        done = subprocess.run(command(model, schema, system_prompt), input=prompt, capture_output=True,
+        done = subprocess.run(args, input=prompt, capture_output=True,
                               text=True, cwd=empty, env=env, timeout=timeout)
+    try:
+        reply = json.loads(done.stdout)
+    except json.JSONDecodeError:
+        if done.returncode:
+            raise RuntimeError(f'model exit {done.returncode}') from None
+        raise
+    if isinstance(reply, dict) and reply.get('subtype') == 'error_max_budget_usd':
+        raise ModelBudgetExceeded('model budget exhausted')
     if done.returncode:
         raise RuntimeError(f'model exit {done.returncode}')
-    reply = json.loads(done.stdout)
     out = reply.get('structured_output') if isinstance(reply, dict) else None
     if not isinstance(reply, dict) or reply.get('is_error') or not isinstance(out, dict):
         raise ValueError('model reply carries no result')
-    return out
+    return reply
+
+
+def ask(prompt: str, *, model: str, schema: dict, system_prompt: str, timeout: int = 180) -> dict:
+    """Return the constrained structured result for existing proposal callers."""
+    return _reply(prompt, model=model, schema=schema, system_prompt=system_prompt,
+                  timeout=timeout)['structured_output']
+
+
+def ask_with_usage(prompt: str, *, model: str, schema: dict, system_prompt: str, timeout: int = 180,
+                   max_budget_usd: str = "0.50") -> dict:
+    """Keep reported model and cost beside the proposal; absent accounting refuses."""
+    reply = _reply(prompt, model=model, schema=schema, system_prompt=system_prompt, timeout=timeout,
+                   max_budget_usd=max_budget_usd)
+    usage = reply.get('modelUsage')
+    if 'total_cost_usd' not in reply or not isinstance(usage, dict) or not usage:
+        raise ValueError('model reply carries no usage')
+    return {'output': reply['structured_output'], 'cost_usd': str(reply['total_cost_usd']),
+            'model': ','.join(sorted(usage))}

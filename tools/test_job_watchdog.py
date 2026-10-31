@@ -114,6 +114,20 @@ class WatchdogTests(unittest.TestCase):
             watchdog.scan(self.root, self.config)
         self.assertEqual(watchdog.digest(self.root, self.config), "")
 
+    def test_three_consecutive_reconcile_failures_raise_and_clear_alarm(self):
+        def receipt(reason, state):
+            return "outlook-intake-receipt " + json.dumps({"state": state, "reason": reason, "counts": {}})
+        failure = receipt("reconcile_failed", "failed")
+        success = receipt("reconciled", "succeeded")
+        reply = subprocess.CompletedProcess([], 0, "PID\tStatus\tLabel\n-\t1\tcom.carr.fixture\n", "")
+        with patch.object(watchdog, "SOURCE", self.source), \
+             patch.object(watchdog.subprocess, "run", return_value=reply), \
+             patch.object(watchdog.shutil, "disk_usage", return_value=(100, 50, 50)):
+            for lines, expected in [([failure, failure], False), ([failure, success, failure, failure], False),
+                                    ([failure, failure, failure], True), ([failure, failure, failure, success], False)]:
+                self.log.write_text("\n".join(lines) + "\n")
+                watchdog.scan(self.root, self.config)
+                self.assertEqual("reconciliation failed three consecutive times" in watchdog.digest(self.root, self.config), expected)
     def test_failed_coverage_receipt_remains_visible_after_a_normal_run(self):
         def receipt(state, reason, counts):
             return 'outlook-intake-receipt ' + json.dumps({'state': state, 'reason': reason,
