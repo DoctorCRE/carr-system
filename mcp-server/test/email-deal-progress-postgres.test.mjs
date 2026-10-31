@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
@@ -55,6 +55,8 @@ before(async () => {
   await c.query(readFileSync(new URL('../../migrations/1026_email_recent_outcomes_index.sql', import.meta.url), 'utf8'));
   if (!(await c.query("select to_regclass('public.v_email_thread_filing_event') as relation")).rows[0].relation)
     await c.query(readFileSync(new URL('../../migrations/1023_email_thread_filing_events.sql', import.meta.url), 'utf8'));
+  if (!(await c.query("select 1 from information_schema.columns where table_schema='public' and table_name='activity' and column_name='email_identity'")).rows.length)
+    await c.query(readFileSync(new URL('../../migrations/1068_email_identity.sql', import.meta.url), 'utf8'));
   await c.query(readFileSync(new URL('../../migrations/1069_email_non_deal_steps.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic physician',$1,$1) returning id", [actor.id])).rows[0].id;
@@ -1459,6 +1461,29 @@ const submitDraft = (proposal, extra = {}, identity = actor) => command('submit-
   cc: [identity.slug === 'dell' ? 'joe@example.test' : 'dell@example.test'], ...extra }, identity, 'carr_writer');
 const refuses = (promise, code) => assert.rejects(promise, error => error.payload?.error === code);
 
+test('submission audit binds recipients without addresses and proves both partner copies', async () => {
+  await c.query("update actor set email='joe@example.test' where slug='joe'");
+  await c.query("insert into actor(slug,kind,display_name,email) values('dell','human','Synthetic Dell','dell@example.test') on conflict(slug) do update set email=excluded.email,active=true");
+  for (const owner of ['joe', 'dell']) {
+    const identity = { ...actor, ...(await c.query('select id,slug from actor where slug=$1', [owner])).rows[0] };
+    const proposal = await draftFor(owner);
+    const key = randomUUID();
+    const submitted = await submitDraft(proposal, { idempotency_key: key }, identity);
+    const room = await command('get-deal-room', { deal });
+    const events = room.events.filter(e => e.verb === 'submit-email-draft' && e.new_value.proposal_id === proposal.proposal_id);
+    assert.equal(events.length, 1);
+    const audit = events[0].new_value;
+    assert.ok(!JSON.stringify(audit).includes('@'), 'audit must omit recipient addresses');
+    const digest = value => createHash('sha256').update(value).digest('hex');
+    assert.deepEqual(audit.recipient_binding, {
+      sha256: digest(JSON.stringify({ to: submitted.to, cc: submitted.cc })),
+      cc_owner: owner === 'joe' ? 'dell' : 'joe',
+      cc_sha256: digest(submitted.cc[0]),
+    });
+    assert.equal((await submitDraft(proposal, { idempotency_key: key }, identity)).replayed, true);
+  }
+});
+
 test('only the mailbox owner can dismiss a reply draft', async () => {
   const dell = { ...(await c.query("insert into actor(slug,kind,display_name) values('dell','human','Synthetic Dell') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
   for (const [owner, other] of [[actor, dell], [dell, actor]]) {
@@ -2000,6 +2025,76 @@ test('an unconfirmed receipt never creates sent correspondence', async () => {
   assert.deepEqual((await command('get-deal-room', { deal: sentDeal })).activities, []);
 });
 
+
+test('email identity survives new retry keys and filing to a deal', async () => {
+  await c.query("update actor set email='joe@example.test' where slug='joe'");
+  const identity = { mailbox_owner: 'joe', mailbox_account: 'joe@example.test', item_id: 'hxstore-key:50277' };
+  const args = { ref: clientRef, kind: 'email_in', summary: 'Synthetic durable email',
+    detail: quote, email_identity: identity };
+  const first = await command('log-activity', { ...args, idempotency_key: randomUUID() }, machineFor('joe'));
+  await c.query('update activity set deal_id=$2 where id=$1', [first.activity_id, deal]);
+  const retry = await command('log-activity', { ...args, summary: 'Decoder corrected the subject',
+    email_identity: { ...identity, item_id: 'hxstore-key:50277' },
+    idempotency_key: randomUUID() }, machineFor('joe'));
+  assert.equal(retry.activity_id, first.activity_id);
+  const distinct = await command('log-activity', { ...args, idempotency_key: randomUUID(),
+    email_identity: { ...identity, item_id: 'hxstore-key:50278' } }, machineFor('joe'));
+  assert.notEqual(distinct.activity_id, first.activity_id);
+});
+
+test('intake and confirmed send share correspondence in either arrival order', async () => {
+  for (const intakeFirst of [false, true]) {
+    const { proposal, sentDeal } = await sentDraftFixture();
+    const submitted = await submitDraft(proposal);
+    const item = `hxstore-key:${intakeFirst ? 50281 : 50280}`;
+    const ingest = () => command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+      kind: 'email_out', summary: 'Synthetic sent intake', detail: 'Synthetic reply',
+      email_identity: { mailbox_owner: 'joe', mailbox_account: 'joe@example.test', item_id: item } }, machineFor('joe'), 'carr_writer');
+    const initial = intakeFirst ? await ingest() : null;
+    await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+      base_version: 2, sha256: submitted.sha256, status: 'sent', sent_item_id: item }, machineFor('joe'), 'carr_writer');
+    const room = await command('get-deal-room', { deal: sentDeal }, actor, 'carr_reader');
+    const sent = room.activities.filter(a => a.email_context?.send_id === proposal.proposal_id);
+    assert.equal(sent.length, 1);
+    if (initial) assert.equal(sent[0].id, initial.activity_id);
+    assert.equal((await ingest()).activity_id, sent[0].id);
+  }
+});
+
+
+test('email identity keeps mailbox ownership and concurrent retries separate', async () => {
+  await c.query("update actor set email='joe@example.test' where slug='joe'");
+  await c.query("insert into actor(slug,kind,display_name,email) values('dell','human','Synthetic partner','dell@example.test') on conflict(slug) do update set email=excluded.email");
+  const args = { ref: clientRef, kind: 'email_in', summary: 'Synthetic concurrent mail',
+    email_identity: { mailbox_owner: 'joe', mailbox_account: 'joe@example.test', item_id: 'hxstore-key:50290' } };
+  const connections = [new pg.Client(connection), new pg.Client(connection)];
+  await Promise.all(connections.map(client => client.connect()));
+  let results;
+  try {
+    results = await Promise.all(connections.map(client => command('log-activity',
+      { ...args, idempotency_key: randomUUID() }, machineFor('joe'), 'carr_writer', client)));
+  } finally { await Promise.all(connections.map(client => client.end())); }
+  assert.equal(results[0].activity_id, results[1].activity_id);
+  await refuses(command('log-activity', { ...args, idempotency_key: randomUUID(),
+    email_identity: { ...args.email_identity, mailbox_owner: 'dell' } }, machineFor('joe')), 'email_identity_owner_mismatch');
+  const other = await command('log-activity', { ...args, idempotency_key: randomUUID(),
+    email_identity: { ...args.email_identity, mailbox_owner: 'dell', mailbox_account: 'dell@example.test' } }, machineFor('dell'));
+  assert.notEqual(other.activity_id, results[0].activity_id);
+  await refuses(command('log-activity', { ...args, kind: 'email_out', idempotency_key: randomUUID() },
+    machineFor('joe')), 'email_identity_conflict');
+  await refuses(command('log-activity', { ...args, idempotency_key: randomUUID(),
+    email_identity: { ...args.email_identity, mailbox_account: 'wrong@example.test' } }, machineFor('joe')),
+    'email_identity_account_mismatch');
+  await c.query("update actor set email='new-account@example.test' where slug='joe'");
+  try {
+    const switched = await command('log-activity', { ...args, idempotency_key: randomUUID(),
+      email_identity: { ...args.email_identity, mailbox_account: 'new-account@example.test' } }, machineFor('joe'));
+    assert.notEqual(switched.activity_id, results[0].activity_id);
+  } finally { await c.query("update actor set email='joe@example.test' where slug='joe'"); }
+
+  await assert.rejects(c.query("update activity set email_identity=null where id=$1", [other.activity_id]),
+    error => error.message === 'email_identity_immutable');
+});
 
 test('a client email without a deal reaches partner review and confirms only the reviewed action', async () => {
   const source = await email(askQuote);

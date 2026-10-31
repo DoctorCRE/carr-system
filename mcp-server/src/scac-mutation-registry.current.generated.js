@@ -978,6 +978,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "draft-terms-comparison": {
+    "ingress_key": "mcp-tool:draft-terms-comparison",
+    "source_locator": "mcp-server/src/fact-review.ts",
+    "schema_digest": "5a91e5723d17f1aa0ec05d6104a082c26267db1aa0cc774521228d05fc111897",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "drop-action": {
     "ingress_key": "mcp-tool:drop-action",
     "source_locator": "mcp-server/src/action-closure.ts",
@@ -1544,7 +1554,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "log-activity": {
     "ingress_key": "mcp-tool:log-activity",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "007833d9bc988d15629f78d26e387ab3f340a1aba83b59c17af7571bc2d4d152",
+    "schema_digest": "db04624ca7394165a6ec8d0cc269ac292f7fde02c7834b3a7b6d18da8e532e82",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -1832,6 +1842,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "prepare-terms-comparison": {
+    "ingress_key": "mcp-tool:prepare-terms-comparison",
+    "source_locator": "mcp-server/src/fact-generation.ts",
+    "schema_digest": "a4a685b6cbd90a9e378441a59fe51b319c9c55f8465300d85247502dc84bd774",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "prepare-tour-route-version": {
     "ingress_key": "mcp-tool:prepare-tour-route-version",
     "source_locator": "mcp-server/src/tour-domain.js",
@@ -2096,6 +2116,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:read-deal-reconciliation",
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "c95ca24a7624ac4279c35aa1fa5a3ee0968da2adcbfc03ab6c4d3cd9ddf30190",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-deal-update-reviews": {
+    "ingress_key": "mcp-tool:read-deal-update-reviews",
+    "source_locator": "mcp-server/src/deal-update-resolution.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -2982,6 +3012,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "resolve-action-link": {
+    "ingress_key": "mcp-tool:resolve-action-link",
+    "source_locator": "mcp-server/src/action-links.js",
+    "schema_digest": "c62d641eb925ed921cf03a27f05c6d9e8c28aecbb6ef50be14b2f93b4d7d1efa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "resolve-candidate": {
     "ingress_key": "mcp-tool:resolve-candidate",
     "source_locator": "mcp-server/src/tools.js",
@@ -3123,6 +3163,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "942ac3fdfa92a1ed455647d2e39d5ea63d17d9d0649802269add41694940b57a",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "review-deal-update": {
+    "ingress_key": "mcp-tool:review-deal-update",
+    "source_locator": "mcp-server/src/deal-update-resolution.js",
+    "schema_digest": "e5ee03930b63ead188d0d067066f37a905d191c00711e1fae4396ddc0bbec110",
+    "write": true,
+    "human_only": true,
     "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
@@ -3634,6 +3684,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "a46d9164f4f25becd07e3db36d52617a35ada87d78338b7ffd1eab2ce674f0e5",
     "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "validate-terms-comparison": {
+    "ingress_key": "mcp-tool:validate-terms-comparison",
+    "source_locator": "mcp-server/src/fact-generation.ts",
+    "schema_digest": "b6fadbaee48596a2ed5696e9abec887f2547c662dabd967b15af7d3e92331e3a",
+    "write": false,
     "human_only": false,
     "human_caller_only": false,
     "authority_only": false,
@@ -4274,6 +4334,21 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.record_deal_extraction(p_tenant text, p_actor_id uuid, p_args jsonb)",
       "volatility": "v",
       "ingress_key": "db-function-acl:ops.record_deal_extraction(p_tenant text, p_actor_id uuid, p_args jsonb):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.list_fact_review(p_tenant text, p_entity_ref text, p_limit integer, p_cursor jsonb, p_include_resolved boolean)",
+      "volatility": "s",
+      "ingress_key": "db-function-acl:ops.list_fact_review(p_tenant text, p_entity_ref text, p_limit integer, p_cursor jsonb, p_include_resolved boolean):carr_writer:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true

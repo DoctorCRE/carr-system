@@ -61,6 +61,36 @@ test('phone sessions refuse anonymous and machine actors before reading input or
   }
 });
 
+test('Studio status refuses content and oversized bodies without logging them', async t => {
+  const { handler, send } = rig();
+  const session = (await send('', 'POST', recording)).body;
+  const url = `https://api.example.test/capture/phone/v1/call-sessions/${session.session_id}/status`;
+  const logs = [];
+  for (const method of ['log', 'warn', 'error']) t.mock.method(console, method, (...args) => logs.push(args));
+  for (const body of [
+    { state: 'held_review', reason: 'private transcript', open_questions: 0 },
+    { state: 'needs_attention', reason: 'extraction_failed', open_questions: 0, summary: 'private summary' },
+    { state: 'held_review', reason: 'summary_repeats_transcript', open_questions: 'private question' },
+    { state: 'held_review', reason: 'open_review_questions', open_questions: 1,
+      review_questions: [{ id: 'q1', question: 'Review?', answer: 'confirm' }] },
+    { state: 'held_review', reason: 'open_review_questions', open_questions: 1,
+      review_questions: [{ id: 'q1', question: 'Review?', transcript: 'private transcript' }] },
+    { state: 'held_review', reason: 'open_review_questions', open_questions: 2,
+      review_questions: [{ id: 'q1', question: 'Review?' }] },
+    { state: 'held_review', reason: 'open_review_questions', open_questions: 2,
+      review_questions: [{ id: 'q1', question: 'Review?' }, { id: 'q1', question: 'Duplicate?' }] },
+  ]) {
+    const response = await handler.studioFetch(new Request(url, { method: 'POST',
+      headers: { authorization: `Bearer ${environment.CALL_STUDIO_TOKEN}` }, body: JSON.stringify(body) }), environment);
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: 'invalid_studio_status' });
+  }
+  const response = await handler.studioFetch(new Request(url, { method: 'POST',
+    headers: { authorization: `Bearer ${environment.CALL_STUDIO_TOKEN}` }, body: 'private transcript'.repeat(4000) }), environment);
+  assert.equal(response.status, 413);
+  assert.deepEqual(logs, []);
+});
+
 test('Studio reports reject transcript fields and leases preserve the session capability', async () => {
   const { send, handler } = rig();
   const { body: session } = await send('', 'POST', recording);
@@ -334,4 +364,19 @@ test('alarm deletes queued chunks and session read reports expired across restar
   assert.equal((await send(path, 'GET', undefined, joe, env)).body.state, 'expired');
   assert.equal((await send(path + '/transfer', 'PUT', new Uint8Array(100), joe, env)).status, 202);
   assert.equal((await send(path, 'GET', undefined, joe, env)).body.state, 'queued');
+});
+
+test('configuration cannot raise hard call or daily limits', async () => {
+  const { send, store } = rig();
+  const env = { ...environment, CALL_MAX_BYTES: 999999999, CALL_MAX_SECONDS: 99999, CALL_DAILY_ADMISSIONS: 99 };
+  for (const changes of [{ byte_count: 52428801 }, { duration_seconds: 3601 }]) {
+    assert.equal((await send('', 'POST', { ...recording, ...changes }, joe, env)).status, 400);
+  }
+  assert.equal(store.sessions.length, 0);
+  for (let n = 0; n < 5; n++) {
+    const body = { ...recording, sha256: String(n).repeat(64) };
+    assert.equal((await send('', 'POST', body, joe, env)).status, 201);
+    assert.equal((await send('', 'POST', body, joe, env)).status, 200);
+  }
+  assert.equal((await send('', 'POST', recording, joe, env)).status, 429);
 });
