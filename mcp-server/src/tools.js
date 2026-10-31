@@ -12,6 +12,7 @@ import { dealExtractionTools } from "./deal-extraction.js";
 import { factReviewTools } from "./fact-review.ts";
 import { factObservationTools } from "./fact-observations.ts";
 import { actionClosureTools } from "./action-closure.ts";
+import { requirementRequestTools } from "./requirement-requests.js";
 import { dealFileTools } from "./deal-files.js";
 import { dealItemTools, readDealItems, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.ts";
 import { bindReferralDeal } from "./relationship-network.ts";
@@ -9060,6 +9061,7 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
 
 const TOOL_REGISTRATION_SOURCE = Object.freeze({
   'action-closure': 'mcp-server/src/action-closure.ts',
+  'requirement-requests': 'mcp-server/src/requirement-requests.js',
   'deal-files': 'mcp-server/src/deal-files.js',
   'deal-items': 'mcp-server/src/deal-items.ts',
   'feature-switches':'mcp-server/src/feature-switches.js',
@@ -10608,6 +10610,7 @@ registerTools(scheduleBoardTools(), "schedule-board");
 registerTools(dealItemTools({ withEnvelope, writeEvent, resolveSubject,
   canExercisePartnerAuthority, partnerAuthoritySlugForActor }), "deal-items");
 registerTools(actionClosureTools({ withEnvelope, writeEvent, canExercisePartnerAuthority }), "action-closure");
+registerTools(requirementRequestTools({ withEnvelope, writeEvent, resolveSubject }), "requirement-requests");
 registerTools(dealFileTools({ withEnvelope, writeEvent, resolveSubject }), "deal-files");
 
 // WR-AI-006: curation proposals are machine-callable; approval and retirement
