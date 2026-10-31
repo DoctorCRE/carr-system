@@ -251,11 +251,13 @@ def publish_status(session: Path, cfg: dict, token: str, bridge) -> bool:
                  for question in report.get('review_questions', []) if not question.get('resolved', False)]
     count = len(questions)
     state, reason = status.get('state'), status.get('reason_code', status.get('reason'))
-    if state == 'needs_attention':
+    if report.get('checks_hold'):
+        state, reason = 'held_review', 'budget'
+    elif state == 'needs_attention':
         if reason not in {'extraction_failed', 'transcript_unavailable', 'transient_ceiling'}:
             reason = 'extraction_failed'
     elif state == 'held_review':
-        if reason not in {'summary_repeats_transcript', 'transcript_unavailable'}:
+        if reason not in {'summary_repeats_transcript', 'transcript_unavailable', 'budget'}:
             reason = 'summary_repeats_transcript'
     elif count:
         state, reason = 'held_review', 'open_review_questions'
@@ -313,6 +315,12 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                     if not publish_status(session, cfg, token, bridge):
                         counts['pending'] += 1
                         continue
+                    report = post_call.read_json(session / post_call.REPORT_FILE) or {}
+                    if report.get('checks_hold'):
+                        post_call.process_session(session)
+                        if not publish_status(session, cfg, token, bridge):
+                            counts['pending'] += 1
+                            continue
                     if (session / 'ingested.json').exists():
                         continue
                     local = post_call.read_json(session / post_call.STATUS_FILE) or {}
