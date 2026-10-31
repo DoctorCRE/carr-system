@@ -43,9 +43,29 @@ class Controls(unittest.TestCase):
         wf = workflow()
         setup = next(step for step in wf['jobs']['classes']['steps']
                      if 'actions/setup-node@' in step.get('uses', ''))
-        self.assertEqual(setup['with'].get('cache'), 'npm')
-        self.assertEqual(setup['with'].get('cache-dependency-path', '').split(),
-                         ['mcp-server/package-lock.json', 'practice-plugin/package-lock.json'])
+        self.assertFalse(setup['with']['package-manager-cache'])
+        cache = workflow('../actions/ci-downloads/action.yml')
+        self.assertIn('$ImageOS-$ImageVersion', cache['runs']['steps'][0]['run'])
+        npm, pip = cache['runs']['steps'][1:]
+        for step, locks in ((npm, ('.nvmrc', 'mcp-server/package-lock.json', 'practice-plugin/package-lock.json')),
+                            (pip, ('.python-version', 'requirements.lock'))):
+            key = step['with']['key']
+            self.assertIn('${{ runner.os }}-${{ runner.arch }}-${{ steps.image.outputs.identity }}', key)
+            for lock in locks:
+                self.assertIn(lock, key)
+            self.assertNotIn('restore-keys', step['with'])
+        for filename in ('ci.yml', 'main-canary.yml'):
+            for job in workflow(filename)['jobs'].values():
+                steps = job.get('steps', [])
+                setups = [step for step in steps if 'actions/setup-node@' in step.get('uses', '')
+                          or 'actions/setup-python@' in step.get('uses', '')]
+                if not setups:
+                    continue
+                with self.subTest(workflow=filename, job=job.get('name')):
+                    self.assertTrue(all('cache' not in step['with'] for step in setups))
+                    restore = next(step for step in steps if step.get('uses') == './.github/actions/ci-downloads')
+                    self.assertGreater(steps.index(restore), steps.index(setups[-1]))
+                    self.assertEqual(restore.get('if'), setups[-1].get('if'))
         install = next(step for step in wf['jobs']['classes']['steps']
                        if step.get('name') == 'Install Node dependencies')
         commands = install['run'].splitlines()
