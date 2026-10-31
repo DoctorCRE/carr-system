@@ -13,4 +13,5 @@ export async function applyPendingDealRoomReads(client) {
     await client.query(readFileSync(new URL('../../../migrations/1013_register_client_portal.sql', import.meta.url), 'utf8'));
   await client.query(readFileSync(new URL('../../../migrations/1064_deal_sent_correspondence.sql', import.meta.url), 'utf8'));
   await client.query(readFileSync(new URL('../../../migrations/1065_call_followup_contact.sql', import.meta.url), 'utf8'));
+  await client.query(readFileSync(new URL('../../../migrations/1067_post_call_due_provenance.sql', import.meta.url), 'utf8'));
 }
