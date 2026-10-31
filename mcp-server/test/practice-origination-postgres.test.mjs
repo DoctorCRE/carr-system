@@ -1,7 +1,7 @@
 // Exercise the real registered contracts and migration on isolated synthetic PostgreSQL.
 import test, {before,after} from 'node:test';
 import assert from 'node:assert/strict';
-import {existsSync,readFileSync} from 'node:fs';
+import { readFileSync } from 'node:fs';
 import {randomUUID} from 'node:crypto';
 import pg from 'pg';
 import {acquireDisposablePostgres} from './helpers/disposable-postgres.mjs';
@@ -9,21 +9,10 @@ import {executeRegisteredTool} from '../src/tools.js';
 
 let fixture,c,actor;
 before(async () => {
-  const bin=['/opt/homebrew/opt/postgresql@18/bin','/usr/lib/postgresql/18/bin',
-    '/opt/homebrew/opt/postgresql@17/bin','/usr/lib/postgresql/17/bin'].find(p=>existsSync(`${p}/initdb`));
-  assert.ok(bin,'isolated PostgreSQL required');
-  fixture=await acquireDisposablePostgres({prefix:'practice-origination-',pgCtl:`${bin}/pg_ctl`});
-  await fixture.run(`${bin}/initdb`,['-D',`${fixture.root}/data`,'-U','carr_ci','--auth=trust','--no-locale']);
-  await fixture.run(`${bin}/pg_ctl`,['-D',`${fixture.root}/data`,'-l',`${fixture.root}/server.log`,
-    '-o',`-k ${fixture.root} -h ''`,'-w','start']);
-  await fixture.run(`${bin}/createdb`,['-h',fixture.root,'-U','carr_ci','carr_ci']);
-  c=new pg.Client({host:fixture.root,user:'carr_ci',database:'carr_ci'});
+  fixture = await acquireDisposablePostgres({ prefix: 'practice-origination-', snapshot: true });
+  c=new pg.Client(fixture.connection);
   await c.connect();
-  await c.query('create role neondb_owner');
-  await fixture.run(`${bin}/psql`,['-h',fixture.root,'-U','carr_ci','-d','carr_ci','-X','-q','-v','ON_ERROR_STOP=1',
-    '-f',new URL('../../db/schema.sql',import.meta.url).pathname]);
-  await c.query(readFileSync(new URL('../../migrations/1100_practice_origination.sql',import.meta.url),'utf8'));
-  await c.query(readFileSync(new URL('../../migrations/1108_practice_address_key.sql',import.meta.url),'utf8'));
+
   actor={...(await c.query("select id,slug from actor where slug='joe'")).rows[0],human:true};
 });
 after(async()=>{try {await c?.end();} finally {await fixture?.close();}});
