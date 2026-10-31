@@ -34,9 +34,9 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
       if (unavailable && sql.includes(unavailable)) throw new Error("fixture source unavailable");
       if (sql.includes("calendar_deal_matches")) return { rows: calendarDeals };
       if (sql.includes("/* calendar_meeting_prep */")) return { rows: meetingPrep };
-      if (sql.includes("from v_today_triage")) return { rows: todayRows || [
+      if (sql.includes("from v_today_triage")) return { rows: (todayRows || [
         { item_kind: "next_action", owner: "joe", what: "Call the client", subject_name: "Example Practice" },
-      ] };
+      ]).map(row => ({ ...row, triage_due_on: row.due_on ?? null })) };
       if (sql.includes("from v_claim_card") && sql.includes("count(*)")) return { rows: [
         { claimable: 3, needs_contact_count: 1 },
       ] };
