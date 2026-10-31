@@ -10,7 +10,7 @@ import test from "node:test";
 
 const yaml = createRequire(import.meta.url)("js-yaml");
 const files = ["ci.yml", "doc-drift.yml"];
-const CI_PR_JOBS = ["fast", "unit", "unit-coverage", "checks"];
+const CI_PR_JOBS = ["fast", "gates", "secret", "unit", "unit-coverage", "checks"];
 const CI_FULL_JOBS = ["scope", "unit", "unit-coverage", "classes", "migration-fixtures", "checks"];
 const read = name => yaml.load(readFileSync(new URL("../../.github/workflows/" + name, import.meta.url), "utf8"));
 // Evaluate the workflows' scalar policy expressions, not a synthetic scheduler.
@@ -106,6 +106,18 @@ test("expensive proof jobs survive scope failure but stop when superseded", () =
     "every job belongs to the PR lane, full lane, or both");
 });
 
+test("PR gates retain two parallel partitions and secret scanning runs independently", () => {
+  const ci = read("ci.yml");
+  assert.deepEqual(ci.jobs.gates.strategy.matrix.shard, [1, 2]);
+  const gates = ci.jobs.gates.steps.find(step => step.name === "Gates checks");
+  assert.equal(gates.run, 'ops/ci.sh --strict --only gates --gate-shard "${{ matrix.shard }}/2"');
+  const fast = ci.jobs.fast.steps.find(step => step.name === "Fast checks");
+  assert.doesNotMatch(fast.run, /\b(?:gates|secret)\b/);
+  assert.equal(ci.jobs.secret.steps.find(step => step.name === "Secret checks").run,
+    'ops/ci.sh --strict --only secret');
+  assert.ok(ci.jobs.checks.needs.includes("gates") && ci.jobs.checks.needs.includes("secret"));
+});
+
 test("only unit fixtures provision the shared PostgreSQL service", () => {
   const ci = read("ci.yml"), job = ci.jobs.classes;
   const run = job.steps.find(step => step.name === "Run this group's check classes");
@@ -140,7 +152,7 @@ test("metadata edits start no validation workflow, so no skipped suite replaces 
 test("strict aggregate runs after failed classes and requires complete successful evidence", () => {
   const ci = read("ci.yml"), gate = ci.jobs.checks;
   assert.equal(gate.name, "ops/ci.sh --strict", "the required context name must be a literal");
-  assert.deepEqual(gate.needs, ["fast", "unit-coverage", "scope", "classes", "migration-fixtures"]);
+  assert.deepEqual(gate.needs, ["fast", "gates", "secret", "unit-coverage", "scope", "classes", "migration-fixtures"]);
   assert.equal(ci.jobs["unit-coverage"].needs, "unit", "coverage must wait for the entire shard matrix");
   assert.deepEqual(ci.jobs.unit.strategy.matrix.shard, [1, 2, 3, 4]);
   assert.ok(policy(ci, context(), false).runnable.includes("checks"), "always() must override implicit success()");
@@ -150,7 +162,7 @@ test("strict aggregate runs after failed classes and requires complete successfu
   try {
     assert.equal(step.env.CI_NEEDS, "${{ toJSON(needs) }}");
     assert.equal(step.env.CI_EVENT, "${{ github.event_name }}");
-    for (const [event, active] of [["pull_request", ["fast", "unit-coverage"]],
+    for (const [event, active] of [["pull_request", ["fast", "gates", "secret", "unit-coverage"]],
                                   ["merge_group", ["scope", "classes", "migration-fixtures", "unit-coverage"]]]) {
       const needs = Object.fromEntries(gate.needs.map(name => [name, { result: active.includes(name) ? "success" : "skipped" }]));
       needs.scope.outputs = { full: "true" };

@@ -1068,7 +1068,7 @@ def test_hosted_draft_lifecycle():
             ["node", "-e", script, json.dumps([expression, context])], text=True))
 
     for filename, lanes, verdict_name, command in (
-            ("ci.yml", ("fast", "unit-coverage", "scope", "classes", "migration-fixtures"),
+            ("ci.yml", ("fast", "gates", "secret", "unit-coverage", "scope", "classes", "migration-fixtures"),
              "checks", "verdict"),
             ("doc-drift.yml", ("check",), "verdict", "drift-verdict")):
         wf = _hosted_workflow(filename)
@@ -1119,7 +1119,7 @@ def test_hosted_draft_lifecycle():
                 ctx = context(draft=draft, action=action, sha=sha)
                 groups.append(evaluate(wf["concurrency"]["group"], ctx))
                 check(f"{filename}: {action} draft={draft} SHA={sha[:7]} schedules correct lanes",
-                      all(bool(evaluate(jobs[name].get("if", "true"), ctx)) == ((not draft) if filename != "ci.yml" or name in ("fast", "unit-coverage") else False)
+                      all(bool(evaluate(jobs[name].get("if", "true"), ctx)) == ((not draft) if filename != "ci.yml" or name in ("fast", "gates", "secret", "unit-coverage") else False)
                           for name in lanes))
                 result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=REPO,
                     env={**scrubbed_env(), "CI_NEEDS": json.dumps(needs),
@@ -1143,10 +1143,10 @@ def test_hosted_draft_lifecycle():
             for event in ("merge_group", "schedule", "workflow_dispatch"):
                 ctx = context(event=event, draft=True)
                 check(f"{filename}: {event} runs every lane outside PR cancellation group",
-                      all(bool(evaluate(jobs[name].get("if", "true"), ctx)) == (filename != "ci.yml" or name != "fast") for name in lanes)
+                      all(bool(evaluate(jobs[name].get("if", "true"), ctx)) == (filename != "ci.yml" or name not in ("fast", "gates", "secret")) for name in lanes)
                       and not evaluate(wf["concurrency"]["cancel-in-progress"], ctx)
                       and evaluate(wf["concurrency"]["group"], ctx) != groups[0])
-            for lane in (tuple(n for n in lanes if n != "fast") if filename == "ci.yml" else lanes):
+            for lane in (tuple(n for n in lanes if n not in ("fast", "gates", "secret")) if filename == "ci.yml" else lanes):
                 for state in ("failure", "cancelled", "skipped", "timed_out", "missing"):
                     broken = {name: dict(value) for name, value in needs.items()}
                     if state == "missing":

@@ -11,6 +11,34 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ShardCoverage(unittest.TestCase):
+    def test_measured_durations_balance_and_discovery_keeps_new_suites(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tests = root / 'mcp-server/test'
+            tests.mkdir(parents=True)
+            records = {}
+            for index, milliseconds in enumerate((90, 80, 70, 60, 40, 30, 20, 10)):
+                name = f'{index}.test.mjs'
+                (tests / name).touch()
+                records[name] = {'milliseconds': milliseconds, 'serial': True}
+            timing_file = root / 'ops/config/ci-unit-durations.json'
+            timing_file.parent.mkdir(parents=True)
+            timing_file.write_text(json.dumps({'suites': records}))
+            command = [sys.executable, str(ROOT / 'ops/ci_unit_shards.py'), '--root', str(root), 'plan']
+            result = subprocess.run(command, text=True, capture_output=True, check=True)
+            shards = json.loads(result.stdout)
+            self.assertEqual(sorted(sum(records[file]['milliseconds'] for file in shard) for shard in shards), [100] * 4)
+            (tests / 'new.test.mjs').touch()
+            result = subprocess.run(command, text=True, capture_output=True, check=True)
+            self.assertEqual(sorted(file for shard in json.loads(result.stdout) for file in shard), sorted([*records, 'new.test.mjs']))
+            log = root / 'incomplete.log'
+            log.write_text('suite-timing: 0.test.mjs 90ms\n')
+            result = subprocess.run([sys.executable, str(ROOT / 'ops/ci_unit_shards.py'), '--root', str(root),
+                                     'timings', str(log), '--source-run', '1', '--output', str(timing_file)],
+                                    text=True, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('missing=', result.stderr)
+
     def test_receipts_require_every_suite_and_nonempty_shards(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

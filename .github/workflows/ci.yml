@@ -64,7 +64,79 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CARR_LOCAL_PG_ALLOW_HOSTED: "1"
           CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
-        run: ops/ci.sh --strict --only "pushfloor unit types secret binding artifact gates" --unit-part fast
+        run: ops/ci.sh --strict --only "pushfloor unit types binding artifact" --unit-part fast
+
+
+  gates:
+    name: PR gates shard ${{ matrix.shard }} of 2
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+      - uses: ./.github/actions/ci-downloads
+
+      - run: python -m pip install -r requirements.lock
+      - run: npm --prefix mcp-server ci --no-audit
+      - run: npm --prefix practice-plugin ci --no-audit
+      - name: Identify the runner image for the zsh archive
+        id: zsh-image
+        run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
+      - name: Restore zsh package archives
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ runner.temp }}/zsh-debs/*.deb
+          key: zsh-ubuntu24-${{ runner.arch }}-${{ steps.zsh-image.outputs.version }}-${{ hashFiles('ops/ci-zsh.sh') }}
+      - name: Install zsh
+        timeout-minutes: 12
+        env:
+          ZSH_RETRY_BACKOFF: "5"
+          ZSH_ARCHIVE_DIR: ${{ runner.temp }}/zsh-debs
+        run: ops/ci-zsh.sh
+      - uses: ./.github/actions/ci-apt
+        with:
+          packages: --postgres --documents
+      - name: Verify edge incident delivery
+        if: matrix.shard == 1
+        run: python3 test/ci-noise-incident-test.py
+      - name: Gates checks
+        env:
+          CARR_CI_PORTABLE_ONLY: "1"
+          GH_TOKEN: ${{ github.token }}
+          CARR_LOCAL_PG_ALLOW_HOSTED: "1"
+          CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
+        run: ops/ci.sh --strict --only gates --gate-shard "${{ matrix.shard }}/2"
+
+
+  secret:
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version-file: .python-version
+      - uses: ./.github/actions/ci-downloads
+      - run: python -m pip install -r requirements.lock
+      - name: Secret checks
+        run: ops/ci.sh --strict --only secret
 
   scope:
     if: ${{ !cancelled() && github.event_name != 'pull_request' }}
@@ -461,7 +533,7 @@ jobs:
     # the merge silently instead of saying why.
     name: ops/ci.sh --strict
     runs-on: ubuntu-24.04
-    needs: [fast, unit-coverage, scope, classes, migration-fixtures]
+    needs: [fast, gates, secret, unit-coverage, scope, classes, migration-fixtures]
     permissions:
       contents: read
     if: ${{ always() }}

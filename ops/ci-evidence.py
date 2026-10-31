@@ -53,7 +53,7 @@ def hosted_verdict(*, drift=False):
         return 1
     needs = json.loads(os.environ['CI_NEEDS'])
     fast = not drift and os.environ.get('CI_EVENT') == 'pull_request'
-    lanes = ('check',) if drift else (('fast', 'unit-coverage') if fast else ('scope', 'classes', 'migration-fixtures', 'unit-coverage'))
+    lanes = ('check',) if drift else (('fast', 'gates', 'secret', 'unit-coverage') if fast else ('scope', 'classes', 'migration-fixtures', 'unit-coverage'))
     results = {name: needs[name]['result'] for name in lanes}
     allowed = {name: {'success'} for name in lanes}
     if not drift and not fast:
@@ -75,7 +75,7 @@ def hosted_verdict(*, drift=False):
 def contract_digest(root=ROOT):
     digest = hashlib.sha256()
     for name in ('.github/workflows/ci.yml', 'ops/ci-evidence.py', 'ops/ci.sh', 'ops/ci-unit.py',
-                 'ops/ci_unit_shards.py', 'mcp-server/run-tests.mjs', 'ops/ci-pushfloor.py', 'ops/ci-migration.py', 'ops/ci-gates.py', 'ops/ci-secret.py',
+                 'ops/config/ci-unit-durations.json', 'ops/ci_unit_shards.py', 'mcp-server/run-tests.mjs', 'ops/ci-pushfloor.py', 'ops/ci-migration.py', 'ops/ci-gates.py', 'ops/ci-secret.py',
                  'ops/node_test_summary.py',
                  'ops/ci-node-file.mjs',
                  'requirements.lock',

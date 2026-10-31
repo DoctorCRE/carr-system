@@ -177,7 +177,7 @@ class Controls(unittest.TestCase):
         self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
         self.assertIn('always()', wf['jobs']['checks']['if'])
         self.assertIn('!cancelled()', wf['jobs']['classes']['if'])
-        self.assertEqual(set(wf['jobs']['checks']['needs']), {'fast', 'unit-coverage', 'scope', 'classes', 'migration-fixtures'})
+        self.assertEqual(set(wf['jobs']['checks']['needs']), {'fast', 'gates', 'secret', 'unit-coverage', 'scope', 'classes', 'migration-fixtures'})
         steps = wf['jobs']['checks']['steps']
         verdict = next(step for step in steps if step.get('name') == 'Fail unless every class group succeeded')
         self.assertIn('python3 ops/ci-evidence.py verdict', verdict['run'])

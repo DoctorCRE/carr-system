@@ -6,7 +6,8 @@ import runpy
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -24,25 +25,38 @@ class SystemDependencies(unittest.TestCase):
     def test_existing_runner_packages_skip_apt_and_publish_postgres_path(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
-            from unittest.mock import Mock
             run = Mock()
             self.invoke(directory, True, run)
             run.assert_not_called()
             self.assertEqual((directory / 'path').read_text(), '/usr/lib/postgresql/17/bin\n')
 
+    def test_cached_packages_install_without_refresh_or_download(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            run = Mock(return_value=SimpleNamespace(returncode=0))
+            self.invoke(directory, False, run)
+            run.assert_called_once()
+            command = run.call_args.args[0]
+            self.assertIn('--no-download', command)
+            self.assertIn('postgresql-17-pgvector', command)
+            self.assertIn('libreoffice-calc', command)
+            self.assertNotIn('update', command)
+            self.assertEqual((directory / 'path').read_text(), '/usr/lib/postgresql/17/bin\n')
+
     def test_missing_packages_use_archives_and_fail_closed(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
-            from unittest.mock import Mock
-            run = Mock()
+            run = Mock(return_value=SimpleNamespace(returncode=1))
             self.invoke(directory, False, run)
             commands = [call.args[0] for call in run.call_args_list]
-            self.assertEqual(commands[0], ['bash', 'ops/ci-postgres.sh'])
-            self.assertEqual(len(commands), 3)
-            self.assertIn(f'Dir::Cache::archives={directory / "archives"}', commands[2])
-            self.assertIn('APT::Keep-Downloaded-Packages=true', commands[2])
-            self.assertIn('libreoffice-calc', commands[2])
-            for call in run.call_args_list:
+            self.assertIn('--no-download', commands[0])
+            self.assertEqual(commands[1], ['bash', 'ops/ci-postgres.sh'])
+            self.assertEqual(len(commands), 4)
+            self.assertIn(f'Dir::Cache::archives={directory / "archives"}', commands[3])
+            self.assertIn('APT::Keep-Downloaded-Packages=true', commands[3])
+            self.assertIn('libreoffice-calc', commands[3])
+            self.assertFalse(run.call_args_list[0].kwargs['check'])
+            for call in run.call_args_list[1:]:
                 self.assertTrue(call.kwargs['check'])
                 self.assertLessEqual(call.kwargs['timeout'], 240)
             run.side_effect = subprocess.CalledProcessError(1, 'apt-get')

@@ -14,6 +14,7 @@ runs:
       with:
         path: ${{ runner.temp }}/apt-debs/*.deb
         key: apt-ubuntu24-${{ runner.arch }}-${{ steps.image.outputs.version }}-${{ inputs.packages }}-${{ hashFiles('ops/ci-postgres.sh', 'ops/ci-apt.py') }}
+        restore-keys: apt-ubuntu24-${{ runner.arch }}-${{ steps.image.outputs.version }}-${{ inputs.packages }}-
     - shell: bash
       env:
         CARR_CI_APT_ARCHIVES: ${{ runner.temp }}/apt-debs

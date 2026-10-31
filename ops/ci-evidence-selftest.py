@@ -39,7 +39,7 @@ class HostedVerdict(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             for state, expected in [('success', 0), ('failure', 1), ('cancelled', 1), ('skipped', 1)]:
                 with self.subTest(state=state), patch.dict(os.environ,
-                    CI_EVENT='pull_request', CI_NEEDS=json.dumps({'fast': {'result': state}, 'unit-coverage': {'result': 'success'}}),
+                    CI_EVENT='pull_request', CI_NEEDS=json.dumps({'fast': {'result': state}, 'gates': {'result': 'success'}, 'secret': {'result': 'success'}, 'unit-coverage': {'result': 'success'}}),
                     CI_DRAFT='false', GITHUB_STEP_SUMMARY=str(pathlib.Path(directory) / 'summary')):
                     self.assertEqual(evidence.hosted_verdict(), expected)
 
@@ -47,7 +47,7 @@ class HostedVerdict(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             for event in ('pull_request', 'merge_group'):
                 for state in ('failure', 'cancelled', 'skipped'):
-                    needs = {'fast': {'result': 'success'},
+                    needs = {'fast': {'result': 'success'}, 'gates': {'result': 'success'}, 'secret': {'result': 'success'},
                              'scope': {'result': 'success', 'outputs': {'full': 'true'}},
                              'classes': {'result': 'success'},
                              'migration-fixtures': {'result': 'success'},
