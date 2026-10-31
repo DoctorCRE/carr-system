@@ -34,13 +34,13 @@ on disposable PostgreSQL. It requires empty-database refusal without writes,
 then loads the snapshot, applies pending migrations, and compares the exact
 filename/checksum ledger with the source. A regression in either side fails CI.
 
-## Rules
-
 ## Prove migrations locally
 
 Run `./run.sh local-db-ci --class migration` to prove migrations on disposable PostgreSQL.
 Run `python3 ops/migration-shadow.py --base origin/main` to rehearse a base-first upgrade.
 A pre-push migration result marked `skipped` is not a proof.
+
+## Rules
 
 - **Forward-only, numbered.** `NNNN_name.sql`, applied in filename order by
   `tools/migrate.py` (`run.sh migrate`) for the pending files in each run.
