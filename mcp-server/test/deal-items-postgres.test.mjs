@@ -80,6 +80,72 @@ async function command(name, args = {}, identity = actor) {
 }
 const item = title => ({ title, due_on: '2026-10-23', source_ref: `synthetic:${title}`, bullets: [{ date: '2026-10-20', kind: 'promised', text: 'Requested on the call.' }] });
 
+test('expanded deal history retains an update after fifty newer activities', async () => {
+  await c.query('begin');
+  try {
+    await c.query(`insert into activity (deal_id, actor_id, kind, summary, occurred_at, source)
+      select $1, $2, 'note',
+             case when n=0 then 'Synthetic original requirement' else 'Synthetic follow-up ' || n end,
+             '2026-01-01 12:00:00+00'::timestamptz + n * interval '1 minute', 'stated'
+        from generate_series(0, 50) n`, [deal, actor.id]);
+    const detail = await executeRegisteredTool(c, actor, 'get-deal-room', { deal });
+    assert.equal(detail.activities.length, 51);
+    assert.equal(detail.activities_truncated, false);
+    assert.equal(detail.activities[0].summary, 'Synthetic follow-up 50');
+    assert.equal(detail.activities.at(-1).summary, 'Synthetic original requirement');
+    assert.equal(new Set(detail.activities.map(activity => activity.id)).size, 51);
+  } finally {
+    await c.query('rollback');
+  }
+});
+
+test('deal history caps activities at 500 newest rows', async () => {
+  await c.query('begin');
+  try {
+    await c.query(`insert into activity (deal_id, actor_id, kind, summary, occurred_at, source)
+      select $1, $2, 'note', 'Synthetic activity ' || n,
+             '2026-01-01 12:00:00+00'::timestamptz + n * interval '1 minute', 'stated'
+        from generate_series(0, 500) n`, [deal, actor.id]);
+    const detail = await executeRegisteredTool(c, actor, 'get-deal-room', { deal });
+    assert.equal(detail.activities.length, 500);
+    assert.equal(detail.activities_truncated, true);
+    assert.equal(detail.activities[0].summary, 'Synthetic activity 500');
+    assert.equal(detail.activities.at(-1).summary, 'Synthetic activity 1');
+  } finally {
+    await c.query('rollback');
+  }
+});
+
+test('deal room caps notes and events at 500 newest rows', async () => {
+  await c.query('begin');
+  try {
+    await c.query(`insert into deal_note (deal_id, actor_id, kind, text, created_at)
+      select $1, $2, 'note', 'Note ' || n, '2026-01-01'::timestamptz + n * interval '1 minute'
+      from generate_series(1, 500) n`, [deal, actor.id]);
+    await c.query(`insert into event (actor_id, verb, subject_type, subject_id, occurred_at, recorded_at, cause)
+      select $2, 'event ' || n, 'deal', $1, '2026-01-01'::timestamptz, '2026-01-01'::timestamptz + n * interval '1 minute', 'system'
+      from generate_series(1, 500) n`, [deal, actor.id]);
+    let detail = await executeRegisteredTool(c, actor, 'get-deal-room', { deal });
+    assert.equal(detail.thread.length, 500);
+    assert.equal(detail.thread_truncated, false);
+    assert.equal(detail.events.length, 500);
+    assert.equal(detail.events_truncated, false);
+    await c.query("insert into deal_note (deal_id, actor_id, kind, text, created_at) values ($1, $2, 'note', 'Newest', '2027-01-01')", [deal, actor.id]);
+    await c.query("insert into event (actor_id, verb, subject_type, subject_id, occurred_at, recorded_at, cause) values ($2, 'newest', 'deal', $1, '2027-01-01', '2027-01-01', 'system')", [deal, actor.id]);
+    detail = await executeRegisteredTool(c, actor, 'get-deal-room', { deal });
+    assert.equal(detail.thread.length, 500);
+    assert.equal(detail.thread_truncated, true);
+    assert.equal(detail.thread[0].text, 'Newest');
+    assert.equal(detail.thread.at(-1).text, 'Note 2');
+    assert.equal(detail.events.length, 500);
+    assert.equal(detail.events_truncated, true);
+    assert.equal(detail.events[0].verb, 'newest');
+    assert.equal(detail.events.at(-1).verb, 'event 2');
+  } finally {
+    await c.query('rollback');
+  }
+});
+
 test('two sourced items persist and replay through the normal write envelope', async () => {
   const key = randomUUID();
   const first = await command('record-deal-item', { ...item('Vendor Introductions'), idempotency_key: key });
@@ -418,10 +484,10 @@ test('Home discovers pending call follow-ups through existing grants without exe
     const result = await read();
     for (const candidate of result.candidates) candidate.created_at = new Date(candidate.created_at).toISOString();
     assert.deepEqual(result, { schema_version:'post-call-followups.v1', send:false, candidates:[
-      { id:first, session_id:session, kind:'assigned_action', deal_id:deal, deal_name:'Synthetic coastal purchase',
+      { id:first, session_id:session, kind:'assigned_action', deal_id:deal, deal_name:'Synthetic coastal purchase', contact_name:null,
         payload:{deal_id:deal,assignee:'dell',action:'Call the synthetic lender',due_on:null},
         evidence_quote:'Dell will call the lender',created_at:'2026-10-20T12:00:00.000Z' },
-      { id:second, session_id:session, kind:'email_draft', deal_id:deal, deal_name:'Synthetic coastal purchase',
+      { id:second, session_id:session, kind:'email_draft', deal_id:deal, deal_name:'Synthetic coastal purchase', contact_name:'Synthetic vendor contact',
         payload:{deal_id:deal,recipient_party_id:recipient.id,recipient_ref:recipient.ref,subject:'Synthetic vendor follow-up',body_sha256:'a'.repeat(64)},
         evidence_quote:'Draft a vendor follow-up',created_at:'2026-10-20T12:00:00.000Z' },
     ] });

@@ -264,12 +264,14 @@ def event(h, key='event-key', send_requested=True, **overrides):
 
 class SendTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch.object(ui, 'screen_locked', return_value=False))
         self.tmp = tempfile.TemporaryDirectory()
         self.out = Path(self.tmp.name) / 'out'
         self.home = Path(self.tmp.name) / 'home'
         self.config = write_settings(self.home, ROOT, account=ACCOUNT, internal_domain='company.test')
         self.enterContext(patch.object(send_mod, 'load_settings', lambda: load_settings(home=self.home)))
         self.enterContext(patch.object(ui, 'load_settings', lambda: load_settings(home=self.home)))
+        self.enterContext(patch.object(ui, 'screen_locked', return_value=False))
         self.dialog = self.enterContext(patch.object(send_mod.subprocess, 'run',
             return_value=subprocess.CompletedProcess(['osascript'], 0, 'true\n', '')))
 
@@ -1034,6 +1036,7 @@ class SendTests(unittest.TestCase):
 
 class OutboxTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch.object(ui, 'screen_locked', return_value=False))
         from lib import outlook_outbox
         self.worker = outlook_outbox
         self.tmp = self.enterContext(tempfile.TemporaryDirectory())
@@ -1090,7 +1093,7 @@ class OutboxTests(unittest.TestCase):
         packet = root / 'synthetic-unreadable.pdf'
         packet.write_bytes(b'synthetic bytes')
         self.settings = replace(self.settings, attachment_root=root, attachment_max_bytes=1000)
-        self.draft['attachments'] = [dict(path=str(packet), sha256=send_mod._digest(packet))]
+        self.draft['attachments'] = [dict(path=str(packet), sha256=send_mod._digest(packet), size=packet.stat().st_size)]
         second = {**self.draft, 'proposal_id': '22222222-2222-4333-8444-555555555555', 'attachments': []}
         carr = self.ports.carr
         def two_drafts(verb, args):
@@ -1184,7 +1187,7 @@ class OutboxTests(unittest.TestCase):
         packet.write_bytes(b'synthetic attachment')
         from dataclasses import replace
         self.settings = replace(self.settings, attachment_root=root, attachment_max_bytes=1000)
-        self.draft['attachments'] = [dict(path=str(packet), sha256=send_mod._digest(packet))]
+        self.draft['attachments'] = [dict(path=str(packet), sha256=send_mod._digest(packet), size=packet.stat().st_size)]
         self.ports.script_send = lambda mail: 'sent'
         with patch.object(send_mod, 'default_sender', lambda: f'{ACCOUNT}_ActiveSyncExchange_HxS'):
             counts = self.worker.run(self.settings, self.ports)
@@ -1199,7 +1202,7 @@ class OutboxTests(unittest.TestCase):
         packet.write_bytes(b'original synthetic bytes')
         self.settings = replace(self.settings, attachment_root=root, attachment_max_bytes=1000)
         digest = send_mod._digest(packet)
-        self.draft['attachments'] = [dict(path=str(packet), sha256=digest)]
+        self.draft['attachments'] = [dict(path=str(packet), sha256=digest, size=packet.stat().st_size)]
         packet.write_bytes(b'changed synthetic bytes')
         counts = self.worker.run(self.settings, self.ports)
         self.assertEqual(counts['failed'], 1)
@@ -1207,9 +1210,64 @@ class OutboxTests(unittest.TestCase):
         packet.write_bytes(b'original synthetic bytes')
         alias = root / 'alias.pdf'
         alias.symlink_to(packet)
-        self.draft['attachments'] = [dict(path=str(alias), sha256=digest)]
+        self.draft['attachments'] = [dict(path=str(alias), sha256=digest, size=packet.stat().st_size)]
         with self.assertRaisesRegex(ValueError, '^submission_attachment_mismatch$'):
             self.worker.SubmittedDraft.parse(self.draft, self.settings)
+
+    def test_submitted_attachment_size_must_match_frozen_submission(self):
+        from dataclasses import replace
+        root = Path(self.tmp).resolve() / 'approved'
+        root.mkdir()
+        packet = root / 'synthetic.pdf'
+        packet.write_bytes(b'synthetic attachment')
+        self.settings = replace(self.settings, attachment_root=root, attachment_max_bytes=1000)
+        self.draft['attachments'] = [dict(path=str(packet), sha256=send_mod._digest(packet), size=20)]
+        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        self.assertEqual(draft.mail.attachments[0].size, 20)
+        for size in (19, True, -1, '20'):
+            with self.subTest(size=size):
+                self.draft['attachments'][0]['size'] = size
+                with self.assertRaisesRegex(ValueError, '^submission_attachment_mismatch$'):
+                    self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        del self.draft['attachments'][0]['size']
+        with self.assertRaisesRegex(ValueError, '^invalid_submission$'):
+            self.worker.SubmittedDraft.parse(self.draft, self.settings)
+
+    def test_confirmed_attachment_receipt_replays_after_file_changes(self):
+        root = Path(self.tmp).resolve() / 'approved'
+        root.mkdir()
+        packet = root / 'synthetic.pdf'
+        packet.write_bytes(b'abc')
+        digest = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
+        self.settings = replace(self.settings, attachment_root=root, attachment_max_bytes=1000)
+        self.draft['attachments'] = [dict(path=str(packet), sha256=digest, size=3)]
+        def dispatch(mail):
+            self.assertEqual(mail.attachments[0].path.read_bytes(), b'abc')
+            self.sent.append(mail)
+            self.mailbox.sent.append(SentRow(ACCOUNT, '; '.join(mail.recipients), mail.subject,
+                                             int(NOW), 'synthetic-changed-file'))
+            packet.write_bytes(b'changed after dispatch')
+            return 'sent'
+        self.ports.script_send = dispatch
+        carr = self.ports.carr
+        def offline_receipt(verb, args):
+            reply = carr(verb, args)
+            if verb == 'record-email-sent':
+                raise OSError('synthetic outage')
+            return reply
+        self.ports.carr = offline_receipt
+        with patch.object(send_mod, 'default_sender', lambda: f'{ACCOUNT}_ActiveSyncExchange_HxS'):
+            first = self.worker.run(self.settings, self.ports)
+        self.assertEqual((first['sent'], first['receipt_failed']), (1, 1))
+        self.ports.carr = carr
+        self.worker.run(self.settings, self.ports)
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual((self.sent[0].attachments[0].sha256, self.sent[0].attachments[0].size), (digest, 3))
+        receipts = [a for v, a in self.calls if v == 'record-email-sent']
+        self.assertEqual(len(receipts), 2)
+        self.assertEqual(receipts[0], receipts[1])
+        self.assertEqual(receipts[0]['status'], 'sent')
+        self.assertEqual(list((self.ports.out / 'outbox').glob('*.json')), [])
 
     def test_confirmed_files_keep_names_out_of_ledger_receipts_and_diagnostics(self):
         from dataclasses import replace
@@ -1221,7 +1279,7 @@ class OutboxTests(unittest.TestCase):
         for path in paths:
             path.write_bytes(b'synthetic attachment')
         self.settings = replace(self.settings, attachment_root=root, attachment_max_bytes=1000)
-        self.draft['attachments'] = [dict(path=str(p), sha256=send_mod._digest(p)) for p in paths]
+        self.draft['attachments'] = [dict(path=str(p), sha256=send_mod._digest(p), size=p.stat().st_size) for p in paths]
         def dispatch(mail):
             self.sent.append(mail)
             self.mailbox.sent.append(SentRow(ACCOUNT, '; '.join(mail.recipients), mail.subject,
@@ -1271,7 +1329,8 @@ class OutboxTests(unittest.TestCase):
                         quit_seconds=0, sync_seconds=0, new_window_seconds=0))
                     with patch.object(ui, 'cua', fake), \
                             patch.object(ui, 'outlook_pid', return_value=42), \
-                            patch.object(ui.subprocess, 'run') as command:
+                            patch.object(ui.subprocess, 'run', return_value=
+                                subprocess.CompletedProcess([], 1, b'', b'')) as command:
                         counts = self.worker.run(self.settings, self.ports)
                     self.assertEqual(counts['deferred'], 1)
                     self.assertEqual(counts['compose_window_open'], 1)
@@ -1281,6 +1340,13 @@ class OutboxTests(unittest.TestCase):
                     self.assertEqual(len(fake.forms), 1)
                     self.assertFalse(any(tool == 'invoke_menu' for tool, _ in fake.calls))
                     command.assert_not_called()
+
+    def test_locked_screen_defers_without_failure_receipt(self):
+        locked = send_mod.Result(send_mod.State.FAILED, 'screen_locked')
+        with patch.object(send_mod, 'send_submitted', return_value=locked):
+            counts = self.worker.run(self.settings, self.ports)
+        self.assertEqual((counts['deferred'], counts['failed'], counts['sent']), (1, 0, 0))
+        self.assertEqual([v for v, _ in self.calls if v == 'record-email-sent'], [])
 
     def test_invalid_rows_record_failure_and_do_not_block_later_draft(self):
         bad = dict(self.draft, cc=['wrong@example.test'])
