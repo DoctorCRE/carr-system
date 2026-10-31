@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -11,14 +12,14 @@ import urllib.request
 import jwt
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = json.loads((ROOT / 'ops/config/github-app.json').read_text())
+sys.path.insert(0, str(ROOT))
+from lib.github_app_config import CONFIG_PATH, read_config
+
+CONFIG = read_config(CONFIG_PATH)
 API = 'https://api.github.com'
 
 
 def private_key():
-    secret = os.environ.get('CARR_GITHUB_APP_PRIVATE_KEY')
-    if secret:
-        return secret.encode()
     path = Path.home() / '.config/carr' / CONFIG['key_file']
     try:
         with path.open('rb') as source:

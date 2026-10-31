@@ -1,6 +1,8 @@
 """Behavior tests for the conditional review gate."""
 import importlib.util
 from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -23,6 +25,9 @@ class ReviewGate(unittest.TestCase):
         self.assertFalse(gate.approved(self.pr, [{'filename': 'safe', 'previous_filename': 'db/a'}], [], 'reviewer'))
         self.assertFalse(gate.approved(self.pr, [], [], "reviewer"))
 
+    def test_docs_only_exemption_at_any_size(self):
+        self.assertTrue(gate.approved({**self.pr, "additions": 900}, [{"filename": "docs/outlook.md"}], [], "reviewer"))
+
     def test_risky_paths_and_renames(self):
         paths = ['LaunchAgents/job', 'a/job.plist', 'ops/install-job.sh', 'outlook/a', 'hxstore/a', 'hxprobe/a', 'calendar.js', '.github/workflows/deploy.yml', 'migrations/a', 'db/a', 'wrangler.toml', 'tools/migrate.py']
         for path in paths:
@@ -31,9 +36,9 @@ class ReviewGate(unittest.TestCase):
                     self.assertFalse(gate.approved(self.pr, [{key: path}], [], 'reviewer'))
         self.assertFalse(gate.approved(self.pr, [{'filename': 'ops/new.py', 'status': 'added'}], [], 'reviewer'))
 
-    def test_armed_safe_requires_review(self):
+    def test_armed_safe_needs_no_review(self):
         armed = {**self.pr, 'auto_merge': {'enabled_by': {'login': 'author'}}}
-        self.assertFalse(gate.approved(armed, self.files, [], "reviewer"))
+        self.assertTrue(gate.approved(armed, self.files, [], "reviewer"))
         self.assertTrue(gate.approved(armed, self.files, [self.approval], "reviewer"))
 
     def test_review_states_and_identity(self):
@@ -44,6 +49,12 @@ class ReviewGate(unittest.TestCase):
         self.assertFalse(gate.approved(large, self.files, [self.approval, changes], "reviewer"))
         self.assertFalse(gate.approved(self.pr, self.files, [changes], "reviewer"))
         self.assertTrue(gate.approved(large, self.files, [changes, {**self.approval, 'submitted_at': '2026-01-03T00:00:00Z'}], 'reviewer'))
+
+    def test_older_approval_requires_proven_unchanged_merges(self):
+        pr = {**self.pr, "additions": 151}
+        old = {**self.approval, "commit_id": "old"}
+        self.assertTrue(gate.approved(pr, self.files, [old], "reviewer", lambda sha: sha == "old"))
+        self.assertFalse(gate.approved(pr, self.files, [old], "reviewer", lambda sha: False))
 
     def test_unknown_reviewer_never_approves(self):
         large = {**self.pr, "additions": 151}
@@ -64,5 +75,35 @@ class ReviewGate(unittest.TestCase):
         with patch.object(gate, 'api', side_effect=[self.pr, {}, self.files, [], {**self.pr, 'title': 'changed'}]) as api:
             gate.run({'number': 4}, 'owner/repo')
             self.assertEqual(api.call_count, 5)
+
+class MergeHistory(unittest.TestCase):
+    def test_only_unchanged_main_merge_preserves_review(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            def git(*args):
+                return subprocess.check_output(['git', '-C', raw, *args], text=True, stderr=subprocess.DEVNULL).strip()
+            git('init', '-b', 'main')
+            git('config', 'user.name', 'Test')
+            git('config', 'user.email', 'test@example.com')
+            (root / 'base').write_text('base')
+            git('add', 'base'); git('commit', '-m', 'base')
+            git('checkout', '-b', 'feature')
+            (root / 'feature').write_text('approved')
+            git('add', 'feature'); git('commit', '-m', 'feature')
+            old = git('rev-parse', 'HEAD')
+            git('checkout', 'main')
+            (root / 'base').write_text('main advanced')
+            git('add', 'base'); git('commit', '-m', 'main moved')
+            base = git('rev-parse', 'HEAD')
+            git('checkout', 'feature'); git('merge', '--no-edit', 'main')
+            head = git('rev-parse', 'HEAD')
+            self.assertTrue(gate.unchanged_merges(raw, base, old, head))
+            (root / 'feature').write_text('unreviewed merge resolution')
+            git('add', 'feature'); git('commit', '--amend', '--no-edit')
+            self.assertFalse(gate.unchanged_merges(raw, base, old, git('rev-parse', 'HEAD')))
+            git('reset', '--hard', head)
+            (root / 'feature').write_text('changed after review')
+            git('add', 'feature'); git('commit', '-m', 'author change')
+            self.assertFalse(gate.unchanged_merges(raw, base, old, git('rev-parse', 'HEAD')))
 
 if __name__ == '__main__': unittest.main()

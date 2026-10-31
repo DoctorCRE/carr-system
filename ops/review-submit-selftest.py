@@ -1,5 +1,7 @@
 """Tests for native App review submission."""
 import importlib.util
+import os
+import tempfile
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -25,6 +27,10 @@ class Submit(unittest.TestCase):
         with patch.object(submit, "private_key", return_value=b"test"), patch.object(submit.jwt, "encode", return_value="jwt"), patch.object(submit, "request", side_effect=[{"id": 42}, {"token": "app-token"}]) as request:
             self.assertEqual(submit.installation_token(), "app-token")
             self.assertEqual(request.call_args_list[1].args, ("/app/installations/42/access_tokens", "jwt", {}))
+
+    def test_environment_key_does_not_override_missing_file(self):
+        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {"CARR_GITHUB_APP_PRIVATE_KEY": "ignored"}), patch.object(submit.Path, "home", return_value=Path(home)):
+            with self.assertRaises(ValueError): submit.private_key()
 
     def test_missing_key_fails_closed(self):
         with patch.object(submit, 'private_key', side_effect=ValueError('missing')):
