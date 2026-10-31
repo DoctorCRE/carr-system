@@ -2,7 +2,6 @@ import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { TOOLS } from '../src/tools.js';
@@ -18,8 +17,7 @@ before(async () => {
   pool = new pg.Pool({ host: fixture.root, user: 'carr_ci', database: 'carr_ci' });
   await pool.query('create role neondb_owner');
   await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-f', new URL('../../db/schema.sql', import.meta.url).pathname]);
-  execFileSync(new URL('../../.venv/bin/python', import.meta.url).pathname, [new URL('../../tools/migrate.py', import.meta.url).pathname, '--apply', '--yes'], { env: { ...process.env, DATABASE_URL: `postgresql://carr_ci@/carr_ci?host=${fixture.root}` }, timeout: 180000 });
-  actor = { ...(await pool.query("select id,slug from actor where slug='joe'")).rows[0], human: true };
+  actor = { ...(await pool.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => { try { await pool?.end(); } finally { await fixture?.close(); } });
 async function setup() {
