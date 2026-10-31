@@ -125,7 +125,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
     if (args.idempotency_key && !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(args.idempotency_key)) refuse('invalid_idempotency_key');
   };
   const suggestTitle = async (c, wr, args, current) => {
-    const words = (args.card_title.match(/[A-Za-z']+/g) || []).filter(word => /[A-Za-z]/.test(word));
+    const words = (String(args.card_title || args.description || '').match(/[A-Za-z']+/g) || []).filter(word => /[A-Za-z]/.test(word));
     const verb = cardVerbs.includes(words[0]) ? words.shift() : 'Build';
     const subject = (words[0] || 'work').slice(0, 30);
     const used = new Set((await c.query(`select card_title from ops.work_request_job where work_request_id=$1
@@ -138,15 +138,18 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
     }
     return title;
   };
+  const suggestDescription = value => {
+    const words = String(value || 'the work').replace(/[.!?\r\n]+/gu, ' ').trim().split(/\s+/u);
+    const verb = cardVerbs.includes(words[0]) ? words.shift() : 'Build';
+    return `${verb} ${words.join(' ').slice(0, 490) || 'the work'}.`;
+  };
   const validateCopy = async (c, wr, args, current) => {
     const titleRefusal = async error => { throw new ToolError({ error, suggested_card_title: await suggestTitle(c, wr, args, current) }); };
     if (!/^[A-Za-z']+( [A-Za-z']+){1,2}$/.test(args.card_title)) await titleRefusal('invalid_card_title');
     if (!cardVerbs.includes(args.card_title.split(' ')[0])) await titleRefusal('card_title_verb');
     if (args.description != null && (/[\r\n]/u.test(args.description) || args.description.trim().split(/[.!?](?:\s|$)/u).filter(Boolean).length !== 1
       || !cardVerbs.includes(args.description.split(/\s/u)[0]))) {
-      const words = args.description.replace(/[.!?\r\n]+/gu, ' ').trim().split(/\s+/u);
-      const verb = cardVerbs.includes(words[0]) ? words.shift() : 'Build';
-      throw new ToolError({ error: 'invalid_job_description', suggested_description: `${verb} ${words.join(' ').slice(0, 490) || 'the work'}.` });
+      throw new ToolError({ error: 'invalid_job_description', suggested_description: suggestDescription(args.description) });
     }
     if ((await c.query(`select 1 from ops.work_request_job where work_request_id=$1
       and lower(card_title)=lower($2) and not (slice_ordinal=$3 and j_number=$4)`,
@@ -168,7 +171,19 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
     return { write: true, description,
       inputSchema: { type: 'object', additionalProperties: false, properties, required: needed, ...schema },
       handler: async (c, actor, args) => {
-        validate(args, properties, needed);
+        try { validate(args, properties, needed); } catch (error) {
+          if (name === 'dispatch-job' && error.message === 'invalid_work_queue_fields') {
+            const invalid = key => Object.hasOwn(args, key) && (typeof args[key] !== 'string' || !args[key].trim() || args[key].length > properties[key].maxLength);
+            if (invalid('card_title') || invalid('description')) {
+              let wr;
+              try { wr = await request(c, actor, args.work_request); } catch { throw error; }
+              throw new ToolError({ error: error.message,
+                ...(invalid('card_title') ? { suggested_card_title: await suggestTitle(c, wr, args) } : {}),
+                ...(invalid('description') ? { suggested_description: suggestDescription(args.description || args.card_title) } : {}) });
+            }
+          }
+          throw error;
+        }
         await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
         return withEnvelope(c, actor, name, args, async () => {
           await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', ['work-queue:' + organizationTenantForActor(actor)]);
@@ -228,7 +243,11 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         const starting = jobStart.some(key => Object.hasOwn(args, key));
         if ((!starting || Object.hasOwn(args, 'job_type')) && !jobTypes.includes(args.job_type)) throw new ToolError({ error: 'invalid_job_type', allowed_values: jobTypes });
         if ((starting ? jobStart : jobFacts).some(key => args[key] == null)
-          || (jobFacts.some(key => Object.hasOwn(args, key)) && jobFacts.some(key => args[key] == null))) refuse('invalid_work_queue_fields');
+          || (jobFacts.some(key => Object.hasOwn(args, key)) && jobFacts.some(key => args[key] == null))) {
+          throw new ToolError({ error: 'invalid_work_queue_fields',
+            ...(!starting && args.card_title == null ? { suggested_card_title: await suggestTitle(c, wr, args) } : {}),
+            ...(!starting && args.description == null ? { suggested_description: suggestDescription(args.card_title) } : {}) });
+        }
         if ((starting || Object.hasOwn(args, 'repository')) && !repositories.includes(args.repository)) refuse('invalid_work_queue_fields');
         if (starting) {
           const row = (await c.query(`select runner_job_id,repository,job_type from ops.work_request_job

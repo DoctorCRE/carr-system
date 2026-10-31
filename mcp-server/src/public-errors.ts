@@ -273,9 +273,9 @@ export function publicError(error: unknown, { env, inputSchema, fallback = "unha
       && payload.recorded_titles.length <= 100
       && payload.recorded_titles.every(title => typeof title === "string" && title.trim() && title.length <= 200))
     result.recorded_titles = payload.recorded_titles;
-  if (["invalid_card_title", "card_title_verb", "card_title_duplicate"].includes(code) && typeof payload?.suggested_card_title === "string")
+  if (["invalid_card_title", "card_title_verb", "card_title_duplicate", "invalid_work_queue_fields"].includes(code) && typeof payload?.suggested_card_title === "string")
     result.suggested_card_title = payload.suggested_card_title;
-  if (code === "invalid_job_description" && typeof payload?.suggested_description === "string")
+  if (["invalid_job_description", "invalid_work_queue_fields"].includes(code) && typeof payload?.suggested_description === "string")
     result.suggested_description = payload.suggested_description;
   if (code === "invalid_job_type" && Array.isArray(payload?.allowed_values))
     result.allowed_values = payload.allowed_values.filter((value): value is string => typeof value === "string");

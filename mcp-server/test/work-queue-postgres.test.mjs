@@ -515,6 +515,11 @@ test('dispatch refusals provide usable copy suggestions and vocabulary', async (
     });
     await command('dispatch-job', job(work_request, { card_title: suggestion }));
   }
+  await assert.rejects(command('dispatch-job', job(work_request, { card_title: 'x'.repeat(81) })), failure => {
+    assert.equal(failure.message, 'invalid_work_queue_fields');
+    assert.ok(publicError(failure).suggested_card_title);
+    return true;
+  });
   await assert.rejects(command('dispatch-job', job(work_request, { description: 'Implement useful cards. Another sentence.' })), failure => {
     const result = publicError(failure);
     assert.match(result.suggested_description, /^Build .+[.]$/);
