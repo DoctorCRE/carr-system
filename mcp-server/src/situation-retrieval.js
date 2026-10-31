@@ -295,10 +295,11 @@ export function situationRetrievalTools({ withEnvelope: envelope, writeEvent, To
       },
     },
     "approve-retrieval-proposals": {
+      // Joe, 2026-10-31 (decision aad97741): agents approve and tell him, as
+      // with adopt-rule; the golden-suite rollback is the safety check.
       write: true,
       humanOnly: true,
-      humanCallerOnly: true,
-      description: "HUMAN-ONLY atomic batch approval. Promotes pending rows, reruns the golden suite, and rolls back on any regression.",
+      description: "Atomic batch approval by a partner or the agent they sponsor, who tells Joe what it approved. Promotes pending rows, reruns the golden suite, and rolls back on any regression.",
       inputSchema: { type: "object", properties: {
         idempotency_key: { type: "string" },
         proposal_ids: { type: "array", items: { type: "string" }, maxItems: 50 },

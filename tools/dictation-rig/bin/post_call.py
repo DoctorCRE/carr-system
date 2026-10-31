@@ -828,7 +828,7 @@ def hold_transcript_repeat(session_dir: Path, report: dict[str, Any]) -> dict[st
     available = isinstance(segments, list) and all(
         isinstance(segment, dict) and isinstance(segment.get("text"), str) for segment in segments
     )
-    field = transcript_repeat_field(report, transcript) if available else None
+    field = transcript_repeat_field(report, transcript) if available and transcript else None
     if available and field is None:
         return None
     status = read_json(session_dir / STATUS_FILE) or {"schema_version": SCHEMA_VERSION, "session": session_dir.name}
@@ -896,8 +896,8 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         held = hold_transcript_repeat(session_dir, read_json(session_dir / REPORT_FILE) or {})
         if held is not None:
             return held
-        existing = read_json(session_dir / STATUS_FILE)
-        if existing is not None and existing.get("state") in {"ready_review", "filed"}:
+        existing = read_json(session_dir / STATUS_FILE) or {}
+        if existing.get("state") in {"ready_review", "filed"}:
             return existing
         report = read_json(session_dir / REPORT_FILE)
         if report is None:

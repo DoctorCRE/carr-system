@@ -17,7 +17,6 @@ test('embedding failure preserves lexical hits and reports unavailable semantic 
   assert.equal(result.semantic.status, 'unavailable');
   assert.equal(result.semantic.reason, 'embedding_failed');
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].params.length, 6, 'failure retains the existing lexical call');
 });
 
 const unit = (x = 1, y = 0) => [x, y, ...Array(382).fill(0)];

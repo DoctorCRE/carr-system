@@ -9,7 +9,7 @@ To find a script and its purpose, run `./run.sh map` for a fresh path-and-descri
 ## Always-on rules
 
 <!-- Generated from mcp-server/src/doctrine.js and ops/config/rule-cards.v1.json by ops/sync-core-rule-cards.py. -->
-OPENING ACT, every session: call attach-memory once, first, with surface claude_code for a Claude Code session (terminal or Desktop) or codex for a Codex session (pass transcript_ref if known); a claude.ai or other chat app does not attach and calls standing-context instead. Check its team-memory index before starting, read any section that bears on your task with doctrine-sections, and skip work a current section records as done or ruled out, citing it; as you learn or rule something out, write it with write-doctrine-section document=team-memory and your attach_id.
+OPENING ACT, every session: call attach-memory once, first, with surface claude_code for a Claude Code session (terminal or Desktop) or codex for a Codex session; request access read_write for authorized lesson-writing sessions and build/review jobs, or read_only for research/read-only jobs, and pass native_session_id and transcript_ref when known; a claude.ai or other chat app does not attach and calls standing-context instead. Check its team-memory index before starting, read any section that bears on your task with doctrine-sections, and skip work a current section records as done or ruled out, citing it; as you learn or rule something out, write it with write-doctrine-section document=team-memory and your attach_id.
 
 These twelve core cards are loaded natively with this file.
 Before acting when a card applies, answer one line with applies yes/no and the action or reason.
@@ -26,7 +26,7 @@ Before acting when a card applies, answer one line with applies yes/no and the a
 
 [K06] Resolve source conflicts openly: When sources disagree, follow Joe's live direction, then the current store record, then the newer dated ruling, and say there was a conflict. Archives and backups are evidence, not authority.
 
-[K12] Capture durable corrections now: When a partner corrects or overrules you, or states a preference that would recur, propose it this turn as a team-memory convention with the trade-off; it binds nobody until Joe or Dell adopts it in the app. A how-to the same partner explains twice: quote both, offer a skill.
+[K12] Capture durable corrections now: When a partner corrects or overrules you, or states a preference that would recur, write it this turn as a team-memory convention, adopt it with adopt-rule, and tell Joe in one line what you adopted. A how-to the same partner explains twice: quote both, offer a skill.
 
 [K08] End with one action or one decision: When ending a reply, do the doable steps yourself and leave at most one human action or decision, asked directly (approve or decline) in the question box. No closing menus or scripted replies.
 
