@@ -157,13 +157,15 @@ begin
     return jsonb_build_object('ok',false,'error','duplicate_inbox_item');
   end if;
   for entry in select value from jsonb_array_elements(p_items) loop
-    select i into current_item from ops.home_inbox_items(a) i where i->>'item_id'=entry->>'item_id';
+    select i,s.material_version into current_item,source_material
+      from ops.home_inbox_items(a) i
+      join ops.home_inbox_sources(a) s on s.item_id=i->>'item_id'
+      where i->>'item_id'=entry->>'item_id';
     if current_item is null or current_item->>'source_type'='overflow' then
       result:=jsonb_build_object('ok',false,'error','inbox_item_not_found');
     elsif entry->>'base_version' is distinct from current_item->>'base_version' then
       result:=jsonb_build_object('ok',false,'error','version_conflict','current_version',current_item->>'base_version');
     else
-      select material_version into source_material from ops.home_inbox_sources(a) s where s.item_id=entry->>'item_id';
       insert into ops.home_inbox_disposition(actor_id,item_id,disposition,snoozed_until,source_version,material_version,explicit_unsettle)
         values(a,entry->>'item_id',case p_command when 'snooze' then 'snoozed' when 'settle' then 'settled' else 'inbox' end,
           p_until,current_item->>'source_version',source_material,p_command='unsettle')
