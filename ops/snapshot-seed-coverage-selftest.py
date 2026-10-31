@@ -33,6 +33,7 @@ import tempfile
 import contextlib
 import io
 import time
+import statistics
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
@@ -1361,20 +1362,19 @@ def main():
         case("an E-string with a backslash-escaped quote still leaves the call visible",
              "ops.landed" in module.written_tables(escaped_call))
 
-    # PostgreSQL concatenates newline-separated adjacent literals. Doubling
-    # their count must stay below quadratic growth; use best-of-two to reduce
-    # scheduling noise, plus a small allowance for timer resolution.
+    # Process CPU time excludes runner descheduling. Medians reduce incidental
+    # noise, and a sixteenfold input separates linear from quadratic growth.
     timings = []
-    for count in (16000, 32000):
+    for count in (32000, 512000):
         sql = "select " + "'x'\n" * count + ";"
         samples = []
-        for _ in range(2):
-            start = time.perf_counter()
+        for _ in range(5):
+            start = time.process_time()
             module.scan_sql(sql)
-            samples.append(time.perf_counter() - start)
-        timings.append(min(samples))
+            samples.append(time.process_time() - start)
+        timings.append(statistics.median(samples))
     case(f"adjacent literal scanning scales below quadratic ({timings})",
-         timings[1] < timings[0] * 3.2 + 0.03)
+         timings[1] < timings[0] * 26)
 
     # -------------------------------------------------------------------- 9d
     # A COPY WITH NO TERMINATOR used to blank the region to end of file, so a

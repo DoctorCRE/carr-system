@@ -4,11 +4,13 @@ import { isCalendarDate } from './calendar-date.ts';
 import type { Db } from './verb-contract.ts';
 
 type DealType = 'lease' | 'renewal' | 'purchase' | 'land';
+type RequirementRequest = { id: string; row_key: string; owner: string; due_on: string;
+  document_type: string; satisfied: false; receipts: { id: string; state: 'quarantined' }[] };
 type ChecklistItem = { id: string; label: string; status: string; due_on: string | null;
-  evidence_ref: string | null; source: object };
+  evidence_ref: string | null; owner: string | null; document_type: string | null; request?: RequirementRequest; source: object };
 type ChecklistPhase = { id: string; label: string; items: ChecklistItem[] };
 /** The deal fields the checklist reads; tools.js passes its full Deal Room record. */
-type ChecklistDeal = { id: string; type?: string | null; invoiced_on?: string | null;
+type ChecklistDeal = { requests?: RequirementRequest[]; id: string; owner?: string | null; type?: string | null; invoiced_on?: string | null;
   lease?: { status?: string; evidence_ref?: string; executed_on?: string; expiration_on?: string } | null;
   critical_dates?: { id: string; kind: string; status: string; source?: string | null; due_on: string }[] | null;
   commissions?: { commission_id: string; status: string; received_on: string | null }[] };
@@ -86,14 +88,15 @@ export function deriveDealChecklist(record: ChecklistDeal, sources: SourceRow[],
   result.phases = PHASES.map(([id, label]) => ({ id, label, items: TEMPLATE
     .filter(([, , phase, types]) => phase === id && (!types || types.includes(type as DealType)))
     .map(([itemId, itemLabel, , , source]) => ({ id: itemId, label: itemLabel,
-      status: 'not_recorded', due_on: null, evidence_ref: null,
+      status: 'not_recorded', due_on: null, evidence_ref: null, owner: record.owner || null,
+      document_type: ['expiration_recorded', 'executed_comp', 'move_in', 'check_in_90_day', 'invoice_recorded', 'commission_received'].includes(itemId) ? null : itemId,
       source: source === null ? { request: 'per-deal standard checklist', record_verb: itemId === 'invoice_recorded' ? 'record-deal-invoice' : 'record-commission-receipt' } : CHECKLIST_SOURCES[source],
     })) }));
   for (const date of record.critical_dates || []) {
     if (date.status !== 'open' || !date.source?.trim() || !isCalendarDate(date.due_on)) continue;
     const deadline = { id: `critical-date:${date.id}`, label: date.kind.replaceAll('_', ' '),
       status: date.due_on < today ? 'overdue' : date.due_on === today ? 'due' : 'upcoming',
-      due_on: date.due_on, evidence_ref: date.source, source: { record_verb: 'add-critical-date' } };
+      due_on: date.due_on, evidence_ref: date.source, owner: record.owner || null, document_type: null, source: { record_verb: 'add-critical-date' } };
     result.phases.find(phase => phase.id === 'legal')!.items.push(deadline);
   }
   const items = result.phases.flatMap(phase => phase.items);
@@ -109,6 +112,13 @@ export function deriveDealChecklist(record: ChecklistDeal, sources: SourceRow[],
   const commissions = record.commissions || [];
   complete('commission_received', commissions.length > 0 && commissions.every(row =>
     row.status === 'received' && isCalendarDate(row.received_on)) && commissions.map(row => `commission:${row.commission_id}`).join(', '));
+  for (const item of items) {
+    const request = record.requests?.find(row => row.row_key === item.id);
+    if (request) {
+      Object.assign(item, { request, owner: request.owner, due_on: request.due_on });
+      if (item.status !== 'complete') item.status = request.due_on < today ? 'overdue' : request.due_on === today ? 'due' : 'upcoming';
+    }
+  }
   result.due_items = items
     .filter(item => ['due', 'overdue'].includes(item.status))
     .sort((a, b) => a.due_on!.localeCompare(b.due_on!) || a.id.localeCompare(b.id));
@@ -118,7 +128,7 @@ export function deriveDealChecklist(record: ChecklistDeal, sources: SourceRow[],
 let storageUnavailableLogged = false;
 
 export async function readDealChecklist(client: Db, record: ChecklistDeal, now = new Date()) {
-  let sources, commissions;
+  let sources, commissions, requests;
   try {
     sources = await client.query(
       `select id, status, body_hash from doctrine_section where id = any($1::uuid[]) /* checklist:doctrine */`,
@@ -134,6 +144,11 @@ export async function readDealChecklist(client: Db, record: ChecklistDeal, now =
     }
     return { schema_version: 'deal-checklist.v1', template_state: 'unavailable', phases: [], due_items: [] };
   }
+  const available = await client.query("select to_regclass('v_requirement_request') as relation /* checklist:requests-available */");
+  requests = available.rows[0]?.relation ? await client.query(`select id,row_key,owner,to_char(due_on,'YYYY-MM-DD') as due_on,
+    document_type,satisfied,receipts from v_requirement_request
+    where organization_tenant_id='carr-internal' and deal_id=$1 order by row_key /* checklist:requests */`, [record.id]) : null;
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
-  return deriveDealChecklist({ ...record, commissions: commissions.rows }, sources.rows, today);
+  return { ...deriveDealChecklist({ ...record, commissions: commissions.rows, requests: requests?.rows }, sources.rows, today),
+    requests_state: requests ? 'current' : 'unavailable' };
 }
