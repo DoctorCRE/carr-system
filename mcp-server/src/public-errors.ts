@@ -38,6 +38,8 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["next_action_conflict", "Re-read get-next-action with ref and owner. Review the current action before retrying set-next-action with its id and version, or null if absent, in expected_action."],
   ["needs_confirm", "Ask the human to confirm before resubmitting with confirm:true."],
   ["not_found", "The requested record was not found."],
+  ["action_link_not_found", "This link does not open a card for you. Sign in as the partner it was sent to, or ask for a fresh link."],
+  ["action_link_no_longer_actionable", "This card has already been handled or has changed. Open Home for what needs you now."],
   ["unsupported_decision_about", "The about field accepts lead, client, vendor, party, and deal references or names; Work Request references are not supported. Omit about and name the Work Request in the rationale."],
   ["decision_about_work_request_not_found", "The Work Request in the about field was not found. Check its reference, or omit about and name the Work Request in the rationale."],
   ["work_request_not_found", "Re-read the Work Request reference before retrying."],

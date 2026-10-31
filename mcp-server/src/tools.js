@@ -60,6 +60,7 @@ import { addCalendarMeetingPrep } from "./calendar-meeting-prep.js";
 import { CALENDAR_AGENDA_BOARD, calendarSection, addCalendarContacts, addCalendarDealSuggestions } from "./brief-calendar.js";
 import { emailLeadProposalTools } from "./email-lead-proposal.ts";
 import { leadAutomationTools } from "./lead-automation.js";
+import { actionLinkTools } from "./action-links.js";
 import { workflowCutoverTools } from "./workflow-cutover.v5.ts";
 import { engineeringRuntimeTools } from "./engineering-runtime.js";
 import { tourRightsProjectionTools } from "./tour-rights-projection.js";
@@ -9089,6 +9090,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "client-portal": "mcp-server/src/client-portal.ts",
   "resource-observation": "mcp-server/src/resource-observation.v5.ts",
   "lead-automation": "mcp-server/src/lead-automation.js",
+  "action-links": "mcp-server/src/action-links.js",
   "invoice-automation": "mcp-server/src/invoice-automation.js",
   "email-deal-progress": "mcp-server/src/email-deal-progress.ts",
   "email-next-step": "mcp-server/src/email-next-step.ts",
@@ -10712,6 +10714,7 @@ const invoices=invoiceAutomation({withEnvelope,writeEvent,ToolError,lockDealFiel
   invoicingMailbox:process.env.CARR_INVOICING_MAILBOX});
 registerTools(invoices.tools,"invoice-automation");
 registerTools(leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoices }), "lead-automation");
+registerTools(actionLinkTools({ ToolError }), "action-links");
 // DoctorCRE V5-R02: workflow cutover, caller migration and retirement
 // readiness. Reads historical acceptance and native retirement evidence rather than
 // duplicating their evidence; retire-workflow-cutover-plan is authority-only.
