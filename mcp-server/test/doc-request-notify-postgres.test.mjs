@@ -26,15 +26,15 @@ async function setup() {
   await pool.query("insert into ops.doc_conversation_turn(conversation_id,sequence,role,body,msg_id,origin_actor) values ($1,0,'human','question',$2,'joe'),($1,1,'assistant','answer',$3,'claude')", [conversation, request, answer]);
   return { conversation, request, answer };
 }
-async function complete(ids, extra = {}) {
-  const c = await pool.connect();
+async function complete(ids, extra = {}, client) {
+  const c = client ?? await pool.connect();
   try {
     await c.query('begin');
     await c.query('set local role carr_authority');
     const result = await TOOLS['complete-doc-request'].handler(c, actor, { idempotency_key: randomUUID(), conversation_id: ids.conversation, request_msg_id: ids.request, outcome: 'answered', answer_msg_id: ids.answer, ...extra });
     await c.query('commit');
     return result;
-  } catch (e) { await c.query('rollback'); throw e; } finally { c.release(); }
+  } catch (e) { await c.query('rollback'); throw e; } finally { if (!client) c.release(); }
 }
 async function counts(ids) {
   const events = await pool.query("select count(*)::int as n from event where verb='complete-doc-request' and subject_id=$1 and new_value->>'request_msg_id'=$2", [ids.conversation, ids.request]);
@@ -65,10 +65,18 @@ test('concurrent completions store one event and notification', async () => {
 test('overlapping calls with the same key both succeed and store one completion', async () => {
   const ids = await setup();
   const idempotency_key = randomUUID();
-  const [a, b] = await Promise.all([complete(ids, { idempotency_key }), complete(ids, { idempotency_key })]);
-  assert.equal(a.notification_id, b.notification_id);
-  assert.equal(a.outcome, b.outcome);
-  assert.equal(a.deep_link, b.deep_link);
+  const clients = await Promise.all([pool.connect(), pool.connect()]);
+  try {
+    const [a, b] = await Promise.all(clients.map(client => complete(ids, { idempotency_key }, client)));
+    const first = a.replayed ? b : a;
+    const retry = a.replayed ? a : b;
+    assert.equal(first.replayed, undefined);
+    assert.deepEqual(retry, { replayed: true, ...first });
+    assert.equal(first.outcome, 'answered');
+    assert.equal(first.request_msg_id, ids.request);
+  } finally {
+    clients.forEach(client => client.release());
+  }
   await counts(ids);
   const receipts = await pool.query("select count(*)::int as n from tool_call where verb='complete-doc-request' and idempotency_key=$1", [idempotency_key]);
   assert.equal(receipts.rows[0].n, 1);
