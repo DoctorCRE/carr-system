@@ -374,13 +374,14 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError, completeWo
         const saved = (await c.query(`update ops.work_request_slice set outcome=$3::jsonb,version=version+1
           where work_request_id=$1 and ordinal=$2 and outcome->>'outcome'='open' returning ordinal,version`, [wr.id, args.slice, JSON.stringify(record)])).rows[0];
         if (!saved) refuse('slice_not_found');
+        const result = { slice_id: queueCardId(wr.ref, saved.ordinal), version: saved.version, ...record };
         let completion;
         const slices = (await c.query('select ordinal,outcome from ops.work_request_slice where work_request_id=$1 order by ordinal', [wr.id])).rows;
         if (args.outcome === 'done' && args.completion && readyToClose(wr.state, slices.map(row => row.outcome))) {
           const approvals = [];
           for (const row of slices) for (const change of row.outcome.change_refs ?? []) {
             const approval = await c.reviewedChange?.(change, queueCardId(wr.ref, row.ordinal));
-            if (!approval) refuse('slice_independent_review_required');
+            if (!approval) return { ...result, completion_pending: 'slice_independent_review_required' };
             approvals.push(approval);
           }
           const current = (await c.query('select version from ops.work_request where id=$1 for update', [wr.id])).rows[0];
@@ -391,8 +392,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError, completeWo
             change_refs: approvals.map(({ pr_url, merge_commit_sha }) => ({ pr_url, merge_commit_sha })),
           }, { reviewer_card: approvals.at(-1).reviewer_card, approvals });
         }
-        return { slice_id: queueCardId(wr.ref, saved.ordinal), version: saved.version, ...record,
-          ...(completion ? { work_request_state: completion.state } : {}) };
+        return { ...result, ...(completion ? { work_request_state: completion.state } : {}) };
       }),
     'dispatch-job': command('dispatch-job', 'Mint a queued job with a caller-supplied job_type from job-workflows.v1.yaml, or record a runner start for an existing job exactly once.',
       { slice, job: positive, runner_job_id: text(), repository: { ...text(), enum: repositories }, job_type: { ...text(), enum: jobTypes }, executor: text(), model: text(), effort: text(), card_title: text(80), description: text(500) },

@@ -120,10 +120,9 @@ def main():
                 raise ValueError('completion requires merged change references')
             if plan['calls']:
                 plan['calls'][-1]['args']['completion'] = evidence
-            else:
-                plan['calls'].append(dict(verb='complete-work-request', args=dict(
-                    human_ref=ref, base_version=card['version'], change_refs=plan['change_refs'],
-                    idempotency_key=str(uuid4()), **evidence)))
+            plan['calls'].append(dict(verb='complete-work-request', args=dict(
+                human_ref=ref, base_version=card['version'], change_refs=plan['change_refs'],
+                idempotency_key=str(uuid4()), **evidence)))
     results = []
     if args.apply:
         for command in plan['calls']:
