@@ -288,7 +288,11 @@ class PhoneIntakeTests(unittest.TestCase):
             post_call.write_private(session / post_call.REPORT_FILE, report)
             fail[0] = True
             phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
+            self.assertEqual(post_call.read_json(session / post_call.STATUS_FILE)['state'], 'filed')
             fail[0] = False
+            status = post_call.read_json(session / post_call.STATUS_FILE)
+            status['next_attempt_at'] = '2000-01-01T00:00:00Z'
+            post_call.write_private(session / post_call.STATUS_FILE, status)
             phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
             self.assertEqual(updates[-2:], [{'state': 'held_review', 'reason': 'open_review_questions', 'open_questions': 1,
                                            'review_questions': [{'id': 'q1', 'question': 'Review the closure?'}]}] * 2)
@@ -414,6 +418,115 @@ class PhoneIntakeTests(unittest.TestCase):
         self.assertEqual(result, {'ready': 0, 'pending': 1})
         self.assertEqual(updates[-1], {'state': 'needs_attention', 'reason': 'extraction_failed', 'open_questions': 0})
         self.assertEqual(post_call.read_json(session / post_call.STATUS_FILE)['state'], 'needs_attention')
+
+    def test_network_blips_do_not_spend_attempts(self):
+        phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
+        session = self.root / f"phone-{self.metadata['session_id']}"
+        phone_intake.post_call.write_private(session / phone_intake.post_call.REPORT_FILE, {'report': {}})
+        bridge = phone_intake.bridge_module()
+        replies = [(503, {})] * 5 + [(200, {'ok': True}), (200, {'session_token': 'fixture'}), (200, {'ok': True})]
+        with patch.object(phone_intake, 'bridge_module', return_value=bridge), \
+             patch.object(bridge, 'http_request', side_effect=replies), \
+             patch.object(bridge, 'publish_cmd', return_value=0), \
+             patch.object(bridge, 'poll_cmd'), \
+             patch.object(phone_intake, 'extract', return_value={'state': 'ready_review'}), \
+             patch.object(phone_intake.post_call, 'now') as clock:
+            for timestamp in ['2026-01-01T00:00:00Z', '2026-01-01T00:00:30Z',
+                              '2026-01-01T00:01:30Z', '2026-01-01T00:03:30Z',
+                              '2026-01-01T00:07:30Z']:
+                clock.return_value = timestamp
+                phone_intake.process_pending(self.root, {'base_url': 'https://api.example.test'}, 'fixture')
+            status = phone_intake.post_call.read_json(session / phone_intake.post_call.STATUS_FILE)
+            self.assertEqual(status.get('extraction_attempts', 0), 0)
+            self.assertEqual(status['state'], 'blocked')
+            clock.return_value = '2026-01-01T00:15:30Z'
+            result = phone_intake.process_pending(self.root, {'base_url': 'https://api.example.test'}, 'fixture')
+        self.assertEqual(result['ready'], 1)
+
+    def test_transient_errors_expire_after_a_day(self):
+        phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
+        session = self.root / f"phone-{self.metadata['session_id']}"
+        bridge = phone_intake.bridge_module()
+        with patch.object(phone_intake, 'bridge_module', return_value=bridge), \
+             patch.object(bridge, 'http_request', return_value=(429, {})), \
+             patch.object(phone_intake.post_call, 'now') as clock:
+            clock.return_value = '2026-01-01T00:00:00Z'
+            phone_intake.process_pending(self.root, {'base_url': 'https://api.example.test'}, 'fixture')
+            clock.return_value = '2026-01-02T00:00:00Z'
+            phone_intake.process_pending(self.root, {'base_url': 'https://api.example.test'}, 'fixture')
+            phone_intake.process_pending(self.root, {'base_url': 'https://api.example.test'}, 'fixture')
+        status = phone_intake.post_call.read_json(session / phone_intake.post_call.STATUS_FILE)
+        self.assertEqual(status['state'], 'needs_attention')
+        self.assertIn('Transient network error', status['reason'])
+        self.assertEqual(status.get('extraction_attempts', 0), 0)
+
+    def test_prolonged_status_outage_preserves_review_and_filed_states_through_recovery(self):
+        for state, ingested in [('held_review', False), ('filed', True), ('filed', False)]:
+            with self.subTest(state=state, ingested=ingested):
+                root = self.root / f'{state}-{ingested}'
+                phone_intake.receive(root, self.metadata, io.BytesIO(self.audio))
+                session = root / f"phone-{self.metadata['session_id']}"
+                reason = 'summary_repeats_transcript' if state == 'held_review' else 'All candidates filed.'
+                original = {'state': state, 'reason': reason, 'extraction_attempts': 2}
+                if state == 'held_review':
+                    original['reason_code'] = reason
+                post_call.write_private(session / post_call.STATUS_FILE, original)
+                if ingested:
+                    post_call.write_private(session / 'ingested.json', {'ok': True})
+                bridge = phone_intake.bridge_module()
+                updates = []
+                replies = iter([(503, {}), (503, {}), (503, {}), (200, {'ok': True})])
+
+                def http(_method, url, body, _headers):
+                    self.assertTrue(url.endswith('/status'), url)
+                    updates.append(body)
+                    return next(replies)
+
+                with (patch.object(phone_intake, 'bridge_module', return_value=bridge),
+                      patch.object(bridge, 'http_request', side_effect=http),
+                      patch.object(phone_intake, 'extract') as extract,
+                      patch.object(post_call, 'now') as clock):
+                    for timestamp in ['2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z',
+                                      '2026-01-02T01:00:00Z']:
+                        clock.return_value = timestamp
+                        phone_intake.process_pending(root, {'base_url': 'https://api.example.test'}, 'fixture')
+                        status = post_call.read_json(session / post_call.STATUS_FILE)
+                        for key, value in original.items():
+                            self.assertEqual(status[key], value)
+                    self.assertTrue(status['transient_expired'])
+                    self.assertEqual(status['transient_since'], '2026-01-01T00:00:00Z')
+                    clock.return_value = '2026-01-02T01:00:01Z'
+                    phone_intake.process_pending(root, {'base_url': 'https://api.example.test'}, 'fixture')
+                    phone_intake.process_pending(root, {'base_url': 'https://api.example.test'}, 'fixture')
+                    extract.assert_not_called()
+                recovered = post_call.read_json(session / post_call.STATUS_FILE)
+                for key, value in original.items():
+                    self.assertEqual(recovered[key], value)
+                for key in ('transient_since', 'transient_count', 'transient_expired'):
+                    self.assertNotIn(key, recovered)
+                self.assertIsNone(recovered['next_attempt_at'])
+                expected = {'state': state if state == 'held_review' else None,
+                            'reason': reason if state == 'held_review' else None, 'open_questions': 0}
+                self.assertEqual(updates, [expected] * 4)
+                self.assertEqual((session / 'imported.audio').read_bytes(), self.audio)
+
+    def test_processor_fatal_error_exits_process(self):
+        class FatalExit(BaseException):
+            pass
+
+        class ImmediateThread:
+            def __init__(self, *, target, args, daemon):
+                self.target, self.args = target, args
+
+            def start(self):
+                self.target(*self.args)
+
+        with patch.object(phone_intake, 'process_pending', side_effect=RuntimeError('fatal')), \
+             patch.object(phone_intake.threading, 'Thread', ImmediateThread), \
+             patch.object(phone_intake.os, '_exit', side_effect=FatalExit) as exit_process:
+            with self.assertRaises(FatalExit):
+                phone_intake.serve(self.root, {}, 'fixture')
+        exit_process.assert_called_once_with(1)
 
     def test_imported_recording_uses_existing_extraction_and_candidate_processing(self):
         wav = io.BytesIO()

@@ -1213,9 +1213,6 @@ def launchd_path_refusal(body):
 def cmd_check_launchd_main_paths():
     """Read installed CARR agents without changing or reloading any plist."""
     names = carr_plists()
-    board = "local.carr-progress-board.plist"
-    if os.path.isfile(os.path.join(LAUNCHD_SRC, board)):
-        names.append(board)
     failures = []
     for name in names:
         refusal = launchd_path_refusal(read(os.path.join(LAUNCHD_SRC, name)) or "")
@@ -1472,7 +1469,7 @@ def reconcile_retired_launchd(apply, filenames=None):
     """Unload and quarantine CARR definitions absent from the repository.
 
     Holds prevent activation of declared jobs, not retirement of deleted jobs.
-    Labels outside com.carr.*, including local.carr-progress-board, are never owned here.
+    Labels outside com.carr.* are never owned here.
     """
     failures = []
     if not os.path.isdir(LAUNCHD_REPO):
@@ -1814,79 +1811,6 @@ def install_launchd_plist(filename, dest, body, body_matches, *, timeout=15):
     print(f"      LOAD FAILED ({(r.stderr or r.stdout).strip()[:80]}) "
           "— pending reload retained; migration will remain incomplete")
     return "failed"
-
-
-def cmd_install_progress_board(apply=False, repo=None):
-    """Migrate the existing board agent to the repository wrapper, then read
-    launchd's arguments back. This does not create a new schedule or label.
-    Runtime and state belong to the canonical main checkout.
-    --repo may name that checkout explicitly, but cannot
-    select a feature tree even for pre-merge verification.
-    """
-    label = "local.carr-progress-board"
-    try:
-        if launchd_hold.off_reason(label, HOME):
-            if apply:
-                launchd_hold.activate(label, ["launchctl", "load", "-w", label], home=HOME)
-            else:
-                print(launchd_hold.off_reason(label, HOME))
-            return 0
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
-        print(f"progress-board: HOLD REFUSED: {exc}")
-        return 1
-    runtime_repo = os.path.abspath(os.path.expanduser(repo)) if repo else REPO
-    if os.path.realpath(runtime_repo) != os.path.realpath(REPO):
-        print("progress-board: runtime must use the canonical main checkout; "
-              "feature checkout installation is refused")
-        return 1
-    wrapper = os.path.join(runtime_repo, "ops", "progress-board-render.sh")
-    python = os.path.join(runtime_repo, ".venv", "bin", "python")
-    if not os.path.isfile(wrapper) or not os.access(python, os.X_OK):
-        print("progress-board: selected checkout wrapper or repository interpreter unavailable; "
-              "select a repository checkout containing the wrapper and interpreter")
-        return 1
-    label = "local.carr-progress-board"
-    dest = os.path.join(HOME, "Library", "LaunchAgents", label + ".plist")
-    try:
-        with open(dest, "rb") as handle:
-            current = plistlib.load(handle)
-        if not isinstance(current, dict) or current.get("Label") != label:
-            raise ValueError("unexpected board agent label")
-    except (OSError, ValueError, plistlib.InvalidFileException) as exc:
-        print(f"progress-board: existing agent unavailable: {exc}; no schedule created")
-        return 1
-    desired = dict(current)
-    desired["ProgramArguments"] = ["/bin/bash", wrapper]
-    desired["WorkingDirectory"] = runtime_repo
-    desired["EnvironmentVariables"] = dict(current.get("EnvironmentVariables", {}))
-    desired["EnvironmentVariables"]["PROGRESS_BOARD_ROOT"] = os.path.join(REPO, "out")
-    desired = plistlib.loads(concrete(plistlib.dumps(desired).decode('utf-8')).encode('utf-8'))
-    refusal = launchd_path_refusal(plistlib.dumps(desired).decode("utf-8"))
-    if refusal:
-        print(f"progress-board: REFUSED {refusal}")
-        return 1
-    def registered_arguments():
-        observed = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{label}"],
-                                  capture_output=True, text=True, check=False, timeout=15)
-        args = re.search(r"(?ms)^\s*arguments = \{\n(.*?)^\s*\}", observed.stdout or "")
-        return ([line.strip() for line in args.group(1).splitlines()]
-                if observed.returncode == 0 and args else [])
-
-    matches = desired == current and registered_arguments() == desired["ProgramArguments"]
-    if apply:
-        outcome = install_launchd_plist(os.path.basename(dest), dest,
-                                       plistlib.dumps(desired).decode("utf-8"), matches)
-        if outcome not in {"loaded", "kept"}:
-            return 1
-    elif not matches:
-        print("progress-board: existing agent needs migration: "
-              "ops/config-as-code.py install-progress-board --apply")
-        return 1
-    if registered_arguments() != desired["ProgramArguments"]:
-        print("progress-board: launchd arguments unverified; migration is incomplete")
-        return 1
-    print(f"progress-board: verified registered repository wrapper: {wrapper}")
-    return 0
 
 
 def write_claude_settings(path, document, before, sink=None):
@@ -2834,14 +2758,6 @@ def main():
         return flash_install.configure(REPO_HERE, apply=options.apply)
     if mode == "check-launchd-main-paths":
         return cmd_check_launchd_main_paths()
-    if mode in {"install-progress-board", "verify-progress-board"}:
-        import argparse
-        parser = argparse.ArgumentParser(prog=f"config-as-code.py {mode}")
-        parser.add_argument("--repo", help="repository checkout to run; defaults to canonical checkout")
-        parser.add_argument("--apply", action="store_true")
-        options = parser.parse_args(sys.argv[2:])
-        return cmd_install_progress_board(options.apply if mode == "install-progress-board" else False,
-                                          repo=options.repo)
     if mode == "reinstall-launchd-calendar":
         return cmd_reinstall_launchd_calendar(sys.argv[2:])
     if mode == "launchd-handoff-smoke":

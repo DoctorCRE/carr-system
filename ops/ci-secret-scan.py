@@ -72,10 +72,19 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 ALLOW_FILE = REPO / "ops" / "config" / "secret-scan-allow.json"
 INLINE_ALLOW = "ci-secret-scan: allow"
 
+PRIVATE_KEY_KINDS = ('PRIVATE KEY', 'RSA PRIVATE KEY', 'EC PRIVATE KEY', 'DSA PRIVATE KEY',
+                     'ENCRYPTED PRIVATE KEY', 'OPENSSH PRIVATE KEY', 'PGP PRIVATE KEY',
+                     'PGP PRIVATE KEY BLOCK')
+PRIVATE_KEY_STARTS = tuple('-----BEGIN ' + kind + '-----' for kind in PRIVATE_KEY_KINDS)
+PRIVATE_KEY_BLOCK = re.compile(
+    r'-----BEGIN (' + '|'.join(map(re.escape, PRIVATE_KEY_KINDS))
+    + r')-----[\s\S]*?(?:-----END \1-----|\Z)')
+
+
 # (name, regex, why it is high-confidence, allowlistable)
 PATTERNS = [
     ("private-key-block",
-     re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----"),
+     PRIVATE_KEY_BLOCK,
      "A private key block has no legitimate reason to be in this tree.",
      False),
     ("aws-access-key",
@@ -273,6 +282,44 @@ def scan(source=None):
     return findings
 
 
+class Redactor:
+    """Redact ordered text chunks; private blocks remain hidden across chunks."""
+
+    def __init__(self):
+        self.end_marker: str | None = None
+        self.pending = ''
+
+    def redact(self, text, *, final=False):
+        text = self.pending + text
+        self.pending = ''
+        if self.end_marker:
+            end = text.find(self.end_marker)
+            if end < 0:
+                self.pending = text[-(len(self.end_marker) - 1):]
+                return ''
+            text = text[end + len(self.end_marker):]
+            self.end_marker = None
+
+        def private_block(match):
+            end_marker = '-----END ' + match[1] + '-----'
+            if not match[0].endswith(end_marker):
+                self.end_marker = end_marker
+                self.pending = match[0][-(len(end_marker) - 1):]
+            return '<redacted:private-key-block>'
+
+        for name, pattern, _, _ in PATTERNS:
+            if name == 'private-key-block':
+                text = pattern.sub(private_block, text)
+            else:
+                text = pattern.sub(lambda m, n=name: f'<redacted:{n}:{len(m[0])} chars>', text)
+        if not final and not self.end_marker:
+            for size in range(min(len(text), max(map(len, PRIVATE_KEY_STARTS)) - 1), 0, -1):
+                if any(marker.startswith(text[-size:]) for marker in PRIVATE_KEY_STARTS):
+                    self.pending, text = text[-size:], text[:-size]
+                    break
+        return text
+
+
 def redact(text):
     """Mask every shaped credential in ARBITRARY TEXT, reusing this one list.
 
@@ -290,14 +337,11 @@ def redact(text):
     tracked files; neither has any meaning for a child process's stdout, which
     is not a file anyone reviewed. Every match is masked, unconditionally.
 
-    The mask keeps the finding and drops the value: the pattern name and the
-    length, which is what a reader diagnosing a log actually needs, and exactly
-    what scan() already reports for the same reason.
+    The mask keeps the pattern name and drops the value. Single-value masks
+    include the match length; private blocks may span chunks and omit lengths.
+    Use one Redactor for ordered chunks so a block cannot leak across calls.
     """
-    for pname, rx, _why, _allowlistable in PATTERNS:
-        text = rx.sub(lambda m, n=pname: f"<redacted:{n}:{len(m.group(0))} chars>",
-                      text)
-    return text
+    return Redactor().redact(text, final=True)
 
 
 def main():

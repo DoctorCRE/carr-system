@@ -31,9 +31,6 @@ def store_cards():
 
 def cards_from_store(document, adopted):
     """The cards file with its cards replaced by the adopted ones, in file order."""
-    if not adopted:
-        raise SystemExit('The store holds no adopted rule cards yet; the cards file stays the source '
-                         'until a partner adopts the staged card proposals.')
     order = {card['id']: index for index, card in enumerate(document['cards'])}
     cards = [{k: v for k, v in card.items() if k != 'rule_id'} for card in adopted]
     cards.sort(key=lambda card: (order.get(card['id'], len(order)), card['id']))
@@ -47,7 +44,9 @@ def attach_line():
 
 def render(text):
     start = text.index('## Always-on rules\n')
-    end = list(re.finditer(r'^\[K\d+\].*\n', text, re.M))[-1].end()
+    end = list(re.finditer(
+        r'^\[K\d+\].*\n|^Before acting when a card applies, answer one line with applies yes/no and the action or reason\.\n',
+        text, re.M))[-1].end()
     cards = sorted((c for c in load_cards() if c['placement'] == 'CORE'),
                    key=lambda c: c['core_rank'])
     block = ('## Always-on rules\n\n'
@@ -56,7 +55,7 @@ def render(text):
              'These twelve core cards are loaded natively with this file.\n'
              'Before acting when a card applies, answer one line with applies yes/no and the action or reason.\n\n')
     block += '\n\n'.join(f"[{c['id']}] {c['title']}: {c['wording']}" for c in cards) + '\n'
-    return text[:start] + block + text[end:]
+    return text[:start] + block.rstrip() + '\n' + text[end:]
 
 
 def missing_paths(text):
