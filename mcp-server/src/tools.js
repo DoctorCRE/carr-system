@@ -9531,6 +9531,7 @@ registerTools({
 
   "add-deal-note": {
     write: true,
+    afterCommit: (...args) => overdueUpdates.process(...args),
     description: "Record a partner status update in the immutable deal thread. Jev checks the content against overdue actions. Only supported completion resolves them, with evidence and undo; uncertainty stays open for Home review. Supply next_step and next_date together, or Doc prompts for the missing plan. Other partners' actions and manual attention remain unchanged.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, deal: { type: "string" }, text: { type: "string" },
@@ -9549,7 +9550,7 @@ registerTools({
         "insert into deal_note (deal_id, kind, text, actor_id) values ($1,'note',$2,$3) returning id, created_at /* dealroom:add-note */",
         [s.id, args.text.trim(), actor.id],
       );
-      const assessment = await overdueUpdates.assess(c, actor, s.id, note.rows[0].id, args.text.trim(), args.idempotency_key);
+      const assessment = await overdueUpdates.prepare(c, actor, s.id, note.rows[0].id, args.text.trim(), args.idempotency_key);
       await writeEvent(c, actor, "add-deal-note", "deal", s.id, {
         field: "note", new: { note: args.text.trim() }, idempotency_key: args.idempotency_key,
       });

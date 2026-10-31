@@ -7,10 +7,10 @@
   "consumer_adoption": "The Home renderer must consume read-deal-update-reviews and render this new proposal kind. This backend contract does not change the existing app renderer.",
   "record": {
     "verb": "add-deal-note",
-    "judgment": "One bounded Jev systemOne call covers the calling partner's overdue ordinary and accepted post-call actions. Structured checklist items and other partners' actions remain separate.",
+    "judgment": "Only the calling partner's overdue ordinary and accepted post-call actions are assessed. Structured checklist items and other partners' actions remain separate. After the update commits, callTool returns its pending assessment immediately and schedules assessment with ctx.waitUntil. Across at most two requests, at most two Jev attempts run, each bounded to 11 seconds within a 25-second assessment budget. Transient 5xx and timeout failures can retry immediately; 429 waits for a later run. No database lock is held during Jev.",
     "automatic_resolution": "yes, confidence at least 0.9, valid choice distribution, and the shared #2449 evidence bar including four quoted words. The 0.9 numeric threshold is additional to #2449's deterministic evidence bar.",
     "evidence": "Each immutable overdue_assessment event retains the action snapshot, note ID, complete update, exact selected quote, verdict, confidence, reason, and completion stamp.",
-    "failure": "Missing credentials, provider errors, rate limits, time budget and input bounds preserve the open item and record a reason.",
+    "failure": "The update, overdue_assessment_pending request and per-action overdue_assessment_fallback proposals commit together. Immutable overdue_assessment_status events expose attempts, failure reasons, completion or version conflict in the deal timeline. A background failure never changes the committed save response. Failed assessments can retry on the next update for that deal by the same partner, including replay, with at most three lifetime attempts. Missing credentials, over-budget inputs and other non-retryable failures stop further attempts. A database-clock 45-second lease protects running work. Home shows failed or expired unfinished assessments, including interrupted third attempts, for manual resolution or dismissal. Manual review supersedes automatic processing of that request.",
     "plan": "A supplied next_step and next_date are saved together. The app's separate set-next-step command also preserves previously assessed unresolved overdue actions. Without a new plan, a resolved current action clears the obsolete plan and prompts for its replacement."
   },
   "read": {
@@ -28,7 +28,7 @@
       "assessment",
       "confirm_verb"
     ],
-    "membership": "Latest uncertain or low-confidence assessment for an open action, visible in the authenticated actor's tenant and personal scope, not already reviewed.",
+    "membership": "Latest uncertain or low-confidence assessment, or fallback for an unfinished assessment that failed or passed its database-clock lease, for an open action visible in the authenticated actor’s tenant and personal scope, not already reviewed. Stale running work reports interrupted. Fallback proposals use the existing assessment_id and review-deal-update contract.",
     "limit": "Above 200 pending proposals the read refuses instead of silently truncating.",
     "automatic_resolution_fields": [
       "assessment_id",
