@@ -175,8 +175,12 @@ or environment IDs. None are quoted in this public repo.
   The immutable retirement receipt names the replacement in `superseded_by`.
 - **Proposal.** A team-memory section under `conventions/proposed/<slug>`,
   written by an agent. It binds nobody.
-- **Adoption.** Joe or Dell approves a proposal in person in the app's
-  `governance-queue` surface, which calls `adopt-rule`.
+- **Adoption.** `adopt-rule` makes a proposal an active rule. Since Joe's
+  2026-10-31 ruling ("If you think a rule is needed you just make it a rule and
+  tell me you did it", WR-000631) a partner or the agent they sponsor calls it
+  directly and tells Joe; the event row records which actor adopted. Rules do
+  not loosen production, credential, send, destructive or merge safeguards;
+  code enforces those.
 - **Card.** A rule whose `card` column is set. Card rules render into the
   generated block.
 - **Attach.** One call to `attach-memory` at session start. It returns an
