@@ -160,10 +160,21 @@ jobs:
           ZSH_ARCHIVE_DIR: ${{ runner.temp }}/zsh-debs
         run: ops/ci-zsh.sh
 
+      - name: Install PDF text extraction dependency
+        if: matrix.classes == 'gates'
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
+
       - name: Install PostgreSQL 17
         if: contains(matrix.classes, 'unit') || contains(matrix.classes, 'gates') || (matrix.classes == 'migration' && steps.scope.outputs.full != 'false')
         timeout-minutes: 5
         run: bash ops/ci-postgres.sh
+
+      - name: Install document export dependencies
+        if: contains(matrix.classes, 'unit') || matrix.classes == 'gates'
+        timeout-minutes: 5
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libreoffice-calc poppler-utils
 
       - name: Verify edge incident delivery
         # Gate shard 1 owns it, like the other repository-wide invariants.

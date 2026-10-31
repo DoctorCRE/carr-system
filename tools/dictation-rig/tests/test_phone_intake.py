@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'bin'))
 import phone_intake
+import post_call
 
 
 def test_bridge_paths_are_isolated(tmp_path):
@@ -27,6 +28,13 @@ class PhoneIntakeTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        isolated_env = patch.dict('os.environ', {'HOME': str(self.root),
+                                                   'CARR_CAPTURE_LOG': str(self.root / 'capture-bridge.log')})
+        isolated_env.start()
+        self.addCleanup(isolated_env.stop)
+        log_patch = patch.object(post_call, 'LOG_PATH', self.root / 'call-mode.log')
+        log_patch.start()
+        self.addCleanup(log_patch.stop)
         self.audio = b'synthetic fixture only'
         self.metadata = {
             'schema_version': 1, 'session_id': '10000000-0000-0000-0000-000000000001',
@@ -52,7 +60,67 @@ class PhoneIntakeTests(unittest.TestCase):
             phone_intake.receive(self.root, self.metadata, io.BytesIO(b'x' * len(self.audio)))
         self.assertFalse(list(self.root.glob('phone-*/transfer.json')))
 
-    def test_processor_reports_holds_question_changes_and_clear_without_private_text(self):
+    def test_status_exchange_picks_up_answers_and_reports_the_local_count(self):
+        import post_call
+        phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
+        session = self.root / f"phone-{self.metadata['session_id']}"
+        post_call.write_private(session / post_call.REPORT_FILE, {
+            'report': {'summary': 'Private summary'},
+            'review_questions': [{'id': 'q1', 'question': 'Confirm closure?', 'resolved': False}],
+        })
+        bridge = phone_intake.bridge_module()
+        updates = []
+
+        def http(_method, _url, body, headers):
+            self.assertEqual(headers['Authorization'], 'Bearer synthetic-service-secret')
+            updates.append(body)
+            return 200, {'ok': True, 'question_answers': [] if len(updates) == 1 else [
+                {'question_id': 'q1', 'answer': 'dismiss'}]}
+
+        cfg = {'base_url': 'https://api.example.test'}
+        with patch.object(bridge, 'http_request', side_effect=http):
+            self.assertTrue(phone_intake.publish_status(session, cfg, 'synthetic-service-secret', bridge))
+            self.assertTrue(phone_intake.publish_status(session, cfg, 'synthetic-service-secret', bridge))
+            self.assertTrue(phone_intake.publish_status(session, cfg, 'synthetic-service-secret', bridge))
+        question = post_call.read_json(session / post_call.REPORT_FILE)['review_questions'][0]
+        self.assertTrue(question['resolved'])
+        self.assertEqual(question['resolution'], 'dismiss')
+        self.assertEqual(updates[0]['review_questions'], [{'id': 'q1', 'question': 'Confirm closure?'}])
+        self.assertEqual(updates[1], updates[0])
+        self.assertEqual(updates[2], {'state': None, 'reason': None, 'open_questions': 0, 'review_questions': [],
+                                      'answer_outcomes': [{'question_id': 'q1', 'outcome': 'applied'}]})
+        self.assertNotIn('Private summary', json.dumps(updates))
+
+    def test_locally_resolved_answer_is_acknowledged_to_the_app(self):
+        import post_call
+        phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
+        session = self.root / f"phone-{self.metadata['session_id']}"
+        post_call.write_private(session / post_call.REPORT_FILE, {
+            'review_questions': [{'id': 'q1', 'question': 'Confirm closure?',
+                                  'resolved': True, 'resolution': 'dismiss'}],
+        })
+        bridge = phone_intake.bridge_module()
+        updates = []
+
+        def http(_method, _url, body, _headers):
+            updates.append(body)
+            if len(updates) == 2:
+                return 503, {}
+            return 200, {'ok': True, 'question_answers': [] if 'answer_outcomes' in body else [
+                {'question_id': 'q1', 'answer': 'confirm'}]}
+
+        cfg = {'base_url': 'https://api.example.test'}
+        with patch.object(bridge, 'http_request', side_effect=http):
+            self.assertTrue(phone_intake.publish_status(session, cfg, 'synthetic-service-secret', bridge))
+            self.assertFalse(phone_intake.publish_status(session, cfg, 'synthetic-service-secret', bridge))
+            self.assertTrue(phone_intake.publish_status(session, cfg, 'synthetic-service-secret', bridge))
+        self.assertEqual(updates[1], updates[2])
+        self.assertEqual(updates[-1].get('answer_outcomes'), [
+            {'question_id': 'q1', 'outcome': 'already_resolved'}])
+        self.assertEqual(post_call.read_json(session / post_call.REPORT_FILE)[
+            'review_questions'][0]['resolution'], 'dismiss')
+
+    def test_processor_reports_questions_and_holds_without_transcript_or_summary(self):
         import post_call
         phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
         session = self.root / f"phone-{self.metadata['session_id']}"
@@ -87,22 +155,25 @@ class PhoneIntakeTests(unittest.TestCase):
             jev_question = hashlib.sha256(f'{session.name}:jev_partial_unavailable'.encode()).hexdigest()[:16]
             report = {'session': session.name, 'report': {'summary': 'private summary'}, 'review_questions': [
                 {'id': jev_question, 'question': 'Automatic Jev checks did not run', 'resolved': False},
-                {'id': 'other', 'question': 'private question', 'resolved': False}, {'question': 'resolved question', 'resolved': True}]}
+                {'id': 'other', 'question': 'Review the closure?', 'resolved': False}, {'id': 'q2', 'question': 'resolved question', 'resolved': True}]}
             post_call.write_private(session / post_call.REPORT_FILE, report)
             report['checks_hold'] = 'Jev daily dollar budget is exhausted.'
             post_call.write_private(session / post_call.REPORT_FILE, report)
             phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
-            self.assertEqual(updates[-1], {'state': 'held_review', 'reason': 'budget', 'open_questions': 2})
+            self.assertEqual(updates[-1], {'state': 'held_review', 'reason': 'budget', 'open_questions': 2,
+                                           'review_questions': [{'id': jev_question, 'question': 'Automatic Jev checks did not run'},
+                                                                {'id': 'other', 'question': 'Review the closure?'}]})
             post_call.resolve_question(session, jev_question, 'Reviewed the unchecked items')
             report = post_call.read_json(session / post_call.REPORT_FILE)
             fail[0] = True
             phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
             fail[0] = False
             phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
-            self.assertEqual(updates[-2:], [{'state': 'held_review', 'reason': 'open_review_questions', 'open_questions': 1}] * 2)
+            self.assertEqual(updates[-2:], [{'state': 'held_review', 'reason': 'open_review_questions', 'open_questions': 1,
+                                           'review_questions': [{'id': 'other', 'question': 'Review the closure?'}]}] * 2)
             post_call.resolve_question(session, 'other', 'Reviewed the remaining question')
             phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
-            self.assertEqual(updates[-1], {'state': None, 'reason': None, 'open_questions': 0})
+            self.assertEqual(updates[-1], {'state': None, 'reason': None, 'open_questions': 0, 'review_questions': []})
         payloads = json.dumps(updates)
         self.assertNotIn('private', payloads)
         self.assertEqual(output.getvalue(), '')
@@ -159,12 +230,15 @@ class PhoneIntakeTests(unittest.TestCase):
             post_call.write_private(session / post_call.STATUS_FILE, {'state': 'filed'})
             post_call.write_private(session / 'ingested.json', {'ok': True})
             phone_intake.process_pending(self.root, {'base_url': 'https://api.example.test'}, 'synthetic')
-            self.assertEqual(updates[-1], {'state': 'held_review', 'reason': 'budget', 'open_questions': 1})
+            self.assertEqual(updates[-1]['state'], 'held_review')
+            self.assertEqual(updates[-1]['reason'], 'budget')
+            self.assertEqual(updates[-1]['open_questions'], 1)
+            self.assertEqual(len(updates[-1]['review_questions']), 1)
             self.assertEqual(client.system_one.call_count, 1)
             self.assertEqual(len(post_call.read_json(session / post_call.REPORT_FILE)['review_questions']), 1)
             clock.now.return_value = datetime(2026, 1, 2, 6, tzinfo=timezone.utc)
             phone_intake.process_pending(self.root, {'base_url': 'https://api.example.test'}, 'synthetic')
-            self.assertEqual(updates[-1], {'state': None, 'reason': None, 'open_questions': 0})
+            self.assertEqual(updates[-1], {'state': None, 'reason': None, 'open_questions': 0, 'review_questions': []})
             self.assertEqual(client.system_one.call_count, 2)
             phone_intake.process_pending(self.root, {'base_url': 'https://api.example.test'}, 'synthetic')
             self.assertEqual(client.system_one.call_count, 2)
@@ -223,7 +297,8 @@ class PhoneIntakeTests(unittest.TestCase):
                 errors.append(type(exc).__name__)
                 swept.set()
 
-        with (patch.object(call_budget, 'datetime') as clock,
+        with (patch.dict('os.environ', {'CALL_JEV_DAILY_DOLLARS': '100'}),
+              patch.object(call_budget, 'datetime') as clock,
               patch.object(post_call, 'fetch_context', return_value={'deals': []}),
               patch.object(post_call, '_jev_fixture_client', return_value=client),
               patch.object(phone_intake, 'publish_status', side_effect=lambda path, *_: visited.append(path) or True)):
@@ -333,6 +408,40 @@ class PhoneIntakeTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=5)
 
+    def test_malformed_lease_does_not_stop_other_sessions(self):
+        phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
+        bad = self.root / f"phone-{self.metadata['session_id']}"
+        self.metadata['session_id'] = '10000000-0000-0000-0000-000000000002'
+        phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
+        good = self.root / f"phone-{self.metadata['session_id']}"
+        bridge = phone_intake.bridge_module()
+
+        def http(_method, url, _body, _headers):
+            if url.endswith('/lease'):
+                return 200, [] if bad.name.removeprefix('phone-') in url else {'session_token': 'fixture'}
+            return 200, {'ok': True}
+
+        phone_intake.post_call.write_private(good / phone_intake.post_call.REPORT_FILE, {'report': {}})
+        with patch.object(phone_intake, 'bridge_module', return_value=bridge), \
+             patch.object(bridge, 'http_request', side_effect=http), \
+             patch.object(bridge, 'publish_cmd', return_value=0), \
+             patch.object(bridge, 'poll_cmd'), \
+             patch.object(phone_intake, 'extract', return_value={'state': 'ready_review'}):
+            result = phone_intake.process_pending(self.root, {'base_url': 'https://api.example.test'}, 'fixture')
+        self.assertEqual(result, {'ready': 1, 'pending': 1})
+        status = phone_intake.post_call.read_json(bad / phone_intake.post_call.STATUS_FILE)
+        self.assertEqual(status['extraction_attempts'], 1)
+        self.assertTrue(status['reason'])
+        with patch.object(phone_intake, 'bridge_module', return_value=bridge), \
+             patch.object(bridge, 'http_request', side_effect=http), \
+             patch.object(bridge, 'publish_cmd', return_value=0), \
+             patch.object(bridge, 'poll_cmd'), \
+             patch.object(phone_intake, 'extract', return_value={'state': 'ready_review'}):
+            for _ in range(4):
+                phone_intake.process_pending(self.root, {'base_url': 'https://api.example.test'}, 'fixture')
+        status = phone_intake.post_call.read_json(bad / phone_intake.post_call.STATUS_FILE)
+        self.assertEqual(status['extraction_attempts'], 3)
+        self.assertEqual(status['state'], 'needs_attention')
     def test_exhausted_extraction_posts_attention_in_the_same_sweep(self):
         import post_call
         phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
@@ -410,7 +519,6 @@ class PhoneIntakeTests(unittest.TestCase):
         self.assertNotIn('transcript', json.dumps(report['report']))
         self.assertFalse((session / 'ingested.json').exists())
         bridge = phone_intake.bridge_module()
-        bridge.LOG_PATH = self.root / 'bridge.log'
         uploaded = {}
 
         def http(_method, url, body, _headers):

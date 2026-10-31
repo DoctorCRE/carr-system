@@ -244,10 +244,12 @@ def bridge_module():
 
 
 def publish_status(session: Path, cfg: dict, token: str, bridge) -> bool:
-    """Send only allowlisted codes and counts; keep the receipt for retry deduplication."""
+    """Exchange review questions and answers through the authenticated status report."""
     status = post_call.read_json(session / post_call.STATUS_FILE) or {}
     report = post_call.read_json(session / post_call.REPORT_FILE) or {}
-    count = sum(not question.get('resolved', False) for question in report.get('review_questions', []))
+    questions = [{'id': question['id'], 'question': question['question']}
+                 for question in report.get('review_questions', []) if not question.get('resolved', False)]
+    count = len(questions)
     state, reason = status.get('state'), status.get('reason_code', status.get('reason'))
     if report.get('checks_hold'):
         state, reason = 'held_review', 'budget'
@@ -262,8 +264,14 @@ def publish_status(session: Path, cfg: dict, token: str, bridge) -> bool:
     else:
         state, reason = None, None
     payload = {'state': state, 'reason': reason, 'open_questions': count}
+    if 'review_questions' in report:
+        payload['review_questions'] = questions
     receipt = session / 'phone-status.json'
-    if post_call.read_json(receipt) == payload:
+    previous = post_call.read_json(receipt) or {}
+    pending = previous.get('pending_answer_outcomes', [])
+    if pending:
+        payload['answer_outcomes'] = pending
+    if not count and previous == payload:
         return True
     metadata = required_json(session / 'phone.json')
     code, reply = bridge.http_request('POST',
@@ -271,17 +279,30 @@ def publish_status(session: Path, cfg: dict, token: str, bridge) -> bool:
         payload, {'Authorization': f'Bearer {token}'})
     if code != 200 or reply.get('ok') is not True:
         return False
-    post_call.write_private(receipt, payload)
+    acknowledged = {item['question_id'] for item in pending}
+    outcomes = []
+    for answer in reply.get('question_answers', []):
+        if answer['question_id'] in acknowledged:
+            continue
+        current = post_call.read_json(session / post_call.REPORT_FILE) or {}
+        question = next((q for q in current.get('review_questions', [])
+                         if q['id'] == answer['question_id']), None)
+        outcome = 'already_resolved'
+        if question and not question.get('resolved', False):
+            post_call.resolve_question(session, answer['question_id'], answer['answer'])
+            outcome = 'applied'
+        outcomes.append({'question_id': answer['question_id'], 'outcome': outcome})
+    post_call.write_private(receipt, {**payload, **(
+        {'pending_answer_outcomes': outcomes} if outcomes else {})})
     return True
 
 
 def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict:
     """One bounded sweep. The processor lock also excludes another invocation."""
-    from transcribe_session import TranscribeError
+    counts = {'ready': 0, 'pending': 0}
     config_limit('CALL_PROCESSORS', 1)
     if slot != 0:
         raise ValueError('only one phone processor is allowed')
-    counts = {'ready': 0, 'pending': 0}
     try:
         with exclusive(root / '.phone-processor-0.lock', blocking=False):
             bridge = bridge_module()
@@ -337,7 +358,14 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                         counts['pending'] += 1
                         continue
                     counts['ready'] += 1
-                except (ValueError, OSError, RuntimeError, subprocess.SubprocessError, bridge.BridgeNetworkError, TranscribeError):
+                except Exception as exc:
+                    previous = post_call.read_json(session / post_call.STATUS_FILE) or {}
+                    attempts = previous.get('extraction_attempts', 0) + 1
+                    previous.update({'schema_version': post_call.SCHEMA_VERSION, 'session': session.name,
+                                     'state': 'needs_attention' if attempts >= config_limit('CALL_EXTRACTION_ATTEMPTS', 3) else 'blocked',
+                                     'updated_at': post_call.now(), 'extraction_attempts': attempts,
+                                     'next_attempt_at': None, 'reason': f'Phone processing failed: {type(exc).__name__}'})
+                    post_call.write_private(session / post_call.STATUS_FILE, previous)
                     counts['pending'] += 1
     except BlockingIOError:
         return {'busy': True}
@@ -348,9 +376,12 @@ def serve(root: Path, cfg: dict, token: str) -> None:
     stopped = threading.Event()
 
     def processor(slot):
-        while not stopped.is_set():
-            process_pending(root, cfg, token, slot=slot)
-            stopped.wait(30)
+        try:
+            while not stopped.is_set():
+                process_pending(root, cfg, token, slot=slot)
+                stopped.wait(30)
+        except BaseException:
+            os._exit(1)
 
     threads = [threading.Thread(target=processor, args=(slot,), daemon=True)
                for slot in range(config_limit('CALL_PROCESSORS', 1))]
@@ -364,7 +395,9 @@ def serve(root: Path, cfg: dict, token: str) -> None:
         stopped.set()
 
 
-if __name__ == '__main__':
+def main() -> None:
+    from lib.call_settings import configure_environment
+    configure_environment()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', required=True, type=Path)
     parser.add_argument('--process', action='store_true', help='Pull recordings and run one processing sweep')
@@ -382,3 +415,7 @@ if __name__ == '__main__':
             for slot in range(config_limit('CALL_PROCESSORS', 1))]}))
     else:
         serve(args.root, {'base_url': base_url}, token)
+
+
+if __name__ == "__main__":
+    main()

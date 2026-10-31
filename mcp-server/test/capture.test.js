@@ -21,6 +21,7 @@ const joe = { id: ids.joe, slug: "joe", display: "Joe", human: true,
 class CaptureFake {
   constructor() {
     this.actors = new Map([["mac-studio", ids.device], ["joe", ids.joe]]);
+    this.inactiveActors = new Set();
     this.sessions = [];
     this.candidates = [];
     this.postCallCandidates = [];
@@ -53,7 +54,7 @@ class CaptureFake {
     if (sql.includes("capture:claim-nonce"))
       return { rows: this.sessions.filter(session => session.nonce === params[0]).map(session => ({ id: session.id })) };
     if (sql.includes("capture:device-actor"))
-      return { rows: this.actors.has(params[0]) ? [{ id: this.actors.get(params[0]) }] : [] };
+      return { rows: this.actors.has(params[0]) ? [{ id: this.actors.get(params[0]), active: !this.inactiveActors.has(params[0]) }] : [] };
     if (sql.includes("capture:claim-insert")) {
       this.sessions.push({ id: ids.session, nonce: params[0], device_id: params[1], actor_id: params[2],
         mode: params[3], started_at: params[4], consent_announced_at: params[5], token_hash: params[6],
@@ -63,7 +64,7 @@ class CaptureFake {
     if (sql.includes("capture:session-auth")) {
       const session = this.sessions.find(row => row.token_hash === params[0]);
       return { rows: session ? [{ id: session.id, state: session.state, post_call: session.post_call,
-        state_at: session.state_at }] : [] };
+        state_at: session.state_at, expired: !!session.expired, actor_active: !this.inactiveActors.has(session.device_id) }] : [] };
     }
     if (sql.includes("capture:status-update")) {
       const session = this.sessions.find(row => row.id === params[0]);
@@ -327,6 +328,90 @@ test("claim authenticates first, requires consent, and never mints on nonce repl
   assert.equal(db.sessions.length, 1);
 });
 
+test("revoked devices cannot claim or continue a session", async () => {
+  const { db, r, token } = await claimed();
+  db.inactiveActors.add("mac-studio");
+  const environment = { CAPTURE_TOKENS: '{"mac-studio":"device-secret"}' };
+  const claim = await r.handler.fetch(claimRequest({ ...validClaim, nonce: "new-nonce" }), environment);
+  assert.equal(claim.status, 403);
+  assert.equal((await claim.json()).error, "device_revoked");
+  const status = await post(r.handler, "/capture/status", { session_token: token, state: "transcribing", at: validClaim.started_at });
+  assert.equal(status.status, 403);
+  assert.equal((await status.json()).error, "device_revoked");
+  db.actors.delete("mac-studio");
+  const unknown = await r.handler.fetch(claimRequest({ ...validClaim, nonce: "unknown-nonce" }), environment);
+  assert.equal(unknown.status, 503);
+  assert.equal((await unknown.json()).error, "device_actor_not_provisioned");
+});
+
+test("expired sessions retain their explicit authentication error", async () => {
+  const { db, r, token } = await claimed();
+  db.sessions[0].expired = true;
+  const response = await post(r.handler, "/capture/status", { session_token: token, state: "transcribing", at: validClaim.started_at });
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "session_token_expired");
+});
+
+test("Studio claims pass the actor gate after the idempotent device migration", async () => {
+  const { acquireDisposablePostgres } = await import("./helpers/disposable-postgres.mjs");
+  const { existsSync } = await import("node:fs");
+  const { default: pg } = await import("pg");
+  const { migrationNames } = await import("./migration-source.testhelper.mjs");
+  const bin = ["/opt/homebrew/opt/postgresql@18/bin", "/usr/lib/postgresql/18/bin"]
+    .find(path => existsSync(`${path}/initdb`));
+  assert.ok(bin, "PostgreSQL 18 is required for the Studio migration proof");
+  const fixture = await acquireDisposablePostgres({ prefix: "studio-capture-", pgCtl: `${bin}/pg_ctl` });
+  let client;
+  try {
+    await fixture.run(`${bin}/initdb`, ["-D", `${fixture.root}/data`, "-U", "carr_ci", "--auth=trust", "--no-locale"]);
+    await fixture.run(`${bin}/pg_ctl`, ["-D", `${fixture.root}/data`, "-l", `${fixture.root}/server.log`,
+      "-o", `-k ${fixture.root} -h ''`, "-w", "start"]);
+    await fixture.run(`${bin}/createdb`, ["-h", fixture.root, "-U", "carr_ci", "carr_ci"]);
+    client = new pg.Client({ host: fixture.root, user: "carr_ci", database: "carr_ci" });
+    await client.connect();
+    await client.query("create role neondb_owner");
+    await fixture.run(`${bin}/psql`, ["-h", fixture.root, "-U", "carr_ci", "-d", "carr_ci",
+      "-X", "-v", "ON_ERROR_STOP=1", "-q", "-f", new URL("../../db/schema.sql", import.meta.url).pathname]);
+    const handler = createCaptureHandler({ withWriter: fn => fn(client), randomStringFn: () => "studio-session-proof" });
+    const body = { ...validClaim, device_id: "quill-joe-studio" };
+    const environment = { CAPTURE_TOKENS: '{"quill-joe-studio":"device-secret"}' };
+    const before = await handler.fetch(claimRequest(body), environment);
+    assert.equal(before.status, 503);
+    assert.equal((await before.json()).error, "device_actor_not_provisioned");
+    const migration = migrationNames().find(name => /^\d{4}_provision_studio_capture_device\.sql$/.test(name));
+    assert.ok(migration, "Studio device migration exists");
+    await client.query(readMigration(migration));
+    const first = (await client.query("select * from actor where slug='quill-joe-studio'")).rows;
+    assert.equal(first.length, 1);
+    assert.equal(first[0].kind, "automation");
+    assert.equal(first[0].active, true);
+    assert.equal(first[0].display_name, "Quill capture rig (Joe Mac Studio)");
+    assert.equal(first[0].email, null);
+    assert.equal(first[0].phone, null);
+    await client.query(readMigration(migration));
+    assert.deepEqual((await client.query("select * from actor where slug='quill-joe-studio'")).rows, first);
+    const claimed = await handler.fetch(claimRequest(body), environment);
+    assert.equal(claimed.status, 200);
+    assert.equal((await claimed.json()).session_token, "studio-session-proof");
+    await client.query("update actor set active=false where slug='quill-joe-studio'");
+    const revoked = await post(handler, "/capture/status", { session_token: "studio-session-proof", state: "transcribing", at: validClaim.started_at });
+    assert.equal(revoked.status, 403);
+    assert.equal((await revoked.json()).error, "device_revoked");
+
+  } finally {
+    try { await client?.end(); } finally { await fixture.close(); }
+  }
+});
+
+test("a recovered transcription can advance a previously failed session", async () => {
+  const { r, token } = await claimed();
+  for (const state of ["transcribing", "failed", "distilling"]) {
+    const response = await post(r.handler, "/capture/status", { session_token: token, state,
+      at: "2026-08-08T17:00:00.000Z" });
+    assert.equal(response.status, 200, state);
+  }
+});
+
 test("status transitions move forward, reject every backward edge, and stop at terminals", async () => {
   for (const terminal of ["done", "failed"]) {
     const { db, r, token } = await claimed();
@@ -347,6 +432,7 @@ test("status transitions move forward, reject every backward edge, and stop at t
       }
     }
     for (const state of ["recording", "transcribing", "distilling", "done", "failed"]) {
+      if (terminal === "failed" && state === "distilling") continue;
       const after = await post(r.handler, "/capture/status", { session_token: token, state,
         at: "2026-08-08T17:00:00.000Z" });
       assert.equal(after.status, 409, `${terminal} -> ${state}`);

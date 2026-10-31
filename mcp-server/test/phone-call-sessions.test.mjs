@@ -40,6 +40,12 @@ class PhoneStore {
       this.sessions.find(s => s.id === p[0]).transferred_at = '2026-01-01T12:01:00Z';
       return { rows: [] };
     }
+    if (sql.includes('phone:status')) {
+      const row = this.sessions.find(s => s.id === p[0]);
+      const changed = JSON.stringify(row.studio_status) !== p[1];
+      row.studio_status = JSON.parse(p[1]);
+      return { rows: changed ? [{ id: row.id }] : [] };
+    }
     if (sql.includes('phone:projection')) { this.sessions.find(s => s.id === p[0]).projection = JSON.parse(p[1]); return { rows: [] }; }
     throw new Error(`Unexpected query ${sql}`);
   }
@@ -88,9 +94,21 @@ test('Studio status refuses content and oversized bodies without logging them', 
   const logs = [];
   for (const method of ['log', 'warn', 'error']) t.mock.method(console, method, (...args) => logs.push(args));
   for (const body of [
+    { state: null, reason: null, open_questions: 0, answer_outcomes: [
+      { question_id: 'q1', outcome: 'private transcript' }] },
+    { state: null, reason: null, open_questions: 0, answer_outcomes: [
+      { question_id: 'q1', outcome: 'already_resolved', answer: 'private words' }] },
     { state: 'held_review', reason: 'private transcript', open_questions: 0 },
     { state: 'needs_attention', reason: 'extraction_failed', open_questions: 0, summary: 'private summary' },
     { state: 'held_review', reason: 'summary_repeats_transcript', open_questions: 'private question' },
+    { state: 'held_review', reason: 'open_review_questions', open_questions: 1,
+      review_questions: [{ id: 'q1', question: 'Review?', answer: 'confirm' }] },
+    { state: 'held_review', reason: 'open_review_questions', open_questions: 1,
+      review_questions: [{ id: 'q1', question: 'Review?', transcript: 'private transcript' }] },
+    { state: 'held_review', reason: 'open_review_questions', open_questions: 2,
+      review_questions: [{ id: 'q1', question: 'Review?' }] },
+    { state: 'held_review', reason: 'open_review_questions', open_questions: 2,
+      review_questions: [{ id: 'q1', question: 'Review?' }, { id: 'q1', question: 'Duplicate?' }] },
   ]) {
     const response = await handler.studioFetch(new Request(url, { method: 'POST',
       headers: { authorization: `Bearer ${environment.CALL_STUDIO_TOKEN}` }, body: JSON.stringify(body) }), environment);
@@ -98,7 +116,7 @@ test('Studio status refuses content and oversized bodies without logging them', 
     assert.deepEqual(await response.json(), { error: 'invalid_studio_status' });
   }
   const response = await handler.studioFetch(new Request(url, { method: 'POST',
-    headers: { authorization: `Bearer ${environment.CALL_STUDIO_TOKEN}` }, body: 'private transcript'.repeat(100) }), environment);
+    headers: { authorization: `Bearer ${environment.CALL_STUDIO_TOKEN}` }, body: 'private transcript'.repeat(4000) }), environment);
   assert.equal(response.status, 413);
   assert.deepEqual(logs, []);
 });
@@ -391,4 +409,57 @@ test('configuration cannot raise hard call or daily limits', async () => {
     assert.equal((await send('', 'POST', body, joe, env)).status, 200);
   }
   assert.equal((await send('', 'POST', recording, joe, env)).status, 429);
+});
+
+test('Studio omitting questions removes locally resolved questions from session reads', async () => {
+  const { handler, send } = rig();
+  const { session_id: id } = (await send('', 'POST', recording)).body;
+  const status = body => handler.studioFetch(new Request(
+    `https://api.example.test/capture/phone/v1/call-sessions/${id}/status`, {
+      method: 'POST', headers: { authorization: `Bearer ${environment.CALL_STUDIO_TOKEN}` },
+      body: JSON.stringify(body),
+    }), environment);
+  await status({ state: 'held_review', reason: 'open_review_questions', open_questions: 1,
+    review_questions: [{ id: 'q1', question: 'Confirm closure?' }] });
+  assert.equal((await send(`/${id}`)).body.review_questions.length, 1);
+  assert.equal((await status({ state: null, reason: null, open_questions: 0 })).status, 200);
+  const visible = (await send(`/${id}`)).body;
+  assert.deepEqual(visible.review_questions, []);
+  assert.equal(visible.open_questions, 0);
+});
+
+test('app learns when Call Mode resolved a question before answer pickup', async () => {
+  const { handler, send } = rig();
+  const { session_id: id } = (await send('', 'POST', recording)).body;
+  const status = body => handler.studioFetch(new Request(
+    `https://api.example.test/capture/phone/v1/call-sessions/${id}/status`, {
+      method: 'POST', headers: { authorization: `Bearer ${environment.CALL_STUDIO_TOKEN}` },
+      body: JSON.stringify(body),
+    }), environment);
+  const held = { state: 'held_review', reason: 'open_review_questions', open_questions: 2,
+    review_questions: [{ id: 'q1', question: 'Confirm closure?' }, { id: 'q2', question: 'Invoice now?' }] };
+  await status(held);
+  const answer = question_id => send(`/${id}/answers`, 'POST', {
+    session_id: id, question_id, answer: 'confirm', idempotency_key: question_id,
+  });
+  assert.equal((await answer('q1')).status, 200);
+  assert.equal((await answer('q2')).status, 200);
+  const pickup = await (await status({ ...held, open_questions: 1,
+    review_questions: [held.review_questions[1]] })).json();
+  assert.deepEqual(pickup.question_answers, [
+    { question_id: 'q1', answer: 'confirm' }, { question_id: 'q2', answer: 'confirm' },
+  ]);
+  const expected = [{ question_id: 'q1', outcome: 'already_resolved' }];
+  assert.equal((await status({ state: null, reason: null, open_questions: 0,
+    answer_outcomes: [{ question_id: 'unknown', outcome: 'already_resolved' }] })).status, 400);
+  await status({ state: null, reason: null, open_questions: 0, answer_outcomes: [
+    ...expected, { question_id: 'q2', outcome: 'applied' },
+  ] });
+  assert.deepEqual((await send(`/${id}`)).body.answer_outcomes, expected);
+  assert.equal((await answer('q1')).body.outcome, 'already_resolved');
+  const clear = { state: null, reason: null, open_questions: 0 };
+  const next = await (await status(clear)).json();
+  assert.deepEqual(next.question_answers, []);
+  assert.deepEqual((await send(`/${id}`)).body.answer_outcomes, expected);
+  assert.deepEqual((await send(`/${id}`)).body.review_questions, []);
 });

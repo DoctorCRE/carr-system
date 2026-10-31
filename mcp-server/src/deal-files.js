@@ -1,5 +1,12 @@
 // Record an archived email attachment against the deal its mail matched.
+import { organizationTenantForActor } from "./identity.js";
 import { ToolError } from "./tool-error.ts";
+
+export const REQUIREMENT_UPLOAD_MAX_BYTES = 1024 * 1024;
+export function isRequirementPdf(bytes) {
+  return bytes.length >= 5 && bytes.length <= REQUIREMENT_UPLOAD_MAX_BYTES
+    && String.fromCharCode(...bytes.subarray(0, 5)) === '%PDF-';
+}
 
 const MAX_BYTES = 25 * 1024 * 1024;
 const MIME = new Set(["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -9,6 +16,37 @@ const KEY = /^documents\/([A-Za-z0-9._-]+)\/([0-9a-f]{16})\/([A-Za-z0-9._-]+)$/;
 
 export function dealFileTools({ withEnvelope, writeEvent, resolveSubject }) {
   return {
+    "list-deal-documents": {
+      write: false,
+      description: "List stored, undeleted documents for one visible deal UUID. IDs are the attachment UUIDs used by fact citations. Returns display name, MIME document type, null page count, content hash and stored date. Source is omitted because attachments have no stored source field. No bytes, object keys or signed URLs. Pages sort by immutable document UUID; cursors bind tenant and deal. New IDs before the cursor appear on a fresh scan.",
+      inputSchema: { type: "object", additionalProperties: false, properties: {
+        deal_id: { type: "string", pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        limit: { type: "integer", minimum: 1, maximum: 100 },
+        cursor: { type: "string", minLength: 1, maxLength: 1000 },
+      }, required: ["deal_id"] },
+      handler: async (c, actor, args) => {
+        const tenant = organizationTenantForActor(actor);
+        const deal = args.deal_id.toLowerCase();
+        let after = null;
+        if (args.cursor) {
+          try {
+            const cursor = JSON.parse(args.cursor);
+            if (!cursor || cursor.version !== 1 || cursor.tenant !== tenant || cursor.deal !== deal
+              || typeof cursor.after !== "string"
+              || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(cursor.after)) throw new Error();
+            after = cursor.after;
+          } catch { throw new ToolError({ error: "invalid_cursor" }); }
+        }
+        const limit = args.limit ?? 50;
+        const rows = (await c.query(`select id, display_name, document_type, page_count, content_hash, stored_at
+          from public.v_deal_documents where organization_tenant_id=$1 and deal_id=$2
+            and ($3::uuid is null or id>$3::uuid) order by id limit $4`, [tenant, deal, after, limit + 1])).rows;
+        const documents = rows.slice(0, limit);
+        const has_more = rows.length > limit;
+        return { ok: true, schema_version: "deal-documents.v1", documents, has_more,
+          next_cursor: has_more ? JSON.stringify({ version: 1, tenant, deal, after: documents.at(-1).id }) : null };
+      },
+    },
     "attach-deal-file": {
       write: true,
       description: "Record one email attachment, already archived in R2 by the Studio intake under the quota guard, against the deal its mail matched. Takes the deal, the object key (documents/<client>/<first 16 of sha256>/<file name>), file name, type, sha256 and size; it never receives file bytes and cannot read the bucket, so the caller uploads first. Only deal document types (PDF, Word, Excel, PowerPoint, legacy Office) up to 25 MB. Replays of the same file on the same deal return the existing attachment row and write nothing; a key already filed on another record is refused. Writes one attachment row and one event; sends nothing.",

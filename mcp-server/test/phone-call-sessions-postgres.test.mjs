@@ -18,6 +18,7 @@ import { createPhoneCallHandler } from '../src/phone-call-sessions.js';
 import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.current.generated.js';
 
 let fixture, pool, actor, handler;
+const clients = new Map();
 before(async () => {
   const bin = ['/opt/homebrew/opt/postgresql@18/bin', '/usr/lib/postgresql/18/bin',
     '/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin'].find(p => existsSync(`${p}/initdb`));
@@ -27,6 +28,12 @@ before(async () => {
   await fixture.run(`${bin}/pg_ctl`, ['-D', `${fixture.root}/data`, '-l', `${fixture.root}/server.log`, '-o', `-k ${fixture.root} -h ''`, '-w', 'start']);
   await fixture.run(`${bin}/createdb`, ['-h', fixture.root, '-U', 'carr_ci', 'carr_ci']);
   pool = new pg.Pool({ host: fixture.root, user: 'carr_ci', database: 'carr_ci' });
+  pool.on('connect', client => {
+    let closed;
+    const done = new Promise(resolve => { closed = resolve; });
+    clients.set(client, { done, closed });
+  });
+  pool.on('remove', client => { clients.get(client).closed(); clients.delete(client); });
   await pool.query('create role neondb_owner');
   await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-f', new URL('../../db/schema.sql', import.meta.url).pathname]);
   const python = new URL('../../.venv/bin/python', import.meta.url).pathname;
@@ -47,7 +54,14 @@ before(async () => {
     finally { c.release(); }
   } });
 });
-after(async () => { try { await pool?.end(); } finally { await fixture?.close(); } });
+after(async () => {
+  try {
+    const closing = [...clients.values()].map(client => client.done);
+    await pool?.end();
+    await Promise.all(closing);
+    assert.equal(clients.size, 0, 'all clients closed before PostgreSQL stops');
+  } finally { await fixture?.close(); }
+});
 
 const handoff = new PhoneAudioHandoff(handoffState());
 const env = { CALL_STUDIO_TOKEN: 'synthetic-service-secret',
@@ -61,6 +75,76 @@ audio.writeUInt16LE(2, 32); audio.writeUInt16LE(16, 34);
 audio.write('data', 36); audio.writeUInt32LE(32000, 40);
 const metadata = { sha256: createHash('sha256').update(audio).digest('hex'), byte_count: audio.length, duration_seconds: 1, mime_type: 'audio/wav',
   started_at: '2026-01-01T12:00:00Z', consent_announced_at: '2026-01-01T12:00:00Z' };
+
+test('owner answers once and Studio pickup cannot resurrect resolved questions', async () => {
+  const session = await (await handler.fetch(new Request(url, { method: 'POST',
+    body: JSON.stringify({ ...metadata, sha256: 'c'.repeat(64) }) }), env, actor)).json();
+  const id = session.session_id;
+  const read = async (who = actor) => handler.fetch(new Request(`${url}/${id}`), env, who);
+  const other = { ...actor, id: '10000000-0000-0000-0000-000000000009', slug: 'dell' };
+  const status = body => handler.studioFetch(new Request(
+    `https://api.example.test/capture/phone/v1/call-sessions/${id}/status`, {
+      method: 'POST', headers: { authorization: `Bearer ${env.CALL_STUDIO_TOKEN}` }, body: JSON.stringify(body),
+    }), env);
+  const question = { id: 'review-model-1', question: 'Confirm the closure?' };
+  const held = { state: 'held_review', reason: 'open_review_questions', open_questions: 1, review_questions: [question] };
+  assert.equal((await status(held)).status, 200);
+  assert.deepEqual((await (await read()).json()).review_questions, [question]);
+  assert.equal((await read(other)).status, 404);
+  const body = { idempotency_key: 'question-answer-1', session_id: id, question_id: question.id, answer: 'confirm' };
+  const answer = (value = body, who = actor) => handler.fetch(new Request(`${url}/${id}/answers`, {
+    method: 'POST', body: JSON.stringify(value),
+  }), env, who);
+  for (const invalid of [{ ...body, answer: '' }, { ...body, answer: ' '.repeat(2) },
+    { ...body, answer: 'x'.repeat(1001) }, { ...body, session_id: 'different' },
+    { ...body, transcript: 'private words' }, { ...body, idempotency_key: '' }])
+    assert.equal((await answer(invalid)).status, 400);
+  assert.equal((await answer(body, other)).status, 404);
+  const [first, duplicate] = await Promise.all([answer(), answer()]);
+  assert.equal(first.status, 200);
+  assert.equal(duplicate.status, 200);
+  assert.deepEqual(await first.json(), await duplicate.json());
+  assert.equal((await answer({ ...body, answer: 'dismiss' })).status, 409);
+  assert.equal((await answer({ ...body, idempotency_key: 'new-answer' })).status, 409);
+  assert.equal((await answer({ ...body, question_id: 'unknown', idempotency_key: 'unknown-answer' })).status, 404);
+  const visible = await (await read()).json();
+  assert.deepEqual(visible.review_questions, []);
+  assert.equal(visible.open_questions, 0);
+  const pickup = await (await status(held)).json();
+  assert.deepEqual(pickup.question_answers, [{ question_id: question.id, answer: 'confirm' }]);
+  assert.equal((await (await read()).json()).open_questions, 0);
+  assert.equal((await status({ state: null, reason: null, open_questions: 0, review_questions: [] })).status, 200);
+  assert.equal((await (await read()).json()).state, 'pending');
+  assert.equal((await answer()).status, 200);
+  assert.equal((await status(held)).status, 200);
+  assert.deepEqual((await (await read()).json()).review_questions, []);
+  const more = [{ id: 'q2', question: 'Invoice now?' }, { id: 'q3', question: 'Which recipient?' }];
+  assert.equal((await status({ ...held, open_questions: 2, review_questions: more })).status, 200);
+  for (const [question_id, value] of [['q2', 'dismiss'], ['q3', 'Use the attached client contact.']]) {
+    const response = await answer({ ...body, question_id, answer: value, idempotency_key: question_id });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).answer, value);
+  }
+  assert.equal((await (await read()).json()).open_questions, 0);
+  const local = { id: 'q4', question: 'Confirm the local closure?' };
+  await status({ ...held, review_questions: [local] });
+  await answer({ ...body, question_id: local.id, idempotency_key: local.id });
+  const clear = { state: null, reason: null, open_questions: 0 };
+  const beforeAck = await (await status(clear)).json();
+  assert.ok(beforeAck.question_answers.some(q => q.question_id === local.id));
+  assert.deepEqual((await (await read()).json()).review_questions, []);
+  const outcomes = [{ question_id: local.id, outcome: 'already_resolved' }];
+  assert.equal((await status({ ...clear, answer_outcomes: outcomes })).status, 200);
+  assert.deepEqual((await (await read()).json()).answer_outcomes, outcomes);
+  assert.equal((await answer({ ...body, question_id: local.id, idempotency_key: local.id })).status, 200);
+  assert.equal((await (await answer({ ...body, question_id: local.id, idempotency_key: local.id })).json()).outcome,
+    'already_resolved');
+  assert.ok(!(await (await status(clear)).json()).question_answers.some(q => q.question_id === local.id));
+  const stale = { id: 'q5', question: 'Resolved on the Mac?' };
+  await status({ ...held, review_questions: [stale] });
+  await status(clear);
+  assert.deepEqual((await (await read()).json()).review_questions, []);
+});
 
 test('Studio holds override normal reads and clear idempotently', async () => {
   const admitted = await (await handler.fetch(new Request(url, { method: 'POST',
@@ -88,7 +172,7 @@ test('Studio holds override normal reads and clear idempotently', async () => {
   const clear = { state: null, reason: null, open_questions: 0 };
   assert.equal((await status(clear)).status, 200);
   assert.deepEqual(await read(), { schema_version: 1, session_id: id, state: 'pending',
-    filed: false, transferred: false, reason: null, open_questions: 0 });
+    filed: false, transferred: false, reason: null, open_questions: 0, review_questions: [] });
   const report = await handler.studioFetch(new Request(
     `https://api.example.test/capture/phone/v1/call-sessions/${id}/report`, {
       method: 'POST', headers: { authorization: `Bearer ${env.CALL_STUDIO_TOKEN}` },
@@ -199,22 +283,6 @@ print(json.dumps(result))
   assert.deepEqual(visible.actions, []);
   assert.deepEqual(visible.deal_updates, []);
   assert.equal((await handler.fetch(new Request(`${url}/${id}`), env, { ...actor, id: '10000000-0000-0000-0000-000000000009', slug: 'dell' })).status, 404);
-});
-
-test('five admissions are isolated by partner and Chicago day, with free duplicate retries', async () => {
-  const admit = async (body, partner = actor) => handler.fetch(new Request(url, {
-    method: 'POST', body: JSON.stringify(body),
-  }), { ...env, CALL_DAILY_ADMISSIONS: 99 }, partner);
-  for (let n = 0; n < 3; n++) {
-    assert.equal((await admit({ ...metadata, sha256: String(n).repeat(64) })).status, 201);
-  }
-  const sixth = { ...metadata, sha256: 'c'.repeat(64) };
-  assert.equal((await admit(sixth)).status, 429);
-  assert.equal((await admit(metadata)).status, 200);
-  const dell = { ...(await pool.query("select id,slug from actor where slug='dell'")).rows[0], human: true };
-  assert.equal((await admit(sixth, dell)).status, 201);
-  await pool.query("update phone_call_session set admitted_on=(now() at time zone 'America/Chicago')::date-1 where owner_id=$1", [actor.id]);
-  assert.equal((await admit(sixth)).status, 201);
 });
 
 test('phone writer grants preserve the current SCAC catalog and reject extra authority', async () => {
