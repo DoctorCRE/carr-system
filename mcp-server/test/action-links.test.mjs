@@ -12,8 +12,8 @@ const draftId = '20000000-0000-4000-8000-0000000000d1';
 const leadId = '20000000-0000-4000-8000-0000000000e1';
 const row = (over = {}) => ({
   id: draftId, lead_id: leadId, owner_id: joe.id, revision: 3, approved_at: null,
-  subject: 'Synthetic subject', body: 'Synthetic body', scheduled_for: '2026-11-03T14:00:00.000Z',
-  time_zone: 'America/Chicago', stage: 'qualified', suppressed: false, party_merged: false, party_suppressed: false, ...over,
+  subject: 'Synthetic subject', body: 'Synthetic body', scheduled_for: '2026-11-03T08:00:00-06:00',
+  time_zone: 'America/Chicago', eligible: true, ...over,
 });
 const client = rows => ({ calls: [], async query(sql, params) { this.calls.push({ sql, params }); return { rows }; } });
 const resolve = (db, actor, ref) => TOOLS['resolve-action-link'].handler(db, actor, { ref });
@@ -85,10 +85,19 @@ test('a settled card refuses as no longer actionable', async () => {
     { error: 'action_link_no_longer_actionable' });
 });
 
-test('a stale card (lead moved, suppressed or party merged) refuses as no longer actionable', async () => {
+test('a card the approval path would refuse (lead moved, suppressed, party changed, merged or restricted) is no longer actionable', async () => {
   const { ref } = buildActionLink({ kind: 'lead_draft', id: draftId });
-  for (const over of [{ stage: 'engaged' }, { suppressed: true }, { party_merged: true }, { party_suppressed: true }])
-    assert.deepEqual(await refusal(client([row(over)]), joe, ref), { error: 'action_link_no_longer_actionable' }, JSON.stringify(over));
+  assert.deepEqual(await refusal(client([row({ eligible: false })]), joe, ref), { error: 'action_link_no_longer_actionable' });
+});
+
+test('eligibility is the approval path\'s own predicate, including the lead\'s current party', async () => {
+  const { DRAFT_ELIGIBLE_SQL } = await import('../src/lead-automation.js');
+  assert.match(DRAFT_ELIGIBLE_SQL, /d\.party_id=l\.party_id/);
+  const { ref } = buildActionLink({ kind: 'lead_draft', id: draftId });
+  const db = client([row()]);
+  await resolve(db, joe, ref);
+  assert.ok(db.calls[0].sql.includes(DRAFT_ELIGIBLE_SQL));
+  assert.match(db.calls[0].sql, /join party p on p\.id = l\.party_id/);
 });
 
 test('an unknown or malformed reference refuses without touching the database', async () => {

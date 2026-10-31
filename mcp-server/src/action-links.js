@@ -7,6 +7,8 @@
 // (migration 0521: relative path, no scheme, host or query), so the morning
 // brief, the outbox and the Dot can all carry it.
 
+import { DRAFT_ELIGIBLE_SQL } from "./lead-automation.js";
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const REF = /^al1_([A-Za-z0-9_-]{1,120})$/;
 const ORIGIN = "https://app.doctorcre.com";
@@ -52,19 +54,17 @@ export function actionLinkTools({ ToolError }) {
         const { rows: [d] } = await c.query(
           `select d.id, d.lead_id, d.owner_id, d.revision, d.approved_at, d.subject, d.body,
                   to_jsonb(d.scheduled_for)#>>'{}' as scheduled_for, d.time_zone,
-                  l.stage, l.suppressed, (p.merged_into is not null or p.deleted_at is not null) as party_merged,
-                  (p.contact_state <> 'active') as party_suppressed
-             from lead_contact_draft d join lead l on l.id = d.lead_id join party p on p.id = d.party_id
+                  (${DRAFT_ELIGIBLE_SQL}) as eligible
+             from lead_contact_draft d join lead l on l.id = d.lead_id join party p on p.id = l.party_id
             where d.id = $1::uuid`, [card.id]);
         // Ownership first, so another partner's card is indistinguishable from an unknown one.
         if (!d || !d.owner_id || d.owner_id !== actor.id) refuse("action_link_not_found");
-        if (d.approved_at || d.stage !== "qualified" || d.suppressed || d.party_merged || d.party_suppressed)
-          refuse("action_link_no_longer_actionable");
+        if (d.approved_at || !d.eligible) refuse("action_link_no_longer_actionable");
         return {
           schema_version: ACTION_LINK_RESOLVE_SCHEMA_VERSION, ref: args.ref,
           card: {
             kind: card.kind, id: d.id, lead_id: d.lead_id, state: "pending_approval", revision: d.revision,
-            subject: d.subject, body: d.body, scheduled_for: d.scheduled_for, time_zone: d.time_zone,
+            subject: d.subject, body: d.body, scheduled_for: new Date(d.scheduled_for).toISOString(), time_zone: d.time_zone,
             actions: [{ action: "approve", verb: "approve-lead-draft", args: { draft_id: d.id, revision: d.revision } }],
           },
         };

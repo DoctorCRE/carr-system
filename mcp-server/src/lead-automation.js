@@ -114,13 +114,16 @@ const ACTIVITIES_SQL = `select a.* from activity a join lead l on l.id=a.lead_id
   order by a.occurred_at,a.id`;
 const DRAFTS_SQL = `select * from lead_contact_draft order by created_at,id`;
 
+// The one eligibility test for acting on a first-contact draft (aliases d, l, p). Shared with action-links.js.
+export const DRAFT_ELIGIBLE_SQL = `d.party_id=l.party_id and l.stage='qualified' and not l.suppressed
+  and p.merged_into is null and p.deleted_at is null and p.contact_state='active'`;
+
 export function leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoices }) {
   const fail = error => { throw new ToolError({ error }); };
   const schema = properties => ({ type: "object", additionalProperties: false, properties });
   // Locks the lead, party and draft rows in id order so concurrent edits and batches serialise.
   const lockPendingDrafts = async (c, ids) => (await c.query(`select d.* from lead_contact_draft d join lead l on l.id=d.lead_id
-    join party p on p.id=l.party_id where d.id=any($1::uuid[]) and d.party_id=l.party_id
-    and l.stage='qualified' and not l.suppressed and p.merged_into is null and p.deleted_at is null and p.contact_state='active'
+    join party p on p.id=l.party_id where d.id=any($1::uuid[]) and ${DRAFT_ELIGIBLE_SQL}
     order by d.id for update of l,p,d`, [ids])).rows;
   const approveDraft = async (c, actor, d) => {
     await c.query("update lead_contact_draft set approved_at=now(),approved_by=$2 where id=$1",[d.id,actor.id]);
