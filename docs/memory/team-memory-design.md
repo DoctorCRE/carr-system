@@ -6,10 +6,9 @@ the three layers of Anthropic's talk "Memory and dreaming for self-learning
 agents".
 
 - **Storage.** Two record-layer stores.
-  - **Org conventions** are the `rule` corpus. It is read-only to agents.
-    Rules are adopted only by Joe or Dell in person, through the app's
-    existing `governance-queue` approval, which calls one door: `adopt-rule`,
-    flagged `humanCallerOnly`.
+  - **Org conventions** are the `rule` corpus. Its one write door is
+    `adopt-rule`. An agent writes a convention, adopts or retires it with
+    `adopt-rule`, and tells Joe what it did (Joe, 2026-10-31, WR-000631).
   - **Team memory** is one read-write doctrine document whose sections are the
     memory files.
 - **Structure.** Agents attach through one new verb, `attach-memory`, and write
@@ -101,7 +100,7 @@ The memory-relevant ones:
 | Rules (org conventions) | `standing-context`, `applicable-rules`, `find-rule`, `resolve-doctrine-rules` | `rule` (0001): `statement`, `human_quote`, `taught_by`, `scope`, `personal_to`, `status proposed/active/retired/superseded`, `activated_by`/`activated_at` (check: "no silent activation"), `supersedes`. **189 rules: 160 shared and 29 personal** | **No live verb writes it.** `teach`, `activate-rule`, `amend-rule` and `retire-rule` are retired (`ops/config/retired-verbs.v1.json` L155–165) |
 | Rule cards | (none; files) | `ops/config/rule-cards.v1.json` (60 cards). Each cites `source_rule_ids` (K01 cites three). `ops/sync-core-rule-cards.py` renders the core cards into CLAUDE.md and AGENTS.md, and `--check` (run by `ops/rule-cards-selftest.py`) fails a stale render | The wording is hand-authored in git, a second home for conventions. `rule` has **no column** for it |
 | Human-only acts | `humanOnly: true` admits any actor with `canExercisePartnerAuthority`, which includes the sponsored `claude`, `codex`, `joe-local` and `dell-local` agents (decision dc57f62d retired the humanOnly refusal). **`humanCallerOnly: true`** requires `authorizationClassForActor(actor) === "verified_partner"` however the caller is sponsored (decision cbe91287; `mcp-server/src/tools.js` L8866–8880) | — | Used today by `mcp-server/src/board-answers.js`, `mcp-server/src/email-next-step.ts` and `mcp-server/src/email-deal-progress.ts` |
-| Pending decisions | `governance-queue` (read only): "the ONE list of every open item waiting on Joe … rule approvals" | — | The app's existing approval surface |
+| Pending decisions | `governance-queue` (read only): pending convention proposals and the other governance lanes | — | Agents act on convention proposals with `adopt-rule`; the app lists them read-only |
 | Decision log | `log-decision`, `read-decision`, `update-decision`, `find-precedent` | decision table | Joe's rulings with their rationale |
 | A second memory store | `recall-memory` (read only) | `memory_item` + `memory_evidence` (0299; sponsor RLS 0573/0574/0579); also read by two 0303 functions (deletion #4) | **No write verb exists.** Recall returned none for a test query on 2026-10-27 |
 | Sessions | `read-session-identity`, `list-my-codex-sessions` | `claude_continuity_leaf` (0485), `codex_continuity_checkpoint` (0480), `session_work` (0193) | **No live verb writes the continuity tables.** Nothing links a session to the memory versions it read or wrote |
@@ -118,7 +117,7 @@ Each file was read and classified. **34 of the 104 contain an em-dash.**
 
 | Class | Count | Files | Destination |
 |---|---|---|---|
-| ORG | 41 | automation-invisible-background, batch-joe-blockers, briefs-ban-env-dumps, bug-inventory, build-it-myself-when-asked, carr-system-stays-public, check-platform-before-building, claude-models-for-jobs, client-portal-standard-site, commit-email-private, compliance-out-of-scope, decide-dont-ask-design, flash-off-until-maintenance, independent-taste-score-before-merge, jev-used-as-shipped, keep-orchestrating-without-joe, living-readiness-checklist, main-moved-is-not-rereview, maximize-work-not-tokens, never-ignore-bugs, no-machinery-creep, orchestrator-reviews-audit-deletions, outlook-intake-stays-live, owners-contacted-are-not-leads, paired-prs-server-first, post-call-e2e-review, product-backlog-is-work-requests, quote-joe-not-my-reading, read-tool-docs-first, removals-are-immediate, report-main-clashes-with-cause, requeue-dropped-prs, review-before-automerge-large-prs, review-round-cap, simplest-mechanism-first, skill-use-verified-not-claimed, team-territory, tiny-changes-skip-review, use-tools-as-intended, v1-to-v2-sequence, work-calendar-only-in-outlook | **The `rule` store.** Each is checked against the 189 rules. Uncovered ones become proposals that Joe adopts in person (D1). TEAM fragments go to team memory |
+| ORG | 41 | automation-invisible-background, batch-joe-blockers, briefs-ban-env-dumps, bug-inventory, build-it-myself-when-asked, carr-system-stays-public, check-platform-before-building, claude-models-for-jobs, client-portal-standard-site, commit-email-private, compliance-out-of-scope, decide-dont-ask-design, flash-off-until-maintenance, independent-taste-score-before-merge, jev-used-as-shipped, keep-orchestrating-without-joe, living-readiness-checklist, main-moved-is-not-rereview, maximize-work-not-tokens, never-ignore-bugs, no-machinery-creep, orchestrator-reviews-audit-deletions, outlook-intake-stays-live, owners-contacted-are-not-leads, paired-prs-server-first, post-call-e2e-review, product-backlog-is-work-requests, quote-joe-not-my-reading, read-tool-docs-first, removals-are-immediate, report-main-clashes-with-cause, requeue-dropped-prs, review-before-automerge-large-prs, review-round-cap, simplest-mechanism-first, skill-use-verified-not-claimed, team-territory, tiny-changes-skip-review, use-tools-as-intended, v1-to-v2-sequence, work-calendar-only-in-outlook | **The `rule` store.** Each is checked against the 189 rules. Uncovered ones become proposals that agents adopt with `adopt-rule` and report to Joe. TEAM fragments go to team memory |
 | TEAM | 34 | agent-concurrency-cap, assurance-fixture-repin, background-loops-need-a-deadline, briefs-state-rules-not-values, checkout-current-all-machines, cleanup-before-features, cloud-work-runs-headless, codex-briefs-avoid-attack-wording, codex-cloud-envs, codex-latest-model-families, connector-needs-new-session, dell-mac-ssh-alias, detect-stalled-jobs, dot-on-studio, dot-runs-one-job-at-a-time, email-calendar-top-priority, immediate-email-lane, keep-slots-full, keychain-hang-freezes-codex, live-checkout-stuck-check, macbook-ssh-alias, open-wrs-are-stale, outlook-applescript-send-works, read-area-memories-before-dispatch, read-work-mail-via-parser, security-items-deferred, social-batch-stays, stop-codex-job-whole-tree, studio-is-main-hub, studio-outlook-accounts, trellis-app-reference, wednesday-swarm, where-keys-live, wr557-work-queue-plan | `team-memory` sections verbatim, with secrets checked by `ops/ci-secret-scan.py`. The first dream organizes them |
 | STALE | 17 | apple-mail-blocked-outlook-workaround, cloud-session-credits, codemap-after-purge, direct-main-push-runs-gates, dispatch-checkout-new-prefix, free-seats-first-for-reviews, front-door-obsolete, heavy-build-obsolete, keep-dot-and-cloud-lanes-fed, model-subscriptions-2026-10, nous-and-grok-first, orchestrator-standard-process, review-pr-replaces-waiters, scac-successor-seal-procedure, start-work-not-suggestion-cards, workers-report-to-orchestrator, `_to_delete/codex-reset-2026-10-02` | Not migrated; archived as evidence |
 | DUP | 12 | briefs-name-pstack-pocock, builders-never-touch-live-checkout, client-sites-on-share-doctorcre, close-done-wrs-with-completion-verb, do-dashboard-steps-in-joes-chrome, dont-carry-dead-questions, grill-runs-autonomous, orchestrator-owns-merges, outlook-lane-owned-by-orchestrator, proposed-rules-are-not-live, search-both-macs-sessions, sizing-step-before-work | Not migrated. The ledger names the rule or card that covers each, and TEAM fragments go to team memory |
@@ -174,7 +173,8 @@ or environment IDs. None are quoted in this public repo.
   convention proposal, optionally adopting a replacement in the same transaction.
   The immutable retirement receipt names the replacement in `superseded_by`.
 - **Proposal.** A team-memory section under `conventions/proposed/<slug>`,
-  written by an agent. It binds nobody.
+  written by an agent. It becomes a rule when the agent adopts it with
+  `adopt-rule`.
 - **Adoption.** `adopt-rule` makes a proposal an active rule. Since Joe's
   2026-10-31 ruling ("If you think a rule is needed you just make it a rule and
   tell me you did it", WR-000631) a partner or the agent they sponsor calls it
@@ -210,7 +210,13 @@ write path and a home for card wording. Conventions therefore leak into git
 prose, the private folder and briefs.
 
 *Decision:* **Org conventions = the `rule` table, the only home.**
-- **Adoption is in person only.** Joe or Dell adopts a rule through the app's
+- **Superseded 2026-10-31 (WR-000631).** Joe: "If you think a rule is needed
+  you just make it a rule and tell me you did it." `adopt-rule` is now
+  `humanOnly` and `authorityOnly` only: a partner or the agent they sponsor
+  writes a convention, adopts or retires it with `adopt-rule`, and tells Joe.
+  The app lists pending proposals read-only and has no Adopt control. The two
+  bullets below are the original S1 decision, kept as history.
+- *(Historical)* **Adoption is in person only.** Joe or Dell adopts a rule through the app's
   existing `governance-queue` approval. That approval calls a new verb,
   **`adopt-rule`**, declared `humanOnly: true, humanCallerOnly: true`.
   `humanCallerOnly` is the flag that refuses machine identities however they
@@ -221,7 +227,7 @@ prose, the private folder and briefs.
     **unverified**. If it is, S4 also restricts `adopt-rule` to the app's
     approval surface, and S4's CI test proves both a `claude`-sponsored actor
     and a connector session get `human_only_verb_requires_verified_partner`.
-- **Agents only propose.** A proposal is a `team-memory` section under
+- *(Historical)* **Agents only propose.** A proposal is a `team-memory` section under
   `conventions/proposed/`, written with `write-doctrine-section`. That verb
   cannot touch `rule`, so the propose path cannot activate anything.
   `governance-queue` lists these sections beside its existing rule approvals.
@@ -233,10 +239,11 @@ prose, the private folder and briefs.
   starts with `Convention: <statement>`, keeps the existing Card/Packs format,
   and adds `Retires`. IDs are normalized and deduplicated; every target must
   still be active at adoption. Unknown, proposed, or already-retired targets
-  refuse the entire transaction. The existing in-person app, authority, and
-  agent refusal checks apply unchanged, including the Joe-only database
-  approval/retirement chain (Dell remains refused by that existing chain).
-  The receipt reason includes the partner's reason and `Proposal: <section_id>@<version>`.
+  refuse the entire transaction. Retirement uses the same `adopt-rule` door as
+  adoption, so a partner or the agent they sponsor retires and tells Joe. The
+  Joe-only database approval/retirement chain still applies (Dell remains
+  refused by it).
+  The receipt reason includes the caller's reason and `Proposal: <section_id>@<version>`.
   `find-rule` exposes the retirement actor, time, reason, receipt, and optional
   replacement; `rule-cards` excludes retired rows. Retirement-only adoption
   returns `rule_id: null` and `retired_rule_ids`; replacement adoption returns
@@ -254,8 +261,9 @@ prose, the private folder and briefs.
 *Authority and the K12 conflict:* core card **K12** sends durable corrections to
 "an edit to the relevant guidance file (CLAUDE.md, AGENTS.md or a skill) in a
 PR". **WR-000562**, Joe's store record, requires one store, so under K06 the
-store record governs. The K12 rewrite ("propose a convention as a team-memory
-proposal; Joe adopts it in the app") goes in a guidance PR. **That PR must merge
+store record governs. The K12 rewrite goes in a guidance PR; since WR-000631
+it reads "write it as a team-memory convention, adopt it with adopt-rule, and
+tell Joe". **That PR must merge
 before S4 turns on the store-rendered block and before S5 turns on the
 pointers-only check**, so no agent is ever told to make an edit CI refuses.
 
@@ -382,7 +390,8 @@ rules (K01 cites three). *Decision:* one migration in S4 adds a nullable
   the card supersedes the rule with a new row whose statement is the card text.
 - A card citing several rules becomes **its own rule row**: statement = card
   wording, `card.source_rule_ids` = the cited rules, which stay active.
-- All 60 cards enter as proposals that Joe adopts in one in-person batch.
+- All 60 cards enter as proposals; agents adopt them with `adopt-rule` and tell
+  Joe.
 
 *Reopen if* card metadata outgrows one column; then it gets a child table.
 
@@ -390,7 +399,7 @@ rules (K01 cites three). *Decision:* one migration in S4 adds a nullable
 
 | Platform | Record layer | Exists? | Gap and fix |
 |---|---|---|---|
-| Read-only org store | `rule` | Store yes; human write path no; card wording no | **`adopt-rule`** (`humanOnly` + `humanCallerOnly`, called by `governance-queue` approval) (D1); **`rule.card`** column (D16) |
+| Read-only org store | `rule` | Store yes; human write path no; card wording no | **`adopt-rule`** (`humanOnly` + `authorityOnly`, called by the agent that wrote the convention) (D1); **`rule.card`** column (D16) |
 | Read-write team store | `team-memory`, class `distillation` | Yes | Created with `new-doctrine-doc` (S2) |
 | `access` per attach | `memory_session.access` + gate `memory_attach_required` | No | **New table** + **gate row and function** |
 | Memory at `path` | `doctrine_section.section_key` | Yes | None |
@@ -433,10 +442,11 @@ out: { attach_id,
 **`write-doctrine-section` / `change-doctrine-sections`** (existing) gain
 `attach_id` and `op: retire`.
 
-**`adopt-rule`** (new; `humanOnly: true, humanCallerOnly: true`) is called only
-by the app's `governance-queue` approval. It takes a proposal section (or a
-card import) and writes the active `rule` row with `taught_by` and
-`activated_by` set to the human, then retires the proposal.
+**`adopt-rule`** (`humanOnly: true, authorityOnly: true`) is called by a
+partner or the agent they sponsor, which then tells Joe. It takes a proposal
+section and writes the active `rule` row with `taught_by` and `activated_by`
+set to the authority partner, retires any `Retires` targets, then retires the
+proposal. The event row names the actor that called it.
 
 ### 6.2 How each surface calls them
 
@@ -740,8 +750,8 @@ reports its net lines.
 | WR562.S1.J1 | This design. The orchestrator freezes the private folder at merge | tiny | Merged; the folder is unwritable and still readable |
 | WR562.S2.J1 | Storage + attach. `memory_session`; the gate row, function and selftest; the review policy; `attach-memory`; `attach_id` and `op: retire`; the `team-memory` and `dreams-log` documents; log D1–D16 | medium | P1 S2 cases red, then green; the existing doctrine gate tests pass |
 | WR562.S3.J1 | Seed team memory. The TEAM and PERSONAL files plus TEAM fragments, in one change set; list the contradictions | small | `dry-run-doctrine-gates` passes over every seed section; the secret scan is clean; ledger TEAM, STALE and DUP rows mapped |
-| WR562.S4.J1 | Org-conventions store. **Precondition: the K12 guidance PR has merged.** `adopt-rule` (`humanCallerOnly`), wired into the `governance-queue` approval; `governance-queue` lists proposal sections; the `rule.card` migration; `ops/sync-core-rule-cards.py` renders from the store; the 60 cards and the uncovered ORG files staged as proposals; Joe adopts the batch in person | medium | P1 S4 refusals; the block renders from the store and `--check` passes; the ledger has all 105 rows mapped |
-| WR562.S5.J1 | Guidance prose into the store. A line ledger of CLAUDE.md and AGENTS.md: **convention** (→ proposal, then adoption), **navigation pointer** (keep), or **obsolete** (drop). Code documentation moves to the `docs/` file it describes, leaving a pointer. Add the heading allowlist to `--check` | medium | Every line classified; after Joe's in-person adoption both files hold only the generated block and pointers; `--check` fails a test file with a hand-written convention heading |
+| WR562.S4.J1 | Org-conventions store. **Precondition: the K12 guidance PR has merged.** `adopt-rule`; `governance-queue` lists proposal sections; the `rule.card` migration; `ops/sync-core-rule-cards.py` renders from the store; the 60 cards and the uncovered ORG files staged as proposals; agents adopt the batch and tell Joe (WR-000631) | medium | P1 S4 refusals; the block renders from the store and `--check` passes; the ledger has all 105 rows mapped |
+| WR562.S5.J1 | Guidance prose into the store. A line ledger of CLAUDE.md and AGENTS.md: **convention** (→ proposal, then adoption), **navigation pointer** (keep), or **obsolete** (drop). Code documentation moves to the `docs/` file it describes, leaving a pointer. Add the heading allowlist to `--check` | medium | Every line classified; after adoption both files hold only the generated block and pointers; `--check` fails a test file with a hand-written convention heading |
 | WR562.S6.J1 | Attach for Claude and Codex. MCP instructions; the generated attach line; the job-log path in `bin/codex-job` | small | P1 live test passes; one Claude and one Codex `memory_session` row |
 | WR562.S7.J1 | Attach for routines and the Dot; strip copies. Routine templates and live trigger prompts stripped; the Dot connector attach; the 35 briefs stripped; the exact-block refusal and selftest; delete `tools/room-bridge/brief-footer.md` | small | P3 brief checks; routine and Dot rows exist (or "no connector" is recorded) |
 | WR562.S8.J1 | Dream: clone, verify (rebase), apply; the condenser; the fixture | medium | P2 CI checks, including the negative cases |
@@ -749,9 +759,8 @@ reports its net lines.
 | WR562.S10.J1 | Deletions 4–10 (C1, C2 if their conditions hold). Replace the 0303 functions first; migrate every dependent; the drop with its fail-closed preflight; `autoMemoryEnabled: false`; archive, then a human removes the folder | medium | The database preflight and the repo grep return nothing; P3 drop checks; CI green |
 | WR562.S11.J1 | Hook decision (D11) | small | The comparison numbers are in the PR; the hook is removed or the exception logged |
 
-**Joe's in-person time.** S4 and S5 each end in one batched adoption in the
-app's approval surface. That is the only human work besides removing the
-folder in S10.
+**Joe's time.** Agents adopt the S4 and S5 batches with `adopt-rule` and tell
+Joe (WR-000631). The only human work left is removing the folder in S10.
 
 ## 11. Defects found while mapping
 

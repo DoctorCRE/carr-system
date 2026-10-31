@@ -95,7 +95,7 @@ async function refused(promise, code) {
 
 const ruleCount = async () => Number((await c.query('select count(*) from rule')).rows[0].count);
 const adopt = (actor, proposal, as, extra = {}) => call(actor, 'adopt-rule', { section_id: proposal.section_id,
-  base_version: proposal.base_version, reason: 'Synthetic in-person adoption', ...extra }, as);
+  base_version: proposal.base_version, reason: 'Synthetic adoption', ...extra }, as);
 
 let queue;
 test('the staging plan writes every proposal through the team-memory gates, and no proposal touches rule', async () => {
