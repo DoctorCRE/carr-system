@@ -74,6 +74,7 @@ fi
 IMPORT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/verb-count.XXXXXX")"
 trap 'rm -rf "$IMPORT_ROOT"' EXIT HUP INT TERM
 ln -s "$WORKER_DIR" "$IMPORT_ROOT/mcp-server"
+ln -s "$(dirname -- "$WORKER_DIR")/lib" "$IMPORT_ROOT/lib"
 ln -s "$RUNTIME_NODE_MODULES" "$IMPORT_ROOT/node_modules"
 
 COUNT="$(node --preserve-symlinks --input-type=module -e '

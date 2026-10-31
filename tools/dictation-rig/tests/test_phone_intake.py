@@ -10,7 +10,7 @@ import threading
 import unittest
 import wave
 from unittest.mock import patch
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'bin'))
 import phone_intake
@@ -60,28 +60,134 @@ class PhoneIntakeTests(unittest.TestCase):
             phone_intake.receive(self.root, self.metadata, io.BytesIO(b'x' * len(self.audio)))
         self.assertFalse(list(self.root.glob('phone-*/transfer.json')))
 
-    def test_http_transfer_requires_studio_identity_and_matching_content(self):
-        server = ThreadingHTTPServer(('127.0.0.1', 0), phone_intake.handler_for(self.root, 'synthetic-service-secret'))
+    def test_processor_reports_holds_question_changes_and_clear_without_private_text(self):
+        import post_call
+        phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
+        session = self.root / f"phone-{self.metadata['session_id']}"
+        post_call.write_private(session / 'transcript.json', {'segments': [{'text': 'private transcript'}]})
+        bridge = phone_intake.bridge_module()
+        updates = []
+        fail = [False]
+
+        def http(_method, url, body, headers):
+            self.assertEqual(headers['Authorization'], 'Bearer synthetic-service-secret')
+            if url.endswith('/status'):
+                updates.append(body)
+                return (503, {}) if fail[0] else (200, {'ok': True})
+            self.fail(f'Unexpected external route {url}')
+
+        cfg = {'base_url': 'https://api.example.test'}
+        output = io.StringIO()
+        with (patch.object(phone_intake, 'bridge_module', return_value=bridge),
+              patch.object(bridge, 'http_request', side_effect=http),
+              patch('sys.stdout', output), patch('sys.stderr', output)):
+            for state, reason in [('needs_attention', 'private error'), ('held_review', 'summary_repeats_transcript'),
+                                  ('held_review', 'transcript_unavailable'), ('needs_attention', 'transient_ceiling')]:
+                post_call.write_private(session / post_call.STATUS_FILE, {'state': state, 'reason': reason})
+                phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
+                expected = {'state': state, 'reason': 'extraction_failed' if reason == 'private error' else reason, 'open_questions': 0}
+                self.assertEqual(updates[-1], expected)
+                count = len(updates)
+                phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
+                self.assertEqual(len(updates), count)
+            post_call.write_private(session / 'ingested.json', {'ok': True})
+            post_call.write_private(session / post_call.STATUS_FILE, {'state': 'filed'})
+            report = {'report': {'summary': 'private summary'}, 'review_questions': [
+                {'question': 'private question', 'resolved': False}, {'question': 'resolved question', 'resolved': True}]}
+            post_call.write_private(session / post_call.REPORT_FILE, report)
+            fail[0] = True
+            phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
+            fail[0] = False
+            phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
+            self.assertEqual(updates[-2:], [{'state': 'held_review', 'reason': 'open_review_questions', 'open_questions': 1}] * 2)
+            report['review_questions'][0]['resolved'] = True
+            post_call.write_private(session / post_call.REPORT_FILE, report)
+            phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
+            self.assertEqual(updates[-1], {'state': None, 'reason': None, 'open_questions': 0})
+        payloads = json.dumps(updates)
+        self.assertNotIn('private', payloads)
+        self.assertEqual(output.getvalue(), '')
+        self.assertEqual((session / 'phone-status.json').stat().st_mode & 0o777, 0o600)
+
+    def test_outbound_download_is_acknowledged_only_after_durable_hash_verification(self):
+        received = []
+        listed = [True]
+        ack_status = [503]
+        fixture = self
+
+        class Server(BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def do_GET(self):
+                if self.headers.get('Authorization') != 'Bearer synthetic-service-secret':
+                    self.send_error(401)
+                    return
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                if self.path.endswith('/audio'):
+                    self.wfile.write(fixture.audio)
+                else:
+                    self.wfile.write(json.dumps({'sessions': [fixture.metadata] if listed[0] else []}).encode())
+
+            def do_POST(self):
+                received.append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
+                session = fixture.root / f"phone-{fixture.metadata['session_id']}"
+                fixture.assertEqual((session / 'imported.audio').read_bytes(), fixture.audio)
+                self.send_response(ack_status[0])
+                self.end_headers()
+                self.wfile.write(b'{"ok":true}')
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Server)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            def send(auth):
-                client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=5)
-                client.request('PUT', f"/v1/call-sessions/{self.metadata['session_id']}/transfer", self.audio,
-                    {'Authorization': auth, 'Content-Type': 'audio/wav', 'X-Carr-Call': json.dumps(self.metadata)})
-                response = client.getresponse()
-                status, body = response.status, json.loads(response.read())
-                client.close()
-                return status, body
-            self.assertEqual(send('Bearer outsider')[0], 401)
-            self.assertFalse(list(self.root.glob('phone-*')))
-            status, receipt = send('Bearer synthetic-service-secret')
-            self.assertEqual(status, 200)
-            self.assertEqual(receipt['sha256'], self.metadata['sha256'])
+            cfg = {'base_url': f'http://127.0.0.1:{server.server_port}'}
+            self.assertEqual(phone_intake.pull_pending(self.root, cfg, 'synthetic-service-secret')['received'], 0)
+            listed[0] = False
+            ack_status[0] = 200
+            received.clear()
+            self.assertEqual(phone_intake.pull_pending(self.root, cfg, 'synthetic-service-secret')['received'], 1)
+            self.assertEqual(received, [{'sha256': self.metadata['sha256']}])
+            received.clear()
+            listed[0] = True
+            self.metadata['sha256'] = 'f' * 64
+            self.assertEqual(phone_intake.pull_pending(self.root, cfg, 'synthetic-service-secret')['received'], 0)
+            self.assertEqual(received, [])
         finally:
             server.shutdown()
             server.server_close()
             thread.join(timeout=5)
+
+    def test_exhausted_extraction_posts_attention_in_the_same_sweep(self):
+        import post_call
+        phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
+        session = self.root / f"phone-{self.metadata['session_id']}"
+        post_call.write_private(session / 'transcript.json', {'segments': [{'text': 'private transcript'}]})
+        post_call.store_context(session, {'session': session.name, 'workspace_kind': 'all',
+                                          'generated_at': '2026-01-01T12:00:00Z', 'deals': []})
+        post_call.write_private(session / post_call.STATUS_FILE, {'state': 'blocked', 'extraction_attempts': 2})
+        fixture = self.root / 'failed_distiller.py'
+        fixture.write_text('raise SystemExit(1)\n')
+        bridge = phone_intake.bridge_module()
+        updates = []
+
+        def http(_method, url, body, _headers):
+            if url.endswith('/status'):
+                updates.append(body)
+                return 200, {'ok': True}
+            if url.endswith('/lease'):
+                return 200, {'session_token': 'synthetic-session-token'}
+            self.fail(f'Unexpected external route {url}')
+
+        with (patch.object(phone_intake, 'bridge_module', return_value=bridge),
+              patch.object(bridge, 'http_request', side_effect=http),
+              patch.dict('os.environ', {'CARR_POST_CALL_DISTILLER_COMMAND': f'{sys.executable} {fixture}'})):
+            result = phone_intake.process_pending(self.root, {'base_url': 'https://api.example.test'}, 'synthetic-service-secret')
+        self.assertEqual(result, {'ready': 0, 'pending': 1})
+        self.assertEqual(updates[-1], {'state': 'needs_attention', 'reason': 'extraction_failed', 'open_questions': 0})
+        self.assertEqual(post_call.read_json(session / post_call.STATUS_FILE)['state'], 'needs_attention')
 
     def test_imported_recording_uses_existing_extraction_and_candidate_processing(self):
         wav = io.BytesIO()

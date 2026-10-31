@@ -21,7 +21,7 @@ def _deal(check):
 
 
 class _Client:
-    def system_one(self, *, state, questions):
+    def system_one(self, *, state, questions, model=None, retry=None):
         answers = {}
         for key in questions:
             if key == "deal_match":

@@ -264,12 +264,14 @@ def event(h, key='event-key', send_requested=True, **overrides):
 
 class SendTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch.object(ui, 'screen_locked', return_value=False))
         self.tmp = tempfile.TemporaryDirectory()
         self.out = Path(self.tmp.name) / 'out'
         self.home = Path(self.tmp.name) / 'home'
         self.config = write_settings(self.home, ROOT, account=ACCOUNT, internal_domain='company.test')
         self.enterContext(patch.object(send_mod, 'load_settings', lambda: load_settings(home=self.home)))
         self.enterContext(patch.object(ui, 'load_settings', lambda: load_settings(home=self.home)))
+        self.enterContext(patch.object(ui, 'screen_locked', return_value=False))
         self.dialog = self.enterContext(patch.object(send_mod.subprocess, 'run',
             return_value=subprocess.CompletedProcess(['osascript'], 0, 'true\n', '')))
 
@@ -1041,6 +1043,7 @@ class SendTests(unittest.TestCase):
 
 class OutboxTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch.object(ui, 'screen_locked', return_value=False))
         from lib import outlook_outbox
         self.worker = outlook_outbox
         self.tmp = self.enterContext(tempfile.TemporaryDirectory())
@@ -1341,12 +1344,7 @@ class OutboxTests(unittest.TestCase):
                     self.assertEqual(fake.presses(), 0)
                     self.assertEqual(len(fake.forms), 1)
                     self.assertFalse(any(tool == 'invoke_menu' for tool, _ in fake.calls))
-                    if recovery:
-                        command.assert_called_once_with(
-                            ['ioreg', '-a', '-d1', '-k', 'IOConsoleUsers', '-r'],
-                            capture_output=True, timeout=5)
-                    else:
-                        command.assert_not_called()
+                    command.assert_not_called()
 
     def test_locked_screen_defers_without_failure_receipt(self):
         locked = send_mod.Result(send_mod.State.FAILED, 'screen_locked')

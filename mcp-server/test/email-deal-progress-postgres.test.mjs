@@ -1781,6 +1781,7 @@ async function automaticThreadFiling() {
   await c.query('update activity set deal_id=$2 where id=$1', [prior.activity_id, deal]);
   const reply = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
     summary: 'Synthetic reply', detail: quote, email_context: context });
+  await c.query("update activity set occurred_at=(select occurred_at - interval '1 second' from activity where id=$2) where id=$1", [prior.activity_id, reply.activity_id]);
   const capturedAt = (await c.query('select occurred_at from activity where id=$1', [reply.activity_id])).rows[0].occurred_at.getTime();
   await command('inherit-email-thread', { idempotency_key: randomUUID(), activity_id: reply.activity_id,
     thread_activity_id: prior.activity_id }, router(), 'carr_writer');
