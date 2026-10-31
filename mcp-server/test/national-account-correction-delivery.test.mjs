@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -13,25 +13,26 @@ const { NODE_TEST_CONTEXT, ...childEnv } = process.env;
 test('the correction fixture leases PostgreSQL before creating a cluster under the configured temporary directory', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'carr-na-portability-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const postgres = join(directory, 'postgres');
+  const initdb = join(directory, 'initdb');
+  const observed = join(directory, 'initdb-args');
+  writeFileSync(postgres, '');
+  writeFileSync(initdb, `#!/bin/sh\nprintf '%s\n' "$@" > ${JSON.stringify(observed)}\necho portability-probe-stop >&2\nexit 1\n`, { mode: 0o755 });
   // Stop at initdb so this filesystem regression also runs without PostgreSQL.
   // The migration behavior itself is covered by the real database fixture.
   const probe = `
     import childProcess from 'node:child_process';
     import fs from 'node:fs';
-    import { basename } from 'node:path';
     import { syncBuiltinESMExports } from 'node:module';
     const spawn = childProcess.spawn;
     childProcess.spawn = (command, args, options) => {
-      if (args.some(arg => arg.endsWith('/lib/disposable_pg_fixture.py')))
-        console.log('fixture-budget-requested');
-      return spawn(command, args, options);
+      const child = spawn(command, args, options);
+      if (args.some(arg => arg.endsWith('/lib/disposable_pg_fixture.py')) && !args.includes('--supervise'))
+        child.stdout.once('data', () => console.log('fixture-budget-acquired'));
+      return child;
     };
     childProcess.spawnSync = (command, args) => {
-      if (command === 'which') return { status: 0, stdout: process.execPath };
-      if (basename(command) === 'initdb') {
-        console.log('fixture-data=' + args[args.indexOf('-D') + 1]);
-        return { status: 1, stderr: 'portability probe stops before initdb' };
-      }
+      if (command === 'which') return { status: 0, stdout: ${JSON.stringify(postgres)} };
       throw new Error('unexpected command: ' + command);
     };
     fs.existsSync = () => true;
@@ -41,11 +42,13 @@ test('the correction fixture leases PostgreSQL before creating a cluster under t
   const result = spawnSync(process.execPath, ['--input-type=module', '-e', probe], {
     encoding: 'utf8', env: { ...childEnv, CARR_NATIONAL_ACCOUNT_TEST_REQUIRED: '0', TMPDIR: directory, TMP: directory, TEMP: directory },
   });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /fixture-budget-requested[\s\S]*fixture-data=/,
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.match(result.stdout + result.stderr, /portability-probe-stop/);
+  assert.match(result.stdout, /fixture-budget-acquired[\s\S]*portability-probe-stop/,
     'the fixture must acquire the shared PostgreSQL budget before initdb');
-  const data = result.stdout.match(/^fixture-data=(.+)$/m)?.[1];
-  assert.ok(data?.startsWith(directory + '/'), `fixture must honor TMPDIR; observed ${data}`);
+  const args = readFileSync(observed, 'utf8').trim().split('\n');
+  const data = args[args.indexOf('-D') + 1];
+  assert.ok(data?.startsWith(realpathSync(directory) + '/'), `fixture must honor TMPDIR; observed ${data}`);
 });
 
 test('the pending correction sorts after the committed schema migration ledger', () => {

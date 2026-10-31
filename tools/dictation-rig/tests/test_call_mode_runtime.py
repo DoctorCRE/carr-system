@@ -63,7 +63,7 @@ server.serve_forever()
                 if not port:
                     self.fail(process.stderr.read())
                 with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/state", timeout=5) as response:
-                    self.assertEqual(json.load(response), {"state": "idle", "local_partner": None})
+                    self.assertEqual(json.load(response), {"state": "idle", "local_partner": None, "sessions": []})
             finally:
                 process.terminate()
                 process.communicate(timeout=5)

@@ -526,6 +526,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             ("category_objects", categories.objects),
             ("categories", categories.categories.len()),
             ("detail_objects", details.objects),
+            ("details_rejected", details.rejected),
             ("messages_with_detail", rows.iter().filter(|r| details.get(r.key).is_some()).count()),
             ("messages_with_key", stored),
             ("message_objects", message_objects.len()),
