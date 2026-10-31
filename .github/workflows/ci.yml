@@ -160,6 +160,10 @@ jobs:
           ZSH_ARCHIVE_DIR: ${{ runner.temp }}/zsh-debs
         run: ops/ci-zsh.sh
 
+      - name: Install PDF text extraction dependency
+        if: matrix.classes == 'gates'
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
+
       - name: Install PostgreSQL 17
         if: contains(matrix.classes, 'unit') || contains(matrix.classes, 'gates') || (matrix.classes == 'migration' && steps.scope.outputs.full != 'false')
         timeout-minutes: 5

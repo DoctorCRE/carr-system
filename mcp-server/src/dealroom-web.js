@@ -34,6 +34,7 @@ import { callTool } from "./mcp.js";
 import { isStagingBrowserEnvironment } from "./staging-browser.ts";
 import { bearerCredential } from "./bearer.ts";
 import { prepareStagingLoopFixtures } from "./staging-loop-fixtures.js";
+import { PHONE_CALL_PREFIX, phoneCallByteLimit } from "./phone-call-sessions.js";
 
 export const DEALROOM_ASSET_DIRECTORY = "../out/doctorcre-artifacts/current"; // mirrors wrangler.toml [assets]
 
@@ -55,6 +56,7 @@ const COMMAND_CENTER_API_PREFIX = "/api/v1/";
 export const FACT_REVIEW_ROUTES = new Map([
   ["/api/v1/fact-review/comparison", "prepare-terms-comparison"],
   ["/api/v1/fact-review/comparison/validate", "validate-terms-comparison"],
+  ["/api/v1/fact-review/documents", "list-deal-documents"],
   ["/api/v1/fact-review/list", "list-fact-review"],
   ["/api/v1/fact-review/record", "record-human-fact"],
   ["/api/v1/fact-review/resolve", "resolve-fact-review"],
@@ -508,13 +510,13 @@ async function systemWorkBody(request, maxBytes = SYSTEM_WORK_MAX_BODY) {
   catch { return { error: json({ error: "invalid_json" }, 400) }; }
 }
 
-// One browser-POST guard for every authenticated write on this host: JSON only,
+// One browser write guard for JSON commands and phone audio transfers:
 // same origin, same-site fetch metadata, and a synchronizer token that never
 // enters the cookie.  The Model Room composer reuses it verbatim rather than
 // growing a second, subtly different door.
-async function guardSystemWorkPost(request, env, session, { readBody = false, maxBytes = SYSTEM_WORK_MAX_BODY } = {}) {
+async function guardSystemWorkPost(request, env, session, { readBody = false, maxBytes = SYSTEM_WORK_MAX_BODY, audio = false } = {}) {
   const contentType = request.headers.get("content-type") || "";
-  if (!/^application\/json(?:\s*;|$)/i.test(contentType)) return { error: json({ error: "unsupported_media_type" }, 415) };
+  if (!(audio ? /^audio\/[a-z0-9-]+$/i : /^application\/json(?:\s*;|$)/i).test(contentType)) return { error: json({ error: "unsupported_media_type" }, 415) };
   if (!sameOrigin(request, env)) return { error: json({ error: "forbidden", reason: "origin_mismatch" }, 403) };
   if (request.headers.get("sec-fetch-site") !== "same-origin") return { error: json({ error: "forbidden", reason: "fetch_metadata_mismatch" }, 403) };
   if (!equalStrings(request.headers.get("x-carr-csrf"), session.csrfToken)) return { error: json({ error: "forbidden", reason: "csrf_mismatch" }, 403) };
@@ -1093,6 +1095,7 @@ async function handleRequest(request, env, ctx, dependencies) {
       if (url.pathname.startsWith("/api/v1/") && url.pathname !== COMMAND_CENTER_PATH &&
           url.pathname !== JEV_DEAL_READING_PATH && !FACT_REVIEW_ROUTES.has(url.pathname) &&
           url.pathname !== WORK_INVENTORY_PATH && url.pathname !== ATLAS_GRAPH_PATH &&
+          url.pathname !== PHONE_CALL_PREFIX && !url.pathname.startsWith(PHONE_CALL_PREFIX + '/') &&
           !isBusinessApiPath(url.pathname)) return json({ error: "not_found" }, 404);
       // Home, Clients and Vendors are one workspace surface and share its flag.
       if ((url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
@@ -1121,6 +1124,7 @@ async function handleRequest(request, env, ctx, dependencies) {
         if (url.pathname === "/auth/session") return json({ error: "unauthorized", state: "sign_in_required" }, 401);
         if (url.pathname === JEV_DEAL_READING_PATH || url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
             url.pathname === ATLAS_GRAPH_PATH || FACT_REVIEW_ROUTES.has(url.pathname) ||
+            url.pathname === PHONE_CALL_PREFIX || url.pathname.startsWith(PHONE_CALL_PREFIX + '/') ||
             isBusinessApiPath(url.pathname)) {
           return json({ error: "AUTHENTICATION_REQUIRED" }, 401);
         }
@@ -1136,6 +1140,16 @@ async function handleRequest(request, env, ctx, dependencies) {
       if (url.pathname === "/auth/session") {
         response = request.method === "GET" ? await systemWorkSession(session, dependencies)
           : json({ error: "method_not_allowed" }, 405);
+      } else if (url.pathname === PHONE_CALL_PREFIX || url.pathname.startsWith(PHONE_CALL_PREFIX + '/')) {
+        if (!['GET', 'POST', 'PUT'].includes(request.method)) return json({ error: 'method_not_allowed' }, 405);
+        if (request.method !== 'GET') {
+          const guard = await guardSystemWorkPost(request, env, session,
+            { audio: request.method === 'PUT', maxBytes: request.method === 'PUT' ? phoneCallByteLimit(env) : 4096 });
+          if (guard.error) return guard.error;
+        }
+        response = dependencies.phoneCallHandler
+          ? await dependencies.phoneCallHandler(request, env, session.actor)
+          : json({ error: 'phone_intake_unavailable' }, 503);
       } else if (isTourInternalRequest(request) && dependencies.tourHandler?.fetch) {
         response = await dependencies.tourHandler.fetch(request, env, ctx, session.actor, session);
       } else if (url.pathname.startsWith(ROOM_PREFIX)) {

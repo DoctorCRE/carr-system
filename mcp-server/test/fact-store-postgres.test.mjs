@@ -73,10 +73,21 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
       secdef_execute: SCAC_MUTATION_CURRENT_DB_GRANTS.secdef_execute.filter(g => !FACT_FUNCTIONS.test(g.signature) && !LATER_FUNCTIONS.test(g.signature)) };
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as $f$select ${c.escapeLiteral(JSON.stringify(predecessor))}::jsonb$f$`);
     await c.query(await readFile(new URL('../../migrations/0983_fact_store.sql', import.meta.url), 'utf8'));
-    await c.query(await readFile(new URL('../../migrations/1070_fact_review.sql', import.meta.url), 'utf8'));
-    await c.query(await readFile(new URL('../../migrations/1078_deal_extraction.sql', import.meta.url), 'utf8'));
-    await c.query(await readFile(new URL('../../migrations/1088_terms_comparison_read.sql', import.meta.url), 'utf8'));
+    await c.query(await readFile(new URL('../../migrations/1099_fact_review.sql', import.meta.url), 'utf8'));
+    await c.query(await readFile(new URL('../../migrations/1102_fact_review_matching_promotion.sql', import.meta.url), 'utf8'));
+    await c.query(await readFile(new URL('../../migrations/1103_deal_extraction.sql', import.meta.url), 'utf8'));
     await c.query("update system_config set value='true'::jsonb where key='facts.automatic_promotion_enabled'");
+    await c.query('create table v_ref_index(subject_id uuid, subject_type text)');
+    await c.query(await readFile(new URL('../../migrations/1086_deal_documents.sql', import.meta.url), 'utf8'));
+    const reviewDefinition = async () => (await c.query("select pg_get_functiondef('ops.list_fact_review(text,text,integer,jsonb,boolean)'::regprocedure) as body")).rows[0].body;
+    const reviewBody = await reviewDefinition();
+    await c.query(await readFile(new URL('../../migrations/1110_terms_comparison_read.sql', import.meta.url), 'utf8'));
+    assert.equal(await reviewDefinition(), reviewBody, 'comparison grant preserves main fact review body');
+    const reviewAcl = (await c.query("select r.rolname, a.privilege_type, a.is_grantable from pg_proc p cross join lateral aclexplode(p.proacl) a join pg_roles r on r.oid=a.grantee where p.oid='ops.list_fact_review(text,text,integer,jsonb,boolean)'::regprocedure and r.rolname in ('carr_reader','carr_writer') order by r.rolname")).rows;
+    assert.deepEqual(reviewAcl, [
+      { rolname: 'carr_reader', privilege_type: 'EXECUTE', is_grantable: false },
+      { rolname: 'carr_writer', privilege_type: 'EXECUTE', is_grantable: false },
+    ]);
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner'),($2,'codex','automation','Synthetic job')", [partner.id, job.id]);
 
     await c.query('grant select,update on system_config to carr_writer');
@@ -233,6 +244,7 @@ assert len(os.listdir(root+'/output'))==1
 
     await t.test('partners record a sourced term from an existing deal attachment', async () => {
       const deal = randomUUID(), document = randomUUID();
+      await c.query("insert into v_ref_index values($1,'deal')", [deal]);
       await c.query("insert into attachment(id,subject_type,subject_id,r2_key,filename,mime,sha256,bytes,created_by) values($1,'deal',$2,$3,'synthetic.pdf','application/pdf',$4,100,$5)",
         [document, deal, `synthetic/${document}`, hash(39), partner.id]);
       const out = await as('carr_writer', partner, 'record-human-fact', {
@@ -240,6 +252,9 @@ assert len(os.listdir(root+'/output'))==1
         observation: { fact_key: 'base_rent_per_sf', value: '24', unit: 'USD/SF/year', expense_basis: 'nnn', source: { document_ref: document, page_start: 1, page_end: 1, cited_text: 'Synthetic clause.' } },
       });
       assert.equal(out.ok, true);
+      const listed = await as('carr_reader', partner, 'list-deal-documents', { deal_id: deal });
+      assert.equal(listed.documents[0].id, out.observation.source.document_ref);
+      assert.equal(listed.documents[0].display_name, 'synthetic.pdf');
       assert.equal(out.observation.method, 'human');
       assert.equal(out.observation.source.content_hash, hash(39));
     });
@@ -312,6 +327,35 @@ assert len(os.listdir(root+'/output'))==1
       await assert.rejects(resolve(reopened, {}, job), e => /human_only/.test(e.payload.error));
       for (const sql of ['delete from ops.fact_review_decision', "update ops.fact_review_decision set reason='changed'"])
         await assert.rejects(c.query(sql), { code: '23514' });
+    });
+
+    await t.test('promoting the reviewed value and source keeps approval resolved; a changed term reopens', async () => {
+      const entity = 'resolved-promotion';
+      const batch = await record(entity, [observation('chosen'), observation('different', { value: '30' }), observation('same-value')]);
+      const read = async () => (await as('carr_reader', partner, 'list-fact-review', { entity_ref: entity, include_resolved: true })).items[0];
+      const initial = await read();
+      await as('carr_writer', partner, 'resolve-fact-review', {
+        idempotency_key: randomUUID(), entity_ref: entity, fact_key: initial.fact_key,
+        base_version: 0, review_version: initial.review_version, decision: 'approve',
+        observation_id: ids(batch)[0], reason: 'Synthetic approval.',
+      });
+      await promote(entity, [ids(batch)[0]], { basis: 'human_review', base_version: 1 }, partner);
+      const matching = await read();
+      assert.equal(matching.pending, false, 'same reviewed value and source stays resolved');
+      assert.equal(matching.canonical_version, 2);
+      assert.notEqual(matching.review_version, initial.review_version);
+      assert.equal(matching.review_history.length, 1);
+      assert.deepEqual(matching.canonical_history.map(f => f.normalized_value), ['24', '24']);
+      assert.deepEqual((await as('carr_reader', partner, 'list-fact-review', { entity_ref: entity })).items, []);
+      assert.deepEqual((await conflicts({ entity_ref: entity })).conflicts, []);
+      await promote(entity, [ids(batch)[1]], { basis: 'human_review', base_version: 2 }, partner);
+      assert.equal((await read()).pending, true, 'a different value reopens review');
+      await promote(entity, [ids(batch)[2]], { basis: 'human_review', base_version: 3 }, partner);
+      assert.equal((await read()).pending, true, 'a different source reopens review even at the reviewed value');
+      await promote(entity, [ids(batch)[0]], { basis: 'human_review', base_version: 4 }, partner);
+      assert.equal((await read()).pending, false);
+      await record(entity, [observation('new-evidence')]);
+      assert.equal((await read()).pending, true, 'new evidence still needs review even when its value agrees');
     });
 
     await t.test('human entries refuse another deal, tenant, deleted document and stale review evidence', async () => {

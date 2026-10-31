@@ -124,6 +124,30 @@ test("comparison app routes require authentication and CSRF and name a blocked f
   assert.deepEqual(invoked, [["joe", "prepare-terms-comparison"], ["joe", "validate-terms-comparison"]]);
 });
 
+test('phone transfer shares partner-cookie, origin, and CSRF guards while admitting binary audio', async () => {
+  const environment = env();
+  let calls = 0;
+  const handler = createDealroomHandler({ ...identityOverrides(TEST_PARTNER_EMAIL),
+    phoneCallHandler: async (_request, _env, actor) => {
+      assert.equal(actor.slug, 'joe');
+      calls++;
+      return Response.json({ transferred: true });
+    },
+  });
+  const path = `https://${PRODUCTION_HOST}/api/v1/call-sessions/10000000-0000-0000-0000-000000000001/transfer`;
+  assert.equal((await handler.fetch(new Request(path), environment, {})).status, 401);
+  const cookie = namedCookie(await login(handler, environment, TEST_PARTNER_EMAIL), '__Host-dealroom_session');
+  const session = await (await handler.fetch(new Request(`https://${PRODUCTION_HOST}/auth/session`, { headers: { cookie } }), environment, {})).json();
+  const send = extras => handler.fetch(new Request(path, { method: 'PUT', body: new Uint8Array(100),
+    headers: { cookie, origin: `https://${PRODUCTION_HOST}`, 'sec-fetch-site': 'same-origin',
+      'content-type': 'audio/wav', 'content-length': '100', ...extras },
+  }), environment, {});
+  assert.equal((await send({})).status, 403);
+  assert.equal((await send({ 'x-carr-csrf': session.csrf_token, origin: 'https://outsider.example.test' })).status, 403);
+  assert.equal((await send({ 'x-carr-csrf': session.csrf_token })).status, 200);
+  assert.equal(calls, 1);
+});
+
 test("browser MCP passes the verified session key independently of caller budget hints", async () => {
   const email = TEST_PARTNER_EMAIL, environment = env();
   const sessions = [];

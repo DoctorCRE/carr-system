@@ -6,7 +6,7 @@ import { ToolError } from './tool-error.ts';
 import type { Actor, Db, DelegatedHandler, LockDealField, ResolveEmailProposal, VerbInputs, WithEnvelope, WriteEvent } from './verb-contract.ts';
 
 const properties = {
-  deal: { type: 'string', format: 'uuid' },
+  deal: { type: ['string', 'null'], format: 'uuid' },
   activity_id: { type: 'string', format: 'uuid' },
   evidence_quote: { type: 'string', minLength: 10, maxLength: 2000 },
   text: { type: 'string', minLength: 1, maxLength: 500 },
@@ -15,7 +15,7 @@ const properties = {
 };
 const schema = (extra: Record<string, object>) => ({ type: 'object', additionalProperties: false,
   properties: { ...properties, ...extra },
-  required: [...Object.keys(properties).filter(key => key !== 'owner'), ...Object.keys(extra)] });
+  required: [...Object.keys(properties).filter(key => !['owner', 'deal'].includes(key)), ...Object.keys(extra)] });
 
 export function emailNextStepTools({ withEnvelope, writeEvent, lockDealField, setNextStep, setNextAction, resolveEmailProposal }: {
   withEnvelope: WithEnvelope; writeEvent: WriteEvent; lockDealField: LockDealField;
@@ -25,6 +25,33 @@ export function emailNextStepTools({ withEnvelope, writeEvent, lockDealField, se
   async function proposal(c: Db, args: VerbInputs['preview-email-next-step'], lock = false) {
     if (!args.text.trim() || !isCalendarDate(args.next_date) || args.next_date.startsWith('0000'))
       fail('email_next_step_input_invalid');
+    if (!args.deal) {
+      if (lock) {
+        const source = (await c.query('select client_id,lead_id,vendor_id from activity where id=$1 for share', [args.activity_id])).rows[0];
+        for (const [field, table] of [['client_id','client'],['lead_id','lead'],['vendor_id','vendor']]) {
+          if (source?.[field]) await c.query(`select s.id from ${table} s join party p on p.id=s.party_id
+            where s.id=$1 for share of s,p`, [source[field]]);
+        }
+      }
+      const subject = (await c.query('select * from v_email_non_deal_step where activity_id=$1', [args.activity_id])).rows[0];
+      if (!subject) fail('email_next_step_evidence_not_found');
+      if (!args.evidence_quote.trim() || !subject.detail?.includes(args.evidence_quote)) fail('email_next_step_quote_invalid');
+      const owner = args.owner || 'joe';
+      const actions = subject.actions.filter((action: { owner: string }) => action.owner === owner);
+      const current = actions[0] ?? null;
+      const result = { contract: 'email-next-step.v1', status: 'proposed', deal: null,
+        deal_name: null, subject_type: subject.subject_type, subject_id: subject.subject_id,
+        subject_name: subject.name, owner, text: args.text.trim(), next_date: args.next_date,
+        evidence_quote: args.evidence_quote, current_next_step: current?.description ?? null,
+        current_next_date: current?.due_date ?? null, current_owner_actions: actions,
+        expected_action: current ? { id: current.id, version: current.version } : null,
+        source: { activity_id: subject.activity_id, summary: subject.summary,
+          occurred_at: new Date(subject.occurred_at).toISOString(), evidence_ref: `activity:${subject.activity_id}` },
+        requires_confirmation: true };
+      return { ...result, proposal_digest: `sha256:${sha256(JSON.stringify({ ...result,
+        activity_version: subject.activity_version, subject_version: subject.subject_version,
+        party_version: subject.party_version, captured_body: subject.detail }))}` };
+    }
     const row = (await c.query(`select d.id as deal_id,d.name,d.client_id,d.version,d.next_date::text as current_next_date,
         b.next_step as current_next_step,
         a.id as activity_id,a.version as activity_version,a.summary,a.detail,a.occurred_at
@@ -54,29 +81,36 @@ export function emailNextStepTools({ withEnvelope, writeEvent, lockDealField, se
   return {
     'preview-email-next-step': {
       write: false,
-      description: 'Preview a Joe or Dell action for a nonterminal deal on the current Deal Room board from a selected captured inbound or outbound email, literal evidence quote, caller-chosen task text and explicit due date. Select the exact deal first. Does not extract or verify commitments, infer dates, execute email instructions or change records. Captured text may be a preview. Shows Joe’s plan or the selected owner’s open actions that confirmation will replace. For Dell, the Deal Room due date follows the confirmed action. Joe must review the task, date, owner and evidence before confirmation.',
+      description: 'Without deal, preview the explicit client, lead or vendor linked to the captured activity, including the action that confirmation replaces. With deal, preview a Joe or Dell action for a nonterminal deal on the current Deal Room board from a selected captured inbound or outbound email, literal evidence quote, caller-chosen task text and explicit due date. Select the exact deal first. Does not extract or verify commitments, infer dates, execute email instructions or change records. Captured text may be a preview. Shows Joe’s plan or the selected owner’s open actions that confirmation will replace. For Dell, the Deal Room due date follows the confirmed action. Joe must review the task, date, owner and evidence before confirmation.',
       inputSchema: schema({}),
       handler: (c: Db, _actor: Actor, args: VerbInputs['preview-email-next-step']) => proposal(c, args),
     },
     'confirm-email-next-step': {
       write: true, humanOnly: true, humanCallerOnly: true,
-      description: "Joe confirms the displayed email next-step proposal. Requires the preview digest and unchanged source, linkage, deal version, task, date, owner and affected actions. Joe-owned proposals replace the canonical plan through set-next-step. Dell-owned proposals replace Dell's open deal action through set-next-action. Both retain the email quote in history. No sends or automatic task execution.",
+      description: "Joe confirms the displayed email next-step proposal. Requires the preview digest and unchanged source, linkage, deal version, task, date, owner and affected actions. Joe-owned proposals replace the canonical plan through set-next-step. Dell-owned proposals replace Dell's open deal action through set-next-action. Both retain the email quote in history. Without deal, confirms the activity-linked client, lead or vendor action through set-next-action with its reviewed action version. No sends or automatic task execution.",
       inputSchema: schema({ proposal_digest: { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' },
         idempotency_key: { type: 'string', minLength: 1, maxLength: 200 } }),
       handler: async (c: Db, actor: Actor, args: VerbInputs['confirm-email-next-step']) => {
         if (actor.human !== true || actor.slug !== 'joe') fail('joe_confirmation_required');
         await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
         return withEnvelope(c, actor, 'confirm-email-next-step', args, async () => {
-          await lockDealField(c, args.deal.toLowerCase(), 'next_date');
-          await lockDealField(c, args.deal.toLowerCase(), 'next_step');
+          if (args.deal) {
+            await lockDealField(c, args.deal.toLowerCase(), 'next_date');
+            await lockDealField(c, args.deal.toLowerCase(), 'next_step');
+          }
           const current = await proposal(c, args, true);
           if (current.proposal_digest !== args.proposal_digest) fail('email_next_step_proposal_stale');
-          const result = current.owner === 'joe'
+          const result = 'subject_id' in current
+            ? await setNextAction(c, actor, { idempotency_key: derivedIdempotencyKey('email-next-action', args.idempotency_key),
+              ref: current.subject_id, description: current.text, due_on: current.next_date, owner: current.owner,
+              expected_action: current.expected_action })
+            : current.owner === 'joe'
             ? await setNextStep(c, actor, { idempotency_key: derivedIdempotencyKey("email-next-step", args.idempotency_key),
               deal: current.deal, base_version: current.base_version, text: current.text, next_date: current.next_date })
             : await setNextAction(c, actor, { idempotency_key: derivedIdempotencyKey("email-next-action", args.idempotency_key),
               ref: current.deal, description: current.text, due_on: current.next_date, owner: current.owner });
-          await writeEvent(c, actor, 'confirm-email-next-step', 'deal', current.deal,
+          await writeEvent(c, actor, 'confirm-email-next-step', 'subject_id' in current ? current.subject_type : 'deal',
+            'subject_id' in current ? current.subject_id : current.deal,
             { new: { ...(current.owner === 'joe' ? { next_step: current.text } : {}),
               next_date: current.next_date, owner: current.owner,
               activity_id: current.source.activity_id, evidence_ref: current.source.evidence_ref,

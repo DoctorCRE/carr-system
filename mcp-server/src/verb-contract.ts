@@ -27,5 +27,5 @@ export type WriteEvent = (c: Db, actor: Actor, verb: string, subjectType: string
   subjectId: string, fields?: Record<string, unknown>) => Promise<unknown>;
 
 /** email-proposals resolveEmailProposal: confirms the matching pending email proposal and returns its id, or null. */
-export type ResolveEmailProposal = (c: Db, actor: Actor, kind: string, deal: string,
+export type ResolveEmailProposal = (c: Db, actor: Actor, kind: string, deal: string | null,
   activityId: string) => Promise<string | null>;
