@@ -310,7 +310,7 @@ test('the read saves a finish once on the side connection, and later reads keep 
   const saved = later.jobs.find(row => row.card_id === done);
   assert.deepEqual([saved.stage, saved.stale, saved.prs.map(pr => pr.card_id)], ['merged', false, [`${done}.carr#77`]]);
   const open = later.jobs.find(row => row.card_id === pending);
-  assert.equal(open.stage, 'queued');
+  assert.equal(open.stage, 'running');
   assert.equal(bounds[0], new Date(first.jobs.find(row => row.card_id === done).created_at).toISOString(), 'before the finish is saved, the old job bounds the window');
   const unfinished = later.jobs.filter(row => row.card_id !== done && !row.finished && row.started_at).map(row => new Date(row.started_at).toISOString()).sort();
   assert.equal(bounds.at(-1), unfinished[0], 'once saved, the window starts at the oldest unfinished job');
