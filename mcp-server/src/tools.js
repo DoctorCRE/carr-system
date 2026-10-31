@@ -1,4 +1,5 @@
 // Register MCP tools and their shared write envelope.
+import { homeInboxTools, HOME_INBOX_WRITES } from "./home-inbox.js";
 import { dealUpdateResolution } from "./deal-update-resolution.js";
 import { practiceOriginationTools } from "./practice-origination.ts";
 import { vendorMeetingTools } from "./vendor-meetings.js";
@@ -12,6 +13,7 @@ import { readDealChecklist } from "./deal-checklist.ts";
 import { dealExtractionTools } from "./deal-extraction.js";
 import { factGenerationTools } from "./fact-generation.ts";
 import { factReviewTools } from "./fact-review.ts";
+import { marketTermsTools } from "./market-terms.ts";
 import { factObservationTools } from "./fact-observations.ts";
 import { actionClosureTools } from "./action-closure.ts";
 import { requirementRequestTools } from "./requirement-requests.js";
@@ -366,7 +368,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing", "clear-the-deck-apply"].includes(verb) || verb === "undo-call" || ["add-deal-note", "review-deal-update", "set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist", "complete-doc-request"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
-  if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
+  if (FEATURE_SWITCH_WRITES.has(verb) || HOME_INBOX_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
   // A receipt older than REPLAY_WINDOW is not a replay: the key is unknown and the
   // write runs as new (tool_call_expire frees the key on insert). A durable
   // receipt is read back by key elsewhere and keeps replaying.
@@ -9093,6 +9095,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "doc-activity": "mcp-server/src/doc-activity.js",
   "meeting-mode": "mcp-server/src/meeting-mode.js",
   "notifications": "mcp-server/src/notifications.ts",
+  "home-inbox": "mcp-server/src/home-inbox.js",
   "session-identity": "mcp-server/src/session-identity.ts",
   "dispatch-spine": "mcp-server/src/dispatch-spine.ts",
   "doc-outcome-cards": "mcp-server/src/tools.js",
@@ -9101,6 +9104,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "work-request-intake": "mcp-server/src/work-request-intake.js",
   "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
   "fact-review": "mcp-server/src/fact-review.ts",
+  "market-terms": "mcp-server/src/market-terms.ts",
   "fact-generation": "mcp-server/src/fact-generation.ts",
   "deal-extraction": "mcp-server/src/deal-extraction.js",
   "fact-observations": "mcp-server/src/fact-observations.ts",
@@ -10664,6 +10668,7 @@ registerTools(meetingModeTools({ withEnvelope, writeEvent, ToolError,
 // acknowledge-notification writes ops.notification_read and nothing else, which
 // is why a session may never report it as having moved a task.
 registerTools(notificationTools({ withEnvelope, writeEvent, ToolError }), "notifications");
+registerTools(homeInboxTools({ withEnvelope, ToolError }), "home-inbox");
 
 // WR-000117: the session-identity read pair. Both verbs are READS on the writer
 // connection -- ops.session_identity_facts and ops.session_dispatch_history
@@ -10712,6 +10717,7 @@ registerTools(workPortfolioTools({ ToolError }), "work-portfolio");
 registerTools(leaseTermComparisonTools({ ToolError }), "lease-term-comparison");
 registerTools(factObservationTools(), "fact-observations");
 registerTools(factReviewTools(), "fact-review");
+registerTools(marketTermsTools(), "market-terms");
 registerTools(factGenerationTools({ withEnvelope, writeEvent }), "fact-generation");
 registerTools(dealExtractionTools(), "deal-extraction");
 
