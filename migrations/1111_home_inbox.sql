@@ -1,3 +1,5 @@
+-- rollback: restore the 0617 feed definition and remove Home inbox verbs before dropping their objects and notification_visible.
+-- lock-review: function replacement and additive tables; canonical work and notification tables stay unchanged.
 create function ops.notification_visible(p_notification uuid)
 returns boolean language sql stable set search_path=pg_catalog,ops as $$
   select not exists (select 1 from ops.notification_delivery h
@@ -42,8 +44,6 @@ begin
   return jsonb_build_object('ok', true, 'unread_count', v_unread, 'notifications', v_rows);
 end $$;
 
--- rollback: remove Home inbox verbs before dropping these additive disposition objects.
--- lock-review: new tables and functions only; canonical work and notification tables stay unchanged.
 create table ops.home_inbox_disposition (
   actor_id uuid not null references public.actor(id),
   item_id text not null,
