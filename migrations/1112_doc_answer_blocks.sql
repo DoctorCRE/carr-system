@@ -3,6 +3,8 @@
 -- lock-review: a constant JSONB default avoids a rewrite; bound the metadata lock to five seconds.
 set local lock_timeout = '5s';
 
+grant select on public.v_deal_room_negotiation to carr_authority;
+
 -- WR617.S10.J2: sourced answer blocks stay on the canonical immutable turn.
 alter table ops.doc_conversation_turn
   add column answer_blocks jsonb not null default '[]'::jsonb;

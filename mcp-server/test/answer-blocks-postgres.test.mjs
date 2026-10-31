@@ -45,16 +45,17 @@ test('recorded proposed-rent comps persist through the sole append door and read
     const old = readMigration('0520_doc_conversation_store.sql');
     await c.query(old.slice(old.indexOf('create or replace function ops.append_doc_conversation_turn('),
       old.indexOf('comment on function ops.append_doc_conversation_turn(')));
-    await c.query(readMigration('1112_doc_answer_blocks.sql').split('do $answer_grants$')[0]);
     const view = snapshot.match(/CREATE VIEW public\.v_deal_room_negotiation AS[\s\S]*?;/)?.[0];
     assert.ok(view);
     await c.query(view);
+    await c.query(readMigration('1112_doc_answer_blocks.sql').split('do $answer_grants$')[0]);
     await c.query(`insert into actor(id,slug,kind,display_name) values ($1,'synthetic-author','automation','Synthetic');
       `, [id(1)]);
     await c.query('insert into ops.doc_conversation(id,title,created_by_actor) values ($1,$2,$3)',
       [id(2), 'Synthetic comps', id(1)]);
     await c.query(`insert into negotiation_round(id,deal_id,round_no,side,proposed_on,rate_amount,rate_basis,created_by)
       values ($1,$2,1,'landlord','2026-10-01',2.5,'usd_sf_mo',$3)`, [id(3), id(4), id(1)]);
+    await c.query('grant usage on schema ops to carr_authority; set role carr_authority');
     const tools = docConversationTools({ ToolError,
       withEnvelope: async (_c, _a, _v, _args, fn) => fn(), writeEvent: async () => {} });
     const actor = { id: id(1) };
