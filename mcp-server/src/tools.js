@@ -1,4 +1,5 @@
 // Register MCP tools and their shared write envelope.
+import { practiceOriginationTools } from "./practice-origination.ts";
 import { vendorMeetingTools } from "./vendor-meetings.js";
 import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.ts";
 import { canonicalJson } from "./artifact-trust.js";
@@ -9080,6 +9081,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
   "fact-review": "mcp-server/src/fact-review.ts",
   "fact-observations": "mcp-server/src/fact-observations.ts",
+  "practice-origination": "mcp-server/src/practice-origination.ts",
   "partner-room": "mcp-server/src/partner-room.js",
   "agent-profile": "mcp-server/src/agent-profiles.js",
   "client-portal": "mcp-server/src/client-portal.ts",
@@ -10780,5 +10782,7 @@ registerTools(assuranceHealthStoreTools({ withEnvelope, ToolError }), "assurance
 registerTools(ruleContextRuntimeTools({ withEnvelope, ToolError }), "rule-context-runtime");
 
 registerTools(vendorMeetingTools(), "vendor-meetings");
+
+registerTools(practiceOriginationTools({ withEnvelope }), "practice-origination");
 
 Object.freeze(TOOLS);

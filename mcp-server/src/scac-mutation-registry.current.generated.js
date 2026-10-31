@@ -1471,6 +1471,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "list-practice-origination": {
+    "ingress_key": "mcp-tool:list-practice-origination",
+    "source_locator": "mcp-server/src/practice-origination.ts",
+    "schema_digest": "b8319b8bea15d7254ae39824845137dba10e60c4a815fe26974578446b30c646",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "list-progress-boards": {
     "ingress_key": "mcp-tool:list-progress-boards",
     "source_locator": "mcp-server/src/board-answers.js",
@@ -2702,6 +2712,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": true,
     "delegates_to": []
   },
+  "record-practice-origination-feed": {
+    "ingress_key": "mcp-tool:record-practice-origination-feed",
+    "source_locator": "mcp-server/src/practice-origination.ts",
+    "schema_digest": "2a56c673d765432e9da824371d464d7d340cdbeb9c520996c309d67bd702e2e7",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "record-representation-agreement": {
     "ingress_key": "mcp-tool:record-representation-agreement",
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
@@ -3784,6 +3804,33 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "grantee": "carr_writer",
       "privilege": "update",
       "grantable": false
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.practice_origination_feed",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.practice_origination_feed:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.practice_origination_feed",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.practice_origination_feed:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.practice_origination_event",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.practice_origination_event:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
     }
   ],
   "secdef_execute": [
