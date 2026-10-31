@@ -1387,7 +1387,7 @@ test('reply drafts keep captured mailbox ownership and submit the exact partner 
   assert.equal(submitted.status, 'approved_to_send');
   assert.equal(submitted.subject, args.subject);
   assert.equal(submitted.body, args.body);
-  assert.equal(submitted.sha256, createHash('sha256').update(args.body, 'utf8').digest('hex'));
+  assert.equal(submitted.sha256, createHash('sha256').update(JSON.stringify({ subject: args.subject, body: args.body }), 'utf8').digest('hex'));
   assert.equal((await command('submit-email-draft', args, actor, 'carr_writer')).replayed, true);
   const outbox = await command('outbox-for-sender', {}, { ...router(), slug: 'joe-local' }, 'carr_reader');
   assert.equal(outbox.drafts.length, 1);
