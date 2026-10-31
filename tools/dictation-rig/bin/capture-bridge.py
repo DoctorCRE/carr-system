@@ -31,6 +31,7 @@ third-party imports, no venv needed.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import re
@@ -46,6 +47,7 @@ from pathlib import Path
 from typing import Any
 
 import post_call
+import transcribe_session
 from post_call import call_record_command
 
 # --- constants -------------------------------------------------------------
@@ -225,6 +227,26 @@ def http_request(
     return status, parsed
 
 
+def session_request(
+    cfg: dict[str, str], session_dir: Path, method: str, route: str,
+    body: dict[str, Any] | None = None,
+) -> tuple[int, dict[str, Any]]:
+    token = capture_token(session_dir)
+    payload = {**body, "session_token": token} if body is not None else None
+    headers = {"Authorization": f"Bearer {token}"} if body is None else None
+    result = http_request(method, f"{cfg['base_url']}{route}", payload, headers)
+    if result[0] != 401 or result[1].get("error") != "session_token_expired" or not token:
+        return result
+    if (session_dir / "ingested.json").exists():
+        return result
+    status, _ = http_request("POST", f"{cfg['base_url']}/capture/renew",
+                              {"session_token": token},
+                              {"Authorization": f"Bearer {cfg['token']}"})
+    if status != 200:
+        return result
+    return http_request(method, f"{cfg['base_url']}{route}", payload, headers)
+
+
 # --- claim -----------------------------------------------------------------
 
 
@@ -369,10 +391,9 @@ def status_cmd(cfg: dict[str, str], session_dir: Path, state: str, detail: str |
     }
     if detail:
         body["detail"] = detail
-    url = f"{cfg['base_url']}/capture/status"
 
     try:
-        status, resp = http_request("POST", url, body, None)
+        status, resp = session_request(cfg, session_dir, "POST", "/capture/status", body)
     except BridgeNetworkError as exc:
         log_line(f"ERROR status network failure session={name} state={state}: {exc}")
         return Outcome.UNAVAILABLE
@@ -417,7 +438,7 @@ def post_batch(
     key = f"post-call:{session_dir.name}:{lane}:{uuid.uuid5(uuid.NAMESPACE_URL, canonical)}"
     body = {"session_token": token, "idempotency_key": key, **content}
     try:
-        status, response = http_request("POST", f"{cfg['base_url']}{route}", body, None)
+        status, response = session_request(cfg, session_dir, "POST", route, body)
     except BridgeNetworkError as exc:
         log_line(f"ERROR publish network failure session={session_dir.name} lane={lane}: {exc}")
         return False
@@ -543,9 +564,7 @@ def file_post_call_report(
         "candidate_count": candidate_count,
     }
     try:
-        status, response = http_request(
-            "POST", f"{cfg['base_url']}/capture/post-call/report", body, None,
-        )
+        status, response = session_request(cfg, session_dir, "POST", "/capture/post-call/report", body)
     except BridgeNetworkError as exc:
         log_line(f"ERROR report filing network failure session={session_dir.name}: {exc}")
         return False, ""
@@ -576,6 +595,36 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         log_line(f"ERROR poll capture-marker-missing-token session={name}")
         return Outcome.UNAVAILABLE
 
+    transcription = read_json(session_dir / transcribe_session.STATUS_FILE) or {}
+    stale = False
+    if transcription.get("state") == "transcribing":
+        try:
+            updated = datetime.fromisoformat(transcription["updated_at"].replace("Z", "+00:00"))
+            stale = datetime.now(timezone.utc) - updated > timedelta(hours=6)
+        except (KeyError, TypeError, ValueError):
+            pass
+    if stale and not (session_dir / "transcript.json").exists():
+        with (session_dir / ".transcription.lock").open("a+") as lock:
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return Outcome.UNAVAILABLE
+            current = read_json(session_dir / transcribe_session.STATUS_FILE) or {}
+            if current == transcription and not (session_dir / "transcript.json").exists():
+                current.update({"state": "needs_attention", "updated_at": post_call.now(),
+                                "reason": "Transcription failed. The local recording is saved."})
+                post_call.write_private(session_dir / transcribe_session.STATUS_FILE, current)
+            transcription = current
+    if transcription.get("state") == "needs_attention" and not (session_dir / "transcript.json").exists():
+        if transcription.get("transcription_attempts", 0) < transcribe_session.MAX_ATTEMPTS:
+            transcribe_session.main(["transcribe_session.py", str(session_dir)],
+                                    max_attempts=transcribe_session.MAX_ATTEMPTS)
+        if not (session_dir / "transcript.json").exists():
+            latest = read_json(session_dir / transcribe_session.STATUS_FILE) or {}
+            if latest.get("state") == "needs_attention" and latest.get("transcription_attempts", 0) >= transcribe_session.MAX_ATTEMPTS:
+                log_line(f"POLL session={name} held after 3 transcription attempts")
+            return Outcome.UNAVAILABLE
+
     metadata = read_json(session_dir / post_call.CONTEXT_FILE) or {}
     if (metadata.get("mode") == "weekly_deal_call" and (session_dir / "transcript.json").exists()
             and not (session_dir / post_call.REPORT_FILE).exists()):
@@ -595,11 +644,8 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         log_line(f"POLL session={name} candidate publish incomplete — holding recordings")
         return Outcome.UNAVAILABLE
 
-    headers = {"Authorization": f"Bearer {session_token}"}
-    url = f"{cfg['base_url']}/capture/session"
-
     try:
-        status, resp = http_request("GET", url, None, headers)
+        status, resp = session_request(cfg, session_dir, "GET", "/capture/session")
     except BridgeNetworkError as exc:
         log_line(f"ERROR poll network failure session={name}: {exc}")
         return Outcome.UNAVAILABLE
@@ -639,6 +685,10 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
             log_line(f"POLL session={name} post_call local report unavailable — holding recordings")
             return verified(session_dir, "poll")
         sync_candidate_statuses(session_dir, resp)
+        local_report = post_call.read_json(session_dir / post_call.REPORT_FILE)
+        if local_report is None or not post_call.review_complete(local_report):
+            log_line(f"POLL session={name} unresolved review questions — holding recordings")
+            return verified(session_dir, "poll")
         raw_candidates = resp.get("candidates")
         post_call_candidates: dict[str, Any] = raw_candidates if isinstance(raw_candidates, dict) else {}
         pending = post_call_candidates.get("pending")
@@ -737,6 +787,8 @@ def check_cmd() -> int:
 
 
 def main(argv: list[str]) -> int:
+    from lib.call_settings import configure_environment
+    configure_environment()
     if len(argv) < 2:
         sys.stderr.write(
             "usage: capture-bridge.py <claim|status|publish|poll|check> [args...]\n"

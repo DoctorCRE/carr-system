@@ -7,6 +7,7 @@ macOS accessibility are intentionally never invoked here.
 from __future__ import annotations
 
 import importlib.util
+import http.client
 import io
 import json
 import os
@@ -15,14 +16,17 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
+import threading
+from concurrent.futures import ThreadPoolExecutor
 import urllib.error
 from email.message import Message
 from pathlib import Path
 from unittest.mock import Mock, patch
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, TypedDict
 from typesafe_sdk import TypeSafeError
 
 
@@ -41,7 +45,7 @@ def load_module(name: str, filename: str):
 
 
 call_mode = load_module("call_mode_under_test", "call-mode.py")
-transcribe_session = load_module("transcribe_session_under_test", "transcribe_session.py")
+transcribe_session = call_mode.transcribe_session
 post_call = load_module("post_call_under_test", "post_call.py")
 capture_bridge = load_module("capture_bridge_under_test", "capture-bridge.py")
 post_call_jev = load_module("post_call_jev_under_test", "post_call_jev.py")
@@ -58,8 +62,8 @@ _CLIENT_PATCHES = (
 
 
 _LOG_DIR = tempfile.TemporaryDirectory()
+_BUDGET_ENV = patch.dict(os.environ, {'CALL_JEV_DAILY_DOLLARS': '100'})
 _LOG_PATCHES = (
-    patch.dict(os.environ, {'CALL_JEV_DAILY_DOLLARS': '100'}),
     patch.object(post_call_jev, 'BUDGET_LEDGER', Path(_LOG_DIR.name) / 'budget.json'),
     patch.object(runtime_jev, 'BUDGET_LEDGER', Path(_LOG_DIR.name) / 'budget.json'),
     patch.object(post_call, 'LOG_PATH', Path(_LOG_DIR.name) / 'post-call.log'),
@@ -74,6 +78,7 @@ def setUpModule() -> None:
     # Injected ask functions and loopback distiller fakes still run normally.
     for client_patch in _CLIENT_PATCHES:
         client_patch.start()
+    _BUDGET_ENV.start()
     for log_patch in _LOG_PATCHES:
         log_patch.start()
 
@@ -81,8 +86,142 @@ def setUpModule() -> None:
 def tearDownModule() -> None:
     for log_patch in reversed(_LOG_PATCHES):
         log_patch.stop()
+    _BUDGET_ENV.stop()
     for client_patch in reversed(_CLIENT_PATCHES):
         client_patch.stop()
+
+
+class CallState(TypedDict, total=False):
+    sessions: list[dict[str, object]]
+    hidden_older_count: int
+    state: str
+    status_text: str
+    transcription_attempts: int
+    extraction_attempts: int
+    session: str
+    mode: str
+    speaker_labels: dict[str, str]
+class ReportConcurrencyTests(unittest.TestCase):
+    def draft_report(self, session):
+        post_call.write_private(session / post_call.REPORT_FILE, {"draft_proposals": [{
+            "draft_id": "draft", "content_hash": "approved", "candidate_id": "candidate",
+            "candidate_status": "confirmed", "recipient_email": "fixture@example.test",
+            "subject": "Fixture", "body": "Offline fixture",
+        }]})
+
+    def test_concurrent_draft_requests_create_once(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = Path(directory)
+            self.draft_report(session)
+            entered = threading.Event()
+            second_progress = threading.Event()
+            resume = threading.Event()
+            flock = post_call.fcntl.flock
+            write = post_call.write_private
+
+            def creator(*args, **kwargs):
+                if threading.current_thread().name.endswith("_0"):
+                    entered.set()
+                    assert resume.wait(5), "creator was not released"
+                return SimpleNamespace(returncode=0)
+
+            def observed_lock(fd, operation):
+                if threading.current_thread().name.endswith("_1"):
+                    second_progress.set()
+                return flock(fd, operation)
+
+            def observed_write(path, value):
+                write(path, value)
+                if threading.current_thread().name.endswith("_1"):
+                    second_progress.set()
+
+            runner = Mock(side_effect=creator)
+            with (patch.object(post_call.fcntl, "flock", side_effect=observed_lock),
+                  patch.object(post_call, "write_private", side_effect=observed_write),
+                  ThreadPoolExecutor(max_workers=2) as pool):
+                first = pool.submit(post_call.create_outlook_draft, session, "draft", "approved", runner)
+                try:
+                    self.assertTrue(entered.wait(5))
+                    second = pool.submit(post_call.create_outlook_draft, session, "draft", "approved", runner)
+                    self.assertTrue(second_progress.wait(5))
+                finally:
+                    resume.set()
+                results = [first.result(timeout=5), second.result(timeout=5)]
+            self.assertEqual(runner.call_count, 1)
+            self.assertEqual([item["idempotent"] for item in results], [False, True])
+
+    def test_interrupted_draft_creation_requires_attention_on_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = Path(directory)
+            self.draft_report(session)
+            runner = Mock(side_effect=SystemExit("simulated process death"))
+            with self.assertRaises(SystemExit):
+                post_call.create_outlook_draft(session, "draft", "approved", runner)
+            retry = Mock(return_value=SimpleNamespace(returncode=0))
+            result = post_call.create_outlook_draft(session, "draft", "approved", retry)
+            self.assertEqual(result.get("state"), "needs_attention")
+            retry.assert_not_called()
+            visible = post_call.report_for_deal_room(session)["report"]["draft_proposals"][0]
+            self.assertEqual(visible["status"], "needs_attention")
+
+    def test_replayed_candidate_receipt_preserves_confirmed_disposition(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = Path(directory)
+            post_call.write_private(session / post_call.REPORT_FILE, {"joe_tasks": [{}]})
+            bindings = [{"list_name": "joe_tasks", "index": 0}]
+            post_call.apply_candidate_ids(session, bindings, ["task"])
+            post_call.apply_candidate_statuses(session, {"task": "confirmed"})
+            post_call.apply_candidate_ids(session, bindings, ["task"])
+            report = post_call.read_json(session / post_call.REPORT_FILE)
+            self.assertEqual(report["joe_tasks"][0]["candidate_status"], "confirmed")
+
+    def test_question_resolution_preserves_concurrent_disposition(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = Path(directory)
+            post_call.write_private(session / post_call.REPORT_FILE, {
+                "joe_tasks": [{"candidate_id": "task", "candidate_status": "pending"}],
+                "review_questions": [{"id": "question", "resolved": False}],
+            })
+            read = post_call.read_json
+            write = post_call.write_private
+            flock = post_call.fcntl.flock
+            snapshot_loaded = threading.Event()
+            second_progress = threading.Event()
+            resume = threading.Event()
+
+            def paused_read(path):
+                value = read(path)
+                if path.name == post_call.REPORT_FILE and threading.current_thread().name.endswith("_0"):
+                    snapshot_loaded.set()
+                    assert resume.wait(5), "first writer was not released"
+                return value
+
+            def observed_lock(fd, operation):
+                if threading.current_thread().name.endswith("_1"):
+                    second_progress.set()
+                return flock(fd, operation)
+
+            def observed_write(path, value):
+                write(path, value)
+                if threading.current_thread().name.endswith("_1"):
+                    second_progress.set()
+
+            with (patch.object(post_call, "read_json", side_effect=paused_read),
+                  patch.object(post_call, "write_private", side_effect=observed_write),
+                  patch.object(post_call.fcntl, "flock", side_effect=observed_lock),
+                  ThreadPoolExecutor(max_workers=2) as pool):
+                first = pool.submit(post_call.resolve_question, session, "question", "answered")
+                try:
+                    self.assertTrue(snapshot_loaded.wait(5))
+                    second = pool.submit(post_call.apply_candidate_statuses, session, {"task": "confirmed"})
+                    self.assertTrue(second_progress.wait(5))
+                finally:
+                    resume.set()
+                first.result(timeout=5)
+                second.result(timeout=5)
+            report = read(session / post_call.REPORT_FILE)
+            self.assertEqual(report["joe_tasks"][0]["candidate_status"], "confirmed")
+            self.assertEqual(report["review_questions"][0]["resolution"], "answered")
 
 
 class CallModeTests(unittest.TestCase):
@@ -98,9 +237,160 @@ class CallModeTests(unittest.TestCase):
         path.mkdir()
         return path
 
-    def state(self) -> dict[str, object]:
+    def state(self) -> CallState:
         with patch.object(call_mode, "partner_from_device", return_value="Joe"):
             return call_mode.current_state(self.recordings)
+
+    def test_unrecognized_post_call_state_is_visible_as_unknown(self) -> None:
+        session = self.session("held")
+        (session / "transcript.json").write_text("{}")
+        post_call.write_private(session / post_call.STATUS_FILE, {"state": "held_review"})
+        self.assertEqual(self.state()["state"], "state_unknown")
+
+    def test_stale_interrupted_transcription_retries_and_respects_cap(self) -> None:
+        session = self.session("interrupted")
+        (session / "meta.json").write_text("{}")
+        (session / ".capture.json").write_text(json.dumps({"session_token": "fixture"}))
+        post_call.write_private(session / transcribe_session.STATUS_FILE, {
+            "state": "transcribing", "transcription_attempts": 1, "updated_at": "2000-01-01T00:00:00Z"})
+        with patch.object(transcribe_session, "resolve_model", side_effect=transcribe_session.TranscribeError("unavailable")) as model:
+            for _ in range(4):
+                capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session)
+            self.assertEqual(model.call_count, 2)
+        self.assertEqual(post_call.read_json(session / transcribe_session.STATUS_FILE)["transcription_attempts"], 3)
+        self.assertIn("held after 3", capture_bridge.LOG_PATH.read_text())
+
+    def test_stale_final_attempt_is_held_only_when_lock_is_free(self) -> None:
+        import fcntl
+        session = self.session("stale-final")
+        (session / ".capture.json").write_text(json.dumps({"session_token": "fixture"}))
+        status_path = session / transcribe_session.STATUS_FILE
+        post_call.write_private(status_path, {"state": "transcribing", "transcription_attempts": 3,
+                                              "updated_at": "2000-01-01T00:00:00Z"})
+        with (session / ".transcription.lock").open("a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session)
+            self.assertEqual(post_call.read_json(status_path)["state"], "transcribing")
+        capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session)
+        self.assertEqual(post_call.read_json(status_path)["state"], "needs_attention")
+        self.assertIn("held after 3", capture_bridge.LOG_PATH.read_text())
+
+    def test_unfiled_hides_old_calls_except_needs_attention(self) -> None:
+        for name, state in (("old", "blocked"), ("old-attention", "needs_attention"), ("recent", "blocked")):
+            session = self.session(name)
+            post_call.write_private(session / post_call.STATUS_FILE, {"state": state})
+            stamp = time.time() - (15 * 86400 if name.startswith("old") else 60)
+            os.utime(session, (stamp, stamp))
+        result = self.state()
+        self.assertEqual({row["session"] for row in result["sessions"]}, {"old-attention", "recent"})
+        self.assertEqual(result["hidden_older_count"], 1)
+
+    def test_missing_meta_during_stat_does_not_break_state(self) -> None:
+        session = self.session("race")
+        (session / "meta.json").write_text("{}")
+        original = Path.stat
+        def raced(path, *args, **kwargs):
+            if path == session / "meta.json":
+                raise FileNotFoundError()
+            return original(path, *args, **kwargs)
+        with patch.object(Path, "stat", raced):
+            self.state()
+
+    def test_fatal_transcription_stays_visible_after_age_cutoff(self) -> None:
+        session = self.session("failed-model")
+        (session / "meta.json").write_text("{}")
+        with patch.object(transcribe_session, "resolve_model", side_effect=transcribe_session.TranscribeError("model unavailable")):
+            self.assertEqual(transcribe_session.main(["transcribe", str(session)]), 1)
+        stale = time.time() - call_mode.TERMINAL_AGE_SECONDS - 60
+        os.utime(session, (stale, stale))
+        result = self.state()
+        self.assertEqual(result["state"], "needs_attention")
+        self.assertEqual(result["status_text"], "Transcription failed. The local recording is saved.")
+        self.assertEqual(result["transcription_attempts"], 1)
+        self.assertNotIn("model unavailable", json.dumps(result))
+        self.assertEqual(stat.S_IMODE((session / transcribe_session.STATUS_FILE).stat().st_mode), 0o600)
+        self.assertFalse((session / "transcript.json").exists())
+
+    def test_poll_retries_failed_transcription_only_three_total_attempts(self) -> None:
+        session = self.session("retry-model")
+        (session / "meta.json").write_text("{}")
+        (session / ".capture.json").write_text(json.dumps({"session_token": "fixture"}))
+        with (
+            patch.object(transcribe_session, "resolve_model", side_effect=transcribe_session.TranscribeError("model unavailable")) as model,
+            patch.object(capture_bridge, "http_request", return_value=(200, {"state": "transcribing", "meeting_record": None})) as network,
+        ):
+            self.assertEqual(transcribe_session.main(["transcribe", str(session)]), 1)
+            for _ in range(5):
+                self.assertEqual(capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session), capture_bridge.Outcome.UNAVAILABLE)
+            self.assertEqual(model.call_count, 3)
+            network.assert_not_called()
+        self.assertEqual(self.state()["transcription_attempts"], 3)
+        self.assertFalse((session / "ingested.json").exists())
+
+    def test_unfiled_sessions_keep_real_status_newest_first(self) -> None:
+        for index, state in enumerate(("needs_attention", "awaiting_context", "blocked", "ready_review")):
+            session = self.session(state)
+            (session / "transcript.json").write_text("{}")
+            post_call.write_private(session / post_call.STATUS_FILE, {"state": state})
+            stamp = time.time() - 100 + index
+            os.utime(session, (stamp, stamp))
+        filed = self.session("filed")
+        (filed / "ingested.json").write_text("{}")
+        os.utime(filed, (time.time() - 200, time.time() - 200))
+        result = self.state()
+        self.assertEqual(result["state"], "ready_review")
+        self.assertEqual([item["state"] for item in result["sessions"]],
+                         ["ready_review", "blocked", "awaiting_context", "needs_attention"])
+        self.assertTrue(all(item["status_text"] for item in result["sessions"]))
+
+    def test_new_failure_receipt_does_not_reorder_recorded_calls(self) -> None:
+        older = self.session("older-call")
+        newer = self.session("newer-call")
+        post_call.write_private(older / call_mode.CONTEXT_FILE, {"started_at": "2026-10-29T10:00:00Z"})
+        post_call.write_private(newer / call_mode.CONTEXT_FILE, {"started_at": "2026-10-29T11:00:00Z"})
+        (older / "meta.json").write_text("{}")
+        (newer / "transcript.json").write_text("{}")
+        post_call.write_private(older / post_call.STATUS_FILE, {"state": "needs_attention"})
+        os.utime(newer, (time.time() - 100, time.time() - 100))
+        self.assertEqual([row["session"] for row in self.state()["sessions"]], ["newer-call", "older-call"])
+
+    def test_successful_poll_retry_clears_failure_and_shows_post_call_state(self) -> None:
+        session = self.session("recovered-model")
+        (session / "meta.json").write_text("{}")
+        (session / ".capture.json").write_text(json.dumps({"session_token": "fixture"}))
+        with patch.object(transcribe_session, "resolve_model", side_effect=transcribe_session.TranscribeError("model unavailable")):
+            self.assertEqual(transcribe_session.main(["transcribe", str(session)]), 1)
+        model = self.recordings / "fixture-model"
+        model.write_bytes(b"synthetic model")
+
+        def finish_post_call(_session):
+            post_call.write_private(session / post_call.STATUS_FILE, {"state": "awaiting_context"})
+            return {"state": "awaiting_context"}
+
+        with (
+            patch.object(transcribe_session, "resolve_model", return_value=model),
+            patch.object(transcribe_session, "verify_model_pin"),
+            patch.object(transcribe_session.post_call, "run_session", side_effect=finish_post_call),
+            patch.object(capture_bridge, "http_request", return_value=(200, {"state": "transcribing", "meeting_record": None})),
+        ):
+            self.assertEqual(capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session), 0)
+        self.assertFalse((session / transcribe_session.STATUS_FILE).exists())
+        self.assertTrue((session / "transcript.json").exists())
+        self.assertEqual(self.state()["state"], "awaiting_context")
+
+    def test_recording_or_filed_newest_does_not_hide_older_unfiled_calls(self) -> None:
+        older = self.session("older-failure")
+        post_call.write_private(older / post_call.STATUS_FILE, {"state": "needs_attention"})
+        os.utime(older, (time.time() - 100, time.time() - 100))
+        newer = self.session("new-call")
+        (newer / "mic.caf").touch()
+        self.assertEqual(self.state()["state"], "recording")
+        self.assertEqual([row["session"] for row in self.state()["sessions"]], ["new-call", "older-failure"])
+        (newer / "ingested.json").write_text("{}")
+        (newer / "meta.json").write_text("{}")
+        result = self.state()
+        self.assertEqual(result["state"], "filed")
+        self.assertEqual([row["session"] for row in result["sessions"]], ["older-failure"])
 
     def test_weekly_deal_labels_pair_joe_and_dell(self) -> None:
         self.assertEqual(call_mode.labels_for("weekly_deal_call", "Joe"), ("Joe", "Dell"))
@@ -204,8 +494,8 @@ class CallModeTests(unittest.TestCase):
         os.utime(track, (stale, stale))
         self.assertEqual(self.state()["state"], "state_unknown")
 
-    def test_current_state_is_idle_without_sessions_or_when_newest_session_is_stale(self) -> None:
-        self.assertEqual(self.state(), {"state": "idle", "local_partner": "Joe"})
+    def test_old_unfinished_transcription_remains_visible(self) -> None:
+        self.assertEqual(self.state(), {"state": "idle", "local_partner": "Joe", "sessions": [], "hidden_older_count": 0})
 
         session = self.session("old-terminal")
         (session / "meta.json").write_text("{}")
@@ -214,7 +504,11 @@ class CallModeTests(unittest.TestCase):
         import os
 
         os.utime(session, (stale, stale))
-        self.assertEqual(self.state(), {"state": "idle", "local_partner": "Joe"})
+        os.utime(session / "meta.json", (stale, stale))
+        result = self.state()
+        self.assertEqual(result["state"], "needs_attention")
+        self.assertEqual(result["status_text"], "Transcription has not finished. The local recording is saved.")
+        self.assertEqual(result["sessions"][0]["session"], "old-terminal")
 
 
 class SpeakerLabelTests(unittest.TestCase):
@@ -254,6 +548,37 @@ class SpeakerLabelTests(unittest.TestCase):
             {"mic": "Dell", "system": "Other participant"},
         )
 
+    def test_missing_or_failed_audio_side_is_recorded_in_transcript(self) -> None:
+        (self.session / "meta.json").write_text("{}")
+        model = self.session / "model.bin"
+        model.write_bytes(b"synthetic model")
+        for label in ("mic", "system"):
+            for failed in (False, True):
+                with self.subTest(label=label, failed=failed):
+                    for side in ("mic", "system"):
+                        (self.session / f"{side}.caf").write_bytes(b"synthetic audio")
+                    if not failed:
+                        (self.session / f"{label}.caf").unlink()
+
+                    def convert(path, *_args):
+                        if failed and path.stem == label:
+                            raise transcribe_session.TranscribeError("synthetic conversion failure")
+                        return path
+
+                    with (
+                        patch.object(transcribe_session, "resolve_model", return_value=model),
+                        patch.object(transcribe_session, "verify_model_pin"),
+                        patch.object(transcribe_session, "load_prompt", return_value=""),
+                        patch.object(transcribe_session, "convert_caf_to_wav", side_effect=convert),
+                        patch.object(transcribe_session, "run_whisper", return_value=[transcribe_session.RawSegment(0, 100, "Hello")]),
+                        patch.object(transcribe_session.speaker_split, "run_diarizer", return_value=[]),
+                        patch.object(transcribe_session.post_call, "run_session", return_value={"state": "ready_review"}),
+                    ):
+                        transcribe_session.process_session(self.session, lambda _line: None)
+                    transcript = json.loads((self.session / "transcript.json").read_text())
+                    self.assertEqual(transcript.get("missing_tracks"), [label])
+                    self.assertEqual(len(transcript["segments"]), 1)
+
     def test_transcript_outputs_are_private_to_the_local_user(self) -> None:
         transcript = {
             "session": "test",
@@ -273,6 +598,78 @@ class SpeakerLabelTests(unittest.TestCase):
         self.assertFalse((self.session / "transcript.md").exists())
 
 
+class CallModeHostTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.session = Path(self.tmp.name) / "synthetic"
+        self.session.mkdir()
+        post_call.write_private(self.session / post_call.REPORT_FILE, {
+            "review_questions": [{"id": "q1", "question": "Which deal?", "resolved": False}],
+        })
+        recordings = patch.object(call_mode, "RECORDINGS", self.session.parent)
+        recordings.start()
+        self.addCleanup(recordings.stop)
+        self.server = call_mode.ThreadingHTTPServer(("127.0.0.1", 0), call_mode.CallModeHandler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.thread.join, 5)
+        self.addCleanup(self.server.shutdown)
+
+    def request(self, method, path, host, body=None):
+        client = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
+        try:
+            client.putrequest(method, path, skip_host=True)
+            for value in host:
+                client.putheader("Host", value)
+            if method != "GET":
+                client.putheader("Origin", "https://app.doctorcre.com")
+            client.putheader("Sec-Fetch-Site", "same-origin")
+            client.putheader(call_mode.POST_HEADER, call_mode.POST_HEADER_VALUE)
+            payload = json.dumps(body).encode() if body is not None else b""
+            client.putheader("Content-Length", str(len(payload)))
+            client.endheaders(payload)
+            response = client.getresponse()
+            return response.status, response.read()
+        finally:
+            client.close()
+
+    def test_every_route_rejects_nonlocal_host_before_dispatch(self) -> None:
+        port = self.server.server_port
+        for method, path in (
+            ("GET", "/api/post-call?session=synthetic"), ("GET", "/api/state"),
+            ("GET", "/"), ("POST", "/api/post-call/questions/q1/resolve"),
+            ("OPTIONS", "/api/state"), ("GET", "/unknown"),
+        ):
+            for hosts in (
+                [f"foreign.example:{port}"], ["localhost"], [f"localhost:{port + 1}"],
+                [], [f"localhost:{port}", f"foreign.example:{port}"],
+            ):
+                with self.subTest(method=method, path=path, hosts=hosts):
+                    status, body = self.request(method, path, hosts)
+                    self.assertEqual(status, 403)
+                    self.assertEqual(json.loads(body), {"error": "host_not_allowed"})
+
+    def test_local_hosts_can_load_page_read_report_and_resolve(self) -> None:
+        for name in ("127.0.0.1", "localhost"):
+            with self.subTest(host=name):
+                hosts = [f"{name}:{self.server.server_port}"]
+                for path in ("/", "/index.html", "/api/state", "/api/post-call?session=synthetic"):
+                    status, body = self.request("GET", path, hosts)
+                    self.assertEqual(status, 200)
+                    if path.startswith("/api/post-call"):
+                        self.assertEqual(json.loads(body)["report"]["review_questions"][0]["id"], "q1")
+                post_call.write_private(self.session / post_call.REPORT_FILE, {
+                    "review_questions": [{"id": "q1", "question": "Which deal?", "resolved": False}],
+                })
+                with patch.object(call_mode, "sync_post_call", side_effect=call_mode.post_call.report_for_deal_room):
+                    status, body = self.request("POST", "/api/post-call/questions/q1/resolve", hosts,
+                                                {"session": "synthetic", "resolution": "Deal A"})
+                self.assertEqual(status, 200)
+                self.assertEqual(json.loads(body)["report"]["review_questions"][0]["resolution"], "Deal A")
+
+
 class CallModeHttpTests(unittest.TestCase):
     def handler(self, path: str, body: bytes, origin: str | None):
         handler = object.__new__(call_mode.CallModeHandler)
@@ -287,6 +684,53 @@ class CallModeHttpTests(unittest.TestCase):
         handler.rfile = io.BytesIO(body)
         handler.send_json = Mock()
         return handler
+
+    def test_embedded_page_can_read_questions_without_get_origin_header(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            session = Path(tmp) / "2026.08.10-review"
+            session.mkdir()
+            post_call.write_private(session / post_call.REPORT_FILE, {"review_questions": []})
+            handler = self.handler(f"/api/post-call?session={session.name}", b"", None)
+            handler.headers["Sec-Fetch-Site"] = "same-origin"
+            with patch.object(call_mode, "RECORDINGS", session.parent):
+                handler.do_GET()
+            self.assertNotIn("error", handler.send_json.call_args.args[0])
+            del handler.headers[call_mode.POST_HEADER]
+            handler.send_json.reset_mock()
+            handler.do_GET()
+            handler.send_json.assert_called_once_with({"error": "origin_not_allowed"}, 403)
+
+    def test_question_resolution_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            session = Path(tmp) / "2026.08.10-review"
+            session.mkdir()
+            post_call.write_private(session / post_call.REPORT_FILE, {
+                "review_questions": [{"id": "q1", "question": "Which deal?", "resolved": False}],
+            })
+            with patch.object(call_mode, "RECORDINGS", session.parent), patch.object(call_mode, "sync_post_call") as sync:
+                for question_id, resolution, status, error in (
+                    ("bad-id", "Deal A", 404, "unknown question id"),
+                    ("q1", " ", 400, "resolution must be a non-empty string"),
+                    ("q1", None, 400, "resolution must be a non-empty string"),
+                ):
+                    with self.subTest(question_id=question_id, resolution=resolution):
+                        handler = self.handler(
+                            f"/api/post-call/questions/{question_id}/resolve",
+                            json.dumps({"session": session.name, "resolution": resolution}).encode(),
+                            "http://127.0.0.1:4682",
+                        )
+                        handler.do_POST()
+                        handler.send_json.assert_called_once_with({"error": error}, status)
+                post_call.resolve_question(session, "q1", "Deal A")
+                handler = self.handler(
+                    "/api/post-call/questions/q1/resolve",
+                    json.dumps({"session": session.name, "resolution": "Deal B"}).encode(),
+                    "http://127.0.0.1:4682",
+                )
+                handler.do_POST()
+                handler.send_json.assert_called_once_with({"error": "already_resolved"}, 409)
+                self.assertEqual(post_call.read_json(session / post_call.REPORT_FILE)["review_questions"][0]["resolution"], "Deal A")
+                sync.assert_not_called()
 
     def test_post_requires_an_allowlisted_browser_origin(self) -> None:
         handler = self.handler("/api/stop", b"{}", None)
@@ -473,6 +917,47 @@ class CallModeHttpTests(unittest.TestCase):
             create.assert_called_once_with(session.resolve(), "draft-1", "a" * 64)
             draft.send_json.assert_called_once_with({"draft_id": "draft-1", "idempotent": False})
 
+    def test_checked_outlook_resolves_intent_through_http(self) -> None:
+        for exists in (True, False):
+            with self.subTest(exists=exists), tempfile.TemporaryDirectory() as tmp:
+                session = Path(tmp) / "s1"
+                session.mkdir()
+                ReportConcurrencyTests().draft_report(session)
+                post_call.write_private(session / post_call.DRAFTS_FILE, {"drafts": {
+                    "draft": {"state": "intent", "content_hash": "approved"}}})
+                body = json.dumps({"session": "s1", "exists": exists}).encode()
+                handler = self.handler("/api/post-call/drafts/draft/checked", body, "https://dealroom.doctorcre.com")
+                with patch.object(call_mode, "RECORDINGS", Path(tmp)), patch.object(post_call.subprocess, "run") as runner:
+                    handler.do_POST()
+                runner.assert_not_called()
+                handler.send_json.assert_called_once_with({"draft_id": "draft", "state": "created" if exists else "cleared"})
+                visible = post_call.report_for_deal_room(session)["report"]["draft_proposals"][0]
+                self.assertEqual(visible.get("status"), "created" if exists else None)
+                if not exists:
+                    create = Mock(return_value=SimpleNamespace(returncode=0))
+                    post_call.create_outlook_draft(session, "draft", "approved", create)
+                    create.assert_called_once()
+
+    def test_checked_outlook_rejects_non_boolean_before_resolving(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "s1").mkdir()
+            body = b'{"session":"s1","exists":"false"}'
+            handler = self.handler("/api/post-call/drafts/draft/checked", body, "https://dealroom.doctorcre.com")
+            with patch.object(call_mode, "RECORDINGS", Path(tmp)), patch.object(call_mode.post_call, "resolve_outlook_intent") as resolve:
+                handler.do_POST()
+            handler.send_json.assert_called_once_with({"error": "exists must be true or false"}, 400)
+            resolve.assert_not_called()
+
+    def test_checked_outlook_refuses_without_intent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            session = Path(tmp) / "s1"
+            session.mkdir()
+            ReportConcurrencyTests().draft_report(session)
+            handler = self.handler("/api/post-call/drafts/draft/checked", b'{"session":"s1","exists":false}', "https://dealroom.doctorcre.com")
+            with patch.object(call_mode, "RECORDINGS", Path(tmp)):
+                handler.do_POST()
+            handler.send_json.assert_called_once_with({"error": "draft has no matching intent marker"}, 400)
+
     def test_context_body_over_limit_is_rejected_not_truncated(self) -> None:
         handler = self.handler(
             "/api/call-context", b"{}", "https://dealroom.doctorcre.com",
@@ -482,8 +967,23 @@ class CallModeHttpTests(unittest.TestCase):
         handler.send_json.assert_called_once_with({"error": "request body too large"}, 409)
 
 
+def through_fake_transport(verb: str, args: dict[str, Any], **kwargs: Any):
+    """Send the live `run.sh call` route through post_call.subprocess.run, which tests fake."""
+    def runner(argv, **options):
+        done = post_call.subprocess.run(argv, **options)
+        return SimpleNamespace(returncode=done.returncode, stdout=getattr(done, "stdout", ""),
+                               stderr=getattr(done, "stderr", ""))
+    return REAL_CALL_VERB(verb, args, runner=runner, **kwargs)
+
+
+REAL_CALL_VERB = post_call.call_verb
+
+
 class PostCallTests(unittest.TestCase):
     def setUp(self) -> None:
+        transport = patch.object(post_call, "call_verb", through_fake_transport)
+        transport.start()
+        self.addCleanup(transport.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.session = Path(self.tmp.name) / "2026.08.10-1234"
         self.session.mkdir()
@@ -517,6 +1017,23 @@ class PostCallTests(unittest.TestCase):
         }
         result.update(overrides)
         return result
+
+    def test_counterpart_reaches_action_and_draft_candidates_when_named(self) -> None:
+        task = {"title": "Call Pat", "deal_id": "deal-a", "participant_ids": ["p-1"],
+                "evidence": "Joe will call Pat", "counterpart": "Pat"}
+        unclear = {"title": "Review options", "deal_id": "deal-a", "participant_ids": [],
+                   "evidence": "Review options"}
+        draft = {"recipient_party_id": "p-1", "deal_id": "deal-a", "subject": "Next steps",
+                 "body": "Thank you.", "participant_ids": ["p-1"], "evidence": "Email Pat",
+                 "counterpart": "Pat"}
+        transcript = {"segments": [{"speaker": "Joe", "text": "Joe will call Pat. Review options. Email Pat."}]}
+        report = post_call.normalize_distillation(self.output(joe_tasks=[task, unclear],
+            deal_updates=[], draft_proposals=[draft]), self.context, self.session.name, transcript=transcript)
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        candidates = post_call.sanitized_candidates(self.session)["post_call_items"]
+        self.assertEqual(candidates[0]["counterpart"], {"name": "Pat"})
+        self.assertNotIn("counterpart", candidates[1])
+        self.assertEqual(candidates[2]["counterpart"], {"name": "Pat"})
 
     def test_transcript_runs_normalize_case_punctuation_and_whitespace_in_every_field(self) -> None:
         words = "amber birch cedar dawn elm fern grove hazel iris jade kelp leaf moss oak pine"
@@ -885,6 +1402,8 @@ class PostCallTests(unittest.TestCase):
         update = post_call.report_for_deal_room(self.session)["report"]["deal_updates"][0]
         self.assertEqual(update["candidate_status"], "confirmed")
         self.assertEqual(update["next_step"]["candidate_status"], "skipped")
+        for question in post_call.report_for_deal_room(self.session)["report"]["review_questions"]:
+            post_call.resolve_question(self.session, question["id"], "Reviewed the advisory check.")
         self.assertIsNotNone(post_call.retention_ready(self.session, "a" * 64))
 
     def test_explicit_phase_move_reaches_review_and_waits_for_its_own_disposition(self) -> None:
@@ -910,6 +1429,8 @@ class PostCallTests(unittest.TestCase):
         self.assertIsNone(post_call.retention_ready(self.session, "a" * 64))
         post_call.apply_candidate_statuses(self.session, {"phase-candidate": "skipped"})
         self.assertEqual(post_call.report_for_deal_room(self.session)["report"]["deal_updates"][0]["phase_move"]["candidate_status"], "skipped")
+        for question in post_call.report_for_deal_room(self.session)["report"]["review_questions"]:
+            post_call.resolve_question(self.session, question["id"], "Reviewed the advisory check.")
         self.assertIsNotNone(post_call.retention_ready(self.session, "a" * 64))
 
     def test_phase_proposals_reject_unsupported_shapes_and_quarantine_unknown_deals(self) -> None:
@@ -1282,6 +1803,53 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(report["draft_proposals"][0]["candidate_id"], "candidate-draft")
         self.assertEqual(report["draft_proposals"][0]["candidate_status"], "pending")
 
+    def test_question_only_call_holds_retention_until_partner_resolution(self) -> None:
+        post_call.store_context(self.session, self.context)
+        post_call.process_session(self.session, distiller=lambda _request: self.output(
+            joe_tasks=[], deal_updates=[], draft_proposals=[],
+            review_questions=["Which deal did Dell mean?"],
+        ))
+        self.assertIsNone(post_call.retention_ready(self.session, "b" * 64))
+        self.assertEqual(post_call.read_json(self.session / post_call.STATUS_FILE)["state"], "ready_review")
+        question = post_call.report_for_deal_room(self.session)["report"]["review_questions"][0]
+        post_call.resolve_question(self.session, question["id"], "Dell meant deal A.")
+        self.assertIsNotNone(post_call.retention_ready(self.session, "b" * 64))
+
+    def test_missing_side_requires_visible_partner_acknowledgment_before_purge(self) -> None:
+        home = Path(self.tmp.name) / "home"
+        recordings = home / "Recordings"
+        recordings.mkdir(parents=True)
+        self.session = self.session.rename(recordings / self.session.name)
+        (home / "Library" / "Logs").mkdir(parents=True)
+        (self.session / "mic.caf").write_bytes(b"synthetic audio")
+        post_call.write_private(self.session / "transcript.json", {
+            "segments": [{"speaker": "Joe", "text": "Hello"}],
+            "speaker_labels": {"mic": "Joe", "system": "Dell"}, "missing_tracks": ["system"],
+        })
+        post_call.store_context(self.session, self.context)
+        post_call.process_session(self.session, distiller=lambda _request: self.output(
+            joe_tasks=[], deal_updates=[], draft_proposals=[],
+        ))
+        visible = post_call.report_for_deal_room(self.session)["report"]
+        self.assertEqual(visible.get("missing_tracks"), ["system"])
+        question = visible["review_questions"][0]
+        self.assertIn("system", question["question"])
+        self.assertIn("Dell", question["question"])
+        self.assertIsNone(post_call.retention_ready(self.session, "b" * 64))
+        command = ["/bin/sh", str(BIN_DIR / "purge-recordings.sh")]
+        isolated = {"HOME": str(home), "PATH": "/usr/bin:/bin"}
+        subprocess.run(command, check=True, env=isolated)
+        self.assertTrue((self.session / "mic.caf").exists())
+        post_call.resolve_question(self.session, question["id"], "File knowingly with Dell audio missing.")
+        self.assertIsNotNone(post_call.retention_ready(self.session, "b" * 64))
+        post_call.write_private(self.session / "ingested.json", {
+            "post_call": True, "aggregate_report_hash": "a" * 64,
+            "backend_report_sha256": "b" * 64, "pending_items": 0,
+            "ingested_at": "2000-01-01T00:00:00Z",
+        })
+        subprocess.run(command, check=True, env=isolated)
+        self.assertFalse((self.session / "mic.caf").exists())
+
     def test_retention_requires_final_candidate_dispositions(self) -> None:
         post_call.store_context(self.session, self.context)
         post_call.process_session(self.session, distiller=lambda _request: self.output())
@@ -1293,6 +1861,9 @@ class PostCallTests(unittest.TestCase):
                 item["candidate_id"] = f"{list_name}-{index}"
                 item["candidate_status"] = "confirmed"
         post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        self.assertIsNone(post_call.retention_ready(self.session, "b" * 64))
+        for question in report["review_questions"]:
+            post_call.resolve_question(self.session, question["id"], "Reviewed the advisory check.")
         receipt = post_call.retention_ready(self.session, "b" * 64)
         self.assertEqual(receipt["pending_items"], 0)
         self.assertTrue(receipt["aggregate_report_hash"])
@@ -1313,6 +1884,27 @@ class PostCallTests(unittest.TestCase):
                 self.assertIsNone(post_call.retention_ready(self.session, digest))
         unchanged = post_call.read_json(self.session / post_call.REPORT_FILE)
         self.assertNotIn("backend_report_sha256", unchanged)
+
+    def test_pre_change_filed_session_purges_despite_unresolved_question(self) -> None:
+        home = Path(self.tmp.name) / "home"
+        session = home / "Recordings" / "2026.01.01-1200"
+        session.mkdir(parents=True)
+        (home / "Library" / "Logs").mkdir(parents=True)
+        (session / "mic.caf").write_bytes(b"synthetic audio")
+        report = post_call.normalize_distillation(self.output(
+            joe_tasks=[], deal_updates=[], draft_proposals=[],
+            review_questions=["Which deal did Dell mean?"],
+        ), self.context, session.name)
+        post_call.write_private(session / post_call.REPORT_FILE, report)
+        post_call.write_private(session / "ingested.json", {
+            "post_call": True, "aggregate_report_hash": "a" * 64,
+            "backend_report_sha256": "b" * 64, "pending_items": 0,
+            "ingested_at": "2000-01-01T00:00:00Z",
+        })
+        command = ["/bin/sh", str(BIN_DIR / "purge-recordings.sh")]
+        isolated = {"HOME": str(home), "PATH": "/usr/bin:/bin"}
+        subprocess.run(command, check=True, env=isolated)
+        self.assertFalse((session / "mic.caf").exists())
 
     def test_purger_holds_malformed_post_call_hashes_and_preserves_consent(self) -> None:
         home = Path(self.tmp.name) / "home"
@@ -1942,6 +2534,51 @@ class CaptureBridgePostCallTests(unittest.TestCase):
             self.assertEqual(capture_bridge.claim_cmd(self.cfg, self.session), 0)
         self.assertEqual(claims[0]["workflow"], "post_call")
 
+    def test_publish_renews_owned_expired_session_once(self) -> None:
+        (self.session / ".capture.json").unlink()
+        post_call.write_private(self.session / "announcement.json", {
+            "announcement_fired_at": "2026-08-10T12:00:00Z",
+        })
+        post_call.write_private(self.session / "meta.json", {"started": "2026-08-10T12:00:00Z"})
+        post_call.write_private(self.session / "call-context.json", {"mode": "weekly_deal_call"})
+        renewed = False
+        renewals = []
+        attempts = []
+        claims = []
+
+        def request(_method, url, body, headers):
+            nonlocal renewed
+            if url.endswith("/capture/claim"):
+                claims.append(body)
+                return 200, {"session_token": "opaque-session-token", "ttl_seconds": 86400}
+            if url.endswith("/capture/renew"):
+                self.assertEqual(headers, {"Authorization": "Bearer device"})
+                self.assertEqual(body["session_token"], "opaque-session-token")
+                renewals.append(body)
+                renewed = True
+                return 200, {"ttl_seconds": 86400}
+            if url.endswith("/capture/status"):
+                return 200, {}
+            if url.endswith("/capture/post-call/candidates"):
+                attempts.append(body.copy())
+                if not renewed:
+                    return 401, {"error": "session_token_expired"}
+                return 200, {"candidate_ids": ["action-id", "draft-id"]}
+            if url.endswith("/capture/candidates"):
+                return 200, {"candidate_ids": ["update-id"]}
+            raise AssertionError(url)
+
+        with patch.object(capture_bridge, "http_request", side_effect=request):
+            self.assertEqual(capture_bridge.claim_cmd(self.cfg, self.session), 0)
+            self.assertEqual(capture_bridge.publish_cmd(self.cfg, self.session), 0)
+            self.assertEqual(capture_bridge.publish_cmd(self.cfg, self.session), 0)
+        self.assertEqual(len(renewals), 1)
+        self.assertEqual(len(claims), 1)
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(attempts[0], attempts[1])
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        self.assertEqual(report["joe_tasks"][0]["candidate_id"], "action-id")
+
     def test_publish_exports_only_sanitized_metadata_and_binds_all_receipts(self) -> None:
         calls: list[tuple[str, str, dict[str, object] | None]] = []
 
@@ -1982,6 +2619,49 @@ class CaptureBridgePostCallTests(unittest.TestCase):
         report = post_call.read_json(self.session / post_call.REPORT_FILE)
         self.assertEqual(report["joe_tasks"][0]["candidate_id"], "action-id")
         self.assertEqual(report["deal_updates"][0]["candidate_id"], "update-id")
+
+    def test_partner_resolves_question_via_route_then_poll_files_call(self) -> None:
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        for key in ("joe_tasks", "dell_tasks", "deal_updates", "draft_proposals"):
+            report[key] = []
+        report["review_questions"] = [{"id": "q1", "question": "Which deal?", "resolved": False}]
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        response = {"state": "distilling", "post_call": True, "meeting_record": None,
+                    "candidates": {"pending": 0}, "candidate_statuses": [],
+                    "post_call_report": {"filed": False}}
+
+        def request(_method, url, _body, _headers):
+            if url.endswith("/capture/session"):
+                return 200, response
+            if url.endswith("/capture/post-call/report"):
+                return 200, {"filed": True, "candidate_count": 0}
+            if url.endswith("/capture/status"):
+                return 200, {"ok": True}
+            raise AssertionError(url)
+
+        def runner(*_args, **_kwargs):
+            return SimpleNamespace(returncode=capture_bridge.poll_cmd(self.cfg, self.session))
+
+        sync = call_mode.sync_post_call
+        with (
+            patch.object(call_mode, "RECORDINGS", self.session.parent),
+            patch.object(capture_bridge, "http_request", side_effect=request),
+            patch.object(call_mode, "sync_post_call", side_effect=lambda path: sync(path, runner)),
+        ):
+            capture_bridge.poll_cmd(self.cfg, self.session)
+            self.assertFalse((self.session / "ingested.json").exists())
+            handler = CallModeHttpTests().handler(
+                "/api/post-call/questions/q1/resolve",
+                json.dumps({"session": self.session.name, "resolution": "Dell meant deal A."}).encode(),
+                "http://127.0.0.1:4682",
+            )
+            handler.do_POST()
+        value = handler.send_json.call_args.args[0]
+        self.assertNotIn("error", value)
+        self.assertTrue(value["report"]["review_questions"][0]["resolved"])
+        self.assertEqual(value["report"]["review_questions"][0]["resolution"], "Dell meant deal A.")
+        self.assertEqual(value["status"]["session"], self.session.name)
+        self.assertTrue((self.session / "ingested.json").exists())
 
     def test_poll_syncs_all_lanes_files_report_then_marks_purge_safe(self) -> None:
         report = post_call.read_json(self.session / post_call.REPORT_FILE)
@@ -2024,6 +2704,46 @@ class CaptureBridgePostCallTests(unittest.TestCase):
         self.assertTrue(final["backend_report_sha256"])
         for key in ("joe_tasks", "deal_updates", "draft_proposals"):
             self.assertEqual(final[key][0]["candidate_status"], "confirmed")
+
+    def test_question_hold_keeps_candidate_dispositions_current(self) -> None:
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        report["joe_tasks"][0].update(candidate_id="action-id", candidate_status="pending")
+        report["review_questions"] = [{"id": "q1", "question": "Which deal?", "resolved": False}]
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        response = {"state": "distilling", "post_call": True, "meeting_record": None,
+                    "candidates": {"pending": 0},
+                    "candidate_statuses": [{"id": "action-id", "status": "confirmed"}]}
+        with (
+            patch.object(capture_bridge, "publish_cmd", return_value=0),
+            patch.object(capture_bridge, "http_request", return_value=(200, response)),
+        ):
+            capture_bridge.poll_cmd(self.cfg, self.session)
+        visible = post_call.report_for_deal_room(self.session)["report"]
+        self.assertEqual(visible["joe_tasks"][0]["candidate_status"], "confirmed")
+        self.assertFalse((self.session / "ingested.json").exists())
+
+    def test_poll_holds_question_only_call_before_filing_or_done(self) -> None:
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        for key in ("joe_tasks", "dell_tasks", "deal_updates", "draft_proposals"):
+            report[key] = []
+        report["review_questions"] = [{"id": "q1", "question": "Which deal?", "resolved": False}]
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        for already_filed in (False, True):
+            with self.subTest(already_filed=already_filed):
+                response = {"state": "distilling", "post_call": True, "meeting_record": None,
+                            "candidates": {"pending": 0}, "candidate_statuses": [],
+                            "post_call_report": {"filed": already_filed, "sha256": "b" * 64}}
+                with (
+                    patch.object(capture_bridge, "publish_cmd", return_value=0),
+                    patch.object(capture_bridge, "http_request", return_value=(200, response)),
+                    patch.object(capture_bridge, "file_post_call_report", return_value=(True, "b" * 64)) as file_report,
+                    patch.object(capture_bridge, "status_cmd", return_value=0) as status,
+                ):
+                    capture_bridge.poll_cmd(self.cfg, self.session)
+                file_report.assert_not_called()
+                status.assert_not_called()
+                self.assertFalse((self.session / "ingested.json").exists())
+                self.assertTrue((self.session / ".capture.json").exists())
 
     def test_poll_never_files_zero_count_report_when_candidate_publish_fails(self) -> None:
         calls: list[str] = []
@@ -2278,6 +2998,39 @@ class PostCallJevChecksTests(unittest.TestCase):
         )
         self.assertLessEqual(len(candidates), post_call_jev.MAX_CANDIDATE_DEALS)
         self.assertEqual(candidates[0]["id"], "deal-a")
+
+
+
+class RecordCommandRouteTests(unittest.TestCase):
+    """The live route reads `run.sh call`'s indented JSON, which has no `ok` key."""
+
+    def test_default_route_reads_pretty_reply_without_ok_key(self) -> None:
+        board = {"schema_version": "local-deals-board.v2", "deals": [{"id": "deal-a"}]}
+        seen: list[list[str]] = []
+
+        def runner(argv, **_kwargs):
+            seen.append(argv)
+            return subprocess.CompletedProcess(argv, 0, json.dumps(board, indent=2) + "\n", "banner\n")
+
+        real = post_call.call_verb
+        with patch.dict(os.environ, {}, clear=False), \
+                patch.object(post_call, "call_verb", lambda verb, args, **kw: real(verb, args, runner=runner, **kw)):
+            os.environ.pop("CARR_POST_CALL_VERB_COMMAND", None)
+            ok, reply = post_call.call_record_command("deal-room-board", {"workspace": "all"})
+        self.assertTrue(ok)
+        self.assertEqual(reply, board)
+        self.assertEqual(seen[0][1:3], ["call", "deal-room-board"])
+
+    def test_default_route_reports_refusal_payload(self) -> None:
+        def runner(argv, **_kwargs):
+            return subprocess.CompletedProcess(argv, 1, "", 'TOOL ERROR {"error": "version_conflict"}\n')
+
+        real = post_call.call_verb
+        with patch.object(post_call, "call_verb", lambda verb, args, **kw: real(verb, args, runner=runner, **kw)):
+            os.environ.pop("CARR_POST_CALL_VERB_COMMAND", None)
+            ok, reply = post_call.call_record_command("resolve-candidate", {"candidate_id": "c"})
+        self.assertFalse(ok)
+        self.assertEqual(reply.get("error"), "version_conflict")
 
 
 if __name__ == "__main__":

@@ -20,7 +20,8 @@
 #
 # THE GATE — all three must hold, or the session keeps everything, forever:
 #   1. ingested.json exists in the session directory, AND
-#   2. it names a meeting_record — the attributed narrative that satisfies
+#   2. a post-call receipt has report hashes and zero pending items, or
+#      it names a meeting_record — the attributed narrative that satisfies
 #      Joe's "who said what" condition. A marker without one means the
 #      summary half was never done, so the transcript is still the only
 #      account of the meeting and must not be deleted. This is checked here
@@ -30,7 +31,7 @@
 #      because weekends are not workdays (rule 236ca227), so a Friday
 #      ingestion is still re-runnable Monday morning.
 #
-# MARKER CONTRACT, for the WO-4 capture bridge (the intended writer):
+# MARKER CONTRACT, written by the capture bridge:
 #   ~/Recordings/<session>/ingested.json
 #   {"ingested_at": "<ISO-8601 UTC>",
 #    "by": "<actor>",
@@ -43,9 +44,9 @@
 # ALWAYS SURVIVES: announcement.json (consent proof must outlive everything it
 # documents), meta.json, ingested.json.
 #
-# Until the bridge ships, nothing writes markers, so this job purges NOTHING
-# and reports the held backlog. That is deliberate and the safe direction: the
-# bar rises before the deletion does.
+# The capture bridge writes filing receipts only after review is complete.
+# Existing receipts remain authoritative, including sessions filed before the
+# question gate. Unfiled sessions have no receipt and keep their recordings.
 set -eu
 
 RECORDINGS="$HOME/Recordings"
@@ -59,8 +60,8 @@ log_line() {
 [ -d "$RECORDINGS" ] || exit 0
 
 # Validates a marker against the gate's first two conditions and the grace
-# clock. Prints PURGE, or HOLD with the reason. Pure stdlib python3, same
-# dependency posture as transcribe_session.py.
+# clock. Prints PURGE, or HOLD with the reason. Uses only Python's standard
+# library. Post-call receipts require report hashes and zero pending items.
 marker_verdict() {
     python3 - "$1" "$GRACE_HOURS" <<'PY' 2>/dev/null || echo "HOLD unreadable-marker"
 import datetime, json, sys

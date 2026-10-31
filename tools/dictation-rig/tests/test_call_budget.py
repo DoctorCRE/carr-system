@@ -17,14 +17,35 @@ class BudgetTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.ledger = Path(self.temp.name) / 'budget.json'
 
-    def test_default_and_lowered_caps(self):
-        for value, count in ((None, 145), ('', 145), ('0.10', 36), ('5', 145)):
+    def test_absent_and_empty_budget_hold_before_client_construction(self):
+        import os
+        import post_call_jev
+        from unittest.mock import Mock
+        for value in (None, ''):
+            with self.subTest(value=value), patch.dict(os.environ, {}, clear=True):
+                if value is not None:
+                    os.environ['CALL_JEV_DAILY_DOLLARS'] = value
+                result = {'session': 'synthetic', 'joe_tasks': [
+                    {'title': 'Review proposal', 'evidence': 'Review proposal'}]}
+                client = Mock()
+                with patch.object(post_call_jev, 'TypeSafeClient') as factory:
+                    checked = post_call_jev.check_distillation(
+                        result, {}, {}, client=client, budget_ledger=self.ledger)
+                    factory.assert_not_called()
+                client.system_one.assert_not_called()
+                self.assertIn('unconfigured', checked['checks_hold'])
+                self.assertIn('unconfigured', checked['joe_tasks'][0]['checks']['reason'])
+                self.assertTrue(checked['review_questions'])
+                self.assertFalse(self.ledger.exists())
+                with patch.object(post_call_jev, 'TypeSafeClient') as factory:
+                    post_call_jev.check_distillation(result, {}, {}, budget_ledger=self.ledger)
+                    factory.assert_not_called()
+
+    def test_configured_and_lowered_caps(self):
+        for value, count in (('0.50', 181), ('0.10', 36)):
             with self.subTest(value=value), tempfile.TemporaryDirectory() as directory:
                 ledger = Path(directory) / 'budget.json'
-                with patch.dict('os.environ', {}, clear=True):
-                    if value is not None:
-                        import os
-                        os.environ['CALL_JEV_DAILY_DOLLARS'] = value
+                with patch.dict('os.environ', {'CALL_JEV_DAILY_DOLLARS': value}):
                     for _ in range(count):
                         call_budget.reserve(ledger)
                     with self.assertRaises(call_budget.BudgetHold):

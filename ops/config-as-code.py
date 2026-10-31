@@ -416,6 +416,9 @@ def portable(text):
 
 
 def concrete(text):
+    if '{{CALL_JEV_DAILY_DOLLARS}}' in text:
+        from lib.call_settings import daily_dollars
+        text = text.replace('{{CALL_JEV_DAILY_DOLLARS}}', escape(daily_dollars()))
     if '{{COPY_HELPER}}' in text or '{{EXECUTABLE_PATH}}' in text:
         from lib.outlook_settings import load_settings
         settings = load_settings(Path(HOME))
@@ -1994,6 +1997,76 @@ def git_hooks_path_report() -> str:
     return f"  git core.hooksPath: {observed or '(unset)'} — {note} [informational]"
 
 
+def plan_scheduled_task_install(apply):
+    task_plan = scheduled_task_install_plan()
+    if task_plan["modified"]:
+        print("ERROR: modified CARR scheduled task(s) active on this secondary: "
+              + ", ".join(task_plan["modified"])
+              + "; refusing to move or overwrite them.")
+        return None
+    if IS_PRIMARY:
+        for name in task_plan["install"]:
+            source = tracked_scheduled_task_paths()[name]
+            destination = os.path.join(TASKS_SRC, name, "SKILL.md")
+            # Same rule the launchd loop below already applies to
+            # DEFINITION_ONLY plists, which this loop had never honoured. A task
+            # whose body says "do not create, enable, or invoke any scheduler"
+            # must not be written INTO the scheduler directory by the installer
+            # that claims to be converging the machine to the repository.
+            if is_definition_only_task(read(source)):
+                print(f"  SKIP  scheduled task {name} (definition only: "
+                      f"awaits its own stated activation approval)")
+                continue
+            if read(destination) == concrete(read(source)):
+                print(f"  scheduled task already matches: {name}")
+            else:
+                print(f"  {'WRITE' if apply else 'would write'}  scheduled task {name}")
+    elif task_plan["exact"]:
+        for name in task_plan["exact"]:
+            destination = os.path.join(TASKS_QUARANTINE, name)
+            if os.path.exists(destination):
+                print(f"ERROR: recovery quarantine already has {destination}; refusing to overwrite it.")
+                return None
+            print(f"  {'QUARANTINE' if apply else 'would quarantine'}  scheduled task {name} "
+                  f"-> {destination}")
+    else:
+        print("  SKIP  scheduled tasks (secondary machines install none; no approved "
+              "secondary task scope is configured)")
+
+    return task_plan
+
+
+def apply_scheduled_task_install(task_plan):
+    # Scheduled task definitions are reconciled as definitions only.  Scheduler
+    # registration stays outside this tool; an on-disk SKILL.md must never be
+    # mistaken for proof that a task is enabled.
+    if IS_PRIMARY:
+        for name, source in sorted(tracked_scheduled_task_paths().items()):
+            # THE SKIP PRINTED ABOVE IS AN ANNOUNCEMENT; THIS IS THE WRITE IT
+            # DESCRIBES. Guarding only the announcing loop left `install
+            # --apply` reporting "SKIP scheduled task X (definition only)" and
+            # then creating X anyway, which is precisely the outcome that loop's
+            # comment says must not happen. The plan loop and the write loop
+            # both walk the same registry, so a rule applied to one and not the
+            # other is not a partial fix — it is a fix that prints.
+            if is_definition_only_task(read(source)):
+                continue
+            destination = os.path.join(TASKS_SRC, name, "SKILL.md")
+            desired = concrete(read(source))
+            if read(destination) != desired:
+                os.makedirs(os.path.dirname(destination), exist_ok=True)
+                with open(destination, "w", encoding="utf-8") as fh:
+                    fh.write(desired)
+    elif task_plan["exact"]:
+        os.makedirs(TASKS_QUARANTINE, exist_ok=True)
+        for name in task_plan["exact"]:
+            source_dir = os.path.join(TASKS_SRC, name)
+            destination = os.path.join(TASKS_QUARANTINE, name)
+            # The full directory moves so task-local state stays together and
+            # the active scheduler directory contains no CARR definition.
+            shutil.move(source_dir, destination)
+
+
 def cmd_install(apply):
     """repo -> machine. The half that makes a second machine possible."""
     try:
@@ -2107,40 +2180,9 @@ def cmd_install(apply):
         else:
             print("  Codex CARR permissions: WILL ENABLE FULL ACCESS WITHOUT A PERMISSION PROFILE")
 
-    task_plan = scheduled_task_install_plan()
-    if task_plan["modified"]:
-        print("ERROR: modified CARR scheduled task(s) active on this secondary: "
-              + ", ".join(task_plan["modified"])
-              + "; refusing to move or overwrite them.")
+    task_plan = plan_scheduled_task_install(apply)
+    if task_plan is None:
         return 1
-    if IS_PRIMARY:
-        for name in task_plan["install"]:
-            source = tracked_scheduled_task_paths()[name]
-            destination = os.path.join(TASKS_SRC, name, "SKILL.md")
-            # Same rule the launchd loop below already applies to
-            # DEFINITION_ONLY plists, which this loop had never honoured. A task
-            # whose body says "do not create, enable, or invoke any scheduler"
-            # must not be written INTO the scheduler directory by the installer
-            # that claims to be converging the machine to the repository.
-            if is_definition_only_task(read(source)):
-                print(f"  SKIP  scheduled task {name} (definition only: "
-                      f"awaits its own stated activation approval)")
-                continue
-            if read(destination) == concrete(read(source)):
-                print(f"  scheduled task already matches: {name}")
-            else:
-                print(f"  {'WRITE' if apply else 'would write'}  scheduled task {name}")
-    elif task_plan["exact"]:
-        for name in task_plan["exact"]:
-            destination = os.path.join(TASKS_QUARANTINE, name)
-            if os.path.exists(destination):
-                print(f"ERROR: recovery quarantine already has {destination}; refusing to overwrite it.")
-                return 1
-            print(f"  {'QUARANTINE' if apply else 'would quarantine'}  scheduled task {name} "
-                  f"-> {destination}")
-    else:
-        print("  SKIP  scheduled tasks (secondary machines install none; no approved "
-              "secondary task scope is configured)")
 
     launchd_activation_failures = reconcile_retired_launchd(apply)
     launchd_activation_failures += quarantine_definition_only_plists(apply, held_labels)
@@ -2248,34 +2290,7 @@ def cmd_install(apply):
         print("\nDRY RUN — nothing written. Re-run with --apply.")
         return 0
 
-    # Scheduled task definitions are reconciled as definitions only.  Scheduler
-    # registration stays outside this tool; an on-disk SKILL.md must never be
-    # mistaken for proof that a task is enabled.
-    if IS_PRIMARY:
-        for name, source in sorted(tracked_scheduled_task_paths().items()):
-            # THE SKIP PRINTED ABOVE IS AN ANNOUNCEMENT; THIS IS THE WRITE IT
-            # DESCRIBES. Guarding only the announcing loop left `install
-            # --apply` reporting "SKIP scheduled task X (definition only)" and
-            # then creating X anyway, which is precisely the outcome that loop's
-            # comment says must not happen. The plan loop and the write loop
-            # both walk the same registry, so a rule applied to one and not the
-            # other is not a partial fix — it is a fix that prints.
-            if is_definition_only_task(read(source)):
-                continue
-            destination = os.path.join(TASKS_SRC, name, "SKILL.md")
-            desired = concrete(read(source))
-            if read(destination) != desired:
-                os.makedirs(os.path.dirname(destination), exist_ok=True)
-                with open(destination, "w", encoding="utf-8") as fh:
-                    fh.write(desired)
-    elif task_plan["exact"]:
-        os.makedirs(TASKS_QUARANTINE, exist_ok=True)
-        for name in task_plan["exact"]:
-            source_dir = os.path.join(TASKS_SRC, name)
-            destination = os.path.join(TASKS_QUARANTINE, name)
-            # The full directory moves so task-local state stays together and
-            # the active scheduler directory contains no CARR definition.
-            shutil.move(source_dir, destination)
+    apply_scheduled_task_install(task_plan)
 
     written_backups = []
     install_managed_safety(safety_plan, apply=True)
@@ -2756,7 +2771,21 @@ def main():
     if mode == "verify-codex-continuity-mcp":
         return cmd_install_codex_continuity_mcp(False)
     if mode == "install":
-        return cmd_install(apply)
+        import argparse
+        parser = argparse.ArgumentParser(prog="config-as-code.py install")
+        parser.add_argument("--apply", action="store_true")
+        parser.add_argument("--only", choices=["scheduled-tasks"])
+        options = parser.parse_args(sys.argv[2:])
+        if options.only:
+            plan = plan_scheduled_task_install(options.apply)
+            if plan is None:
+                return 1
+            if options.apply:
+                apply_scheduled_task_install(plan)
+            else:
+                print("\nDRY RUN — nothing written. Re-run with --apply.")
+            return 0
+        return cmd_install(options.apply)
     if mode == "install-flash-on-demand":
         import argparse
         from tools import flash_install

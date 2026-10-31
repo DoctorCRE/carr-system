@@ -2229,8 +2229,9 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `Index::observe`.
+- [`vendor/hxprobe/src/message.rs` at `ee79130cc200f4e479ccb91d11a12d2ccb9da3bd`](https://github.com/DoctorCRE/carr-system/blob/ee79130cc200f4e479ccb91d11a12d2ccb9da3bd/vendor/hxprobe/src/message.rs), `Index::observe`.
 - [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
+- [`vendor/hxprobe/src/main.rs` at `ee79130cc200f4e479ccb91d11a12d2ccb9da3bd`](https://github.com/DoctorCRE/carr-system/blob/ee79130cc200f4e479ccb91d11a12d2ccb9da3bd/vendor/hxprobe/src/main.rs), `cmd_db`.
 
 ## ConversationIndex descriptor (object.class.00c9.offset.1166)
 
@@ -2251,7 +2252,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `revision`.
+- [`vendor/hxprobe/src/message.rs` at `ee79130cc200f4e479ccb91d11a12d2ccb9da3bd`](https://github.com/DoctorCRE/carr-system/blob/ee79130cc200f4e479ccb91d11a12d2ccb9da3bd/vendor/hxprobe/src/message.rs), `revision`.
 - [`spec/outlook/recipients-threads-research.md` at `578ced0753e446fe832a585e6932d2e60033cf0e`](https://github.com/DoctorCRE/carr-system/blob/578ced0753e446fe832a585e6932d2e60033cf0e/spec/outlook/recipients-threads-research.md), `Layout`.
 - [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
 
@@ -2274,7 +2275,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `revision`.
+- [`vendor/hxprobe/src/message.rs` at `ee79130cc200f4e479ccb91d11a12d2ccb9da3bd`](https://github.com/DoctorCRE/carr-system/blob/ee79130cc200f4e479ccb91d11a12d2ccb9da3bd/vendor/hxprobe/src/message.rs), `revision`.
 - [`spec/outlook/recipients-threads-research.md` at `578ced0753e446fe832a585e6932d2e60033cf0e`](https://github.com/DoctorCRE/carr-system/blob/578ced0753e446fe832a585e6932d2e60033cf0e/spec/outlook/recipients-threads-research.md), `Layout`.
 - [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
 
@@ -2298,7 +2299,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `revision`.
+- [`vendor/hxprobe/src/message.rs` at `ee79130cc200f4e479ccb91d11a12d2ccb9da3bd`](https://github.com/DoctorCRE/carr-system/blob/ee79130cc200f4e479ccb91d11a12d2ccb9da3bd/vendor/hxprobe/src/message.rs), `revision`.
 - [`spec/outlook/recipients-threads-research.md` at `578ced0753e446fe832a585e6932d2e60033cf0e`](https://github.com/DoctorCRE/carr-system/blob/578ced0753e446fe832a585e6932d2e60033cf0e/spec/outlook/recipients-threads-research.md), `Layout`.
 - [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
 
@@ -2321,7 +2322,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `base`.
+- [`vendor/hxprobe/src/message.rs` at `ee79130cc200f4e479ccb91d11a12d2ccb9da3bd`](https://github.com/DoctorCRE/carr-system/blob/ee79130cc200f4e479ccb91d11a12d2ccb9da3bd/vendor/hxprobe/src/message.rs), `revision`.
 - [`spec/outlook/recipients-threads-research.md` at `578ced0753e446fe832a585e6932d2e60033cf0e`](https://github.com/DoctorCRE/carr-system/blob/578ced0753e446fe832a585e6932d2e60033cf0e/spec/outlook/recipients-threads-research.md), `Layout`.
 - [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
 
@@ -2342,7 +2343,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `revision`.
+- [`vendor/hxprobe/src/message.rs` at `ee79130cc200f4e479ccb91d11a12d2ccb9da3bd`](https://github.com/DoctorCRE/carr-system/blob/ee79130cc200f4e479ccb91d11a12d2ccb9da3bd/vendor/hxprobe/src/message.rs), `revision`.
 
 ## Sender address descriptor (object.class.00c9.offset.1386)
 
@@ -2364,7 +2365,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `revision`.
+- [`vendor/hxprobe/src/message.rs` at `ee79130cc200f4e479ccb91d11a12d2ccb9da3bd`](https://github.com/DoctorCRE/carr-system/blob/ee79130cc200f4e479ccb91d11a12d2ccb9da3bd/vendor/hxprobe/src/message.rs), `revision`.
 - [`spec/outlook/recipients-threads-research.md` at `578ced0753e446fe832a585e6932d2e60033cf0e`](https://github.com/DoctorCRE/carr-system/blob/578ced0753e446fe832a585e6932d2e60033cf0e/spec/outlook/recipients-threads-research.md), `Layout`.
 - [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
 
@@ -2388,7 +2389,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `revision`.
+- [`vendor/hxprobe/src/message.rs` at `ee79130cc200f4e479ccb91d11a12d2ccb9da3bd`](https://github.com/DoctorCRE/carr-system/blob/ee79130cc200f4e479ccb91d11a12d2ccb9da3bd/vendor/hxprobe/src/message.rs), `revision`.
 - [`spec/outlook/recipients-threads-research.md` at `578ced0753e446fe832a585e6932d2e60033cf0e`](https://github.com/DoctorCRE/carr-system/blob/578ced0753e446fe832a585e6932d2e60033cf0e/spec/outlook/recipients-threads-research.md), `Layout`.
 - [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
 
@@ -2409,7 +2410,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `Index::observe`.
+- [`vendor/hxprobe/src/message.rs` at `ee79130cc200f4e479ccb91d11a12d2ccb9da3bd`](https://github.com/DoctorCRE/carr-system/blob/ee79130cc200f4e479ccb91d11a12d2ccb9da3bd/vendor/hxprobe/src/message.rs), `Index::observe`.
 
 ## Recipient object (object.class.0055)
 
@@ -2432,7 +2433,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `recipient`.
+- [`vendor/hxprobe/src/message.rs` at `ee79130cc200f4e479ccb91d11a12d2ccb9da3bd`](https://github.com/DoctorCRE/carr-system/blob/ee79130cc200f4e479ccb91d11a12d2ccb9da3bd/vendor/hxprobe/src/message.rs), `recipient`.
 - [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
 
 ## Recipient kind (object.class.0055.offset.18)
@@ -2455,7 +2456,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `kind_name`.
+- [`vendor/hxprobe/src/message.rs` at `ee79130cc200f4e479ccb91d11a12d2ccb9da3bd`](https://github.com/DoctorCRE/carr-system/blob/ee79130cc200f4e479ccb91d11a12d2ccb9da3bd/vendor/hxprobe/src/message.rs), `kind_name`.
 - [`spec/outlook/recipients-threads-research.md` at `578ced0753e446fe832a585e6932d2e60033cf0e`](https://github.com/DoctorCRE/carr-system/blob/578ced0753e446fe832a585e6932d2e60033cf0e/spec/outlook/recipients-threads-research.md), `Layout`.
 - [`spec/outlook/hxstore-harness.json` at `f03be8931e4be950b68a034987eef062949e56bb`](https://github.com/DoctorCRE/carr-system/blob/f03be8931e4be950b68a034987eef062949e56bb/spec/outlook/hxstore-harness.json), `corpus.cases`.
 
@@ -2476,7 +2477,7 @@ Null means the first Outlook version is unknown. The pinned source revision esta
 }
 ```
 
-- [`vendor/hxprobe/src/message.rs` at `f160135d4e5d38613ecf05643e64d8ba4975920d`](https://github.com/DoctorCRE/carr-system/blob/f160135d4e5d38613ecf05643e64d8ba4975920d/vendor/hxprobe/src/message.rs), `recipient`.
+- [`vendor/hxprobe/src/message.rs` at `ee79130cc200f4e479ccb91d11a12d2ccb9da3bd`](https://github.com/DoctorCRE/carr-system/blob/ee79130cc200f4e479ccb91d11a12d2ccb9da3bd/vendor/hxprobe/src/message.rs), `recipient`.
 
 ## Message reference kind and account owner (object.class.00c9.offset.18)
 
@@ -2796,8 +2797,8 @@ Null means the first Outlook version is unknown. The pinned source revision esta
     "sha256": "b7f10a2112bbb8a3d7a4a10fc97f04ff757e2e514caf1fef10aa0929d54c7d58"
   },
   "vendor/hxprobe/src/message.rs": {
-    "revision": "f160135d4e5d38613ecf05643e64d8ba4975920d",
-    "sha256": "8f5ae1e61d55cc02d385f0cda01ff1513f84d803095c841c8c38497dc86b94e7"
+    "revision": "ee79130cc200f4e479ccb91d11a12d2ccb9da3bd",
+    "sha256": "66445c91d9404852cc2c68ffa22fd101d2dd481157078a28f6774e0a338b6eff"
   },
   "spec/outlook/hxstore-harness.json": {
     "revision": "f03be8931e4be950b68a034987eef062949e56bb",
@@ -2806,6 +2807,10 @@ Null means the first Outlook version is unknown. The pinned source revision esta
   "spec/outlook/recipients-threads-research.md": {
     "revision": "578ced0753e446fe832a585e6932d2e60033cf0e",
     "sha256": "b2f00f918474cd190f4dbcc1a049e8d298d04d61139c3727043c172c550bf62e"
+  },
+  "vendor/hxprobe/src/main.rs": {
+    "revision": "ee79130cc200f4e479ccb91d11a12d2ccb9da3bd",
+    "sha256": "c71f63ca41aec62db8296bf8c95973e1415907c9307061957642bc352442e358"
   }
 }
 ```
