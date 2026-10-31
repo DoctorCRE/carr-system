@@ -502,6 +502,36 @@ test('concurrent outcome writers with the same slice version cannot replace the 
   } finally { await Promise.all(clients.map(client => client.end())); }
 });
 
+test('dispatch refusals provide usable copy suggestions and vocabulary', async () => {
+  const work_request = await request('WR-000097');
+  await command('dispatch-job', job(work_request, { card_title: 'Build readable cards' }));
+  for (const card_title of ['Bad 123 title', 'Queue cards', 'Build readable cards']) {
+    let suggestion;
+    await assert.rejects(command('dispatch-job', job(work_request, { card_title })), failure => {
+      const result = publicError(failure);
+      assert.match(result.suggested_card_title, /^(Add|Build|Fix|Remove|Rename|Review|Audit|Plan|Revise|Migrate|Move|Record|Require|Gate|Adopt|Rebind|Repin|Close|Install|Retire) [A-Za-z']+( [A-Za-z']+)?$/);
+      suggestion = result.suggested_card_title;
+      return true;
+    });
+    await command('dispatch-job', job(work_request, { card_title: suggestion }));
+  }
+  await assert.rejects(command('dispatch-job', job(work_request, { card_title: 'x'.repeat(81) })), failure => {
+    assert.equal(failure.message, 'invalid_work_queue_fields');
+    assert.ok(publicError(failure).suggested_card_title);
+    return true;
+  });
+  await assert.rejects(command('dispatch-job', job(work_request, { description: 'Implement useful cards. Another sentence.' })), failure => {
+    const result = publicError(failure);
+    assert.match(result.suggested_description, /^Build .+[.]$/);
+    return true;
+  });
+  await assert.rejects(command('dispatch-job', job(work_request, { job_type: 'unknown' })), failure => {
+    const result = publicError(failure, { inputSchema: TOOLS['dispatch-job'].inputSchema });
+    assert.ok(result.allowed_values.includes('bug-fix'));
+    return true;
+  });
+});
+
 test('mint refuses a title whose first word is outside the imperative vocabulary', async () => {
   const work_request = await request('WR-000091');
   await assert.rejects(command('dispatch-job', job(work_request, { card_title: 'Queue work' })), failure => {

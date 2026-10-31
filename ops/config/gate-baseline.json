@@ -7,7 +7,6 @@
     "gate_paths.py": "81f8ca48e4b70f5732c5dc769e5aa3876df4cde1c07e897335356086312ef7dd",
     "guard-unattended.py": "3745b11f62f511a0e0dd4f1a9fb9535e27ae971a93a3c5c8ade5cfd1103e398f",
     "hook_meter.py": "b6c82a172dff034ddd8b54425c520b48a31187a8122c33f493b785e78f502c6d",
-    "job-watchdog-digest.py": "07d7523fb6240e5248d629f0359e6bfe517c0884d5f97f1b89548313a0c0de72",
     "lint-gate.py": "e04ac9ff6686193f9fedf8643c1e7f4abe85d1fff01074c741fbbc1937c52dcd",
     "machine-converge.py": "037548068bd70bda2f420f893c4224d0d7decea7d44e2047182410a650b2c4ce",
     "md_manifest.py": "fa7b11368ddd71e727122b69192327664d495cc4a1712bd1a2ba3f5baeecded3",
@@ -23,7 +22,7 @@
   },
   "contracts": {
     "hook_runtime.py": "617416d669ccf046041eac9798551932c63e10d6df5cb7b2c0da8a13b373a422",
-    "hooks.json": "39e17f6bedaa7edd5df84f3fe5c09537019b9573b7dbd4f20cd6b19dd0d8a83f",
+    "hooks.json": "c497c10de4a461134f0c0fcde4b75dca1c00261a81423f7ad84195c55cede542",
     "codex-hooks.json": "3631799714d7dbdd10a0a83d4c08e99af96226ed4487dd6661e15e449337579f",
     "rule-enforcement-map.json": "7fd3df5915191d622359be00c4ea96c05a29cb99ea3da394a01217824984062b",
     "native_shell.py": "6b2f3b64b1a5f2be1e48383e7979a011fe2f88be91cc27627e9531464105f268",
