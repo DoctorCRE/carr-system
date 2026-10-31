@@ -957,11 +957,11 @@ class IntakeTest(unittest.TestCase):
                 self.assertEqual(result.detail, detail)
                 self.assertEqual(self.fake.writes('log-activity'), [])
 
-    def cli_mail_fixture(self, records, folder_name='Drafts'):
+    def cli_mail_fixture(self, records, folder_name='Drafts', extra_folders=b''):
         helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
         crate = ROOT / 'vendor/hxprobe'
         REAL_RUN(['cargo', 'build', '--locked'], cwd=crate, check=True, capture_output=True)
-        folders = helpers['folder'](50, folder_name) + helpers['folder'](51, 'Sent Items')
+        folders = helpers['folder'](50, folder_name) + helpers['folder'](51, 'Sent Items') + extra_folders
         binding = helpers['message'](0x9999, sender=OWNER, sent=ts(-timedelta(days=60)), folder=51)
         self.store.write_bytes(helpers['STORE'](folders + b''.join(records) + binding))
 
@@ -1050,6 +1050,16 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(result.counts['mail_account_unresolved'], 0)
         self.assertEqual(len(self.fake.writes('log-activity')), 1)
         self.assertEqual(intake.run(self.repo, self.home, ports).counts['emails'], 0)
+
+    def test_cli_typed_reference_to_another_accounts_folder_is_not_admitted(self):
+        helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
+        message = helpers['message'](71, sent=ts(-timedelta(hours=1)), folder=52)
+        ports = self.cli_mail_fixture([message], folder_name='Inbox',
+                                      extra_folders=helpers['folder'](52, 'Inbox', account=8))
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(result.counts['emails'], 0)
+        self.assertEqual(self.fake.writes('log-activity'), [])
 
     def test_cli_complete_revision_settles_a_prior_incomplete_message(self):
         helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))

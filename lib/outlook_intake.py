@@ -559,11 +559,17 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
         meta.update(dict.fromkeys(MAIL_STORE_COUNTERS, 0))
         meta['decoder_rejected'] = rejected
         meta['decoder_details_rejected'] = int(meta.get('details_rejected') or 0)
+        # Decoders built before folder export have no folders table.
+        folder_accounts = (dict(con.execute('SELECT id, account_id FROM folders'))
+                           if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='folders'").fetchone()
+                           else {})
         admitted = []
         for m in mails:
             owners = ownership.get(m['id'], {None})
-            typed_folder = m.get('account_id') == account_id and m.get('folder_id') is not None
-            # A current typed reference retains ownership even when the folder catalogue omits it.
+            typed_folder = (m.get('account_id') == account_id and m.get('folder_id') is not None
+                            and folder_accounts.get(m['folder_id'], account_id) == account_id)
+            # A current typed reference retains ownership when the folder catalogue omits the folder,
+            # never when the catalogue places that folder under another account.
             reason = ('mail_outside_selected_account' if m.get('account_id') not in (None, account_id) else
                       None if typed_folder and owners <= {None, account_id} else
                       'mail_account_unresolved' if None in owners or m['folder_links_unresolved'] else
