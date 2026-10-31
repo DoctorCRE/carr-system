@@ -651,7 +651,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "compare-fact-observations": {
     "ingress_key": "mcp-tool:compare-fact-observations",
     "source_locator": "mcp-server/src/fact-observations.ts",
-    "schema_digest": "361ab3e2f12dd524f23f96410eaa6507e72339f6494ca585082ef456bb9c598f",
+    "schema_digest": "20b9ad0b103dba9c2d81172a1bca73ed516e78661864e4d948c1630d9895c300",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -1905,7 +1905,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "promote-fact": {
     "ingress_key": "mcp-tool:promote-fact",
     "source_locator": "mcp-server/src/fact-observations.ts",
-    "schema_digest": "5976b93047ba504a919ec7770d0dac843953d7059ac284832ed3d56e20e9f9a9",
+    "schema_digest": "1ccf57205ceea669f9543384f5963cc521d96e1a0a8868ea37603d9d6425bc31",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -2105,7 +2105,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "read-deal-extraction-source": {
     "ingress_key": "mcp-tool:read-deal-extraction-source",
     "source_locator": "mcp-server/src/deal-extraction.js",
-    "schema_digest": "b5a22a2d82c40946035d8e254f39db463dc3a8683be2d6dcd710f4ef6ac38f10",
+    "schema_digest": "dea18d62c4d0d7540e62126001e36ff80807d968599261b03e56a705b2c1e9a6",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -2545,7 +2545,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-deal-extraction": {
     "ingress_key": "mcp-tool:record-deal-extraction",
     "source_locator": "mcp-server/src/deal-extraction.js",
-    "schema_digest": "f9f1bd1c147b39e3ab203454c5a7038bcdf3d73c0d5a28164d1a0a82b8889fe7",
+    "schema_digest": "07439bbcaf9b067794bf3a6f43ab4b637a70579e4768336b473b8b97dae83259",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -2655,7 +2655,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-fact-observations": {
     "ingress_key": "mcp-tool:record-fact-observations",
     "source_locator": "mcp-server/src/fact-observations.ts",
-    "schema_digest": "ffc4b25e1062de68b6fe937d51d4559f32bf2b5ca3a64a7a5f820b946de96a19",
+    "schema_digest": "ef62b8a358d922a010b6a9c4f8fe397c169f3b9df1533a43c0ea7c19713d57f3",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -2675,7 +2675,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-human-fact": {
     "ingress_key": "mcp-tool:record-human-fact",
     "source_locator": "mcp-server/src/fact-review.ts",
-    "schema_digest": "10da9cff3fedb5238d429a8d8196dd8becc2de7d7035a5e8085d0f43933e80cc",
+    "schema_digest": "0cd1ec8b6b4e47bf8c061bfa0dddae92c0d57637f6b98f8bd8f2b5dd32b1b2fd",
     "write": true,
     "human_only": true,
     "human_caller_only": false,
@@ -3060,7 +3060,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "resolve-fact-review": {
     "ingress_key": "mcp-tool:resolve-fact-review",
     "source_locator": "mcp-server/src/fact-review.ts",
-    "schema_digest": "0e9b1abefa1d5ee93c002c990de12c06449dfef3a7e83df42d8c50a750d6dca8",
+    "schema_digest": "7d8d4a0e16d1d0a77fa6f6fa9959d929c8d64c49309df0fba057205bcd300fd6",
     "write": true,
     "human_only": true,
     "human_caller_only": false,
