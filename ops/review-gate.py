@@ -4,8 +4,13 @@ import re
 import json
 import os
 import subprocess
+import sys
 import time
+import tempfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from git_env import fixture_env
 
 RISKY = ("*launchagents*", "*.plist", "install-*.sh", "*/install-*.sh",
          "*outlook*", "*hxstore*", "*hxprobe*", "*calendar*",
@@ -27,25 +32,84 @@ def card_allowed(pr, files):
                 for line in (pr.get("body") or "").splitlines()))
 
 
-def approved(pr, files, comments):
+def approved(pr, files, reviews, reviewer_login, preserved=lambda sha: False):
     if SKIP_CI.search(pr.get("title") or ""):
         return False
-    sha_line = f'Reviewed-SHA: {pr["head"]["sha"]}'
-    # A changes verdict vetoes the current head until a new push.
-    verdicts = [lines[0] for lines in ((c.get("body") or "").splitlines() for c in comments)
-                if len(lines) >= 3 and lines[0] in ("VERDICT: APPROVE", "VERDICT: CHANGES")
-                and lines[1] == sha_line and lines[2].startswith("Reviewer: ")
-                and lines[2][10:].strip()]
-    if "VERDICT: CHANGES" in verdicts:
+    latest = {}
+    for review in sorted(reviews, key=lambda r: r.get("submitted_at") or ""):
+        user = (review.get("user") or {}).get("login")
+        state = review.get("state")
+        if user and state in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
+            latest[user.lower()] = review
+    current_review = latest.get(reviewer_login.lower(), {}) if reviewer_login else {}
+    if current_review.get("state") == "CHANGES_REQUESTED" and current_review.get("commit_id") == pr["head"]["sha"]:
         return False
-    # Markdown-only PRs carry no runtime behaviour, so they merge on green CI at any size (Joe 2026-10-27).
-    if docs_only(pr, files):
-        return True
     risky = any(f.get("status") == "added" and f.get("filename", "").startswith(("bin/", "hooks/", "ops/", ".github/workflows/")) for f in files) or any(fnmatch.fnmatchcase(f.get(key, "").lower(), pattern)
                 for f in files for key in ("filename", "previous_filename") for pattern in RISKY)
-    if len(files) == pr["changed_files"] and pr["additions"] - pr["deletions"] <= 150 and not risky:
+    complete = len(files) == pr["changed_files"]
+    if docs_only(pr, files) or (complete and pr["additions"] - pr["deletions"] <= 150 and not risky):
         return True
-    return verdicts[-1:] == ["VERDICT: APPROVE"]
+    author = (pr.get("user") or {}).get("login", "").lower()
+    return any(reviewer_login and user == reviewer_login.lower() and user != author and r["state"] == "APPROVED" and (r.get("commit_id") == pr["head"]["sha"] or (r.get("commit_id") and preserved(r["commit_id"])))
+               for user, r in latest.items())
+
+
+def review_delta(diff):
+    sections = re.split(rb"(?m)^(?=diff --git )", diff)
+    normalized = []
+    for section in sections:
+        lines = section.splitlines(keepends=True)
+        binary = any(line.startswith((b"GIT binary patch", b"Binary files ")) for line in lines)
+        in_header = True
+        output = []
+        for line in lines:
+            if line.startswith((b"@@ ", b"@@@ ", b"GIT binary patch", b"Binary files ")):
+                in_header = False
+            if not binary and in_header and line.startswith(b"index "):
+                continue
+            output.append(line)
+        normalized.append(b"".join(output))
+    return b"".join(normalized)
+
+
+def unchanged_merges(git_dir, base, reviewed, head):
+    def git(*args):
+        return subprocess.check_output(["git", "-C", git_dir, *args], stderr=subprocess.DEVNULL, timeout=120, env=fixture_env())
+    try:
+        commits = git("rev-list", "--first-parent", "--parents", f"{reviewed}..{head}").decode().splitlines()
+        expected = head
+        if not commits:
+            return False
+        for line in commits:
+            parts = line.split()
+            if len(parts) != 3 or parts[0] != expected:
+                return False
+            git("merge-base", "--is-ancestor", parts[2], base)
+            expected = parts[1]
+        if expected != reviewed:
+            return False
+        old_base = git("merge-base", base, reviewed).decode().strip()
+        new_base = git("merge-base", base, head).decode().strip()
+        opts = ("diff", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", "--no-renames")
+        return review_delta(git(*opts, old_base, reviewed)) == review_delta(git(*opts, new_base, head))
+    except (subprocess.SubprocessError, OSError, UnicodeError):
+        return False
+
+
+def preserved_review(repo, number, base, reviewed, head):
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo) or any(
+            not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha)
+            for sha in (base, reviewed, head)):
+        return False
+    try:
+        with tempfile.TemporaryDirectory(prefix="review-gate-") as directory:
+            subprocess.run(["git", "init", "--bare", "-q", directory], check=True, capture_output=True, timeout=30, env=fixture_env())
+            subprocess.run(["git", "-C", directory, "fetch", "--quiet", "--no-tags",
+                            f"https://github.com/{repo}.git", "refs/heads/main", f"refs/pull/{int(number)}/head"],
+                           check=True, capture_output=True, timeout=150, env=fixture_env())
+            return unchanged_merges(directory, base, reviewed, head)
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return False
 
 
 def api(path, payload=None):
@@ -76,13 +140,12 @@ def run(event, repo):
     sha = pr["head"]["sha"]
     status(sha, "pending")
     files = api(f"{root}/pulls/{number}/files?per_page=100")
-    comments = api(f"{root}/issues/{number}/comments?per_page=100")
     reviews = api(f"{root}/pulls/{number}/reviews?per_page=100")
-    comments = sorted(comments + [r for r in reviews if r.get("state") not in ("DISMISSED", "PENDING")], key=lambda item: item.get("submitted_at") or item.get("created_at") or "")
     card_ok = card_allowed(pr, files)
-    passed = card_ok and approved(pr, files, comments)
+    passed = card_ok and approved(pr, files, reviews, os.environ.get("CARR_REVIEW_APP_LOGIN", ""),
+        lambda reviewed: preserved_review(repo, number, pr["base"]["sha"], reviewed, sha))
     latest = api(f"{root}/pulls/{number}")
-    if latest["head"]["sha"] == sha and latest.get("body") == pr.get("body"):
+    if latest["head"]["sha"] == sha and all(latest.get(k) == pr.get(k) for k in ("body", "title", "base")):
         description = ("No skip-CI title; small safe diff or current-head approval required" if card_ok else
                        "Missing PR body line: Card: WR<number>.S<number>.J<number>")
         status(sha, "success" if passed else "failure", description)
