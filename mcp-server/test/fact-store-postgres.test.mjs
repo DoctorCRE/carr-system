@@ -58,10 +58,13 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
     await c.query(await readFile(new URL('../../migrations/1099_fact_review.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(new URL('../../migrations/1103_deal_extraction.sql', import.meta.url), 'utf8'));
     await c.query("update system_config set value='true'::jsonb where key='facts.automatic_promotion_enabled'");
+    await c.query('create table v_ref_index(subject_id uuid, subject_type text)');
+    await c.query(await readFile(new URL('../../migrations/1086_deal_documents.sql', import.meta.url), 'utf8'));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner'),($2,'codex','automation','Synthetic job')", [partner.id, job.id]);
 
     await t.test('partners record a sourced term from an existing deal attachment', async () => {
       const deal = randomUUID(), document = randomUUID();
+      await c.query("insert into v_ref_index values($1,'deal')", [deal]);
       await c.query("insert into attachment(id,subject_type,subject_id,r2_key,filename,mime,sha256,bytes,created_by) values($1,'deal',$2,$3,'synthetic.pdf','application/pdf',$4,100,$5)",
         [document, deal, `synthetic/${document}`, hash(39), partner.id]);
       const out = await as('carr_writer', partner, 'record-human-fact', {
@@ -69,6 +72,9 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
         observation: { fact_key: 'base_rent_per_sf', value: '24', unit: 'USD/SF/year', expense_basis: 'nnn', source: { document_ref: document, page_start: 1, page_end: 1, cited_text: 'Synthetic clause.' } },
       });
       assert.equal(out.ok, true);
+      const listed = await as('carr_reader', partner, 'list-deal-documents', { deal_id: deal });
+      assert.equal(listed.documents[0].id, out.observation.source.document_ref);
+      assert.equal(listed.documents[0].display_name, 'synthetic.pdf');
       assert.equal(out.observation.method, 'human');
       assert.equal(out.observation.source.content_hash, hash(39));
     });

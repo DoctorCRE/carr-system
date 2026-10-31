@@ -182,3 +182,9 @@ test('malformed cursor dates and keys refuse before SQL', async () => {
     { owners: 'partners', cursor: btoa(JSON.stringify({ ...valid, ...patch })) }),
     error => error instanceof ToolError && error.payload.error === 'triage_cursor_invalid');
 });
+
+test('flagged mail action keeps its calendar due date in triage', async () => {
+  await rows([[91, 'next_action', 'joe-local', '2026-10-29']]);
+  const result = await call({});
+  assert.equal(result.items[0].due_on, '2026-10-29');
+});
