@@ -775,7 +775,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
             !Array.isArray(args.criteria) || !args.criteria.length || args.criteria.length > 12 ||
             args.criteria.some(item => Object.keys(item || {}).sort().join() !== "id,text" || !CRITERION_ID.test(item.id) || !text(item.text, 500)) ||
             !text(args.source_ref, 300) || (args.outcome_addendum !== undefined && !text(args.outcome_addendum, 500)))
-          throw new ToolError({ error: "invalid_scope_append", hint: "Supply a UUID key, human_ref, current base_version, 1-12 criteria {id,text}, and source_ref." });
+          throw new ToolError({ error: "invalid_scope_append", hint: "Supply a UUID key, human_ref, current base_version, 1-12 criteria {id,text}, source_ref, and an optional outcome_addendum of at most 500 characters." });
         const authorizationClass = authorizationClassForActor(actor);
         if (!["verified_partner", "sponsored_agent"].includes(authorizationClass))
           throw new ToolError({ error: "sponsored_actor_required", authorization_class: authorizationClass });
@@ -794,20 +794,22 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
           if (repeated.length) throw new ToolError({ error: "duplicate_criterion_id", ids: [...new Set(repeated)] });
           if (ids.length > 12)
             throw new ToolError({ error: "criteria_cap_exceeded", current: current.acceptance_criteria.length, appending: args.criteria.length, cap: 12 });
-          const outcome = args.outcome_addendum === undefined ? current.desired_outcome : `${current.desired_outcome}\n\n${args.outcome_addendum.trim()}`;
+          const addendum = args.outcome_addendum?.trim() ?? null;
+          const outcome = addendum === null ? current.desired_outcome : current.desired_outcome ? `${current.desired_outcome}\n\n${addendum}` : addendum;
           if (outcome !== null && outcome.length > 4000)
             throw new ToolError({ error: "invalid_scope_append", hint: "The desired outcome would pass 4000 characters; shorten outcome_addendum." });
           const criteria = args.criteria.map(item => ({ id: item.id, text: item.text.trim() }));
+          // The event is the receipt the sourced guard requires, so it is written first.
+          await writeEvent(c, actor, "append-work-request-scope", "ops_work_request", current.id, {
+            field: "acceptance_criteria", old: { version: args.base_version, criteria_count: current.acceptance_criteria.length },
+            new: { version: args.base_version + 1, appended: criteria, outcome_addendum: addendum, source_ref: args.source_ref },
+            idempotency_key: args.idempotency_key,
+          });
           const row = (await c.query(`update ops.work_request set acceptance_criteria=acceptance_criteria || $3::jsonb,
             desired_outcome=$4, version=version+1, updated_at=now()
             where id=$1 and version=$2 returning ref, state, version /* work-request-intake:append-scope */`,
             [current.id, args.base_version, JSON.stringify(criteria), outcome])).rows[0];
           if (!row) throw new ToolError({ error: "version_conflict" });
-          await writeEvent(c, actor, "append-work-request-scope", "ops_work_request", current.id, {
-            field: "acceptance_criteria", old: { version: args.base_version, criteria_count: current.acceptance_criteria.length },
-            new: { version: Number(row.version), appended: criteria, outcome_addendum: args.outcome_addendum ?? null, source_ref: args.source_ref },
-            idempotency_key: args.idempotency_key,
-          });
           return { ok: true, human_ref: row.ref, state: row.state, version: Number(row.version), appended: criteria.map(item => item.id), criteria_count: ids.length };
         });
       },

@@ -62,7 +62,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["work_request_scope_frozen", "Append scope only to a captured or triaged Work Request. A ready plan needs a plan amendment instead."],
   ["duplicate_criterion_id", "Each appended criterion id must be new on the Work Request. Choose unused ids and retry."],
   ["criteria_cap_exceeded", "A Work Request holds at most 12 acceptance criteria. Merge related criteria before appending; nothing was appended."],
-  ["sponsored_actor_required","An authenticated partner or sponsored agent must perform this operation."],
+  ["sponsored_actor_required", "An authenticated partner or sponsored agent must perform this operation."],
   ["memory_attach_required", "Call attach-memory first, then pass the attach_id it returned to this actor when writing or retiring team-memory."],
   ["memory_read_only", "This attach is read_only. Call attach-memory with access read_write, then retry with the new attach_id."],
   ["convention_proposal_not_found", "Choose an active proposal from governance-queue pending_convention_proposals."],

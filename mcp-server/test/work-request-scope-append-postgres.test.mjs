@@ -70,6 +70,45 @@ test('append-work-request-scope appends after existing criteria, bumps version a
   assert.equal(events[0].new_value.source_ref, 'record:ROW-0000000000000001');
 });
 
+test('an addendum on a request with no desired outcome becomes the whole outcome', async () => {
+  await c.query(`insert into ops.work_request(ref,title,requester_actor,owner_actor,acceptance_criteria)
+    values('WR-998003','Synthetic unsourced scope','joe','builder',$1)`, [criteria(1)]);
+  await command('append-work-request-scope', append('WR-998003', { outcome_addendum: 'Added.' }));
+  assert.equal((await row('WR-998003')).desired_outcome, 'Added.');
+});
+
+// A receipt forged by the database owner, so the guard's other checks are tested alone.
+async function receipt(ref, appended) {
+  const w = (await c.query('select id,version from ops.work_request where ref=$1', [ref])).rows[0];
+  await c.query(`insert into event(occurred_at,actor_id,verb,subject_type,subject_id,field,new_value,cause,idempotency_key)
+    values(now(),$1,'append-work-request-scope','ops_work_request',$2,'acceptance_criteria',$3,'system',$4)`,
+    [actor.id, w.id, { version: w.version + 1, appended, outcome_addendum: null }, randomUUID()]);
+}
+
+test('the sourced guard refuses a direct append with no matching receipt', async () => {
+  await sourcedRequest('WR-998004', 1);
+  const append1 = `update ops.work_request set version=version+1,
+    acceptance_criteria=acceptance_criteria || '[{"id":"BF-1","text":"New"}]' where ref='WR-998004'`;
+  await c.query('begin');
+  try {
+    await c.query('set local role carr_writer');
+    await assert.rejects(c.query(append1), /sourced Program 6 Work Requests permit only/);
+  } finally { await c.query('rollback'); }
+  await receipt('WR-998004', [{ id: 'BF-1', text: 'Different' }]);
+  await assert.rejects(c.query(append1), /sourced Program 6 Work Requests permit only/);
+  assert.equal((await row('WR-998004')).version, 1);
+});
+
+for (const [label, bad] of [['numeric text', { id: 'BF-1', text: 123 }], ['object text', { id: 'BF-1', text: { a: 1 } }], ['numeric id', { id: 7, text: 'Seven' }]]) {
+  test(`the sourced guard refuses ${label} even with a receipt`, async () => {
+    const ref = { 'numeric text': 'WR-998005', 'object text': 'WR-998006', 'numeric id': 'WR-998007' }[label];
+    await sourcedRequest(ref, 1);
+    await receipt(ref, [bad]);
+    await assert.rejects(c.query(`update ops.work_request set version=version+1,
+      acceptance_criteria=acceptance_criteria || $2::jsonb where ref=$1`, [ref, JSON.stringify([bad])]), /sourced Program 6 Work Requests permit only/);
+  });
+}
+
 test('the sourced guard refuses a direct write that rewrites an existing criterion', async () => {
   await sourcedRequest('WR-998002', 2);
   await assert.rejects(c.query(`update ops.work_request set version=version+1,
