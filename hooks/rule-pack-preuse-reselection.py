@@ -15,7 +15,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 from lib.rule_scope_lookup import fetch_catalog, select_rules
 from lib.rule_delivery_preuse import (LOOKUP_RECEIPT_SCHEMA, LOOKUP_INSTRUCTION, LOOKUP_COMPLETE_INSTRUCTION,
-    canonical, digest, receipt_id, source_sha256, valid_local_identity, _claude_user_text)
+    canonical, digest, receipt_id, source_sha256, valid_local_identity, _claude_user_text, grok_user_chunk)
 from lib import rule_cards, rule_routes
 from lib.hook_runtime import decision, run
 
@@ -71,10 +71,19 @@ def task_text(payload):
                 raise ValueError('agent_transcript_mismatch')
         elif path.name != child_name:
             path = path.with_suffix('') / 'subagents' / child_name
+    grok_chunks = []  # newest first; a Grok prompt can span consecutive chunk records
     for line in _transcript_lines(path):
         if not line.strip():
             continue
         record = json.loads(line)
+        chunk = grok_user_chunk(record)
+        if chunk is not None:
+            grok_chunks.append(chunk)
+            continue
+        if grok_chunks:
+            text, grok_chunks = ''.join(reversed(grok_chunks)), []
+            if text:
+                return _bounded(text)
         text = _claude_user_text(record)
         part = record.get('payload', {})
         if record.get('type') == 'event_msg' and part.get('type') == 'user_message':
@@ -84,10 +93,16 @@ def task_text(payload):
             text = '\n'.join(c.get('text', '') for c in part.get('content') or []
                              if isinstance(c, dict) and c.get('type') == 'input_text')
         if isinstance(text, str) and text:
-            if len(text) > 90000:
-                raise ValueError('task_too_large')
-            return text
+            return _bounded(text)
+    if ''.join(grok_chunks):
+        return _bounded(''.join(reversed(grok_chunks)))
     raise ValueError('task_context_unavailable')
+
+
+def _bounded(text):
+    if len(text) > 90000:
+        raise ValueError('task_too_large')
+    return text
 
 
 def _catalog_root():

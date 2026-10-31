@@ -129,6 +129,24 @@ def _claude_user_text(record: object) -> str | None:
     return "".join(pieces)
 
 
+def grok_user_chunk(record: object) -> str | None:
+    """One piece of a Grok user turn from its updates.jsonl; None for any other record.
+
+    Grok records a prompt as one or more consecutive user_message_chunk updates.
+    """
+    if not isinstance(record, dict) or record.get("method") != "session/update":
+        return None
+    params = record.get("params")
+    update = params.get("update") if isinstance(params, dict) else None
+    if (not isinstance(update, dict)
+            or update.get("sessionUpdate") != "user_message_chunk"):
+        return None
+    content = update.get("content")
+    if isinstance(content, dict) and content.get("type") == "text" and isinstance(content.get("text"), str):
+        return content["text"]
+    return ""
+
+
 def validate_lookup_receipt(row: object, *, repo: Path) -> bool:
     if not isinstance(row, dict):
         return False
