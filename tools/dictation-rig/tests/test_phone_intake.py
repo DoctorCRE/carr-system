@@ -320,6 +320,26 @@ class PhoneIntakeTests(unittest.TestCase):
         self.assertIn('exception=KeyError', post_call.LOG_PATH.read_text())
         self.assertNotIn('private provider details', post_call.LOG_PATH.read_text())
 
+    def test_failed_resume_waits_until_next_budget_day(self):
+        import call_budget
+        import post_call
+        from datetime import datetime, timezone
+
+        session = self.budget_held_phone()
+        with (patch.object(call_budget, 'datetime') as clock,
+              patch.object(post_call, 'fetch_context', side_effect=RuntimeError('synthetic failure')) as fetch,
+              patch.object(post_call, 'write_private', wraps=post_call.write_private) as write,
+              patch.object(phone_intake, 'publish_status', return_value=True)):
+            clock.now.return_value = datetime(2026, 1, 2, 12, tzinfo=timezone.utc)
+            phone_intake.process_pending(self.root, {}, 'synthetic')
+            fetch.assert_called_once()
+            fetch.reset_mock()
+            write.reset_mock()
+            for _ in range(5):
+                phone_intake.process_pending(self.root, {}, 'synthetic')
+            fetch.assert_not_called()
+            self.assertEqual([c for c in write.call_args_list if c.args[0] == session / post_call.REPORT_FILE], [])
+
     def test_same_chicago_budget_day_sweep_does_no_context_fetch_or_report_write(self):
         import call_budget
         import post_call

@@ -832,6 +832,7 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
                 report = resumed
             except Exception as exc:
                 _deal_check_unavailable(report, session_dir, exc)
+                report["checks_hold_day"] = call_budget.budget_day()
             with update_report(session_dir, initial=report, locked=True) as current:
                 current.clear()
                 current.update(report)
