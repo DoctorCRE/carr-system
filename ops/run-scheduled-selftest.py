@@ -71,6 +71,13 @@ class ScheduledRunTests(unittest.TestCase):
         self.assertNotIn("SYNTHETIC_PRIVATE", observed)
         self.assertFalse(list((self.root / "out").glob("outlook-intake-receipt.*")))
 
+    def test_reconciled_intake_receipt_is_recorded_as_expected(self):
+        receipt = {'state': 'succeeded', 'reason': 'reconciled', 'counts': {'mail_ids': 2}}
+        result = self.invoke_intake(receipt, code=0)
+        self.assertEqual(result.returncode, 0)
+        args = json.loads(self.rows()[0][3])
+        self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
+
     def test_runtime_fields_reach_ops_detail(self):
         for behind in (3, None):
             receipt = {"state": "succeeded", "reason": "processed", "counts": {},
@@ -118,6 +125,20 @@ class ScheduledRunTests(unittest.TestCase):
         self.assertEqual(args[args.index('--state') + 1], 'skipped')
         self.assertNotIn('--failure-class', args)
         self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
+
+    def test_locked_screen_skip_preserves_reason_without_failure_class(self):
+        receipt = {'state': 'skipped', 'reason': 'screen_locked', 'counts': {}}
+        child = self.root / 'locked.py'
+        child.write_text(f"print({('outlook-triage-receipt ' + json.dumps(receipt))!r})\n"
+                         "raise SystemExit(78)\n")
+        result = subprocess.run(['/bin/zsh', str(self.root / 'bin/run-scheduled.sh'),
+            'outlook-triage', 'outlook.triage', sys.executable, str(child)], cwd=self.root,
+            env=self.env, text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 78)
+        args = json.loads(self.rows()[-1][3])
+        self.assertEqual(self.rows()[-1][2], 'skipped')
+        self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
+        self.assertNotIn('--failure-class', args)
 
     def test_receipt_tempfile_failure_still_runs_service(self):
         (self.root / 'out').write_text('synthetic unavailable receipt directory')

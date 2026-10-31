@@ -97,6 +97,24 @@ class CaptureOutcomesTests(unittest.TestCase):
         request.assert_called_once()
         self.assertTrue((self.session / "mic.caf").exists())
 
+    def test_expired_poll_renews_once_and_never_releases_unfiled_recordings(self) -> None:
+        expired = (401, {"error": "session_token_expired"})
+        for renewal, retry, expected_calls in (
+            ((200, {}), (200, {"state": "distilling", "meeting_record": None}), 3),
+            ((200, {}), expired, 3),
+            ((409, {"error": "terminal_state"}), None, 2),
+            ((401, {"error": "unauthorized"}), None, 2),
+        ):
+            with self.subTest(renewal=renewal, retry=retry), patch.object(
+                bridge, "http_request", side_effect=[expired, renewal, retry],
+            ) as request:
+                result = bridge.poll_cmd(self.cfg, self.session)
+                self.assertEqual(result == 0, retry is not None and retry[0] == 200)
+                self.assertEqual(request.call_count, expected_calls)
+                self.assertTrue(request.call_args_list[1].args[1].endswith("/capture/renew"))
+                self.assertTrue((self.session / "mic.caf").exists())
+                self.assertFalse((self.session / "ingested.json").exists())
+
     def test_claim_refusal_logs_public_error_code(self) -> None:
         (self.session / ".capture.json").unlink()
         (self.session / "announcement.json").write_text('{"announcement_fired_at":"2026-01-05T12:00:00Z"}')
@@ -281,7 +299,8 @@ class CaptureSweepTests(unittest.TestCase):
         self.commands = self.root / "commands"
         self.commands.mkdir()
         self.attempts = self.root / "attempts"
-        self.env = {"HOME": str(self.root), "PATH": f"{self.commands}:/usr/bin:/bin", "CARR_RECORDINGS_DIR": str(self.recordings)}
+        self.env = {"HOME": str(self.root), "PATH": f"{self.commands}:/usr/bin:/bin", "CARR_RECORDINGS_DIR": str(self.recordings),
+                    "CARR_CAPTURE_LOG": str(self.root / "capture.log")}
         self.command("python3", f"#!/bin/bash\nprintf '%s\\n' \"$3\" >> '{self.attempts}'\ncase \"$3\" in *first*) exit 1;; esac\n")
         self.command("date", "#!/bin/bash\nif [ \"$1\" = -j ]; then printf '1\\n'; else /bin/date \"$@\"; fi\n")
         self.command("sleep", "#!/bin/bash\nexit 0\n")
