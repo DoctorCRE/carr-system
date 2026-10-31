@@ -2112,6 +2112,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-deal-update-reviews": {
+    "ingress_key": "mcp-tool:read-deal-update-reviews",
+    "source_locator": "mcp-server/src/deal-update-resolution.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-decision": {
     "ingress_key": "mcp-tool:read-decision",
     "source_locator": "mcp-server/src/tools.js",
@@ -3133,6 +3143,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "942ac3fdfa92a1ed455647d2e39d5ea63d17d9d0649802269add41694940b57a",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "review-deal-update": {
+    "ingress_key": "mcp-tool:review-deal-update",
+    "source_locator": "mcp-server/src/deal-update-resolution.js",
+    "schema_digest": "e5ee03930b63ead188d0d067066f37a905d191c00711e1fae4396ddc0bbec110",
+    "write": true,
+    "human_only": true,
     "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
