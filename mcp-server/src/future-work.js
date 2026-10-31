@@ -59,7 +59,7 @@ function records(verb, args, result, actor) {
       || (kind === 'incident' && args.ref) || result.suggestion_id || result.suggestion?.id
       || (kind === 'meeting_action' && `${args.meeting_id}:${result.action?.action_number || result.action_number || args.action_number || args.dedupe_key || args.idempotency_key}`)
       || result.ref || args.idempotency_key;
-  return [{ ref: `${kind}:${id}`, title: args.title || args.summary || args.prompt || args.description
+  return [{ ref: `${kind}:${id}`, work_request: kind === 'capture' ? result.result?.work_request : undefined, title: args.title || args.summary || args.prompt || args.description
     || args.polished_text || args.proposed_text || args.next_action || args.row_key || args.text || args.name || args.next_step || args.goal || args.body || args.defect_class || args.kind || verb, source: args }];
 }
 

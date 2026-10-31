@@ -3,6 +3,7 @@ import cardVerbs from './job-card-verbs.v1.json' with { type: 'json' };
 import jobTypes from './job-types.v1.json' with { type: 'json' };
 import addressFormat from './progress-address.v1.json' with { type: 'json' };
 import { organizationTenantForActor } from './identity.js';
+import { derivedIdempotencyKey } from './derived-key.ts';
 import { readableWorkRequestSql } from './work-request-read.ts';
 
 const text = (max = 100) => ({ type: 'string', minLength: 1, maxLength: max });
@@ -211,7 +212,7 @@ export function queueView(rows, sources, at) {
   return { jobs, github: sources.map(({ prs, ...source }) => source) };
 }
 
-export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
+export function workQueueTools({ withEnvelope, writeEvent, ToolError, completeWorkRequest }) {
   const refuse = error => { throw new ToolError({ error }); };
   const validate = (args, properties, required) => {
     if (Object.keys(args).some(key => !Object.hasOwn(properties, key)) || required.some(key => args[key] == null)) refuse('invalid_work_queue_fields');
@@ -309,7 +310,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
           select $1,$3::integer+ordinality,title from unnest($2::text[]) with ordinality as s(title,ordinality)`, [wr.id, titles.slice(prior.length), prior.length]);
         return { slices: titles.map((title, index) => ({ slice_id: queueCardId(wr.ref, index + 1), title })) };
       }),
-    'close-work-request-slice': command('close-work-request-slice', 'Record an open slice as done or retired exactly once, using the current slice version as base_version. Done requires merged change evidence.',
+    'close-work-request-slice': command('close-work-request-slice', 'Record an open slice as done or retired exactly once, using the current slice version as base_version. Done requires merged change evidence. Closing the last done slice completes an already-attested request through complete-work-request.',
       { slice, base_version: positive, outcome: { ...text(), enum: ['done', 'retired'] }, reason: text(2000), superseded_by: positive,
         change_refs: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false,
           properties: { pr_url: text(300), merge_commit_sha: text(40) }, required: ['pr_url', 'merge_commit_sha'] } } },
@@ -334,7 +335,20 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         const saved = (await c.query(`update ops.work_request_slice set outcome=$3::jsonb,version=version+1
           where work_request_id=$1 and ordinal=$2 and outcome->>'outcome'='open' returning ordinal,version`, [wr.id, args.slice, JSON.stringify(record)])).rows[0];
         if (!saved) refuse('slice_not_found');
-        return { slice_id: queueCardId(wr.ref, saved.ordinal), version: saved.version, ...record };
+        let completion;
+        const slices = (await c.query('select outcome from ops.work_request_slice where work_request_id=$1', [wr.id])).rows;
+        if (args.outcome === 'done' && readyToClose(wr.state, slices.map(row => row.outcome))) {
+          const current = (await c.query('select version,completion_evidence from ops.work_request where id=$1 for update', [wr.id])).rows[0];
+          const evidence = current.completion_evidence;
+          if (typeof evidence?.attested_by === 'string' && evidence.attested_by.trim()) completion = await completeWorkRequest(c, actor, {
+            human_ref: wr.ref, base_version: current.version,
+            idempotency_key: derivedIdempotencyKey('slice-completion', args.idempotency_key),
+            change_refs: evidence.change_refs, criterion_evidence: evidence.criterion_evidence, user_facing: evidence.user_facing,
+            ...(evidence.user_journey_ref !== undefined ? { user_journey_ref: evidence.user_journey_ref } : {}),
+          }, evidence.attested_by);
+        }
+        return { slice_id: queueCardId(wr.ref, saved.ordinal), version: saved.version, ...record,
+          ...(completion ? { work_request_state: completion.state } : {}) };
       }),
     'dispatch-job': command('dispatch-job', 'Mint a queued job with a caller-supplied job_type from job-workflows.v1.yaml, or record a runner start for an existing job exactly once.',
       { slice, job: positive, runner_job_id: text(), repository: { ...text(), enum: repositories }, job_type: { ...text(), enum: jobTypes }, executor: text(), model: text(), effort: text(), card_title: text(80), description: text(500) },

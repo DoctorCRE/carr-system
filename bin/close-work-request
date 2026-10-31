@@ -126,6 +126,8 @@ def main():
         for command in plan['calls']:
             result = call(command['verb'], command['args'])
             print(json.dumps(dict(verb=command['verb'], result=result)), flush=True)
+            if result.get('work_request_state') == 'confirmed_closed':
+                break
         return int(bool(plan['blocked']))
     return 0
 

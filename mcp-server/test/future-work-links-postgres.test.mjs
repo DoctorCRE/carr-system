@@ -285,3 +285,34 @@ test('accepting a factual capture does not invent future work',async()=>{
   assert.equal((await c.query('select count(*) from ops.work_request')).rows[0].count,before);
   assert.equal((await command('resolve-candidate',args,actor,'carr_writer')).work_request,undefined);
 });
+
+for (const inherited of ['minted','payload','linked']) {
+  test(`accepted next step uses one WR across its capture and durable items (${inherited})`,async()=>{
+    await businessRecords();
+    const wr=inherited==='minted' ? null : (await command('record-defect',{idempotency_key:randomUUID(),
+      defect_class:'synthetic-inherited-wr',claimed:'Captured follow-up',actual:'Follow-up needs delivery',detected_by:'self'},actor,'carr_writer')).work_request;
+    const nonce=randomUUID();
+    const session=(await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,consent_announced_at,session_token_hash,expires_at,state_at)
+      values($1,'synthetic-device',$2,'meeting',now(),now(),$1,now()+interval '1 hour',now()) returning id`,[nonce,actor.id])).rows[0].id;
+    const payload={deal:syntheticDeal,text:'Vendor introductions: synthetic lender; Prelim market study: synthetic purchase search',
+      next_date:'2026-11-04',...(inherited==='payload'?{work_request:wr}:{})};
+    const candidate=(await c.query(`insert into capture_candidate(session_id,idempotency_key,batch_hash,item_index,kind,payload,evidence_quote,confidence)
+      values($1,$2,'synthetic',0,'next_step',$3::jsonb,'Introduce the lender and prepare a market study',0.9) returning id`,[session,randomUUID(),JSON.stringify(payload)])).rows[0].id;
+    if (inherited==='linked') await c.query(`insert into ops.future_work_link(organization_tenant_id,source_ref,work_request_id,source_verb,source_key)
+      select 'carr-internal',$1,id,'resolve-candidate',$2 from ops.work_request where ref=$3`,['capture:'+candidate,randomUUID(),wr]);
+    const before=Number((await c.query('select count(*) from ops.work_request')).rows[0].count);
+    const args={candidate_id:candidate,accept:true,idempotency_key:randomUUID()};
+    const out=await command('resolve-candidate',args,actor,'carr_writer');
+    assert.equal(Number((await c.query('select count(*) from ops.work_request')).rows[0].count),before+(wr?0:1));
+    if(wr) assert.equal(out.work_request,wr);
+    assert.equal(out.result.work_request,out.work_request);
+    assert.equal(out.result.items.length,2);
+    const sources=['capture:'+candidate,'action:'+out.result.next_action_id,...out.result.items.map(item=>'deal_item:'+item.id)];
+    const links=(await c.query(`select f.source_ref,w.ref from ops.future_work_link f join ops.work_request w on w.id=f.work_request_id
+      where f.source_ref=any($1::text[])`,[sources])).rows;
+    assert.equal(links.length,sources.length);
+    assert.ok(links.every(link=>link.ref===out.work_request));
+    assert.equal((await command('resolve-candidate',args,actor,'carr_writer')).work_request,out.work_request);
+    assert.equal(Number((await c.query('select count(*) from ops.work_request')).rows[0].count),before+(wr?0:1));
+  });
+}

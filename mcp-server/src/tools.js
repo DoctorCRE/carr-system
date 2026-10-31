@@ -9948,6 +9948,11 @@ registerTools({
       if (!verb) throw new ToolError({ error: "unknown_candidate_kind", kind: candidate.kind });
       const innerArgs = { ...candidate.payload, idempotency_key: captureKey(candidate.id),
         ...(FUTURE_WORK_WRITES[verb] && args.work_request ? { work_request: args.work_request } : {}) };
+      if (candidate.kind === 'next_step' && !innerArgs.work_request) {
+        const linked = (await c.query(`select w.ref from ops.future_work_link f join ops.work_request w on w.id=f.work_request_id
+          where f.organization_tenant_id=$1 and f.source_ref=$2`, [organizationTenantForActor(actor), `capture:${candidate.id}`])).rows[0];
+        if (linked) innerArgs.work_request = linked.ref;
+      }
       delete innerArgs.plan_base;
       delete innerArgs.evidence_source;
       if (candidate.kind === "meeting_record") innerArgs.kind = "meeting";
@@ -9993,7 +9998,7 @@ registerTools({
           `capture_candidate:${candidate.id}`).entries()) {
           const { status, ...facts } = item;
           const stored = await executeRegisteredTool(c, actor, 'record-deal-item', {
-            ...facts, deal: result.deal_id, ...(args.work_request ? { work_request: args.work_request } : {}),
+            ...facts, deal: result.deal_id, work_request: result.work_request,
             idempotency_key: derivedIdempotencyKey("capture-candidate-item", `${candidate.id}:${index}`),
           });
           result.items.push(stored.item);
@@ -10731,7 +10736,9 @@ registerTools({
 registerTools(workShapeTools({ withEnvelope, writeEvent, ToolError }), "work-shape");
 
 // Program 6: sourced additive capture and a safe card only. No lifecycle verbs.
-registerTools(workQueueTools({ withEnvelope, writeEvent, ToolError }), "work-queue");
+registerTools(workQueueTools({ withEnvelope, writeEvent, ToolError,
+  completeWorkRequest: (c, actor, args, attestor) => TOOLS["complete-work-request"].handler(c, actor, args, attestor),
+}), "work-queue");
 registerTools(workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }), "work-request-intake");
 registerTools(workPortfolioTools({ ToolError }), "work-portfolio");
 

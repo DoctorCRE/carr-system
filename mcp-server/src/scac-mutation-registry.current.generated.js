@@ -636,7 +636,9 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "human_only": false,
     "human_caller_only": false,
     "authority_only": false,
-    "delegates_to": []
+    "delegates_to": [
+      "complete-work-request"
+    ]
   },
   "commit-winning-property": {
     "ingress_key": "mcp-tool:commit-winning-property",
