@@ -1,9 +1,9 @@
-// Org conventions: the read-only `rule` store's one human write door
+// Org conventions: the read-only `rule` store's one write door
 // (WR-000562 S4, docs/memory/team-memory-design.md D1 and D16).
 //
-// Agents propose a convention as a team-memory section under
+// Agents write a convention as a team-memory section under
 // conventions/proposed/<slug>. governance-queue lists those sections, and a
-// partner's in-person approval calls adopt-rule, which hands the section to
+// partner or their sponsored agent calls adopt-rule, which hands the section to
 // ops.adopt_rule: one transaction activates any replacement through the
 // existing Joe-authority approval chain, retires the named active rules and
 // consumes the proposal. rule-cards reads the adopted cards back for
@@ -85,9 +85,6 @@ const ADOPT_REFUSALS = new Map([
   ["convention_retirement_rule_not_active", "convention_retirement_rule_not_active"],
 ]);
 
-// The server-written via of the app's Deal Room cookie session (dealroom-web.js).
-const APP_APPROVAL_VIA = "dealroom-cookie";
-
 export function orgConventionTools({ withEnvelope, writeEvent }) {
   const adopt = (c, actor, args) => withEnvelope(c, actor, "adopt-rule", args, async () => {
     let adopted;
@@ -113,23 +110,18 @@ export function orgConventionTools({ withEnvelope, writeEvent }) {
   });
   return {
     "adopt-rule": {
-      write: true, humanOnly: true, humanCallerOnly: true, authorityOnly: true,
-      description: "Adopt a team-memory convention proposal (conventions/proposed/<slug>, listed by governance-queue) in person through Joe's existing authority chain. A Retires JSON-array line retires named active rules with the approval reason and proposal reference. Convention with Card or Packs creates an optional replacement. Retirement-only adoption creates no rule. All effects and proposal consumption are atomic. Only the app's signed-in approval surface can call it; machine identities and chat connector sessions are refused.",
+      // Joe, 2026-10-31: "If you think a rule is needed you just make it a rule
+      // and tell me you did it." humanOnly admits a partner or the agent they
+      // sponsor; the event row records which actor adopted.
+      write: true, humanOnly: true, authorityOnly: true,
+      description: "Adopt a team-memory convention proposal (conventions/proposed/<slug>, listed by governance-queue) through Joe's existing authority chain. A partner or the agent they sponsor adopts directly and tells Joe what it adopted. A Retires JSON-array line retires named active rules with the reason and proposal reference. Convention with Card or Packs creates an optional replacement. Retirement-only adoption creates no rule. All effects and proposal consumption are atomic.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
         idempotency_key: { type: "string" },
         section_id: { type: "string", description: "the proposal section from governance-queue pending_convention_proposals" },
         base_version: { type: "integer", description: "the proposal's current version" },
-        reason: { type: "string", description: "why the partner adopts it" } },
+        reason: { type: "string", description: "why the rule is adopted or retired" } },
         required: ["idempotency_key", "section_id", "base_version", "reason"] },
-      handler: async (c, actor, args) => {
-        // A partner's own claude.ai or Desktop connector session authenticates
-        // as the verified partner, so humanCallerOnly alone would admit a chat
-        // model acting in Joe's name (design D1). Adoption happens only in the
-        // app: the Deal Room cookie gate is the one server-written via for it.
-        if (actor.via !== APP_APPROVAL_VIA)
-          throw new ToolError({ error: "rule_adoption_requires_app_approval" });
-        return adopt(c, actor, args);
-      },
+      handler: adopt,
     },
 
     "rule-cards": {

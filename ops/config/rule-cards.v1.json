@@ -148,8 +148,8 @@
     {
       "id": "K12",
       "title": "Capture durable corrections now",
-      "wording": "When a partner corrects or overrules you, or states a preference that would recur, propose it this turn as a team-memory convention with the trade-off; it binds nobody until Joe or Dell adopts it in the app. A how-to the same partner explains twice: quote both, offer a skill.",
-      "word_count": 49,
+      "wording": "When a partner corrects or overrules you, or states a preference that would recur, write it this turn as a team-memory convention, adopt it with adopt-rule, and tell Joe in one line what you adopted. A how-to the same partner explains twice: quote both, offer a skill.",
+      "word_count": 47,
       "placement": "CORE",
       "merged_from_drafts": [
         "G01",
@@ -1479,8 +1479,8 @@
     {
       "id": "A10",
       "title": "Sweep learning at real boundaries",
-      "wording": "When committing, deploying, checkpointing, or handing off, sweep the exchanges since the last sweep: propose uncaptured rulings as team-memory conventions; they bind nobody until Joe or Dell adopts them in the app. Record partner adoption needs as action_required, and tell Joe in one line.",
-      "word_count": 44,
+      "wording": "When committing, deploying, checkpointing, or handing off, sweep the exchanges since the last sweep: write each uncaptured ruling as a team-memory convention, adopt it with adopt-rule, and tell Joe in one line what you adopted.",
+      "word_count": 35,
       "placement": "TOOL",
       "merged_from_drafts": [
         "T03",

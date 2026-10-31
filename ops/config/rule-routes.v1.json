@@ -826,7 +826,7 @@
      ]
     }
    ],
-   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
+   "note": "Durable corrections become team-memory conventions (conventions/proposed/<slug>) that the agent adopts with adopt-rule and reports to Joe."
   },
   "4c21d86b": {
    "moment": "merge_survivor verb check (confirm-merge)",
@@ -1169,7 +1169,7 @@
      ]
     }
    ],
-   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
+   "note": "Durable corrections become team-memory conventions (conventions/proposed/<slug>) that the agent adopts with adopt-rule and reports to Joe."
   },
   "5f8c661d": {
    "moment": "vendor introduction work (intro_politics scope)",
@@ -1412,7 +1412,7 @@
      ]
     }
    ],
-   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
+   "note": "Durable corrections become team-memory conventions (conventions/proposed/<slug>) that the agent adopts with adopt-rule and reports to Joe."
   },
   "7105955b": {
    "moment": "loop_successor schema (close-loop verb)",
@@ -1765,7 +1765,7 @@
      ]
     }
    ],
-   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
+   "note": "Durable corrections become team-memory conventions (conventions/proposed/<slug>) that the agent adopts with adopt-rule and reports to Joe."
   },
   "88e9b5eb": {
    "moment": "blocker_decider gate",
@@ -1920,7 +1920,7 @@
      ]
     }
    ],
-   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
+   "note": "Durable corrections become team-memory conventions (conventions/proposed/<slug>) that the agent adopts with adopt-rule and reports to Joe."
   },
   "9530fb1c": {
    "moment": "the moment a session says 'the right fix is X'",
@@ -1969,7 +1969,7 @@
      ]
     }
    ],
-   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
+   "note": "Durable corrections become team-memory conventions (conventions/proposed/<slug>) that the agent adopts with adopt-rule and reports to Joe."
   },
   "9873a0d2": {
    "moment": "a partner re-explains the same how-to twice",
@@ -1994,7 +1994,7 @@
      ]
     }
    ],
-   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
+   "note": "Durable corrections become team-memory conventions (conventions/proposed/<slug>) that the agent adopts with adopt-rule and reports to Joe."
   },
   "98e74e7c": {
    "moment": "reviewing a fed link or source",
@@ -2219,7 +2219,7 @@
      ]
     }
    ],
-   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
+   "note": "Durable corrections become team-memory conventions (conventions/proposed/<slug>) that the agent adopts with adopt-rule and reports to Joe."
   },
   "af7de070": {
    "moment": "a tool call blocked by a permission classifier",
@@ -2530,7 +2530,7 @@
      ]
     }
    ],
-   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
+   "note": "Durable corrections become team-memory conventions (conventions/proposed/<slug>) that the agent adopts with adopt-rule and reports to Joe."
   },
   "c66dc739": {
    "moment": "reading/capturing Joe's mail",
@@ -3208,7 +3208,7 @@
      ]
     }
    ],
-   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
+   "note": "Durable corrections become team-memory conventions (conventions/proposed/<slug>) that the agent adopts with adopt-rule and reports to Joe."
   },
   "fc4d7753": {
    "moment": "any turn - evaluating whether to add structure or ideas",
@@ -3266,7 +3266,7 @@
      ]
     }
    ],
-   "note": "Durable corrections become team-memory convention proposals (conventions/proposed/<slug>); they bind nobody until adopted in person through governance-queue (adopt-rule)."
+   "note": "Durable corrections become team-memory conventions (conventions/proposed/<slug>) that the agent adopts with adopt-rule and reports to Joe."
   },
   "76fcbed6": {
    "moment": "Joe sends a link, article, repo, video or other source",
