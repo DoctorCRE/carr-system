@@ -482,7 +482,7 @@ const completeOne = (row, extra={}) => command('complete-one-action', {
 test('authenticated app route admits single-task completion and refuses anonymous and cross-origin writes', async () => {
   const ref = await secondDeal();
   const row = await plainAction(ref);
-  const now = Date.now();
+  const now = 1700000000000;
   const opaque = randomUUID();
   const sessionKey = 'dealroom_session:' + createHash('sha256').update(opaque).digest('hex');
   const session = { props:{slug:'joe',via:'dealroom-cookie',client_id:'dealroom-pwa'},
