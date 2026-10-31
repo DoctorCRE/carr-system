@@ -1,10 +1,20 @@
 # Test progress orchestrator state projection.
 import json
+from pathlib import Path
 import unittest
 from progress_orchestrator import project
 
 
 class OrchestratorTests(unittest.TestCase):
+    def test_board_publication_is_unscheduled(self):
+        root = Path(__file__).resolve().parents[1]
+        services = json.loads((root / 'ops/config/services.json').read_text())['services']
+        jobs = json.loads((root / 'ops/config/studio-failover.v1.json').read_text())['jobs']
+        self.assertNotIn('progress-board-publication', {service['key'] for service in services})
+        self.assertNotIn('local.carr-progress-board', {job['label'] for job in jobs})
+        self.assertFalse((root / 'ops/launchd/local.carr-progress-board.plist').exists())
+        self.assertNotIn('cmd_install_progress_board', (root / 'ops/config-as-code.py').read_text())
+
     def test_review_return_merge_and_release_are_distinct_facts(self):
         state = {'tasks': {'p': {'title': 'Deal room search', 'repo': 'jbookout/doctorcre-app', 'pr': 12,
             'stage': 'fixing', 'executor': 'Codex', 'pr_phase': 'Changes requested'}}}
@@ -45,12 +55,6 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(len(result['cards']), 1)
         self.assertEqual(result['cards'][0]['prs'], ['https://github.com/jbookout/doctorcre-app/pull/12'])
 
-    def test_scheduled_refresh_runs_every_five_minutes_without_a_model(self):
-        import plistlib
-        from pathlib import Path
-        config = plistlib.loads((Path(__file__).parents[1]/'ops/launchd/local.carr-progress-board.plist').read_bytes())
-        self.assertEqual(len(config['StartCalendarInterval']), 12)
-        self.assertEqual(config['ProgramArguments'][1], '{{REPO}}/ops/progress-board-render.sh')
 
 
 if __name__ == '__main__':
