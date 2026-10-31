@@ -24,9 +24,11 @@ class RegistryMergeTests(unittest.TestCase):
             (self.repo / directory).mkdir(parents=True, exist_ok=True)
         shutil.copytree(ROOT / 'mcp-server/src', self.repo / 'mcp-server/src')
         for path in ('lib/deal_schedule.schema.json', 'mcp-server/package.json',
-                     'mcp-server/run-tests.mjs', 'ops/scac-mutation-inventory.mjs',
+                     'mcp-server/run-tests.mjs', 'mcp-server/suite-discovery.mjs',
+                     'ops/scac-mutation-inventory.mjs',
                      'ops/git_env.py', 'tools/regen.py', '.gitignore'):
             shutil.copy(ROOT / path, self.repo / path)
+        (self.repo / 'mcp-server/suite-inventory.json').write_text('{"expected": 1}\n')
         source = self.repo / 'mcp-server/src/tools.js'
         text = source.read_text()
         for name in ('a', 'b'):
@@ -39,6 +41,7 @@ class RegistryMergeTests(unittest.TestCase):
         self.git('config', 'user.name', 'jbookout')
         self.git('config', 'user.email', 'jbookout@users.noreply.github.com')
         self.git('add', 'mcp-server/src', 'mcp-server/package.json', 'mcp-server/run-tests.mjs',
+                 'mcp-server/suite-discovery.mjs', 'mcp-server/suite-inventory.json',
                  'ops', 'tools', 'lib/deal_schedule.schema.json', '.gitignore')
         self.commit('main plus WR622 implementation')
         clone = Path(self.temp.name) / 'clone'
