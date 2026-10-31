@@ -542,9 +542,9 @@ class PhoneIntakeTests(unittest.TestCase):
         model = self.root / 'synthetic-model'
         model.write_bytes(b'fixture model, never speech recognition')
         decoder = self.root / 'decoder'
-        decoder.write_text(f'#!{sys.executable}\nimport shutil,sys\nshutil.copyfile(sys.argv[sys.argv.index("-i")+1],sys.argv[-1])\n')
+        decoder.write_text(f'#!{sys.executable}\nimport os,shutil,sys\nassert not os.environ.get("SYNTHETIC_UNRELATED_SECRET")\nshutil.copyfile(sys.argv[sys.argv.index("-i")+1],sys.argv[-1])\n')
         whisper = self.root / 'whisper'
-        whisper.write_text(f'#!{sys.executable}\nimport json,sys\njson.dump({{"transcription":[{{"offsets":{{"from":0,"to":1000}},"text":"Synthetic Clinic needs a revised proposal."}}]}},open(sys.argv[sys.argv.index("-of")+1]+".json","w"))\n')
+        whisper.write_text(f'#!{sys.executable}\nimport json,os,sys\nassert not os.environ.get("SYNTHETIC_UNRELATED_SECRET")\njson.dump({{"transcription":[{{"offsets":{{"from":0,"to":1000}},"text":"Synthetic Clinic needs a revised proposal."}}]}},open(sys.argv[sys.argv.index("-of")+1]+".json","w"))\n')
         decoder.chmod(0o700)
         whisper.chmod(0o700)
         import transcribe_session
@@ -564,7 +564,7 @@ class PhoneIntakeTests(unittest.TestCase):
                         'next_step': {'text': 'Revise proposal', 'next_date': '2026-01-02', 'needs_review': None}}],
                     'draft_proposals': [], 'review_questions': []}
 
-        with patch.dict('os.environ', {'CARR_WHISPER_MODEL': str(model)}), patch.object(transcribe_session, 'WHISPER_CLI_BIN', str(whisper)):
+        with patch.dict('os.environ', {'CARR_WHISPER_MODEL': str(model), 'SYNTHETIC_UNRELATED_SECRET': 'fixture'}), patch.object(transcribe_session, 'WHISPER_CLI_BIN', str(whisper)):
             status = phone_intake.extract(session, decoder=str(decoder), distiller=distiller)
         self.assertEqual(status['state'], 'ready_review')
         report = post_call.read_json(session / post_call.REPORT_FILE)
