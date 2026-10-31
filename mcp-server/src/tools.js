@@ -3864,14 +3864,14 @@ export const TOOLS = {
                          order by due_on nulls last, id limit 3) n), '[]'::jsonb) as open_actions,
                 (select jsonb_build_object('kind', step.kind, 'summary', step.summary,
                                            'occurred_at', to_jsonb(step.occurred_at)#>>'{}')
-                   from (select a.kind, a.summary, a.occurred_at, a.id
+                   from (select a.kind, a.summary, a.occurred_at, a.id, null::bigint as mutation_order
                            from v_deal_room_activity a where a.deal_id=b.id
                          union all
                          select 'completed_action', coalesce(nullif(e.new_value->>'outcome', ''),
-                           e.new_value->>'next_action', e.new_value->>'post_call_action'), e.recorded_at, e.id
+                           e.new_value->>'next_action', e.new_value->>'post_call_action'), e.recorded_at, e.id, e.mutation_order
                            from v_deal_room_event e where e.subject_id=b.id and e.verb in ('complete-action','complete-one-action')
                              and e.new_value->>'status'='done') step
-                  order by step.occurred_at desc, step.id desc limit 1) as last_step,
+                  order by step.occurred_at desc, step.mutation_order desc nulls last, step.id desc limit 1) as last_step,
                 (b.next_step is null or b.next_date is null) as next_step_required, b.market, b.segment,
                 b.client_id, b.client_ref, b.client_name, ce.client_status, ce.client_version,
                 ce.prospect_engagement_status, b.account_client_id, b.account_client_ref,

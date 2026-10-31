@@ -260,6 +260,16 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal(value.deals[0].last_step.summary, 'Synthetic outcome');
     }));
 
+    await t.test('board chooses the later recorded completion when timestamps match', async () => transaction(async () => {
+      await fixture(false);
+      await c.query(`insert into event(id, occurred_at, actor_id, verb, subject_type, subject_id, new_value, cause)
+        values ($1, now(), $3, 'complete-one-action', 'deal', $4, '{"status":"done","outcome":"First"}', 'system'),
+               ($2, now(), $3, 'complete-one-action', 'deal', $4, '{"status":"done","outcome":"Second"}', 'system')`,
+        [id(90), id(89), actor.id, id(4)]);
+      const value = await TOOLS['deal-room-board'].handler(c, actor, {workspace:'team'});
+      assert.equal(value.deals[0].last_step.summary, 'Second');
+    }));
+
     await t.test('partner status update supersedes an overdue step and flags the next-step gap', async () => transaction(async () => {
       await fixture(true);
       const yesterday = (await c.query("select (current_date-1)::text as day")).rows[0].day;

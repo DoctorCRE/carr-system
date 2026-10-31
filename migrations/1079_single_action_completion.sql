@@ -43,3 +43,14 @@ UNION ALL
     pca.version
    FROM (public.capture_post_call_action pca
      JOIN public.actor a ON ((a.id = pca.owner_id)));
+
+CREATE OR REPLACE VIEW public.v_deal_room_event AS
+ SELECT e.id, e.recorded_at, a.slug AS actor, e.verb, e.subject_type, e.subject_id,
+    e.field,
+    (e.old_value - ARRAY['sf_commission_placeholder'::text, 'sf_close_date_placeholder'::text]) AS old_value,
+    (e.new_value - ARRAY['sf_commission_placeholder'::text, 'sf_close_date_placeholder'::text]) AS new_value,
+    e.mutation_order
+   FROM public.event e JOIN public.actor a ON a.id = e.actor_id
+  WHERE e.subject_type = 'deal'::text
+    AND e.field IS DISTINCT FROM 'sf_commission_placeholder'::text
+    AND e.field IS DISTINCT FROM 'sf_close_date_placeholder'::text;
