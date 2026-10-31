@@ -144,6 +144,86 @@ class DreamTest(unittest.TestCase):
                         dream.apply(store, root, notes, inputs, 'attach', 'fixture')
                     self.assertEqual(store.applies, [])
 
+    def test_success_claims_follow_totals_markers_and_exit_status(self):
+        outcomes = [
+            ('Tests: 4 passed, 1 FAIL\nProcess exited with code 1', False),
+            ('Tests: 4 passed, 0 failed\nExit code: 0', True),
+            ('Tests: 4 passed, 0 failed\nexit_code: 2', False),
+            ('Tests: 4 passed, 0 failed\nreturncode: -1', False),
+            ('Tests: 4 passed, 0 failed\nreturn code: 3', False),
+            ('Tests: 4 passed, 0 failed\nExit status: 7', False),
+            ('Tests: 4 passed, 2 failures\nExit code: 0', False),
+            ('Tests: 4 passed, failures=1, errors=0', False),
+            ('Tests: 4 passed, 0 failed\nFAIL test_memory', False),
+            ('Tests: 4 passed, 0 failed\n✖ test_memory', False),
+            ('Tests: 4 passed, 0 failed\nnot ok 1 - memory', False),
+            ('Tests: 4 passed, failed=0, errors=0\nexit_code: 0', True),
+            ('ℹ tests 4\nℹ pass 4\nℹ fail 0\nExit code: 0', True),
+            ('ℹ tests 4\nℹ pass 3\nℹ fail 1\nExit code: 0', False),
+            ({'stdout': 'Tests: 4 passed, 0 failed', 'exit_code': 1}, False),
+            ({'stdout': 'Tests: 4 passed, 0 failed', 'exit_code': 0}, True),
+            ({'stdout': 'Tests: 4 passed, 0 failed', 'returncode': -9}, False),
+        ]
+        for label in ('observed', 'quoted', 'inference'):
+            for success in ('Tests passed', 'Tests succeeded', 'Tests green', 'Tests all pass'):
+                for output, passes in outcomes:
+                    with self.subTest(label=label, success=success, output=output), tempfile.TemporaryDirectory() as tmp:
+                        store = Store()
+                        root = dream.clone(store, Path(tmp) / 'mem')
+                        transcript = Path(tmp) / 'session.jsonl'
+                        content = dict(output) if isinstance(output, dict) else {'stdout': output}
+                        content['stdout'] = success + '\n' + content['stdout']
+                        transcript.write_text(json.dumps({'message': {'role': 'tool', 'content': content}}))
+                        evidence = dream.condense(transcript)
+                        claim = {'section_key': 'confirmed', 'text': success, 'label': label,
+                                 'anchors': [evidence[0]['anchor']],
+                                 'supersedes': {'section_key': 'confirmed', 'version': 1}}
+                        notes = [{'sections': ['confirmed'], 'sessions': ['a'], 'note': 'result', 'claims': [claim]}]
+                        path = root / 'confirmed.md'
+                        path.write_text(path.read_text() + '\n' + success)
+                        if passes:
+                            self.assertEqual(dream.apply(store, root, notes, {'a': evidence}, 'attach', 'fixture')['changed'], 1)
+                        else:
+                            with self.assertRaises(ValueError):
+                                dream.apply(store, root, notes, {'a': evidence}, 'attach', 'fixture')
+                            self.assertEqual(store.applies, [])
+
+    def test_private_key_payloads_never_reach_evidence_or_memory(self):
+        for kind in ('PRIVATE KEY', 'RSA PRIVATE KEY', 'EC PRIVATE KEY', 'DSA PRIVATE KEY',
+                     'ENCRYPTED PRIVATE KEY', 'OPENSSH PRIVATE KEY', 'PGP PRIVATE KEY BLOCK'):
+            for form in ('complete', 'truncated', 'split'):
+                with self.subTest(kind=kind, form=form), tempfile.TemporaryDirectory() as tmp:
+                    begin = '-----' + 'BEGIN ' + kind + '-----'
+                    end = '-----' + 'END ' + kind + '-----'
+                    first, second = 'SYNTHETIC_KEY_PAYLOAD_ONE', 'SYNTHETIC_KEY_PAYLOAD_TWO'
+                    start = 'Tests passed\nError: ' + begin + '\nError: ' + first
+                    finish = '\nError: ' + second + '\nError: ' + end + '\nTests passed'
+                    outputs = [start, finish] if form == 'split' else [start + (finish if form == 'complete' else '\nError: ' + second * 5000)]
+                    transcript = Path(tmp) / 'session.jsonl'
+                    transcript.write_text('\n'.join(json.dumps({'message': {'role': 'tool', 'content': output}}) for output in outputs))
+                    evidence = dream.condense(transcript, max_tokens=1000)
+                    serialized = json.dumps(evidence)
+                    for payload in (first, second, begin, end): self.assertNotIn(payload, serialized)
+                    self.assertLessEqual(len(serialized), 4000)
+                    store = Store()
+                    root = dream.clone(store, Path(tmp) / 'mem')
+                    path = root / 'confirmed.md'
+                    original = path.read_text()
+                    claim = {'section_key': 'confirmed', 'text': first, 'label': 'observed',
+                             'anchors': [evidence[0]['anchor']],
+                             'supersedes': {'section_key': 'confirmed', 'version': 1}}
+                    notes = [{'sections': ['confirmed'], 'sessions': ['a'], 'note': 'result', 'claims': [claim]}]
+                    path.write_text(original + '\n' + first)
+                    with self.assertRaises(ValueError):
+                        dream.apply(store, root, notes, {'a': evidence}, 'attach', 'fixture')
+                    claim['label'] = 'inference'
+                    claim['text'] = 'Tests require review'
+                    path.write_text(original + '\nTests require review')
+                    dream.apply(store, root, notes, {'a': evidence}, 'attach', 'fixture')
+                    saved = (root.parent / '.mem-dream-state' / 'evidence.json').read_text()
+                    for payload in (first, second, begin, end):
+                        self.assertNotIn(payload, saved + store.sections['confirmed']['body']['text'])
+
     def run_fixture(self, *, moved=False, secret=False, missing_note=False):
         store = Store()
         with tempfile.TemporaryDirectory() as tmp:

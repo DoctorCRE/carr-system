@@ -33,14 +33,8 @@ KEY = re.compile(r'^[^/\\\x00-\x1f]+(?:/[^/\\\x00-\x1f]+)*$')
 
 
 EVIDENCE_LINE = re.compile(
-    r'(?i)\b(fail(?:ed|ure|ures)?|error|exception|traceback|passed|tests?|'
-    r'\w*error|exit(?:ed)?|exit_code|returncode|status|ok)\b')
-
-
-def _redact(text):
-    for name, pattern, _, _ in secret_scan.PATTERNS:
-        text = pattern.sub('[REDACTED ' + name + ']', text)
-    return text
+    r'(?i)\b(fail(?:ed|ure|ures)?|error|exception|traceback|pass(?:ed)?|tests?|'
+    r'success(?:ful|fully)?|succeeded|green|\w*error|exit(?:ed)?|exit_code|return(?:code|\s+code)|status|ok)\b|[✖✗]')
 
 
 def _text(content):
@@ -69,7 +63,8 @@ def condense(path, *, transcript_ref=None, max_tokens=40000):
     """
     if not isinstance(max_tokens, int) or max_tokens < 1:
         raise ValueError('invalid evidence budget')
-    ref = _redact(str(transcript_ref or Path(path).resolve()))
+    ref = secret_scan.redact(str(transcript_ref or Path(path).resolve()))
+    redactor = secret_scan.Redactor()
     result = []
     size = 2
     for entry, record in enumerate(load_transcript(path, hook='dream')):
@@ -99,17 +94,18 @@ def condense(path, *, transcript_ref=None, max_tokens=40000):
                     continue
                 kind, text = 'command', _text(command)
             elif kind in ('tool_result', 'function_call_output'):
-                raw = _redact(_tool_text(part.get('content', part.get('output', ''))))
-                lines = [line[:500] for line in raw.splitlines() if EVIDENCE_LINE.search(line)]
-                text = '\n'.join(lines[:24])
-                if part.get('is_error'):
-                    text = 'tool error\n' + text
-                kind = 'tool_result'
+                kind, text = 'tool_result', _tool_text(part.get('content', part.get('output', '')))
             elif kind in ('text', 'input_text', 'output_text') and role in ('user', 'assistant'):
                 kind, text = role, _text(part.get('text', ''))
             else:
                 continue
-            text = _redact(text).strip()[:2000]
+            text = redactor.redact(text)
+            if kind == 'tool_result':
+                lines = [line[:500] for line in text.splitlines() if EVIDENCE_LINE.search(line)]
+                text = '\n'.join(lines[:24])
+                if part.get('is_error'):
+                    text = 'tool error\n' + text
+            text = text.strip()[:2000]
             if not text:
                 continue
             observation = {'anchor': {'transcript_ref': ref, 'entry_index': entry,
@@ -191,6 +187,28 @@ def _anchor_key(anchor):
     return json.dumps(anchor, sort_keys=True)
 
 
+SUCCESS_CLAIM = re.compile(r'(?i)\b(?:pass(?:ed)?|success(?:ful|fully)?|succeeded|green)\b')
+FAILURE_COUNTS = (
+    re.compile(r'(?i)\b(\d+)\s+(?:fail(?:ed|ures?)?|errors?)\b'),
+    re.compile(r'(?i)\b(?:fail(?:ed|ures?)?|errors?)(?:\s*[:=]\s*|\s+)(\d+)\b'),
+)
+EXIT_STATUS = re.compile(
+    r'(?i)\b(?:exit(?:ed)?(?:\s+(?:with\s+)?(?:code|status))?|exit_code|returncode|return\s+code)'
+    r'\s*[:=]?\s*(-?\d+)\b')
+FAILURE_MARKER = re.compile(r'(?im)\b(?:fail(?:ed|ure|ures)?|\w*error)\b|[✖✗]|^\s*not\s+ok\b')
+
+
+def _failure_evidence(text):
+    """Numeric outcomes outrank success words; zero-failure totals are benign."""
+    if any(int(match[1]) != 0 for match in EXIT_STATUS.finditer(text)):
+        return True
+    for pattern in FAILURE_COUNTS:
+        if any(int(match[1]) > 0 for match in pattern.finditer(text)):
+            return True
+        text = pattern.sub('', text)
+    return bool(FAILURE_MARKER.search(text))
+
+
 def _verify_claims(unit, inputs, originals, output):
     claims = unit.get('claims')
     if not isinstance(claims, list) or not claims:
@@ -222,13 +240,13 @@ def _verify_claims(unit, inputs, originals, output):
             if observation is None:
                 raise ValueError('claim anchor absent from allowed session evidence')
             observations.append(observation)
+        support = '\n'.join(o['text'] for o in observations)
+        if SUCCESS_CLAIM.search(claim['text']) and _failure_evidence(support):
+            raise ValueError('success claim contradicts failure evidence')
         if claim['label'] == 'observed':
-            support = '\n'.join(o['text'] for o in observations)
             tokens = _tokens(claim['text'])
             if (any(o['kind'] == 'assistant' for o in observations) or not tokens
-                    or not tokens <= _tokens(support)
-                    or (tokens & {'passed', 'success', 'successful'}
-                        and _tokens(support) & {'failed', 'failure', 'failures', 'error'})):
+                    or not tokens <= _tokens(support)):
                 raise ValueError('observed claim lacks key tokens or contradicts failure evidence')
         by_section[section_key].append(claim)
     for section_key, section_claims in by_section.items():
