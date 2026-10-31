@@ -436,7 +436,8 @@ class InstallerTest(unittest.TestCase):
                          'ops/launchd/com.carr.outlook-outbox.plist',
                          'ops/launchd/com.carr.outlook-triage.plist'):
             shutil.copyfile(ROOT / relative, self.repo / relative)
-        shutil.copytree(ROOT / 'lib', self.repo / 'lib', dirs_exist_ok=True)
+        shutil.copytree(ROOT / 'lib', self.repo / 'lib', dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns('__pycache__'))
         shutil.copyfile(ROOT / 'ops/config-as-code.py', self.repo / 'ops/config-as-code.py')
         shutil.copyfile(ROOT / 'ops/git_env.py', self.repo / 'ops/git_env.py')
         shutil.copytree(ROOT / 'ops/config', self.repo / 'ops/config')
