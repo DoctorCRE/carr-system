@@ -216,8 +216,13 @@ lists `CARR Local Helpers`, both installers sign their helper with that certific
 under a fixed identifier and an explicit designated requirement:
 `designated => identifier "com.carr.outlook-intake-copy" and certificate leaf = H"<certificate SHA-1>"`
 (and `com.carr.outlook-research-copy` for the research helper), verify it, and print it.
-The grant then follows the identifier and certificate, so a rebuild needs no consent
-and no re-grant. Without the identity, each installer prints one line and keeps the
+The grant then follows the identifier and certificate. Intake rebuilds with the same
+signing requirement need no consent and no re-grant. When the intake helper changes
+from ad-hoc signing to a certificate, or between certificates, the installer stops
+before replacement unless `--rebuild-helper` is given. The refusal and completed
+replacement both name the helper path and print the same Full Disk Access re-grant
+steps. Rebuild first, re-grant access in System Settings, then run the printed launch
+commands. Without the identity, each installer prints one line and keeps the
 pinned ad-hoc helper exactly as before. The installers only read the keychain.
 
 ### Joe's steps
@@ -250,7 +255,7 @@ Run these on the Mac in a local session, never over SSH, because `codesign` need
 the keychain prompt in steps 11 and 12.
 
 1. After step 7, run `security find-identity -p codesigning -v`; if it omits `CARR Local Helpers`, ask for steps 8 to 10 and run it again.
-2. Run `./bin/install-outlook-intake.sh` and `./bin/install-outlook-research-copy.sh`; each prints its requirement, which must name its identifier and `certificate leaf`, not `cdhash`.
+2. Run `./bin/install-outlook-intake.sh --rebuild-helper` and `./bin/install-outlook-research-copy.sh`; each prints its requirement, which must name its identifier and `certificate leaf`, not `cdhash`.
 3. After step 18, delete `~/carr-local/bin/outlook-intake-copy.pin` and `~/carr-local/bin/outlook-research-copy.pin`, then run both installers again; they rebuild without asking.
 4. Check the next scheduled intake run succeeds, with no `full_disk_access_required` failure.
 5. With Outlook quit, run `launchctl kickstart gui/$(id -u)/com.carr.outlook-research-copy` and check `launchctl print` shows last exit code 0.

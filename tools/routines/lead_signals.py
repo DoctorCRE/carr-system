@@ -163,6 +163,41 @@ def parse_nppes(rows, *, as_of, source, practice_locations=None):
     return result
 
 
+NPPES_ORIGINATION_COLUMNS = {
+    "NPI", "Entity Type Code", "Provider Enumeration Date", "Last Update Date",
+    "Provider Business Practice Location Address Postal Code",
+    "Provider Business Practice Location Address City Name",
+    "Provider Business Practice Location Address State Name",
+    "Provider Organization Name (Legal Business Name)",
+}
+
+
+def origination_rows(rows, *, as_of):
+    """Project recent enumeration/update evidence, never a practice opening date."""
+    result = []
+    for raw in rows:
+        if not NPPES_ORIGINATION_COLUMNS.issubset(raw):
+            raise ValueError("NPPES schema drift; missing required columns")
+        if _text(raw.get("NPI Deactivation Date")):
+            continue
+        enumerated = _date(raw["Provider Enumeration Date"])
+        updated = _date(raw["Last Update Date"])
+        evidence_date = max(d for d in (enumerated, updated) if d is not None)
+        projected = parse_nppes([{**raw, "Provider Enumeration Date": evidence_date.isoformat()}],
+                                as_of=as_of, source=INDEX_URL)
+        for row in projected:
+            if classify(row)[0] == "EXCLUDE":
+                continue
+            result.append({"record_key": row["npi"], "npi": row["npi"], "name": row["name"],
+                           "city": row["city"], "state": row["state"],
+                           "evidence_date": evidence_date.isoformat(),
+                           "date_basis": "enumeration" if evidence_date == enumerated else "registry_update",
+                           "source_url": "https://npiregistry.cms.hhs.gov/provider-view/" + row["npi"],
+                           "facts": {"address": row["address"], "specialty": row["specialty"],
+                                     "mailing_only": row["mailing_only"]}})
+    return result
+
+
 def parse_weekly_zip(payload, *, as_of, source):
     with zipfile.ZipFile(io.BytesIO(payload)) as archive:
         primary = [n for n in archive.namelist() if Path(n).name.lower().startswith("npidata_pfile_") and n.lower().endswith(".csv") and "fileheader" not in n.lower()]

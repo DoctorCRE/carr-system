@@ -34,9 +34,9 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
       if (unavailable && sql.includes(unavailable)) throw new Error("fixture source unavailable");
       if (sql.includes("calendar_deal_matches")) return { rows: calendarDeals };
       if (sql.includes("/* calendar_meeting_prep */")) return { rows: meetingPrep };
-      if (sql.includes("from v_today_triage")) return { rows: todayRows || [
+      if (sql.includes("from v_today_triage")) return { rows: (todayRows || [
         { item_kind: "next_action", owner: "joe", what: "Call the client", subject_name: "Example Practice" },
-      ] };
+      ]).map(row => ({ ...row, triage_due_on: row.due_on ?? null })) };
       if (sql.includes("from v_claim_card") && sql.includes("count(*)")) return { rows: [
         { claimable: 3, needs_contact_count: 1 },
       ] };
@@ -66,8 +66,8 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
       if (sql.includes("from board_snapshot") && params[2] === "system-costs")
         return { rows: costs === null ? [] : [{ snapshot_json: { costs } }] };
       if (sql.includes("ops.v5_a05_assurance_cadence_batch")) return { rows: [{ batch: [] }] };
-      if (sql.includes("read_governance_queue")) return { rows: [{ queue: governanceQueue || { pending_rule_approvals: [
-        { rule_id: "rule-1", statement: "Name the deal in every question box.", admitted_at: "2026-10-01T00:00:00Z" },
+      if (sql.includes("read_governance_queue")) return { rows: [{ queue: governanceQueue || { pending_guidance_import_batches: [
+        { batch_id: "batch-1", entry_count: 3, reason: "Name the deal in every question box.", staged_at: "2026-10-01T00:00:00Z" },
       ] } }] };
       if (sql.includes("from ops.work_request")) return { rows: [] };
       if (sql.includes("from board_question")) return { rows: [] };

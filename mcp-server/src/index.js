@@ -86,6 +86,7 @@ import { OAuthProvider, getOAuthApi } from "@cloudflare/workers-oauth-provider";
 import { neon, Pool } from "@neondatabase/serverless";
 import { mcpApiHandler, dispatch } from "./mcp.js";
 import { handleAuthorize, handleCallback, handleConsent } from "./google-oidc.js";
+export { PhoneAudioHandoff } from './phone-audio-handoff.js';
 export { OAuthConsentState } from "./oauth-consent-state.ts";
 export { VerbRequestBudget } from "./verb-request-budget.js";
 export { AiNeuronBudget } from "./ai-budget.js";
@@ -693,7 +694,7 @@ async function routeRequest(request, env, ctx) {
   // that hostname instead of reaching an unrelated machine surface.
   if (isLegacyDealroomRequest(request, env)) return dealroomHandler.fetch(request, env, ctx);
   if (url.pathname.startsWith("/capture/")) {
-    if (url.pathname.startsWith(PHONE_STUDIO_PREFIX + '/')) return phoneCallHandler(env).studioFetch(request, env);
+    if (url.pathname === PHONE_STUDIO_PREFIX || url.pathname.startsWith(PHONE_STUDIO_PREFIX + '/')) return phoneCallHandler(env).studioFetch(request, env);
     return captureHandler(env).fetch(request, env, ctx);
   }
   if (url.pathname === "/mcp") {

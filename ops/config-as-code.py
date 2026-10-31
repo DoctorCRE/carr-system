@@ -416,6 +416,9 @@ def portable(text):
 
 
 def concrete(text):
+    if '{{CALL_JEV_DAILY_DOLLARS}}' in text:
+        from lib.call_settings import daily_dollars
+        text = text.replace('{{CALL_JEV_DAILY_DOLLARS}}', escape(daily_dollars()))
     if '{{COPY_HELPER}}' in text or '{{EXECUTABLE_PATH}}' in text:
         from lib.outlook_settings import load_settings
         settings = load_settings(Path(HOME))
@@ -1210,9 +1213,6 @@ def launchd_path_refusal(body):
 def cmd_check_launchd_main_paths():
     """Read installed CARR agents without changing or reloading any plist."""
     names = carr_plists()
-    board = "local.carr-progress-board.plist"
-    if os.path.isfile(os.path.join(LAUNCHD_SRC, board)):
-        names.append(board)
     failures = []
     for name in names:
         refusal = launchd_path_refusal(read(os.path.join(LAUNCHD_SRC, name)) or "")
@@ -1469,7 +1469,7 @@ def reconcile_retired_launchd(apply, filenames=None):
     """Unload and quarantine CARR definitions absent from the repository.
 
     Holds prevent activation of declared jobs, not retirement of deleted jobs.
-    Labels outside com.carr.*, including local.carr-progress-board, are never owned here.
+    Labels outside com.carr.* are never owned here.
     """
     failures = []
     if not os.path.isdir(LAUNCHD_REPO):
@@ -1813,79 +1813,6 @@ def install_launchd_plist(filename, dest, body, body_matches, *, timeout=15):
     return "failed"
 
 
-def cmd_install_progress_board(apply=False, repo=None):
-    """Migrate the existing board agent to the repository wrapper, then read
-    launchd's arguments back. This does not create a new schedule or label.
-    Runtime and state belong to the canonical main checkout.
-    --repo may name that checkout explicitly, but cannot
-    select a feature tree even for pre-merge verification.
-    """
-    label = "local.carr-progress-board"
-    try:
-        if launchd_hold.off_reason(label, HOME):
-            if apply:
-                launchd_hold.activate(label, ["launchctl", "load", "-w", label], home=HOME)
-            else:
-                print(launchd_hold.off_reason(label, HOME))
-            return 0
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
-        print(f"progress-board: HOLD REFUSED: {exc}")
-        return 1
-    runtime_repo = os.path.abspath(os.path.expanduser(repo)) if repo else REPO
-    if os.path.realpath(runtime_repo) != os.path.realpath(REPO):
-        print("progress-board: runtime must use the canonical main checkout; "
-              "feature checkout installation is refused")
-        return 1
-    wrapper = os.path.join(runtime_repo, "ops", "progress-board-render.sh")
-    python = os.path.join(runtime_repo, ".venv", "bin", "python")
-    if not os.path.isfile(wrapper) or not os.access(python, os.X_OK):
-        print("progress-board: selected checkout wrapper or repository interpreter unavailable; "
-              "select a repository checkout containing the wrapper and interpreter")
-        return 1
-    label = "local.carr-progress-board"
-    dest = os.path.join(HOME, "Library", "LaunchAgents", label + ".plist")
-    try:
-        with open(dest, "rb") as handle:
-            current = plistlib.load(handle)
-        if not isinstance(current, dict) or current.get("Label") != label:
-            raise ValueError("unexpected board agent label")
-    except (OSError, ValueError, plistlib.InvalidFileException) as exc:
-        print(f"progress-board: existing agent unavailable: {exc}; no schedule created")
-        return 1
-    desired = dict(current)
-    desired["ProgramArguments"] = ["/bin/bash", wrapper]
-    desired["WorkingDirectory"] = runtime_repo
-    desired["EnvironmentVariables"] = dict(current.get("EnvironmentVariables", {}))
-    desired["EnvironmentVariables"]["PROGRESS_BOARD_ROOT"] = os.path.join(REPO, "out")
-    desired = plistlib.loads(concrete(plistlib.dumps(desired).decode('utf-8')).encode('utf-8'))
-    refusal = launchd_path_refusal(plistlib.dumps(desired).decode("utf-8"))
-    if refusal:
-        print(f"progress-board: REFUSED {refusal}")
-        return 1
-    def registered_arguments():
-        observed = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{label}"],
-                                  capture_output=True, text=True, check=False, timeout=15)
-        args = re.search(r"(?ms)^\s*arguments = \{\n(.*?)^\s*\}", observed.stdout or "")
-        return ([line.strip() for line in args.group(1).splitlines()]
-                if observed.returncode == 0 and args else [])
-
-    matches = desired == current and registered_arguments() == desired["ProgramArguments"]
-    if apply:
-        outcome = install_launchd_plist(os.path.basename(dest), dest,
-                                       plistlib.dumps(desired).decode("utf-8"), matches)
-        if outcome not in {"loaded", "kept"}:
-            return 1
-    elif not matches:
-        print("progress-board: existing agent needs migration: "
-              "ops/config-as-code.py install-progress-board --apply")
-        return 1
-    if registered_arguments() != desired["ProgramArguments"]:
-        print("progress-board: launchd arguments unverified; migration is incomplete")
-        return 1
-    print(f"progress-board: verified registered repository wrapper: {wrapper}")
-    return 0
-
-
 def write_claude_settings(path, document, before, sink=None):
     """Write the settings render, optionally exposing one redacted fake witness.
 
@@ -1992,6 +1919,76 @@ def git_hooks_path_report() -> str:
         note = (f"does not resolve to {hooks_dir}; this machine's hook "
                 "resolution is someone else's deliberate setting")
     return f"  git core.hooksPath: {observed or '(unset)'} — {note} [informational]"
+
+
+def plan_scheduled_task_install(apply):
+    task_plan = scheduled_task_install_plan()
+    if task_plan["modified"]:
+        print("ERROR: modified CARR scheduled task(s) active on this secondary: "
+              + ", ".join(task_plan["modified"])
+              + "; refusing to move or overwrite them.")
+        return None
+    if IS_PRIMARY:
+        for name in task_plan["install"]:
+            source = tracked_scheduled_task_paths()[name]
+            destination = os.path.join(TASKS_SRC, name, "SKILL.md")
+            # Same rule the launchd loop below already applies to
+            # DEFINITION_ONLY plists, which this loop had never honoured. A task
+            # whose body says "do not create, enable, or invoke any scheduler"
+            # must not be written INTO the scheduler directory by the installer
+            # that claims to be converging the machine to the repository.
+            if is_definition_only_task(read(source)):
+                print(f"  SKIP  scheduled task {name} (definition only: "
+                      f"awaits its own stated activation approval)")
+                continue
+            if read(destination) == concrete(read(source)):
+                print(f"  scheduled task already matches: {name}")
+            else:
+                print(f"  {'WRITE' if apply else 'would write'}  scheduled task {name}")
+    elif task_plan["exact"]:
+        for name in task_plan["exact"]:
+            destination = os.path.join(TASKS_QUARANTINE, name)
+            if os.path.exists(destination):
+                print(f"ERROR: recovery quarantine already has {destination}; refusing to overwrite it.")
+                return None
+            print(f"  {'QUARANTINE' if apply else 'would quarantine'}  scheduled task {name} "
+                  f"-> {destination}")
+    else:
+        print("  SKIP  scheduled tasks (secondary machines install none; no approved "
+              "secondary task scope is configured)")
+
+    return task_plan
+
+
+def apply_scheduled_task_install(task_plan):
+    # Scheduled task definitions are reconciled as definitions only.  Scheduler
+    # registration stays outside this tool; an on-disk SKILL.md must never be
+    # mistaken for proof that a task is enabled.
+    if IS_PRIMARY:
+        for name, source in sorted(tracked_scheduled_task_paths().items()):
+            # THE SKIP PRINTED ABOVE IS AN ANNOUNCEMENT; THIS IS THE WRITE IT
+            # DESCRIBES. Guarding only the announcing loop left `install
+            # --apply` reporting "SKIP scheduled task X (definition only)" and
+            # then creating X anyway, which is precisely the outcome that loop's
+            # comment says must not happen. The plan loop and the write loop
+            # both walk the same registry, so a rule applied to one and not the
+            # other is not a partial fix — it is a fix that prints.
+            if is_definition_only_task(read(source)):
+                continue
+            destination = os.path.join(TASKS_SRC, name, "SKILL.md")
+            desired = concrete(read(source))
+            if read(destination) != desired:
+                os.makedirs(os.path.dirname(destination), exist_ok=True)
+                with open(destination, "w", encoding="utf-8") as fh:
+                    fh.write(desired)
+    elif task_plan["exact"]:
+        os.makedirs(TASKS_QUARANTINE, exist_ok=True)
+        for name in task_plan["exact"]:
+            source_dir = os.path.join(TASKS_SRC, name)
+            destination = os.path.join(TASKS_QUARANTINE, name)
+            # The full directory moves so task-local state stays together and
+            # the active scheduler directory contains no CARR definition.
+            shutil.move(source_dir, destination)
 
 
 def cmd_install(apply):
@@ -2107,40 +2104,9 @@ def cmd_install(apply):
         else:
             print("  Codex CARR permissions: WILL ENABLE FULL ACCESS WITHOUT A PERMISSION PROFILE")
 
-    task_plan = scheduled_task_install_plan()
-    if task_plan["modified"]:
-        print("ERROR: modified CARR scheduled task(s) active on this secondary: "
-              + ", ".join(task_plan["modified"])
-              + "; refusing to move or overwrite them.")
+    task_plan = plan_scheduled_task_install(apply)
+    if task_plan is None:
         return 1
-    if IS_PRIMARY:
-        for name in task_plan["install"]:
-            source = tracked_scheduled_task_paths()[name]
-            destination = os.path.join(TASKS_SRC, name, "SKILL.md")
-            # Same rule the launchd loop below already applies to
-            # DEFINITION_ONLY plists, which this loop had never honoured. A task
-            # whose body says "do not create, enable, or invoke any scheduler"
-            # must not be written INTO the scheduler directory by the installer
-            # that claims to be converging the machine to the repository.
-            if is_definition_only_task(read(source)):
-                print(f"  SKIP  scheduled task {name} (definition only: "
-                      f"awaits its own stated activation approval)")
-                continue
-            if read(destination) == concrete(read(source)):
-                print(f"  scheduled task already matches: {name}")
-            else:
-                print(f"  {'WRITE' if apply else 'would write'}  scheduled task {name}")
-    elif task_plan["exact"]:
-        for name in task_plan["exact"]:
-            destination = os.path.join(TASKS_QUARANTINE, name)
-            if os.path.exists(destination):
-                print(f"ERROR: recovery quarantine already has {destination}; refusing to overwrite it.")
-                return 1
-            print(f"  {'QUARANTINE' if apply else 'would quarantine'}  scheduled task {name} "
-                  f"-> {destination}")
-    else:
-        print("  SKIP  scheduled tasks (secondary machines install none; no approved "
-              "secondary task scope is configured)")
 
     launchd_activation_failures = reconcile_retired_launchd(apply)
     launchd_activation_failures += quarantine_definition_only_plists(apply, held_labels)
@@ -2248,34 +2214,7 @@ def cmd_install(apply):
         print("\nDRY RUN — nothing written. Re-run with --apply.")
         return 0
 
-    # Scheduled task definitions are reconciled as definitions only.  Scheduler
-    # registration stays outside this tool; an on-disk SKILL.md must never be
-    # mistaken for proof that a task is enabled.
-    if IS_PRIMARY:
-        for name, source in sorted(tracked_scheduled_task_paths().items()):
-            # THE SKIP PRINTED ABOVE IS AN ANNOUNCEMENT; THIS IS THE WRITE IT
-            # DESCRIBES. Guarding only the announcing loop left `install
-            # --apply` reporting "SKIP scheduled task X (definition only)" and
-            # then creating X anyway, which is precisely the outcome that loop's
-            # comment says must not happen. The plan loop and the write loop
-            # both walk the same registry, so a rule applied to one and not the
-            # other is not a partial fix — it is a fix that prints.
-            if is_definition_only_task(read(source)):
-                continue
-            destination = os.path.join(TASKS_SRC, name, "SKILL.md")
-            desired = concrete(read(source))
-            if read(destination) != desired:
-                os.makedirs(os.path.dirname(destination), exist_ok=True)
-                with open(destination, "w", encoding="utf-8") as fh:
-                    fh.write(desired)
-    elif task_plan["exact"]:
-        os.makedirs(TASKS_QUARANTINE, exist_ok=True)
-        for name in task_plan["exact"]:
-            source_dir = os.path.join(TASKS_SRC, name)
-            destination = os.path.join(TASKS_QUARANTINE, name)
-            # The full directory moves so task-local state stays together and
-            # the active scheduler directory contains no CARR definition.
-            shutil.move(source_dir, destination)
+    apply_scheduled_task_install(task_plan)
 
     written_backups = []
     install_managed_safety(safety_plan, apply=True)
@@ -2756,7 +2695,21 @@ def main():
     if mode == "verify-codex-continuity-mcp":
         return cmd_install_codex_continuity_mcp(False)
     if mode == "install":
-        return cmd_install(apply)
+        import argparse
+        parser = argparse.ArgumentParser(prog="config-as-code.py install")
+        parser.add_argument("--apply", action="store_true")
+        parser.add_argument("--only", choices=["scheduled-tasks"])
+        options = parser.parse_args(sys.argv[2:])
+        if options.only:
+            plan = plan_scheduled_task_install(options.apply)
+            if plan is None:
+                return 1
+            if options.apply:
+                apply_scheduled_task_install(plan)
+            else:
+                print("\nDRY RUN — nothing written. Re-run with --apply.")
+            return 0
+        return cmd_install(options.apply)
     if mode == "install-flash-on-demand":
         import argparse
         from tools import flash_install
@@ -2766,14 +2719,6 @@ def main():
         return flash_install.configure(REPO_HERE, apply=options.apply)
     if mode == "check-launchd-main-paths":
         return cmd_check_launchd_main_paths()
-    if mode in {"install-progress-board", "verify-progress-board"}:
-        import argparse
-        parser = argparse.ArgumentParser(prog=f"config-as-code.py {mode}")
-        parser.add_argument("--repo", help="repository checkout to run; defaults to canonical checkout")
-        parser.add_argument("--apply", action="store_true")
-        options = parser.parse_args(sys.argv[2:])
-        return cmd_install_progress_board(options.apply if mode == "install-progress-board" else False,
-                                          repo=options.repo)
     if mode == "reinstall-launchd-calendar":
         return cmd_reinstall_launchd_calendar(sys.argv[2:])
     if mode == "launchd-handoff-smoke":

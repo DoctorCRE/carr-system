@@ -30,7 +30,7 @@ from contextlib import nullcontext
 import re
 from typing import Any
 
-from typesafe_sdk import Choice, Noul, RetryPolicy, TypeSafeClient, TypeSafeError
+from typesafe_sdk import Choice, Noul, RetryPolicy, TypeSafeClient
 
 BUDGET_LEDGER = Path.home() / 'Recordings' / '.jev-budget.json'
 
@@ -252,8 +252,11 @@ def _item_checks(item, answers):
     }
 
 
-def _unavailable() -> dict[str, Any]:
-    return {"unavailable": True}
+def _unavailable(exc: Exception) -> dict[str, Any]:
+    message = str(exc).lower()
+    cause = "missing key" if "key" in message else "budget exhausted" if "budget" in message else "request failed"
+    return {"unavailable": True, "flagged": True,
+            "reasons": [f"Jev deal check unavailable ({type(exc).__name__}, {cause}); review this proposal manually."]}
 
 
 def _review_id(session: str, tag: str) -> str:
@@ -277,8 +280,8 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
 
     Mutates and returns `result`. A missing Jev key or SDK request failure never blocks the
     review pack. Every affected item instead gets
-    `checks: {"unavailable": True}` and one review_questions entry records
-    that the automatic checks did not run.
+    `checks` with an unavailable flag and a safe exception-class reason.
+    A review question records that the automatic checks did not run.
     """
     deals = context.get("deals") if isinstance(context, dict) else None
     deals = deals if isinstance(deals, list) else []
@@ -313,8 +316,8 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
                                                     for name in local_questions})
             except call_budget.BudgetHold as exc:
                 item["checks"] = {"unavailable": True, "reason": str(exc)}
-            except TypeSafeError:
-                item["checks"] = _unavailable()
+            except Exception as exc:
+                item["checks"] = _unavailable(exc)
 
         with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CALLS) as pool:
             list(pool.map(judge, pending))
@@ -328,7 +331,9 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
         result.setdefault("review_questions", []).append({
             "id": _review_id(session, "jev_partial_unavailable"),
             "question": "Automatic Jev checks did not run for one or more items in this pack. " +
-                " ".join(holds),
+                " ".join(holds + sorted({reason for item, _, _ in pending
+                                         if item["checks"].get("unavailable")
+                                         for reason in item["checks"].get("reasons", [])})),
             "resolved": False,
         })
     return result

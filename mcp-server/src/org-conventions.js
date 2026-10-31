@@ -1,28 +1,44 @@
-// Org conventions: the read-only `rule` store's one human write door
+// Org conventions: the read-only `rule` store's one write door
 // (WR-000562 S4, docs/memory/team-memory-design.md D1 and D16).
 //
-// Agents propose a convention as a team-memory section under
+// Agents write a convention as a team-memory section under
 // conventions/proposed/<slug>. governance-queue lists those sections, and a
-// partner's in-person approval calls adopt-rule, which hands the section to
-// ops.adopt_rule (migration 1027): one transaction makes it a proposed rule,
-// activates it through the existing Joe-authority approval chain and retires
-// the proposal. rule-cards reads the adopted cards back for
+// partner or their sponsored agent calls adopt-rule, which hands the section to
+// ops.adopt_rule: one transaction activates any replacement through the
+// existing Joe-authority approval chain, retires the named rules and
+// consumes the proposal. rule-cards reads the adopted cards back for
 // ops/sync-core-rule-cards.py --from-store.
 import { ToolError } from "./tool-error.ts";
 
 const PLACEMENTS = new Set(["CORE", "PROMPT", "TOOL", "PLANNING"]);
 
-// The same grammar ops.adopt_rule enforces: "Convention: <statement>" on the
-// first line, an optional "Card: <json object>" line, then free notes.
+// Mirrors ops.adopt_rule: Convention with Card or Packs, optionally Retires;
+// a retirement-only proposal starts with Retires and has no delivery metadata.
 function parseProposal(text) {
-  const statement = /^Convention: ([^\n]+)/.exec(String(text ?? ""))?.[1]?.trim();
-  if (!statement) return { adoptable: false, problem: "first line must be 'Convention: <statement>'" };
+  text = String(text ?? "");
+  const retireLines = text.match(/^Retires:.*$/gm) ?? [];
+  let retires = [];
+  if (retireLines.length) {
+    try {
+      const ids = JSON.parse(retireLines[0].slice("Retires: ".length));
+      if (retireLines.length !== 1 || !Array.isArray(ids) || !ids.length
+          || ids.some(id => typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)))
+        throw new Error("invalid retirement targets");
+      retires = [...new Set(ids.map(id => id.toLowerCase()))].sort();
+    } catch { return { adoptable: false, problem: "Retires needs a nonempty JSON array of full rule UUIDs" }; }
+  }
+  const statement = /^Convention: ([^\n]+)/.exec(text)?.[1]?.trim();
+  if (!statement) {
+    if (retires.length && text.startsWith("Retires: ") && !/^(Card|Packs|Convention):/m.test(text))
+      return { adoptable: true, statement: null, card: null, packs: [], retires };
+    return { adoptable: false, problem: "first line must be 'Convention: <statement>' or 'Retires: [<rule UUID>, ...]'" };
+  }
   const cardText = /\nCard: (\{[^\n]*\})[ \t]*(?:\n|$)/.exec(text)?.[1];
   const packsText = /\nPacks: ([^\n]*)/.exec(text)?.[1];
   if (cardText === undefined) {
     const packs = [...new Set((packsText ?? "").split(",").map((p) => p.trim()).filter(Boolean))].sort();
     if (!packs.length) return { adoptable: false, problem: "a convention without a card needs a 'Packs: <pack>, <pack>' line" };
-    return { adoptable: true, statement, card: null, packs };
+    return { adoptable: true, statement, card: null, packs, retires };
   }
   if (packsText !== undefined) return { adoptable: false, problem: "a card is delivered by the core block; drop its Packs line" };
   let card;
@@ -30,20 +46,32 @@ function parseProposal(text) {
   if (!card || typeof card !== "object" || Array.isArray(card) || !card.id || "wording" in card
       || !PLACEMENTS.has(card.placement))
     return { adoptable: false, problem: "Card needs an id and a placement and must not carry wording" };
-  return { adoptable: true, statement, card, packs: [] };
+  return { adoptable: true, statement, card, packs: [], retires };
 }
 
 // governance-queue's pending_convention_proposals lane, read by
 // ops.read_governance_queue() (migration 1027), with each proposal's
 // adoptability and the adopt-rule call that approves it.
-export function conventionProposals(rows = []) {
-  return rows.map(({ body_text, ...row }) => {
-    const parsed = parseProposal(body_text);
-    return { ...row, base_version: Number(row.base_version), adoptable: parsed.adoptable,
-      ...(parsed.adoptable
-        ? { statement: parsed.statement, card_id: parsed.card?.id ?? null, packs: parsed.packs,
+export async function conventionProposals(rows = [], c) {
+  const proposals = rows.map(({ body_text, ...row }) => ({ row, parsed: parseProposal(body_text) }));
+  const ids = [...new Set(proposals.flatMap(({ parsed }) => parsed.retires ?? []))];
+  const rules = ids.length ? (await c.query(
+    "select id, statement, status from v_rule_lookup where id=any($1::uuid[])", [ids])).rows : [];
+  return proposals.map(({ row, parsed }) => {
+    const retirements = (parsed.retires ?? []).map(id => {
+      const rule = rules.find(r => r.id === id);
+      return { rule_id: id, statement: rule?.statement ?? null, status: rule?.status ?? null };
+    });
+    const problem = retirements.some(r => !["proposed", "active"].includes(r.status)) ? "every retirement target must be a proposed or active rule" : parsed.problem;
+    const adoptable = parsed.adoptable && !problem;
+    const statement = [...retirements.map(r => `retires rule ${r.rule_id}: ${r.statement}`),
+      ...(parsed.statement ? [parsed.statement] : [])].join("\n");
+    return { ...row, base_version: Number(row.base_version), adoptable,
+      ...(adoptable
+        ? { statement, replacement_statement: parsed.statement, retires: parsed.retires, retirements,
+            card_id: parsed.card?.id ?? null, packs: parsed.packs,
             approve_with: { verb: "adopt-rule", section_id: row.section_id, base_version: Number(row.base_version) } }
-        : { problem: parsed.problem }) };
+        : { problem }) };
   });
 }
 
@@ -53,10 +81,9 @@ const ADOPT_REFUSALS = new Map([
   ["convention_card_already_active", "convention_card_already_active"],
   ["convention_pack_unknown", "convention_pack_unknown"],
   ["version_conflict", "version_conflict"],
+  ["convention_retirement_rule_not_found", "convention_retirement_rule_not_found"],
+  ["convention_retirement_rule_not_active", "convention_retirement_rule_not_active"],
 ]);
-
-// The server-written via of the app's Deal Room cookie session (dealroom-web.js).
-const APP_APPROVAL_VIA = "dealroom-cookie";
 
 export function orgConventionTools({ withEnvelope, writeEvent }) {
   const adopt = (c, actor, args) => withEnvelope(c, actor, "adopt-rule", args, async () => {
@@ -76,30 +103,25 @@ export function orgConventionTools({ withEnvelope, writeEvent }) {
         throw new ToolError({ error: "rule_adoption_requires_joe" });
       throw error;
     }
-    await writeEvent(c, actor, "adopt-rule", "rule", adopted.rule_id,
-      { new: { section_id: args.section_id, card_id: adopted.card_id, load_layer: adopted.load_layer, packs: adopted.packs },
+    await writeEvent(c, actor, "adopt-rule", adopted.rule_id ? "rule" : "doctrine_section", adopted.rule_id ?? args.section_id,
+      { new: { section_id: args.section_id, retired_rule_ids: adopted.retired_rule_ids, card_id: adopted.card_id, load_layer: adopted.load_layer, packs: adopted.packs },
         idempotency_key: args.idempotency_key });
     return adopted;
   });
   return {
     "adopt-rule": {
-      write: true, humanOnly: true, humanCallerOnly: true, authorityOnly: true,
-      description: "A partner adopts one team-memory convention proposal (conventions/proposed/<slug>, listed by governance-queue) as an active rule, in person: the rule's statement and card come from the proposal, a card-less convention is delivered by the existing packs its Packs line names, Joe's approval chain activates it, and the proposal retires in the same transaction. Only the app's signed-in approval surface can call it; machine identities and chat connector sessions are refused.",
+      // Joe, 2026-10-31: "If you think a rule is needed you just make it a rule
+      // and tell me you did it." humanOnly admits a partner or the agent they
+      // sponsor; the event row records which actor adopted.
+      write: true, humanOnly: true, authorityOnly: true,
+      description: "Adopt a team-memory convention proposal (conventions/proposed/<slug>, listed by governance-queue) through Joe's existing authority chain. A partner or the agent they sponsor adopts directly and tells Joe what it adopted. A Retires JSON-array line retires named proposed or active rules with the reason and proposal reference. Convention with Card or Packs creates an optional replacement, scoped by its own statement as the moment; retiring a pending proposed rule into a replacement is how an agent activates its current wording. Retirement-only adoption creates no rule. All effects and proposal consumption are atomic.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
         idempotency_key: { type: "string" },
         section_id: { type: "string", description: "the proposal section from governance-queue pending_convention_proposals" },
         base_version: { type: "integer", description: "the proposal's current version" },
-        reason: { type: "string", description: "why the partner adopts it" } },
+        reason: { type: "string", description: "why the rule is adopted or retired" } },
         required: ["idempotency_key", "section_id", "base_version", "reason"] },
-      handler: async (c, actor, args) => {
-        // A partner's own claude.ai or Desktop connector session authenticates
-        // as the verified partner, so humanCallerOnly alone would admit a chat
-        // model acting in Joe's name (design D1). Adoption happens only in the
-        // app: the Deal Room cookie gate is the one server-written via for it.
-        if (actor.via !== APP_APPROVAL_VIA)
-          throw new ToolError({ error: "rule_adoption_requires_app_approval" });
-        return adopt(c, actor, args);
-      },
+      handler: adopt,
     },
 
     "rule-cards": {

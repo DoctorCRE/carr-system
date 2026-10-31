@@ -1,4 +1,5 @@
-// Phone intake stores metadata in CARR and streams recordings to the Studio.
+// Phone intake stores metadata in CARR; the Studio pulls transient audio.
+import { audioHandoff } from './phone-audio-handoff.js';
 import { bearerCredential } from './bearer.ts';
 
 export const PHONE_CALL_PREFIX = '/api/v1/call-sessions';
@@ -57,28 +58,117 @@ function validAdmission(body, env) {
 }
 
 function view(row) {
+  const status = row.studio_status;
+  const outcomes = (status?.review_questions ?? []).filter(q => q.outcome === 'already_resolved')
+    .map(q => ({ question_id: q.id, outcome: q.outcome }));
   return { schema_version: 1, session_id: row.id,
-    state: row.state === 'done' ? 'filed' : row.projection ? 'ready_review' : row.transferred_at ? 'transferred' : 'pending',
+    state: status?.state ?? (row.state === 'done' ? 'filed' : row.projection ? 'ready_review' : row.transferred_at ? 'transferred' : 'pending'),
+    reason: status?.reason ?? null, open_questions: status?.open_questions ?? 0,
+    review_questions: (status?.review_questions ?? []).filter(q => !q.answer).map(q => ({ id: q.id, question: q.question })),
+    ...(outcomes.length ? { answer_outcomes: outcomes } : {}),
     filed: row.state === 'done', transferred: !!row.transferred_at };
 }
 
-async function readSession(client, id, owner) {
+function validStudioStatus(value) {
+  if (!value || !['open_questions,reason,state', 'open_questions,reason,review_questions,state'].includes(
+      Object.keys(value).filter(k => k !== 'answer_outcomes').sort().join(',')) ||
+      !Number.isSafeInteger(value.open_questions) || value.open_questions < 0) return false;
+  if (Object.hasOwn(value, 'review_questions') && (!Array.isArray(value.review_questions) ||
+      value.review_questions.length > 50 || value.review_questions.length !== value.open_questions ||
+      new Set(value.review_questions.map(q => q?.id)).size !== value.review_questions.length ||
+      !value.review_questions.every(q => q && Object.keys(q).sort().join(',') === 'id,question' &&
+        typeof q.id === 'string' && /^[a-zA-Z0-9_:-]{1,160}$/.test(q.id) &&
+        typeof q.question === 'string' && q.question.trim().length > 0 && q.question.length <= 1000))) return false;
+  if (Object.hasOwn(value, 'answer_outcomes') && (!Array.isArray(value.answer_outcomes) ||
+      value.answer_outcomes.length > 50 ||
+      new Set(value.answer_outcomes.map(a => a?.question_id)).size !== value.answer_outcomes.length ||
+      !value.answer_outcomes.every(a => a && Object.keys(a).sort().join(',') === 'outcome,question_id' &&
+        typeof a.question_id === 'string' && /^[a-zA-Z0-9_:-]{1,160}$/.test(a.question_id) &&
+        ['applied', 'already_resolved'].includes(a.outcome)))) return false;
+  if (value.state === null) return value.reason === null && value.open_questions === 0;
+  if (value.state === 'needs_attention') return ['extraction_failed', 'transcript_unavailable', 'transient_ceiling'].includes(value.reason);
+  return value.state === 'held_review' && (['summary_repeats_transcript', 'transcript_unavailable'].includes(value.reason) ||
+    (value.reason === 'open_review_questions' && value.open_questions > 0));
+}
+
+async function handoffStatus(env, id) {
+  const response = await audioHandoff(env, `${id}?status`);
+  if (!response.ok) throw new Error('handoff_unavailable');
+  return response.json();
+}
+
+async function readSession(client, id, owner, lock = false) {
   const result = await client.query(`select p.*, s.state from phone_call_session p
     join capture_session s on s.id=p.id where p.id=$1 and ($2::uuid is null or p.owner_id=$2)
-    /* phone:read */`, [id, owner]);
+    ${lock ? 'for update of p' : ''} /* phone:read */`, [id, owner]);
   return result.rows[0];
 }
 
-export function createPhoneCallHandler({ withWriter, fetchFn = fetch }) {
+export function createPhoneCallHandler({ withWriter }) {
   return {
     async studioFetch(request, env) {
       const supplied = bearerCredential(request.headers.get('authorization'));
       if (!env.CALL_STUDIO_TOKEN || !supplied || await sha(supplied) !== await sha(env.CALL_STUDIO_TOKEN))
         return json({ error: 'unauthorized' }, 401);
       const path = new URL(request.url).pathname;
-      const match = path.slice(PHONE_STUDIO_PREFIX.length).match(/^\/([^/]+)\/(report|lease)$/);
+      if (path === PHONE_STUDIO_PREFIX && request.method === 'GET') {
+        try { return await audioHandoff(env); }
+        catch { return json({ error: 'phone_intake_unavailable' }, 503); }
+      }
+      const match = path.slice(PHONE_STUDIO_PREFIX.length).match(/^\/([^/]+)\/(report|lease|audio|ack|status)$/);
       if (!path.startsWith(PHONE_STUDIO_PREFIX + '/') || !match || !UUID.test(match[1])) return json({ error: 'not_found' }, 404);
-      if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
+      if (match[2] === 'audio' && request.method === 'GET') {
+        try { return await audioHandoff(env, match[1]); }
+        catch { return json({ error: 'phone_intake_unavailable' }, 503); }
+      }
+      if (request.method !== 'POST' || match[2] === 'audio') return json({ error: 'method_not_allowed' }, 405);
+      if (match[2] === 'status') {
+        const text = await boundedText(request, 64000);
+        if (text === null) return json({ error: 'status_too_large' }, 413);
+        let status;
+        try { status = JSON.parse(text); } catch { return json({ error: 'invalid_json' }, 400); }
+        if (!validStudioStatus(status)) return json({ error: 'invalid_studio_status' }, 400);
+        try {
+          return await withWriter(async client => {
+            const row = await readSession(client, match[1], null, true);
+            if (!row) return json({ error: 'not_found' }, 404);
+            const answered = (row.studio_status?.review_questions ?? []).filter(q => q.answer);
+            for (const result of status.answer_outcomes ?? []) {
+              const question = answered.find(q => q.id === result.question_id);
+              if (!question || (question.outcome && question.outcome !== result.outcome))
+                return json({ error: 'invalid_answer_outcome' }, 400);
+              question.outcome = result.outcome;
+            }
+            delete status.answer_outcomes;
+            if (status.review_questions) {
+              status.review_questions = [...status.review_questions.filter(q => !answered.some(a => a.id === q.id)), ...answered];
+              status.open_questions = status.review_questions.filter(q => !q.answer).length;
+            } else if (row.studio_status?.review_questions) {
+              status.review_questions = answered;
+              status.open_questions = status.review_questions.filter(q => !q.answer).length;
+            }
+            const updated = await client.query(`update phone_call_session set studio_status=$2::jsonb
+              where id=$1 and studio_status is distinct from $2::jsonb returning id /* phone:status */`,
+            [match[1], JSON.stringify(status)]);
+            return json({ ok: true, session_id: match[1], changed: updated.rows.length > 0,
+              ...(status.review_questions ? { question_answers: answered.filter(q => !q.outcome).map(q => ({ question_id: q.id, answer: q.answer })) } : {}) });
+          });
+        } catch { return json({ error: 'phone_intake_unavailable' }, 503); }
+      }
+      if (match[2] === 'ack') {
+        const text = await boundedText(request, 256);
+        if (text === null) return json({ error: 'receipt_too_large' }, 413);
+        let receipt;
+        try { receipt = JSON.parse(text); } catch { return json({ error: 'invalid_receipt' }, 400); }
+        try {
+          const row = await withWriter(client => readSession(client, match[1], null));
+          if (!row || receipt?.sha256 !== row.sha256) return json({ error: 'receipt_mismatch' }, 409);
+          await withWriter(client => client.query('update phone_call_session set transferred_at=coalesce(transferred_at,now()) where id=$1 /* phone:transferred */', [match[1]]));
+          const removed = await audioHandoff(env, match[1], { method: 'DELETE' });
+          if (!removed.ok) throw new Error('handoff_unavailable');
+          return json({ ok: true });
+        } catch { return json({ error: 'phone_intake_unavailable' }, 503); }
+      }
       if (match[2] === 'lease') {
         try {
           return await withWriter(async client => {
@@ -143,12 +233,51 @@ export function createPhoneCallHandler({ withWriter, fetchFn = fetch }) {
           if (result.limited) return json({ error: 'daily_admission_limit' }, 429);
           return json({ ...view(result.row), duplicate: result.duplicate }, result.duplicate ? 200 : 201);
         }
-        const match = path.slice(PHONE_CALL_PREFIX.length).match(/^\/([^/]+)(?:\/(transfer|report))?$/);
+        const match = path.slice(PHONE_CALL_PREFIX.length).match(/^\/([^/]+)(?:\/(transfer|report|answers))?$/);
         if (!path.startsWith(PHONE_CALL_PREFIX + '/') || !match || !UUID.test(match[1])) return json({ error: 'not_found' }, 404);
         const [, id, operation] = match;
+        if (request.method === 'POST' && operation === 'answers') {
+          const text = await boundedText(request, 4096);
+          if (text === null) return json({ error: 'answer_too_large' }, 413);
+          let body;
+          try { body = JSON.parse(text); } catch { return json({ error: 'invalid_json' }, 400); }
+          if (!body || Object.keys(body).sort().join(',') !== 'answer,idempotency_key,question_id,session_id' ||
+              body.session_id !== id || typeof body.question_id !== 'string' ||
+              typeof body.idempotency_key !== 'string' || !body.idempotency_key.trim() || body.idempotency_key.length > 160 ||
+              typeof body.answer !== 'string' || !body.answer.trim() || body.answer.length > 1000)
+            return json({ error: 'invalid_question_answer' }, 400);
+          return await withWriter(async client => {
+            const row = await readSession(client, id, actor.id, true);
+            if (!row) return json({ error: 'not_found' }, 404);
+            const status = row.studio_status;
+            const questions = status?.review_questions ?? [];
+            const prior = questions.find(q => q.idempotency_key === body.idempotency_key);
+            const receipt = { ok: true, session_id: id, question_id: body.question_id, answer: body.answer };
+            if (prior) return prior.id === body.question_id && prior.answer === body.answer
+              ? json({ ...receipt, ...(prior.outcome ? { outcome: prior.outcome } : {}) }) : json({ error: 'key_reuse' }, 409);
+            const question = questions.find(q => q.id === body.question_id);
+            if (!question) return json({ error: 'question_not_found' }, 404);
+            if (question.answer) return json({ error: 'question_already_resolved' }, 409);
+            question.answer = body.answer;
+            question.idempotency_key = body.idempotency_key;
+            status.open_questions = questions.filter(q => !q.answer).length;
+            await client.query(`update phone_call_session set studio_status=$2::jsonb where id=$1 /* phone:status */`,
+              [id, JSON.stringify(status)]);
+            return json(receipt);
+          });
+        }
         const row = await withWriter(client => readSession(client, id, actor.id));
         if (!row) return json({ error: 'not_found' }, 404);
-        if (request.method === 'GET' && !operation) return json(view(row));
+        if (request.method === 'GET' && !operation) {
+          const result = view(row);
+          if (result.state === 'pending' && env.PHONE_AUDIO_HANDOFF) {
+            try {
+              const status = await handoffStatus(env, id);
+              if (['queued', 'expired'].includes(status.state)) result.state = status.state;
+            } catch { result.upload_state_unavailable = true; }
+          }
+          return json(result);
+        }
         if (request.method === 'GET' && operation === 'report') {
           const candidates = await withWriter(async client => {
             const actions = await client.query(`select id,kind,deal_id,assignee_slug as assignee,
@@ -166,31 +295,28 @@ export function createPhoneCallHandler({ withWriter, fetchFn = fetch }) {
         if (Number(request.headers.get('content-length')) !== Number(row.byte_count)) return json({ error: 'length_mismatch' }, 400);
         if (row.byte_count > phoneCallByteLimit(env) ||
             row.duration_seconds > limit(env, 'CALL_MAX_SECONDS', 3600)) return json({ error: 'call_limit' }, 413);
-        let studio;
-        try { studio = new URL(env.CALL_STUDIO_URL); } catch { return json(view(row), 202); }
-        if (studio.protocol !== 'https:' || !env.CALL_STUDIO_TOKEN) return json(view(row), 202);
-        const token = await sessionToken(env, id);
-        // Only the owner can renew a pending transfer's existing capture capability.
-        await withWriter(async client => client.query(`update capture_session set session_token_hash=$2,
-          expires_at=now()+interval '30 days' where id=$1 /* phone:renew */`, [id, await sha(token)]));
+        if (!env.PHONE_AUDIO_HANDOFF || !env.CALL_STUDIO_TOKEN) return json(view(row), 202);
+        const status = await handoffStatus(env, id);
+        if (status.state === 'queued') {
+          if (status.sha256 !== row.sha256 || status.byte_count !== Number(row.byte_count))
+            return json({ error: 'recording_mismatch' }, 409);
+          return json({ ...view(row), state: 'queued', queued: true, retry_after_seconds: 30 }, 202);
+        }
         const metadata = { schema_version: 1, session_id: id, owner: actor.slug,
           sha256: row.sha256, byte_count: Number(row.byte_count), duration_seconds: Number(row.duration_seconds),
           mime_type: row.mime_type, started_at: row.started_at, consent_announced_at: row.consent_announced_at,
-          session_token: token };
-        let response;
-        try {
-          response = await fetchFn(new URL(`/v1/call-sessions/${id}/transfer`, studio), {
-            method: 'PUT', headers: { authorization: `Bearer ${env.CALL_STUDIO_TOKEN}`,
-              'content-type': row.mime_type, 'content-length': String(row.byte_count),
-              'x-carr-call': JSON.stringify(metadata) }, body: request.body, duplex: 'half',
-            redirect: 'error', signal: AbortSignal.timeout(120000),
-          });
-          if (!response.ok) return json(view(row), 202);
-          const receipt = await response.json();
-          if (receipt.session_id !== id || receipt.sha256 !== row.sha256 || receipt.transferred !== true) return json(view(row), 202);
-        } catch { return json(view(row), 202); }
-        await withWriter(client => client.query('update phone_call_session set transferred_at=coalesce(transferred_at,now()) where id=$1 /* phone:transferred */', [id]));
-        return json({ ...view({ ...row, transferred_at: true }), sha256: row.sha256 });
+          session_token: await sessionToken(env, id) };
+        const response = await audioHandoff(env, id, {
+          method: 'PUT', headers: { 'x-carr-call': JSON.stringify(metadata) },
+          body: request.body, duplex: 'half',
+        });
+        if (!response.ok) {
+          const retryAfter = response.headers.get('retry-after');
+          const result = json({ ...view(row), error: 'audio_handoff_unavailable' }, response.status);
+          if (retryAfter) result.headers.set('retry-after', retryAfter);
+          return result;
+        }
+        return json({ ...view(row), state: 'queued', queued: true, retry_after_seconds: 30 }, 202);
       } catch { return json({ error: 'phone_intake_unavailable' }, 503); }
     },
   };

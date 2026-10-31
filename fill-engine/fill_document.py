@@ -700,6 +700,49 @@ def colored_runs(path: str, ignore_black: bool = True) -> list[dict]:
 
 # ---------------------------------------------------------------- xlsx fill
 
+def fill_comparison_xlsx(template: str, out: str, edits: list[dict]) -> str:
+    """Keep grid formatting while removing template data, formulas and metadata."""
+    from copy import copy
+    import openpyxl
+
+    if os.path.abspath(template) == os.path.abspath(out):
+        raise FillError("refusing to fill a template in place")
+    source = openpyxl.load_workbook(template)
+    if "LOI Grid" not in source.sheetnames:
+        raise FillError("comparison requires the LOI Grid template")
+    clean = openpyxl.Workbook()
+    sheet = clean.active
+    sheet.title = "LOI Grid"
+    for edit in edits:
+        address = parse_address(edit["where"])
+        if address[0] != "cell" or address[1] != "LOI Grid":
+            raise FillError("comparison edit outside LOI Grid")
+        cell = sheet[address[2]]
+        original = source["LOI Grid"][address[2]]
+        font = copy(original.font)
+        font.color = "000000"
+        cell.font = font
+        cell.fill = copy(original.fill)
+        cell.border = copy(original.border)
+        cell.number_format = "General"
+        cell.value = edit["text"]
+        cell.data_type = "s"
+        cell.alignment = openpyxl.styles.Alignment(wrap_text=True, vertical="top")
+    sheet.column_dimensions["A"].width = 34
+    for column in ["B", "C"]:
+        sheet.column_dimensions[column].width = 40
+    sheet.row_dimensions[4].height = 36
+    sheet.print_area = "A1:C15"
+    sheet.sheet_properties.pageSetUpPr.fitToPage = True
+    sheet.page_setup.orientation = "landscape"
+    sheet.page_setup.paperSize = sheet.PAPERSIZE_A4
+    sheet.page_setup.fitToWidth = 1
+    sheet.page_setup.fitToHeight = 1
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    clean.save(out)
+    return out
+
+
 def fill_xlsx(template: str, out: str, edits: list[dict], recalc: bool = True) -> str:
     import openpyxl
 

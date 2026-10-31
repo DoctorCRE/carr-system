@@ -1,0 +1,11 @@
+{
+  "schema_version": "deal-extraction-smoke.v1",
+  "synthetic_only": true,
+  "frozen_holdout": false,
+  "cases": [
+    {"id": "loi-scalar", "document_type": "loi", "pages": ["Synthetic letter of intent. Base rent is $24 per SF per year NNN. Landlord TI is $40 per SF. Term is 60 months. Free rent is 3 months."], "expected": {"base_rent_per_sf": "24", "landlord_ti_per_sf": "40", "term_months": "60", "free_rent_months": "3"}},
+    {"id": "lease-scalar", "document_type": "lease", "pages": ["Synthetic lease. Base rent is $30 per SF per year NNN. Landlord TI is $50 per SF. Term is 120 months. Free rent is 6 months."], "expected": {"base_rent_per_sf": "30", "landlord_ti_per_sf": "50", "term_months": "120", "free_rent_months": "6"}},
+    {"id": "counter-scalar", "document_type": "counter", "pages": ["Synthetic counter. Base rent is $28 per SF per year NNN. Landlord TI is $35 per SF. Term is 84 months. Free rent is 2 months."], "expected": {"base_rent_per_sf": "28", "landlord_ti_per_sf": "35", "term_months": "84", "free_rent_months": "2"}},
+    {"id": "amendment-scalar", "document_type": "amendment", "pages": ["Synthetic amendment. Base rent is $32 per SF per year NNN. Landlord TI is $10 per SF. Term is 36 months. Free rent is 1 months."], "expected": {"base_rent_per_sf": "32", "landlord_ti_per_sf": "10", "term_months": "36", "free_rent_months": "1"}}
+  ]
+}

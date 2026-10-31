@@ -17,7 +17,7 @@ import { budgetedAi } from "./ai-budget.js";
 import { publicError } from "./public-errors.ts";
 import { mcpOriginRefusal } from "./oauth-policy.ts";
 import { DOC_TOOL_NAMES, DOC_INSTRUCTIONS, docToolAnnotations } from "./doc-profile.ts";
-import { isolatePullRequests } from "./work-queue.js";
+import { isolatePullRequests, isolateProduction } from "./work-queue.js";
 import { MEMORY_ATTACH_LINE } from "./doctrine.js";
 import { toolCallContent } from "./untrusted-text.js";
 import { TOOLS, ToolError, executeRegisteredTool, assertRegisteredToolInput, UNATTENDED_AUTHORITY_VERBS,
@@ -827,6 +827,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
     const client = {
       ai: budgetedAi(env),
       pullRequests: isolatePullRequests(env.GITHUB_TOKEN),
+      production: isolateProduction(env.GITHUB_TOKEN),
       query: async (text, params = []) => ({ rows: await retrySafeDatabaseOperation(() => sql.query(text, params)) }),
       sideWrite: env?.DATABASE_URL_WRITER
         ? (text, params = []) => {
@@ -868,8 +869,10 @@ export async function callTool(env, actor, name, args, profile = "full") {
     throw error;
   }
   client.ai = budgetedAi(env);
+  client.jevApiKey = env.TYPESAFE_API_KEY;
   const writerRead = tool.writerConnection === true && !tool.write;
   let readOk = true;
+  let backgroundOwnsConnection = false;
   try {
     await client.query(tool.writerConnection && !tool.write ? "begin read only" : "begin");
     client.inTransaction = true;
@@ -894,6 +897,29 @@ export async function callTool(env, actor, name, args, profile = "full") {
       needsAuthority ? "carr_authority" : "carr_writer",
       fullActor => executeRegisteredTool(client, fullActor, name, args || {}));
     await client.query("commit");
+    client.inTransaction = false;
+    if (tool.afterCommit) {
+      const transact = async fn => {
+        await client.query('begin');
+        client.inTransaction = true;
+        try {
+          await setWriterActorContext(client, actorWithId);
+          const value = await fn();
+          await client.query('commit');
+          return value;
+        } catch (error) { await client.query('rollback'); throw error; }
+        finally { client.inTransaction = false; }
+      };
+      if (typeof env.ctx?.waitUntil === 'function') {
+        backgroundOwnsConnection = true;
+        const task = Promise.resolve()
+          .then(() => tool.afterCommit(client, actorWithId, args || {}, result, transact))
+          .catch(() => {}) // The committed pending receipt remains available on Home.
+          .finally(async () => { client.release(); await pool.end(); });
+        try { env.ctx.waitUntil(task); } catch { /* The save is already committed. */ }
+      }
+      return result;
+    }
     return result;
   } catch (e) {
     await client.query("rollback").catch(() => {});
@@ -932,7 +958,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
     }
     throw e;
   } finally {
-    client.release();
+    if (!backgroundOwnsConnection) client.release();
     // Actor-scoped read doors use a read-only writer transaction. Record their
     // metadata through the same detached audit path as ordinary reader calls;
     // the transaction has already ended, so this cannot change its answer.
@@ -941,7 +967,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
       scheduleWriterReadCall(tool, actor, name, readOk,
         env.ctx?.waitUntil?.bind(env.ctx), insertFn);
     }
-    env.ctx?.waitUntil?.(pool.end());
+    if (!backgroundOwnsConnection) env.ctx?.waitUntil?.(pool.end());
   }
 }
 

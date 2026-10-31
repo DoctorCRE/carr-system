@@ -1,57 +1,23 @@
 // Test email lead proposal identity, rejection, and replay in PostgreSQL.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { readFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
-import { migrationNames, readMigration } from './migration-source.testhelper.mjs';
 
-let fixture, admin, database, c, actor, connection;
+let fixture, c, actor, connection;
 before(async () => {
-  const ciDsn = process.env.CARR_CI_DATABASE_URL;
-  let bin;
-  if (ciDsn) {
-    const url = new URL(ciDsn);
-    assert.ok(['postgres:', 'postgresql:'].includes(url.protocol));
-    assert.ok(['127.0.0.1', 'localhost'].includes(url.hostname), 'fixture requires disposable loopback PostgreSQL');
-    assert.equal(url.search, '', 'fixture connection must not override its loopback host');
-    admin = new pg.Client({ connectionString: ciDsn });
-    await admin.connect();
-    database = `email_lead_${randomUUID().replaceAll('-', '')}`;
-    await admin.query(`create database "${database}" template template0`);
-    url.pathname = `/${database}`;
-    connection = { connectionString: url.href };
-  } else {
-    bin = ['/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin',
-      '/opt/homebrew/opt/postgresql@18/bin', '/usr/lib/postgresql/18/bin'].find(p => existsSync(`${p}/initdb`));
-    assert.ok(bin, 'PostgreSQL is required for the isolated record-layer proof');
-    fixture = await acquireDisposablePostgres({ prefix: 'email-lead-', pgCtl: `${bin}/pg_ctl` });
-    await fixture.run(`${bin}/initdb`, ['-D', `${fixture.root}/data`, '-U', 'carr_ci', '--auth=trust', '--no-locale']);
-    await fixture.run(`${bin}/pg_ctl`, ['-D', `${fixture.root}/data`, '-l', `${fixture.root}/server.log`, '-o', `-k ${fixture.root} -h ''`, '-w', 'start']);
-    await fixture.run(`${bin}/createdb`, ['-h', fixture.root, '-U', 'carr_ci', 'carr_ci']);
-    connection = { host: fixture.root, user: 'carr_ci', database: 'carr_ci' };
-  }
+  fixture = await acquireDisposablePostgres({ prefix: 'email-lead-', snapshot: true });
+  connection = fixture.connection;
   c = new pg.Client(connection);
   await c.connect();
-  await c.query('do $$ begin create role neondb_owner; exception when duplicate_object then null; end $$;');
-  const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
-  if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
-  else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
-  const applied = new Set((await c.query('select filename from schema_migrations')).rows.map(row => row.filename));
-  for (const name of migrationNames().filter(name => !applied.has(name)).sort()) await c.query(readMigration(name));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('fixture-intake','automation','Synthetic intake') returning id,slug")).rows[0], human: false };
   await c.query("insert into party(kind,name,email,created_by,updated_by) values('person','Synthetic known person','first@known.test; second@known.test',$1,$1)", [actor.id]);
 });
 after(async () => {
-  try { await c?.end(); }
-  finally {
-    try { if (database) await admin.query(`drop database "${database}"`); }
-    finally { await Promise.all([admin?.end(), fixture?.close()]); }
-  }
+  try { await c?.end(); } finally { await fixture?.close(); }
 });
 
 async function propose(address, extra = {}) {
@@ -300,6 +266,25 @@ test('confirming a known contact at a new address adds the address to that party
     ['We need about 3,000 square feet', true, 'existing_party', false]);
 });
 
+test('confirming an existing client succeeds when the client already carries the sender address', async () => {
+  await fixtures();
+  const address = 'carried.client@confirm.test';
+  const id = await queued(joeHome(), address, { applies_to: 'existing_party', party: 'C-999451' });
+  const person = (await c.query("update party set email=$1 where id=(select party_id from client where roster_ref='C-999451') returning id", [address])).rows[0].id;
+  const result = await confirm(joeHome(), { pool_id: id, base_version: 1 });
+  assert.deepEqual([result.status, result.applies_to, result.party_id], ['confirmed', 'existing_party', person]);
+});
+
+test('confirming an existing deal succeeds when the sender is already a participant', async () => {
+  const { open } = await fixtures();
+  const address = 'carried.deal@confirm.test';
+  const id = await queued(joeHome(), address, { applies_to: 'existing_deal', deal: open });
+  const person = (await c.query("insert into party(kind,name,email,created_by,updated_by) values('person','Synthetic participant',$1,$2,$2) returning id", [address, actor.id])).rows[0].id;
+  await c.query("insert into deal_participant(deal_id,party_id,role,set_by) values($1,$2,'email_contact',$3)", [open, person, actor.id]);
+  const result = await confirm(joeHome(), { pool_id: id, base_version: 1 });
+  assert.deepEqual([result.status, result.applies_to, result.deal_id, result.party_id], ['confirmed', 'existing_deal', open, person]);
+});
+
 test('confirming an open deal attaches a minimal sender party to it, which the intake deal contacts carry', async () => {
   const { open } = await fixtures();
   const id = await queued(joeHome(), 'landlord.rep@confirm.test', { applies_to: 'existing_deal', deal: open });
@@ -387,4 +372,45 @@ test('only the mailbox owner confirms: the other partner and machine callers are
   const local = { ...actor, slug: 'dell-local', native_agent_verified: true, sponsoring_human_slug: 'dell' };
   await assert.rejects(confirm(local, { pool_id: id, base_version: 1 }), error => error.payload?.error === 'email_lead_not_found');
   assert.deepEqual(await pool(id), { status: 'pool', version: 1, promoted_lead_id: null });
+});
+
+test('confirmation refuses a sender who became a client after proposal without writes', async () => {
+  await fixtures();
+  const id = await queued(joeHome(), 'became.client@confirm.test', { applies_to: 'new_matter' });
+  await c.query("update party set email='became.client@confirm.test' where id=(select party_id from client where roster_ref='C-999451')");
+  const before = await counts();
+  await assert.rejects(confirm(joeHome(), { pool_id: id, base_version: 1 }), error => error.payload?.error === 'email_lead_sender_known');
+  assert.deepEqual(await counts(), before);
+  assert.deepEqual(await pool(id), { status: 'pool', version: 1, promoted_lead_id: null });
+});
+
+test('confirmation refuses senders with lead, vendor, or another open deal', async () => {
+  const { open } = await fixtures();
+  for (const kind of ['lead', 'vendor', 'open_deal']) {
+    const address = `${kind}@guard.confirm.test`;
+    const id = await queued(joeHome(), address, { applies_to: 'new_matter' });
+    const person = (await c.query("insert into party(kind,name,email,created_by,updated_by) values('person','Synthetic guard',$1,$2,$2) returning id", [address, actor.id])).rows[0].id;
+    if (kind === 'lead') await c.query("insert into lead(party_id,registry_ref,stage,created_by,updated_by) values($1,'L-999899','new',$2,$2)", [person, actor.id]);
+    if (kind === 'vendor') await c.query("insert into vendor(party_id,category,vendor_ref,created_by,updated_by) values($1,'banker','V-SYNTHETIC-899',$2,$2)", [person, actor.id]);
+    if (kind === 'open_deal') await c.query("insert into deal_participant(deal_id,party_id,role,set_by) values($1,$2,'email_contact',$3)", [open, person, actor.id]);
+    const before = await counts();
+    await assert.rejects(confirm(joeHome(), { pool_id: id, base_version: 1 }), error => error.payload?.error === 'email_lead_sender_known' && error.payload.reason === kind);
+    assert.deepEqual(await counts(), before);
+    assert.deepEqual(await pool(id), { status: 'pool', version: 1, promoted_lead_id: null });
+  }
+});
+
+test('email contact read uses the real view and excludes ineligible deal contacts', async () => {
+  const { open, closed } = await fixtures();
+  const cases = ['eligible', 'role', 'closed', 'left', 'merged'];
+  for (const kind of cases) {
+    const person = (await c.query("insert into party(kind,name,email,created_by,updated_by) values('person','Synthetic view',$1,$2,$2) returning id", [`${kind}@view.confirm.test`, actor.id])).rows[0].id;
+    if (kind === 'role') await c.query("insert into lead(party_id,registry_ref,stage,created_by,updated_by) values($1,'L-999898','new',$2,$2)", [person, actor.id]);
+    if (kind === 'merged') await c.query("update party set merged_into=(select party_id from client where roster_ref='C-999451') where id=$1", [person]);
+    await c.query("insert into deal_participant(deal_id,party_id,role,set_by,to_at) values($1,$2,'email_contact',$3,case when $4 then now() else null end)", [kind === 'closed' ? closed : open, person, actor.id, kind === 'left']);
+  }
+  const result = await leadCommand(joeHome(), 'email-match-contacts', {});
+  const matches = result.contacts.filter(item => item.address.endsWith('@view.confirm.test') && [open, closed].includes(item.ref));
+  assert.deepEqual(matches.map(item => item.address), ['eligible@view.confirm.test']);
+  assert.ok(result.contacts.some(item => item.address === 'role@view.confirm.test' && item.ref === 'L-999898'));
 });

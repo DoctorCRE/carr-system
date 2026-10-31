@@ -67,7 +67,10 @@ test('dream applies a synthetic memory consolidation in one doctrine change set'
     await finished;
     assert.equal(changes, 2);
     assert.equal(report.changed, 5);
-    assert.deepEqual(report.dropped, [{ sections: ['duplicate/1'], sessions: ['synthetic-a'], note: 'duplicate' }]);
+    assert.deepEqual(report.dropped.map(({ claims, ...unit }) => unit),
+      [{ sections: ['duplicate/1'], sessions: ['synthetic-a'], note: 'duplicate' }]);
+    assert.equal(report.dropped[0].claims[0].label, 'quoted');
+    assert.deepEqual(report.dropped[0].claims[0].supersedes, { section_key: 'duplicate/1', version: 1 });
     const log = await call('read-doctrine', { document: 'dreams-log' });
     assert.deepEqual(JSON.parse(log.sections[0].body.text), report);
     const after = await call('read-doctrine', { document: 'team-memory' });
