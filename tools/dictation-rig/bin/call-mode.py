@@ -627,7 +627,7 @@ def main() -> int:
         print(json.dumps(stop_recording(), indent=2))
     elif args.command == "release":
         path = session_path(args.session)
-        lock = post_call.session_lock(path)
+        lock = post_call.session_lock(path, blocking=False)
         try:
             lock.__enter__()
         except RuntimeError as exc:
