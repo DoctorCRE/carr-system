@@ -1381,6 +1381,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "list-deal-documents": {
+    "ingress_key": "mcp-tool:list-deal-documents",
+    "source_locator": "mcp-server/src/deal-files.js",
+    "schema_digest": "3600bc2b80820a44c2584c3f4e2296db8a3dadb6aa1364cc733d07c4a2688366",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "list-doc-conversations": {
     "ingress_key": "mcp-tool:list-doc-conversations",
     "source_locator": "mcp-server/src/doc-conversation.js",
@@ -1465,6 +1475,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:list-my-codex-sessions",
     "source_locator": "mcp-server/src/codex-continuity.js",
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "list-practice-origination": {
+    "ingress_key": "mcp-tool:list-practice-origination",
+    "source_locator": "mcp-server/src/practice-origination.ts",
+    "schema_digest": "b8319b8bea15d7254ae39824845137dba10e60c4a815fe26974578446b30c646",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -2062,6 +2082,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-deal-extraction-source": {
+    "ingress_key": "mcp-tool:read-deal-extraction-source",
+    "source_locator": "mcp-server/src/deal-extraction.js",
+    "schema_digest": "b5a22a2d82c40946035d8e254f39db463dc3a8683be2d6dcd710f4ef6ac38f10",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-deal-reconciliation": {
     "ingress_key": "mcp-tool:read-deal-reconciliation",
     "source_locator": "mcp-server/src/tools.js",
@@ -2492,6 +2522,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "record-deal-extraction": {
+    "ingress_key": "mcp-tool:record-deal-extraction",
+    "source_locator": "mcp-server/src/deal-extraction.js",
+    "schema_digest": "f9f1bd1c147b39e3ab203454c5a7038bcdf3d73c0d5a28164d1a0a82b8889fe7",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "record-deal-invoice": {
     "ingress_key": "mcp-tool:record-deal-invoice",
     "source_locator": "mcp-server/src/invoice-automation.js",
@@ -2710,6 +2750,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "human_only": true,
     "human_caller_only": true,
     "authority_only": true,
+    "delegates_to": []
+  },
+  "record-practice-origination-feed": {
+    "ingress_key": "mcp-tool:record-practice-origination-feed",
+    "source_locator": "mcp-server/src/practice-origination.ts",
+    "schema_digest": "2a56c673d765432e9da824371d464d7d340cdbeb9c520996c309d67bd702e2e7",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
     "delegates_to": []
   },
   "record-representation-agreement": {
@@ -3816,6 +3866,33 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "grantable": false
     },
     {
+      "grantee": "carr_writer",
+      "relation": "public.practice_origination_feed",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.practice_origination_feed:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.practice_origination_feed",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:public.practice_origination_feed:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "public.practice_origination_event",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:public.practice_origination_event:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
       "ingress_key": "db-relation-acl:ops.requirement_upload_quota:carr_writer:update",
       "ingress_kind": "db_relation_acl",
       "relation": "ops.requirement_upload_quota",
@@ -3903,6 +3980,15 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "relation_kind": "r",
       "grantee": "carr_writer",
       "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_visitor:carr_writer:delete",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_visitor",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "delete",
       "grantable": false
     }
   ],
@@ -4158,6 +4244,36 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.resolve_fact_review(p_tenant text, p_actor_id uuid, p_args jsonb)",
       "volatility": "v",
       "ingress_key": "db-function-acl:ops.resolve_fact_review(p_tenant text, p_actor_id uuid, p_args jsonb):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_reader",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.read_deal_extraction_source(p_tenant text, p_actor_id uuid, p_contract jsonb)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.read_deal_extraction_source(p_tenant text, p_actor_id uuid, p_contract jsonb):carr_reader:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.record_deal_extraction(p_tenant text, p_actor_id uuid, p_args jsonb)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.record_deal_extraction(p_tenant text, p_actor_id uuid, p_args jsonb):carr_writer:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
