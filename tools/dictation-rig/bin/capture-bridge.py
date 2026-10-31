@@ -31,6 +31,7 @@ third-party imports, no venv needed.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import re
@@ -590,11 +591,33 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         return Outcome.UNAVAILABLE
 
     transcription = read_json(session_dir / transcribe_session.STATUS_FILE) or {}
+    stale = False
+    if transcription.get("state") == "transcribing":
+        try:
+            updated = datetime.fromisoformat(transcription["updated_at"].replace("Z", "+00:00"))
+            stale = datetime.now(timezone.utc) - updated > timedelta(hours=6)
+        except (KeyError, TypeError, ValueError):
+            pass
+    if stale and not (session_dir / "transcript.json").exists():
+        with (session_dir / ".transcription.lock").open("a+") as lock:
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return Outcome.UNAVAILABLE
+            current = read_json(session_dir / transcribe_session.STATUS_FILE) or {}
+            if current == transcription and not (session_dir / "transcript.json").exists():
+                current.update({"state": "needs_attention", "updated_at": post_call.now(),
+                                "reason": "Transcription failed. The local recording is saved."})
+                post_call.write_private(session_dir / transcribe_session.STATUS_FILE, current)
+            transcription = current
     if transcription.get("state") == "needs_attention" and not (session_dir / "transcript.json").exists():
         if transcription.get("transcription_attempts", 0) < transcribe_session.MAX_ATTEMPTS:
             transcribe_session.main(["transcribe_session.py", str(session_dir)],
                                     max_attempts=transcribe_session.MAX_ATTEMPTS)
         if not (session_dir / "transcript.json").exists():
+            latest = read_json(session_dir / transcribe_session.STATUS_FILE) or {}
+            if latest.get("state") == "needs_attention" and latest.get("transcription_attempts", 0) >= transcribe_session.MAX_ATTEMPTS:
+                log_line(f"POLL session={name} held after 3 transcription attempts")
             return Outcome.UNAVAILABLE
 
     metadata = read_json(session_dir / post_call.CONTEXT_FILE) or {}
