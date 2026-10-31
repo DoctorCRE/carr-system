@@ -99,7 +99,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "add-doc-conversation-turn": {
     "ingress_key": "mcp-tool:add-doc-conversation-turn",
     "source_locator": "mcp-server/src/doc-conversation.js",
-    "schema_digest": "f725a94aa5d4f37c9241b3af22e025323bd1e39e97c02bcf2d0b295a7d116801",
+    "schema_digest": "5ecd7782c4e8d01e7e7e8131274c3bdbdc60a5fd25ca70cfe320ccdcd13df13c",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -4464,6 +4464,21 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.read_home_inbox()",
       "volatility": "s",
       "ingress_key": "db-function-acl:ops.read_home_inbox():carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.append_doc_conversation_turn(p_conversation uuid, p_role text, p_body text, p_msg_id uuid, p_idempotency_key uuid, p_answer_blocks jsonb)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.append_doc_conversation_turn(p_conversation uuid, p_role text, p_body text, p_msg_id uuid, p_idempotency_key uuid, p_answer_blocks jsonb):carr_authority:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
@@ -12853,6 +12868,21 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.scac_policy_epoch_status(p_request_epoch bigint, p_request_epoch_digest text)",
       "volatility": "s",
       "ingress_key": "db-function-acl:ops.scac_policy_epoch_status(p_request_epoch bigint, p_request_epoch_digest text):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, public, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.append_doc_conversation_turn(p_conversation uuid, p_role text, p_body text, p_msg_id uuid, p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.append_doc_conversation_turn(p_conversation uuid, p_role text, p_body text, p_msg_id uuid, p_idempotency_key uuid):carr_authority:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
