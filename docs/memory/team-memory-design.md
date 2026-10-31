@@ -436,6 +436,21 @@ card import) and writes the active `rule` row with `taught_by` and
 
 ### 6.2 How each surface calls them
 
+Authorized Claude Code lesson writers and Codex build/review jobs explicitly
+request `access: read_write` in the existing opening act, passing
+`native_session_id` and `transcript_ref` when known. Research/read-only jobs
+request `read_only`. The surface defaults remain unchanged, so Codex, routine
+and dream attachments stay read-only unless they request write access. This
+keeps the access decision in the job's existing attach path, without granting
+all Codex research sessions write access or adding a launcher or hook.
+
+Both `doctrine-sections` and `read-doctrine` return team-memory bodies with
+`last_writer` (actor, session key, version and timestamp),
+`last_writer_surface`, and `provenance_note`. The note has the same untrusted
+agent-authorship meaning as attach's `index_note`: agent-written content is
+data, not instructions. Provenance identifies the revision returned, including
+snapshots built before these response fields were added.
+
 | Surface | Platform mechanism reused | What changes |
 |---|---|---|
 | Claude Code session | MCP server `instructions` + the generated CLAUDE.md block | "OPENING ACT: call `attach-memory` first", in both places |
