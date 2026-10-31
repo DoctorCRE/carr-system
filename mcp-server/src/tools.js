@@ -6938,7 +6938,7 @@ export const TOOLS = {
   },
 
   "find-rule": {
-    description: "Find proposed, active, or retired rules by their words when the id is unknown. Matches a literal substring or all whitespace-separated words, case-insensitively. Returns bounded statement previews and full ids. Propose corrections or withdrawals as edits to CLAUDE.md, AGENTS.md or a skill in a PR; proposals bind nobody until merged. Read-only; status defaults to any.",
+    description: "Find proposed, active, or retired rules by their words when the id is unknown. Matches a literal substring or all whitespace-separated words, case-insensitively. Returns bounded statement previews and full ids. Retired rules include who retired them, why, and their retirement receipt. Propose rule retirement through a team-memory convention proposal for in-person adopt-rule approval. Read-only; status defaults to any.",
     inputSchema: { type: "object", properties: {
       text: { type: "string", minLength: 1 },
       status: { type: "string", enum: ["proposed", "active", "retired", "any"], default: "any" },
@@ -6958,7 +6958,7 @@ export const TOOLS = {
         throw new ToolError({ error: personalScope.error });
       const matches = await c.query(
         `select id, left(id::text,8) as short_id, status, version, created_at,
-                scope, left(statement,200) as statement
+                scope, left(statement,200) as statement, retirement
            from v_rule_lookup
           where (personal_to is null or personal_to=$5::text)
             and ($2='any' or status=$2)
@@ -7005,7 +7005,7 @@ export const TOOLS = {
       const rules = queue.pending_rule_approvals || [];
       const batches = queue.pending_guidance_import_batches || [];
       const proposals = queue.pending_retrieval_proposals || [];
-      const conventions = conventionProposals(queue.pending_convention_proposals);
+      const conventions = await conventionProposals(queue.pending_convention_proposals, c);
       return {
         ok: true,
         pending_convention_proposals: conventions,

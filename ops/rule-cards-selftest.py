@@ -100,6 +100,9 @@ class CardTests(unittest.TestCase):
         rendered = sync.cards_from_store(document, adopted)
         self.assertEqual(json.dumps(rendered, indent=2, ensure_ascii=False) + '\n', text,
                          'the store form of every card round-trips to the committed cards file')
+        active = [card for card in adopted if card['id'] != 'K01']
+        self.assertNotIn('K01', [card['id'] for card in sync.cards_from_store(document, active)['cards']],
+                         'a retired card omitted by rule-cards is removed from the generated source')
         with self.assertRaises(SystemExit):
             sync.cards_from_store(document, [])
 
