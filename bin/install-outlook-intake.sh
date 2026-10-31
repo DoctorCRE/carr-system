@@ -107,7 +107,7 @@ if [ -x "$VENDOR/hxprobe/target/release/hxprobe" ] && [ -f "$STATE" ] && ! grep 
     sleep 2
   done
   if ! grep -q '"mail_ids"' "$STATE"; then
-    print -u2 -- "install-outlook-intake: reconciliation did not save mail_ids within 120 seconds; decoder left unchanged. See $REPO/out/run-scheduled.log"
+    print -u2 -- "install-outlook-intake: reconciliation did not save mail_ids within 120 seconds; decoder left unchanged. Rerun the installer after the current run finishes. See $REPO/out/run-scheduled.log"
     exit 1
   fi
 fi

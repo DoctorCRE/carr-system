@@ -1,9 +1,11 @@
 // Test the app document gate web routes.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { ALLOW_LIST } from "../src/identity.js";
 import { createDealroomHandler, isDealroomRequest } from "../src/dealroom-web.js";
 
 const HOST = "dealroom.doctorcre.com";
+const FACT_ROUTES = [['documents', 'list-deal-documents'], ['list', 'list-fact-review'], ['record', 'record-human-fact'], ['resolve', 'resolve-fact-review']];
 const APP_PAGES = ["/work-inventory", "/tasks", "/business", "/pipeline", "/control-room", "/incidents", "/notifications", "/conversations"];
 
 class Kv {
@@ -38,6 +40,36 @@ async function signIn(handler, environment) {
   const callback = await handler.fetch(new Request(`https://${HOST}/auth/callback?state=${google.searchParams.get("state")}&code=stub`, { headers: { cookie: pending, "x-test-email": "joe.bookout.carr.us@gmail.com" } }), environment, {});
   return cookie(callback);
 }
+
+test('fact review routes require a session and CSRF and dispatch their bound verbs', async () => {
+  const environment = makeEnvironment();
+  environment.VERB_REQUEST_BUDGET_HUMAN = { limit: async () => ({ success: true }) };
+  environment.VERB_REQUEST_BUDGET = { idFromName: key => key,
+    get: () => ({ fetch: async () => Response.json({ allowed: true }) }) };
+  const calls = [];
+  const handler = createDealroomHandler({ ...overrides(Object.keys(ALLOW_LIST).find(email => ALLOW_LIST[email] === 'joe')),
+    factReviewCaller: async (_env, actor, verb, args) => { calls.push({ actor, verb, args }); return { ok: true }; },
+  });
+  for (const [path] of FACT_ROUTES) {
+    const response = await handler.fetch(new Request(`https://${HOST}/api/v1/fact-review/${path}`, { method: 'POST' }), environment, {});
+    assert.equal(response.status, 401);
+  }
+  const session = await signIn(handler, environment);
+  const response = await handler.fetch(new Request(`https://${HOST}/auth/session`, { headers: { cookie: session } }), environment, {});
+  const details = await response.json();
+  const post = (path, extra = {}) => new Request(`https://${HOST}/api/v1/fact-review/${path}`, {
+    method: 'POST', headers: { cookie: session, origin: `https://${HOST}`, 'content-type': 'application/json',
+      'sec-fetch-site': 'same-origin', 'x-carr-csrf': details.csrf_token, ...extra }, body: JSON.stringify({ limit: 1 }),
+  });
+  assert.equal((await handler.fetch(post('list', { 'x-carr-csrf': 'wrong' }), environment, {})).status, 403);
+  for (const [path, verb] of FACT_ROUTES) {
+    assert.equal((await handler.fetch(post(path), environment, {})).status, 200);
+    assert.equal(calls.at(-1).verb, verb);
+    assert.deepEqual(calls.at(-1).args, { limit: 1 });
+  }
+  assert.equal((await handler.fetch(post('record-fact-observations'), environment, {})).status, 404);
+  assert.equal(calls.length, 4);
+});
 
 test("every DoctorCRE app page route is a Deal Room request; an unlisted page is not", () => {
   for (const path of APP_PAGES) {
