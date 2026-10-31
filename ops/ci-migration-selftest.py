@@ -30,6 +30,7 @@ PROOFS = [
     "mcp-server/test/doc-conversation-write-doors-postgres.sql",
     "mcp-server/test/dot-security-definers-postgres.sql",
     "mcp-server/test/f01-login-bundle-membership-postgres.sql",
+    "mcp-server/test/fact-review-installed-postgres.test.mjs",
     "mcp-server/test/find-rule-supersedes.test.mjs",
     "mcp-server/test/foundation-assurance-minimum-postgres.sql",
     "mcp-server/test/governed-correspondence-store-postgres.sql",
@@ -151,6 +152,15 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(len(logs), 1)
         self.assertIn("synthetic failure", logs[0].read_text())
 
+    def test_fact_review_failure_stops_lane_and_names_reconciliation(self):
+        result, trace = self.run_ci("proofs", FAIL_PROGRAM="fact-review-installed-postgres.test.mjs")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("reconcile the later function body with the earlier behavior and update the proof", result.stdout)
+        self.assertFalse(any("find-rule-supersedes.test.mjs" in row["argv"] for row in trace))
+        logs = list(self.root.glob("carr-ci.*/migration-fact-review.log"))
+        self.assertEqual(len(logs), 1)
+        self.assertIn("synthetic failure", logs[0].read_text())
+
     def test_empty_shard_setting_keeps_three_shards(self):
         result, trace = self.run_ci("proofs", CARR_DOT_PROOF_SHARDS="")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -255,11 +265,11 @@ BASELINES = {
     "equivalence": "b09903454648438b634b50e5d500f37151daa0f3a0a01d6f94f9aa485d00e29f",
     "shadow": "e152e1e9ff1e9f217bb289391326d3608a9a6296a39fc1c68c1177b79a3f3971",
     "fixtures": "cc6996dc077062e8bc3edcf3fb613c556c140d75eef7d27a61c90845678249e8",
-    "proofs": "1764787ff969b190edfdc76e91f1266f81f0540e3681f4248f28667869909138",
+    "proofs": "7188ff4909662444f3b70ba2977c67f528a5ab4ded342852242b6c58a9cbe735",
     "gates": "b56db7dc88a6190a2817d79c4c07e0fac9ca964a615adefb9346f1e6c749665e",
     "acceptance": "f1f0bc65eb63af0eb97d47de87885c239df12bd7c35d6f6edec4ba76c9044cf0",
-    "core": "d23eb17e8f3f6aa07313de2591ef76c8536834b345519642247cd3d9a2f3dd38",
-    "all": "0342caca1e9a882712bbd0637d2490f0d9b4eccda090e59baaef2671b56b35ca",
+    "core": "7e4ae96af1e26978d5ba8ea1161beb7930591aafc5b37f5e108f0690ddef34fe",
+    "all": "50e961f225baa2c122a59db95e20f7b4108767a6664c8ebe5acc78a2551851ed",
 }
 
 if __name__ == "__main__":

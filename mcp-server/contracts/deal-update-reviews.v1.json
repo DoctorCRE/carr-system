@@ -1,0 +1,30 @@
+{
+  "schema": "deal-update-reviews.v1",
+  "card": "WR433.S4.J4",
+  "transport": "Authenticated MCP",
+  "producer": "DoctorCRE/carr-system",
+  "consumer": "jbookout/doctorcre-app Home",
+  "consumer_adoption": "The Home renderer must consume read-deal-update-reviews and render this new proposal kind. This backend contract does not change the existing app renderer.",
+  "record": {
+    "verb": "add-deal-note",
+    "judgment": "One bounded Jev systemOne call covers the calling partner's overdue ordinary and accepted post-call actions. Structured checklist items and other partners' actions remain separate.",
+    "automatic_resolution": "yes, confidence at least 0.9, valid choice distribution, and the shared #2449 evidence bar including four quoted words. The 0.9 numeric threshold is additional to #2449's deterministic evidence bar.",
+    "evidence": "Each immutable overdue_assessment event retains the action snapshot, note ID, complete update, exact selected quote, verdict, confidence, reason, and completion stamp.",
+    "failure": "Missing credentials, provider errors, rate limits, time budget and input bounds preserve the open item and record a reason.",
+    "plan": "A supplied next_step and next_date are saved together. The app's separate set-next-step command also preserves previously assessed unresolved overdue actions. Without a new plan, a resolved current action clears the obsolete plan and prompts for its replacement."
+  },
+  "read": {
+    "verb": "read-deal-update-reviews",
+    "arguments": {},
+    "result": { "schema_version": "deal-update-reviews.v1", "proposals": [] },
+    "proposal_fields": ["assessment_id", "deal_id", "deal_name", "assessment", "confirm_verb"],
+    "membership": "Latest uncertain or low-confidence assessment for an open action, visible in the authenticated actor's tenant and personal scope, not already reviewed.",
+    "limit": "Above 200 pending proposals the read refuses instead of silently truncating."
+  },
+  "review": {
+    "verb": "review-deal-update",
+    "arguments": ["idempotency_key", "assessment_id", "decision", "reason"],
+    "decisions": { "resolve": "Complete the exact unchanged action after partner review.", "dismiss": "Remove the proposal while leaving its action open.", "undo": "Reopen an unchanged automatic completion and reverse its coupled plan while no newer plan change exists." },
+    "replay": "Retry with the original key. A changed action or newer plan refuses rather than overwriting subsequent work."
+  }
+}
