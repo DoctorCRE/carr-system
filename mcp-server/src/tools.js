@@ -1,4 +1,5 @@
 // Register MCP tools and their shared write envelope.
+import { homeInboxTools, HOME_INBOX_WRITES } from "./home-inbox.js";
 import { dealUpdateResolution } from "./deal-update-resolution.js";
 import { practiceOriginationTools } from "./practice-origination.ts";
 import { vendorMeetingTools } from "./vendor-meetings.js";
@@ -12,6 +13,7 @@ import { readDealChecklist } from "./deal-checklist.ts";
 import { dealExtractionTools } from "./deal-extraction.js";
 import { factGenerationTools } from "./fact-generation.ts";
 import { factReviewTools } from "./fact-review.ts";
+import { marketTermsTools } from "./market-terms.ts";
 import { factObservationTools } from "./fact-observations.ts";
 import { actionClosureTools } from "./action-closure.ts";
 import { requirementRequestTools } from "./requirement-requests.js";
@@ -363,10 +365,10 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing", "clear-the-deck-apply"].includes(verb) || verb === "undo-call" || ["add-deal-note", "review-deal-update", "set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing", "clear-the-deck-apply"].includes(verb) || verb === "undo-call" || ["add-deal-note", "review-deal-update", "set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist", "complete-doc-request"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
-  if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
+  if (FEATURE_SWITCH_WRITES.has(verb) || HOME_INBOX_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
   // A receipt older than REPLAY_WINDOW is not a replay: the key is unknown and the
   // write runs as new (tool_call_expire frees the key on insert). A durable
   // receipt is read back by key elsewhere and keeps replaying.
@@ -3869,14 +3871,14 @@ export const TOOLS = {
                          order by due_on nulls last, id limit 3) n), '[]'::jsonb) as open_actions,
                 (select jsonb_build_object('kind', step.kind, 'summary', step.summary,
                                            'occurred_at', to_jsonb(step.occurred_at)#>>'{}')
-                   from (select a.kind, a.summary, a.occurred_at, a.id
+                   from (select a.kind, a.summary, a.occurred_at, a.id, null::bigint as mutation_order
                            from v_deal_room_activity a where a.deal_id=b.id
                          union all
                          select 'completed_action', coalesce(nullif(e.new_value->>'outcome', ''),
-                           e.new_value->>'next_action', e.new_value->>'post_call_action'), e.recorded_at, e.id
-                           from v_deal_room_event e where e.subject_id=b.id and e.verb='complete-action'
+                           e.new_value->>'next_action', e.new_value->>'post_call_action'), e.recorded_at, e.id, e.mutation_order
+                           from v_deal_room_event e where e.subject_id=b.id and e.verb in ('complete-action','complete-one-action')
                              and e.new_value->>'status'='done') step
-                  order by step.occurred_at desc, step.id desc limit 1) as last_step,
+                  order by step.occurred_at desc, step.mutation_order desc nulls last, step.id desc limit 1) as last_step,
                 (b.next_step is null or b.next_date is null) as next_step_required, b.market, b.segment,
                 b.client_id, b.client_ref, b.client_name, ce.client_status, ce.client_version,
                 ce.prospect_engagement_status, b.account_client_id, b.account_client_ref,
@@ -9093,6 +9095,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "doc-activity": "mcp-server/src/doc-activity.js",
   "meeting-mode": "mcp-server/src/meeting-mode.js",
   "notifications": "mcp-server/src/notifications.ts",
+  "home-inbox": "mcp-server/src/home-inbox.js",
   "session-identity": "mcp-server/src/session-identity.ts",
   "dispatch-spine": "mcp-server/src/dispatch-spine.ts",
   "doc-outcome-cards": "mcp-server/src/tools.js",
@@ -9101,6 +9104,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "work-request-intake": "mcp-server/src/work-request-intake.js",
   "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
   "fact-review": "mcp-server/src/fact-review.ts",
+  "market-terms": "mcp-server/src/market-terms.ts",
   "fact-generation": "mcp-server/src/fact-generation.ts",
   "deal-extraction": "mcp-server/src/deal-extraction.js",
   "fact-observations": "mcp-server/src/fact-observations.ts",
@@ -9246,7 +9250,7 @@ registerTools({
       );
       const actions = await c.query(
         `select n.id, n.owner, n.description, n.item_title as title, n.item_bullets as bullets, n.source_ref,
-                to_jsonb(n.due_on)#>>'{}' as due_on, n.status,
+                to_jsonb(n.due_on)#>>'{}' as due_on, n.status, n.version,
                 to_jsonb(n.hold_until)#>>'{}' as hold_until,
                 to_jsonb(n.updated_at)#>>'{}' as updated_at
            from v_deal_room_action n
@@ -9391,7 +9395,7 @@ registerTools({
            order by d.deal_id, d.due_on nulls last, d.id limit 10001
         ), actions as materialized (
           select a.deal_id, a.id, a.owner, a.description, to_jsonb(a.due_on)#>>'{}' as due_on,
-                 a.status, to_jsonb(a.hold_until)#>>'{}' as hold_until
+                 a.status, a.version, to_jsonb(a.hold_until)#>>'{}' as hold_until
             from v_deal_room_action a join scoped s on s.id = a.deal_id
            where a.status = 'open'
            order by a.deal_id, a.updated_at desc, a.id desc limit 10001
@@ -9527,6 +9531,7 @@ registerTools({
 
   "add-deal-note": {
     write: true,
+    afterCommit: (...args) => overdueUpdates.process(...args),
     description: "Record a partner status update in the immutable deal thread. Jev checks the content against overdue actions. Only supported completion resolves them, with evidence and undo; uncertainty stays open for Home review. Supply next_step and next_date together, or Doc prompts for the missing plan. Other partners' actions and manual attention remain unchanged.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, deal: { type: "string" }, text: { type: "string" },
@@ -9545,7 +9550,7 @@ registerTools({
         "insert into deal_note (deal_id, kind, text, actor_id) values ($1,'note',$2,$3) returning id, created_at /* dealroom:add-note */",
         [s.id, args.text.trim(), actor.id],
       );
-      const assessment = await overdueUpdates.assess(c, actor, s.id, note.rows[0].id, args.text.trim(), args.idempotency_key);
+      const assessment = await overdueUpdates.prepare(c, actor, s.id, note.rows[0].id, args.text.trim(), args.idempotency_key);
       await writeEvent(c, actor, "add-deal-note", "deal", s.id, {
         field: "note", new: { note: args.text.trim() }, idempotency_key: args.idempotency_key,
       });
@@ -10225,7 +10230,7 @@ registerTools({
           throw new ToolError({ error: "applied_change_not_found", deal_id: dealId });
         const fields = [...new Set(journal.map(row => row.field))];
         const newer = (await c.query(`select 1 from event e where e.subject_type='deal' and e.subject_id=$1
-          and (e.field=any($3::text[]) or e.verb in ('set-next-action','complete-action'))
+          and (e.field=any($3::text[]) or e.verb in ('set-next-action','complete-action','complete-one-action'))
           and not (coalesce(e.idempotency_key,'')=any($2::text[]))
           and (e.recorded_at,e.id) > (select b.recorded_at,b.id from event b where b.id=$4)
           limit 1`, [dealId,keys,fields,journal[0].id])).rows.length;
@@ -10684,6 +10689,7 @@ registerTools(meetingModeTools({ withEnvelope, writeEvent, ToolError,
 // acknowledge-notification writes ops.notification_read and nothing else, which
 // is why a session may never report it as having moved a task.
 registerTools(notificationTools({ withEnvelope, writeEvent, ToolError }), "notifications");
+registerTools(homeInboxTools({ withEnvelope, ToolError }), "home-inbox");
 
 // WR-000117: the session-identity read pair. Both verbs are READS on the writer
 // connection -- ops.session_identity_facts and ops.session_dispatch_history
@@ -10732,6 +10738,7 @@ registerTools(workPortfolioTools({ ToolError }), "work-portfolio");
 registerTools(leaseTermComparisonTools({ ToolError }), "lease-term-comparison");
 registerTools(factObservationTools(), "fact-observations");
 registerTools(factReviewTools(), "fact-review");
+registerTools(marketTermsTools(), "market-terms");
 registerTools(factGenerationTools({ withEnvelope, writeEvent }), "fact-generation");
 registerTools(dealExtractionTools(), "deal-extraction");
 

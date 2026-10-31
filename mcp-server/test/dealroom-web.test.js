@@ -101,7 +101,7 @@ test("comparison app routes require authentication and CSRF and name a blocked f
   };
   const invoked = [];
   const handler = createDealroomHandler({ ...identityOverrides(TEST_PARTNER_EMAIL),
-    factReviewCaller: async (_env, actor, verb) => {
+    appFactCaller: async (_env, actor, verb) => {
       invoked.push([actor.slug, verb]);
       if (verb === "prepare-terms-comparison")
         throw new ToolError({ error: "comparison_fact_blocked", field: "term_months", reason: "unresolved" });

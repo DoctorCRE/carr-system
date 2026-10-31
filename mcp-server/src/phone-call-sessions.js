@@ -59,15 +59,19 @@ function validAdmission(body, env) {
 
 function view(row) {
   const status = row.studio_status;
+  const outcomes = (status?.review_questions ?? []).filter(q => q.outcome === 'already_resolved')
+    .map(q => ({ question_id: q.id, outcome: q.outcome }));
   return { schema_version: 1, session_id: row.id,
     state: status?.state ?? (row.state === 'done' ? 'filed' : row.projection ? 'ready_review' : row.transferred_at ? 'transferred' : 'pending'),
     reason: status?.reason ?? null, open_questions: status?.open_questions ?? 0,
     review_questions: (status?.review_questions ?? []).filter(q => !q.answer).map(q => ({ id: q.id, question: q.question })),
+    ...(outcomes.length ? { answer_outcomes: outcomes } : {}),
     filed: row.state === 'done', transferred: !!row.transferred_at };
 }
 
 function validStudioStatus(value) {
-  if (!value || !['open_questions,reason,state', 'open_questions,reason,review_questions,state'].includes(Object.keys(value).sort().join(',')) ||
+  if (!value || !['open_questions,reason,state', 'open_questions,reason,review_questions,state'].includes(
+      Object.keys(value).filter(k => k !== 'answer_outcomes').sort().join(',')) ||
       !Number.isSafeInteger(value.open_questions) || value.open_questions < 0) return false;
   if (Object.hasOwn(value, 'review_questions') && (!Array.isArray(value.review_questions) ||
       value.review_questions.length > 50 || value.review_questions.length !== value.open_questions ||
@@ -75,6 +79,12 @@ function validStudioStatus(value) {
       !value.review_questions.every(q => q && Object.keys(q).sort().join(',') === 'id,question' &&
         typeof q.id === 'string' && /^[a-zA-Z0-9_:-]{1,160}$/.test(q.id) &&
         typeof q.question === 'string' && q.question.trim().length > 0 && q.question.length <= 1000))) return false;
+  if (Object.hasOwn(value, 'answer_outcomes') && (!Array.isArray(value.answer_outcomes) ||
+      value.answer_outcomes.length > 50 ||
+      new Set(value.answer_outcomes.map(a => a?.question_id)).size !== value.answer_outcomes.length ||
+      !value.answer_outcomes.every(a => a && Object.keys(a).sort().join(',') === 'outcome,question_id' &&
+        typeof a.question_id === 'string' && /^[a-zA-Z0-9_:-]{1,160}$/.test(a.question_id) &&
+        ['applied', 'already_resolved'].includes(a.outcome)))) return false;
   if (value.state === null) return value.reason === null && value.open_questions === 0;
   if (value.state === 'needs_attention') return ['extraction_failed', 'transcript_unavailable', 'transient_ceiling'].includes(value.reason);
   return value.state === 'held_review' && (['summary_repeats_transcript', 'transcript_unavailable'].includes(value.reason) ||
@@ -123,18 +133,25 @@ export function createPhoneCallHandler({ withWriter }) {
             const row = await readSession(client, match[1], null, true);
             if (!row) return json({ error: 'not_found' }, 404);
             const answered = (row.studio_status?.review_questions ?? []).filter(q => q.answer);
+            for (const result of status.answer_outcomes ?? []) {
+              const question = answered.find(q => q.id === result.question_id);
+              if (!question || (question.outcome && question.outcome !== result.outcome))
+                return json({ error: 'invalid_answer_outcome' }, 400);
+              question.outcome = result.outcome;
+            }
+            delete status.answer_outcomes;
             if (status.review_questions) {
               status.review_questions = [...status.review_questions.filter(q => !answered.some(a => a.id === q.id)), ...answered];
               status.open_questions = status.review_questions.filter(q => !q.answer).length;
             } else if (row.studio_status?.review_questions) {
-              status.review_questions = row.studio_status.review_questions;
+              status.review_questions = answered;
               status.open_questions = status.review_questions.filter(q => !q.answer).length;
             }
             const updated = await client.query(`update phone_call_session set studio_status=$2::jsonb
               where id=$1 and studio_status is distinct from $2::jsonb returning id /* phone:status */`,
             [match[1], JSON.stringify(status)]);
             return json({ ok: true, session_id: match[1], changed: updated.rows.length > 0,
-              ...(status.review_questions ? { question_answers: answered.map(q => ({ question_id: q.id, answer: q.answer })) } : {}) });
+              ...(status.review_questions ? { question_answers: answered.filter(q => !q.outcome).map(q => ({ question_id: q.id, answer: q.answer })) } : {}) });
           });
         } catch { return json({ error: 'phone_intake_unavailable' }, 503); }
       }
@@ -237,7 +254,7 @@ export function createPhoneCallHandler({ withWriter }) {
             const prior = questions.find(q => q.idempotency_key === body.idempotency_key);
             const receipt = { ok: true, session_id: id, question_id: body.question_id, answer: body.answer };
             if (prior) return prior.id === body.question_id && prior.answer === body.answer
-              ? json(receipt) : json({ error: 'key_reuse' }, 409);
+              ? json({ ...receipt, ...(prior.outcome ? { outcome: prior.outcome } : {}) }) : json({ error: 'key_reuse' }, 409);
             const question = questions.find(q => q.id === body.question_id);
             if (!question) return json({ error: 'question_not_found' }, 404);
             if (question.answer) return json({ error: 'question_already_resolved' }, 409);

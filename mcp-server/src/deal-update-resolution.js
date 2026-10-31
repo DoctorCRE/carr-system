@@ -62,7 +62,7 @@ export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds
     }
     return plan;
   }
-  async function assess(c, actor, deal, note, text, key) {
+  async function prepare(c, actor, deal, note, text, key) {
     if (!partnerAuthoritySlugForActor(actor)) return { preserved_action_ids: [] };
     await lockDealField(c, deal, 'next_date');
     await lockDealField(c, deal, 'next_step');
@@ -72,6 +72,17 @@ export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds
     const today = (await c.query('select current_date::text as day')).rows[0].day;
     const overdue = all.filter(a => a.due_on && a.due_on < today);
     if (!overdue.length) return { preserved_action_ids: [], ...dealNextStepStatus(before?.next_step, before?.next_date) };
+    await writeEvent(c, actor, 'add-deal-note', 'deal', deal, { field: 'overdue_assessment_pending',
+      new: { note_id: note, update: text, actions: overdue }, idempotency_key: key, recorded_at_after_lock: true });
+    for (const action of overdue)
+      await writeEvent(c, actor, 'add-deal-note', 'deal', deal, { field: 'overdue_assessment_fallback',
+        new: { action, note_id: note, update: text, resolved: false, review_required: true,
+          verdict: 'unavailable', reason: 'awaiting_assessment' }, idempotency_key: key, recorded_at_after_lock: true });
+    return { ...dealNextStepStatus(before?.next_step, before?.next_date),
+      overdue_assessment: { pending: true, reason: 'awaiting_assessment', items: [] },
+      preserved_action_ids: overdue.filter(a => a.source === 'next_action').map(a => a.id) };
+  }
+  async function judge(c, text, overdue, timeout) {
     const quotes = Object.fromEntries((text.match(/[^.!?\n]+[.!?]?/g) || [text])
       .map(s => s.trim().slice(0, 400)).filter(Boolean).slice(0, 40).map((s, i) => [`quote_${i}`, s]));
     let answers, failure, model = null;
@@ -79,17 +90,31 @@ export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds
     else if (text.length > 6000 || overdue.length > 20 || text.length + overdue.reduce((n, a) => n + a.description.length, 0) > 12000) failure = 'assessment_budget_exceeded';
     else try {
       const client = c.jevClient || new TypeSafeClient({ apiKey: c.jevApiKey, defaultModel: 'jev-1.13.0',
-        baseURL: 'https://api.typesafe.ai', timeout: 1100, retry: { maxRetries: 0 }, compression: false, logLevel: 'off' });
+        baseURL: 'https://api.typesafe.ai', timeout, retry: { maxRetries: 0 }, compression: false, logLevel: 'off' });
       const questions = {};
       overdue.forEach((a, i) => {
         questions[`action_${i}`] = { type: 'choice', instructions: `${DATA_SENTENCE} Does state.update satisfy state.actions[${i}]?`, criteria: verdicts };
         questions[`quote_${i}`] = { type: 'choice', instructions: `${DATA_SENTENCE} Select the sentence in state.update that best establishes whether state.actions[${i}] was accomplished.`, criteria: quotes };
       });
       const result = await client.systemOne({ state: { update: text, actions: overdue }, questions },
-        { signal: AbortSignal.timeout(1100) });
+        { signal: AbortSignal.timeout(timeout) });
       answers = result.answers;
       model = typeof result.model === 'string' ? result.model.slice(0, 80) : null;
-    } catch (error) { failure = error?.status === 429 ? 'jev_budget_exhausted' : 'jev_unavailable'; }
+    } catch (error) {
+      failure = error?.status === 429 ? 'jev_budget_exhausted' : 'jev_unavailable';
+      return { failure, retryImmediately: error?.status !== 429, retryable: error?.status === 429 || error?.status >= 500 ||
+        ['TimeoutError', 'AbortError'].includes(error?.name) || /timeout/i.test(error?.message || '') };
+    }
+    return { quotes, answers, failure, model, retryable: false };
+  }
+  async function apply(c, actor, request, judgment) {
+    const { subject_id: deal, idempotency_key: key, new_value: { note_id: note, update: text, actions: overdue } } = request;
+    const { quotes, answers, failure, model } = judgment;
+    await lockDealField(c, deal, 'next_date');
+    await lockDealField(c, deal, 'next_step');
+    await assertUnchanged(c, actor, deal, overdue);
+    const before = await currentPlan(c, deal);
+
     const assessments = [];
     for (const [i, action] of overdue.entries()) {
       const answer = answers?.[`action_${i}`], quoteAnswer = answers?.[`quote_${i}`];
@@ -121,6 +146,85 @@ export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds
       resolved_action_ids: resolvedIds,
       preserved_action_ids: assessments.filter(a => !a.resolved && a.action.source === 'next_action').map(a => a.action.id) };
   }
+  async function assertUnchanged(c, actor, deal, overdue) {
+    const owners = await partnerOwnerIds(c, actor);
+    const current = await actions(c, deal, owners);
+    if (overdue.some(a => !current.some(b => b.id === a.id && b.source === a.source &&
+      b.updated_at === a.updated_at && b.version === a.version)))
+      throw new ToolError({ error: 'overdue_action_changed' });
+  }
+  async function process(c, actor, args, result, transact) {
+    if (!partnerAuthoritySlugForActor(actor) || !result.deal_id) return result;
+    const deadline = Date.now() + 25000;
+    let attemptsLeft = 2;
+    const requests = await transact(async () => (await c.query(`select * from event
+      where field='overdue_assessment_pending' and subject_type='deal' and subject_id=$1
+        and (actor_id=$2 or sponsoring_human_slug=$6 or actor_id=(select id from actor where slug=$6)) and organization_tenant_id=$3 and personal_scope=any($4::text[])
+        and (idempotency_key=$5 or not exists (
+          select 1 from event done where done.field='overdue_assessment_status'
+            and done.new_value->>'request_id'=event.id::text
+            and (done.new_value->>'status' in ('complete','conflict') or (done.new_value->>'attempt')::int>=3)))
+      order by (idempotency_key=$5) desc,mutation_order limit 2`, [result.deal_id, actor.id, organizationTenantForActor(actor), visibleScopes(actor), args.idempotency_key, partnerAuthoritySlugForActor(actor)])).rows);
+    for (const request of requests) {
+      for (let retry = 0; retry < 2 && attemptsLeft > 0 && Date.now() < deadline; retry++) {
+        const claim = await transact(async () => {
+          await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [request.id]);
+          const states = (await c.query(`select new_value,recorded_at > clock_timestamp()-interval '45 seconds' as leased from event
+            where field='overdue_assessment_status' and new_value->>'request_id'=$1
+            order by mutation_order desc limit 1`, [request.id])).rows;
+          const state = states[0]?.new_value;
+          if (state?.status === 'complete') return { cached: state.result };
+          if (state?.status === 'conflict') return {cached: {overdue_assessment: {pending: false, reason: state.reason, items: []}}};
+          if (state?.status === 'running' && states[0].leased) return {};
+          if (state?.attempt >= 3) return {cached: {overdue_assessment: {pending: true, attempts: state.attempt, reason: state.status === 'running' ? 'interrupted' : state.reason, items: []}}};
+          try { await assertUnchanged(c, actor, request.subject_id, request.new_value.actions); }
+          catch (error) {
+            if (error?.payload?.error !== 'overdue_action_changed') throw error;
+            await status(c, actor, request, {status: 'conflict', attempt: state?.attempt || 0, reason: 'overdue_action_changed'});
+            return {cached: {overdue_assessment: {pending: false, reason: 'overdue_action_changed', items: []}}};
+          }
+          const attempt = (state?.attempt || 0) + 1;
+          await status(c, actor, request, { status: 'running', attempt, reason: 'assessment_in_progress' });
+          return { attempt };
+        });
+        if (claim.cached) {
+          if (request.idempotency_key === args.idempotency_key) result = { ...result, ...claim.cached };
+          break;
+        }
+        if (!claim.attempt) break;
+        attemptsLeft--;
+        const judgment = await judge(c, request.new_value.update, request.new_value.actions, Math.max(1, Math.min(11000, deadline - Date.now())));
+        let applied;
+        try {
+          applied = await transact(async () => {
+            await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [request.id]);
+            const latest = (await c.query(`select new_value from event where field='overdue_assessment_status'
+              and new_value->>'request_id'=$1 order by mutation_order desc limit 1`, [request.id])).rows[0]?.new_value;
+            if (latest?.status !== 'running' || latest.attempt !== claim.attempt) return {};
+            if (judgment.failure) {
+              await status(c, actor, request, {status: 'pending', attempt: judgment.retryable ? claim.attempt : 3, reason: judgment.failure});
+              return { overdue_assessment: {pending: true, attempts: claim.attempt, reason: judgment.failure, items: []} };
+            }
+            const value = await apply(c, actor, request, judgment);
+            await status(c, actor, request, {status: 'complete', attempt: claim.attempt, result: value});
+            return value;
+          });
+        } catch (error) {
+          if (error?.payload?.error !== 'overdue_action_changed') throw error;
+          await transact(() => status(c, actor, request, {status: 'conflict', attempt: claim.attempt, reason: 'overdue_action_changed'}));
+          applied = { overdue_assessment: { pending: false, reason: 'overdue_action_changed', items: [] } };
+        }
+        if (request.idempotency_key === args.idempotency_key) result = { ...result, ...applied };
+        if (!judgment.failure || !judgment.retryable || judgment.retryImmediately === false) break;
+      }
+    }
+    return result;
+  }
+  async function status(c, actor, request, value) {
+    await writeEvent(c, actor, 'add-deal-note', 'deal', request.subject_id, {
+      field: 'overdue_assessment_status', new: {request_id: request.id, note_id: request.new_value.note_id, ...value},
+      idempotency_key: request.idempotency_key, recorded_at_after_lock: true });
+  }
   const tools = {
     'read-deal-update-reviews': {
       writerConnection: true,
@@ -128,19 +232,67 @@ export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       handler: async (c, actor) => {
         if (!partnerAuthoritySlugForActor(actor)) throw new ToolError({ error: 'partner_required' });
+        const owners = await partnerOwnerIds(c, actor);
         const rows = (await c.query(`
-        select e.id as assessment_id,e.subject_id as deal_id,d.name as deal_name,e.new_value as assessment,
+        select e.id as assessment_id,e.subject_id as deal_id,d.name as deal_name,
+          case when e.field='overdue_assessment_fallback' then e.new_value || jsonb_build_object('reason',
+            case when state.new_value->>'status'='running' then 'interrupted'
+              else coalesce(state.new_value->>'reason','awaiting_assessment') end)
+            else e.new_value end as assessment,
           'review-deal-update' as confirm_verb
         from event e join deal d on d.id=e.subject_id
-        where e.subject_type='deal' and e.field='overdue_assessment' and e.organization_tenant_id=$1 and e.personal_scope=any($2::text[]) and e.new_value->>'review_required'='true'
-          and not exists(select 1 from event newer where newer.subject_id=e.subject_id and newer.field=e.field
+        left join event request on request.subject_id=e.subject_id and request.idempotency_key=e.idempotency_key
+          and request.field='overdue_assessment_pending'
+        left join lateral (select new_value,recorded_at from event s
+          where s.field='overdue_assessment_status' and s.new_value->>'request_id'=request.id::text
+          order by s.mutation_order desc limit 1) state on true
+        where e.subject_type='deal' and e.field in ('overdue_assessment','overdue_assessment_fallback')
+          and (e.field='overdue_assessment' or (
+            coalesce(state.new_value->>'status','pending') not in ('complete','conflict')
+            and (state.new_value->>'status' in ('pending','failed')
+              or coalesce(state.recorded_at,request.recorded_at) <= clock_timestamp()-interval '45 seconds'))
+            or (e.field='overdue_assessment_fallback' and state.new_value->>'reason'='partner_review'))
+          and e.organization_tenant_id=$1 and e.personal_scope=any($2::text[]) and e.new_value->>'review_required'='true'
+          and not exists(select 1 from event newer where newer.subject_id=e.subject_id and newer.field in ('overdue_assessment','overdue_assessment_fallback')
             and newer.new_value#>>'{action,id}'=e.new_value#>>'{action,id}' and newer.mutation_order>e.mutation_order)
           and not exists(select 1 from event r where r.field='overdue_review' and r.new_value->>'assessment_id'=e.id::text)
-          and (exists(select 1 from next_action a where a.id=(e.new_value#>>'{action,id}')::uuid and a.status='open')
-            or exists(select 1 from capture_post_call_action a where a.id=(e.new_value#>>'{action,id}')::uuid and a.status='open'))
-        order by e.recorded_at,e.id limit 201`, [organizationTenantForActor(actor), visibleScopes(actor)])).rows;
+          and (exists(select 1 from next_action a where a.id=(e.new_value#>>'{action,id}')::uuid and a.status='open' and a.owner_id=any($3::uuid[]))
+            or exists(select 1 from capture_post_call_action a where a.id=(e.new_value#>>'{action,id}')::uuid and a.status='open' and a.owner_id=any($3::uuid[])))
+        order by e.recorded_at,e.id limit 201`, [organizationTenantForActor(actor), visibleScopes(actor), owners])).rows;
         if (rows.length > 200) throw new ToolError({ error: 'deal_update_reviews_limit_exceeded' });
-        return { schema_version: 'deal-update-reviews.v1', proposals: rows };
+        const resolutions = (await c.query(`select e.id as assessment_id,e.subject_id as deal_id,d.name as deal_name,
+          e.new_value as assessment,e.recorded_at::text as resolved_on,e.idempotency_key
+          from event e join deal d on d.id=e.subject_id
+          where e.subject_type='deal' and e.field='overdue_assessment' and e.organization_tenant_id=$1
+            and e.personal_scope=any($2::text[]) and e.new_value->>'resolved'='true'
+            and e.recorded_at >= current_timestamp - interval '7 days'
+            and not exists(select 1 from event r where r.field='overdue_review' and r.new_value->>'assessment_id'=e.id::text)
+            and (exists(select 1 from next_action a where a.id=(e.new_value#>>'{action,id}')::uuid and a.owner_id=any($3::uuid[]))
+              or exists(select 1 from capture_post_call_action a where a.id=(e.new_value#>>'{action,id}')::uuid and a.owner_id=any($3::uuid[])))
+          order by e.recorded_at desc,e.id desc`, [organizationTenantForActor(actor), visibleScopes(actor), owners])).rows;
+        const automatic_resolutions = [];
+        for (const row of resolutions) {
+          const siblings = (await c.query(`select new_value from event where subject_type='deal' and subject_id=$1
+            and idempotency_key=$2 and field='overdue_assessment' and new_value->>'resolved'='true'`, [row.deal_id, row.idempotency_key])).rows;
+          let undo_possible = true;
+          for (const {new_value: value} of siblings) {
+            const current = (await c.query(value.action.source === 'next_action'
+              ? 'select status,updated_at::text as updated_at,version from next_action where id=$1 and owner_id=any($2::uuid[])'
+              : 'select status,updated_at::text as updated_at from capture_post_call_action where id=$1 and owner_id=any($2::uuid[])',
+            [value.action.id, owners])).rows[0];
+            if (current?.status !== 'done' || current.updated_at !== value.resolved_at ||
+                (value.action.source === 'next_action' && current.version !== value.resolved_version)) undo_possible = false;
+          }
+          const fields = (await c.query(`select idempotency_key,new_value from event where subject_type='deal' and subject_id=$1
+            and field in ('next_date','next_step') order by recorded_at desc,id desc`, [row.deal_id])).rows;
+          const ownFields = fields.filter(field => field.idempotency_key === row.idempotency_key);
+          if ((row.assessment.action.source === 'next_action' || ownFields.length) && fields[0]?.idempotency_key !== row.idempotency_key) undo_possible = false;
+          const replacement = ownFields.find(field => field.new_value.next_action_id)?.new_value.next_action_id;
+          if (replacement && !(await c.query("select 1 from next_action where id=$1 and status='open' and version=1", [replacement])).rows.length) undo_possible = false;
+          automatic_resolutions.push({ assessment_id: row.assessment_id, deal_id: row.deal_id, deal_name: row.deal_name,
+            action_title: row.assessment.action.description, quote: row.assessment.quote, resolved_at: row.resolved_on, undo_possible });
+        }
+        return { schema_version: 'deal-update-reviews.v1', proposals: rows, automatic_resolutions };
       },
     },
     'review-deal-update': {
@@ -154,16 +306,31 @@ export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds
         if (!partnerAuthoritySlugForActor(actor)) throw new ToolError({ error: 'partner_required' });
         if (!['resolve', 'dismiss', 'undo'].includes(args.decision) || !args.reason?.trim())
           throw new ToolError({ error: 'invalid_review' });
-        const event = (await c.query("select subject_id,new_value,idempotency_key from event where id=$1 and subject_type='deal' and field='overdue_assessment' and organization_tenant_id=$2 and personal_scope=any($3::text[])", [args.assessment_id, organizationTenantForActor(actor), visibleScopes(actor)])).rows[0];
+        const event = (await c.query("select subject_id,new_value,idempotency_key,field from event where id=$1 and subject_type='deal' and field in ('overdue_assessment','overdue_assessment_fallback') and organization_tenant_id=$2 and personal_scope=any($3::text[])", [args.assessment_id, organizationTenantForActor(actor), visibleScopes(actor)])).rows[0];
         if (!event) throw new ToolError({ error: 'assessment_not_found' });
+        if (event.field === 'overdue_assessment_fallback') {
+          const request = (await c.query(`select * from event where subject_id=$1 and idempotency_key=$2
+            and field='overdue_assessment_pending'`, [event.subject_id, event.idempotency_key])).rows[0];
+          await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [request.id]);
+          const state = (await c.query(`select new_value,recorded_at > clock_timestamp()-interval '45 seconds' as leased
+            from event where field='overdue_assessment_status' and new_value->>'request_id'=$1
+            order by mutation_order desc limit 1`, [request.id])).rows[0];
+          if (state?.new_value.status === 'complete' || (state?.new_value.status === 'running' && state.leased))
+            throw new ToolError({error: 'assessment_in_progress_or_complete'});
+          await status(c, actor, request, {status: 'conflict', attempt: state?.new_value.attempt || 0, reason: 'partner_review'});
+        }
+        const a = event.new_value;
+        const owners = await partnerOwnerIds(c, actor);
+        const owned = await c.query(a.action.source === 'next_action'
+          ? 'select 1 from next_action where id=$1 and owner_id=any($2::uuid[])'
+          : 'select 1 from capture_post_call_action where id=$1 and owner_id=any($2::uuid[])', [a.action.id, owners]);
+        if (!owned.rows.length) throw new ToolError({ error: 'not_action_owner' });
         await lockDealField(c, event.subject_id, 'next_date');
         await lockDealField(c, event.subject_id, 'next_step');
-        const a = event.new_value;
         if ((await c.query("select 1 from event where field='overdue_review' and new_value->>'assessment_id'=$1", [args.assessment_id])).rows.length)
           throw new ToolError({ error: 'assessment_already_reviewed' });
         if (args.decision === 'undo' ? !a.resolved : !a.review_required)
           throw new ToolError({ error: 'invalid_review_decision' });
-        const owners = await partnerOwnerIds(c, actor);
         const current = (await c.query(a.action.source === 'next_action'
           ? 'select updated_at::text as updated_at,version from next_action where id=$1 and owner_id=any($2::uuid[]) for update'
           : 'select updated_at::text as updated_at from capture_post_call_action where id=$1 and owner_id=any($2::uuid[]) for update', [a.action.id, owners])).rows[0];
@@ -225,8 +392,14 @@ export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds
   async function preserved(c, deal) {
     return (await c.query(`select distinct (e.new_value#>>'{action,id}')::uuid as id
       from event e where e.subject_type='deal' and e.subject_id=$1 and e.field='overdue_assessment'
-        and e.new_value->>'resolved'='false'
-        /* deal-update:preserved */`, [deal])).rows.map(row => row.id);
+        and e.new_value->>'resolved'='false' and e.recorded_at >= current_timestamp - interval '14 days'
+        union select distinct (a->>'id')::uuid as id from event e
+      cross join lateral jsonb_array_elements(e.new_value->'actions') a
+      where e.subject_type='deal' and e.subject_id=$1 and e.field='overdue_assessment_pending'
+        and a->>'source'='next_action' and e.recorded_at >= current_timestamp - interval '14 days'
+        and not exists(select 1 from event done where done.field='overdue_assessment_status'
+          and done.new_value->>'request_id'=e.id::text and done.new_value->>'status' in ('complete','conflict'))
+      /* deal-update:preserved */`, [deal])).rows.map(row => row.id);
   }
-  return { assess, tools, preserved };
+  return { prepare, process, tools, preserved };
 }

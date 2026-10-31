@@ -78,6 +78,8 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["needs_disambiguation", "Choose an exact record reference from the candidates before retrying."],
   ["decline_claims_completion", "Use complete-work-request to close built work. Decline only work that will not be built."],
   ["loop_not_open", "Re-read the loop before choosing another action."],
+  ["action_not_found", "Re-read the action list. This action is unavailable in your organization."],
+  ["invalid_action_id", "Supply the action UUID from a fresh action list."],
   ["action_not_open", "Re-read the current action. It is already closed; review its status before choosing another action."],
   ["critical_date_not_open", "Re-read the current critical date. It is already resolved; review its status before choosing another action."],
   ["personal_doc_not_owner", "This personal doctrine belongs to another owner."],
