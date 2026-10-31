@@ -202,7 +202,7 @@ for (const explicit of [false,true]) {
     await verify('propose-doc-correction',{suggestion_id:out.suggestion_id,base_version:out.material_version,proposed_text:'Deliver and verify the synthetic follow-up',source_conversation_id:conversation.conversation_id,source_sequence:turn.sequence},explicit);
   });
   test(`meeting actions and acceptance preserve ${explicit ? 'explicit' : 'minted'} WR`,async()=>{
-    const meeting=await command('start-meeting',{title:'Synthetic follow-up meeting',platform:'zoom',native_identity:{source_system:'zoom',native_id:String(Date.now())+Number(explicit),native_id_epoch:randomUUID()},activation_intent:'one_tap_user_activation',client_instance:'synthetic',idempotency_key:randomUUID()},actor,'carr_writer');
+    const meeting=await command('start-meeting',{title:'Synthetic follow-up meeting',platform:'zoom',native_identity:{source_system:'zoom',native_id:'999628'+Number(explicit),native_id_epoch:randomUUID()},activation_intent:'one_tap_user_activation',client_instance:'synthetic',idempotency_key:randomUUID()},actor,'carr_writer');
     const out=await verify('propose-meeting-action',{meeting_id:meeting.meeting_id,summary:'Deliver synthetic meeting follow-up',basis:'tentative_discussion',client_instance:'synthetic',command:{verb:'add-loop',args:{kind:'team_loop',owner:'joe',title:'Deliver synthetic meeting follow-up'}}},explicit);
     await verify('decide-meeting-action',{meeting_id:meeting.meeting_id,action_number:out.action.action_number,base_revision:out.action.current_revision,decision:'accept',disposition:'execute',client_instance:'synthetic',work_request:out.work_request});
   });

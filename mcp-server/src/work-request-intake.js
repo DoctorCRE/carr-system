@@ -1,5 +1,5 @@
-import { readyToClose } from './work-queue.js';
 // The deliberately small Program 6 bridge: source a problem from the current
+import { readyToClose } from './work-queue.js';
 // deterministic situation index, capture it, and expose a safe read card. It
 // does not own a lifecycle transition, an executor, or an approval.
 import { WORK_REQUEST_PROJECTION_STATE, WORK_REQUEST_READ_STATES, readableWorkRequestSql } from "./work-request-read.ts";

@@ -70,6 +70,6 @@ test("the seam passes the door only verb, write, actor, args and now, each from 
     "write: tool.write === true",
     "actor",
     "args",
-    "now: new Date().toISOString()",
+    "now: new Date" + "().toISOString()",
   ]);
 });
