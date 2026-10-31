@@ -47,6 +47,15 @@ const observationSchema = { anyOf: Object.entries(CONTRACTS).map(([key, contract
   }, required: [...observationRequired, ...(contract.expenseBasis ? ['expense_basis'] : [])] };
 }) };
 
+export const humanFactSchema = { anyOf: observationSchema.anyOf.map(schema => {
+  const properties = Object.fromEntries(Object.entries(schema.properties)
+    .filter(([key]) => ['fact_key', 'value', 'unit', 'expense_basis'].includes(key)));
+  return { ...schema, properties: { ...properties, source: { ...sourceSchema,
+    properties: Object.fromEntries(Object.entries(sourceSchema.properties)
+      .filter(([key]) => ['document_ref', 'page_start', 'page_end', 'cited_text'].includes(key))) } },
+    required: schema.required.filter(key => ['fact_key', 'value', 'unit', 'expense_basis', 'source'].includes(key)) };
+}) };
+
 function normalize(value: string, multiplier: number) {
   const [whole, fractional = ''] = value.split('.');
   const scaled = (BigInt(whole + fractional) * BigInt(multiplier)).toString().padStart(fractional.length + 1, '0');
@@ -55,7 +64,7 @@ function normalize(value: string, multiplier: number) {
 }
 
 // Re-checks every field of untrusted input, so it reads args loosely.
-function validate(args: Record<string, any>, extra: string[] = []) {
+export function validateFactObservations(args: Record<string, any>, extra: string[] = []) {
   const invalid = () => { throw new ToolError({ error: 'validation_error' }); };
   const object = (value: any, allowed: string[], required = allowed) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -112,7 +121,7 @@ export function factObservationTools() {
         entity_ref: { ...text(200), description: 'Caller-asserted entity for this comparable set. No stored identity or document binding is checked.' }, observations: { type: 'array', minItems: 1, maxItems: 100, items: observationSchema },
       }, required: ['entity_ref', 'observations'] },
       handler: async (_client: Db, _actor: Actor, args: VerbInputs['compare-fact-observations']) => {
-        validate(args);
+        validateFactObservations(args);
         // expense_basis is read only for expense-basis contracts, where validate() required it.
         const observations = args.observations.map(input => ({ input,
           effective_confidence_tier: input.method === 'ocr' ? 'human_review' : input.confidence_tier,
@@ -188,7 +197,7 @@ export function factObservationTools() {
       handler: async (c: Db, actor: Actor, args: VerbInputs['record-fact-observations']) => {
         if (['verified_partner', 'probe_agent', 'review_agent'].includes(authorizationClassForActor(actor)))
           throw new ToolError({ error: 'not_in_profile' });
-        validate(args, ['idempotency_key']);
+        validateFactObservations(args, ['idempotency_key']);
         const out = (await c.query('select ops.record_fact_observations($1,$2,$3,$4,$5::jsonb) as r',
           [organizationTenantForActor(actor), actor.id, args.idempotency_key, args.entity_ref, JSON.stringify(args.observations)])).rows[0].r;
         if (!out.ok) throw new ToolError({ error: out.error });
@@ -197,7 +206,7 @@ export function factObservationTools() {
     },
     'promote-fact': {
       write: true,
-      description: 'Promote one entity-field to its next canonical version from stored observations. basis independent_agreement is the deterministic kernel rule: at least two agreeing auto-accept text-layer observations, no disagreeing observation on the field, and at least one pair proven independent by a different document, different content hash, disjoint document family and derivation chain, and a different extraction pass or model. A single AI observation never promotes by rule. basis human_review promotes exactly one observation and requires a verified partner. base_version is the current canonical version (0 when none); a stale value is refused with current_version. Every promotion is an append-only receipt naming the basis, actor, and exact observation ids. Refusals return ok false with the reason.',
+      description: 'Promote one entity-field to its next canonical version from stored observations. basis independent_agreement requires the default-off facts.automatic_promotion_enabled setting and server-verified lineage, which callers cannot assert. The deterministic kernel rule also requires at least two agreeing auto-accept text-layer observations, no disagreeing observation on the field, and at least one pair proven independent by a different document, different content hash, disjoint document family and derivation chain, and a different extraction pass or model. A single AI observation never promotes by rule. basis human_review promotes exactly one observation and requires a verified partner. base_version is the current canonical version (0 when none); a stale value is refused with current_version. Every promotion is an append-only receipt naming the basis, actor, and exact observation ids. Refusals return ok false with the reason.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         idempotency_key: { ...uuid, description: 'A fresh UUID per intended promotion; retries reuse the same key.' },
         entity_ref: text(200), fact_key: { type: 'string', enum: Object.keys(CONTRACTS) },
@@ -218,7 +227,7 @@ export function factObservationTools() {
     },
     'list-fact-conflicts': {
       write: false,
-      description: 'List unresolved fact conflicts: entity-fields whose stored observations normalize to more than one value (expense basis included), newest first, each with every competing observation, its cited source, lineage, tier, and the current canonical version to pass as base_version. A conflict closes only when a human-review promotion is recorded after its newest observation. Expired cited text reads as null; its SHA-256 remains.',
+      description: 'List unresolved fact conflicts: entity-fields whose stored observations normalize to more than one value (expense basis included), newest first, each with every competing observation, its cited source, lineage, tier, and the current canonical version to pass as base_version. Uses the durable review state: a human promotion or review decision settles the current evidence set; new evidence reopens review. Expired cited text reads as null; its SHA-256 remains.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         entity_ref: { ...text(200), description: 'Limit to one entity.' },
         limit: { type: 'integer', minimum: 1, maximum: 100, default: 50 },

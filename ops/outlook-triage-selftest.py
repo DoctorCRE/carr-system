@@ -186,8 +186,9 @@ if name == 'ioreg':
         if state.get('ioreg_unreadable'):
             print(state.get('ioreg_output', 'unreadable'))
         else:
-            sys.stdout.buffer.write(plistlib.dumps([{'IOConsoleUsers': [
-                {'CGSSessionScreenIsLocked': state.get('screen_locked', False)}]}]))
+            users = state.get('console_users', [{'kCGSSessionUserIDKey': os.getuid(),
+                                                 'CGSSessionScreenIsLocked': state.get('screen_locked', False)}])
+            sys.stdout.buffer.write(plistlib.dumps([{'IOConsoleUsers': users}]))
         sys.exit(state.get('ioreg_exit', 0))
     print('    | |   "HIDIdleTime" = %d' % int(state['idle_seconds'] * 1e9))
     sys.exit(0)
@@ -513,8 +514,27 @@ class PreflightQuitTest(FakeOutlookCase):
         self.assert_no_restart()
         self.assertEqual(self.called('pgrep') + self.called('cua-driver'), [])
 
+    def test_lock_probe_only_uses_current_console_user(self):
+        for other_locked, current_locked in ((False, True), (True, False)):
+            with self.subTest(other_locked=other_locked, current_locked=current_locked):
+                self.calls.unlink(missing_ok=True)
+                self.given(console_users=[
+                    {'kCGSSessionUserIDKey': os.getuid() + 1, 'CGSSessionScreenIsLocked': other_locked},
+                    {'kCGSSessionUserIDKey': os.getuid(), 'CGSSessionScreenIsLocked': current_locked},
+                ])
+                outcome = self.prepare()
+                if current_locked:
+                    self.assertEqual(outcome, triage.Outcome('skipped', 'screen_locked'))
+                    self.assert_no_restart()
+                else:
+                    self.assertIsNone(outcome)
+                    self.assertTrue(self.called('open'))
+
     def test_unlocked_or_unreadable_lock_probe_follows_existing_preflight(self):
-        for options in ({'screen_locked': False}, {'ioreg_unreadable': True},
+        for options in ({'screen_locked': False},
+                        {'console_users': [{'kCGSSessionUserIDKey': os.getuid() + 1,
+                                            'CGSSessionScreenIsLocked': True}]},
+                        {'ioreg_unreadable': True},
                         {'ioreg_unreadable': True, 'ioreg_output': '<?xml version="1.0"?><plist><array>'},
                         {'screen_locked': True, 'ioreg_exit': 1}):
             with self.subTest(options=options):
@@ -747,6 +767,30 @@ class PreflightQuitTest(FakeOutlookCase):
         self.assertNotIn(ACCOUNT, outcome.detail)
         self.assert_no_restart()
 
+    def test_unreadable_candidates_report_same_probe_without_titles(self):
+        from lib.outlook_ui import cua
+        second = window(16, f'Private title • {ACCOUNT}', 1230, 800, True)
+        self.given(windows=[ORDINARY | {'title': f'Secret title • {ACCOUNT}'}, second])
+        probes = {13: {'degraded_reason': 'ax_window_unresolved', 'elements': [
+                      {'role': 'AXButton', 'label': 'New Mail'},
+                      {'role': 'AXTable', 'label': 'Message List'}]},
+                  16: {'elements': [{'role': 'AXButton', 'label': 'Private subject'}]}}
+        seen = []
+        def probe(tool, arguments):
+            if tool == 'get_window_state' and arguments['window_id'] in probes:
+                seen.append(arguments['window_id'])
+                return probes[arguments['window_id']]
+            return cua(tool, arguments)
+        with patch('lib.outlook_ui.cua', side_effect=probe):
+            outcome = self.prepare()
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'no_usable_main_window'))
+        self.assertEqual(seen, [13, 16])
+        self.assertIn('"unresolved":true,"new_mail_found":true,"message_list_found":true,"element_count":2', outcome.detail)
+        self.assertIn('"unresolved":false,"new_mail_found":false,"message_list_found":false,"element_count":1', outcome.detail)
+        for private in ('Secret title', 'Private title', 'Private subject', ACCOUNT):
+            self.assertNotIn(private, outcome.detail)
+        self.assert_no_restart()
+
     def test_different_new_mail_button_name_prevents_restart(self):
         for label in ('New Mail Rule', 'New Mail Rule, pressed'):
             with self.subTest(label=label):
@@ -848,6 +892,40 @@ class OutlookTriageTest(FakeOutlookCase):
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'cua_driver_unavailable'))
         self.assertEqual((state['moved'], state['selections']), ([], []))
+
+    def test_driver_failure_detail_at_both_triage_catches(self):
+        from lib.outlook_ui import CuaError
+        for target in ('lib.outlook_triage.decide', 'lib.outlook_triage.file_inbox'):
+            with self.subTest(target=target):
+                self.given([FILE_A])
+                with patch(target, side_effect=CuaError('click: exit 7')):
+                    outcome, _ = self.run_triage()
+                self.assertEqual((outcome.reason, outcome.detail), ('cua_driver_failed', 'click: exit 7'))
+                self.assertIn('click: exit 7', self.report())
+
+    def test_undecodable_driver_output_raises_cua_error(self):
+        from lib.outlook_ui import CuaError, cua
+        for exit_code in (0, 1):
+            with self.subTest(exit_code=exit_code):
+                driver = self.tmp / 'bin/cua-driver'
+                driver.write_text(f"#!{sys.executable}\nimport os\nos.write(1, bytes([255, 254]))\nraise SystemExit({exit_code})\n")
+                with self.assertRaises(CuaError) as caught:
+                    cua('click', {})
+                self.assertEqual(str(caught.exception), 'click: UnicodeDecodeError')
+
+    def test_driver_nonzero_error_diagnostic_excludes_mail(self):
+        from lib.outlook_ui import CuaError, cua
+        from subprocess import CompletedProcess
+        cases = [('{"error":{"code":"AX_TIMEOUT"}}', 'Subject: Private deal', 'AX_TIMEOUT'),
+                 ('', 'TimeoutError: Subject: Private deal', 'TimeoutError'),
+                 ('{"error":"AX_TIMEOUT"}', '', '')]
+        for stdout, stderr, code in cases:
+            with self.subTest(code=code), patch('lib.outlook_ui.subprocess.run',
+                    return_value=CompletedProcess([], 7, stdout, stderr)):
+                with self.assertRaises(CuaError) as caught:
+                    cua('click', {})
+                self.assertEqual(str(caught.exception), f'click: exit 7{": " + code if code else ""}')
+                self.assertNotIn('Private deal', str(caught.exception))
 
     def test_files_read_email_by_each_rule_and_never_selects_unread(self):
         self.given([FILE_A, VENDOR, FIRM, NEWS, UNREAD])

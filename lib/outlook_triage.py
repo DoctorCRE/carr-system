@@ -340,8 +340,8 @@ def preserve_unread(window: Window, report: Report, action: Callable[[dict], Out
     except UiError as exc:
         outcome = Outcome('failed', str(exc),
                           f'at {exc.step}: {exc}' if exc.step else '')
-    except CuaError:
-        outcome = Outcome('failed', 'cua_driver_failed')
+    except CuaError as exc:
+        outcome = Outcome('failed', 'cua_driver_failed', str(exc))
     end_badge, end_tabs = _inbox(window)
     try:
         end_unread = _unread(end_tabs)
@@ -427,8 +427,8 @@ def triage(repo: Path, home: Path, waits: Waits, limits: Limits,
         outcome = file_inbox(window, guide, CarrFinder(repo), limits, report, closed)
     except UiError as exc:
         outcome = Outcome('failed', str(exc))
-    except CuaError:
-        outcome = Outcome('failed', 'cua_driver_failed')
+    except CuaError as exc:
+        outcome = Outcome('failed', 'cua_driver_failed', str(exc))
     try:
         window.show_folder_pane(True)
     except (UiError, CuaError):

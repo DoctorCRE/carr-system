@@ -124,6 +124,7 @@ class TranscriptJson(TypedDict):
     speaker_labels: dict[str, str]
     speaker_method: str
     speaker_tracks: dict[str, TrackSpeakers]
+    missing_tracks: list[str]
     segments: list[Segment]
 
 
@@ -447,6 +448,7 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
         "speaker_labels": speaker_labels,
         "speaker_method": speaker_method,
         "speaker_tracks": speaker_tracks,
+        "missing_tracks": missing_tracks,
         "segments": merged_segments,
     }
     write_outputs(session_dir, transcript)

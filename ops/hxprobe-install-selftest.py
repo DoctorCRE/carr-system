@@ -180,6 +180,7 @@ if waits == 2 and (repo / 'out/complete').exists():
         failed = self.install(check=False)
         self.assertNotEqual(failed.returncode, 0)
         self.assertIn('out/run-scheduled.log', failed.stderr)
+        self.assertIn('Rerun the installer', failed.stderr)
         self.assertEqual((self.repo / 'out/waits').read_text(), '60')
         self.assertEqual(self.receipt(), built)
         self.assertNotIn('mail_ids', json.loads(state.read_text()))
