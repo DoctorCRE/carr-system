@@ -188,7 +188,7 @@ async function status(request, dependencies) {
   try {
     const result = await dependencies.withWriter(async client => {
       const session = await authenticatedSession(client, body.session_token, true);
-      if (session.state === "done" || session.state === "failed")
+      if (session.state === "done" || (session.state === "failed" && body.state !== "distilling"))
         refuse(409, { error: "terminal_state", state: session.state });
       const current = STATES.indexOf(session.state);
       const requested = STATES.indexOf(body.state);

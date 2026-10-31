@@ -826,7 +826,7 @@ def update_report(session_dir: Path, *, initial: dict[str, Any] | None = None,
 def process_session(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]] = default_distiller, *,
                     run_checks: bool = True, max_attempts: int = 3) -> dict[str, Any]:
     with session_lock(session_dir, blocking=False):
-        return _process_session_locked(session_dir, distiller, run_checks=run_checks, max_attempts=max_attempts)
+        return _process_session_locked(session_dir, distiller, run_checks=run_checks, max_attempts=min(max_attempts, len(EXTRACTION_RETRY_DELAYS) + 1))
 
 
 def _complete_session(session_dir: Path, report: dict[str, Any]) -> dict[str, Any]:
@@ -917,7 +917,9 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
             raise RuntimeError("Phone checks require an admitted Jev budget")
         import post_call_jev
 
-        result = post_call_jev.check_distillation(result, speaker_context, transcript, client=_jev_fixture_client())
+        result = post_call_jev.check_distillation(
+            result, speaker_context, transcript, client=_jev_fixture_client(),
+            budget_ledger=session_dir.parent / ".jev-budget.json")
     except Exception as exc:
         exception_class = type(exc).__name__
         deal_check_status = {"status": "unavailable", "exception_class": exception_class}
@@ -1100,6 +1102,8 @@ def _automatic_hold(update: dict[str, Any], field: str, report: dict[str, Any],
     model cannot place is kicked back as an approval card. Confident here is
     deterministic and checkable, never the model's own say-so.
     """
+    if report.get("checks_hold"):
+        return str(report["checks_hold"])
     unavailable = report.get("deal_check")
     if isinstance(unavailable, dict) and unavailable.get("status") == "unavailable":
         return f"Deal check unavailable ({unavailable['exception_class']})."

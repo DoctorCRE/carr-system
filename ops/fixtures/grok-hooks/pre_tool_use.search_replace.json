@@ -1,0 +1,28 @@
+{
+ "hookEventName": "pre_tool_use",
+ "sessionId": "00000000-0000-4000-8000-0000000000a2",
+ "cwd": "/repo/.grok-capture",
+ "workspaceRoot": "/repo",
+ "timestamp":"2026-10-31T00:00:00+00:00",
+ "transcriptPath": "/home/example/.grok/sessions/%2Frepo%2F.grok-capture/00000000-0000-4000-8000-0000000000a2/updates.jsonl",
+ "permissionMode": "bypassPermissions",
+ "toolName": "search_replace",
+ "toolUseId": "call-00000000-0000-4000-8000-000000000000-1",
+ "toolInput": {
+  "file_path": "/repo/.grok-capture/note.txt",
+  "old_string": "hello",
+  "new_string": "goodbye"
+ },
+ "toolInputTruncated": false,
+ "hook_event_name": "PreToolUse",
+ "session_id": "00000000-0000-4000-8000-0000000000a2",
+ "transcript_path": "/home/example/.grok/sessions/%2Frepo%2F.grok-capture/00000000-0000-4000-8000-0000000000a2/updates.jsonl",
+ "permission_mode": "bypassPermissions",
+ "tool_name": "search_replace",
+ "tool_input": {
+  "file_path": "/repo/.grok-capture/note.txt",
+  "old_string": "hello",
+  "new_string": "goodbye"
+ },
+ "tool_use_id": "call-00000000-0000-4000-8000-000000000000-1"
+}

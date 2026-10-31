@@ -6,7 +6,7 @@ export default {
   async fetch(request, env) {
     const pool = new Pool({ connectionString: env.DATABASE_URL_WRITER });
     try {
-      return await createRequirementUploadHandler({ bucket: env.requirement_quarantine,
+      return await createRequirementUploadHandler({ bucket: env.requirement_quarantine, visitorSecret: env.REQUIREMENT_VISITOR_HMAC_KEY,
         transaction: async fn => {
           const c = await pool.connect();
           try {

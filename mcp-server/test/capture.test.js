@@ -413,6 +413,15 @@ test("Studio claims pass the actor gate after the idempotent device migration", 
   }
 });
 
+test("a recovered transcription can advance a previously failed session", async () => {
+  const { r, token } = await claimed();
+  for (const state of ["transcribing", "failed", "distilling"]) {
+    const response = await post(r.handler, "/capture/status", { session_token: token, state,
+      at: "2026-08-08T17:00:00.000Z" });
+    assert.equal(response.status, 200, state);
+  }
+});
+
 test("status transitions move forward, reject every backward edge, and stop at terminals", async () => {
   for (const terminal of ["done", "failed"]) {
     const { db, r, token } = await claimed();
@@ -433,6 +442,7 @@ test("status transitions move forward, reject every backward edge, and stop at t
       }
     }
     for (const state of ["recording", "transcribing", "distilling", "done", "failed"]) {
+      if (terminal === "failed" && state === "distilling") continue;
       const after = await post(r.handler, "/capture/status", { session_token: token, state,
         at: "2026-08-08T17:00:00.000Z" });
       assert.equal(after.status, 409, `${terminal} -> ${state}`);

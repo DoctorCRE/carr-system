@@ -110,6 +110,7 @@ class FakeClient {
       return { rows: [{ next_date: deal.next_date, overdue: !!deal.next_date && deal.next_date < this.now.toISOString().slice(0,10),
         owner: deal.owner, action_id: action?.id ?? null, next_step: action?.description ?? null }] };
     }
+    if (sql.includes("deal-update:preserved")) return { rows: [] };
     if (sql.includes("dealroom:supersede-overdue")) return { rows: [] };
 
     if (sql.includes("dealroom:close-lead") || sql.includes("dealroom:open-lead")) return { rows: [] };
