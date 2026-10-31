@@ -632,8 +632,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           const { rows } = await c.query(`with inbound as (
               select a.recorded_at from activity a where a.kind='email_in'
                 and (a.email_source->>'mailbox_owner'=$1 or
-                  (a.email_source is null and (a.actor_id=$3::uuid or
-                    a.actor_id=(select id from actor where slug=$1))))
+                  (a.email_source is null and a.actor_id=$3::uuid))
                 and (a.email_identity->>'mailbox_account' is null or
                   a.email_identity->>'mailbox_account'=$2)
             ), filing as (
