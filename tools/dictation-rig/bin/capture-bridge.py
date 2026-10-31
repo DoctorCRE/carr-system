@@ -782,6 +782,8 @@ def check_cmd() -> int:
 
 
 def main(argv: list[str]) -> int:
+    from lib.call_settings import configure_environment
+    configure_environment()
     if len(argv) < 2:
         sys.stderr.write(
             "usage: capture-bridge.py <claim|status|publish|poll|check> [args...]\n"
