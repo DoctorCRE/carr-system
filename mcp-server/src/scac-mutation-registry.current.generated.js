@@ -978,6 +978,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "draft-terms-comparison": {
+    "ingress_key": "mcp-tool:draft-terms-comparison",
+    "source_locator": "mcp-server/src/fact-review.ts",
+    "schema_digest": "5a91e5723d17f1aa0ec05d6104a082c26267db1aa0cc774521228d05fc111897",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "drop-action": {
     "ingress_key": "mcp-tool:drop-action",
     "source_locator": "mcp-server/src/action-closure.ts",
@@ -1261,6 +1271,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "issue-requirement-upload": {
+    "ingress_key": "mcp-tool:issue-requirement-upload",
+    "source_locator": "mcp-server/src/requirement-requests.js",
+    "schema_digest": "1719221eab60a995637a428f3e131cd8c6fc3128f32556ae046832f7d3a67c50",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": true,
+    "delegates_to": []
+  },
   "issue-tour-share-grant": {
     "ingress_key": "mcp-tool:issue-tour-share-grant",
     "source_locator": "mcp-server/src/tour-sharing.js",
@@ -1491,6 +1511,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "list-requirement-requests": {
+    "ingress_key": "mcp-tool:list-requirement-requests",
+    "source_locator": "mcp-server/src/requirement-requests.js",
+    "schema_digest": "6090673a493e5225d9d0fa948e3ba6f8191dbef5560bff4696dcb8a86fbbb5a6",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "list-research-sites": {
     "ingress_key": "mcp-tool:list-research-sites",
     "source_locator": "mcp-server/src/research-sites.ts",
@@ -1524,7 +1554,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "log-activity": {
     "ingress_key": "mcp-tool:log-activity",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "007833d9bc988d15629f78d26e387ab3f340a1aba83b59c17af7571bc2d4d152",
+    "schema_digest": "db04624ca7394165a6ec8d0cc269ac292f7fde02c7834b3a7b6d18da8e532e82",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -2076,6 +2106,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:read-deal-reconciliation",
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "c95ca24a7624ac4279c35aa1fa5a3ee0968da2adcbfc03ab6c4d3cd9ddf30190",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-deal-update-reviews": {
+    "ingress_key": "mcp-tool:read-deal-update-reviews",
+    "source_locator": "mcp-server/src/deal-update-resolution.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -2952,6 +2992,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "request-checklist-document": {
+    "ingress_key": "mcp-tool:request-checklist-document",
+    "source_locator": "mcp-server/src/requirement-requests.js",
+    "schema_digest": "f32f9485f4a830d935b8ec2faa6891c86af22f0aee06fe7febae8de9ef886117",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "request-tour-pdf-render": {
     "ingress_key": "mcp-tool:request-tour-pdf-render",
     "source_locator": "mcp-server/src/tour-artifacts.js",
@@ -3107,6 +3157,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "review-deal-update": {
+    "ingress_key": "mcp-tool:review-deal-update",
+    "source_locator": "mcp-server/src/deal-update-resolution.js",
+    "schema_digest": "e5ee03930b63ead188d0d067066f37a905d191c00711e1fae4396ddc0bbec110",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "revise-board-question": {
     "ingress_key": "mcp-tool:revise-board-question",
     "source_locator": "mcp-server/src/board-answers.js",
@@ -3125,6 +3185,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "human_only": true,
     "human_caller_only": false,
     "authority_only": false,
+    "delegates_to": []
+  },
+  "revoke-requirement-upload": {
+    "ingress_key": "mcp-tool:revoke-requirement-upload",
+    "source_locator": "mcp-server/src/requirement-requests.js",
+    "schema_digest": "fb1e2483a8d6da867a4fc7d161872a598a38efa47900eb71af2068932d06e141",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": true,
     "delegates_to": []
   },
   "revoke-salesforce-read-consent": {
@@ -3891,6 +3961,96 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "ingress_key": "db-relation-acl:public.practice_origination_event:carr_writer:insert",
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_quota:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_quota",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "update",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_request:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_request",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_receipt:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_receipt",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_grant:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_grant",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_grant:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_grant",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "update",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_visitor:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_visitor",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_visitor:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_visitor",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "update",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_grant:carr_authority:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_grant",
+      "relation_kind": "r",
+      "grantee": "carr_authority",
+      "privilege": "insert",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_grant:carr_authority:update",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_grant",
+      "relation_kind": "r",
+      "grantee": "carr_authority",
+      "privilege": "update",
+      "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_quota:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_quota",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "insert",
+      "grantable": false
     }
   ],
   "secdef_execute": [

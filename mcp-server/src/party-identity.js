@@ -220,11 +220,7 @@ export function partyIdentityTools({ withEnvelope, writeEvent, versionGuard, res
           const before = (await c.query(
             `select p.kind, p.name, p.state, p.org_id, o.name as org_name,
                     p.email, p.phone, p.cell, p.npi, p.city,
-                    (select f.value->>'street_address' from record_flag f
-                       where f.subject_type='party' and f.subject_id=p.id and f.kind='address'
-                         and f.value->>'found'='true' and f.value->>'epistemic_status'='source_backed'
-                         and (f.expires_on is null or f.expires_on>=current_date)
-                       order by f.observed_at desc, f.id desc limit 1) as street_address
+                    (select a.street_address from v_practice_origination_party_address a where a.party_id=p.id) as street_address
                from party p left join party o on o.id=p.org_id where p.id=$1`, [partyId])).rows[0];
           if (!before) throw new ToolError({ error: "not_found", table: "party", id: partyId });
           // Check stored identifiers before any correction or envelope receipt.
