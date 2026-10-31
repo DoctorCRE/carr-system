@@ -45,6 +45,30 @@ REQUIRED_COLUMNS = {
     "MDL_NAME", "LAST_NAME", "ORG_NAME",
 }
 
+def origination_rows(rows, *, published_on):
+    """Use the public-file publication date; an enrollment ID is not a dated fact."""
+    result = []
+    for raw in rows:
+        if not REQUIRED_COLUMNS.issubset(raw):
+            raise ValueError("PECOS schema drift; missing required columns")
+        state = raw["STATE_CD"].strip()
+        if state not in STATES:
+            continue
+        npi, enrollment = raw["NPI"].strip(), raw["ENRLMT_ID"].strip()
+        if not re.fullmatch(r"\d{10}", npi) or not re.fullmatch(r"[IO]\d{8}\d+", enrollment):
+            raise ValueError("PECOS invalid NPI or enrollment identifier")
+        name = raw["ORG_NAME"].strip() or " ".join(raw[k].strip() for k in
+               ("FIRST_NAME", "MDL_NAME", "LAST_NAME") if raw[k].strip())
+        if not name:
+            raise ValueError("PECOS missing provider name")
+        result.append({"record_key": npi + "|" + enrollment, "npi": npi, "name": name,
+                       "city": "", "state": state, "evidence_date": published_on.isoformat(),
+                       "date_basis": "publication",
+                       "source_url": "https://data.cms.gov/provider-characteristics/medicare-provider-supplier-enrollment/medicare-fee-for-service-public-provider-enrollment",
+                       "facts": {"enrollment_id": enrollment, "provider_type": raw["PROVIDER_TYPE_DESC"].strip()}})
+    return result
+
+
 def tc(s): return " ".join(w.capitalize() for w in str(s).split())
 
 def enrl_date(enrlmt_id):

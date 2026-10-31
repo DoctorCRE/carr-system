@@ -3,12 +3,22 @@ import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import pg from 'pg';
+import { createServer } from 'node:http';
+import { Readable } from 'node:stream';
+import { spawn } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { handoffState } from './helpers/phone-handoff-state.mjs';
+import { PhoneAudioHandoff } from '../src/phone-audio-handoff.js';
 import { execFileSync } from 'node:child_process';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { createPhoneCallHandler } from '../src/phone-call-sessions.js';
 import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.current.generated.js';
 
 let fixture, pool, actor, handler;
+const clients = new Map();
 before(async () => {
   const bin = ['/opt/homebrew/opt/postgresql@18/bin', '/usr/lib/postgresql/18/bin',
     '/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin'].find(p => existsSync(`${p}/initdb`));
@@ -18,6 +28,12 @@ before(async () => {
   await fixture.run(`${bin}/pg_ctl`, ['-D', `${fixture.root}/data`, '-l', `${fixture.root}/server.log`, '-o', `-k ${fixture.root} -h ''`, '-w', 'start']);
   await fixture.run(`${bin}/createdb`, ['-h', fixture.root, '-U', 'carr_ci', 'carr_ci']);
   pool = new pg.Pool({ host: fixture.root, user: 'carr_ci', database: 'carr_ci' });
+  pool.on('connect', client => {
+    let closed;
+    const done = new Promise(resolve => { closed = resolve; });
+    clients.set(client, { done, closed });
+  });
+  pool.on('remove', client => { clients.get(client).closed(); clients.delete(client); });
   await pool.query('create role neondb_owner');
   await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-f', new URL('../../db/schema.sql', import.meta.url).pathname]);
   const python = new URL('../../.venv/bin/python', import.meta.url).pathname;
@@ -36,16 +52,28 @@ before(async () => {
       return result;
     } catch (error) { await c.query('rollback'); console.error(error.code, error.message); throw error; }
     finally { c.release(); }
-  }, fetchFn: async (_url, options) => {
-    const metadata = JSON.parse(options.headers['x-carr-call']);
-    return Response.json({ session_id: metadata.session_id, sha256: metadata.sha256, transferred: true });
   } });
 });
-after(async () => { try { await pool?.end(); } finally { await fixture?.close(); } });
+after(async () => {
+  try {
+    const closing = [...clients.values()].map(client => client.done);
+    await pool?.end();
+    await Promise.all(closing);
+    assert.equal(clients.size, 0, 'all clients closed before PostgreSQL stops');
+  } finally { await fixture?.close(); }
+});
 
-const env = { CALL_STUDIO_TOKEN: 'synthetic-service-secret', CALL_STUDIO_URL: 'https://studio.example.test' };
+const handoff = new PhoneAudioHandoff(handoffState());
+const env = { CALL_STUDIO_TOKEN: 'synthetic-service-secret',
+  PHONE_AUDIO_HANDOFF: { idFromName: n => n, get: () => handoff } };
 const url = 'https://app.example.test/api/v1/call-sessions';
-const metadata = { sha256: 'b'.repeat(64), byte_count: 100, duration_seconds: 1, mime_type: 'audio/wav',
+const audio = Buffer.alloc(32044);
+audio.write('RIFF', 0); audio.writeUInt32LE(32036, 4); audio.write('WAVEfmt ', 8);
+audio.writeUInt32LE(16, 16); audio.writeUInt16LE(1, 20); audio.writeUInt16LE(1, 22);
+audio.writeUInt32LE(16000, 24); audio.writeUInt32LE(32000, 28);
+audio.writeUInt16LE(2, 32); audio.writeUInt16LE(16, 34);
+audio.write('data', 36); audio.writeUInt32LE(32000, 40);
+const metadata = { sha256: createHash('sha256').update(audio).digest('hex'), byte_count: audio.length, duration_seconds: 1, mime_type: 'audio/wav',
   started_at: '2026-01-01T12:00:00Z', consent_announced_at: '2026-01-01T12:00:00Z' };
 
 test('concurrent imports admit one session under carr_writer and expose its report without filing', async () => {
@@ -59,8 +87,72 @@ test('concurrent imports admit one session under carr_writer and expose its repo
   assert.equal(replies.filter(r => !r.duplicate).length, 1);
   const id = replies[0].session_id;
   const transfer = await handler.fetch(new Request(`${url}/${id}/transfer`, { method: 'PUT',
-    headers: { 'content-type': 'audio/wav', 'content-length': '100' }, body: new Uint8Array(100) }), env, actor);
-  assert.equal(transfer.status, 200, await transfer.clone().text());
+    headers: { 'content-type': 'audio/wav', 'content-length': String(audio.length) }, body: audio }), env, actor);
+  assert.equal(transfer.status, 202, await transfer.clone().text());
+  const dir = await mkdtemp(join(tmpdir(), 'phone-pull-'));
+  const server = createServer(async (req, res) => {
+    try {
+      const response = await handler.studioFetch(new Request(`http://127.0.0.1${req.url}`, {
+        method: req.method, headers: req.headers,
+        ...(['GET', 'HEAD'].includes(req.method) ? {} : { body: Readable.toWeb(req), duplex: 'half' }),
+      }), env);
+      res.writeHead(response.status, Object.fromEntries(response.headers));
+      res.end(Buffer.from(await response.arrayBuffer()));
+    } catch { res.writeHead(500).end(); }
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const script = `
+import sys,json,os,hashlib
+from pathlib import Path
+sys.path.insert(0, str(Path('tools/dictation-rig/bin').resolve()))
+import phone_intake,post_call,transcribe_session
+root = Path(sys.argv[1])
+cfg = {'base_url': sys.argv[2]}
+result = phone_intake.pull_pending(root,cfg,'synthetic-service-secret')
+assert result['received'] == 1, result
+session = next(root.glob('phone-*'))
+assert hashlib.sha256((session/'imported.audio').read_bytes()).hexdigest() == sys.argv[3]
+assert (session/'imported.audio').stat().st_mode & 0o777 == 0o600
+model = root/'synthetic-model'
+model.write_bytes(b'fixture model')
+decoder = root/'decoder'
+decoder.write_text('#!'+sys.executable+'\\nimport shutil,sys\\nshutil.copyfile(sys.argv[sys.argv.index("-i")+1],sys.argv[-1])\\n')
+whisper = root/'whisper'
+whisper.write_text('#!'+sys.executable+'\\nimport json,sys\\njson.dump({"transcription":[{"offsets":{"from":0,"to":1000},"text":"Synthetic recording."}]},open(sys.argv[sys.argv.index("-of")+1]+".json","w"))\\n')
+decoder.chmod(0o700)
+whisper.chmod(0o700)
+os.environ['CARR_WHISPER_MODEL'] = str(model)
+transcribe_session.WHISPER_CLI_BIN = str(whisper)
+post_call.LOG_PATH = root/'processor.log'
+post_call.store_context(session, {'session':session.name,'workspace_kind':'all',
+    'generated_at':'2026-01-01T12:00:00Z','deals':[]})
+def distiller(request):
+    assert request['transcript']['segments'][0]['text'] == 'Synthetic recording.'
+    return {'schema_version':1,'report':{'summary':'Synthetic imported conversation.','decisions':[], 'open_questions':[]},
+        'joe_tasks':[],'dell_tasks':[],'deal_updates':[],'draft_proposals':[],'review_questions':[]}
+status = phone_intake.extract(session, decoder=str(decoder), distiller=distiller)
+assert status['state'] == 'ready_review', status
+assert not (session/'ingested.json').exists()
+print(json.dumps(result))
+`;
+    const child = spawn('python3', ['-c', script, dir, `http://127.0.0.1:${server.address().port}`, metadata.sha256], {
+      cwd: new URL('../..', import.meta.url).pathname, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let output = '', errors = '';
+    child.stdout.on('data', chunk => { output += chunk; });
+    child.stderr.on('data', chunk => { errors += chunk; });
+    const exit = await new Promise((resolve, reject) => { child.on('error', reject); child.on('exit', resolve); });
+    assert.equal(exit, 0, errors);
+    assert.equal(JSON.parse(output.trim().split('\n').at(-1)).received, 1);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    await rm(dir, { recursive: true, force: true });
+    await handoff.fetch(new Request(`https://fixture.test/${id}`, { method: 'DELETE' }));
+  }
+  const transferred = await (await handler.fetch(new Request(`${url}/${id}`), env, actor)).json();
+  assert.equal(transferred.transferred, true);
   const projection = { summary: 'Synthetic imported conversation.', decisions: [], open_questions: [] };
   const report = await handler.studioFetch(new Request(`https://api.example.test/capture/phone/v1/call-sessions/${id}/report`, {
     method: 'POST', headers: { authorization: `Bearer ${env.CALL_STUDIO_TOKEN}` }, body: JSON.stringify(projection),
