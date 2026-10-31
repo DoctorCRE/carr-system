@@ -28,5 +28,5 @@ export async function applyFutureWorkSchema(client) {
     return;
   }
   if (!(await client.query("select to_regclass('ops.future_work_link') as relation")).rows[0].relation)
-    await client.query(readFileSync(new URL('../../../migrations/1119_future_work_links.sql', import.meta.url), 'utf8'));
+    await client.query(readFileSync(new URL('../../../migrations/1120_future_work_links.sql', import.meta.url), 'utf8'));
 }
