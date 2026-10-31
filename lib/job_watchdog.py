@@ -66,7 +66,11 @@ def collect(root, config):
     total, _, free = shutil.disk_usage(root)
     facts = {"jobs": jobs, "disk_free_percent": free / total * 100}
     if "com.carr.outlook-intake" in statuses:
-        facts["outlook"] = collect_outlook(config)
+        # A failed outcome read is its own finding; it must not silence every other alarm.
+        try:
+            facts["outlook"] = collect_outlook(config)
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            facts["outlook"] = {"read_error": str(exc)}
     return facts
 
 
@@ -150,6 +154,11 @@ def degraded_receipt(lines):
 
 
 def outlook_findings(facts, now):
+    if "read_error" in facts:
+        return [{"key": "job_degraded:outlook:outcome_read_failed", "kind": "job_degraded",
+                 "subject": "com.carr.outlook-intake", "source": "outlook-outcomes",
+                 "reason": f"Outlook intake: outcome read failed ({facts['read_error']})"}]
+
     def instant(value):
         if isinstance(value, (int, float)):
             return datetime.fromtimestamp(value, timezone.utc)

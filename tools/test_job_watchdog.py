@@ -112,6 +112,21 @@ class WatchdogTests(unittest.TestCase):
             self.assertEqual(watchdog.scan(self.root, self.config), 0)
         self.assertIn('daily coverage check failed', watchdog.digest(self.root, self.config))
 
+    def test_failed_outcome_read_is_one_finding_and_other_alarms_still_land(self):
+        launchctl = subprocess.CompletedProcess(
+            [], 0, 'PID Status Label\n- 0 com.carr.outlook-intake\n- 1 com.carr.fixture\n', '')
+        settings = SimpleNamespace(repo=self.root, account='fixture@example.test', timezone='America/Chicago',
+                                   transport_environment=lambda: {})
+        with patch.object(watchdog, 'SOURCE', self.source), patch.object(watchdog, 'load_settings', return_value=settings), \
+             patch.object(watchdog.subprocess, 'run', side_effect=[launchctl]):
+            facts = watchdog.collect(self.root, self.config)
+        keys = {f['key'] for f in watchdog.detect(facts)}
+        self.assertIn('job_degraded:outlook:outcome_read_failed', keys)
+        self.assertIn('job_failed:com.carr.fixture:exit_1', keys)
+        with patch.object(watchdog, 'collect', return_value=facts):
+            self.assertEqual(watchdog.scan(self.root, self.config), 0)
+        self.assertIn('outcome read failed', watchdog.digest(self.root, self.config))
+
     def test_only_failed_scheduled_jobs_and_low_disk_are_collected(self):
         response = subprocess.CompletedProcess([], 0,
             "PID\tStatus\tLabel\n-\t7\tcom.carr.fixture\n-\t1\tcom.apple.other\n", "")
