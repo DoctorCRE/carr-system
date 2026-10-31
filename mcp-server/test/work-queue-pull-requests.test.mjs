@@ -236,3 +236,9 @@ test('a search GitHub flags incomplete_results saves no finish and no stale verd
   assert.equal(full.truncated, false);
   assert.deepEqual(queueView([jobRow(1)], [full], at).finishes.map(({ finished }) => finished.stage), ['merged']);
 });
+
+test('a started job without a PR is running rather than waiting in the queue', () => {
+  const view = queueView([jobRow(1, { started_at: '2026-10-28T11:00:00Z' }), jobRow(2)],
+    [{ repo: 'DoctorCRE/carr-system', state: 'ok', prs: [] }], at);
+  assert.deepEqual(view.jobs.map(job => job.stage), ['running', 'queued']);
+});

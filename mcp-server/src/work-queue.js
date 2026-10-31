@@ -103,7 +103,7 @@ export function queueView(rows, sources, at) {
     const card_id = queueCardId(row.work_request, row.slice_ordinal, row.j_number);
     const live = byCard.get(card_id) ?? [];
     const prs = live.length || !finished ? live : finished.prs;
-    const stage = live.length || !finished ? jobStage(live) : finished.stage;
+    const stage = live.length || !finished ? (live.length ? jobStage(live) : row.started_at ? 'running' : 'queued') : finished.stage;
     if (complete && !finished && (stage === 'merged' || stage === 'closed'))
       finishes.push({ key: [work_request_id, row.slice_ordinal, row.j_number], finished: { stage, prs } });
     const since = stage === 'build' ? Math.max(...prs.filter(pr => pr.state === 'open').map(pr => Date.parse(pr.updated_at))) : NaN;
