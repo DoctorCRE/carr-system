@@ -77,6 +77,12 @@ READER_EXEMPT: dict[str, str] = {
     "public.defect_resolution":
         "read only on the writer connection by close-defect and close-incident; "
         "readers use public.v_defect",
+    # 0520 grants select to carr_writer and carr_authority only; reads go through
+    # ops.doc_conversation_facts. complete-doc-request is a write:true,
+    # authorityOnly verb, so mcp.js routes it to the carr_authority connection.
+    "ops.doc_conversation_turn":
+        "read only on the authority connection by complete-doc-request; "
+        "readers use ops.doc_conversation_facts",
 }
 DECLARED = re.compile(r"^CREATE TABLE (?:ONLY )?([a-z_]+\.[a-z_]+)", re.M)
 READ = re.compile(r"\b(?:from|join)\s+(ops|public)\.([a-z_]+)\b", re.I)

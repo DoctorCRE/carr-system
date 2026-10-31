@@ -21,6 +21,7 @@ const joe = { id: ids.joe, slug: "joe", display: "Joe", human: true,
 class CaptureFake {
   constructor() {
     this.actors = new Map([["mac-studio", ids.device], ["joe", ids.joe]]);
+    this.inactiveActors = new Set();
     this.sessions = [];
     this.candidates = [];
     this.postCallCandidates = [];
@@ -53,7 +54,7 @@ class CaptureFake {
     if (sql.includes("capture:claim-nonce"))
       return { rows: this.sessions.filter(session => session.nonce === params[0]).map(session => ({ id: session.id })) };
     if (sql.includes("capture:device-actor"))
-      return { rows: this.actors.has(params[0]) ? [{ id: this.actors.get(params[0]) }] : [] };
+      return { rows: this.actors.has(params[0]) ? [{ id: this.actors.get(params[0]), active: !this.inactiveActors.has(params[0]) }] : [] };
     if (sql.includes("capture:claim-insert")) {
       this.sessions.push({ id: ids.session, nonce: params[0], device_id: params[1], actor_id: params[2],
         mode: params[3], started_at: params[4], consent_announced_at: params[5], token_hash: params[6],
@@ -63,7 +64,7 @@ class CaptureFake {
     if (sql.includes("capture:session-auth")) {
       const session = this.sessions.find(row => row.token_hash === params[0]);
       return { rows: session ? [{ id: session.id, state: session.state, post_call: session.post_call,
-        state_at: session.state_at }] : [] };
+        state_at: session.state_at, expired: !!session.expired, actor_active: !this.inactiveActors.has(session.device_id) }] : [] };
     }
     if (sql.includes("capture:status-update")) {
       const session = this.sessions.find(row => row.id === params[0]);
@@ -149,7 +150,7 @@ class CaptureFake {
         this.postCallCandidates.push({ id: this.uuid("6"), session_id: params[0], idempotency_key: params[1],
           batch_hash: params[2], item_index, kind: item.kind, deal_id: payload.deal_id,
           assignee_slug: payload.assignee || null, action_description: payload.action || null,
-          due_on: payload.due_on || null, recipient_party_id: payload.recipient_party_id || null,
+          due_on: payload.due_on || null, due_defaulted: payload.due_defaulted ?? null, recipient_party_id: payload.recipient_party_id || null,
           recipient_ref: payload.recipient_ref || null, email_subject: payload.subject || null,
           body_sha256: payload.body_sha256 || null, evidence_quote: item.evidence_quote,
           confidence: item.confidence, status: "pending", resulting_ref: null });
@@ -214,13 +215,23 @@ class CaptureFake {
     if (sql.includes("capture:resolve-post-call-assignee"))
       return { rows: params[0] === "joe" ? [{ id: ids.joe }] : params[0] === "dell" ? [{ id: "10000000-0000-0000-0000-000000000003" }] : [] };
     if (sql.includes("capture:resolve-post-call-drop-prior")) return { rows: [] };
+    if (/^select id from (?:next_action|capture_post_call_action) where id=\$1 for update$/u.test(sql)) return { rows: [{ id: params[0] }] };
+    if (sql.includes("capture:followup-deal-lock")) return { rows: [{ id: params[0] }] };
+    if (sql.includes("capture:followup-existing")) return { rows: [...this.postCallActions.map(row => ({ ...row, source: "capture_post_call_action" })),
+      ...this.nextActions.map(row => ({ ...row, deal_id: row.subject_id, source: "next_action" }))].filter(row =>
+      row.deal_id === params[0] && row.status === "open" && row.owner_id === params[2] && row.description.trim().replace(/\s+/gu, ' ').toLowerCase() === params[1]).slice(0, 1) };
+    if (sql.includes("capture:followup-merge")) {
+      const row = [...this.postCallActions, ...this.nextActions].find(row => row.id === params[0]);
+      Object.assign(row, { due_on: params[3] && params[1] != null ? params[1] : row.due_on, item_bullets: JSON.parse(params[2]) });
+      return { rows: [{ id: row.id, due_on: row.due_on }] };
+    }
     if (sql.includes("capture:resolve-post-call-action")) {
       const action = { id: this.uuid("7"), candidate_id: params[0], deal_id: params[1], owner_id: params[2],
         due_on: params[3], description: params[4], accepted_by: params[5], status: "open",
         item_title: params[6], item_bullets: JSON.parse(params[7]), source_ref: params[8],
         updated_at: "2026-08-08T15:00:00.000Z", completed_at: null };
       this.postCallActions.push(action);
-      return { rows: [{ id: action.id }] };
+      return { rows: [{ id: action.id, due_on: action.due_on }] };
     }
     if (sql.startsWith("select subject_type, subject_id from v_ref_index where subject_id=$1"))
       return { rows: params[0] === ids.deal ? [{ subject_type: "deal", subject_id: ids.deal }] : [] };
@@ -327,6 +338,30 @@ test("claim authenticates first, requires consent, and never mints on nonce repl
   assert.equal(db.sessions.length, 1);
 });
 
+test("revoked devices cannot claim or continue a session", async () => {
+  const { db, r, token } = await claimed();
+  db.inactiveActors.add("mac-studio");
+  const environment = { CAPTURE_TOKENS: '{"mac-studio":"device-secret"}' };
+  const claim = await r.handler.fetch(claimRequest({ ...validClaim, nonce: "new-nonce" }), environment);
+  assert.equal(claim.status, 403);
+  assert.equal((await claim.json()).error, "device_revoked");
+  const status = await post(r.handler, "/capture/status", { session_token: token, state: "transcribing", at: validClaim.started_at });
+  assert.equal(status.status, 403);
+  assert.equal((await status.json()).error, "device_revoked");
+  db.actors.delete("mac-studio");
+  const unknown = await r.handler.fetch(claimRequest({ ...validClaim, nonce: "unknown-nonce" }), environment);
+  assert.equal(unknown.status, 503);
+  assert.equal((await unknown.json()).error, "device_actor_not_provisioned");
+});
+
+test("expired sessions retain their explicit authentication error", async () => {
+  const { db, r, token } = await claimed();
+  db.sessions[0].expired = true;
+  const response = await post(r.handler, "/capture/status", { session_token: token, state: "transcribing", at: validClaim.started_at });
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, "session_token_expired");
+});
+
 test("Studio claims pass the actor gate after the idempotent device migration", async () => {
   const { acquireDisposablePostgres } = await import("./helpers/disposable-postgres.mjs");
   const { existsSync } = await import("node:fs");
@@ -368,9 +403,22 @@ test("Studio claims pass the actor gate after the idempotent device migration", 
     const claimed = await handler.fetch(claimRequest(body), environment);
     assert.equal(claimed.status, 200);
     assert.equal((await claimed.json()).session_token, "studio-session-proof");
+    await client.query("update actor set active=false where slug='quill-joe-studio'");
+    const revoked = await post(handler, "/capture/status", { session_token: "studio-session-proof", state: "transcribing", at: validClaim.started_at });
+    assert.equal(revoked.status, 403);
+    assert.equal((await revoked.json()).error, "device_revoked");
 
   } finally {
     try { await client?.end(); } finally { await fixture.close(); }
+  }
+});
+
+test("a recovered transcription can advance a previously failed session", async () => {
+  const { r, token } = await claimed();
+  for (const state of ["transcribing", "failed", "distilling"]) {
+    const response = await post(r.handler, "/capture/status", { session_token: token, state,
+      at: "2026-08-08T17:00:00.000Z" });
+    assert.equal(response.status, 200, state);
   }
 });
 
@@ -394,6 +442,7 @@ test("status transitions move forward, reject every backward edge, and stop at t
       }
     }
     for (const state of ["recording", "transcribing", "distilling", "done", "failed"]) {
+      if (terminal === "failed" && state === "distilling") continue;
       const after = await post(r.handler, "/capture/status", { session_token: token, state,
         at: "2026-08-08T17:00:00.000Z" });
       assert.equal(after.status, 409, `${terminal} -> ${state}`);
@@ -745,6 +794,23 @@ test("post-call context is authenticated, bounded, exact, and never searches by 
     error => error instanceof ToolError && error.payload.error === "invalid_call_context_deals");
 });
 
+test("accepting the same open deal follow-up twice merges its evidence and date", async () => {
+  const db = new CaptureFake();
+  const candidates = ["first", "second"].map((id, index) => ({
+    id, kind: "assigned_action", deal_id: ids.deal, assignee_slug: "joe",
+    action_description: index ? "  CALL   vendor  " : "Call vendor", due_on: index ? "2026-11-03" : "2026-11-02",
+    due_defaulted: false, evidence_quote: index ? "Joe will call again." : "Joe will call vendor.", status: "pending",
+  }));
+  db.postCallCandidates.push(...candidates);
+  const results = [];
+  for (const candidate of candidates) results.push(await TOOLS["resolve-post-call-candidate"].handler(db, joe,
+    { idempotency_key: candidate.id === "first" ? "00000571-0000-4000-8000-000000000071" : "00000571-0000-4000-8000-000000000072", candidate_id: candidate.id, accept: true }));
+  assert.equal(db.postCallActions.length, 1);
+  assert.equal(results[1].ref, results[0].ref);
+  assert.equal(db.postCallActions[0].due_on, "2026-11-03");
+  assert.equal(db.postCallActions[0].item_bullets.some(b => b.text === "Joe will call again."), true);
+});
+
 test("post-call lifecycle cannot finalize after one acceptance and stores only safe metadata", async () => {
   const db = new CaptureFake();
   const r = rig(db);
@@ -752,7 +818,7 @@ test("post-call lifecycle cannot finalize after one acceptance and stores only s
   const claimedResponse = await r.handler.fetch(claimRequest(validPostCallClaim), environment);
   const token = (await claimedResponse.json()).session_token;
   const action = { kind: "assigned_action", deal_id: ids.deal, assignee: "dell",
-    action: "Call Dr. Alpha Tuesday", due_on: "2026-08-11", evidence_quote: "Dell will call Tuesday. Please discuss the lease.", confidence: 0.9 };
+    action: "Call Dr. Alpha Tuesday", due_on: "2026-08-11", due_defaulted: true, evidence_quote: "Dell will call Tuesday. Please discuss the lease.", confidence: 0.9 };
   const draft = { kind: "email_draft", deal_id: ids.deal2, recipient_party_id: ids.party,
     recipient_ref: "P-0001", subject: "Next steps", body_sha256: "a".repeat(64),
     evidence_quote: "Please send the revised terms", confidence: 0.8 };
@@ -763,6 +829,9 @@ test("post-call lifecycle cannot finalize after one acceptance and stores only s
     idempotency_key: "00000571-0000-4000-8000-000000000058", items: [{ ...draft, recipient_ref: "P-9999" }] });
   assert.equal(mismatched.status, 400);
   const batch = { session_token: token, idempotency_key: "00000571-0000-4000-8000-000000000059", items: [action, draft] };
+  const invalidProvenance = await post(r.handler, "/capture/post-call/candidates", { ...batch,
+    items: [{ ...action, due_defaulted: "false" }] });
+  assert.equal(invalidProvenance.status, 400);
   let response = await post(r.handler, "/capture/post-call/candidates", batch);
   assert.equal(response.status, 200);
   await post(r.handler, "/capture/post-call/candidates", batch);
@@ -772,6 +841,7 @@ test("post-call lifecycle cannot finalize after one acceptance and stores only s
   assert.equal(JSON.stringify(db.postCallCandidates).includes("email_body"), false);
   const first = db.postCallCandidates[0];
   const second = db.postCallCandidates[1];
+  assert.equal(first.due_defaulted, true);
   db.nextActions.push({ id: "existing-action", subject_id: ids.deal, owner_id: "10000000-0000-0000-0000-000000000003",
     description: "Unrelated Dell task", status: "open" });
   await assert.rejects(executeRegisteredTool(db, { ...joe, human: false }, "resolve-post-call-candidate",

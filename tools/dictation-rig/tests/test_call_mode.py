@@ -26,7 +26,7 @@ from email.message import Message
 from pathlib import Path
 from unittest.mock import Mock, patch
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, TypedDict
 from typesafe_sdk import TypeSafeError
 
 
@@ -45,7 +45,7 @@ def load_module(name: str, filename: str):
 
 
 call_mode = load_module("call_mode_under_test", "call-mode.py")
-transcribe_session = load_module("transcribe_session_under_test", "transcribe_session.py")
+transcribe_session = call_mode.transcribe_session
 post_call = load_module("post_call_under_test", "post_call.py")
 capture_bridge = load_module("capture_bridge_under_test", "capture-bridge.py")
 post_call_jev = load_module("post_call_jev_under_test", "post_call_jev.py")
@@ -62,7 +62,11 @@ _CLIENT_PATCHES = (
 
 
 _LOG_DIR = tempfile.TemporaryDirectory()
+_BUDGET_ENV = patch.dict(os.environ, {'CALL_JEV_DAILY_DOLLARS': '100'})
 _LOG_PATCHES = (
+    patch.object(post_call_jev, 'BUDGET_LEDGER', Path(_LOG_DIR.name) / 'budget.json'),
+    patch.object(runtime_jev, 'BUDGET_LEDGER', Path(_LOG_DIR.name) / 'budget.json'),
+    patch.object(post_call, 'LOG_PATH', Path(_LOG_DIR.name) / 'post-call.log'),
     # Keep test lines out of the live companion and bridge logs on the Studio.
     patch.object(call_mode, "LOG_PATH", Path(_LOG_DIR.name) / "call-mode.log"),
     patch.object(capture_bridge, "LOG_PATH", Path(_LOG_DIR.name) / "capture-bridge.log"),
@@ -74,6 +78,7 @@ def setUpModule() -> None:
     # Injected ask functions and loopback distiller fakes still run normally.
     for client_patch in _CLIENT_PATCHES:
         client_patch.start()
+    _BUDGET_ENV.start()
     for log_patch in _LOG_PATCHES:
         log_patch.start()
 
@@ -81,10 +86,21 @@ def setUpModule() -> None:
 def tearDownModule() -> None:
     for log_patch in reversed(_LOG_PATCHES):
         log_patch.stop()
+    _BUDGET_ENV.stop()
     for client_patch in reversed(_CLIENT_PATCHES):
         client_patch.stop()
 
 
+class CallState(TypedDict, total=False):
+    sessions: list[dict[str, object]]
+    hidden_older_count: int
+    state: str
+    status_text: str
+    transcription_attempts: int
+    extraction_attempts: int
+    session: str
+    mode: str
+    speaker_labels: dict[str, str]
 class ReportConcurrencyTests(unittest.TestCase):
     def draft_report(self, session):
         post_call.write_private(session / post_call.REPORT_FILE, {"draft_proposals": [{
@@ -221,9 +237,160 @@ class CallModeTests(unittest.TestCase):
         path.mkdir()
         return path
 
-    def state(self) -> dict[str, object]:
+    def state(self) -> CallState:
         with patch.object(call_mode, "partner_from_device", return_value="Joe"):
             return call_mode.current_state(self.recordings)
+
+    def test_unrecognized_post_call_state_is_visible_as_unknown(self) -> None:
+        session = self.session("held")
+        (session / "transcript.json").write_text("{}")
+        post_call.write_private(session / post_call.STATUS_FILE, {"state": "held_review"})
+        self.assertEqual(self.state()["state"], "state_unknown")
+
+    def test_stale_interrupted_transcription_retries_and_respects_cap(self) -> None:
+        session = self.session("interrupted")
+        (session / "meta.json").write_text("{}")
+        (session / ".capture.json").write_text(json.dumps({"session_token": "fixture"}))
+        post_call.write_private(session / transcribe_session.STATUS_FILE, {
+            "state": "transcribing", "transcription_attempts": 1, "updated_at": "2000-01-01T00:00:00Z"})
+        with patch.object(transcribe_session, "resolve_model", side_effect=transcribe_session.TranscribeError("unavailable")) as model:
+            for _ in range(4):
+                capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session)
+            self.assertEqual(model.call_count, 2)
+        self.assertEqual(post_call.read_json(session / transcribe_session.STATUS_FILE)["transcription_attempts"], 3)
+        self.assertIn("held after 3", capture_bridge.LOG_PATH.read_text())
+
+    def test_stale_final_attempt_is_held_only_when_lock_is_free(self) -> None:
+        import fcntl
+        session = self.session("stale-final")
+        (session / ".capture.json").write_text(json.dumps({"session_token": "fixture"}))
+        status_path = session / transcribe_session.STATUS_FILE
+        post_call.write_private(status_path, {"state": "transcribing", "transcription_attempts": 3,
+                                              "updated_at": "2000-01-01T00:00:00Z"})
+        with (session / ".transcription.lock").open("a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session)
+            self.assertEqual(post_call.read_json(status_path)["state"], "transcribing")
+        capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session)
+        self.assertEqual(post_call.read_json(status_path)["state"], "needs_attention")
+        self.assertIn("held after 3", capture_bridge.LOG_PATH.read_text())
+
+    def test_unfiled_hides_old_calls_except_needs_attention(self) -> None:
+        for name, state in (("old", "blocked"), ("old-attention", "needs_attention"), ("recent", "blocked")):
+            session = self.session(name)
+            post_call.write_private(session / post_call.STATUS_FILE, {"state": state})
+            stamp = time.time() - (15 * 86400 if name.startswith("old") else 60)
+            os.utime(session, (stamp, stamp))
+        result = self.state()
+        self.assertEqual({row["session"] for row in result["sessions"]}, {"old-attention", "recent"})
+        self.assertEqual(result["hidden_older_count"], 1)
+
+    def test_missing_meta_during_stat_does_not_break_state(self) -> None:
+        session = self.session("race")
+        (session / "meta.json").write_text("{}")
+        original = Path.stat
+        def raced(path, *args, **kwargs):
+            if path == session / "meta.json":
+                raise FileNotFoundError()
+            return original(path, *args, **kwargs)
+        with patch.object(Path, "stat", raced):
+            self.state()
+
+    def test_fatal_transcription_stays_visible_after_age_cutoff(self) -> None:
+        session = self.session("failed-model")
+        (session / "meta.json").write_text("{}")
+        with patch.object(transcribe_session, "resolve_model", side_effect=transcribe_session.TranscribeError("model unavailable")):
+            self.assertEqual(transcribe_session.main(["transcribe", str(session)]), 1)
+        stale = time.time() - call_mode.TERMINAL_AGE_SECONDS - 60
+        os.utime(session, (stale, stale))
+        result = self.state()
+        self.assertEqual(result["state"], "needs_attention")
+        self.assertEqual(result["status_text"], "Transcription failed. The local recording is saved.")
+        self.assertEqual(result["transcription_attempts"], 1)
+        self.assertNotIn("model unavailable", json.dumps(result))
+        self.assertEqual(stat.S_IMODE((session / transcribe_session.STATUS_FILE).stat().st_mode), 0o600)
+        self.assertFalse((session / "transcript.json").exists())
+
+    def test_poll_retries_failed_transcription_only_three_total_attempts(self) -> None:
+        session = self.session("retry-model")
+        (session / "meta.json").write_text("{}")
+        (session / ".capture.json").write_text(json.dumps({"session_token": "fixture"}))
+        with (
+            patch.object(transcribe_session, "resolve_model", side_effect=transcribe_session.TranscribeError("model unavailable")) as model,
+            patch.object(capture_bridge, "http_request", return_value=(200, {"state": "transcribing", "meeting_record": None})) as network,
+        ):
+            self.assertEqual(transcribe_session.main(["transcribe", str(session)]), 1)
+            for _ in range(5):
+                self.assertEqual(capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session), capture_bridge.Outcome.UNAVAILABLE)
+            self.assertEqual(model.call_count, 3)
+            network.assert_not_called()
+        self.assertEqual(self.state()["transcription_attempts"], 3)
+        self.assertFalse((session / "ingested.json").exists())
+
+    def test_unfiled_sessions_keep_real_status_newest_first(self) -> None:
+        for index, state in enumerate(("needs_attention", "awaiting_context", "blocked", "ready_review")):
+            session = self.session(state)
+            (session / "transcript.json").write_text("{}")
+            post_call.write_private(session / post_call.STATUS_FILE, {"state": state})
+            stamp = time.time() - 100 + index
+            os.utime(session, (stamp, stamp))
+        filed = self.session("filed")
+        (filed / "ingested.json").write_text("{}")
+        os.utime(filed, (time.time() - 200, time.time() - 200))
+        result = self.state()
+        self.assertEqual(result["state"], "ready_review")
+        self.assertEqual([item["state"] for item in result["sessions"]],
+                         ["ready_review", "blocked", "awaiting_context", "needs_attention"])
+        self.assertTrue(all(item["status_text"] for item in result["sessions"]))
+
+    def test_new_failure_receipt_does_not_reorder_recorded_calls(self) -> None:
+        older = self.session("older-call")
+        newer = self.session("newer-call")
+        post_call.write_private(older / call_mode.CONTEXT_FILE, {"started_at": "2026-10-29T10:00:00Z"})
+        post_call.write_private(newer / call_mode.CONTEXT_FILE, {"started_at": "2026-10-29T11:00:00Z"})
+        (older / "meta.json").write_text("{}")
+        (newer / "transcript.json").write_text("{}")
+        post_call.write_private(older / post_call.STATUS_FILE, {"state": "needs_attention"})
+        os.utime(newer, (time.time() - 100, time.time() - 100))
+        self.assertEqual([row["session"] for row in self.state()["sessions"]], ["newer-call", "older-call"])
+
+    def test_successful_poll_retry_clears_failure_and_shows_post_call_state(self) -> None:
+        session = self.session("recovered-model")
+        (session / "meta.json").write_text("{}")
+        (session / ".capture.json").write_text(json.dumps({"session_token": "fixture"}))
+        with patch.object(transcribe_session, "resolve_model", side_effect=transcribe_session.TranscribeError("model unavailable")):
+            self.assertEqual(transcribe_session.main(["transcribe", str(session)]), 1)
+        model = self.recordings / "fixture-model"
+        model.write_bytes(b"synthetic model")
+
+        def finish_post_call(_session):
+            post_call.write_private(session / post_call.STATUS_FILE, {"state": "awaiting_context"})
+            return {"state": "awaiting_context"}
+
+        with (
+            patch.object(transcribe_session, "resolve_model", return_value=model),
+            patch.object(transcribe_session, "verify_model_pin"),
+            patch.object(transcribe_session.post_call, "run_session", side_effect=finish_post_call),
+            patch.object(capture_bridge, "http_request", return_value=(200, {"state": "transcribing", "meeting_record": None})),
+        ):
+            self.assertEqual(capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session), 0)
+        self.assertFalse((session / transcribe_session.STATUS_FILE).exists())
+        self.assertTrue((session / "transcript.json").exists())
+        self.assertEqual(self.state()["state"], "awaiting_context")
+
+    def test_recording_or_filed_newest_does_not_hide_older_unfiled_calls(self) -> None:
+        older = self.session("older-failure")
+        post_call.write_private(older / post_call.STATUS_FILE, {"state": "needs_attention"})
+        os.utime(older, (time.time() - 100, time.time() - 100))
+        newer = self.session("new-call")
+        (newer / "mic.caf").touch()
+        self.assertEqual(self.state()["state"], "recording")
+        self.assertEqual([row["session"] for row in self.state()["sessions"]], ["new-call", "older-failure"])
+        (newer / "ingested.json").write_text("{}")
+        (newer / "meta.json").write_text("{}")
+        result = self.state()
+        self.assertEqual(result["state"], "filed")
+        self.assertEqual([row["session"] for row in result["sessions"]], ["older-failure"])
 
     def test_weekly_deal_labels_pair_joe_and_dell(self) -> None:
         self.assertEqual(call_mode.labels_for("weekly_deal_call", "Joe"), ("Joe", "Dell"))
@@ -327,8 +494,8 @@ class CallModeTests(unittest.TestCase):
         os.utime(track, (stale, stale))
         self.assertEqual(self.state()["state"], "state_unknown")
 
-    def test_current_state_is_idle_without_sessions_or_when_newest_session_is_stale(self) -> None:
-        self.assertEqual(self.state(), {"state": "idle", "local_partner": "Joe"})
+    def test_old_unfinished_transcription_remains_visible(self) -> None:
+        self.assertEqual(self.state(), {"state": "idle", "local_partner": "Joe", "sessions": [], "hidden_older_count": 0})
 
         session = self.session("old-terminal")
         (session / "meta.json").write_text("{}")
@@ -337,7 +504,11 @@ class CallModeTests(unittest.TestCase):
         import os
 
         os.utime(session, (stale, stale))
-        self.assertEqual(self.state(), {"state": "idle", "local_partner": "Joe"})
+        os.utime(session / "meta.json", (stale, stale))
+        result = self.state()
+        self.assertEqual(result["state"], "needs_attention")
+        self.assertEqual(result["status_text"], "Transcription has not finished. The local recording is saved.")
+        self.assertEqual(result["sessions"][0]["session"], "old-terminal")
 
 
 class SpeakerLabelTests(unittest.TestCase):
@@ -810,6 +981,9 @@ REAL_CALL_VERB = post_call.call_verb
 
 class PostCallTests(unittest.TestCase):
     def setUp(self) -> None:
+        clock = patch.object(post_call, "now", return_value="2026-10-26T12:00:00Z")
+        clock.start()
+        self.addCleanup(clock.stop)
         transport = patch.object(post_call, "call_verb", through_fake_transport)
         transport.start()
         self.addCleanup(transport.stop)
@@ -846,6 +1020,71 @@ class PostCallTests(unittest.TestCase):
         }
         result.update(overrides)
         return result
+
+    def test_undated_actions_default_to_next_business_day_and_show_the_reason(self) -> None:
+        result = post_call.normalize_distillation(self.output(), self.context, self.session.name,
+                                                  call_date="2026-10-30")
+        task = result["joe_tasks"][0]
+        self.assertEqual(task["due_on"], "2026-11-02")
+        self.assertTrue(task["due_defaulted"])
+        self.assertTrue(any("default" in q["question"].lower() for q in result["review_questions"]))
+        post_call.write_private(self.session / post_call.REPORT_FILE, result)
+        self.assertEqual(post_call.sanitized_candidates(self.session)["post_call_items"][0]["due_on"], "2026-11-02")
+        self.assertTrue(post_call.sanitized_candidates(self.session)["post_call_items"][0]["due_defaulted"])
+
+    def test_counterpart_reaches_action_and_draft_candidates_when_named(self) -> None:
+        task = {"title": "Call Pat", "deal_id": "deal-a", "participant_ids": ["p-1"],
+                "evidence": "Joe will call Pat", "counterpart": "Pat"}
+        unclear = {"title": "Review options", "deal_id": "deal-a", "participant_ids": [],
+                   "evidence": "Review options"}
+        draft = {"recipient_party_id": "p-1", "deal_id": "deal-a", "subject": "Next steps",
+                 "body": "Thank you.", "participant_ids": ["p-1"], "evidence": "Email Pat",
+                 "counterpart": "Pat"}
+        transcript = {"segments": [{"speaker": "Joe", "text": "Joe will call Pat. Review options. Email Pat."}]}
+        report = post_call.normalize_distillation(self.output(joe_tasks=[task, unclear],
+            deal_updates=[], draft_proposals=[draft]), self.context, self.session.name, transcript=transcript)
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        candidates = post_call.sanitized_candidates(self.session)["post_call_items"]
+        self.assertEqual(candidates[0]["counterpart"], {"name": "Pat"})
+        self.assertNotIn("counterpart", candidates[1])
+        self.assertEqual(candidates[2]["counterpart"], {"name": "Pat"})
+
+    def test_transcript_runs_normalize_case_punctuation_and_whitespace_in_every_field(self) -> None:
+        words = "amber birch cedar dawn elm fern grove hazel iris jade kelp leaf moss oak pine"
+        transcript = {"segments": [{"text": words}]}
+        self.assertIsNone(post_call.transcript_repeat_field({"summary": " ".join(words.split()[:14])}, transcript))
+        for path, report in (
+            ("report.summary", {"report": {"summary": words}}),
+            ("report.decisions[0]", {"report": {"decisions": [words]}}),
+            ("report.open_questions[0]", {"report": {"open_questions": [words]}}),
+            ("deal_updates[0].summary", {"deal_updates": [{"summary": words}]}),
+            ("draft_proposals[0].body", {"draft_proposals": [{"body": words}]}),
+            ("joe_tasks[0].title", {"joe_tasks": [{"title": words}]}),
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(post_call.transcript_repeat_field(report, transcript), path)
+        changed = " ,\n".join(words.upper().split())
+        self.assertEqual(post_call.transcript_repeat_field({"summary": changed}, transcript), "summary")
+        split_transcript = {"segments": [{"text": " ".join(words.split()[:7])},
+                                         {"text": " ".join(words.split()[7:])}]}
+        self.assertEqual(post_call.transcript_repeat_field({"summary": words}, split_transcript), "summary")
+
+    def test_fifteen_transcript_words_hold_session_without_posting_or_losing_audio(self) -> None:
+        words = "amber birch cedar dawn elm fern grove hazel iris jade kelp leaf moss oak pine"
+        post_call.store_context(self.session, self.context)
+        post_call.write_private(self.session / "transcript.json", {"segments": [{"text": words}]})
+        audio = self.session / "mic.caf"
+        audio.write_bytes(b"synthetic audio")
+        output = self.output(report={"summary": words, "decisions": [], "open_questions": []})
+        with patch.object(post_call.subprocess, "run") as external:
+            status = post_call.process_session(self.session, distiller=Mock(return_value=output))
+        self.assertEqual(status["state"], "held_review")
+        self.assertEqual(status["reason"], "summary_repeats_transcript")
+        self.assertEqual(status["field"], "report.summary")
+        self.assertNotIn(words, json.dumps(status))
+        external.assert_not_called()
+        self.assertFalse((self.session / post_call.REPORT_FILE).exists())
+        self.assertEqual(audio.read_bytes(), b"synthetic audio")
 
     def test_weekly_transcript_without_app_fetches_context_and_processes_once(self) -> None:
         call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
@@ -887,6 +1126,7 @@ class PostCallTests(unittest.TestCase):
         ]
         with (patch.object(capture_bridge.post_call, "run_session", side_effect=worker) as run,
               patch.object(post_call.subprocess, "run", side_effect=replies),
+              patch.object(post_call, "now", return_value="2099-01-01T12:00:00Z"),
               patch.object(capture_bridge, "publish_cmd", return_value=0),
               patch.object(capture_bridge, "http_request", return_value=(200, {"state": "distilling", "meeting_record": None}))):
             self.assertEqual(capture_bridge.poll_cmd(cfg, self.session), capture_bridge.Outcome.VERIFIED)
@@ -967,6 +1207,30 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual([len(args["deal_ids"]) for verb, args in requests if verb == "get-call-context"], [50, 1])
         self.assertEqual(len(distiller.call_args.args[0]["context"]["deals"]), 51)
 
+    def test_deal_closing_during_context_read_is_recorded_and_other_deals_finish(self) -> None:
+        call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
+        replies = [
+            {"ok": True, "deals": [{"id": "deal-a", "operating_state": "active"},
+                                     {"id": "deal-b", "operating_state": "active"}]},
+            {"error": "invalid_call_context_deals", "invalid_deal_ids": ["deal-a"]},
+            {"ok": True, "deals": [self.context["deals"][1]]},
+        ]
+        completed = [SimpleNamespace(returncode=0, stdout=json.dumps(reply)) for reply in replies]
+        with patch.object(post_call.subprocess, "run", side_effect=completed):
+            status = post_call.process_session(self.session, distiller=lambda request: self.output(
+                joe_tasks=[], deal_updates=[{"deal_id": "deal-b", "summary": "Continue", "participant_ids": [], "evidence": "Continue Beta."}], draft_proposals=[]))
+        self.assertEqual(status["state"], "ready_review")
+        report = post_call.report_for_deal_room(self.session)["report"]
+        self.assertEqual(report["deal_updates"][0]["deal_id"], "deal-b")
+        self.assertTrue(any("deal-a" in q["question"] and "skip" in q["question"].lower() for q in report["review_questions"]))
+
+    def test_stored_terminal_deal_is_skipped_before_context_validation(self) -> None:
+        context = json.loads(json.dumps(self.context))
+        context["deals"][0].update(operating_state="closed", participants=None)
+        stored = post_call.store_context(self.session, context)
+        self.assertEqual([deal["id"] for deal in stored["deals"]], ["deal-b"])
+        self.assertEqual(stored["skipped_deals"][0]["id"], "deal-a")
+
     def test_weekly_context_refusal_and_malformed_board_remain_retryable(self) -> None:
         call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
         cases = [
@@ -976,6 +1240,7 @@ class PostCallTests(unittest.TestCase):
         ]
         for replies in cases:
             with self.subTest(replies=replies):
+                (self.session / post_call.STATUS_FILE).unlink(missing_ok=True)
                 completed = [SimpleNamespace(returncode=0, stdout=json.dumps(reply)) for reply in replies]
                 with patch.object(post_call.subprocess, "run", side_effect=completed):
                     status = post_call.process_session(self.session, distiller=Mock())
@@ -983,6 +1248,41 @@ class PostCallTests(unittest.TestCase):
                 self.assertTrue(status["reason"])
                 self.assertIsNone(post_call.context_from_session(self.session))
                 self.assertFalse((self.session / post_call.REPORT_FILE).exists())
+
+    def test_network_failures_back_off_and_end_in_visible_needs_attention(self) -> None:
+        call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
+        failure = SimpleNamespace(returncode=1, stdout='{"error":"unavailable"}')
+        clock = ["2026-10-26T12:00:00Z", "2026-10-26T12:00:01Z", "2026-10-26T12:05:00Z",
+                 "2026-10-26T12:20:00Z", "2026-10-26T13:00:00Z"]
+        with patch.object(post_call.subprocess, "run", return_value=failure) as route:
+            for stamp in clock:
+                with patch.object(post_call, "now", return_value=stamp):
+                    status = post_call.process_session(self.session, distiller=Mock())
+            self.assertEqual(route.call_count, 3)
+        self.assertEqual(status["state"], "needs_attention")
+        self.assertTrue(status["reason"])
+        (self.session / "transcript.json").unlink()
+        (self.session / ".capture.json").write_text(json.dumps({"session_token": "synthetic"}))
+        with patch.object(capture_bridge, "http_request", side_effect=capture_bridge.BridgeNetworkError("offline")) as http:
+            for stamp in clock:
+                with patch.object(capture_bridge, "iso_now_utc", return_value=stamp):
+                    capture_bridge.poll_cmd({"base_url": "https://synthetic.invalid"}, self.session)
+            self.assertEqual(http.call_count, 3)
+        self.assertEqual(post_call.report_for_deal_room(self.session)["status"]["state"], "needs_attention")
+
+    def test_sync_recovery_clears_the_visible_failure_after_backoff(self) -> None:
+        (self.session / ".capture.json").write_text(json.dumps({"session_token": "synthetic"}))
+        post_call.write_private(self.session / post_call.REPORT_FILE, self.output())
+        post_call.write_private(self.session / post_call.STATUS_FILE, {"state": "ready_review"})
+        with patch.object(capture_bridge, "publish_cmd", return_value=0), patch.object(capture_bridge, "http_request") as http:
+            http.side_effect = capture_bridge.BridgeNetworkError("offline")
+            with patch.object(capture_bridge, "iso_now_utc", return_value="2026-10-26T12:00:00Z"):
+                capture_bridge.poll_cmd({"base_url": "https://synthetic.invalid"}, self.session)
+            http.side_effect = None
+            http.return_value = (200, {"state": "distilling", "meeting_record": None})
+            with patch.object(capture_bridge, "iso_now_utc", return_value="2026-10-26T12:05:00Z"):
+                capture_bridge.poll_cmd({"base_url": "https://synthetic.invalid"}, self.session)
+        self.assertEqual(post_call.report_for_deal_room(self.session)["status"]["state"], "ready_review")
 
     def test_extraction_retries_back_off_and_stop_after_three_attempts(self) -> None:
         post_call.store_context(self.session, self.context)
@@ -1046,7 +1346,7 @@ class PostCallTests(unittest.TestCase):
         bad = self.output(joe_tasks=[{"title": "Wrong", "deal_id": "deal-a", "participant_ids": ["missing"], "evidence": "One two."}])
         normalized = post_call.normalize_distillation(bad, self.context, self.session.name)
         self.assertEqual(normalized["joe_tasks"], [])
-        self.assertIn("unknown or ambiguous participant_ids", normalized["review_questions"][0]["question"])
+        self.assertIn("unknown or ambiguous participant_ids", " ".join(q["question"] for q in normalized["review_questions"]))
 
     def test_record_layer_context_is_stored_instead_of_stalling_in_awaiting_context(self) -> None:
         # The 2026-08-17 stall, reproduced with the shapes get-call-context
@@ -1124,7 +1424,7 @@ class PostCallTests(unittest.TestCase):
         }])
         normalized = post_call.normalize_distillation(oversized, self.context, self.session.name)
         self.assertEqual(normalized["draft_proposals"], [])
-        self.assertIn("Outlook draft size limit", normalized["review_questions"][0]["question"])
+        self.assertIn("Outlook draft size limit", " ".join(q["question"] for q in normalized["review_questions"]))
 
     def test_sanitized_candidates_never_include_email_body_or_recipient_email(self) -> None:
         post_call.store_context(self.session, self.context)
@@ -1139,7 +1439,7 @@ class PostCallTests(unittest.TestCase):
         )
         self.assertEqual([item["kind"] for item in shaped["legacy_items"]], ["activity"])
         self.assertEqual(shaped["legacy_items"][0]["payload"]["ref"], "deal-a")
-        self.assertIsNone(shaped["post_call_items"][0]["due_on"])
+        self.assertRegex(shaped["post_call_items"][0]["due_on"], r"^\d{4}-\d{2}-\d{2}$")
         remote_items = shaped["post_call_items"] + shaped["legacy_items"]
         self.assertLessEqual(max(len(item["evidence_quote"].split()) for item in remote_items), 15)
 
@@ -1306,12 +1606,12 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(status["state"], "ready_review")
         report = post_call.report_for_deal_room(self.session)["report"]
         self.assertEqual(report["joe_tasks"][0]["due_on"], "2028-02-29")
-        self.assertIsNone(report["dell_tasks"][0]["due_on"])
+        self.assertTrue(report["dell_tasks"][0]["due_defaulted"])
         self.assertEqual(report["joe_tasks"][0]["candidate_status"], "unfiled")
         actions = [item for item in post_call.sanitized_candidates(self.session)["post_call_items"]
                    if item["kind"] == "assigned_action"]
         self.assertEqual([(item["assignee"], item["due_on"]) for item in actions],
-                         [("joe", "2028-02-29"), ("dell", None)])
+                         [("joe", "2028-02-29"), ("dell", "2026-10-27")])
 
     def test_relative_dates_use_recorded_chicago_day_in_report_and_candidates(self) -> None:
         cases = (
@@ -1364,7 +1664,7 @@ class PostCallTests(unittest.TestCase):
                 self.assertEqual(report["joe_tasks"][0]["due_on"], expected)
                 self.assertEqual(report["deal_updates"][0]["next_step"]["next_date"], expected)
                 self.assertEqual(report["joe_tasks"][0]["evidence"], quote)
-                self.assertIsNone(report["dell_tasks"][0]["due_on"])
+                self.assertTrue(report["dell_tasks"][0]["due_defaulted"])
                 self.assertEqual(requests[0]["call_date"], call_date)
                 candidates = post_call.sanitized_candidates(self.session)
                 self.assertEqual(candidates["post_call_items"][0]["due_on"], expected)
@@ -1387,6 +1687,7 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(report["dell_tasks"][0]["due_on"], "2026-10-27")
         self.assertEqual(report["dell_tasks"][0]["evidence"], quote)
         self.assertEqual(post_call.sanitized_candidates(self.session)["post_call_items"][0]["due_on"], "2026-10-27")
+        self.assertFalse(post_call.sanitized_candidates(self.session)["post_call_items"][0]["due_defaulted"])
 
     def test_ambiguous_deadlines_keep_items_for_review_without_blocking_the_call(self) -> None:
         cases = (
@@ -1445,7 +1746,7 @@ class PostCallTests(unittest.TestCase):
                     status = post_call.process_session(self.session, distiller=lambda _request: output)
                     self.assertEqual(status["state"], "ready_review")
                     report = post_call.report_for_deal_room(self.session)["report"]
-                    self.assertIsNone(report["joe_tasks"][0]["due_on"])
+                    self.assertTrue(report["joe_tasks"][0]["due_defaulted"])
                     self.assertEqual(report["dell_tasks"][0]["due_on"], "2026-11-06")
                     self.assertEqual(len(report["draft_proposals"]), 1)
                     self.assertTrue(report["review_questions"])
@@ -1457,7 +1758,7 @@ class PostCallTests(unittest.TestCase):
                     self.assertEqual(step["apply"], "review")
                     candidates = post_call.sanitized_candidates(self.session)
                     actions = [item for item in candidates["post_call_items"] if item["kind"] == "assigned_action"]
-                    self.assertEqual([item["due_on"] for item in actions], [None, "2026-11-06"])
+                    self.assertEqual([item["due_on"] for item in actions], ["2026-11-02" if started_at == "2026-10-30T18:00:00Z" else "2026-10-27", "2026-11-06"])
                     self.assertIsNone(candidates["legacy_items"][1]["payload"]["next_date"])
 
     def test_relative_date_validation_preserves_explicit_and_unmatched_evidence_dates(self) -> None:
@@ -1465,9 +1766,9 @@ class PostCallTests(unittest.TestCase):
             ("I will call Friday, November 6, 2026.", "2026-11-06", "2026-11-06"),
             ("I will call before the lunch call on November 6, 2026.", "2026-11-06", "2026-11-06"),
             ("I will call two weeks from Friday.", "2026-11-13", "2026-11-13"),
-            ("Review last Friday's proposal.", None, None),
-            ("I will review Friday's proposal.", None, None),
-            ("I will call Vendor A tomorrow.", None, None),
+            ("Review last Friday's proposal.", None, "2026-10-27"),
+            ("I will review Friday's proposal.", None, "2026-10-27"),
+            ("I will call Vendor A tomorrow.", None, "2026-10-27"),
         )
         for quote, supplied, expected in cases:
             with self.subTest(quote=quote):
@@ -1524,7 +1825,7 @@ class PostCallTests(unittest.TestCase):
         report = post_call.report_for_deal_room(self.session)["report"]
         self.assertTrue(report["review_questions"])
         action = post_call.sanitized_candidates(self.session)["post_call_items"][0]
-        self.assertIsNone(action["due_on"])
+        self.assertRegex(action["due_on"], r"^\d{4}-\d{2}-\d{2}$")
 
     def test_long_relative_evidence_retains_the_spoken_deadline(self) -> None:
         post_call.write_private(self.session / post_call.CONTEXT_FILE, {"started_at": "2026-10-27T00:30:00Z"})
@@ -1913,6 +2214,14 @@ class AutomaticApplyTests(unittest.TestCase):
         self.assertEqual(marked["deal_updates"][0]["next_step"]["apply"], "automatic")
         self.assertEqual(marked["deal_updates"][1]["phase_move"]["apply"], "automatic")
 
+    def test_budget_hold_keeps_previously_checked_changes_as_proposals(self) -> None:
+        report = self.mark(self.update(next_step=self.step()))
+        self.assertEqual(report['deal_updates'][0]['next_step']['apply'], 'automatic')
+        report['checks_hold'] = 'Jev daily dollar budget is exhausted.'
+        held = post_call.mark_automatic(report, self.transcript, {})
+        self.assertEqual(held['deal_updates'][0]['next_step']['apply'], 'review')
+        self.assertIn('budget is exhausted', held['deal_updates'][0]['next_step']['review_reason'])
+
     def test_client_stated_change_stays_for_partner_review(self) -> None:
         self.transcript["segments"][0]["speaker"] = "Client"
         change = self.mark(self.update(next_step=self.step()))["deal_updates"][0]["next_step"]
@@ -2238,6 +2547,22 @@ class CaptureBridgePostCallTests(unittest.TestCase):
         )
         self.cfg = {"base_url": "https://worker.test", "device_id": "joe", "token": "device"}
 
+    def test_saved_report_repeating_transcript_cannot_publish_and_keeps_audio(self) -> None:
+        words = "amber birch cedar dawn elm fern grove hazel iris jade kelp leaf moss oak pine"
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        report["report"]["summary"] = words
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        post_call.write_private(self.session / "transcript.json", {"segments": [{"text": words}]})
+        audio = self.session / "mic.caf"
+        audio.write_bytes(b"synthetic audio")
+        with patch.object(capture_bridge, "http_request") as http:
+            self.assertNotEqual(capture_bridge.publish_cmd(self.cfg, self.session), 0)
+            self.assertNotEqual(capture_bridge.publish_cmd(self.cfg, self.session), 0)
+        http.assert_not_called()
+        self.assertEqual(post_call.read_json(self.session / post_call.STATUS_FILE)["field"], "report.summary")
+        self.assertIsNone(post_call.retention_ready(self.session, "b" * 64))
+        self.assertEqual(audio.read_bytes(), b"synthetic audio")
+
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
@@ -2549,7 +2874,7 @@ class PostCallJevChecksTests(unittest.TestCase):
     def fake_client(*, deal_choice: str = "deal-a", deal_confidence: float = 0.9,
                  speaker_probability: float = 0.9, details_probability: float = 0.9,
                  deal_in_candidates: float = 0.9):
-        def _ask(*, state: object, questions: dict[str, object]) -> SimpleNamespace:
+        def _ask(*, state: object, questions: dict[str, object], **kwargs) -> SimpleNamespace:
             body = {
                 "deal_match": {"type": "choice", "choice": deal_choice, "confidence": deal_confidence},
                 "deal_in_candidates": {"type": "noul", "noul": deal_in_candidates},
@@ -2568,7 +2893,7 @@ class PostCallJevChecksTests(unittest.TestCase):
                 "details_supported": SimpleNamespace(noul=0.9),
             })
         client = Mock()
-        client.system_one.side_effect = lambda *, state, questions: answers(
+        client.system_one.side_effect = lambda *, state, questions, **kwargs: answers(
             "deal-a" if "Acme" in state["item"]["fields"]["title"] else "deal-b")
         result = post_call_jev.check_distillation(self.result(dell_tasks=[{
             "title": "Send the revised LOI", "deal_id": "deal-b", "evidence": "Dell will send the revised LOI",
@@ -2615,7 +2940,7 @@ class PostCallJevChecksTests(unittest.TestCase):
         gate = threading.Event()
         inner = self.fake_client()
 
-        def slow(*, state: object, questions: dict[str, object]) -> SimpleNamespace:
+        def slow(*, state: object, questions: dict[str, object], **kwargs) -> SimpleNamespace:
             with lock:
                 state_["now"] += 1
                 state_["peak"] = max(state_["peak"], state_["now"])
@@ -2635,7 +2960,7 @@ class PostCallJevChecksTests(unittest.TestCase):
     def test_one_failed_item_call_leaves_the_others_checked(self) -> None:
         inner = self.fake_client()
 
-        def flaky(*, state: dict[str, Any], questions: dict[str, object]) -> SimpleNamespace:
+        def flaky(*, state: dict[str, Any], questions: dict[str, object], **kwargs) -> SimpleNamespace:
             if state["item"]["fields"]["title"] == "Bad":
                 raise TypeSafeError("refused")
             return inner.system_one(state=state, questions=questions)
@@ -2643,7 +2968,7 @@ class PostCallJevChecksTests(unittest.TestCase):
                  {"title": "Good", "deal_id": "deal-a", "evidence": "I will call the Acme Clinic vendor"}]
         result = post_call_jev.check_distillation(self.result(joe_tasks=tasks), self.context,
                                                   self.transcript, client=Mock(system_one=flaky))
-        self.assertEqual(result["joe_tasks"][0]["checks"], {"unavailable": True})
+        self.assertTrue(result["joe_tasks"][0]["checks"]["unavailable"])
         self.assertFalse(result["joe_tasks"][1]["checks"]["flagged"])
         self.assertEqual(len(result["review_questions"]), 1)
 
@@ -2694,6 +3019,17 @@ class PostCallJevChecksTests(unittest.TestCase):
         self.assertFalse(checks["details"]["pass"])
         self.assertTrue(any("Right details" in reason for reason in checks["reasons"]))
 
+    def test_jev_failure_records_an_item_reason_visible_in_the_review_pack(self) -> None:
+        for error in (TypeSafeError("no key"), RuntimeError("budget exhausted"), TimeoutError("offline")):
+            with self.subTest(error=type(error).__name__):
+                result = post_call_jev.check_distillation(self.result(), self.context, self.transcript,
+                                                        client=Mock(system_one=Mock(side_effect=error)))
+                checks = result["joe_tasks"][0]["checks"]
+                self.assertTrue(checks["unavailable"])
+                self.assertTrue(checks["flagged"])
+                self.assertIn(type(error).__name__, checks["reasons"][0])
+                self.assertIn(type(error).__name__, result["review_questions"][0]["question"])
+
     def test_jev_unavailable_never_fails_the_pack_and_flags_every_item_unavailable(self) -> None:
         def raising_ask(**_kwargs) -> dict[str, object]:
             raise TypeSafeError("network unreachable")
@@ -2706,8 +3042,8 @@ class PostCallJevChecksTests(unittest.TestCase):
             }]),
             self.context, self.transcript, client=Mock(system_one=raising_ask),
         )
-        self.assertEqual(result["joe_tasks"][0]["checks"], {"unavailable": True})
-        self.assertEqual(result["dell_tasks"][0]["checks"], {"unavailable": True})
+        self.assertTrue(result["joe_tasks"][0]["checks"]["unavailable"])
+        self.assertTrue(result["dell_tasks"][0]["checks"]["unavailable"])
         self.assertEqual(len(result["review_questions"]), 1)
         self.assertIn("Jev", result["review_questions"][0]["question"])
         self.assertFalse(result["review_questions"][0]["resolved"])

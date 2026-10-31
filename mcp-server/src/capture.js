@@ -88,6 +88,10 @@ function refuse(status, payload) {
   throw error;
 }
 
+function requireActiveDevice(active) {
+  if (!active) refuse(403, { error: "device_revoked" });
+}
+
 async function claim(request, env, dependencies) {
   // Authentication is intentionally first, before body size, JSON, nonce, or
   // consent checks, matching the ingest socket's information boundary.
@@ -107,8 +111,9 @@ async function claim(request, env, dependencies) {
       const replay = await client.query(
         "select id from capture_session where nonce=$1 /* capture:claim-nonce */", [body.nonce]);
       if (replay.rows.length) refuse(409, { error: "nonce_replayed" });
-      const actor = await client.query("select id from actor where slug=$1 /* capture:device-actor */", [device]);
+      const actor = await client.query("select id, active from actor where slug=$1 /* capture:device-actor */", [device]);
       if (!actor.rows.length) refuse(503, { error: "device_actor_not_provisioned", device_id: device });
+      requireActiveDevice(actor.rows[0].active);
       opaque = dependencies.randomStringFn(32);
       const tokenHash = await sha256(opaque);
       await client.query(
@@ -161,12 +166,14 @@ async function authenticatedSession(client, opaque, lock = false) {
   if (typeof opaque !== "string" || !opaque) refuse(401, { error: "unauthorized" });
   const tokenHash = await sha256(opaque);
   const result = await client.query(
-    `select id, state, post_call, to_jsonb(state_at)#>>'{}' as state_at, expires_at <= now() as expired
-       from capture_session
-      where session_token_hash=$1
-      ${lock ? "for update" : ""} /* capture:session-auth */`, [tokenHash]);
+    `select s.id, s.state, s.post_call, to_jsonb(s.state_at)#>>'{}' as state_at,
+            s.expires_at <= now() as expired, a.active as actor_active
+       from capture_session s join actor a on a.id=s.actor_id
+      where s.session_token_hash=$1
+      ${lock ? "for update of s" : ""} /* capture:session-auth */`, [tokenHash]);
   if (!result.rows.length) refuse(401, { error: "unauthorized" });
   if (result.rows[0].expired) refuse(401, { error: "session_token_expired" });
+  requireActiveDevice(result.rows[0].actor_active);
   return result.rows[0];
 }
 
@@ -181,7 +188,7 @@ async function status(request, dependencies) {
   try {
     const result = await dependencies.withWriter(async client => {
       const session = await authenticatedSession(client, body.session_token, true);
-      if (session.state === "done" || session.state === "failed")
+      if (session.state === "done" || (session.state === "failed" && body.state !== "distilling"))
         refuse(409, { error: "terminal_state", state: session.state });
       const current = STATES.indexOf(session.state);
       const requested = STATES.indexOf(body.state);
@@ -295,10 +302,11 @@ function validatePostCallCandidates(body) {
           typeof value !== "string" || !value.trim() || value.length > 200)))
       return { error: "invalid_counterpart" };
     if (item.kind === "assigned_action") {
-      if (Object.keys(item).some(key => !["kind", "deal_id", "assignee", "action", "due_on", "evidence_quote", "confidence", "counterpart"].includes(key)))
+      if (Object.keys(item).some(key => !["kind", "deal_id", "assignee", "action", "due_on", "due_defaulted", "evidence_quote", "confidence", "counterpart"].includes(key)))
         return { error: "invalid_assigned_action" };
       if (!['joe', 'dell'].includes(item.assignee) || typeof item.action !== "string" ||
           !item.action.trim() || item.action.length > 500 ||
+          (item.due_defaulted != null && typeof item.due_defaulted !== "boolean") ||
           (item.due_on != null && !/^\d{4}-\d{2}-\d{2}$/u.test(item.due_on)))
         return { error: "invalid_assigned_action" };
     }
@@ -317,7 +325,8 @@ function validatePostCallCandidates(body) {
 function postCallPayload(item) {
   if (item.kind === "assigned_action") return {
     deal_id: item.deal_id, assignee: item.assignee, action: item.action.trim(),
-    due_on: item.due_on || null, ...(item.counterpart ? { counterpart: item.counterpart } : {}),
+    due_on: item.due_on || null, due_defaulted: item.due_defaulted ?? null,
+    ...(item.counterpart ? { counterpart: item.counterpart } : {}),
   };
   return { deal_id: item.deal_id, recipient_party_id: item.recipient_party_id,
     recipient_ref: item.recipient_ref, subject: item.subject.trim(), body_sha256: item.body_sha256, ...(item.counterpart ? { counterpart: item.counterpart } : {}) };
@@ -452,11 +461,12 @@ async function postCallCandidates(request, dependencies) {
       await client.query(
         `insert into capture_post_call_candidate
            (session_id,idempotency_key,batch_hash,item_index,kind,deal_id,assignee_slug,
-            action_description,due_on,recipient_party_id,recipient_ref,email_subject,body_sha256,
+            action_description,due_on,due_defaulted,recipient_party_id,recipient_ref,email_subject,body_sha256,
             evidence_quote,confidence,contact_party_id)
          select $1,$2,$3,item.ordinality - 1,item.value->>'kind',(item.value->'payload'->>'deal_id')::uuid,
                 item.value->'payload'->>'assignee',item.value->'payload'->>'action',
-                (item.value->'payload'->>'due_on')::date,(item.value->'payload'->>'recipient_party_id')::uuid,
+                (item.value->'payload'->>'due_on')::date,(item.value->'payload'->>'due_defaulted')::boolean,
+                (item.value->'payload'->>'recipient_party_id')::uuid,
                 item.value->'payload'->>'recipient_ref',item.value->'payload'->>'subject',
                 item.value->'payload'->>'body_sha256',item.value->>'evidence_quote',
                 (item.value->>'confidence')::numeric,(item.value->'payload'->>'contact_party_id')::uuid

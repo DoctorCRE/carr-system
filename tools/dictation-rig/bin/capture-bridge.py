@@ -31,6 +31,7 @@ third-party imports, no venv needed.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import re
@@ -46,6 +47,7 @@ from pathlib import Path
 from typing import Any
 
 import post_call
+import transcribe_session
 from post_call import call_record_command
 
 # --- constants -------------------------------------------------------------
@@ -457,6 +459,11 @@ def publish_cmd(cfg: dict[str, str], session_dir: Path) -> int:
     if capture_token(session_dir) is None:
         log_line(f"NOOP publish no-capture-marker session={session_dir.name}")
         return 0
+    report = post_call.read_json(session_dir / post_call.REPORT_FILE)
+    if report is not None and post_call.hold_transcript_repeat(session_dir, report) is not None:
+        return 1
+    if (post_call.read_json(session_dir / post_call.STATUS_FILE) or {}).get("state") == "held_review":
+        return 1
     try:
         shaped = post_call.sanitized_candidates(session_dir)
     except post_call.ContractError as exc:
@@ -571,6 +578,37 @@ def file_post_call_report(
 
 
 def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
+    metadata = read_json(session_dir / post_call.CONTEXT_FILE) or {}
+    has_report = (session_dir / post_call.REPORT_FILE).exists()
+    if not has_report and (metadata.get("mode") != "weekly_deal_call" or (session_dir / "transcript.json").exists()):
+        return _poll_cmd(cfg, session_dir)
+    retry_path = session_dir / "post-call-sync.json"
+    retry = read_json(retry_path) or {}
+    timestamp = iso_now_utc()
+    attempts = retry.get("attempts", 0)
+    if attempts >= len(post_call.EXTRACTION_RETRY_DELAYS) + 1 or (retry.get("next_attempt_at") and timestamp < retry["next_attempt_at"]):
+        return Outcome.UNAVAILABLE
+    result = _poll_cmd(cfg, session_dir)
+    if result == Outcome.UNAVAILABLE:
+        attempts += 1
+        delay = post_call.EXTRACTION_RETRY_DELAYS[attempts - 1] if attempts <= len(post_call.EXTRACTION_RETRY_DELAYS) else None
+        next_at = (datetime.fromisoformat(timestamp.replace("Z", "+00:00")) + timedelta(seconds=delay)).strftime("%Y-%m-%dT%H:%M:%SZ") if delay else None
+        write_json_atomic(retry_path, {"attempts": attempts, "next_attempt_at": next_at}, mode=0o600)
+        status = read_json(session_dir / post_call.STATUS_FILE) or {"session": session_dir.name}
+        status.update({"state": "needs_attention" if delay is None else "blocked", "updated_at": timestamp,
+                       "reason": "Post-call synchronization failed; recordings retained.", "sync_attempts": attempts})
+        write_json_atomic(session_dir / post_call.STATUS_FILE, status, mode=0o600)
+    elif attempts:
+        write_json_atomic(retry_path, {"attempts": 0, "next_attempt_at": None}, mode=0o600)
+        status = read_json(session_dir / post_call.STATUS_FILE) or {}
+        if status.pop("sync_attempts", None) is not None:
+            status.pop("reason", None)
+            status.update({"state": "ready_review", "updated_at": timestamp})
+            write_json_atomic(session_dir / post_call.STATUS_FILE, status, mode=0o600)
+    return result
+
+
+def _poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
     name = session_dir.name
     retired_marker = session_dir / ".capture-retired.json"
     if retired_marker.is_file():
@@ -587,6 +625,36 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
     if not session_token:
         log_line(f"ERROR poll capture-marker-missing-token session={name}")
         return Outcome.UNAVAILABLE
+
+    transcription = read_json(session_dir / transcribe_session.STATUS_FILE) or {}
+    stale = False
+    if transcription.get("state") == "transcribing":
+        try:
+            updated = datetime.fromisoformat(transcription["updated_at"].replace("Z", "+00:00"))
+            stale = datetime.now(timezone.utc) - updated > timedelta(hours=6)
+        except (KeyError, TypeError, ValueError):
+            pass
+    if stale and not (session_dir / "transcript.json").exists():
+        with (session_dir / ".transcription.lock").open("a+") as lock:
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return Outcome.UNAVAILABLE
+            current = read_json(session_dir / transcribe_session.STATUS_FILE) or {}
+            if current == transcription and not (session_dir / "transcript.json").exists():
+                current.update({"state": "needs_attention", "updated_at": post_call.now(),
+                                "reason": "Transcription failed. The local recording is saved."})
+                post_call.write_private(session_dir / transcribe_session.STATUS_FILE, current)
+            transcription = current
+    if transcription.get("state") == "needs_attention" and not (session_dir / "transcript.json").exists():
+        if transcription.get("transcription_attempts", 0) < transcribe_session.MAX_ATTEMPTS:
+            transcribe_session.main(["transcribe_session.py", str(session_dir)],
+                                    max_attempts=transcribe_session.MAX_ATTEMPTS)
+        if not (session_dir / "transcript.json").exists():
+            latest = read_json(session_dir / transcribe_session.STATUS_FILE) or {}
+            if latest.get("state") == "needs_attention" and latest.get("transcription_attempts", 0) >= transcribe_session.MAX_ATTEMPTS:
+                log_line(f"POLL session={name} held after 3 transcription attempts")
+            return Outcome.UNAVAILABLE
 
     metadata = read_json(session_dir / post_call.CONTEXT_FILE) or {}
     if (metadata.get("mode") == "weekly_deal_call" and (session_dir / "transcript.json").exists()
@@ -750,6 +818,8 @@ def check_cmd() -> int:
 
 
 def main(argv: list[str]) -> int:
+    from lib.call_settings import configure_environment
+    configure_environment()
     if len(argv) < 2:
         sys.stderr.write(
             "usage: capture-bridge.py <claim|status|publish|poll|check> [args...]\n"
