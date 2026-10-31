@@ -822,6 +822,18 @@ class IntakeTest(unittest.TestCase):
                 self.assertEqual(state['attachments_pending'], not terminal)
                 self.assertEqual(len(state['attachments_done']), int(terminal))
 
+    def test_inbound_attachment_waits_for_its_source_activity(self):
+        ports = self.attachment_fixture()
+        self.fake.fail_verbs.add('log-activity')
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(self.filed, {})
+        self.assertEqual(result.counts['attachments_source_pending'], 1)
+        self.fake.fail_verbs.clear()
+        self.fake.now += timedelta(minutes=31)
+        intake.run(self.repo, self.home, ports)
+        [args] = self.filed.values()
+        self.assertIn('activity_id', args)
+
     def test_matched_attachment_is_copied_archived_and_filed_idempotently(self):
         ports = self.attachment_fixture()
         result = intake.run(self.repo, self.home, ports)
@@ -830,6 +842,8 @@ class IntakeTest(unittest.TestCase):
         [args] = self.filed.values()
         self.assertEqual((args['deal'], args['mime'], args['bytes']),
                          ('synthetic-deal', 'application/pdf', len(self.pdf)))
+        source = next(a for _, a in self.fake.writes('log-activity') if a['kind'] == 'email_in')
+        self.assertEqual(args['activity_id'], str(uuid.uuid5(uuid.NAMESPACE_URL, source['idempotency_key'])))
         self.assertEqual(args['sha256'], hashlib.sha256(self.pdf).hexdigest())
         self.assertEqual(self.uploads[args['r2_key']], self.pdf)
         self.assertEqual(self.copied, [self.cache_path])

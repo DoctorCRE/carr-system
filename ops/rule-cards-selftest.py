@@ -21,7 +21,9 @@ class CardTests(unittest.TestCase):
         cards = {c['id']: c['wording'] for c in load_cards()}
         for card in ('K12', 'A10'):
             self.assertIn('team-memory convention', cards[card])
-            self.assertIn('until Joe or Dell adopts', cards[card])
+            self.assertIn('adopt it with adopt-rule', cards[card])
+            self.assertIn('tell Joe', cards[card])
+            self.assertNotIn('bind', cards[card])
             self.assertNotIn(' in a PR', cards[card])
         self.assertIn('quote both, offer a skill', cards['K12'])
         self.assertNotIn('teach', cards['K12'])
@@ -40,6 +42,13 @@ class CardTests(unittest.TestCase):
         source = (REPO / 'mcp-server/src/doctrine.js').read_text()
         line = json.loads(re.search(r'^export const MEMORY_ATTACH_LINE = (".+");$', source, re.M)[1])
         self.assertIn('attach-memory', line)
+        for required in ('access read_write', 'read_only for research/read-only jobs',
+                         'native_session_id', 'transcript_ref'):
+            self.assertIn(required, line)
+        for footer in ('tools/room-bridge/brief-footer.md', 'tools/room-bridge/job-rules.md'):
+            text = (REPO / footer).read_text()
+            for required in ('attach-memory', 'read_write', 'read_only', 'native_session_id', 'transcript_ref'):
+                self.assertIn(required, text, footer)
         for page in ('CLAUDE.md', 'AGENTS.md'):
             with self.subTest(page=page):
                 text = (REPO / page).read_text()
@@ -100,8 +109,36 @@ class CardTests(unittest.TestCase):
         rendered = sync.cards_from_store(document, adopted)
         self.assertEqual(json.dumps(rendered, indent=2, ensure_ascii=False) + '\n', text,
                          'the store form of every card round-trips to the committed cards file')
-        with self.assertRaises(SystemExit):
-            sync.cards_from_store(document, [])
+        active = [card for card in adopted if card['id'] != 'K01']
+        self.assertNotIn('K01', [card['id'] for card in sync.cards_from_store(document, active)['cards']],
+                         'a retired card omitted by rule-cards is removed from the generated source')
+
+    def test_authoritative_empty_store_removes_all_cards(self):
+        spec = importlib.util.spec_from_file_location('sync', REPO / 'ops/sync-core-rule-cards.py')
+        sync = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sync)
+        document = json.loads((REPO / 'ops/config/rule-cards.v1.json').read_text())
+        emptied = sync.cards_from_store(document, [])
+        self.assertEqual(emptied['cards'], [])
+        with mock.patch.object(sync, 'load_cards', return_value=emptied['cards']):
+            for name in ('CLAUDE.md', 'AGENTS.md'):
+                rendered = sync.render((REPO / name).read_text())
+                self.assertNotRegex(rendered, r'(?m)^\[K\d+\]')
+                self.assertEqual(sync.render(rendered), rendered)
+
+    def test_retiring_last_core_card_preserves_other_sections_and_renders_twice(self):
+        spec = importlib.util.spec_from_file_location('sync', REPO / 'ops/sync-core-rule-cards.py')
+        sync = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sync)
+        remaining = [card for card in self.cards if card['placement'] != 'CORE']
+        with mock.patch.object(sync, 'load_cards', return_value=remaining):
+            for name in ('CLAUDE.md', 'AGENTS.md'):
+                text = (REPO / name).read_text()
+                tail = text[text.index('\nNaming trap' if name == 'CLAUDE.md' else '\n## Active product-first delivery policy'):]
+                rendered = sync.render(text)
+                self.assertNotRegex(rendered, r'(?m)^\[K\d+\]')
+                self.assertTrue(rendered.endswith(tail))
+                self.assertEqual(sync.render(rendered), rendered)
 
     def setUp(self):
         self.cards = load_cards()
