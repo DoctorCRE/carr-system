@@ -1,3 +1,4 @@
+// Validate sourced answer tables and chart views on canonical Doc turns.
 import { Validator } from '@cfworker/json-schema';
 import schema from './answer-blocks.v1.schema.json' with { type: 'json' };
 
