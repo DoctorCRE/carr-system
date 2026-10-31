@@ -1,3 +1,4 @@
+import { FUTURE_WORK_WRITES, workRequestLinkSchema, linkFutureWork } from "./future-work.js";
 // Register MCP tools and their shared write envelope.
 import { homeInboxTools, HOME_INBOX_WRITES } from "./home-inbox.js";
 import { dealUpdateResolution } from "./deal-update-resolution.js";
@@ -9071,7 +9072,8 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
   // connection or driver fault) still surfaces as-is for the transport's own
   // generic handling.
   try {
-    return await tool.handler(client, actor, args);
+    const result = await tool.handler(client, actor, args);
+    return await linkFutureWork(client, actor, name, args, result, writeEvent);
   } catch (e) {
     if (e instanceof ToolError) throw e;
     throw pgConstraintError(e) || e;
@@ -9157,13 +9159,15 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "vendor-meetings": "mcp-server/src/vendor-meetings.js",
 });
 
-function bindToolSource(tool, source) {
+function bindToolSource(tool, source, name) {
+  if (FUTURE_WORK_WRITES[name]) tool = { ...tool, inputSchema: { ...tool.inputSchema,
+    properties: { ...tool.inputSchema.properties, work_request: workRequestLinkSchema } } };
   if (!tool || typeof tool !== "object" || !TOOL_REGISTRATION_SOURCE[source])
     throw new Error(`missing reviewed tool source for ${source}`);
   Object.defineProperty(tool, "registrySource", {
     value: TOOL_REGISTRATION_SOURCE[source], enumerable: false, writable: false, configurable: false,
   });
-  deepFreezeToolContract(tool);
+  return deepFreezeToolContract(tool);
 }
 
 function deepFreezeToolContract(value, seen = new Set()) {
@@ -9173,14 +9177,13 @@ function deepFreezeToolContract(value, seen = new Set()) {
   return Object.freeze(value);
 }
 
-for (const tool of Object.values(TOOLS)) bindToolSource(tool, "inline");
+for (const [name, tool] of Object.entries(TOOLS)) TOOLS[name] = bindToolSource(tool, "inline", name);
 
 function registerTools(additions, source) {
   const duplicates = Object.keys(additions).filter(name => Object.hasOwn(TOOLS, name)).sort();
   if (duplicates.length)
     throw new Error(`duplicate tool registration from ${source}: ${duplicates.join(",")}`);
-  for (const tool of Object.values(additions)) bindToolSource(tool, source);
-  Object.assign(TOOLS, additions);
+  Object.assign(TOOLS, Object.fromEntries(Object.entries(additions).map(([name, tool]) => [name, bindToolSource(tool, source, name)])));
 }
 
 registerTools(invoiceTrackerTools({ ToolError, withEnvelope, writeEvent }), "invoice-tracker");

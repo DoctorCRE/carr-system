@@ -1,3 +1,4 @@
+import { readyToClose } from './work-request-readiness.js';
 // The deliberately small Program 6 bridge: source a problem from the current
 // deterministic situation index, capture it, and expose a safe read card. It
 // does not own a lifecycle transition, an executor, or an approval.
@@ -387,13 +388,22 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
   return {
     "current-work-requests": {
       write: false,
-      description: "Read at most 20 current, shared, sourced Program 6 Work Requests that still admit a bounded human next action. It never accepts a caller-selected tenant, filter, state, source, or database identifier.",
+      description: "Read at most 20 current, shared, doctrine- or record-sourced Program 6 Work Requests that still admit a bounded human next action. It never accepts a caller-selected tenant, filter, state, source, or database identifier.",
       inputSchema: { type: "object", additionalProperties: false, properties: {} },
       handler: async (c, actor, args) => {
         if (Object.keys(args).length) throw new ToolError({ error: "invalid_current_work_requests_fields" });
         const tenant = organizationTenantForActor(actor);
         const result = await c.query(
-          `select * from ops.current_sourced_work_requests($1::text)
+          `select * from (
+             select * from ops.current_sourced_work_requests($1::text)
+             union all
+             select w.ref,w.title,w.state,w.origin_ref,'recorded'::text,
+               case w.state when 'captured' then 'Review and triage'
+                 when 'triaged' then 'Prepare or review bounded plan' else 'Record or review outcome evidence' end
+             from ops.work_request w where w.organization_tenant_id=$1 and w.origin_ref like 'record:%'
+               and w.state in ('captured','triaged','ready')
+               and not exists (select 1 from ops.sourced_work_request_outcome_feedback_acceptance_receipt r where r.work_request_id=w.id)
+           ) requests order by ref limit 20
              /* work-request-intake:current */`, [tenant]);
         return { ok: true, items: result.rows.map(row => ({
           human_ref: row.ref, display_id: row.ref, title: row.title, state: row.state,
@@ -575,7 +585,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
         // omits execution states and general requests that the Queue lists.
         if (!row) row = (await c.query(
           `select w.ref,w.title,w.state,w.version,w.desired_outcome,w.acceptance_criteria,
-                  w.doctrine_section_id,w.doctrine_revision_id,
+                  w.origin_ref,w.doctrine_section_id,w.doctrine_revision_id,
                   coalesce(s.title,s.section_key) as doctrine_source_label,
                   coalesce(s.status='active' and s.current_revision_id=w.doctrine_revision_id,false) as source_current,
                   w.exit_reason,w.closed_at,succ.ref as superseded_by_ref
@@ -606,7 +616,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
         const acting = actingIdentityProjection(
           (await c.query(ACTING_IDENTITY + " /* work-request-intake:acting-identity */",
                          [args.work_request])).rows);
-        return { ok: true, human_ref: row.ref, title: row.title, desired_outcome: row.desired_outcome, slices,
+        return { ready_to_close: readyToClose(row.state, slices), ok: true, human_ref: row.ref, title: row.title, desired_outcome: row.desired_outcome, slices,
           acting_identity: acting,
           acceptance_criteria: row.acceptance_criteria, state: row.state, version: Number(row.version),
           projection_state: WORK_REQUEST_PROJECTION_STATE[row.state],
@@ -615,7 +625,8 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
           // doctrine_section_id null), so sourceProjection's "stale" reading
           // would misreport absence as staleness. Same null-when-absent shape
           // as plan/shape below.
-          source: row.doctrine_section_id ? sourceProjection(row) : null,
+          source: row.doctrine_section_id ? sourceProjection(row) : row.origin_ref?.startsWith('record:')
+            ? {label:row.origin_ref,freshness:'recorded',provenance:{record_ref:row.origin_ref.slice(7)}} : null,
           triage: row.triaged_at ? { classification: row.triage_classification, human_actor_slug: row.triaged_by_actor_slug,
             triaged_at: row.triaged_at } : null,
           plan: row.plan_hash ? { plan_ref: row.plan_ref || null, plan_hash: row.plan_hash, runbook_ref: row.runbook_ref || null,

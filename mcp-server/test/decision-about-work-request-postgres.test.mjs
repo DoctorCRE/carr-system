@@ -1,3 +1,4 @@
+import { applyFutureWorkSchema } from './helpers/snapshot-schema.mjs';
 // Test decision subject validation and Work Request handling in PostgreSQL.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -42,6 +43,7 @@ before(async () => {
   const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
   if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
   else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
+  await applyFutureWorkSchema(c);
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
   const doc = (await c.query("insert into doctrine_document(slug,title,content_class,visibility) values('old-about-test','Synthetic','reference','shared') returning id")).rows[0];
   const section = (await c.query("insert into doctrine_section(document_id,section_key,title,ordinal,status,current_version) values($1,'origin','Synthetic',1,'active',1) returning id", [doc.id])).rows[0];

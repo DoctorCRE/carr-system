@@ -8,6 +8,7 @@ export async function restoreEventIdentity(client, snapshot) {
 }
 
 export async function applyPendingDealRoomReads(client) {
+  await applyFutureWorkSchema(client);
   const { rows } = await client.query("select to_regclass('public.v_deal_client_portal') as view");
   if (!rows[0].view)
     await client.query(readFileSync(new URL('../../../migrations/1013_register_client_portal.sql', import.meta.url), 'utf8'));
@@ -18,4 +19,9 @@ export async function applyPendingDealRoomReads(client) {
   await client.query(readFileSync(new URL('../../../migrations/1065_call_followup_contact.sql', import.meta.url), 'utf8'));
   await client.query(readFileSync(new URL('../../../migrations/1067_post_call_due_provenance.sql', import.meta.url), 'utf8'));
   await client.query(readFileSync(new URL('../../../migrations/1079_single_action_completion.sql', import.meta.url), 'utf8'));
+}
+
+export async function applyFutureWorkSchema(client) {
+  if (!(await client.query("select to_regclass('ops.future_work_link') as relation")).rows[0].relation)
+    await client.query(readFileSync(new URL('../../../migrations/1119_future_work_links.sql', import.meta.url), 'utf8'));
 }

@@ -1,3 +1,4 @@
+import { validSliceChange, readyToClose } from './work-request-readiness.js';
 // Store lean Work Request slice and job facts with stable IDs and priority order.
 import cardVerbs from './job-card-verbs.v1.json' with { type: 'json' };
 import jobTypes from './job-types.v1.json' with { type: 'json' };
@@ -26,10 +27,7 @@ export const PULL_REQUEST_TTL_MS = 60_000;
 // and review and merge wait on others, so none of those is ever stale.
 export const STALE_AFTER_MS = 24 * 3_600_000;
 const CARD_LINE = /^Card:[ \t]*(WR\d+\.S\d+\.J\d+)\b/gmu;
-const validSliceChange = change => change && typeof change === 'object' && Object.keys(change).length === 2
-  && typeof change.pr_url === 'string' && typeof change.merge_commit_sha === 'string'
-  && /^https:\/\/github[.]com\/(DoctorCRE\/carr-system|jbookout\/(doctorcre-app|software-factory))\/pull\/[1-9][0-9]*$/.test(change.pr_url)
-  && /^[0-9a-fA-F]{40}$/.test(change.merge_commit_sha);
+
 const unavailablePullRequests = async repos => repos.map(repo => ({ repo, state: 'unavailable', reason: 'no_github_reader', prs: [] }));
 
 // One GitHub search per repository per TTL, shared by every caller in this isolate; failures are cached too.
@@ -398,7 +396,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         }
         return { card_id: queueCardId(wr.ref, args.slice || 1, args.job), priority: slots[args.position - 1] };
       }),
-    'work-queue': { write: false, description: 'Read all visible jobs in priority order with stable card IDs, Work Request titles, and stage, PRs, and staleness derived from Card lines on GitHub pull requests.',
+    'work-queue': { write: false, description: 'Read all visible jobs in priority order with stable card IDs, Work Request titles, and stage, PRs, and staleness derived from Card lines on GitHub pull requests. ready_to_close lists requests whose nonempty slice plan has shipped work, merged evidence for every done slice, and no open slices; completion still requires independent attestation.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       handler: async (c, actor, args) => {
         validate(args, {}, []);
@@ -408,12 +406,15 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         const prs = view.jobs.flatMap(job => job.prs);
         const live = c.production ? await c.production(prs) : prs.map(() => null);
         prs.forEach((pr, index) => { pr.production_live = live[index]; });
-        const slices = (await c.query(`select s.*,w.ref as work_request from ops.work_request_slice s
-          join ops.work_request w on w.id=s.work_request_id where w.id=any($1::uuid[])
-          order by w.ref,s.ordinal`, [[...new Set(rows.map(row => row.work_request_id))]])).rows;
+        const slices = (await c.query(`select s.*,w.ref as work_request,w.title as work_request_title,w.state as work_request_state from ops.work_request_slice s
+          join ops.work_request w on w.id=s.work_request_id where w.organization_tenant_id=$1 and ${readableWorkRequestSql('w')}
+          order by w.ref,s.ordinal`, [organizationTenantForActor(actor)])).rows;
         const projected = slices.map(row => ({ slice_id: queueCardId(row.work_request, row.ordinal),
           work_request: row.work_request, title: row.title, version: row.version, ...row.outcome }));
-        return { ok: true, slices: projected, stale_after_hours: STALE_AFTER_MS / 3_600_000, ...view };
+        const requests = Map.groupBy(slices, row => row.work_request);
+        const ready_to_close = [...requests].filter(([, group]) => readyToClose(group[0].work_request_state, group.map(row => row.outcome)))
+          .map(([human_ref, group]) => ({ human_ref, title: group[0].work_request_title, state: group[0].work_request_state }));
+        return { ok: true, ready_to_close, slices: projected, stale_after_hours: STALE_AFTER_MS / 3_600_000, ...view };
       } },
   };
 }

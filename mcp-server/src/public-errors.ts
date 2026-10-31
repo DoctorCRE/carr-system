@@ -50,6 +50,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["action_link_no_longer_actionable", "This card has already been handled or has changed. Open Home for what needs you now."],
   ["unsupported_decision_about", "The about field accepts lead, client, vendor, party, and deal references or names; Work Request references are not supported. Omit about and name the Work Request in the rationale."],
   ["decision_about_work_request_not_found", "The Work Request in the about field was not found. Check its reference, or omit about and name the Work Request in the rationale."],
+  ["future_work_link_conflict", "This record already has a Work Request. Reuse its existing link."],
   ["work_request_not_found", "Re-read the Work Request reference before retrying."],
   ["work_request_terminal_state", "The Work Request is already terminal. Re-read its card before choosing another action."],
   ["work_request_not_completable", "Complete only a captured, triaged, ready, or verification Work Request."],

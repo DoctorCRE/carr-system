@@ -191,6 +191,7 @@ test('completion refuses open slices and accepts an all-retired plan', async () 
   const retire = async slice => command('close-work-request-slice', { work_request: ref, slice, base_version: (await command('work-request-card', { work_request: ref }, actor, 'carr_reader')).slices[slice - 1].version, outcome: 'retired', reason: 'Scope is no longer needed.', idempotency_key: randomUUID() }, actor, 'carr_writer');
   await retire(1);
   await retire(2);
+  assert.equal((await command('work-request-card',{work_request:ref},actor,'carr_reader')).ready_to_close,false);
   args.base_version = (await command('work-request-card', { work_request: ref }, actor, 'carr_reader')).version;
   assert.equal((await command('complete-work-request', args, actor, 'carr_writer')).state, 'confirmed_closed');
   for (const [name, extra] of [['close-work-request-slice', { slice: 1, base_version: 4, outcome: 'retired', reason: 'More scope.' }],
@@ -262,4 +263,42 @@ print(pathlib.Path(${JSON.stringify(root)}, 'prs.json').read_text() if sys.argv[
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('last merged slice becomes ready to close without completing or self-attesting the request', async () => {
+  const ref = 'WR-999080';
+  await sourcedRequest(ref);
+  await command('plan-work-request-slices', {work_request:ref,slices:['First','Last'],idempotency_key:randomUUID()},actor,'carr_writer');
+  const close = slice => command('close-work-request-slice', {work_request:ref,slice,base_version:1,outcome:'done',
+    change_refs:completion(ref).change_refs,idempotency_key:randomUUID()},actor,'carr_writer');
+  assert.equal((await command('work-request-card',{work_request:ref},actor,'carr_reader')).ready_to_close,false);
+  await close(1);
+  assert.equal((await command('work-request-card',{work_request:ref},actor,'carr_reader')).ready_to_close,false);
+  const args={work_request:ref,slice:2,base_version:1,outcome:'done',change_refs:completion(ref).change_refs,idempotency_key:randomUUID()};
+  await command('close-work-request-slice',args,actor,'carr_writer');
+  const card=await command('work-request-card',{work_request:ref},actor,'carr_reader');
+  assert.equal(card.ready_to_close,true);
+  assert.equal(card.state,'captured');
+  const queue=await command('work-queue',{},actor,'carr_reader');
+  assert.ok(queue.ready_to_close.some(row=>row.human_ref===ref));
+  await command('close-work-request-slice',args,actor,'carr_writer');
+  assert.equal((await command('work-request-card',{work_request:ref},actor,'carr_reader')).ready_to_close,true);
+  const done=completion(ref);
+  done.base_version=card.version;
+  assert.equal((await command('complete-work-request',done,actor,'carr_writer')).state,'confirmed_closed');
+  assert.equal((await command('work-request-card',{work_request:ref},actor,'carr_reader')).ready_to_close,false);
+});
+
+test('appending scope removes derived readiness until the added slice ships', async()=>{
+  const ref='WR-999081';
+  await sourcedRequest(ref);
+  const plan=slices=>command('plan-work-request-slices',{work_request:ref,slices,idempotency_key:randomUUID()},actor,'carr_writer');
+  const close=slice=>command('close-work-request-slice',{work_request:ref,slice,base_version:1,outcome:'done',change_refs:completion(ref).change_refs,idempotency_key:randomUUID()},actor,'carr_writer');
+  const card=()=>command('work-request-card',{work_request:ref},actor,'carr_reader');
+  await plan(['Original']); await close(1);
+  assert.equal((await card()).ready_to_close,true);
+  await plan(['Original','Added']);
+  assert.equal((await card()).ready_to_close,false);
+  await close(2);
+  assert.equal((await card()).ready_to_close,true);
 });
