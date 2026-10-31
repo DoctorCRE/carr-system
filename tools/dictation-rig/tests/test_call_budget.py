@@ -42,7 +42,7 @@ class BudgetTests(unittest.TestCase):
                     factory.assert_not_called()
 
     def test_configured_and_lowered_caps(self):
-        for value, count in (('0.50', 145), ('0.10', 36)):
+        for value, count in (('0.50', 181), ('0.10', 36)):
             with self.subTest(value=value), tempfile.TemporaryDirectory() as directory:
                 ledger = Path(directory) / 'budget.json'
                 with patch.dict('os.environ', {'CALL_JEV_DAILY_DOLLARS': value}):

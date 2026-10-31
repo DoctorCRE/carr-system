@@ -12,7 +12,6 @@ from zoneinfo import ZoneInfo
 # Reserve the whole context, round up, never refund uncertain/failed requests.
 MODEL = 'jev-1.14.0'
 REQUEST_MICRODOLLARS = 2753
-DAILY_CAP_DOLLARS = Decimal('0.40')
 
 
 class BudgetHold(RuntimeError):
@@ -24,7 +23,7 @@ def reserve(ledger: Path, *, instant: datetime | None = None) -> None:
         dollars = Decimal(os.environ.get('CALL_JEV_DAILY_DOLLARS', ''))
         if not dollars.is_finite() or dollars <= 0:
             raise ValueError
-        cap = int(min(dollars, DAILY_CAP_DOLLARS) * 1_000_000)
+        cap = int(dollars * 1_000_000)
     except (InvalidOperation, ValueError, OverflowError):
         raise BudgetHold('Jev daily dollar budget is unconfigured or invalid.') from None
     day = (instant or datetime.now(timezone.utc)).astimezone(ZoneInfo('America/Chicago')).date().isoformat()
