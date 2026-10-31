@@ -99,8 +99,9 @@ When main moves under an open migration PR, all steps are required:
 
 The shadow applies the base branch's pending migrations before the PR's additions.
 SQL dependencies still matter. A migration that needs another PR must name that
-dependency and land after it. Embedded `$current_grants$` contracts must describe
-the combined grants; set membership cannot make stale SQL compatible.
+dependency and land after it. Grant migrations need no extra resync step when
+they append to the installed contract (see Concurrent grant changes). A migration
+that embeds a whole `$current_grants$` literal must describe the combined grants.
 Applied rows cannot be updated, deleted, or truncated. Each successful migration
 and its checksum commit in the same runner-owned transaction.
 
@@ -196,30 +197,22 @@ not aliases and receive no exemption.
 
 ## Concurrent grant changes
 
-The migration runner must not derive expected grants from the live catalog it
-is about to validate. That would bless accidental privilege changes. Historical
-migration checksums, the sealed database registry and the exact installed grant
-contract remain enforced. Numeric migration identities still require allocation
-against main and open PRs; this change does not make colliding numbers safe.
+A migration that adds a grant records it in `ops.scac_current_grant_contract()`
+in the same transaction, as `1121_append_work_request_scope.sql` does: read the
+installed contract, append the explicit rows, and recreate the function.
+Preserve unrelated rows and retirement metadata. Replacing the entire function
+with a copied `$current_grants$` block can erase a concurrent migration's
+grants. Revocations and changes to the same grant need an explicit reviewed
+reconciliation; a blind JSON union cannot settle them.
 
-For a new additive grant migration, append its explicit rows to
-`ops.scac_current_grant_contract()` in the same transaction, as
-`0983_fact_store.sql` does. Preserve unrelated rows and retirement metadata.
-Replacing the entire function with a copied `$current_grants$` block can erase a
-concurrent migration's grants. Revocations and changes to the same grant need an
-explicit reviewed reconciliation; a blind JSON union cannot settle them.
-
-Refresh the complete reviewed grant contract from a disposable rehearsal after merging main.
-All three steps are required, from the repository root:
-
-1. Run `python3 ops/migration-shadow.py --artifact-dir .tmp-grant-rehearsal` to rehearse the combined migration set.
-2. Run `./run.sh regen registry --grant-contract .tmp-grant-rehearsal/schema.sql` to extract its literal contract.
-3. Run `node ops/scac-mutation-inventory.mjs` to verify the regenerated operation contracts.
-
-Review the change to `mcp-server/src/scac-mutation-registry.current.generated.js` before
-committing. The extractor also accepts a migration containing a literal
-`$current_grants$` contract. It parses SQL text without executing it and rejects
-nonliteral bodies or an incompatible registry version. It never queries
-production or silently changes expected grants during deployment. The committed contract
-may still need this explicit refresh when two grant-changing PRs overlap;
-ordinary verb additions change only generated operation rows.
+The migration is the only place a grant is declared. No repository file copies
+the contract, so two PRs that each add a grant migration touch disjoint files
+and merge in either order without regeneration
+(`tools/test_scheduler_retirement.py` proves this with two synthetic branches).
+After migrating a disposable database, `validate_current_catalog` in
+`ops/scac_mutation_db_inventory.py` compares the installed catalog with that
+contract. It refuses a grant that is installed but not recorded, and a recorded
+grant that is not installed. The runner never derives expected grants from the
+catalog it validates. Historical migration checksums and the sealed database
+registry remain enforced. Numeric migration identities still need allocation
+against main and open PRs.

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
-from pathlib import Path
 from typing import Any
 
 
@@ -250,14 +248,8 @@ def validate_registered_grants(projection, baseline, contract):
 
 
 def validate_current_catalog(cur):
-    repo = Path(__file__).resolve().parents[1]
-    contract = json.loads(subprocess.check_output(
-        ["node", "--input-type=module", "-e",
-         "import {SCAC_MUTATION_CURRENT_DB_GRANTS as grants} from './mcp-server/src/scac-mutation-registry.current.generated.js'; console.log(JSON.stringify(grants));"],
-        cwd=repo, text=True))
-    installed = cur.execute("select ops.scac_current_grant_contract()").fetchone()[0]
-    if installed != contract:
-        raise RuntimeError("current generated registry differs from the installed grant contract")
+    # Migrations declare grants by extending this contract; the catalog must match it exactly.
+    contract = cur.execute("select ops.scac_current_grant_contract()").fetchone()[0]
     row = cur.execute(
         "select registry_digest,catalog_projection from ops.scac_mutation_registry_version where registry_version=%s",
         (contract["registry_version"],)).fetchone()
