@@ -289,7 +289,7 @@
     },
     {
       "table": "ops.fact_key_contract",
-      "migration": "1092_deal_schedules.sql",
+      "migration": "1109_deal_schedules.sql",
       "where": "fact_key = 'rent_schedule'",
       "order_by": "fact_key",
       "exact_rows": 1,

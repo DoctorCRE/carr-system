@@ -100,12 +100,16 @@ declare
   multiplier numeric;
   cited text;
   replayed boolean := false;
+  field_key text;
 begin
   if p_tenant is null or p_actor_id is null or p_idempotency_key is null or p_entity_ref is null
      or jsonb_typeof(p_observations) is distinct from 'array'
      or jsonb_array_length(p_observations) not between 1 and 100 then
     raise exception 'invalid fact observation batch' using errcode='22023';
   end if;
+  for field_key in select distinct e->>'fact_key' from jsonb_array_elements(p_observations) e order by 1 loop
+    perform pg_advisory_xact_lock(hashtextextended('canonical-fact:'||p_tenant||':'||p_entity_ref||':'||field_key,0));
+  end loop;
   digest := encode(sha256(convert_to(jsonb_build_object('entity_ref',p_entity_ref,
     'observations',p_observations)::text,'UTF8')),'hex');
   perform pg_advisory_xact_lock(hashtextextended('fact-observation-batch:'||p_tenant||':'||p_idempotency_key,0));
@@ -263,7 +267,12 @@ language sql stable set search_path=pg_catalog,pg_temp as $$
     'canonical_version',coalesce(c.version,0),
     'review_version',encode(sha256(convert_to(jsonb_build_array(e.ids,x.ids,coalesce(c.version,0),d.id)::text,'UTF8')),'hex'),
     'pending',((cardinality(e.ids)>0 and (e.conflict or e.verify_band or e.human_review)) or cardinality(x.ids)>0)
-      and not (coalesce(d.observation_ids=e.ids and d.extraction_job_ids=x.ids and d.canonical_version=coalesce(c.version,0),false)
+      and not (coalesce(d.observation_ids=e.ids and d.extraction_job_ids=x.ids and (d.canonical_version=coalesce(c.version,0)
+          or exists(select 1 from ops.canonical_fact reviewed
+            where reviewed.organization_tenant_id=p_tenant and reviewed.entity_ref=p_entity_ref
+              and reviewed.fact_key=p_fact_key and reviewed.version=d.canonical_version
+              and (reviewed.normalized_value,reviewed.normalized_schedule,reviewed.canonical_unit,reviewed.expense_basis,reviewed.observation_ids)
+                is not distinct from (c.normalized_value,c.normalized_schedule,c.canonical_unit,c.expense_basis,c.observation_ids))),false)
         or coalesce(d.id is null and c.basis='human_review' and c.promoted_at>=e.newest and (x.newest is null or c.promoted_at>=x.newest),false)),
     'priority',case when e.conflict or e.verify_band or exists(select 1 from jsonb_array_elements(x.abstentions) a where a->>'reason'='ocr_disagreement') then 'high' else 'normal' end,
     'reasons',to_jsonb(array_remove(array[case when e.conflict then 'conflict' end,

@@ -152,7 +152,12 @@ language sql stable set search_path=pg_catalog,pg_temp as $$
     'canonical_version',coalesce(c.version,0),
     'review_version',encode(sha256(convert_to(jsonb_build_array(e.ids,x.ids,coalesce(c.version,0),d.id)::text,'UTF8')),'hex'),
     'pending',((cardinality(e.ids)>0 and (e.conflict or e.verify_band or e.human_review)) or cardinality(x.ids)>0)
-      and not (coalesce(d.observation_ids=e.ids and d.extraction_job_ids=x.ids and d.canonical_version=coalesce(c.version,0),false)
+      and not (coalesce(d.observation_ids=e.ids and d.extraction_job_ids=x.ids and (d.canonical_version=coalesce(c.version,0)
+          or exists(select 1 from ops.canonical_fact reviewed
+            where reviewed.organization_tenant_id=p_tenant and reviewed.entity_ref=p_entity_ref
+              and reviewed.fact_key=p_fact_key and reviewed.version=d.canonical_version
+              and (reviewed.normalized_value,reviewed.canonical_unit,reviewed.expense_basis,reviewed.observation_ids)
+                is not distinct from (c.normalized_value,c.canonical_unit,c.expense_basis,c.observation_ids))),false)
         or coalesce(d.id is null and c.basis='human_review' and c.promoted_at>=e.newest and (x.newest is null or c.promoted_at>=x.newest),false)),
     'reasons',to_jsonb(array_remove(array[case when e.conflict then 'conflict' end,
       case when e.verify_band then 'verify_band' end,case when e.human_review then 'human_review' end],null))||coalesce((select jsonb_agg(distinct a->>'reason') from jsonb_array_elements(x.abstentions) a),'[]'::jsonb),

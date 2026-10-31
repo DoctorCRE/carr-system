@@ -24,7 +24,7 @@ test('schedule relations survive storage and human promotion; OCR agreement neve
     await c.query(await readFile(new URL('../../migrations/0001_init.sql', import.meta.url), 'utf8'));
     await c.query('create schema ops; create role carr_reader; create role carr_writer; create role carr_authority; create role dot_reader');
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as $$select '{"secdef_execute":[]}'::jsonb$$`);
-    for (const file of ['0983_fact_store.sql', '1070_fact_review.sql', '1078_deal_extraction.sql', '1092_deal_schedules.sql'])
+    for (const file of ['0983_fact_store.sql', '1099_fact_review.sql', '1103_deal_extraction.sql', '1109_deal_schedules.sql'])
       await c.query(await readFile(new URL(`../../migrations/${file}`, import.meta.url), 'utf8'));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner'),($2,'codex','automation','Synthetic extractor')", [partner.id, job.id]);
     const entity_ref = randomUUID(), document_ref = randomUUID(), hash = 'a'.repeat(64);
@@ -49,6 +49,13 @@ test('schedule relations survive storage and human promotion; OCR agreement neve
     assert.equal(refusal.error, 'observation_not_rule_eligible');
     const approved = await invoke('resolve-fact-review', { idempotency_key: randomUUID(), entity_ref, fact_key: 'rent_schedule', decision: 'approve', reason: 'Synthetic schedule adjudication.', observation_id: a.observations[0].id, base_version: 0, review_version: before.review_version }, partner);
     assert.equal(approved.canonical_fact.normalized_schedule[1].rate, '24.72');
+    assert.equal((await invoke('list-fact-review', { entity_ref }, partner)).items.length, 0);
+    const repeat = await invoke('promote-fact', { idempotency_key: randomUUID(), entity_ref, fact_key: 'rent_schedule', basis: 'human_review', observation_ids: [a.observations[0].id], base_version: 1 }, partner);
+    assert.equal(repeat.canonical_fact.normalized_schedule[1].rate, '24.72');
+    assert.equal((await invoke('list-fact-review', { entity_ref }, partner)).items.length, 0, 'promoting the reviewed schedule and source stays resolved');
+    await invoke('promote-fact', { idempotency_key: randomUUID(), entity_ref, fact_key: 'rent_schedule', basis: 'human_review', observation_ids: [b.observations[0].id], base_version: 2 }, partner);
+    assert.equal((await invoke('list-fact-review', { entity_ref }, partner)).items[0].pending, true, 'another schedule source reopens review');
+    await invoke('promote-fact', { idempotency_key: randomUUID(), entity_ref, fact_key: 'rent_schedule', basis: 'human_review', observation_ids: [a.observations[0].id], base_version: 3 }, partner);
     assert.equal((await invoke('list-fact-review', { entity_ref }, partner)).items.length, 0);
     await assert.rejects(record({ ...observation, method: 'text_layer' }), e => e.payload.error === 'validation_error');
     const overlap = structuredClone(observation); overlap.value[1].start_month.value = 12;
