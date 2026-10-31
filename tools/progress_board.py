@@ -2495,75 +2495,6 @@ def publish_external_inventory(cache: dict[str, Any]) -> dict[str, Any]:
             'schema': 'system-work-external.v3', 'digest': digest, 'item_count': len(cache['items'])}
 
 
-def publish_paged_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
-    """Keep a legacy preview; publish the lossless JSON pages before its manifest.
-
-    Readers join page content in manifest order, verify the UTF-8 SHA-256 digest,
-    then parse JSON. Immutable page IDs preserve older observations on failures.
-    """
-    content = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    pages, payloads = [], []
-    offset = 0
-    while offset < len(content):
-        low, high = 1, min(len(content) - offset, SNAPSHOT_BUDGET)
-        while low <= high:
-            middle = (low + high) // 2
-            payload = {"schema": "carr-progress-board-page.v1", "content": content[offset:offset + middle]}
-            if snapshot_size(payload) <= SNAPSHOT_BUDGET:
-                low = middle + 1
-            else:
-                high = middle - 1
-        if not high:
-            raise SnapshotTooLarge("snapshot page cannot fit; no data published")
-        payload = {"schema": "carr-progress-board-page.v1", "content": content[offset:offset + high]}
-        digest = hashlib.sha256(payload["content"].encode()).hexdigest()
-        board_id = snapshot["project"] + "-snapshot-" + digest
-        payloads.append((board_id, payload))
-        pages.append({"board_id": board_id, "version": 1, "digest": digest})
-        offset += high
-
-    preview = copy.deepcopy(snapshot)
-    omitted: dict[str, int] = {}
-    preview["pagination"] = {"schema": "carr-progress-board-pages.v1", "encoding": "json",
-                             "digest": hashlib.sha256(content.encode()).hexdigest(),
-                             "pages": pages, "omitted": omitted}
-    notice = {"text": ""}
-    preview.setdefault("notes", []).append(notice)
-    while True:
-        counts = {**{key: value for key, value in preview["omitted"].items() if value}, **omitted}
-        notice["text"] = ("Board preview. Omitted from this preview: " + json.dumps(counts, sort_keys=True) +
-                          ". All records remain in the published snapshot pages. "
-                          "Retrieve them with read-progress-board using pagination.pages. Full queue overview: "
-                          "https://app.doctorcre.com/progress-board?board=orchestrator")
-        try:
-            fit_snapshot(preview)
-        except SnapshotTooLarge:
-            pass
-        if snapshot_size(preview) <= SNAPSHOT_BUDGET:
-            break
-        collections = [(key, preview, key) for key, value in preview.items()
-                       if isinstance(value, (list, dict)) and value
-                       and key not in {"pagination", "task_defaults", "task_counts", "omitted"}
-                       and (key != "notes" or len(value) > 1)]
-        if not collections:
-            raise SnapshotTooLarge("snapshot page manifest exceeds publication budget; previous observation retained")
-        path, parent, key = max(collections, key=lambda entry: snapshot_size(entry[1][entry[2]]))
-        value = parent[key]
-        if key == "notes" and parent is preview:
-            value = value[:-1]
-        keep = len(value) // 2
-        omitted[path] = omitted.get(path, 0) + len(value) - keep
-        parent[key] = dict(list(value.items())[:keep]) if isinstance(value, dict) else value[:keep]
-        if key == "notes" and parent is preview:
-            parent[key].append(notice)
-
-    for page, (board_id, payload) in zip(pages, payloads):
-        page["version"] = publish_immutable_page(board_id, payload)
-    if snapshot_size(preview) > SNAPSHOT_BUDGET:
-        raise SnapshotTooLarge("verified page manifest exceeds publication budget; previous observation retained")
-    return preview
-
-
 def as_published(record: dict[str, Any]) -> Any:
     """The snapshot as this board wrote it. read-progress-board derives a
     `linkage` for every task it returns; the board never sends one."""
@@ -2575,6 +2506,9 @@ def as_published(record: dict[str, Any]) -> Any:
     return snapshot
 
 
+SYSTEM_BOARD_FIELDS = ("schema", "kind", "project", "title", "costs", "omitted", "updated_at")
+
+
 def publish_board(project: str, *, costs=None) -> dict[str, int]:
     state = read_state(project)
     board = safe_project(project)
@@ -2583,18 +2517,17 @@ def publish_board(project: str, *, costs=None) -> dict[str, int]:
     before = board_reply("read-progress-board", {"board_id": board})
     remote_snapshot = before.get("snapshot")
     snapshot = project_board_snapshot(state, costs=costs)
-    if board == "carr-v5":
+    if board == LAUNCHD_BOARD:
+        # The system board's cards come live from the record-layer work queue (WR-000557 S4); this
+        # snapshot carries only what the queue does not: costs and the GitHub inventory.
+        snapshot = {key: snapshot[key] for key in SYSTEM_BOARD_FIELDS if key in snapshot}
+        snapshot.update(tasks={}, history={})
+        state = {**state, "questions": {}}
         from system_work_cache import cached_github
         snapshot["external_inventory"] = publish_external_inventory(cached_github(
             board_dir() / "system-work-github-cache.json",
             Path.home() / "carr-system/out/orch/dot/job13/report-G.md"))
-    try:
-        fitted = fit_snapshot(copy.deepcopy(snapshot))
-    except SnapshotTooLarge:
-        if board != LAUNCHD_BOARD:
-            raise
-        fitted = publish_paged_snapshot(snapshot)
-    snapshot = fitted
+    snapshot = fit_snapshot(copy.deepcopy(snapshot))
     if remote_snapshot is None or as_published(remote_snapshot) != snapshot:
         args = {"board_id": board, "base_version": int(remote_snapshot["version"]) if remote_snapshot else 0,
                 "snapshot": snapshot}

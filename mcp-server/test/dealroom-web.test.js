@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { createDealroomHandler, isDealroomRequest } from "../src/dealroom-web.js";
 import { ALLOW_LIST, slugForEmail } from "../src/identity.js";
+import { ToolError } from "../src/tool-error.ts";
 
 const WRANGLER_PATH = fileURLToPath(new URL("../wrangler.toml", import.meta.url));
 const INDEX_PATH = fileURLToPath(new URL("../src/index.js", import.meta.url));
@@ -88,6 +89,40 @@ function identityOverrides(email, clock) {
 function identityHandler(email, clock) {
   return createDealroomHandler(identityOverrides(email, clock));
 }
+
+test("comparison app routes require authentication and CSRF and name a blocked field", async () => {
+  const environment = env();
+  environment.WORKSPACE_COMMAND_CENTER_READ_ENABLED = "true";
+  environment.DEALROOM_PROGRAM6_ACTIONS_ENABLED = "true";
+  environment.VERB_REQUEST_BUDGET_HUMAN = { limit: async () => ({ success: true }) };
+  environment.VERB_REQUEST_BUDGET = {
+    idFromName: name => name,
+    get: () => ({ fetch: async () => Response.json({ allowed: true }) }),
+  };
+  const invoked = [];
+  const handler = createDealroomHandler({ ...identityOverrides(TEST_PARTNER_EMAIL),
+    appFactCaller: async (_env, actor, verb) => {
+      invoked.push([actor.slug, verb]);
+      if (verb === "prepare-terms-comparison")
+        throw new ToolError({ error: "comparison_fact_blocked", field: "term_months", reason: "unresolved" });
+      return { ok: true, status: "draft" };
+    },
+  });
+  const url = `https://${PRODUCTION_HOST}/api/v1/fact-review/comparison`;
+  assert.equal((await handler.fetch(new Request(url, { method: "POST", body: "{}" }), environment, {})).status, 401);
+  const session = namedCookie(await login(handler, environment, TEST_PARTNER_EMAIL), "__Host-dealroom_session");
+  const bootstrap = await (await handler.fetch(new Request(`https://${PRODUCTION_HOST}/api/system-work/session`,
+    { headers: { cookie: session } }), environment, {})).json();
+  const headers = { cookie: session, origin: `https://${PRODUCTION_HOST}`, "sec-fetch-site": "same-origin",
+    "content-type": "application/json" };
+  assert.equal((await handler.fetch(new Request(url, { method: "POST", headers, body: "{}" }), environment, {})).status, 403);
+  headers["x-carr-csrf"] = bootstrap.csrf_token;
+  const blocked = await handler.fetch(new Request(url, { method: "POST", headers, body: "{}" }), environment, {});
+  assert.deepEqual(await blocked.json(), { error: "comparison_fact_blocked", field: "term_months", reason: "unresolved" });
+  const validated = await handler.fetch(new Request(url + "/validate", { method: "POST", headers, body: "{}" }), environment, {});
+  assert.equal((await validated.json()).status, "draft");
+  assert.deepEqual(invoked, [["joe", "prepare-terms-comparison"], ["joe", "validate-terms-comparison"]]);
+});
 
 test('phone transfer shares partner-cookie, origin, and CSRF guards while admitting binary audio', async () => {
   const environment = env();

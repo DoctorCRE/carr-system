@@ -95,9 +95,21 @@ fi
 # Before the decoder is replaced, one reconcile-only intake pass over the installed decoder's rows
 # saves each held message's Message-ID, so intake state follows the new decoder's identities.
 # It files nothing, is skipped once state has them, and a failure stops the install.
+# launchd must start the granted helper so TCC attributes access to that helper.
 STATE="$REPO/out/outlook-intake/state.json"
 if [ -x "$VENDOR/hxprobe/target/release/hxprobe" ] && [ -f "$STATE" ] && ! grep -q '"mail_ids"' "$STATE"; then
-  "$PY" -c 'from lib.outlook_intake import main; raise SystemExit(main())' --reconcile-only
+  if ! launchctl kickstart "gui/$(id -u)/$LABEL"; then
+    print -u2 -- "install-outlook-intake: intake job is not loaded or launchd refused to start it; load the existing job before retrying. See $REPO/out/run-scheduled.log"
+    exit 1
+  fi
+  for attempt in {1..60}; do
+    grep -q '"mail_ids"' "$STATE" && break
+    sleep 2
+  done
+  if ! grep -q '"mail_ids"' "$STATE"; then
+    print -u2 -- "install-outlook-intake: reconciliation did not save mail_ids within 120 seconds; decoder left unchanged. Rerun the installer after the current run finishes. See $REPO/out/run-scheduled.log"
+    exit 1
+  fi
 fi
 "$PY" "$REPO/ops/hxprobe-source-digest.py" --build-into "$VENDOR"
 rm -f "$PIN"
@@ -110,7 +122,7 @@ import sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--rebuild-helper', action='store_true',
-                    help='allow replacing the copy helper; ad-hoc signing requires a Full Disk Access re-grant')
+                    help='allow replacing the copy helper; ad-hoc rebuilds and signing identity changes require a Full Disk Access re-grant')
 args = parser.parse_args(sys.argv[3:])
 repo, home = (Path(value).resolve() for value in sys.argv[1:3])
 sys.path.insert(0, str(repo))

@@ -1,0 +1,17 @@
+# Service binding only. The later app job connects its existing share route.
+name = "carr-requirement-upload"
+main = "src/requirement-upload-worker.js"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+preview_urls = false
+
+[limits]
+cpu_ms = 50
+subrequests = 20
+
+# Isolated from carr-documents and its local sole-writer quota ledger.
+# This empty-at-provisioning bucket admits at most 100 MiB for its lifetime.
+[[r2_buckets]]
+binding = "requirement_quarantine"
+bucket_name = "carr-requirement-quarantine"
