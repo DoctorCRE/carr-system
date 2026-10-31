@@ -4021,6 +4021,15 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "grantee": "carr_writer",
       "privilege": "insert",
       "grantable": false
+    },
+    {
+      "ingress_key": "db-relation-acl:ops.requirement_upload_visitor:carr_writer:delete",
+      "ingress_kind": "db_relation_acl",
+      "relation": "ops.requirement_upload_visitor",
+      "relation_kind": "r",
+      "grantee": "carr_writer",
+      "privilege": "delete",
+      "grantable": false
     }
   ],
   "secdef_execute": [
