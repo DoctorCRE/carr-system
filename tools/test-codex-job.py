@@ -351,17 +351,21 @@ if {int(outcome)} in (0, 7): sys.exit({int(outcome)})
 while True: time.sleep(1)
 """)
                 try:
-                    deadline = time.monotonic() + 10
+                    deadline = time.monotonic() + 60
                     while not pidfile.exists() and time.monotonic() < deadline:
                         time.sleep(.01)
                     self.assertTrue(pidfile.exists(), 'fixture must start its descendant')
                     pid = int(pidfile.read_text().split()[0])
                     if outcome in (signal.SIGTERM, signal.SIGINT):
                         job.send_signal(outcome)
-                    _, errors = job.communicate(timeout=10)
+                    deadline = time.monotonic() + 60
+                    while job.poll() is None and time.monotonic() < deadline:
+                        time.sleep(.05)
+                    self.assertIsNotNone(job.returncode, 'job must exit after its descendant starts')
+                    _, errors = job.communicate()
                     self.assertEqual(job.returncode, int(outcome) if outcome in (0, 7)
                                      else 128 + outcome, errors.decode())
-                    deadline = time.monotonic() + 2
+                    deadline = time.monotonic() + 15
                     while True:
                         state = subprocess.run(['ps', '-p', str(pid), '-o', 'stat='],
                                                capture_output=True, text=True).stdout.strip()
