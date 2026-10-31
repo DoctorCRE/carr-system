@@ -73,7 +73,7 @@ No workflow needs a generation step to make a runtime import resolve.
 - `ops/scac_mutation_db_inventory.py validate_current_catalog` imports the grant
   expectations and compares them with the installed SQL contract. Its scheduler
   retirement and migration-control tests were included in the source audit.
-- Direct grant/operation test readers are `client-portal-register-postgres`,
+- Grant/operation test consumers are `client-portal-register-postgres`,
   `client-portal-postgres`, `fact-store-postgres`, `phone-call-sessions-postgres`,
   `team-memory-postgres`, `work-queue-postgres`, `atlas-inventory-graph-read`,
   `current-mutation-registry-generation` and `siep-11-mutation-registry` under `test/`.
