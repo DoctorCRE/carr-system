@@ -51,5 +51,5 @@ begin
     $reply_grants$[{"ingress_key":"db-relation-acl:ops.requirement_request:carr_writer:update","ingress_kind":"db_relation_acl","relation":"ops.requirement_request","relation_kind":"r","grantee":"carr_writer","privilege":"update","grantable":false},{"ingress_key":"db-relation-acl:ops.requirement_reply_proposal:carr_writer:insert","ingress_kind":"db_relation_acl","relation":"ops.requirement_reply_proposal","relation_kind":"r","grantee":"carr_writer","privilege":"insert","grantable":false},{"ingress_key":"db-relation-acl:ops.requirement_reply_proposal:carr_writer:update","ingress_kind":"db_relation_acl","relation":"ops.requirement_reply_proposal","relation_kind":"r","grantee":"carr_writer","privilege":"update","grantable":false}]$reply_grants$::jsonb);
   execute format(
     'CREATE OR REPLACE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb LANGUAGE sql IMMUTABLE SET search_path=pg_catalog AS %L',
-    'SELECT ' || quote_literal(contract::text) || '::jsonb');
+    'select ' || quote_literal(contract::text) || '::jsonb');
 end $contract$;
