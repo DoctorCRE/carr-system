@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Execute every required Node package and refuse unmeasured success."""
+import argparse
 import os
 from pathlib import Path
 import subprocess
@@ -12,10 +13,13 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = ('mcp-server', 'practice-plugin')
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--part", choices=("all", "fast"), default="all")
+    args = parser.parse_args()
     failed = False
     totals = dict.fromkeys(FIELDS, 0)
     with tempfile.TemporaryDirectory(prefix='carr-ci-unit-') as directory:
-        for package in PACKAGES:
+        for package in (("practice-plugin",) if args.part == "fast" else PACKAGES):
             manifest = ROOT / package / 'package.json'
             if not manifest.is_file():
                 print(f'FAIL unit {package}: required package.json is missing')
@@ -31,7 +35,9 @@ def main():
                 with log.open('w') as output:
                     result = subprocess.run(
                         [sys.executable, str(ROOT / 'bin/with-timeout.py'), '900',
-                         'npm', '--prefix', package, 'test'], cwd=ROOT,
+                         *(['node', '--test', 'practice-plugin/test/calculators.test.mjs',
+                            'practice-plugin/test/verticals.test.mjs'] if args.part == 'fast' else
+                           ['npm', '--prefix', package, 'test'])], cwd=ROOT,
                         env=env, stdout=output, stderr=subprocess.STDOUT)
                 output = log.read_text(errors='replace')
                 counts = test_counts(output)

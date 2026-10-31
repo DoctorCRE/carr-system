@@ -102,6 +102,12 @@ def new_to_main(diff_range):
 def check(floor, diff_range, gates_deferred):
     changed = changed_paths(diff_range)
 
+    if os.environ.get("GITHUB_EVENT_NAME") == "pull_request":
+        floor.ran.append("migration-open-pr")
+        rc, log = floor.py("migration-open-pr", "ops/migration-open-pr-gate.py")
+        if rc:
+            floor.fail("migration-open-pr", "resolve the open PR migration slot claim", log, 15)
+
     rc, log = floor.py("no-client-deliverables", "ops/no-client-deliverables-gate.py")
     if rc:
         floor.fail("no-client-deliverables", "a client-deliverable path is tracked. git rm it — "
