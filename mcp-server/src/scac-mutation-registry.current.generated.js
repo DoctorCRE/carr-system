@@ -688,6 +688,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "complete-doc-request": {
+    "ingress_key": "mcp-tool:complete-doc-request",
+    "source_locator": "mcp-server/src/doc-conversation.js",
+    "schema_digest": "f5d22efcb23aba6708c8ba222ad067ba628f7d4a7d8cc5807fdb2a06fecbfb03",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": true,
+    "delegates_to": []
+  },
   "complete-doc-suggestion-scan": {
     "ingress_key": "mcp-tool:complete-doc-suggestion-scan",
     "source_locator": "mcp-server/src/doc-suggestions.ts",
