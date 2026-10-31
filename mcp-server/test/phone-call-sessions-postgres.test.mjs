@@ -76,6 +76,58 @@ audio.write('data', 36); audio.writeUInt32LE(32000, 40);
 const metadata = { sha256: createHash('sha256').update(audio).digest('hex'), byte_count: audio.length, duration_seconds: 1, mime_type: 'audio/wav',
   started_at: '2026-01-01T12:00:00Z', consent_announced_at: '2026-01-01T12:00:00Z' };
 
+test('owner answers once and Studio pickup cannot resurrect resolved questions', async () => {
+  const session = await (await handler.fetch(new Request(url, { method: 'POST',
+    body: JSON.stringify({ ...metadata, sha256: 'c'.repeat(64) }) }), env, actor)).json();
+  const id = session.session_id;
+  const read = async (who = actor) => handler.fetch(new Request(`${url}/${id}`), env, who);
+  const other = { ...actor, id: '10000000-0000-0000-0000-000000000009', slug: 'dell' };
+  const status = body => handler.studioFetch(new Request(
+    `https://api.example.test/capture/phone/v1/call-sessions/${id}/status`, {
+      method: 'POST', headers: { authorization: `Bearer ${env.CALL_STUDIO_TOKEN}` }, body: JSON.stringify(body),
+    }), env);
+  const question = { id: 'review-model-1', question: 'Confirm the closure?' };
+  const held = { state: 'held_review', reason: 'open_review_questions', open_questions: 1, review_questions: [question] };
+  assert.equal((await status(held)).status, 200);
+  assert.deepEqual((await (await read()).json()).review_questions, [question]);
+  assert.equal((await read(other)).status, 404);
+  const body = { idempotency_key: 'question-answer-1', session_id: id, question_id: question.id, answer: 'confirm' };
+  const answer = (value = body, who = actor) => handler.fetch(new Request(`${url}/${id}/answers`, {
+    method: 'POST', body: JSON.stringify(value),
+  }), env, who);
+  for (const invalid of [{ ...body, answer: '' }, { ...body, answer: ' '.repeat(2) },
+    { ...body, answer: 'x'.repeat(1001) }, { ...body, session_id: 'different' },
+    { ...body, transcript: 'private words' }, { ...body, idempotency_key: '' }])
+    assert.equal((await answer(invalid)).status, 400);
+  assert.equal((await answer(body, other)).status, 404);
+  const [first, duplicate] = await Promise.all([answer(), answer()]);
+  assert.equal(first.status, 200);
+  assert.equal(duplicate.status, 200);
+  assert.deepEqual(await first.json(), await duplicate.json());
+  assert.equal((await answer({ ...body, answer: 'dismiss' })).status, 409);
+  assert.equal((await answer({ ...body, idempotency_key: 'new-answer' })).status, 409);
+  assert.equal((await answer({ ...body, question_id: 'unknown', idempotency_key: 'unknown-answer' })).status, 404);
+  const visible = await (await read()).json();
+  assert.deepEqual(visible.review_questions, []);
+  assert.equal(visible.open_questions, 0);
+  const pickup = await (await status(held)).json();
+  assert.deepEqual(pickup.question_answers, [{ question_id: question.id, answer: 'confirm' }]);
+  assert.equal((await (await read()).json()).open_questions, 0);
+  assert.equal((await status({ state: null, reason: null, open_questions: 0, review_questions: [] })).status, 200);
+  assert.equal((await (await read()).json()).state, 'pending');
+  assert.equal((await answer()).status, 200);
+  assert.equal((await status(held)).status, 200);
+  assert.deepEqual((await (await read()).json()).review_questions, []);
+  const more = [{ id: 'q2', question: 'Invoice now?' }, { id: 'q3', question: 'Which recipient?' }];
+  assert.equal((await status({ ...held, open_questions: 2, review_questions: more })).status, 200);
+  for (const [question_id, value] of [['q2', 'dismiss'], ['q3', 'Use the attached client contact.']]) {
+    const response = await answer({ ...body, question_id, answer: value, idempotency_key: question_id });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).answer, value);
+  }
+  assert.equal((await (await read()).json()).open_questions, 0);
+});
+
 test('Studio holds override normal reads and clear idempotently', async () => {
   const admitted = await (await handler.fetch(new Request(url, { method: 'POST',
     body: JSON.stringify({ ...metadata, sha256: 'b'.repeat(64) }) }), env, actor)).json();
@@ -101,7 +153,7 @@ test('Studio holds override normal reads and clear idempotently', async () => {
   const clear = { state: null, reason: null, open_questions: 0 };
   assert.equal((await status(clear)).status, 200);
   assert.deepEqual(await read(), { schema_version: 1, session_id: id, state: 'pending',
-    filed: false, transferred: false, reason: null, open_questions: 0 });
+    filed: false, transferred: false, reason: null, open_questions: 0, review_questions: [] });
   const report = await handler.studioFetch(new Request(
     `https://api.example.test/capture/phone/v1/call-sessions/${id}/report`, {
       method: 'POST', headers: { authorization: `Bearer ${env.CALL_STUDIO_TOKEN}` },

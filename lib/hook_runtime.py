@@ -92,6 +92,41 @@ def announce(message, event="Stop"):
     return 0
 
 
+# Grok Build runs the Claude settings hooks too. Its payload carries Claude's
+# snake_case keys beside its own camelCase ones, but names tools its own way, so a
+# gate matching "Bash" would wave its shell through (WR614.S1.J2; real payloads in
+# ops/fixtures/grok-hooks). Gates see Claude's names; the original stays in
+# grok_tool_name.
+GROK_TOOLS = {'run_terminal_command': 'Bash', 'write': 'Write', 'search_replace': 'Edit',
+              'read_file': 'Read', 'web_fetch': 'WebFetch'}
+GROK_KEYS = (('session_id', 'sessionId'), ('transcript_path', 'transcriptPath'),
+             ('tool_name', 'toolName'), ('tool_input', 'toolInput'), ('tool_use_id', 'toolUseId'),
+             ('permission_mode', 'permissionMode'), ('stop_hook_active', 'stopHookActive'),
+             ('last_assistant_message', 'lastAssistantMessage'))
+
+
+def _is_grok(payload):
+    return isinstance(payload.get('hookEventName'), str) and 'workspaceRoot' in payload
+
+
+def from_grok(payload):
+    """Claude's view of a Grok hook payload; any other payload is returned as is."""
+    if not _is_grok(payload):
+        return payload
+    event = dict(payload)
+    for snake, camel in GROK_KEYS:
+        if snake not in event and camel in event:
+            event[snake] = event[camel]
+    event.setdefault('hook_event_name', event['hookEventName'].title().replace('_', ''))
+    name = event.get('tool_name')
+    if name in GROK_TOOLS:
+        event['grok_tool_name'], event['tool_name'] = name, GROK_TOOLS[name]
+        tool_input = event.get('tool_input')
+        if name == 'read_file' and isinstance(tool_input, dict) and 'file_path' not in tool_input:
+            event['tool_input'] = dict(tool_input, file_path=tool_input.get('target_file'))
+    return event
+
+
 class Event(dict):
     def transcript(self, *, hook, log_path=None):
         from lib.transcript_read import load_transcript
@@ -113,8 +148,13 @@ def decision(function=None, *, on_error=None, failure="open"):
     def decorate(function):
         @wraps(function)
         def decide(event):
-            if isinstance(event, dict) and not isinstance(event, Event):
-                event = Event(event)
+            if isinstance(event, dict):
+                if (_is_grok(event)
+                        and event['hookEventName'].replace('_', '').lower() == 'pretooluse'
+                        and event.get('toolInputTruncated') is not False):
+                    return Verdict.refuse('Grok tool input is truncated or its completeness is unconfirmed; '
+                                          'toolInputTruncated must be false.')
+                event = Event(from_grok(event))
             out, err = io.StringIO(), io.StringIO()
             code = 0
             caller_out, caller_err = sys.stdout, sys.stderr
@@ -162,5 +202,5 @@ def run(decide, *, stdin=None, stdout=None, stderr=None, parse_error=None,
         return result.emit(stdout, stderr)
     # Keep scalar/array handling in the gate's policy. Several hooks distinguish
     # syntactically valid JSON from an unreadable event in their diagnostic log.
-    event = Event(payload) if isinstance(payload, dict) else payload
+    event = Event(from_grok(payload)) if isinstance(payload, dict) else payload
     return decide(event).emit(stdout, stderr)

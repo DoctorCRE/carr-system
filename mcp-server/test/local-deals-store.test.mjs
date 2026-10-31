@@ -257,10 +257,24 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal(value.deals[0].last_step.kind, 'call');
       assert.equal(value.deals[0].last_step.summary, 'Synthetic call');
       assert.equal(new Date(value.deals[0].last_step.occurred_at).toISOString(), '2026-01-02T12:00:00.000Z');
+      await TOOLS['complete-one-action'].handler(c, actor, {idempotency_key:randomUUID(),action_id:id(11),base_version:1});
+      value = await board();
+      assert.equal(value.deals[0].last_step.kind, 'completed_action');
+      assert.equal(value.deals[0].last_step.summary, 'Earlier action');
       await TOOLS['complete-action'].handler(c, actor, {idempotency_key:randomUUID(),ref:id(4),outcome:'Synthetic outcome'});
       value = await board();
       assert.equal(value.deals[0].last_step.kind, 'completed_action');
       assert.equal(value.deals[0].last_step.summary, 'Synthetic outcome');
+    }));
+
+    await t.test('board chooses the later recorded completion when timestamps match', async () => transaction(async () => {
+      await fixture(false);
+      await c.query(`insert into event(id, occurred_at, actor_id, verb, subject_type, subject_id, new_value, cause)
+        values ($1, now(), $3, 'complete-one-action', 'deal', $4, '{"status":"done","outcome":"First"}', 'system'),
+               ($2, now(), $3, 'complete-one-action', 'deal', $4, '{"status":"done","outcome":"Second"}', 'system')`,
+        [id(90), id(89), actor.id, id(4)]);
+      const value = await TOOLS['deal-room-board'].handler(c, actor, {workspace:'team'});
+      assert.equal(value.deals[0].last_step.summary, 'Second');
     }));
 
     await t.test('unavailable Jev leaves the overdue action open with an assessment receipt', async () => transaction(async () => {
