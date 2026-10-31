@@ -293,9 +293,9 @@ test('queue grants preserve the current catalog seal and reject wider grants', a
 test('the read saves a finish once on the side connection, and later reads keep it after the PR leaves the window', async () => {
   const work_request = await request('WR-000061');
   const done = (await command('dispatch-job', job(work_request, { executor: 'claude' }))).card_id;
-  await c.query("update ops.work_request_job set created_at=now()-interval '20 days' where work_request_id=(select id from ops.work_request where ref=$1)", [work_request]);
+  await c.query("update ops.work_request_job set created_at='2026-10-01T00:00:00Z', started_at='2026-10-02T00:00:00Z' where work_request_id=(select id from ops.work_request where ref=$1)", [work_request]);
   const pending = (await command('dispatch-job', job(work_request))).card_id;
-  await c.query("update ops.work_request_job set runner_job_id='pending-runner', started_at=now() where work_request_id=(select id from ops.work_request where ref=$1) and j_number=2", [work_request]);
+  await c.query("update ops.work_request_job set runner_job_id='pending-runner', started_at='2026-10-20T00:00:00Z' where work_request_id=(select id from ops.work_request where ref=$1) and j_number=2", [work_request]);
   const bounds = [], writes = [];
   const merged = { repo: 'DoctorCRE/carr-system', number: 77, url: 'u77', title: 'PR 77', draft: false, state: 'merged', updated_at: '2026-10-27T12:00:00Z', cards: [done] };
   const reader = sources => ({ query: (text, params) => c.query(text, params),
@@ -311,7 +311,7 @@ test('the read saves a finish once on the side connection, and later reads keep 
   assert.deepEqual([saved.stage, saved.stale, saved.prs.map(pr => pr.card_id)], ['merged', false, [`${done}.carr#77`]]);
   const open = later.jobs.find(row => row.card_id === pending);
   assert.equal(open.stage, 'queued');
-  assert.equal(bounds[0], new Date(first.jobs.find(row => row.card_id === done).created_at).toISOString(), 'before the finish is saved, the old job bounds the window');
+  assert.equal(bounds[0], '2026-10-02T00:00:00.000Z', 'before the finish is saved, the old job bounds the window');
   const unfinished = later.jobs.filter(row => row.card_id !== done && !row.finished && row.started_at).map(row => new Date(row.started_at).toISOString()).sort();
   assert.equal(bounds.at(-1), unfinished[0], 'once saved, the window starts at the oldest unfinished job');
   assert.ok(bounds.at(-1) > bounds[0] && bounds.at(-1) <= new Date(open.started_at).toISOString());
