@@ -216,7 +216,7 @@ FOLDER_CLASSES = {
     'deleted': ('deleted items', 'deleted', 'trash'), 'junk': ('junk email', 'junk', 'spam'),
     'drafts': ('drafts',), 'user': (), 'unknown': (),
 }
-MAIL_STORE_COUNTERS = ('decoder_rejected', 'mail_outside_selected_account', 'mail_account_ambiguous', 'mail_account_unresolved',
+MAIL_STORE_COUNTERS = ('decoder_rejected', 'decoder_details_rejected', 'mail_outside_selected_account', 'mail_account_ambiguous', 'mail_account_unresolved',
                        'stored', 'admitted', 'stored_multi_class', 'mail_account_unknown_not_stored', 'body_complete',
                        'stored_not_admitted_account_ambiguous',
                        'stored_not_admitted_account_unresolved',
@@ -543,6 +543,7 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
         rejected = int(meta.get('messages_rejected') or 0)
         meta.update(dict.fromkeys(MAIL_STORE_COUNTERS, 0))
         meta['decoder_rejected'] = rejected
+        meta['decoder_details_rejected'] = int(meta.get('details_rejected') or 0)
         admitted = []
         for m in mails:
             owners = ownership.get(m['id'], {None})
@@ -613,6 +614,8 @@ def _decoder_health(meta: dict, since: int, now: datetime, baseline: dict) -> di
     # Rejected messages never reach the sampled rows, so this failure follows the counter alone.
     if meta.get('decoder_rejected'):
         failing.append('message_layout')
+    if meta.get('decoder_details_rejected'):
+        failing.append('detail_layout')
     return {'rates': rates, 'samples': samples, 'eligible': eligible, 'failing': failing, 'messages': len(rows),
             'store_messages': len(store_rows)}
 
@@ -1826,7 +1829,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
                   'eligible': {}, 'failing': [], 'messages': 0}
     state['decoder_health'] = health
     prior_failures = state.get('decoder_failures', [])
-    unresolved = [name for name in prior_failures if name not in health['eligible'] and name != 'message_layout']
+    unresolved = [name for name in prior_failures if name not in health['eligible'] and name not in ('message_layout', 'detail_layout')]
     alarm = int(bool(health['failing']) and not state.get('decoder_alarm_delivered', False))
     state['decoder_failures'] = list(dict.fromkeys(health['failing'] + unresolved))
     state['decoder_degraded'] = bool(state['decoder_failures'])

@@ -3557,7 +3557,7 @@ export const TOOLS = {
       const next_cursor = has_more ? btoa(JSON.stringify({ v: 2, owners, on: last.triage_on,
         rank: last.triage_rank, due_on: last.triage_due_on,
         item_kind: last.item_kind, id: last.id })) : null;
-      const items = page.slice(0, limit).map(({ triage_total, triage_rank, triage_on, triage_due_on, triage_key, ...row }) => row);
+      const items = page.slice(0, limit).map(({ triage_total, triage_rank, triage_on, triage_due_on, triage_key, ...row }) => ({ ...row, due_on: triage_due_on }));
       return { items, total, has_more, next_cursor };
     },
   },
@@ -3960,7 +3960,7 @@ export const TOOLS = {
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c) => {
       const { rows } = await c.query(`
-        select c.id, c.session_id, c.kind, c.deal_id, b.name as deal_name,
+        select c.id, c.session_id, c.kind, c.deal_id, b.name as deal_name, p.name as contact_name,
                case c.kind when 'assigned_action' then jsonb_build_object(
                  'deal_id', c.deal_id, 'assignee', c.assignee_slug,
                  'action', c.action_description, 'due_on', to_jsonb(c.due_on)#>>'{}')
@@ -3971,6 +3971,8 @@ export const TOOLS = {
           from capture_post_call_candidate c
           join capture_session s on s.id=c.session_id
           join v_deal_room_board b on b.id=c.deal_id
+          left join party p on p.id=coalesce(c.contact_party_id,c.recipient_party_id)
+            and p.merged_into is null and p.deleted_at is null
          where c.status='pending' and s.post_call and s.state='distilling' and s.expires_at > now()
            and b.operating_state='active' and b.phase not in ('closed', 'invoiced')
            and b.outcome is null and b.closed_on is null and b.invoiced_on is null
@@ -10069,9 +10071,8 @@ registerTools({
           from capture_session s join actor a on a.id=s.actor_id
          where s.post_call and s.outcome_reviewed_at is null
            and (exists (select 1 from capture_candidate c where c.session_id=s.id and c.applied_automatically)
-             or (s.expires_at > now() and (
-                 exists (select 1 from capture_candidate c where c.session_id=s.id and c.status='pending')
-              or exists (select 1 from capture_post_call_candidate c where c.session_id=s.id and c.status='pending'))))
+             or exists (select 1 from capture_candidate c where c.session_id=s.id and c.status='pending')
+             or exists (select 1 from capture_post_call_candidate c where c.session_id=s.id and c.status='pending'))
          order by s.started_at desc, s.id limit 50 /* call-outcome:sessions */`)).rows;
       if (!sessions.length) return { schema_version: "call-outcomes.v1", calls: [], send: false };
       const ids = sessions.map(row => row.session_id);

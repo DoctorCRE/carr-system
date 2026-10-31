@@ -594,6 +594,47 @@ class CallModeHttpTests(unittest.TestCase):
             create.assert_called_once_with(session.resolve(), "draft-1", "a" * 64)
             draft.send_json.assert_called_once_with({"draft_id": "draft-1", "idempotent": False})
 
+    def test_checked_outlook_resolves_intent_through_http(self) -> None:
+        for exists in (True, False):
+            with self.subTest(exists=exists), tempfile.TemporaryDirectory() as tmp:
+                session = Path(tmp) / "s1"
+                session.mkdir()
+                ReportConcurrencyTests().draft_report(session)
+                post_call.write_private(session / post_call.DRAFTS_FILE, {"drafts": {
+                    "draft": {"state": "intent", "content_hash": "approved"}}})
+                body = json.dumps({"session": "s1", "exists": exists}).encode()
+                handler = self.handler("/api/post-call/drafts/draft/checked", body, "https://dealroom.doctorcre.com")
+                with patch.object(call_mode, "RECORDINGS", Path(tmp)), patch.object(post_call.subprocess, "run") as runner:
+                    handler.do_POST()
+                runner.assert_not_called()
+                handler.send_json.assert_called_once_with({"draft_id": "draft", "state": "created" if exists else "cleared"})
+                visible = post_call.report_for_deal_room(session)["report"]["draft_proposals"][0]
+                self.assertEqual(visible.get("status"), "created" if exists else None)
+                if not exists:
+                    create = Mock(return_value=SimpleNamespace(returncode=0))
+                    post_call.create_outlook_draft(session, "draft", "approved", create)
+                    create.assert_called_once()
+
+    def test_checked_outlook_rejects_non_boolean_before_resolving(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "s1").mkdir()
+            body = b'{"session":"s1","exists":"false"}'
+            handler = self.handler("/api/post-call/drafts/draft/checked", body, "https://dealroom.doctorcre.com")
+            with patch.object(call_mode, "RECORDINGS", Path(tmp)), patch.object(call_mode.post_call, "resolve_outlook_intent") as resolve:
+                handler.do_POST()
+            handler.send_json.assert_called_once_with({"error": "exists must be true or false"}, 400)
+            resolve.assert_not_called()
+
+    def test_checked_outlook_refuses_without_intent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            session = Path(tmp) / "s1"
+            session.mkdir()
+            ReportConcurrencyTests().draft_report(session)
+            handler = self.handler("/api/post-call/drafts/draft/checked", b'{"session":"s1","exists":false}', "https://dealroom.doctorcre.com")
+            with patch.object(call_mode, "RECORDINGS", Path(tmp)):
+                handler.do_POST()
+            handler.send_json.assert_called_once_with({"error": "draft has no matching intent marker"}, 400)
+
     def test_context_body_over_limit_is_rejected_not_truncated(self) -> None:
         handler = self.handler(
             "/api/call-context", b"{}", "https://dealroom.doctorcre.com",
@@ -2016,6 +2057,51 @@ class CaptureBridgePostCallTests(unittest.TestCase):
         ):
             self.assertEqual(capture_bridge.claim_cmd(self.cfg, self.session), 0)
         self.assertEqual(claims[0]["workflow"], "post_call")
+
+    def test_publish_renews_owned_expired_session_once(self) -> None:
+        (self.session / ".capture.json").unlink()
+        post_call.write_private(self.session / "announcement.json", {
+            "announcement_fired_at": "2026-08-10T12:00:00Z",
+        })
+        post_call.write_private(self.session / "meta.json", {"started": "2026-08-10T12:00:00Z"})
+        post_call.write_private(self.session / "call-context.json", {"mode": "weekly_deal_call"})
+        renewed = False
+        renewals = []
+        attempts = []
+        claims = []
+
+        def request(_method, url, body, headers):
+            nonlocal renewed
+            if url.endswith("/capture/claim"):
+                claims.append(body)
+                return 200, {"session_token": "opaque-session-token", "ttl_seconds": 86400}
+            if url.endswith("/capture/renew"):
+                self.assertEqual(headers, {"Authorization": "Bearer device"})
+                self.assertEqual(body["session_token"], "opaque-session-token")
+                renewals.append(body)
+                renewed = True
+                return 200, {"ttl_seconds": 86400}
+            if url.endswith("/capture/status"):
+                return 200, {}
+            if url.endswith("/capture/post-call/candidates"):
+                attempts.append(body.copy())
+                if not renewed:
+                    return 401, {"error": "session_token_expired"}
+                return 200, {"candidate_ids": ["action-id", "draft-id"]}
+            if url.endswith("/capture/candidates"):
+                return 200, {"candidate_ids": ["update-id"]}
+            raise AssertionError(url)
+
+        with patch.object(capture_bridge, "http_request", side_effect=request):
+            self.assertEqual(capture_bridge.claim_cmd(self.cfg, self.session), 0)
+            self.assertEqual(capture_bridge.publish_cmd(self.cfg, self.session), 0)
+            self.assertEqual(capture_bridge.publish_cmd(self.cfg, self.session), 0)
+        self.assertEqual(len(renewals), 1)
+        self.assertEqual(len(claims), 1)
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(attempts[0], attempts[1])
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        self.assertEqual(report["joe_tasks"][0]["candidate_id"], "action-id")
 
     def test_publish_exports_only_sanitized_metadata_and_binds_all_receipts(self) -> None:
         calls: list[tuple[str, str, dict[str, object] | None]] = []
