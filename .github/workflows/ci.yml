@@ -31,15 +31,13 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: |
-            mcp-server/package-lock.json
-            practice-plugin/package-lock.json
+          package-manager-cache: false
+
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version-file: .python-version
-          cache: pip
-          cache-dependency-path: requirements.lock
+      - uses: ./.github/actions/ci-downloads
+
       - run: python -m pip install -r requirements.lock
       - run: npm --prefix mcp-server ci --no-audit
       - run: npm --prefix practice-plugin ci --no-audit
@@ -118,15 +116,13 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: |
-            mcp-server/package-lock.json
-            practice-plugin/package-lock.json
+          package-manager-cache: false
+
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version-file: .python-version
-          cache: pip
-          cache-dependency-path: requirements.lock
+      - uses: ./.github/actions/ci-downloads
+
       - run: python -m pip install -r requirements.lock
       - run: npm --prefix mcp-server ci --no-audit
       - name: Identify the runner image for the zsh archive
@@ -253,15 +249,14 @@ jobs:
         if: matrix.classes != 'migration' || steps.scope.outputs.full != 'false'
         with:
           node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: |
-            mcp-server/package-lock.json
-            practice-plugin/package-lock.json
+          package-manager-cache: false
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         if: matrix.classes != 'migration' || steps.scope.outputs.full != 'false'
         with:
           python-version-file: .python-version
+      - uses: ./.github/actions/ci-downloads
+        if: matrix.classes != 'migration' || steps.scope.outputs.full != 'false'
 
       - name: Install Python dependencies from the lock
         if: matrix.classes != 'dependency' && (matrix.classes != 'migration' || steps.scope.outputs.full != 'false')
@@ -387,11 +382,13 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: mcp-server/package-lock.json
+          package-manager-cache: false
+
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version-file: .python-version
+      - uses: ./.github/actions/ci-downloads
+
       - name: Install proof dependencies
         run: |
           python -m pip install -r requirements.lock
