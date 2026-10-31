@@ -1248,7 +1248,8 @@ class Run:
                         self.counts['attachments_unresolved'] = self.counts.get('attachments_unresolved', 0) + 1
                     self.state['attachments_pending'] = True
                     continue
-                prepared.append((mail['ident'], deal, result, Path(result['stored']).read_bytes()))
+                prepared.append((mail['ident'], deal, {**result, 'requires_activity': not _internal(mail['sender'], self.settings.internal_domain)},
+                                 Path(result['stored']).read_bytes()))
         except (CarrError, OSError, KeyError, sqlite3.Error, subprocess.TimeoutExpired):
             self.state['attachments_pending'] = True
             self.counts['attachments_failed'] = self.counts.get('attachments_failed', 0) + 1
@@ -1260,9 +1261,19 @@ class Run:
         done = self.state.setdefault('attachments_done', {})
         put = self.ports.put_object or filing.r2_put_object()
         for ident, deal, result, data in prepared:
+            activity_id = None
+            for ref in (deal['id'], deal['client_ref']):
+                request = self.state.get('requests', {}).get(self.activity_key(ref, ident), {})
+                if request.get('activity_id') and json.loads(request['payload']).get('kind') == 'email_in':
+                    activity_id = request['activity_id']
+                    break
+            if result.get('requires_activity') and not activity_id:
+                self.state['attachments_pending'] = True
+                self.counts['attachments_source_pending'] = self.counts.get('attachments_source_pending', 0) + 1
+                continue
             reply = filing.file_attachment(deal['id'], {'id': result['attachment'], 'name': result['name']},
                 data, message_id=ident, client_ref=f"{deal['client_ref']}.{deal['id']}",
-                put_object=put, carr=self.ports.carr)
+                put_object=put, carr=self.ports.carr, activity_id=activity_id)
             status = reply['status']
             self.counts['attachments_' + status] = self.counts.get('attachments_' + status, 0) + 1
             if status in ('stored', 'existing'):
@@ -1867,7 +1878,6 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         complete_mails = [m for m in mails if not m['metadata_incomplete']]
         prepared = work.prepare_attachments(complete_mails, matcher, db, files)
         _remove(files.parent)
-        work.file_attachments(prepared)
         _quarantine_calendar_requests(state)
         _save(out, state)
         for request in list(state.get('requests', {}).values()):
@@ -1877,6 +1887,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
                 args = json.loads(request['payload'])
                 work.write(request['verb'], args, 'pending write')
         work.emails(mails, matcher, since)
+        work.file_attachments(prepared)
         work.counts['legacy_unmatched'] = _legacy_unmatched(state)
         work.observe_flags(complete_mails, matcher)
         work.leads(matcher)
