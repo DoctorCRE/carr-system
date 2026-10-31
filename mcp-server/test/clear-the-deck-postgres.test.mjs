@@ -13,8 +13,8 @@ const JOE = { slug: 'joe', human: true, via: 'oauth-google', client_id: 'fixture
 const DELL = { slug: 'dell', human: true, via: 'oauth-google', client_id: 'fixture' };
 
 before(async () => {
-  fixture = await acquireDisposablePostgres({ prefix: 'clear-deck-', snapshot: true });
-  connection = { host: fixture.root, user: 'carr_ci', database: 'carr_ci' };
+  fixture = await acquireDisposablePostgres({ prefix: 'clear-deck-', snapshot: true, baseline: true });
+  connection = fixture.connection;
   c = new pg.Client(connection);
   await c.connect();
   await c.query(`insert into actor(slug,kind,display_name) values('dell-local','automation','Dell (local)') on conflict (slug) do nothing`);

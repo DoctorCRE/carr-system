@@ -31,7 +31,7 @@ test("private PostgreSQL clusters run alone without dropping or duplicating suit
     "self-closing-records-sql.test.mjs"];
   const files = ["chrome-launch.test.mjs",
     "ordinary.test.mjs", ...postgres];
-  const batches = suiteBatches(files);
+  const batches = suiteBatches(files, [], postgres);
   for (const file of postgres) assert.deepEqual(batches.find(batch => batch.includes(file)), [file]);
   assert.deepEqual(batches.flat().sort(), files.sort());
 });

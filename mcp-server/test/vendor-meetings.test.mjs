@@ -17,7 +17,7 @@ const OFFICE_STREET='Synthetic Commons, Unit 100';
 let fixture, c, actor, sequence=0;
 before(async () => {
   fixture = await acquireDisposablePostgres({ prefix: 'vendor-meetings-', snapshot: true });
-  const connection = { host: fixture.root, user: 'carr_ci', database: 'carr_ci' };
+  const connection = fixture.connection;
   c = new pg.Client(connection);
   await c.connect();
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };

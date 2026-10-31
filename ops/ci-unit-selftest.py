@@ -120,6 +120,8 @@ class UnitClassTests(unittest.TestCase):
         self.all_packages()
         mcp = self.root / 'mcp-server'
         shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', mcp / 'run-tests.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'minimum': 1}))
         (mcp / 'test/suite.test.mjs').rename(mcp / 'test/workspace-command-center-browser.test.mjs')
         (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
         (mcp / 'test/second.test.mjs').write_text("import test from 'node:test'; test('second', () => {});")
@@ -136,6 +138,8 @@ class UnitClassTests(unittest.TestCase):
         (self.root / 'mcp-server/test/suite.test.mjs').write_text(package_body)
         mcp = self.root / 'mcp-server'
         shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', mcp / 'run-tests.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'minimum': 1}))
         (mcp / 'test/chrome-launch.test.mjs').write_text(
             "import test from 'node:test'; test('early failure', () => { throw Error('original diagnostic'); });")
         (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
@@ -180,6 +184,8 @@ class UnitClassTests(unittest.TestCase):
         self.all_packages()
         mcp = self.root / 'mcp-server'
         shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', mcp / 'run-tests.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'minimum': 1}))
         (mcp / 'test/suite.test.mjs').rename(mcp / 'test/workspace-command-center-browser.test.mjs')
         (mcp / 'test/workspace-command-center-browser.test.mjs').write_text(
             "import test from 'node:test'; test.skip('missing dependency', () => {});")

@@ -1,11 +1,9 @@
 // Test persisted deal items, board projections, and item-level writes in PostgreSQL.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
-import { applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { readDealItems } from '../src/deal-items.ts';
 import { CHECKLIST_SOURCES } from '../src/deal-checklist.ts';
@@ -13,11 +11,9 @@ import { CHECKLIST_SOURCES } from '../src/deal-checklist.ts';
 let fixture, c, actor, deal;
 before(async () => {
   fixture = await acquireDisposablePostgres({ prefix: 'deal-items-', snapshot: true });
-  const connection = { host: fixture.root, user: 'carr_ci', database: 'carr_ci' };
+  const connection = fixture.connection;
   c = new pg.Client(connection);
   await c.connect();
-  await applyPendingDealRoomReads(c);
-  await c.query(readFileSync(new URL('../../migrations/1003_notification_morning_midnight.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic physician',$1,$1) returning id", [actor.id])).rows[0].id;
   await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
@@ -450,7 +446,7 @@ test('Home discovers pending call follow-ups through existing grants without exe
   };
   await t.test('task and email metadata retain exact refs and local-body hash in stable order', async () => {
     const result = await read();
-    for (const candidate of result.candidates) candidate.created_at = new Date(candidate.created_at).toISOString();
+    for (const candidate of result.candidates) candidate.created_at = Temporal.Instant.from(candidate.created_at).toString({ fractionalSecondDigits: 3 });
     assert.deepEqual(result, { schema_version:'post-call-followups.v1', send:false, candidates:[
       { id:first, session_id:session, kind:'assigned_action', deal_id:deal, deal_name:'Synthetic coastal purchase', contact_name:null,
         payload:{deal_id:deal,assignee:'dell',action:'Call the synthetic lender',due_on:null},

@@ -8,7 +8,7 @@ import { TOOLS } from '../src/tools.js';
 let fixture, pool, actor;
 before(async () => {
   fixture = await acquireDisposablePostgres({ prefix: 'doc-completion-', snapshot: true });
-  pool = new pg.Pool({ host: fixture.root, user: 'carr_ci', database: 'carr_ci' });
+  pool = new pg.Pool(fixture.connection);
 
   actor = { ...(await pool.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
