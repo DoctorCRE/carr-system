@@ -8,7 +8,7 @@ import { executeRegisteredTool } from '../src/tools.js';
 import { rebuildMarketTerms } from '../src/market-terms.ts';
 
 const actor = { id: '00000000-0000-4000-8000-000000000001', slug: 'joe', human: true };
-const migration = new URL('../../migrations/1087_market_terms.sql', import.meta.url);
+const migration = new URL('../../migrations/1104_market_terms.sql', import.meta.url);
 
 test('market terms project confirmed history with explicit coverage', async t => {
   const db = await postgresDatabase('market-terms-');
@@ -48,7 +48,7 @@ test('market terms project confirmed history with explicit coverage', async t =>
       create function ops.scac_current_grant_contract() returns jsonb language sql as
       $$select '{"secdef_execute":[]}'::jsonb$$`);
     await c.query(await readFile(new URL('../../migrations/0983_fact_store.sql', import.meta.url), 'utf8'));
-    await c.query(await readFile(new URL('../../migrations/1070_fact_review.sql', import.meta.url), 'utf8'));
+    await c.query(await readFile(new URL('../../migrations/1099_fact_review.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(migration, 'utf8'));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner')", [actor.id]);
 
