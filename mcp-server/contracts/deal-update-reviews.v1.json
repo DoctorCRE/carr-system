@@ -16,15 +16,44 @@
   "read": {
     "verb": "read-deal-update-reviews",
     "arguments": {},
-    "result": { "schema_version": "deal-update-reviews.v1", "proposals": [] },
-    "proposal_fields": ["assessment_id", "deal_id", "deal_name", "assessment", "confirm_verb"],
+    "result": {
+      "schema_version": "deal-update-reviews.v1",
+      "proposals": [],
+      "automatic_resolutions": []
+    },
+    "proposal_fields": [
+      "assessment_id",
+      "deal_id",
+      "deal_name",
+      "assessment",
+      "confirm_verb"
+    ],
     "membership": "Latest uncertain or low-confidence assessment, or fallback for an unfinished assessment that failed or passed its database-clock lease, for an open action visible in the authenticated actor’s tenant and personal scope, not already reviewed. Stale running work reports interrupted. Fallback proposals use the existing assessment_id and review-deal-update contract.",
-    "limit": "Above 200 pending proposals the read refuses instead of silently truncating."
+    "limit": "Above 200 pending proposals the read refuses instead of silently truncating.",
+    "automatic_resolution_fields": [
+      "assessment_id",
+      "deal_id",
+      "deal_name",
+      "action_title",
+      "quote",
+      "resolved_at",
+      "undo_possible"
+    ],
+    "automatic_resolution_membership": "Automatic resolutions from the last seven days for actions owned by the caller, excluding reviewed assessments. undo_possible reflects whether the coupled actions and plan remain unchanged."
   },
   "review": {
     "verb": "review-deal-update",
-    "arguments": ["idempotency_key", "assessment_id", "decision", "reason"],
-    "decisions": { "resolve": "Complete the exact unchanged action after partner review.", "dismiss": "Remove the proposal while leaving its action open.", "undo": "Reopen an unchanged automatic completion and reverse its coupled plan while no newer plan change exists." },
+    "arguments": [
+      "idempotency_key",
+      "assessment_id",
+      "decision",
+      "reason"
+    ],
+    "decisions": {
+      "resolve": "Complete the exact unchanged action after partner review.",
+      "dismiss": "Remove the proposal while leaving its action open.",
+      "undo": "Reopen an unchanged automatic completion and reverse its coupled plan while no newer plan change exists."
+    },
     "replay": "Retry with the original key. A changed action or newer plan refuses rather than overwriting subsequent work."
   }
 }

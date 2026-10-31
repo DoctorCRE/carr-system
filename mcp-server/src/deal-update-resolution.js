@@ -260,7 +260,39 @@ export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds
             or exists(select 1 from capture_post_call_action a where a.id=(e.new_value#>>'{action,id}')::uuid and a.status='open' and a.owner_id=any($3::uuid[])))
         order by e.recorded_at,e.id limit 201`, [organizationTenantForActor(actor), visibleScopes(actor), owners])).rows;
         if (rows.length > 200) throw new ToolError({ error: 'deal_update_reviews_limit_exceeded' });
-        return { schema_version: 'deal-update-reviews.v1', proposals: rows };
+        const resolutions = (await c.query(`select e.id as assessment_id,e.subject_id as deal_id,d.name as deal_name,
+          e.new_value as assessment,e.recorded_at::text as resolved_on,e.idempotency_key
+          from event e join deal d on d.id=e.subject_id
+          where e.subject_type='deal' and e.field='overdue_assessment' and e.organization_tenant_id=$1
+            and e.personal_scope=any($2::text[]) and e.new_value->>'resolved'='true'
+            and e.recorded_at >= current_timestamp - interval '7 days'
+            and not exists(select 1 from event r where r.field='overdue_review' and r.new_value->>'assessment_id'=e.id::text)
+            and (exists(select 1 from next_action a where a.id=(e.new_value#>>'{action,id}')::uuid and a.owner_id=any($3::uuid[]))
+              or exists(select 1 from capture_post_call_action a where a.id=(e.new_value#>>'{action,id}')::uuid and a.owner_id=any($3::uuid[])))
+          order by e.recorded_at desc,e.id desc`, [organizationTenantForActor(actor), visibleScopes(actor), owners])).rows;
+        const automatic_resolutions = [];
+        for (const row of resolutions) {
+          const siblings = (await c.query(`select new_value from event where subject_type='deal' and subject_id=$1
+            and idempotency_key=$2 and field='overdue_assessment' and new_value->>'resolved'='true'`, [row.deal_id, row.idempotency_key])).rows;
+          let undo_possible = true;
+          for (const {new_value: value} of siblings) {
+            const current = (await c.query(value.action.source === 'next_action'
+              ? 'select status,updated_at::text as updated_at,version from next_action where id=$1 and owner_id=any($2::uuid[])'
+              : 'select status,updated_at::text as updated_at from capture_post_call_action where id=$1 and owner_id=any($2::uuid[])',
+            [value.action.id, owners])).rows[0];
+            if (current?.status !== 'done' || current.updated_at !== value.resolved_at ||
+                (value.action.source === 'next_action' && current.version !== value.resolved_version)) undo_possible = false;
+          }
+          const fields = (await c.query(`select idempotency_key,new_value from event where subject_type='deal' and subject_id=$1
+            and field in ('next_date','next_step') order by recorded_at desc,id desc`, [row.deal_id])).rows;
+          const ownFields = fields.filter(field => field.idempotency_key === row.idempotency_key);
+          if ((row.assessment.action.source === 'next_action' || ownFields.length) && fields[0]?.idempotency_key !== row.idempotency_key) undo_possible = false;
+          const replacement = ownFields.find(field => field.new_value.next_action_id)?.new_value.next_action_id;
+          if (replacement && !(await c.query("select 1 from next_action where id=$1 and status='open' and version=1", [replacement])).rows.length) undo_possible = false;
+          automatic_resolutions.push({ assessment_id: row.assessment_id, deal_id: row.deal_id, deal_name: row.deal_name,
+            action_title: row.assessment.action.description, quote: row.assessment.quote, resolved_at: row.resolved_on, undo_possible });
+        }
+        return { schema_version: 'deal-update-reviews.v1', proposals: rows, automatic_resolutions };
       },
     },
     'review-deal-update': {
