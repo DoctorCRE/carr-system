@@ -166,10 +166,27 @@ def cua(tool: str, arguments: dict) -> dict:
         driver = str(load_settings().driver)
         result = subprocess.run([driver, 'call', tool, json.dumps(arguments)],
                                 capture_output=True, text=True, timeout=120)
-        value = json.loads(result.stdout)
-    except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+    except (OSError, subprocess.TimeoutExpired) as exc:
         raise CuaError(f'{tool}: {type(exc).__name__}') from None
-    if result.returncode or not isinstance(value, dict):
+    if result.returncode:
+        diagnostic = ''
+        try:
+            error = json.loads(result.stdout).get('error')
+            code = error.get('code') if isinstance(error, dict) else error
+            if isinstance(code, str) and re.fullmatch(r'[A-Z][A-Z0-9_]{1,119}', code):
+                diagnostic = code
+        except (ValueError, AttributeError):
+            pass
+        if not diagnostic:
+            match = re.match(r'^([A-Za-z][A-Za-z0-9_]{0,114}Error)(?::|\s|$)', result.stderr)
+            diagnostic = match.group(1) if match else ''
+        suffix = f': {diagnostic}' if diagnostic else ''
+        raise CuaError(f'{tool}: exit {result.returncode}{suffix}')
+    try:
+        value = json.loads(result.stdout)
+    except ValueError as exc:
+        raise CuaError(f'{tool}: {type(exc).__name__}') from None
+    if not isinstance(value, dict):
         raise CuaError(f'{tool}: exit {result.returncode}')
     return value
 

@@ -893,6 +893,29 @@ class OutlookTriageTest(FakeOutlookCase):
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'cua_driver_unavailable'))
         self.assertEqual((state['moved'], state['selections']), ([], []))
 
+    def test_driver_failure_detail_at_both_triage_catches(self):
+        from lib.outlook_ui import CuaError
+        for target in ('lib.outlook_triage.decide', 'lib.outlook_triage.file_inbox'):
+            with self.subTest(target=target):
+                self.given([FILE_A])
+                with patch(target, side_effect=CuaError('click: exit 7')):
+                    outcome, _ = self.run_triage()
+                self.assertEqual((outcome.reason, outcome.detail), ('cua_driver_failed', 'click: exit 7'))
+                self.assertIn('click: exit 7', self.report())
+
+    def test_driver_nonzero_error_diagnostic_excludes_mail(self):
+        from lib.outlook_ui import CuaError, cua
+        from subprocess import CompletedProcess
+        cases = [('{"error":{"code":"AX_TIMEOUT"}}', 'Subject: Private deal', 'AX_TIMEOUT'),
+                 ('', 'TimeoutError: Subject: Private deal', 'TimeoutError')]
+        for stdout, stderr, code in cases:
+            with self.subTest(code=code), patch('lib.outlook_ui.subprocess.run',
+                    return_value=CompletedProcess([], 7, stdout, stderr)):
+                with self.assertRaises(CuaError) as caught:
+                    cua('click', {})
+                self.assertEqual(str(caught.exception), f'click: exit 7: {code}')
+                self.assertNotIn('Private deal', str(caught.exception))
+
     def test_files_read_email_by_each_rule_and_never_selects_unread(self):
         self.given([FILE_A, VENDOR, FIRM, NEWS, UNREAD])
         outcome, state = self.run_triage()
