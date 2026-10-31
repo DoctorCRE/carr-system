@@ -11,7 +11,7 @@ import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.c
 // WR-000039 E09a. Synthetic tenants, entities, documents, and actors only.
 const partner = { id: '00000000-0000-4000-8000-000000000001', slug: 'joe', human: true };
 const job = { id: '00000000-0000-4000-8000-000000000002', slug: 'codex', human: false, sponsoring_human_slug: 'joe' };
-const FACT_FUNCTIONS = /^ops\.(record_fact_observations|promote_fact|list_fact_conflicts|record_human_fact|list_fact_review|resolve_fact_review)\(/;
+const FACT_FUNCTIONS = /^ops\.(record_fact_observations|promote_fact|list_fact_conflicts|record_human_fact|list_fact_review|resolve_fact_review|read_deal_extraction_source|record_deal_extraction)\(/;
 const hash = n => n.toString(16).padStart(64, '0');
 
 const observation = (id, patch = {}) => {
@@ -33,8 +33,14 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
     try { return await executeRegisteredTool(c, actor, verb, args); }
     finally { await c.query('reset role'); }
   };
-  const record = (entity_ref, observations, actor = job, idempotency_key = randomUUID()) =>
-    as('carr_writer', actor, 'record-fact-observations', { idempotency_key, entity_ref, observations });
+  const record = async (entity_ref, observations, actor = job, idempotency_key = randomUUID()) => {
+    const result = await as('carr_writer', actor, 'record-fact-observations', { idempotency_key, entity_ref, observations });
+    // Kernel fixtures supply an attestation as the owner. No runtime ingress can assert this flag.
+    await c.query('set session_replication_role=replica');
+    try { await c.query('update ops.fact_observation set lineage_verified=true where batch_id=$1', [result.batch_id]); }
+    finally { await c.query('set session_replication_role=origin'); }
+    return result;
+  };
   const promote = (entity_ref, observation_ids, patch = {}, actor = job) => as('carr_writer', actor, 'promote-fact', {
     idempotency_key: randomUUID(), entity_ref, fact_key: 'base_rent_per_sf', basis: 'independent_agreement',
     observation_ids, base_version: 0, ...patch });
@@ -50,9 +56,83 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as $f$select ${c.escapeLiteral(JSON.stringify(predecessor))}::jsonb$f$`);
     await c.query(await readFile(new URL('../../migrations/0983_fact_store.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(new URL('../../migrations/1099_fact_review.sql', import.meta.url), 'utf8'));
+    await c.query(await readFile(new URL('../../migrations/1102_fact_review_matching_promotion.sql', import.meta.url), 'utf8'));
+    await c.query(await readFile(new URL('../../migrations/1103_deal_extraction.sql', import.meta.url), 'utf8'));
+    await c.query(await readFile(new URL('../../migrations/1109_deal_schedules.sql', import.meta.url), 'utf8'));
+    await c.query("update system_config set value='true'::jsonb where key='facts.automatic_promotion_enabled'");
     await c.query('create table v_ref_index(subject_id uuid, subject_type text)');
     await c.query(await readFile(new URL('../../migrations/1086_deal_documents.sql', import.meta.url), 'utf8'));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner'),($2,'codex','automation','Synthetic job')", [partner.id, job.id]);
+
+    await t.test('comparison refuses missing canonical terms', async () => {
+      await assert.rejects(() => as('carr_reader', partner, 'draft-terms-comparison',
+        { entity_refs: ['synthetic-a', 'synthetic-b'] }), error => {
+        assert.equal(error.payload.error, 'unresolved_facts');
+        assert(error.payload.facts.some(f => f.entity_ref === 'synthetic-a' && f.fact_key === 'base_rent_per_sf' && f.reason === 'missing_canonical'));
+        return true;
+      });
+    });
+
+    await t.test('comparison renders only sourced canonical terms and refuses reopened fields', async () => {
+      const refs = ['comparison-a', 'comparison-b'];
+      const schedule = Object.fromEntries(Object.entries({ start_month: 1, end_month: 12, rate: '24', unit: 'USD/SF/year', expense_basis: 'nnn', escalation_percent: null }).map(([key, value]) => [key, { value, source: { page: 1, region_id: 'row-1', method: 'text_layer' } }]));
+      const terms = [
+        { fact_key: 'base_rent_per_sf', value: '24', unit: 'USD/SF/year', expense_basis: 'nnn' },
+        { fact_key: 'landlord_ti_per_sf', value: '30', unit: 'USD/SF' },
+        { fact_key: 'term_months', value: '60', unit: 'months' },
+        { fact_key: 'free_rent_months', value: '2', unit: 'months' },
+        { fact_key: 'rent_schedule', value: [schedule], unit: 'schedule' },
+      ];
+      const expected = new Map();
+      for (const entity_ref of refs) {
+        for (const term of terms) {
+          const input = observation(term.fact_key, term);
+          if (term.fact_key !== 'base_rent_per_sf') delete input.expense_basis;
+          const batch = await record(entity_ref, [input]);
+          const promoted = await promote(entity_ref, ids(batch), { fact_key: term.fact_key, basis: 'human_review' }, partner);
+          expected.set(`${entity_ref}:${term.fact_key}`, promoted.canonical_fact);
+        }
+      }
+      const draft = await as('carr_reader', partner, 'draft-terms-comparison', { entity_refs: refs });
+      assert.equal(draft.draft, true);
+      assert.equal(draft.deals.length, 2);
+      const lines = draft.text.split('\n').filter(Boolean);
+      assert.equal(lines.length, 12, 'the draft contains exactly five fact lines per deal');
+      for (const [index, entity_ref] of refs.entries()) {
+        assert.equal(lines[index * 6], entity_ref);
+        for (const [offset, term] of [terms[0], terms[1], terms[2], terms[4], terms[3]].entries()) {
+          const fact = expected.get(`${entity_ref}:${term.fact_key}`);
+          const value = fact.normalized_schedule ?? fact.normalized_value;
+          const prefix = `${term.fact_key}: ${JSON.stringify(value)} ${fact.canonical_unit}${fact.expense_basis ? ` (${fact.expense_basis})` : ''} [fact ${fact.id} v${fact.version}; sources `;
+          assert.ok(lines[index * 6 + offset + 1].startsWith(prefix));
+          const line = lines[index * 6 + offset + 1];
+          assert.ok(line.endsWith(']'));
+          assert.deepEqual(JSON.parse(line.slice(prefix.length, -1)), draft.deals[index].fields[offset].citations);
+        }
+      }
+      for (const deal of draft.deals) {
+        assert.equal(deal.fields.length, 5);
+        for (const field of deal.fields) {
+          const fact = expected.get(`${deal.entity_ref}:${field.fact_key}`);
+          assert.ok(fact, 'every rendered field matches a canonical fact');
+          assert.equal(field.fact_id, fact.id);
+          assert.ok(draft.text.includes(`[fact ${fact.id} v${fact.version}; sources `));
+          assert.ok(draft.text.includes(JSON.stringify(field.value)));
+          assert.equal(field.version, fact.version);
+          assert.deepEqual(field.value, fact.normalized_schedule ?? fact.normalized_value);
+          assert.ok(field.citations[0].document_ref);
+        }
+      }
+      await record(refs[0], [observation('conflict', { value: '99' })]);
+      const pending = observation('pending', { fact_key: 'term_months', value: '60', unit: 'months', confidence_tier: 'verify_band' });
+      delete pending.expense_basis;
+      await record(refs[1], [pending]);
+      await assert.rejects(() => as('carr_reader', partner, 'draft-terms-comparison', { entity_refs: refs }), e => {
+        assert(e.payload.facts.some(f => f.entity_ref === refs[0] && f.fact_key === 'base_rent_per_sf' && f.reason === 'open_conflict'));
+        assert(e.payload.facts.some(f => f.entity_ref === refs[1] && f.fact_key === 'term_months' && f.reason === 'pending_review'));
+        return true;
+      });
+    });
 
     await t.test('partners record a sourced term from an existing deal attachment', async () => {
       const deal = randomUUID(), document = randomUUID();
@@ -139,6 +219,35 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
       await assert.rejects(resolve(reopened, {}, job), e => /human_only/.test(e.payload.error));
       for (const sql of ['delete from ops.fact_review_decision', "update ops.fact_review_decision set reason='changed'"])
         await assert.rejects(c.query(sql), { code: '23514' });
+    });
+
+    await t.test('promoting the reviewed value and source keeps approval resolved; a changed term reopens', async () => {
+      const entity = 'resolved-promotion';
+      const batch = await record(entity, [observation('chosen'), observation('different', { value: '30' }), observation('same-value')]);
+      const read = async () => (await as('carr_reader', partner, 'list-fact-review', { entity_ref: entity, include_resolved: true })).items[0];
+      const initial = await read();
+      await as('carr_writer', partner, 'resolve-fact-review', {
+        idempotency_key: randomUUID(), entity_ref: entity, fact_key: initial.fact_key,
+        base_version: 0, review_version: initial.review_version, decision: 'approve',
+        observation_id: ids(batch)[0], reason: 'Synthetic approval.',
+      });
+      await promote(entity, [ids(batch)[0]], { basis: 'human_review', base_version: 1 }, partner);
+      const matching = await read();
+      assert.equal(matching.pending, false, 'same reviewed value and source stays resolved');
+      assert.equal(matching.canonical_version, 2);
+      assert.notEqual(matching.review_version, initial.review_version);
+      assert.equal(matching.review_history.length, 1);
+      assert.deepEqual(matching.canonical_history.map(f => f.normalized_value), ['24', '24']);
+      assert.deepEqual((await as('carr_reader', partner, 'list-fact-review', { entity_ref: entity })).items, []);
+      assert.deepEqual((await conflicts({ entity_ref: entity })).conflicts, []);
+      await promote(entity, [ids(batch)[1]], { basis: 'human_review', base_version: 2 }, partner);
+      assert.equal((await read()).pending, true, 'a different value reopens review');
+      await promote(entity, [ids(batch)[2]], { basis: 'human_review', base_version: 3 }, partner);
+      assert.equal((await read()).pending, true, 'a different source reopens review even at the reviewed value');
+      await promote(entity, [ids(batch)[0]], { basis: 'human_review', base_version: 4 }, partner);
+      assert.equal((await read()).pending, false);
+      await record(entity, [observation('new-evidence')]);
+      assert.equal((await read()).pending, true, 'new evidence still needs review even when its value agrees');
     });
 
     await t.test('human entries refuse another deal, tenant, deleted document and stale review evidence', async () => {

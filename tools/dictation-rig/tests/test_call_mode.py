@@ -26,7 +26,7 @@ from email.message import Message
 from pathlib import Path
 from unittest.mock import Mock, patch
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, TypedDict
 from typesafe_sdk import TypeSafeError
 
 
@@ -45,7 +45,7 @@ def load_module(name: str, filename: str):
 
 
 call_mode = load_module("call_mode_under_test", "call-mode.py")
-transcribe_session = load_module("transcribe_session_under_test", "transcribe_session.py")
+transcribe_session = call_mode.transcribe_session
 post_call = load_module("post_call_under_test", "post_call.py")
 capture_bridge = load_module("capture_bridge_under_test", "capture-bridge.py")
 post_call_jev = load_module("post_call_jev_under_test", "post_call_jev.py")
@@ -62,7 +62,11 @@ _CLIENT_PATCHES = (
 
 
 _LOG_DIR = tempfile.TemporaryDirectory()
+_BUDGET_ENV = patch.dict(os.environ, {'CALL_JEV_DAILY_DOLLARS': '100'})
 _LOG_PATCHES = (
+    patch.object(post_call_jev, 'BUDGET_LEDGER', Path(_LOG_DIR.name) / 'budget.json'),
+    patch.object(runtime_jev, 'BUDGET_LEDGER', Path(_LOG_DIR.name) / 'budget.json'),
+    patch.object(post_call, 'LOG_PATH', Path(_LOG_DIR.name) / 'post-call.log'),
     # Keep test lines out of the live companion and bridge logs on the Studio.
     patch.object(call_mode, "LOG_PATH", Path(_LOG_DIR.name) / "call-mode.log"),
     patch.object(capture_bridge, "LOG_PATH", Path(_LOG_DIR.name) / "capture-bridge.log"),
@@ -74,6 +78,7 @@ def setUpModule() -> None:
     # Injected ask functions and loopback distiller fakes still run normally.
     for client_patch in _CLIENT_PATCHES:
         client_patch.start()
+    _BUDGET_ENV.start()
     for log_patch in _LOG_PATCHES:
         log_patch.start()
 
@@ -81,10 +86,21 @@ def setUpModule() -> None:
 def tearDownModule() -> None:
     for log_patch in reversed(_LOG_PATCHES):
         log_patch.stop()
+    _BUDGET_ENV.stop()
     for client_patch in reversed(_CLIENT_PATCHES):
         client_patch.stop()
 
 
+class CallState(TypedDict, total=False):
+    sessions: list[dict[str, object]]
+    hidden_older_count: int
+    state: str
+    status_text: str
+    transcription_attempts: int
+    extraction_attempts: int
+    session: str
+    mode: str
+    speaker_labels: dict[str, str]
 class ReportConcurrencyTests(unittest.TestCase):
     def draft_report(self, session):
         post_call.write_private(session / post_call.REPORT_FILE, {"draft_proposals": [{
@@ -221,9 +237,160 @@ class CallModeTests(unittest.TestCase):
         path.mkdir()
         return path
 
-    def state(self) -> dict[str, object]:
+    def state(self) -> CallState:
         with patch.object(call_mode, "partner_from_device", return_value="Joe"):
             return call_mode.current_state(self.recordings)
+
+    def test_unrecognized_post_call_state_is_visible_as_unknown(self) -> None:
+        session = self.session("held")
+        (session / "transcript.json").write_text("{}")
+        post_call.write_private(session / post_call.STATUS_FILE, {"state": "held_review"})
+        self.assertEqual(self.state()["state"], "state_unknown")
+
+    def test_stale_interrupted_transcription_retries_and_respects_cap(self) -> None:
+        session = self.session("interrupted")
+        (session / "meta.json").write_text("{}")
+        (session / ".capture.json").write_text(json.dumps({"session_token": "fixture"}))
+        post_call.write_private(session / transcribe_session.STATUS_FILE, {
+            "state": "transcribing", "transcription_attempts": 1, "updated_at": "2000-01-01T00:00:00Z"})
+        with patch.object(transcribe_session, "resolve_model", side_effect=transcribe_session.TranscribeError("unavailable")) as model:
+            for _ in range(4):
+                capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session)
+            self.assertEqual(model.call_count, 2)
+        self.assertEqual(post_call.read_json(session / transcribe_session.STATUS_FILE)["transcription_attempts"], 3)
+        self.assertIn("held after 3", capture_bridge.LOG_PATH.read_text())
+
+    def test_stale_final_attempt_is_held_only_when_lock_is_free(self) -> None:
+        import fcntl
+        session = self.session("stale-final")
+        (session / ".capture.json").write_text(json.dumps({"session_token": "fixture"}))
+        status_path = session / transcribe_session.STATUS_FILE
+        post_call.write_private(status_path, {"state": "transcribing", "transcription_attempts": 3,
+                                              "updated_at": "2000-01-01T00:00:00Z"})
+        with (session / ".transcription.lock").open("a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session)
+            self.assertEqual(post_call.read_json(status_path)["state"], "transcribing")
+        capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session)
+        self.assertEqual(post_call.read_json(status_path)["state"], "needs_attention")
+        self.assertIn("held after 3", capture_bridge.LOG_PATH.read_text())
+
+    def test_unfiled_hides_old_calls_except_needs_attention(self) -> None:
+        for name, state in (("old", "blocked"), ("old-attention", "needs_attention"), ("recent", "blocked")):
+            session = self.session(name)
+            post_call.write_private(session / post_call.STATUS_FILE, {"state": state})
+            stamp = time.time() - (15 * 86400 if name.startswith("old") else 60)
+            os.utime(session, (stamp, stamp))
+        result = self.state()
+        self.assertEqual({row["session"] for row in result["sessions"]}, {"old-attention", "recent"})
+        self.assertEqual(result["hidden_older_count"], 1)
+
+    def test_missing_meta_during_stat_does_not_break_state(self) -> None:
+        session = self.session("race")
+        (session / "meta.json").write_text("{}")
+        original = Path.stat
+        def raced(path, *args, **kwargs):
+            if path == session / "meta.json":
+                raise FileNotFoundError()
+            return original(path, *args, **kwargs)
+        with patch.object(Path, "stat", raced):
+            self.state()
+
+    def test_fatal_transcription_stays_visible_after_age_cutoff(self) -> None:
+        session = self.session("failed-model")
+        (session / "meta.json").write_text("{}")
+        with patch.object(transcribe_session, "resolve_model", side_effect=transcribe_session.TranscribeError("model unavailable")):
+            self.assertEqual(transcribe_session.main(["transcribe", str(session)]), 1)
+        stale = time.time() - call_mode.TERMINAL_AGE_SECONDS - 60
+        os.utime(session, (stale, stale))
+        result = self.state()
+        self.assertEqual(result["state"], "needs_attention")
+        self.assertEqual(result["status_text"], "Transcription failed. The local recording is saved.")
+        self.assertEqual(result["transcription_attempts"], 1)
+        self.assertNotIn("model unavailable", json.dumps(result))
+        self.assertEqual(stat.S_IMODE((session / transcribe_session.STATUS_FILE).stat().st_mode), 0o600)
+        self.assertFalse((session / "transcript.json").exists())
+
+    def test_poll_retries_failed_transcription_only_three_total_attempts(self) -> None:
+        session = self.session("retry-model")
+        (session / "meta.json").write_text("{}")
+        (session / ".capture.json").write_text(json.dumps({"session_token": "fixture"}))
+        with (
+            patch.object(transcribe_session, "resolve_model", side_effect=transcribe_session.TranscribeError("model unavailable")) as model,
+            patch.object(capture_bridge, "http_request", return_value=(200, {"state": "transcribing", "meeting_record": None})) as network,
+        ):
+            self.assertEqual(transcribe_session.main(["transcribe", str(session)]), 1)
+            for _ in range(5):
+                self.assertEqual(capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session), capture_bridge.Outcome.UNAVAILABLE)
+            self.assertEqual(model.call_count, 3)
+            network.assert_not_called()
+        self.assertEqual(self.state()["transcription_attempts"], 3)
+        self.assertFalse((session / "ingested.json").exists())
+
+    def test_unfiled_sessions_keep_real_status_newest_first(self) -> None:
+        for index, state in enumerate(("needs_attention", "awaiting_context", "blocked", "ready_review")):
+            session = self.session(state)
+            (session / "transcript.json").write_text("{}")
+            post_call.write_private(session / post_call.STATUS_FILE, {"state": state})
+            stamp = time.time() - 100 + index
+            os.utime(session, (stamp, stamp))
+        filed = self.session("filed")
+        (filed / "ingested.json").write_text("{}")
+        os.utime(filed, (time.time() - 200, time.time() - 200))
+        result = self.state()
+        self.assertEqual(result["state"], "ready_review")
+        self.assertEqual([item["state"] for item in result["sessions"]],
+                         ["ready_review", "blocked", "awaiting_context", "needs_attention"])
+        self.assertTrue(all(item["status_text"] for item in result["sessions"]))
+
+    def test_new_failure_receipt_does_not_reorder_recorded_calls(self) -> None:
+        older = self.session("older-call")
+        newer = self.session("newer-call")
+        post_call.write_private(older / call_mode.CONTEXT_FILE, {"started_at": "2026-10-29T10:00:00Z"})
+        post_call.write_private(newer / call_mode.CONTEXT_FILE, {"started_at": "2026-10-29T11:00:00Z"})
+        (older / "meta.json").write_text("{}")
+        (newer / "transcript.json").write_text("{}")
+        post_call.write_private(older / post_call.STATUS_FILE, {"state": "needs_attention"})
+        os.utime(newer, (time.time() - 100, time.time() - 100))
+        self.assertEqual([row["session"] for row in self.state()["sessions"]], ["newer-call", "older-call"])
+
+    def test_successful_poll_retry_clears_failure_and_shows_post_call_state(self) -> None:
+        session = self.session("recovered-model")
+        (session / "meta.json").write_text("{}")
+        (session / ".capture.json").write_text(json.dumps({"session_token": "fixture"}))
+        with patch.object(transcribe_session, "resolve_model", side_effect=transcribe_session.TranscribeError("model unavailable")):
+            self.assertEqual(transcribe_session.main(["transcribe", str(session)]), 1)
+        model = self.recordings / "fixture-model"
+        model.write_bytes(b"synthetic model")
+
+        def finish_post_call(_session):
+            post_call.write_private(session / post_call.STATUS_FILE, {"state": "awaiting_context"})
+            return {"state": "awaiting_context"}
+
+        with (
+            patch.object(transcribe_session, "resolve_model", return_value=model),
+            patch.object(transcribe_session, "verify_model_pin"),
+            patch.object(transcribe_session.post_call, "run_session", side_effect=finish_post_call),
+            patch.object(capture_bridge, "http_request", return_value=(200, {"state": "transcribing", "meeting_record": None})),
+        ):
+            self.assertEqual(capture_bridge.poll_cmd({"base_url": "http://fixture.invalid"}, session), 0)
+        self.assertFalse((session / transcribe_session.STATUS_FILE).exists())
+        self.assertTrue((session / "transcript.json").exists())
+        self.assertEqual(self.state()["state"], "awaiting_context")
+
+    def test_recording_or_filed_newest_does_not_hide_older_unfiled_calls(self) -> None:
+        older = self.session("older-failure")
+        post_call.write_private(older / post_call.STATUS_FILE, {"state": "needs_attention"})
+        os.utime(older, (time.time() - 100, time.time() - 100))
+        newer = self.session("new-call")
+        (newer / "mic.caf").touch()
+        self.assertEqual(self.state()["state"], "recording")
+        self.assertEqual([row["session"] for row in self.state()["sessions"]], ["new-call", "older-failure"])
+        (newer / "ingested.json").write_text("{}")
+        (newer / "meta.json").write_text("{}")
+        result = self.state()
+        self.assertEqual(result["state"], "filed")
+        self.assertEqual([row["session"] for row in result["sessions"]], ["older-failure"])
 
     def test_weekly_deal_labels_pair_joe_and_dell(self) -> None:
         self.assertEqual(call_mode.labels_for("weekly_deal_call", "Joe"), ("Joe", "Dell"))
@@ -327,8 +494,8 @@ class CallModeTests(unittest.TestCase):
         os.utime(track, (stale, stale))
         self.assertEqual(self.state()["state"], "state_unknown")
 
-    def test_current_state_is_idle_without_sessions_or_when_newest_session_is_stale(self) -> None:
-        self.assertEqual(self.state(), {"state": "idle", "local_partner": "Joe"})
+    def test_old_unfinished_transcription_remains_visible(self) -> None:
+        self.assertEqual(self.state(), {"state": "idle", "local_partner": "Joe", "sessions": [], "hidden_older_count": 0})
 
         session = self.session("old-terminal")
         (session / "meta.json").write_text("{}")
@@ -337,7 +504,11 @@ class CallModeTests(unittest.TestCase):
         import os
 
         os.utime(session, (stale, stale))
-        self.assertEqual(self.state(), {"state": "idle", "local_partner": "Joe"})
+        os.utime(session / "meta.json", (stale, stale))
+        result = self.state()
+        self.assertEqual(result["state"], "needs_attention")
+        self.assertEqual(result["status_text"], "Transcription has not finished. The local recording is saved.")
+        self.assertEqual(result["sessions"][0]["session"], "old-terminal")
 
 
 class SpeakerLabelTests(unittest.TestCase):
@@ -846,6 +1017,23 @@ class PostCallTests(unittest.TestCase):
         }
         result.update(overrides)
         return result
+
+    def test_counterpart_reaches_action_and_draft_candidates_when_named(self) -> None:
+        task = {"title": "Call Pat", "deal_id": "deal-a", "participant_ids": ["p-1"],
+                "evidence": "Joe will call Pat", "counterpart": "Pat"}
+        unclear = {"title": "Review options", "deal_id": "deal-a", "participant_ids": [],
+                   "evidence": "Review options"}
+        draft = {"recipient_party_id": "p-1", "deal_id": "deal-a", "subject": "Next steps",
+                 "body": "Thank you.", "participant_ids": ["p-1"], "evidence": "Email Pat",
+                 "counterpart": "Pat"}
+        transcript = {"segments": [{"speaker": "Joe", "text": "Joe will call Pat. Review options. Email Pat."}]}
+        report = post_call.normalize_distillation(self.output(joe_tasks=[task, unclear],
+            deal_updates=[], draft_proposals=[draft]), self.context, self.session.name, transcript=transcript)
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        candidates = post_call.sanitized_candidates(self.session)["post_call_items"]
+        self.assertEqual(candidates[0]["counterpart"], {"name": "Pat"})
+        self.assertNotIn("counterpart", candidates[1])
+        self.assertEqual(candidates[2]["counterpart"], {"name": "Pat"})
 
     def test_weekly_transcript_without_app_fetches_context_and_processes_once(self) -> None:
         call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
@@ -1913,6 +2101,14 @@ class AutomaticApplyTests(unittest.TestCase):
         self.assertEqual(marked["deal_updates"][0]["next_step"]["apply"], "automatic")
         self.assertEqual(marked["deal_updates"][1]["phase_move"]["apply"], "automatic")
 
+    def test_budget_hold_keeps_previously_checked_changes_as_proposals(self) -> None:
+        report = self.mark(self.update(next_step=self.step()))
+        self.assertEqual(report['deal_updates'][0]['next_step']['apply'], 'automatic')
+        report['checks_hold'] = 'Jev daily dollar budget is exhausted.'
+        held = post_call.mark_automatic(report, self.transcript, {})
+        self.assertEqual(held['deal_updates'][0]['next_step']['apply'], 'review')
+        self.assertIn('budget is exhausted', held['deal_updates'][0]['next_step']['review_reason'])
+
     def test_client_stated_change_stays_for_partner_review(self) -> None:
         self.transcript["segments"][0]["speaker"] = "Client"
         change = self.mark(self.update(next_step=self.step()))["deal_updates"][0]["next_step"]
@@ -2549,7 +2745,7 @@ class PostCallJevChecksTests(unittest.TestCase):
     def fake_client(*, deal_choice: str = "deal-a", deal_confidence: float = 0.9,
                  speaker_probability: float = 0.9, details_probability: float = 0.9,
                  deal_in_candidates: float = 0.9):
-        def _ask(*, state: object, questions: dict[str, object]) -> SimpleNamespace:
+        def _ask(*, state: object, questions: dict[str, object], **kwargs) -> SimpleNamespace:
             body = {
                 "deal_match": {"type": "choice", "choice": deal_choice, "confidence": deal_confidence},
                 "deal_in_candidates": {"type": "noul", "noul": deal_in_candidates},
@@ -2568,7 +2764,7 @@ class PostCallJevChecksTests(unittest.TestCase):
                 "details_supported": SimpleNamespace(noul=0.9),
             })
         client = Mock()
-        client.system_one.side_effect = lambda *, state, questions: answers(
+        client.system_one.side_effect = lambda *, state, questions, **kwargs: answers(
             "deal-a" if "Acme" in state["item"]["fields"]["title"] else "deal-b")
         result = post_call_jev.check_distillation(self.result(dell_tasks=[{
             "title": "Send the revised LOI", "deal_id": "deal-b", "evidence": "Dell will send the revised LOI",
@@ -2615,7 +2811,7 @@ class PostCallJevChecksTests(unittest.TestCase):
         gate = threading.Event()
         inner = self.fake_client()
 
-        def slow(*, state: object, questions: dict[str, object]) -> SimpleNamespace:
+        def slow(*, state: object, questions: dict[str, object], **kwargs) -> SimpleNamespace:
             with lock:
                 state_["now"] += 1
                 state_["peak"] = max(state_["peak"], state_["now"])
@@ -2635,7 +2831,7 @@ class PostCallJevChecksTests(unittest.TestCase):
     def test_one_failed_item_call_leaves_the_others_checked(self) -> None:
         inner = self.fake_client()
 
-        def flaky(*, state: dict[str, Any], questions: dict[str, object]) -> SimpleNamespace:
+        def flaky(*, state: dict[str, Any], questions: dict[str, object], **kwargs) -> SimpleNamespace:
             if state["item"]["fields"]["title"] == "Bad":
                 raise TypeSafeError("refused")
             return inner.system_one(state=state, questions=questions)

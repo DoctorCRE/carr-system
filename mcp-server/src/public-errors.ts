@@ -14,6 +14,9 @@ type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSche
 // details, event rows, driver codes, or arbitrary properties from a refusal.
 const PUBLIC_ERRORS = new Map<unknown, string>([
   ["email_draft_failure_not_resubmittable", "This failed draft cannot be resubmitted. Review the failure before creating a new draft."],
+  ["email_identity_owner_mismatch", "Use the authenticated partner as the mailbox owner."],
+  ["email_identity_account_mismatch", "Use the mailbox account recorded for the authenticated partner."],
+  ["email_identity_conflict", "The captured email belongs to another direction or submitted send. Re-read its record."],
   ["email_source_owner_mismatch", "Use the mailbox owner that matches the email source."],
   ["email_proposal_confidence_invalid", "Provide a confidence between zero and one."],
   ["email_proposal_fields_invalid", "Check the fields for the proposal kind."],
@@ -38,6 +41,8 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["next_action_conflict", "Re-read get-next-action with ref and owner. Review the current action before retrying set-next-action with its id and version, or null if absent, in expected_action."],
   ["needs_confirm", "Ask the human to confirm before resubmitting with confirm:true."],
   ["not_found", "The requested record was not found."],
+  ["action_link_not_found", "This link does not open a card for you. Sign in as the partner it was sent to, or ask for a fresh link."],
+  ["action_link_no_longer_actionable", "This card has already been handled or has changed. Open Home for what needs you now."],
   ["unsupported_decision_about", "The about field accepts lead, client, vendor, party, and deal references or names; Work Request references are not supported. Omit about and name the Work Request in the rationale."],
   ["decision_about_work_request_not_found", "The Work Request in the about field was not found. Check its reference, or omit about and name the Work Request in the rationale."],
   ["work_request_not_found", "Re-read the Work Request reference before retrying."],

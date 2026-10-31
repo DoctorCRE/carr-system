@@ -376,6 +376,21 @@ test('alarm deletes queued chunks and session read reports expired across restar
   assert.equal((await send(path, 'GET', undefined, joe, env)).body.state, 'queued');
 });
 
+test('configuration cannot raise hard call or daily limits', async () => {
+  const { send, store } = rig();
+  const env = { ...environment, CALL_MAX_BYTES: 999999999, CALL_MAX_SECONDS: 99999, CALL_DAILY_ADMISSIONS: 99 };
+  for (const changes of [{ byte_count: 52428801 }, { duration_seconds: 3601 }]) {
+    assert.equal((await send('', 'POST', { ...recording, ...changes }, joe, env)).status, 400);
+  }
+  assert.equal(store.sessions.length, 0);
+  for (let n = 0; n < 5; n++) {
+    const body = { ...recording, sha256: String(n).repeat(64) };
+    assert.equal((await send('', 'POST', body, joe, env)).status, 201);
+    assert.equal((await send('', 'POST', body, joe, env)).status, 200);
+  }
+  assert.equal((await send('', 'POST', recording, joe, env)).status, 429);
+});
+
 test('Studio omitting questions removes locally resolved questions from session reads', async () => {
   const { handler, send } = rig();
   const { session_id: id } = (await send('', 'POST', recording)).body;

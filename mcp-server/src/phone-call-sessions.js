@@ -40,7 +40,7 @@ async function sessionToken(env, id) {
 function limit(env, name, fallback) {
   const value = Number(env[name] ?? fallback);
   if (!Number.isSafeInteger(value) || value < 1) throw new Error('invalid_phone_limit');
-  return value;
+  return Math.min(value, fallback);
 }
 
 export const phoneCallByteLimit = env => limit(env, 'CALL_MAX_BYTES', 50 * 1024 * 1024);
