@@ -54,6 +54,10 @@ Each decoded email carries its observed folder paths (Inbox, Sent Items, user
 subfolders such as Active Deals/<deal>) as `folders`; matched client attachments use them to resolve one deal.
 Attachment metadata travels as `attachments` with id, name, size, content_type and
 nullable content_id. Cache paths and bytes stay in the private decoder output.
+Attachment routing failures have client, folder and deal counters, counted per
+unfinished attachment. attachments_uncached means a valid cache path has no file;
+attachments_path_conflict means decoded revisions disagree on that path. Conflicts,
+refused paths and read failures count as attachments_unresolved and stay pending.
 Mail enters intake through the configured folder account, including all user
 subfolders. A typed current-folder reference in the verified message account also
 proves admission when that folder is not catalogued. Decoded recipients provide
@@ -1050,6 +1054,9 @@ class Run:
                 'summary': f'{label}: {m["subject"] or "(no subject)"}', 'detail': m['text'],
                 'occurred_at': _iso(m['sent_unix']),
                 'email_context': email_context(m, self.settings.internal_domain),
+                **({'email_identity': {'mailbox_owner': self.settings.owner, 'mailbox_account': self.settings.account,
+                     'item_id': 'hxstore-key:' + ','.join(_store_keys(m['local_keys']))}}
+                   if _store_keys(m['local_keys']) else {}),
                 **({'email_source': {'sender_email': m['sender'].lower(), 'mailbox_owner': self.settings.owner}}
                    if not outbound else {})}, who, '' if m['full'] else 'preview_only') for ref in refs]
             completed.extend(ref for ref, ok in zip(refs, results) if ok)
@@ -1193,6 +1200,9 @@ class Run:
         for mail in mails:
             if not mail.get('attachments') or not (self.now - UNRESOLVED_DAYS).timestamp() <= mail['sent_unix'] <= self.now.timestamp() + 300:
                 continue
+            pending = sum(f"{mail['ident']}/{a['id']}" not in done for a in mail['attachments'])
+            if not pending:
+                continue
             parties = (_addresses(mail['recipients']) if _internal(mail['sender'], self.settings.internal_domain)
                        else [mail['sender']])
             refs = {matcher.ref(a) for a in parties if not _internal(a, self.settings.internal_domain)} - {None}
@@ -1201,10 +1211,11 @@ class Run:
                      if part.casefold() == 'active deals'}
             if not refs:
                 continue
-            if len(refs) != 1 or len(names) != 1:
-                self.counts['attachments_unresolved'] = self.counts.get('attachments_unresolved', 0) + 1
-                continue
-            if all(f"{mail['ident']}/{a['id']}" in done for a in mail['attachments']):
+            reason = ('client_ambiguous' if len(refs) != 1 else
+                      'folder_missing' if not names else 'folder_ambiguous' if len(names) != 1 else None)
+            if reason:
+                counter = 'attachments_' + reason
+                self.counts[counter] = self.counts.get(counter, 0) + pending
                 continue
             candidates.append((mail, next(iter(refs)), next(iter(names))))
         if not candidates:
@@ -1215,18 +1226,15 @@ class Run:
             for mail, ref, name in candidates:
                 matches = [d for d in deals if d['client_ref'] == ref and d['name'].casefold() == name.casefold()]
                 if len(matches) != 1:
-                    self.counts['attachments_unresolved'] = self.counts.get('attachments_unresolved', 0) + 1
+                    counter = 'attachments_deal_missing' if not matches else 'attachments_deal_ambiguous'
+                    self.counts[counter] = self.counts.get(counter, 0) + sum(
+                        f"{mail['ident']}/{a['id']}" not in done for a in mail['attachments'])
                     continue
                 for row_id in mail['row_ids']:
                     selected[row_id] = (mail, matches[0])
             pending_ids = {a['id'] for mail, _ in selected.values() for a in mail['attachments']
                            if f"{mail['ident']}/{a['id']}" not in done}
             rows = [a for a in att.rows(db) if a['message'] in selected and a['attachment'] in pending_ids]
-            for row in rows:
-                if not row['path']:
-                    mail, _ = selected[row['message']]
-                    uncached[f"{mail['ident']}/{row['attachment']}"] = mail['sent_unix']
-                    self.counts['attachments_uncached'] = self.counts.get('attachments_uncached', 0) + 1
             paths = sorted({a['path'] for a in rows if a['path'] and att.CACHE_PATH.fullmatch(a['path'])
                             and not any(ord(c) < 32 or ord(c) == 127 for c in a['path'])})
             if paths:
@@ -1238,7 +1246,6 @@ class Run:
                         capture_output=True, text=True, timeout=900)
                     if copied.returncode:
                         raise OSError('attachment copy failed')
-            pending_ids -= {a['attachment'] for a in rows if not a['path']}
             for result in att.extract(db, files, files.parent / 'extracted', messages=set(selected), attachments=pending_ids):
                 mail, deal = selected[result['message']]
                 source = f"{mail['ident']}/{result['attachment']}"
@@ -1255,6 +1262,8 @@ class Run:
                     done[source] = int(self.now.timestamp())
                     continue
                 if result['status'] != 'stored':
+                    if result['status'] in ('path_conflict', 'path_refused', 'unreadable', 'error'):
+                        self.counts['attachments_unresolved'] = self.counts.get('attachments_unresolved', 0) + 1
                     self.state['attachments_pending'] = True
                     continue
                 prepared.append((mail['ident'], deal, result, Path(result['stored']).read_bytes()))
@@ -1802,7 +1811,7 @@ def _run(out: Path, home: Path, ports: Ports, state: dict) -> Outcome:
     hydration_due = bool(state.get('pending_full')) and now.timestamp() >= state.get('hydration_check_at', 0)
     review_due = 'calendar_review_at' not in state or (state['calendar_review_at'] is not None
                                                       and now.timestamp() >= state['calendar_review_at'])
-    if state.get('account_binding') == _hash(settings.account.strip().lower()) and not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and all(name in state for name in MAIL_STORE_COUNTERS) and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('attachment_policy') == 1 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due'):
+    if state.get('account_binding') == _hash(settings.account.strip().lower()) and not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and all(name in state for name in MAIL_STORE_COUNTERS) and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('attachment_policy') == 2 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due'):
         if state.get('pending_full'):
             Run(ports, state, now, out, settings).full_text([])
             _save(out, state)
@@ -1926,7 +1935,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     if failed:
         _save(out, state)
         return Outcome('failed', failed, counts)
-    state.update(store=signature, high_water=int(now.timestamp()), contact_map=matcher.fingerprint(), attachment_policy=1,
+    state.update(store=signature, high_water=int(now.timestamp()), contact_map=matcher.fingerprint(), attachment_policy=2,
                  **{name: meta[name] for name in MAIL_STORE_COUNTERS},
                  folder_account_id=settings.folder_account_id, account_binding=_hash(settings.account.strip().lower()),
                  mail_rows_reusing_prior_identity=work.counts['mail_rows_reusing_prior_identity'])

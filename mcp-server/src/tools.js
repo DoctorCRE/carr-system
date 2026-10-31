@@ -1,4 +1,6 @@
 // Register MCP tools and their shared write envelope.
+import { homeInboxTools, HOME_INBOX_WRITES } from "./home-inbox.js";
+import { dealUpdateResolution } from "./deal-update-resolution.js";
 import { practiceOriginationTools } from "./practice-origination.ts";
 import { vendorMeetingTools } from "./vendor-meetings.js";
 import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.ts";
@@ -9,9 +11,12 @@ import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeatur
 import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.ts";
 import { dealExtractionTools } from "./deal-extraction.js";
+import { factGenerationTools } from "./fact-generation.ts";
 import { factReviewTools } from "./fact-review.ts";
+import { marketTermsTools } from "./market-terms.ts";
 import { factObservationTools } from "./fact-observations.ts";
 import { actionClosureTools } from "./action-closure.ts";
+import { requirementRequestTools } from "./requirement-requests.js";
 import { dealFileTools } from "./deal-files.js";
 import { dealItemTools, readDealItems, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.ts";
 import { bindReferralDeal } from "./relationship-network.ts";
@@ -54,12 +59,14 @@ import { emailDealProgressTools } from "./email-deal-progress.ts";
 import { derivedIdempotencyKey } from "./derived-key.ts";
 import { DURABLE_KEY_SHAPES, REPLAY_WINDOW, durableReceipt, replayReceipt } from "./replay-receipt.ts";
 import { emailNextStepTools } from "./email-next-step.ts";
+import { EMAIL_IDENTITY_SCHEMA, lockEmailIdentity, capturedEmail } from "./email-identity.js";
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
 import { clearTheDeckTools } from "./clear-the-deck.js";
 import { addCalendarMeetingPrep } from "./calendar-meeting-prep.js";
 import { CALENDAR_AGENDA_BOARD, calendarSection, addCalendarContacts, addCalendarDealSuggestions } from "./brief-calendar.js";
 import { emailLeadProposalTools } from "./email-lead-proposal.ts";
 import { leadAutomationTools } from "./lead-automation.js";
+import { actionLinkTools } from "./action-links.js";
 import { workflowCutoverTools } from "./workflow-cutover.v5.ts";
 import { engineeringRuntimeTools } from "./engineering-runtime.js";
 import { tourRightsProjectionTools } from "./tour-rights-projection.js";
@@ -358,10 +365,10 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing", "clear-the-deck-apply"].includes(verb) || verb === "undo-call" || ["set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing", "clear-the-deck-apply"].includes(verb) || verb === "undo-call" || ["add-deal-note", "review-deal-update", "set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist", "complete-doc-request"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
-  if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
+  if (FEATURE_SWITCH_WRITES.has(verb) || HOME_INBOX_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
   // A receipt older than REPLAY_WINDOW is not a replay: the key is unknown and the
   // write runs as new (tool_call_expire frees the key on insert). A durable
   // receipt is read back by key elsewhere and keeps replaying.
@@ -2377,7 +2384,7 @@ async function lockDealField(c, dealId, field) {
   );
 }
 
-async function appendDealNextStep(c, actor, dealId, text, nextDate, key) {
+async function appendDealNextStep(c, actor, dealId, text, nextDate, key, preservedActionIds = []) {
   assertDealRoomField("next_date", nextDate, ToolError);
   // The step also changes next_date. Take that cell's lock first so its
   // field history cannot race a direct date edit or undo.
@@ -2404,8 +2411,8 @@ async function appendDealNextStep(c, actor, dealId, text, nextDate, key) {
   // board reads the newest open step, so leaving Joe's open would hide it.
   const replaced = (await c.query(
     `update next_action set status='dropped', updated_by=$1
-      where subject_type='deal' and subject_id=$2 and owner_id=any($3::uuid[]) and status='open' and item_title is null
-      returning id /* dealroom:drop-prior-action */`, [actor.id, dealId, await partnerOwnerIds(c, actor)])).rows;
+      where subject_type='deal' and subject_id=$2 and owner_id=any($3::uuid[]) and status='open' and item_title is null and not(id=any($4::uuid[]))
+      returning id /* dealroom:drop-prior-action */`, [actor.id, dealId, await partnerOwnerIds(c, actor), preservedActionIds])).rows;
   const action = await c.query(
     `insert into next_action (subject_type, subject_id, owner_id, due_on,
                               description, created_by, updated_by, updated_at)
@@ -2448,7 +2455,7 @@ async function partnerOwnerIds(c, actor) {
   return ownerIds;
 }
 
-async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-deal-note") {
+async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-deal-note", preservedActionIds = []) {
   const partner = partnerAuthoritySlugForActor(actor);
   if (!partner) return {};
   const ownerIds = await partnerOwnerIds(c, actor);
@@ -2464,13 +2471,13 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
   const dropped = (await c.query(
     `update next_action set status='dropped', updated_by=$2
       where subject_type='deal' and subject_id=$1 and owner_id=any($3::uuid[]) and status='open' and item_title is null
-        and ((id=$4 and $5::boolean) or (id is distinct from $4 and due_on < current_date))
-      returning id, description, due_on::text as due_on /* dealroom:supersede-overdue */`, [dealId, actor.id, ownerIds, current.action_id, current.overdue])).rows;
+        and not(id=any($6::uuid[])) and ((id=$4 and $5::boolean) or (id is distinct from $4 and due_on < current_date))
+      returning id, description, due_on::text as due_on /* dealroom:supersede-overdue */`, [dealId, actor.id, ownerIds, current.action_id, current.overdue, preservedActionIds])).rows;
   const postCall = (await c.query(
     `update capture_post_call_action set status='dropped', updated_at=clock_timestamp(), completed_at=null
-      where deal_id=$1 and owner_id=any($2::uuid[]) and status='open' and item_title is null and due_on < current_date
+      where deal_id=$1 and owner_id=any($2::uuid[]) and status='open' and item_title is null and due_on < current_date and not(id=any($3::uuid[]))
       returning id, description, due_on::text as due_on /* dealroom:supersede-overdue-post-call */`,
-    [dealId, ownerIds])).rows;
+    [dealId, ownerIds, preservedActionIds])).rows;
   const supersededIds = [...dropped, ...postCall].map(a => a.id);
   if (supersededIds.length) await writeEvent(c, actor, verb, "deal", dealId, {
     field: "next_action", old: { actions: [...dropped, ...postCall] },
@@ -3864,14 +3871,14 @@ export const TOOLS = {
                          order by due_on nulls last, id limit 3) n), '[]'::jsonb) as open_actions,
                 (select jsonb_build_object('kind', step.kind, 'summary', step.summary,
                                            'occurred_at', to_jsonb(step.occurred_at)#>>'{}')
-                   from (select a.kind, a.summary, a.occurred_at, a.id
+                   from (select a.kind, a.summary, a.occurred_at, a.id, null::bigint as mutation_order
                            from v_deal_room_activity a where a.deal_id=b.id
                          union all
                          select 'completed_action', coalesce(nullif(e.new_value->>'outcome', ''),
-                           e.new_value->>'next_action', e.new_value->>'post_call_action'), e.recorded_at, e.id
-                           from v_deal_room_event e where e.subject_id=b.id and e.verb='complete-action'
+                           e.new_value->>'next_action', e.new_value->>'post_call_action'), e.recorded_at, e.id, e.mutation_order
+                           from v_deal_room_event e where e.subject_id=b.id and e.verb in ('complete-action','complete-one-action')
                              and e.new_value->>'status'='done') step
-                  order by step.occurred_at desc, step.id desc limit 1) as last_step,
+                  order by step.occurred_at desc, step.mutation_order desc nulls last, step.id desc limit 1) as last_step,
                 (b.next_step is null or b.next_date is null) as next_step_required, b.market, b.segment,
                 b.client_id, b.client_ref, b.client_name, ce.client_status, ce.client_version,
                 ce.prospect_engagement_status, b.account_client_id, b.account_client_ref,
@@ -4368,6 +4375,7 @@ export const TOOLS = {
             required: ['email', 'kind', 'internal'], properties: { email: { type: 'string' },
               name: { type: ['string', 'null'] }, kind: { enum: ['to', 'cc'] }, internal: { type: 'boolean' } } } },
         } },
+      email_identity: EMAIL_IDENTITY_SCHEMA,
       email_source: { type: "object", additionalProperties: false, required: ["sender_email", "mailbox_owner"],
         properties: { sender_email: { type: "string", format: "email", maxLength: 254 },
           mailbox_owner: { type: "string", enum: ["joe", "dell"] } } },
@@ -4422,6 +4430,21 @@ export const TOOLS = {
           args.email_source.mailbox_owner !== partnerAuthoritySlugForActor(actor)))
         throw new ToolError({ error: 'email_source_owner_mismatch' });
       const s = await resolveSubject(c, args.ref);
+      let emailIdentity = null;
+      if (args.email_identity) {
+        if (!['email_in', 'email_out'].includes(args.kind) ||
+            args.email_identity.mailbox_owner !== partnerAuthoritySlugForActor(actor))
+          throw new ToolError({ error: 'email_identity_owner_mismatch' });
+        const account = (await c.query('select email from actor where slug=$1', [args.email_identity.mailbox_owner])).rows[0]?.email;
+        if (args.email_identity.mailbox_account !== account)
+          throw new ToolError({ error: 'email_identity_account_mismatch' });
+        emailIdentity = await lockEmailIdentity(c, args.email_identity.mailbox_owner, account, args.email_identity.item_id);
+        const existing = await capturedEmail(c, emailIdentity, s.id);
+        if (existing) {
+          if (existing.kind !== args.kind) throw new ToolError({ error: 'email_identity_conflict' });
+          return { ok: true, activity_id: existing.id, subject: s };
+        }
+      }
       const assignments = [];
       if (args.vendor_assignments !== undefined) {
         if (s.type !== 'deal' || !Array.isArray(args.vendor_assignments) || !args.vendor_assignments.length || args.vendor_assignments.length > 30)
@@ -4447,15 +4470,13 @@ export const TOOLS = {
         for (const vendorId of versions.keys())
           await c.query('update vendor set updated_by=$1 where id=$2',[actor.id,vendorId]);
       }
-      if (args.email_source !== undefined && (args.kind !== 'email_in' ||
-          args.email_source.mailbox_owner !== partnerAuthoritySlugForActor(actor)))
-        throw new ToolError({ error: 'email_source_owner_mismatch' });
       const r = await c.query(
-        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_context, email_source)
-         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb, $9::jsonb) returning id, occurred_at`,
+        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_context, email_source, email_identity)
+         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb, $9::jsonb, $10::jsonb) returning id, occurred_at`,
         [args.occurred_at || null, actor.id, args.kind, args.summary, args.detail || null, args.owed || null, s.id,
           args.email_context ? JSON.stringify(args.email_context) : null,
-          args.email_source ? JSON.stringify(args.email_source) : null]);
+          args.email_source ? JSON.stringify(args.email_source) : null,
+          emailIdentity ? JSON.stringify({ ...emailIdentity, subject: s.id }) : null]);
       await writeEvent(c, actor, "log-activity", s.type, s.id,
         { new: { activity: r.rows[0].id, kind: args.kind }, human_quote: args.human_quote, idempotency_key: args.idempotency_key });
       const links = args.links && args.links.length
@@ -9060,6 +9081,7 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
 
 const TOOL_REGISTRATION_SOURCE = Object.freeze({
   'action-closure': 'mcp-server/src/action-closure.ts',
+  'requirement-requests': 'mcp-server/src/requirement-requests.js',
   'deal-files': 'mcp-server/src/deal-files.js',
   'deal-items': 'mcp-server/src/deal-items.ts',
   'feature-switches':'mcp-server/src/feature-switches.js',
@@ -9073,6 +9095,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "doc-activity": "mcp-server/src/doc-activity.js",
   "meeting-mode": "mcp-server/src/meeting-mode.js",
   "notifications": "mcp-server/src/notifications.ts",
+  "home-inbox": "mcp-server/src/home-inbox.js",
   "session-identity": "mcp-server/src/session-identity.ts",
   "dispatch-spine": "mcp-server/src/dispatch-spine.ts",
   "doc-outcome-cards": "mcp-server/src/tools.js",
@@ -9081,6 +9104,8 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "work-request-intake": "mcp-server/src/work-request-intake.js",
   "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
   "fact-review": "mcp-server/src/fact-review.ts",
+  "market-terms": "mcp-server/src/market-terms.ts",
+  "fact-generation": "mcp-server/src/fact-generation.ts",
   "deal-extraction": "mcp-server/src/deal-extraction.js",
   "fact-observations": "mcp-server/src/fact-observations.ts",
   "practice-origination": "mcp-server/src/practice-origination.ts",
@@ -9089,10 +9114,12 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "client-portal": "mcp-server/src/client-portal.ts",
   "resource-observation": "mcp-server/src/resource-observation.v5.ts",
   "lead-automation": "mcp-server/src/lead-automation.js",
+  "action-links": "mcp-server/src/action-links.js",
   "invoice-automation": "mcp-server/src/invoice-automation.js",
   "email-deal-progress": "mcp-server/src/email-deal-progress.ts",
   "email-next-step": "mcp-server/src/email-next-step.ts",
   "email-proposals": "mcp-server/src/email-proposals.js",
+  "deal-update-resolution": "mcp-server/src/deal-update-resolution.js",
   "email-lead-proposal": "mcp-server/src/email-lead-proposal.ts",
   "clear-the-deck": "mcp-server/src/clear-the-deck.js",
   "workflow-cutover": "mcp-server/src/workflow-cutover.v5.ts",
@@ -9223,7 +9250,7 @@ registerTools({
       );
       const actions = await c.query(
         `select n.id, n.owner, n.description, n.item_title as title, n.item_bullets as bullets, n.source_ref,
-                to_jsonb(n.due_on)#>>'{}' as due_on, n.status,
+                to_jsonb(n.due_on)#>>'{}' as due_on, n.status, n.version,
                 to_jsonb(n.hold_until)#>>'{}' as hold_until,
                 to_jsonb(n.updated_at)#>>'{}' as updated_at
            from v_deal_room_action n
@@ -9368,7 +9395,7 @@ registerTools({
            order by d.deal_id, d.due_on nulls last, d.id limit 10001
         ), actions as materialized (
           select a.deal_id, a.id, a.owner, a.description, to_jsonb(a.due_on)#>>'{}' as due_on,
-                 a.status, to_jsonb(a.hold_until)#>>'{}' as hold_until
+                 a.status, a.version, to_jsonb(a.hold_until)#>>'{}' as hold_until
             from v_deal_room_action a join scoped s on s.id = a.deal_id
            where a.status = 'open'
            order by a.deal_id, a.updated_at desc, a.id desc limit 10001
@@ -9504,7 +9531,8 @@ registerTools({
 
   "add-deal-note": {
     write: true,
-    description: "Record a partner status update in the immutable deal thread. After the due date, this supersedes your overdue action, never marks it completed. Supply next_step and next_date together, or Doc prompts for the missing plan. Other partners' actions and manual attention remain unchanged.",
+    afterCommit: (...args) => overdueUpdates.process(...args),
+    description: "Record a partner status update in the immutable deal thread. Jev checks the content against overdue actions. Only supported completion resolves them, with evidence and undo; uncertainty stays open for Home review. Supply next_step and next_date together, or Doc prompts for the missing plan. Other partners' actions and manual attention remain unchanged.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, deal: { type: "string" }, text: { type: "string" },
       next_step: { type: "string" }, next_date: { type: "string", description: "YYYY-MM-DD; required with next_step" },
@@ -9516,19 +9544,20 @@ registerTools({
       const hasPlan = args.next_step !== undefined || args.next_date !== undefined;
       if (hasPlan && (typeof args.next_step !== "string" || !args.next_step.trim() || !isCalendarDate(args.next_date)))
         throw new ToolError({ error: "next_step_and_date_required", hint: "supply a next step and a calendar date together" });
-      const superseded = await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key);
+      await lockDealField(c, s.id, "next_date");
+      await lockDealField(c, s.id, "next_step");
       const note = await c.query(
         "insert into deal_note (deal_id, kind, text, actor_id) values ($1,'note',$2,$3) returning id, created_at /* dealroom:add-note */",
         [s.id, args.text.trim(), actor.id],
       );
+      const assessment = await overdueUpdates.prepare(c, actor, s.id, note.rows[0].id, args.text.trim(), args.idempotency_key);
       await writeEvent(c, actor, "add-deal-note", "deal", s.id, {
-        field: "note", new: { note: args.text.trim(), superseded_action_ids: superseded.superseded_action_ids || [] }, idempotency_key: args.idempotency_key,
+        field: "note", new: { note: args.text.trim() }, idempotency_key: args.idempotency_key,
       });
       const plan = hasPlan ? await appendDealNextStep(c, actor, s.id,
-        args.next_step.trim(), args.next_date, args.idempotency_key) : null;
+        args.next_step.trim(), args.next_date, args.idempotency_key, assessment.preserved_action_ids) : null;
       return { ok: true, deal_id: s.id, note_id: note.rows[0].id, created_at: note.rows[0].created_at,
-        ...(plan ? { superseded_action_ids: superseded.superseded_action_ids || [],
-          next_step_id: plan.next_step_id, next_action_id: plan.next_action_id, next_step_required: false } : superseded) };
+        ...assessment, ...(plan ? { next_step_id: plan.next_step_id, next_action_id: plan.next_action_id, next_step_required: false } : {}) };
     }),
   },
 
@@ -9548,8 +9577,9 @@ registerTools({
       await lockDealField(c, s.id, "next_date");
       await lockDealField(c, s.id, "next_step");
       await versionGuard(c, "deal", s.id, args.base_version);
-      await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key, "set-next-step");
-      return appendDealNextStep(c, actor, s.id, args.text.trim(), args.next_date ?? null, args.idempotency_key);
+      const preserved = await overdueUpdates.preserved(c, s.id);
+      await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key, "set-next-step", preserved);
+      return appendDealNextStep(c, actor, s.id, args.text.trim(), args.next_date ?? null, args.idempotency_key, preserved);
     }),
   },
 
@@ -10179,7 +10209,7 @@ registerTools({
           throw new ToolError({ error: "applied_change_not_found", deal_id: dealId });
         const fields = [...new Set(journal.map(row => row.field))];
         const newer = (await c.query(`select 1 from event e where e.subject_type='deal' and e.subject_id=$1
-          and (e.field=any($3::text[]) or e.verb in ('set-next-action','complete-action'))
+          and (e.field=any($3::text[]) or e.verb in ('set-next-action','complete-action','complete-one-action'))
           and not (coalesce(e.idempotency_key,'')=any($2::text[]))
           and (e.recorded_at,e.id) > (select b.recorded_at,b.id from event b where b.id=$4)
           limit 1`, [dealId,keys,fields,journal[0].id])).rows.length;
@@ -10608,6 +10638,7 @@ registerTools(scheduleBoardTools(), "schedule-board");
 registerTools(dealItemTools({ withEnvelope, writeEvent, resolveSubject,
   canExercisePartnerAuthority, partnerAuthoritySlugForActor }), "deal-items");
 registerTools(actionClosureTools({ withEnvelope, writeEvent, canExercisePartnerAuthority }), "action-closure");
+registerTools(requirementRequestTools({ withEnvelope, writeEvent, resolveSubject }), "requirement-requests");
 registerTools(dealFileTools({ withEnvelope, writeEvent, resolveSubject }), "deal-files");
 
 // WR-AI-006: curation proposals are machine-callable; approval and retirement
@@ -10637,6 +10668,7 @@ registerTools(meetingModeTools({ withEnvelope, writeEvent, ToolError,
 // acknowledge-notification writes ops.notification_read and nothing else, which
 // is why a session may never report it as having moved a task.
 registerTools(notificationTools({ withEnvelope, writeEvent, ToolError }), "notifications");
+registerTools(homeInboxTools({ withEnvelope, ToolError }), "home-inbox");
 
 // WR-000117: the session-identity read pair. Both verbs are READS on the writer
 // connection -- ops.session_identity_facts and ops.session_dispatch_history
@@ -10685,6 +10717,8 @@ registerTools(workPortfolioTools({ ToolError }), "work-portfolio");
 registerTools(leaseTermComparisonTools({ ToolError }), "lease-term-comparison");
 registerTools(factObservationTools(), "fact-observations");
 registerTools(factReviewTools(), "fact-review");
+registerTools(marketTermsTools(), "market-terms");
+registerTools(factGenerationTools({ withEnvelope, writeEvent }), "fact-generation");
 registerTools(dealExtractionTools(), "deal-extraction");
 
 // The partner room (Idea 78): shared AI-to-AI transcript both Macs poll; raw
@@ -10712,6 +10746,7 @@ const invoices=invoiceAutomation({withEnvelope,writeEvent,ToolError,lockDealFiel
   invoicingMailbox:process.env.CARR_INVOICING_MAILBOX});
 registerTools(invoices.tools,"invoice-automation");
 registerTools(leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoices }), "lead-automation");
+registerTools(actionLinkTools({ ToolError }), "action-links");
 // DoctorCRE V5-R02: workflow cutover, caller migration and retirement
 // readiness. Reads historical acceptance and native retirement evidence rather than
 // duplicating their evidence; retire-workflow-cutover-plan is authority-only.
@@ -10786,6 +10821,8 @@ registerTools(ruleContextRuntimeTools({ withEnvelope, ToolError }), "rule-contex
 
 registerTools(vendorMeetingTools(), "vendor-meetings");
 
+const overdueUpdates = dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds, lockDealField, dealNextStepStatus, ToolError });
+registerTools(overdueUpdates.tools, "deal-update-resolution");
 registerTools(practiceOriginationTools({ withEnvelope }), "practice-origination");
 
 Object.freeze(TOOLS);
