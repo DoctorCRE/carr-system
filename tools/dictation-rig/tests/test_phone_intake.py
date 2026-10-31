@@ -157,6 +157,7 @@ class PhoneIntakeTests(unittest.TestCase):
             post_call.write_private(session / post_call.REPORT_FILE, report)
             fail[0] = True
             phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
+            self.assertEqual(post_call.read_json(session / post_call.STATUS_FILE)['state'], 'filed')
             fail[0] = False
             status = post_call.read_json(session / post_call.STATUS_FILE)
             status['next_attempt_at'] = '2000-01-01T00:00:00Z'

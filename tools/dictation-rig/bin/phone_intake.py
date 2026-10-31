@@ -333,8 +333,14 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                     if not publish_status(session, cfg, token, bridge):
                         counts['pending'] += 1
                         continue
-                    if (session / 'ingested.json').exists():
-                        continue
+                    if (session / 'ingested.json').exists() or previous.get('state') in {'needs_attention', 'held_review'}:
+                        if previous.get('transient_since') and previous.get('state') != 'needs_attention':
+                            previous.pop('transient_since', None)
+                            previous.pop('transient_count', None)
+                            previous['next_attempt_at'] = None
+                            post_call.write_private(session / post_call.STATUS_FILE, previous)
+                        if (session / 'ingested.json').exists():
+                            continue
                     if previous.get('state') in {'needs_attention', 'held_review'}:
                         counts['pending'] += 1
                         continue
@@ -386,7 +392,7 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                     expired = elapsed >= timedelta(hours=24)
                     delay = min(30 * 2 ** min(count - 1, 5), 900)
                     previous.update({'schema_version': post_call.SCHEMA_VERSION, 'session': session.name,
-                                     'state': 'needs_attention' if expired else 'blocked', 'updated_at': timestamp,
+                                     'state': 'needs_attention' if expired else (previous.get('state') if previous.get('state') in {'needs_attention', 'held_review', 'filed'} else 'blocked'), 'updated_at': timestamp,
                                      'transient_since': since, 'transient_count': count, 'reason_code': 'transient_ceiling' if expired else None,
                                      'next_attempt_at': None if expired else (current + timedelta(seconds=delay)).strftime('%Y-%m-%dT%H:%M:%SZ'),
                                      'reason': f'Transient network error{" for 24 hours" if expired else ""}: {exc}'})
