@@ -23,12 +23,6 @@ def test_bridge_paths_are_isolated(tmp_path):
     assert bridge.CONFIG_PATH == tmp_path / 'capture-config.json'
 
 
-def test_bridge_paths_are_isolated(tmp_path):
-    bridge = phone_intake.bridge_module()
-    assert bridge.LOG_PATH == tmp_path / 'capture-bridge.log'
-    assert bridge.CONFIG_PATH == tmp_path / 'capture-config.json'
-
-
 class PhoneIntakeTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
