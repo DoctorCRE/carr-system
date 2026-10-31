@@ -13,6 +13,7 @@ POST /api/stop               stop the active Quill recording
 POST /api/call-context       exact active-deal/participant index
 POST /api/post-call/sync     verify Cloudflare candidate dispositions
 POST /api/post-call/drafts/<id>/create   create an Outlook draft, never send
+POST /api/post-call/drafts/<id>/checked  record whether the partner found it in Outlook
 GET  /                       standalone Call Mode control surface
 
 Security boundary:
@@ -501,6 +502,13 @@ class CallModeHandler(BaseHTTPRequestHandler):
                     target, unquote(parts[4]), str(body.get("approved_content_hash") or ""),
                 )
                 self.send_json(result)
+                return
+            if len(parts) == 6 and parts[1:4] == ["api", "post-call", "drafts"] and parts[5] == "checked":
+                target = session_path(str(body.get("session") or ""))
+                exists = body.get("exists")
+                if not isinstance(exists, bool):
+                    raise post_call.ContractError("exists must be true or false")
+                self.send_json(post_call.resolve_outlook_intent(target, unquote(parts[4]), exists))
                 return
             self.send_json({"error": "not_found"}, 404)
         except post_call.ContractError as exc:
