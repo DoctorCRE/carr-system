@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 
 const supervisors = new Set();
 const endSupervisors = () => { for (const child of supervisors) child.stdin.end(); };
@@ -26,7 +27,9 @@ function unregister(child) {
 }
 
 async function supervisor(args, response) {
-  const child = spawn('python3', ['-u', fileURLToPath(new URL('../../../lib/disposable_pg_fixture.py', import.meta.url)), ...args],
+  const frozenPython = fileURLToPath(new URL('../../../.venv/bin/python', import.meta.url));
+  const python = process.env.CARR_CI_PYTHON || (existsSync(frozenPython) ? frozenPython : 'python3');
+  const child = spawn(python, ['-u', fileURLToPath(new URL('../../../lib/disposable_pg_fixture.py', import.meta.url)), ...args],
     { stdio: ['pipe', 'pipe', 'pipe'] });
   register(child);
   // An early supervisor failure can close stdin before teardown writes to it.
@@ -93,10 +96,25 @@ export async function acquirePostgresFixtureGroup() {
 }
 
 // The supervisor owns the cluster before initdb/start and survives abrupt Node exit.
-export async function acquireDisposablePostgres({ prefix, pgCtl, dataName = 'data' }) {
-  const fixture = await supervisor(['--supervise', '--prefix', prefix, '--pg-ctl', pgCtl, '--data-name', dataName, '--directory', tmpdir()], line => {
+export async function acquireDisposablePostgres({ prefix, pgCtl, dataName = 'data', snapshot = false, template = false, baseline = false, sourceTemplate, service = false }) {
+  const args = ['--supervise', '--prefix', prefix, '--data-name', dataName, '--directory', tmpdir()];
+  if (service) {
+    if (!process.env.CARR_CI_DATABASE_URL) throw new Error('a provided CI service URL is required');
+    args.push('--service-database');
+  }
+  if (pgCtl) args.push('--pg-ctl', pgCtl);
+  if (snapshot || template) {
+    args.push(template ? '--snapshot-template' : '--snapshot');
+    if (baseline) args.push('--snapshot-baseline');
+    const source = sourceTemplate?.snapshot || (!template && process.env[baseline ? 'CARR_TEST_PG_SNAPSHOT_BASE' : 'CARR_TEST_PG_SNAPSHOT']);
+    const key = sourceTemplate?.key || process.env[baseline ? 'CARR_TEST_PG_SNAPSHOT_BASE_KEY' : 'CARR_TEST_PG_SNAPSHOT_KEY'];
+    if (source && key) args.push('--snapshot-copy', source, '--snapshot-key', key);
+  }
+  const fixture = await supervisor(args, line => {
+    if (snapshot || template || service) return JSON.parse(line);
     if (!line.startsWith('/')) throw new Error('invalid PostgreSQL fixture root response');
     return line;
   });
-  return { root: fixture.value, close: fixture.close, run: fixture.run };
+  const metadata = typeof fixture.value === 'string' ? { root: fixture.value } : fixture.value;
+  return { ...metadata, close: fixture.close, run: fixture.run };
 }
