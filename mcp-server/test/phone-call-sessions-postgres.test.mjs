@@ -76,6 +76,52 @@ audio.write('data', 36); audio.writeUInt32LE(32000, 40);
 const metadata = { sha256: createHash('sha256').update(audio).digest('hex'), byte_count: audio.length, duration_seconds: 1, mime_type: 'audio/wav',
   started_at: '2026-01-01T12:00:00Z', consent_announced_at: '2026-01-01T12:00:00Z' };
 
+test('Studio holds override normal reads and clear idempotently', async () => {
+  const admitted = await (await handler.fetch(new Request(url, { method: 'POST',
+    body: JSON.stringify({ ...metadata, sha256: 'b'.repeat(64) }) }), env, actor)).json();
+  const id = admitted.session_id;
+  const read = async () => (await handler.fetch(new Request(`${url}/${id}`), env, actor)).json();
+  const status = (body, token = env.CALL_STUDIO_TOKEN) => handler.studioFetch(new Request(
+    `https://api.example.test/capture/phone/v1/call-sessions/${id}/status`, {
+      method: 'POST', headers: { authorization: `Bearer ${token}` }, body: JSON.stringify(body),
+    }), env);
+  assert.equal((await status({ state: 'held_review', reason: 'summary_repeats_transcript', open_questions: 2 }, 'wrong')).status, 401);
+  for (const update of [
+    { state: 'needs_attention', reason: 'extraction_failed', open_questions: 0 },
+    { state: 'needs_attention', reason: 'transient_ceiling', open_questions: 0 },
+    { state: 'held_review', reason: 'summary_repeats_transcript', open_questions: 2 },
+    { state: 'held_review', reason: 'transcript_unavailable', open_questions: 1 },
+    { state: 'held_review', reason: 'open_review_questions', open_questions: 3 },
+  ]) {
+    assert.equal((await status(update)).status, 200);
+    assert.deepEqual(await (await status(update)).json(), { ok: true, session_id: id, changed: false });
+    const visible = await read();
+    assert.deepEqual({ state: visible.state, reason: visible.reason, open_questions: visible.open_questions }, update);
+  }
+  const clear = { state: null, reason: null, open_questions: 0 };
+  assert.equal((await status(clear)).status, 200);
+  assert.deepEqual(await read(), { schema_version: 1, session_id: id, state: 'pending',
+    filed: false, transferred: false, reason: null, open_questions: 0 });
+  const report = await handler.studioFetch(new Request(
+    `https://api.example.test/capture/phone/v1/call-sessions/${id}/report`, {
+      method: 'POST', headers: { authorization: `Bearer ${env.CALL_STUDIO_TOKEN}` },
+      body: JSON.stringify({ summary: 'Synthetic summary', decisions: [], open_questions: [] }),
+    }), env);
+  assert.equal(report.status, 200);
+  const held = { state: 'held_review', reason: 'summary_repeats_transcript', open_questions: 0 };
+  await status(held);
+  assert.equal((await read()).state, 'held_review');
+  const reportRead = await (await handler.fetch(new Request(`${url}/${id}/report`), env, actor)).json();
+  assert.equal(reportRead.state, 'held_review');
+  await status(clear);
+  assert.equal((await read()).state, 'ready_review');
+  for (const invalid of [
+    { ...clear, transcript: 'private transcript' }, { ...clear, reason: 'private summary' },
+    { ...clear, open_questions: -1 }, { ...clear, open_questions: 2 },
+    { state: 'held_review', reason: 'private question', open_questions: 0 },
+  ]) assert.equal((await status(invalid)).status, 400);
+});
+
 test('concurrent imports admit one session under carr_writer and expose its report without filing', async () => {
   const admit = () => handler.fetch(new Request(url, { method: 'POST', body: JSON.stringify(metadata) }), env, actor);
   const replies = await Promise.all(Array.from({ length: 6 }, async () => {
