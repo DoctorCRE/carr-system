@@ -170,8 +170,9 @@ or environment IDs. None are quoted in this public repo.
 - **Access.** Each attach grants `read_only` or `read_write` per store.
 - **Memory.** One section of `team-memory`. Its `section_key` is the path and
   its body is markdown.
-- **Convention.** One active `rule` row. It changes only by superseding: a new
-  row with `supersedes` set to the old row.
+- **Convention.** One active `rule` row. A partner can retire it through a
+  convention proposal, optionally adopting a replacement in the same transaction.
+  The immutable retirement receipt names the replacement in `superseded_by`.
 - **Proposal.** A team-memory section under `conventions/proposed/<slug>`,
   written by an agent. It binds nobody.
 - **Adoption.** Joe or Dell approves a proposal in person in the app's
@@ -222,6 +223,20 @@ prose, the private folder and briefs.
   `governance-queue` lists these sections beside its existing rule approvals.
   On adoption, `adopt-rule` writes the active row and retires the proposal
   section in one transaction.
+- **Retirement proposals (WR562.S4.J1).** Add one `Retires: ["<full rule UUID>", ...]`
+  line to the proposal's `body_text`. A retirement-only proposal starts with
+  that line and has no `Convention`, `Card`, or `Packs` line. A replacement
+  starts with `Convention: <statement>`, keeps the existing Card/Packs format,
+  and adds `Retires`. IDs are normalized and deduplicated; every target must
+  still be active at adoption. Unknown, proposed, or already-retired targets
+  refuse the entire transaction. The existing in-person app, authority, and
+  agent refusal checks apply unchanged, including the Joe-only database
+  approval/retirement chain (Dell remains refused by that existing chain).
+  The receipt reason includes the partner's reason and `Proposal: <section_id>@<version>`.
+  `find-rule` exposes the retirement actor, time, reason, receipt, and optional
+  replacement; `rule-cards` excludes retired rows. Retirement-only adoption
+  returns `rule_id: null` and `retired_rule_ids`; replacement adoption returns
+  both the new `rule_id` and `retired_rule_ids`.
 - **Card wording lives on the rule** (D16). `ops/sync-core-rule-cards.py` renders
   `ops/config/rule-cards.v1.json` and the CLAUDE.md and AGENTS.md block **from the store**.
 - **CLAUDE.md and AGENTS.md** hold only the generated core-card block and
@@ -479,13 +494,57 @@ This follows `joe-dreaming-pass.png` step for step.
    gets `$MEM_OUT`, the condensed transcripts and the dream instructions, and
    starts one Sonnet subagent per transcript.
 3. **Subagents read and write `$MEM_OUT`.** They merge, delete stale entries,
-   add patterns, and append `Verified <date> from session <attach_id>`. The
+   add patterns, and label each claim with its supporting observations. The
    orchestrator finishes the structure and writes `<dream-output>/_dream/notes.md`, one entry
-   per change unit with its sessions.
+   per change unit with its sessions and a `claims` array. Each claim has
+   `section_key`, `text`, `label` (`observed`, `quoted`, or `inference`),
+   `anchors`, and `supersedes` (the changed section's key and clone version,
+   or null for a new section). All added nonblank body lines and new titles
+   must appear in claim text; removals also require a supported rationale.
+
+   `ops/dream.py:condense()` returns observation objects with `kind`, `text`,
+   and an `anchor` containing `transcript_ref`, `entry_index`, and `item_index`.
+   Indexes are zero-based parsed JSON-object and content-item indexes, so
+   malformed/blank JSONL lines do not count. Keep the referenced transcript
+   unchanged alongside this evidence. Commands, exit statuses, test totals,
+   failure and error lines survive; whole tool logs do not. Existing secret
+   patterns redact before truncation. The shared secret redactor removes whole
+   PEM, OpenSSH and PGP private-key blocks, including payloads. It carries block
+   state across ordered observations; an unterminated block suppresses the
+   remaining text until a matching END marker, before output-size caps apply.
+   Each item is capped at 2,000 characters;
+   tool excerpts select at most 24 relevant lines of 500 characters each.
+   The default per-transcript budget is 40k estimated tokens (four serialized
+   characters per token, not model-token accounting). Items that do not fit
+   are omitted, so their anchors cannot support claims. This bounds model input,
+   not the transcript reader's memory use.
+
+   The trusted caller passes `apply()` a mapping from allowed session IDs to
+   the preserved `condense()` output. Evidence is caller-owned input, outside
+   the model-edited clone. An untrusted worker must not construct this mapping.
+   Before application, the verified input mapping is also preserved as
+   `evidence.json` in the private sibling dream-state directory beside the
+   journal and receipt. Keep this with the clone for its retention period.
+   Session IDs alone are no longer sufficient.
 4. **Diff.** `git diff` against the clone commit.
 5. **Verify.** All checks are deterministic.
    1. **Rebase (D14):** drop and record change units on moved sections.
-   2. **Provenance:** every remaining change cites an input session.
+   2. **Provenance:** every changed claim cites anchors present in the condensed
+      evidence of its named allowed session, with its label and superseded
+      section version. Observed claims require all non-stopword alphanumeric
+      tokens to occur in the cited observations. Assistant prose cannot support
+      an observed claim. For every label, success claims (`passed`, `succeeded`,
+      `green`, `all pass`) are refused when cited evidence contains a positive
+      failure/error count, a FAIL/✖/not-ok marker or a nonzero parsed exit status.
+      Contradictions outrank keyword overlap; zero-failure totals with exit zero
+      are benign. Other quoted and inference claims still require real anchors;
+      their meaning is not checked.
+      Labels and citations are appended to written section bodies; retire
+      rationales remain in the dream report. The lexical check cannot establish
+      entailment, scope, negation, chronology, source truth, poisoning resistance,
+      or completeness of model-declared claims. It can reject valid paraphrases.
+      Keyword stuffing remains an explicit limitation. It does not replace
+      substantive review.
    3. **Secrets:** `ops/ci-secret-scan.py` is clean.
    4. **Shape:** front matter is intact and the index is at most 300 sections.
    5. **Gates:** `dry-run-doctrine-gates` passes.

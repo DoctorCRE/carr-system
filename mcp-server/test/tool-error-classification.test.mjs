@@ -308,10 +308,10 @@ test("every tools.js ToolError code is classified", t => {
     "a51a7e48501621ccd17585ed3b6fc0364e758a8ae05371b31fdc8acbcc0947e7",
     "a851aca64ebd6fbb6b15f543fafbbf7d34e127184b57960d7bb143b580bf450d",
     "aee5b46a1bbeed53b669b4e5b6f6f17d5b38fafd2821b81789b0041e0fb7b81e",
+    "bcb27572be7ffd1bca3645633c3f2921c9245477006ffa970c165fb9786a30d0",
     "c313a94c9354e3f838359c0e457cadbbebd3d4246bcf5a1b765dae46a142c1d5",
     "c313a94c9354e3f838359c0e457cadbbebd3d4246bcf5a1b765dae46a142c1d5",
     "c313a94c9354e3f838359c0e457cadbbebd3d4246bcf5a1b765dae46a142c1d5",
-    "e998022cdbc1caf206bbb2c690e14d76d6e696cf9c771e79200d1a2fff2b8bf3",
     "efba707fdfa59669e1a3f44fe8bfb4309e4cd13437c54b20392363eba89b4f8e",
     "f63a0f2a5645ee4947efb2591ff71cead89f796204ec510bc9e682a4e66c6c1f",
   ], "review changed dynamic code producers");
@@ -386,4 +386,25 @@ test("changes to a dynamic code producer require review", () => {
   const source = 'function helper() { for (const field of ["stage"]) throw new ToolError({ error: `unknown_${field}` }); }';
   const changed = source.replace('["stage"]', '["stage", "lane"]');
   assert.notDeepEqual(codesIn(source).fingerprints, codesIn(changed).fingerprints);
+});
+
+
+test("find-rule validation and forwarded identity errors retain their private classification", async t => {
+  t.mock.method(console, "error", () => {});
+  const { TOOLS } = await import("../src/tools.js");
+  const partner = { slug: "joe", human: true };
+  const noQuery = { query: () => assert.fail("refusals must precede database access") };
+  for (const [args, actor, code] of [
+    [{ text: " " }, partner, "rule_search_text_required"],
+    [{ text: "rule", status: "invalid" }, partner, "invalid_rule_status"],
+    [{ text: "rule", limit: 0 }, partner, "invalid_rule_search_limit"],
+    [{ text: "rule" }, { slug: "unknown" }, "invalid_runtime_principal"],
+    [{ text: "rule" }, { slug: "claude", human: false, via: "oauth-google" }, "missing_or_ambiguous_sponsor"],
+  ]) {
+    await assert.rejects(TOOLS["find-rule"].handler(noQuery, actor, args), error => {
+      assert.equal(error.payload.error, code);
+      assert.equal(publicError(error).error, "unhandled_verb_failure");
+      return true;
+    });
+  }
 });
