@@ -128,6 +128,7 @@ export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       handler: async (c, actor) => {
         if (!partnerAuthoritySlugForActor(actor)) throw new ToolError({ error: 'partner_required' });
+        const owners = await partnerOwnerIds(c, actor);
         const rows = (await c.query(`
         select e.id as assessment_id,e.subject_id as deal_id,d.name as deal_name,e.new_value as assessment,
           'review-deal-update' as confirm_verb
@@ -136,9 +137,9 @@ export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds
           and not exists(select 1 from event newer where newer.subject_id=e.subject_id and newer.field=e.field
             and newer.new_value#>>'{action,id}'=e.new_value#>>'{action,id}' and newer.mutation_order>e.mutation_order)
           and not exists(select 1 from event r where r.field='overdue_review' and r.new_value->>'assessment_id'=e.id::text)
-          and (exists(select 1 from next_action a where a.id=(e.new_value#>>'{action,id}')::uuid and a.status='open')
-            or exists(select 1 from capture_post_call_action a where a.id=(e.new_value#>>'{action,id}')::uuid and a.status='open'))
-        order by e.recorded_at,e.id limit 201`, [organizationTenantForActor(actor), visibleScopes(actor)])).rows;
+          and (exists(select 1 from next_action a where a.id=(e.new_value#>>'{action,id}')::uuid and a.status='open' and a.owner_id=any($3::uuid[]))
+            or exists(select 1 from capture_post_call_action a where a.id=(e.new_value#>>'{action,id}')::uuid and a.status='open' and a.owner_id=any($3::uuid[])))
+        order by e.recorded_at,e.id limit 201`, [organizationTenantForActor(actor), visibleScopes(actor), owners])).rows;
         if (rows.length > 200) throw new ToolError({ error: 'deal_update_reviews_limit_exceeded' });
         return { schema_version: 'deal-update-reviews.v1', proposals: rows };
       },
@@ -156,14 +157,18 @@ export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds
           throw new ToolError({ error: 'invalid_review' });
         const event = (await c.query("select subject_id,new_value,idempotency_key from event where id=$1 and subject_type='deal' and field='overdue_assessment' and organization_tenant_id=$2 and personal_scope=any($3::text[])", [args.assessment_id, organizationTenantForActor(actor), visibleScopes(actor)])).rows[0];
         if (!event) throw new ToolError({ error: 'assessment_not_found' });
+        const a = event.new_value;
+        const owners = await partnerOwnerIds(c, actor);
+        const owned = await c.query(a.action.source === 'next_action'
+          ? 'select 1 from next_action where id=$1 and owner_id=any($2::uuid[])'
+          : 'select 1 from capture_post_call_action where id=$1 and owner_id=any($2::uuid[])', [a.action.id, owners]);
+        if (!owned.rows.length) throw new ToolError({ error: 'not_action_owner' });
         await lockDealField(c, event.subject_id, 'next_date');
         await lockDealField(c, event.subject_id, 'next_step');
-        const a = event.new_value;
         if ((await c.query("select 1 from event where field='overdue_review' and new_value->>'assessment_id'=$1", [args.assessment_id])).rows.length)
           throw new ToolError({ error: 'assessment_already_reviewed' });
         if (args.decision === 'undo' ? !a.resolved : !a.review_required)
           throw new ToolError({ error: 'invalid_review_decision' });
-        const owners = await partnerOwnerIds(c, actor);
         const current = (await c.query(a.action.source === 'next_action'
           ? 'select updated_at::text as updated_at,version from next_action where id=$1 and owner_id=any($2::uuid[]) for update'
           : 'select updated_at::text as updated_at from capture_post_call_action where id=$1 and owner_id=any($2::uuid[]) for update', [a.action.id, owners])).rows[0];
@@ -225,7 +230,7 @@ export function dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds
   async function preserved(c, deal) {
     return (await c.query(`select distinct (e.new_value#>>'{action,id}')::uuid as id
       from event e where e.subject_type='deal' and e.subject_id=$1 and e.field='overdue_assessment'
-        and e.new_value->>'resolved'='false'
+        and e.new_value->>'resolved'='false' and e.recorded_at >= current_timestamp - interval '14 days'
         /* deal-update:preserved */`, [deal])).rows.map(row => row.id);
   }
   return { assess, tools, preserved };

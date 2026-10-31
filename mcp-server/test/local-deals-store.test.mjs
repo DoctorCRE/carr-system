@@ -339,6 +339,65 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         }
       }));
 
+    await t.test('overdue proposals belong only to the action owner', async () => transaction(async () => {
+      await fixture(false);
+      const dell = {...actor, id: id(7), slug: 'dell'};
+      await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'dell','Synthetic Partner Two','human',true)", [dell.id]);
+      await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      c.jevClient = jevStub('unclear');
+      await TOOLS['add-deal-note'].handler(c, actor, {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord may have sent terms.'});
+      await c.query("update event set personal_scope='none' where field='overdue_assessment'");
+      const joeReviews = await executeRegisteredTool(c, actor, 'read-deal-update-reviews', {});
+      assert.equal(joeReviews.proposals.length, 1);
+      assert.equal((await executeRegisteredTool(c, dell, 'read-deal-update-reviews', {})).proposals.length, 0);
+      await assert.rejects(executeRegisteredTool(c, dell, 'review-deal-update', {
+        idempotency_key: randomUUID(), assessment_id: joeReviews.proposals[0].assessment_id, decision: 'resolve', reason: 'Synthetic review',
+      }), error => error.payload?.error === 'not_action_owner');
+    }));
+
+    await t.test('one update resolves only the satisfied overdue action', async () => transaction(async () => {
+      await fixture(false);
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      const other = await accept(id(4), 'joe', '2020-01-01');
+      c.jevClient = {systemOne: async request => {
+        const answers = {};
+        for (const [i, action] of request.state.actions.entries()) {
+          const verdict = action.id === prior.next_action_id ? 'yes' : 'no';
+          answers[`action_${i}`] = {type: 'choice', choice: verdict, confidence: 0.99,
+            probabilities: Object.fromEntries(['yes', 'no', 'unclear'].map(v => [v, v === verdict ? 0.98 : 0.01]))};
+          answers[`quote_${i}`] = {type: 'choice', choice: 'quote_0'};
+        }
+        return {answers};
+      }};
+      await TOOLS['add-deal-note'].handler(c, actor, {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord sent the revised terms.'});
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'done');
+      assert.equal((await c.query('select status from capture_post_call_action where id=$1', [other])).rows[0].status, 'open');
+    }));
+
+    await t.test('a stale assessment stops preserving an overdue action after 14 days', async () => transaction(async () => {
+      await fixture(false);
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: '2020-01-01',
+      });
+      c.jevClient = jevStub('unclear');
+      await TOOLS['add-deal-note'].handler(c, actor, {idempotency_key: randomUUID(), deal: id(4), text: 'The landlord may have sent terms.'});
+      await c.query("update event set recorded_at=current_timestamp - interval '15 days' where field='overdue_assessment'");
+      await TOOLS['set-next-step'].handler(c, actor, {
+        base_version: (await c.query('select version from deal where id=$1', [id(4)])).rows[0].version,
+        idempotency_key: randomUUID(), deal: id(4), text: 'Follow up again', next_date: '2030-01-01',
+      });
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'dropped');
+    }));
+
     for (const decision of ['resolve', 'dismiss']) await t.test(`Home review can ${decision} an uncertain update after a separate next-step command`, async () => transaction(async () => {
       await fixture(false);
       const prior = await TOOLS['set-next-step'].handler(c, actor, {
