@@ -366,7 +366,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
                 JSON.stringify({ ...identity, subject: row.deal_id })]);
             }
           }
-          const result = args.status === 'sent' ? { status: 'sent', sent_item_id: args.sent_item_id, sender_account: args.sender_account, sent_at: args.sent_at }
+          const result = args.status === 'sent' ? { status: 'sent', sent_item_id: args.sent_item_id, sender_account: args.sender_account, sent_at: args.sent_at,
+            ...(['body_unverified', 'body_mismatch'].includes(args.reason) ? { reason: args.reason } : {}) }
             : { status: 'failed', reason: args.reason };
           await c.query(`update email_proposal set status=$2,version=version+1,send_result=$3::jsonb,result_recorded_at=now()
             where id=$1`, [row.id, args.status, JSON.stringify(result)]);

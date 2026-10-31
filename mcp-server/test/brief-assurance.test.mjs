@@ -46,7 +46,7 @@ before(async () => {
       ('${id(3)}','codex','automation',true);
     insert into signal_event values ('${id(1)}','v5-a05-delivery-cadence','synthetic-alert'),
       ('${id(2)}','unrelated-producer','synthetic-other');`);
-  const visibility = readMigration(new URL('../../migrations/1111_home_inbox.sql', import.meta.url).pathname)
+  const visibility = readMigration(new URL('../../migrations/1114_home_inbox.sql', import.meta.url).pathname)
     .match(/create function ops\.notification_visible[\s\S]*?\$\$;/i)[0];
   await db.query(visibility);
   const resolver = readMigration(new URL('../../migrations/0223_doctrine_search_reads_without_writing_or_reading_actor.sql', import.meta.url).pathname)
