@@ -1,6 +1,8 @@
 // Verify actor-scoped inbox reads and disposition commands on PostgreSQL.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import pg from 'pg';
+import { setTimeout } from 'node:timers/promises';
 import { readFileSync } from 'node:fs';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
@@ -103,6 +105,46 @@ test('Home inbox is an actor-scoped bounded snapshot over canonical records', as
     await change('snooze-home-inbox',[current],{until:'2099-11-01T12:00:00Z'});
     await c.query("update ops.home_inbox_disposition set snoozed_until='2000-01-01T00:00:00Z' where actor_id=$1 and item_id=$2",[joe.id,current.item_id]);
     assert.equal((await read()).items[0].disposition,'inbox');
+  });
+  await t.test('a concurrent material edit of a done task wakes snooze or refuses stale input',async()=>{
+    const editor=new pg.Client(c.connectionParameters);
+    await editor.connect();
+    let pending;
+    try {
+      const item=(await read()).items.find(i=>i.source_id===id(11));
+      const pid=(await c.query('select pg_backend_pid() pid')).rows[0].pid;
+      await c.query(`alter function ops.home_inbox_items(uuid) rename to home_inbox_items_observed;
+        create function ops.home_inbox_items(p_actor uuid) returns setof jsonb
+        language plpgsql stable set search_path=pg_catalog,pg_temp as $$
+        begin
+          return query select * from ops.home_inbox_items_observed(p_actor);
+          perform pg_advisory_lock(617003);
+          perform pg_advisory_unlock(617003);
+        end $$`);
+      await editor.query('select pg_advisory_lock(617003)');
+      pending=change('snooze-home-inbox',[item],{until:'2099-11-01T12:00:00Z'});
+      let waiting=false;
+      for(let attempt=0;attempt<200;attempt++) {
+        const state=await editor.query("select wait_event from pg_stat_activity where pid=$1",[pid]);
+        if(state.rows[0].wait_event==='advisory') {waiting=true;break;}
+        await setTimeout(10);
+      }
+      assert.equal(waiting,true,'command paused after observing the source version');
+      await editor.query("update next_action set description='Concurrent material instruction',version=version+1 where id=$1",[id(11)]);
+      await editor.query('select pg_advisory_unlock(617003)');
+      const result=(await pending).results[0];
+      assert.ok(result.ok || result.error==='version_conflict');
+      const current=(await read()).items.find(i=>i.item_id===item.item_id);
+      assert.equal(current.title,'Concurrent material instruction');
+      assert.equal(current.source_state,'done');
+      assert.equal(current.disposition,'inbox','the newer instruction must not be swallowed by snooze');
+    } finally {
+      await editor.query('select pg_advisory_unlock_all()');
+      if(pending) await pending;
+      await c.query(`drop function ops.home_inbox_items(uuid);
+        alter function ops.home_inbox_items_observed(uuid) rename to home_inbox_items`);
+      await editor.end();
+    }
   });
   await t.test('new failure or request wakes snooze; existing failure and background completion do not',async()=>{
     await c.query(`insert into ops.notification values($1,$2,'deal','synthetic','failure','Synthetic failure','/home','2026-10-29')`,[id(20),joe.id]);
