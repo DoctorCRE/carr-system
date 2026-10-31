@@ -1,22 +1,15 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { TOOLS } from '../src/tools.js';
 
 let fixture, pool, actor;
 before(async () => {
-  const bin = ['/opt/homebrew/opt/postgresql@18/bin', '/usr/lib/postgresql/18/bin', '/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin'].find(p => existsSync(`${p}/initdb`));
-  assert.ok(bin, 'Disposable PostgreSQL is required');
-  fixture = await acquireDisposablePostgres({ prefix: 'doc-completion-', pgCtl: `${bin}/pg_ctl` });
-  await fixture.run(`${bin}/initdb`, ['-D', `${fixture.root}/data`, '-U', 'carr_ci', '--auth=trust', '--no-locale']);
-  await fixture.run(`${bin}/pg_ctl`, ['-D', `${fixture.root}/data`, '-l', `${fixture.root}/server.log`, '-o', `-k ${fixture.root} -h ''`, '-w', 'start']);
-  await fixture.run(`${bin}/createdb`, ['-h', fixture.root, '-U', 'carr_ci', 'carr_ci']);
+  fixture = await acquireDisposablePostgres({ prefix: 'doc-completion-', snapshot: true });
   pool = new pg.Pool({ host: fixture.root, user: 'carr_ci', database: 'carr_ci' });
-  await pool.query('create role neondb_owner');
-  await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-f', new URL('../../db/schema.sql', import.meta.url).pathname]);
+
   actor = { ...(await pool.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => { try { await pool?.end(); } finally { await fixture?.close(); } });

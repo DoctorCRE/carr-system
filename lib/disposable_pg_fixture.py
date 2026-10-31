@@ -376,15 +376,25 @@ if __name__ == '__main__':
     parser.add_argument('--pg-ctl')
     parser.add_argument('--data-name')
     parser.add_argument('--directory', default='/tmp')
+    parser.add_argument('--snapshot', action='store_true')
+    parser.add_argument('--snapshot-template', action='store_true')
+    parser.add_argument('--snapshot-copy')
     args = parser.parse_args()
     if args.supervise:
         # Callers hold stdin open. EOF (caller closed or died) stops every
         # cluster this process launched; a close request lets the caller retain
         # the root as evidence.
         _supervising = True
+        binaries = postgres_bin_dir() if args.snapshot or args.snapshot_template else None
+        if binaries:
+            args.pg_ctl = str(binaries / 'pg_ctl')
         with DisposablePostgres(args.prefix, args.pg_ctl, directory=args.directory) as fixture:
             if args.data_name:
                 fixture.register(fixture.root / args.data_name)
+            if binaries:
+                from postgres_snapshot_fixture import start_snapshot
+                start_snapshot(fixture, binaries, Path(__file__).resolve().parents[1] / 'db/schema.sql',
+                               args.snapshot_copy, template=args.snapshot_template)
             print(fixture.root, flush=True)
             for line in sys.stdin:
                 request = json.loads(line)

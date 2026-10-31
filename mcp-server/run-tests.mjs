@@ -20,6 +20,9 @@ const PRIVATE_POSTGRES_SUITES = new Set([
   "journey-one-clock-input-store.v5.test.mjs", "journey-one-clock-store.v5.test.mjs",
   "lease-radar-postgres.test.mjs", "local-deals-ci-fixture.test.mjs", "local-deals-store.test.mjs", "whats-new-store.test.mjs",
   "self-closing-records-sql.test.mjs", "tool-call-retention-postgres.test.mjs", "unused-index-drop-postgres.test.mjs",
+  "clear-the-deck-postgres.test.mjs", "decision-about-work-request-postgres.test.mjs",
+  "complete-work-request-postgres.test.mjs", "org-conventions-postgres.test.mjs",
+  "team-memory-postgres.test.mjs", "doc-request-notify-postgres.test.mjs",
 ]);
 
 export function suiteBatches(files, browserFiles = []) {
@@ -46,28 +49,40 @@ async function main() {
     if ((await readFile(path.join(ROOT, "test", file), "utf8")).includes("chrome-launch.mjs")) browserFiles.push(file);
   }
   const failures = [];
-  for (const batch of suiteBatches(files, browserFiles)) {
-    if (!batch.length) continue;
-    let cursor = 0;
-    const workers = Math.min(batch.length, Number(process.env.CARR_CI_NODE_JOBS || 4));
-    if (!Number.isInteger(workers) || workers < 1) throw new Error('invalid CARR_CI_NODE_JOBS');
-    await Promise.all(Array.from({ length: workers }, async () => {
-      while (cursor < batch.length) {
-        const file = batch[cursor++];
-        let output = '';
-        const code = await new Promise((resolve, reject) => {
-          const child = spawn(process.execPath, ['--test', path.join(ROOT, 'test', file)],
-            { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
-          for (const [stream, destination] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) {
-            stream.on('data', chunk => { output += chunk; destination.write(chunk); });
-          }
-          child.once('error', reject);
-          child.once('close', (exitCode) => resolve(exitCode ?? 1));
-        });
-        if (code !== 0) { process.exitCode = 1; failures.push({ file, output }); }
-      }
-    }));
+  let template;
+  if (files.some(file => PRIVATE_POSTGRES_SUITES.has(file))) {
+    const started = performance.now();
+    const { acquireDisposablePostgres } = await import('./test/helpers/disposable-postgres.mjs');
+    template = await acquireDisposablePostgres({ prefix: 'mcp-snapshot-', template: true });
+    console.log(`suite-timing: snapshot-template ${(performance.now() - started).toFixed(0)}ms`);
   }
+  try {
+    for (const batch of suiteBatches(files, browserFiles)) {
+      if (!batch.length) continue;
+      let cursor = 0;
+      const workers = Math.min(batch.length, Number(process.env.CARR_CI_NODE_JOBS || 4));
+      if (!Number.isInteger(workers) || workers < 1) throw new Error('invalid CARR_CI_NODE_JOBS');
+      await Promise.all(Array.from({ length: workers }, async () => {
+        while (cursor < batch.length) {
+          const file = batch[cursor++];
+          let output = '';
+          const started = performance.now();
+          const code = await new Promise((resolve, reject) => {
+            const child = spawn(process.execPath, ['--test', path.join(ROOT, 'test', file)],
+              { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'],
+                env: { ...process.env, ...(template && { CARR_TEST_PG_SNAPSHOT: path.join(template.root, 'data') }) } });
+            for (const [stream, destination] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) {
+              stream.on('data', chunk => { output += chunk; destination.write(chunk); });
+            }
+            child.once('error', reject);
+            child.once('close', (exitCode) => resolve(exitCode ?? 1));
+          });
+          console.log(`suite-timing: ${file} ${(performance.now() - started).toFixed(0)}ms`);
+          if (code !== 0) { process.exitCode = 1; failures.push({ file, output }); }
+        }
+      }));
+    }
+  } finally { await template?.close(); }
   for (const { file, output } of failures) console.error(`FAILED SUITE ${file}\n${output}`);
   if (failures.length) console.error(`Failed suites: ${failures.map(({ file }) => file).join(", ")}`);
 }

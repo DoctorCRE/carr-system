@@ -126,6 +126,8 @@ class UnitClassTests(unittest.TestCase):
         result = self.run_class()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('mcp-server: 2 tests, 2 passed', result.stdout)
+        self.assertRegex(result.stdout, r'suite-timing: second\.test\.mjs \d+ms')
+        self.assertRegex(result.stdout, r'suite-timing: workspace-command-center-browser\.test\.mjs \d+ms')
 
     def test_mcp_failed_suite_survives_later_passing_suites(self):
         self.all_packages()

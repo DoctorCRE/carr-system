@@ -93,8 +93,14 @@ export async function acquirePostgresFixtureGroup() {
 }
 
 // The supervisor owns the cluster before initdb/start and survives abrupt Node exit.
-export async function acquireDisposablePostgres({ prefix, pgCtl, dataName = 'data' }) {
-  const fixture = await supervisor(['--supervise', '--prefix', prefix, '--pg-ctl', pgCtl, '--data-name', dataName, '--directory', tmpdir()], line => {
+export async function acquireDisposablePostgres({ prefix, pgCtl, dataName = 'data', snapshot = false, template = false }) {
+  const args = ['--supervise', '--prefix', prefix, '--data-name', dataName, '--directory', tmpdir()];
+  if (pgCtl) args.push('--pg-ctl', pgCtl);
+  if (snapshot || template) {
+    args.push(template ? '--snapshot-template' : '--snapshot');
+    if (!template && process.env.CARR_TEST_PG_SNAPSHOT) args.push('--snapshot-copy', process.env.CARR_TEST_PG_SNAPSHOT);
+  }
+  const fixture = await supervisor(args, line => {
     if (!line.startsWith('/')) throw new Error('invalid PostgreSQL fixture root response');
     return line;
   });

@@ -1,6 +1,6 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { mkdtemp, mkdir, copyFile, writeFile, chmod, rm } from 'node:fs/promises';
@@ -14,19 +14,11 @@ import { publicError } from '../src/public-errors.ts';
 
 let fixture, c, actor, connection;
 before(async () => {
-  const bin = ['/opt/homebrew/opt/postgresql@18/bin', '/usr/lib/postgresql/18/bin',
-    '/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin'].find(p => existsSync(`${p}/initdb`));
-  assert.ok(bin, 'PostgreSQL is required for the isolated record-layer proof');
-  fixture = await acquireDisposablePostgres({ prefix: 'complete-wr-', pgCtl: `${bin}/pg_ctl` });
-  await fixture.run(`${bin}/initdb`, ['-D', `${fixture.root}/data`, '-U', 'carr_ci', '--auth=trust', '--no-locale']);
-  await fixture.run(`${bin}/pg_ctl`, ['-D', `${fixture.root}/data`, '-l', `${fixture.root}/server.log`, '-o', `-k ${fixture.root} -h ''`, '-w', 'start']);
-  await fixture.run(`${bin}/createdb`, ['-h', fixture.root, '-U', 'carr_ci', 'carr_ci']);
+  fixture = await acquireDisposablePostgres({ prefix: 'complete-wr-', snapshot: true });
   connection = { host: fixture.root, user: 'carr_ci', database: 'carr_ci' };
   c = new pg.Client(connection);
   await c.connect();
-  await c.query('do $$ begin create role neondb_owner; exception when duplicate_object then null; end $$;');
-  const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
-  await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
+
   await c.query(readFileSync(new URL('../../migrations/1006_complete_work_request.sql', import.meta.url), 'utf8'));
   for (const name of ['1017_work_request_queue.sql', '1025_work_request_job_finished.sql', '1060_work_request_slice_outcome.sql'])
     if (!(await c.query('select 1 from schema_migrations where filename=$1', [name])).rows.length)
