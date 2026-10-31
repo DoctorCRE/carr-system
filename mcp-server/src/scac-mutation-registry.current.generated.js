@@ -346,6 +346,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "append-work-request-scope": {
+    "ingress_key": "mcp-tool:append-work-request-scope",
+    "source_locator": "mcp-server/src/work-request-intake.js",
+    "schema_digest": "9bf318b5e4b6a67de7ac4cfe24b91998c03321e48fa1cd06bf00e59ec1cf08fb",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "applicable-rules": {
     "ingress_key": "mcp-tool:applicable-rules",
     "source_locator": "mcp-server/src/tools.js",

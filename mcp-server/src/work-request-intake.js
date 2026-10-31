@@ -754,6 +754,64 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
         });
       },
     },
+    "append-work-request-scope": {
+      write: true,
+      description: "Append acceptance criteria, and optionally a short desired-outcome addendum, to one captured or triaged Work Request. Recorded criteria never change. Refuses rather than drops when the request would pass 12 criteria. Needs base_version from a fresh work-request-card read; a replay with the same idempotency_key returns the first result.",
+      inputSchema: { type: "object", additionalProperties: false, properties: {
+        idempotency_key: { type: "string", pattern: "^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$" },
+        human_ref: { type: "string", pattern: "^WR-[0-9]{1,12}$" },
+        base_version: { type: "integer", minimum: 1 },
+        criteria: { type: "array", minItems: 1, maxItems: 12, items: { type: "object", additionalProperties: false, required: ["id", "text"], properties: {
+          id: { type: "string", minLength: 2, maxLength: 64, pattern: "^[A-Z][A-Z0-9-]{1,63}$" }, text: { type: "string", minLength: 1, maxLength: 500 },
+        } } },
+        source_ref: { type: "string", minLength: 1, maxLength: 300 },
+        outcome_addendum: { type: "string", minLength: 1, maxLength: 500 },
+      }, required: ["idempotency_key", "human_ref", "base_version", "criteria", "source_ref"] },
+      handler: async (c, actor, args) => {
+        const fields = new Set(["idempotency_key", "human_ref", "base_version", "criteria", "source_ref", "outcome_addendum"]);
+        const text = (value, max) => typeof value === "string" && value.trim() !== "" && value.length <= max;
+        if (Object.keys(args).some(key => !fields.has(key)) || !UUID.test(args.idempotency_key || "") ||
+            !/^WR-[0-9]{1,12}$/.test(args.human_ref || "") || !Number.isInteger(args.base_version) || args.base_version < 1 ||
+            !Array.isArray(args.criteria) || !args.criteria.length || args.criteria.length > 12 ||
+            args.criteria.some(item => Object.keys(item || {}).sort().join() !== "id,text" || !CRITERION_ID.test(item.id) || !text(item.text, 500)) ||
+            !text(args.source_ref, 300) || (args.outcome_addendum !== undefined && !text(args.outcome_addendum, 500)))
+          throw new ToolError({ error: "invalid_scope_append", hint: "Supply a UUID key, human_ref, current base_version, 1-12 criteria {id,text}, and source_ref." });
+        const authorizationClass = authorizationClassForActor(actor);
+        if (!["verified_partner", "sponsored_agent"].includes(authorizationClass))
+          throw new ToolError({ error: "sponsored_actor_required", authorization_class: authorizationClass });
+        return withEnvelope(c, actor, "append-work-request-scope", { ...args, _server_actor_id: actor.id }, async () => {
+          await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', ['work-queue:' + organizationTenantForActor(actor)]);
+          const current = (await c.query('select id, state, version, desired_outcome, acceptance_criteria from ops.work_request where ref=$1 for update', [args.human_ref])).rows[0];
+          if (!current) throw new ToolError({ error: "work_request_not_found" });
+          if (["confirmed_closed", "declined", "superseded", "failed"].includes(current.state))
+            throw new ToolError({ error: "work_request_terminal_state" });
+          if (Number(current.version) !== args.base_version) throw new ToolError({ error: "version_conflict" });
+          // A ready plan was accepted against the recorded criteria; new scope there needs a plan amendment.
+          if (!["captured", "triaged"].includes(current.state))
+            throw new ToolError({ error: "work_request_scope_frozen", state: current.state });
+          const ids = [...current.acceptance_criteria, ...args.criteria].map(item => item.id);
+          const repeated = ids.filter((id, i) => ids.indexOf(id) !== i);
+          if (repeated.length) throw new ToolError({ error: "duplicate_criterion_id", ids: [...new Set(repeated)] });
+          if (ids.length > 12)
+            throw new ToolError({ error: "criteria_cap_exceeded", current: current.acceptance_criteria.length, appending: args.criteria.length, cap: 12 });
+          const outcome = args.outcome_addendum === undefined ? current.desired_outcome : `${current.desired_outcome}\n\n${args.outcome_addendum.trim()}`;
+          if (outcome !== null && outcome.length > 4000)
+            throw new ToolError({ error: "invalid_scope_append", hint: "The desired outcome would pass 4000 characters; shorten outcome_addendum." });
+          const criteria = args.criteria.map(item => ({ id: item.id, text: item.text.trim() }));
+          const row = (await c.query(`update ops.work_request set acceptance_criteria=acceptance_criteria || $3::jsonb,
+            desired_outcome=$4, version=version+1, updated_at=now()
+            where id=$1 and version=$2 returning ref, state, version /* work-request-intake:append-scope */`,
+            [current.id, args.base_version, JSON.stringify(criteria), outcome])).rows[0];
+          if (!row) throw new ToolError({ error: "version_conflict" });
+          await writeEvent(c, actor, "append-work-request-scope", "ops_work_request", current.id, {
+            field: "acceptance_criteria", old: { version: args.base_version, criteria_count: current.acceptance_criteria.length },
+            new: { version: Number(row.version), appended: criteria, outcome_addendum: args.outcome_addendum ?? null, source_ref: args.source_ref },
+            idempotency_key: args.idempotency_key,
+          });
+          return { ok: true, human_ref: row.ref, state: row.state, version: Number(row.version), appended: criteria.map(item => item.id), criteria_count: ids.length };
+        });
+      },
+    },
     "complete-work-request": {
       write: true,
       description: "Complete one built Work Request with criterion evidence, merged change references, and authenticated independent attestation.",
