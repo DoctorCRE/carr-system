@@ -88,7 +88,7 @@ def event(goid, start, minutes=60, subject='Site visit', attendees=(), organizer
 
 
 def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identities=None, decoded=None,
-             folder_membership=True, rejected=None):
+             folder_membership=True, rejected=None, details_rejected=None):
     con = sqlite3.connect(path)
     con.executescript(SCHEMA)
     # Decoders built before WR-000502 have no local_keys column; keep testing that shape.
@@ -125,7 +125,8 @@ def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identiti
                      ('event_identities', len(events) if identities is None else identities),
                      ('events_decoded', len(events) if decoded is None else decoded),
                      # The slot decoder (WR-000589) reports rejected messages; older decoders do not.
-                     *([('messages_rejected', rejected)] if rejected is not None else [])])
+                     *([('messages_rejected', rejected)] if rejected is not None else []),
+                     *([('details_rejected', details_rejected)] if details_rejected is not None else [])])
     if folder_membership:
         con.executescript("""
             CREATE TABLE folders(id INTEGER PRIMARY KEY, account_id INTEGER, name TEXT,
@@ -1178,6 +1179,12 @@ class IntakeTest(unittest.TestCase):
         receipt = json.loads(output.getvalue().split('outlook-intake-receipt ', 1)[1].splitlines()[0])
         self.assertEqual(receipt['reason'], 'reconciled')
         self.assertEqual(self.fake.calls, [])
+
+    def test_rejected_details_raise_drift_alarm(self):
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=1), local_keys='77')], details_rejected=1)
+        self.assertEqual((result.state, result.counts['decoder_alarm'], result.counts['decoder_details_rejected']),
+                         ('degraded', 1, 1))
+        self.assertEqual(self.run_intake([], details_rejected=0).state, 'succeeded')
 
     def test_message_layout_alarm_clears_and_rearms_on_the_rejection_count(self):
         rows = [mail('pat@example.test', -timedelta(hours=1), local_keys='77')]
