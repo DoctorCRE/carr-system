@@ -10,6 +10,7 @@ import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeatur
 import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.ts";
 import { dealExtractionTools } from "./deal-extraction.js";
+import { factGenerationTools } from "./fact-generation.ts";
 import { factReviewTools } from "./fact-review.ts";
 import { factObservationTools } from "./fact-observations.ts";
 import { actionClosureTools } from "./action-closure.ts";
@@ -9100,6 +9101,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "work-request-intake": "mcp-server/src/work-request-intake.js",
   "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
   "fact-review": "mcp-server/src/fact-review.ts",
+  "fact-generation": "mcp-server/src/fact-generation.ts",
   "deal-extraction": "mcp-server/src/deal-extraction.js",
   "fact-observations": "mcp-server/src/fact-observations.ts",
   "practice-origination": "mcp-server/src/practice-origination.ts",
@@ -10709,6 +10711,7 @@ registerTools(workPortfolioTools({ ToolError }), "work-portfolio");
 registerTools(leaseTermComparisonTools({ ToolError }), "lease-term-comparison");
 registerTools(factObservationTools(), "fact-observations");
 registerTools(factReviewTools(), "fact-review");
+registerTools(factGenerationTools({ withEnvelope, writeEvent }), "fact-generation");
 registerTools(dealExtractionTools(), "deal-extraction");
 
 // The partner room (Idea 78): shared AI-to-AI transcript both Macs poll; raw

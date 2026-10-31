@@ -13,6 +13,10 @@ type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSche
 // Public shapes are deliberately closed. Never copy messages, hints, wrapped
 // details, event rows, driver codes, or arbitrary properties from a refusal.
 const PUBLIC_ERRORS = new Map<unknown, string>([
+  ["comparison_fact_blocked", "Confirm the named deal field and refresh its canonical version before preparing the comparison."],
+  ["comparison_template_unavailable", "Register a reviewed LOI grid template matching the generation snapshot."],
+  ["invalid_snapshot", "Prepare a new confirmed-fact comparison draft."],
+  ["stale_snapshot", "The comparison evidence changed. Prepare a new draft."],
   ["email_draft_failure_not_resubmittable", "This failed draft cannot be resubmitted. Review the failure before creating a new draft."],
   ["email_identity_owner_mismatch", "Use the authenticated partner as the mailbox owner."],
   ["email_identity_account_mismatch", "Use the mailbox account recorded for the authenticated partner."],
@@ -249,6 +253,8 @@ export function publicError(error: unknown, { env, inputSchema, fallback = "unha
   const code = PUBLIC_ERRORS.has(payload?.error) ? payload!.error : fallback;
   const result: PublicError = { error: code, correlation_id: correlationId,
     hint: PUBLIC_ERRORS.get(code) || "The operation failed. Quote the correlation_id when reporting it." };
+  if (code === "comparison_fact_blocked" && ["base_rent_per_sf", "landlord_ti_per_sf", "term_months", "free_rent_months"].includes(String(payload?.field)))
+    result.fields = [payload!.field];
   if (["unsupported_decision_about", "decision_about_work_request_not_found"].includes(code) &&
       typeof payload?.ref === "string" && /^WR-(?:[0-9]{1,12}|AI-[0-9]{3}|SIEP-[0-9A-Z]{2,3})$/i.test(payload.ref))
     result.hint += ` Reference: ${payload.ref}.`;
