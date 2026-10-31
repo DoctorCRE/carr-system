@@ -23,8 +23,9 @@ export async function discoverSuites(directory, { expected, external = [] }) {
   await visit();
   if (omitted.length) throw new Error(`Unit discovery would omit ${omitted.sort().join(', ')}; put unit suites directly in test/ and name them *.test.mjs or *.test.js.`);
   if (!Number.isInteger(expected) || expected < 1) throw new Error('Invalid checked-in unit suite count');
-  if (files.length !== expected)
-    throw new Error(`Unit suite inventory mismatch: found ${files.length}, expected ${expected}; ${files.length < expected ? 'drop' : 'increase'} ${Math.abs(expected - files.length)}. Check deleted, renamed or nested suites and update the checked-in count deliberately.`);
+  // A floor, not an exact count: independent PRs that add suites must not edit one shared line.
+  if (files.length < expected)
+    throw new Error(`Unit suite inventory mismatch: found ${files.length}, expected at least ${expected}; drop ${expected - files.length}. Check deleted, renamed or nested suites and lower the checked-in floor deliberately.`);
   return files.sort();
 }
 
