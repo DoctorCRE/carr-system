@@ -2,11 +2,9 @@ name: Review gate
 on:
   pull_request_target:
     branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    types: [opened, synchronize, reopened, ready_for_review, edited, auto_merge_enabled, auto_merge_disabled]
   pull_request_review:
     types: [submitted, edited, dismissed]
-  issue_comment:
-    types: [created, edited, deleted]
   merge_group:
     types: [checks_requested]
 permissions: {contents: read}
@@ -15,8 +13,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   evaluate:
-    permissions: {contents: read, pull-requests: read, issues: read, statuses: write}
-    if: github.event_name != 'issue_comment' || github.event.issue.pull_request
+    permissions: {contents: read, pull-requests: read, statuses: write}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -27,3 +24,4 @@ jobs:
       - run: python3 ops/review-gate-selftest.py && python3 ops/review-gate.py
         env:
           GH_TOKEN: ${{ github.token }}
+          CARR_REVIEW_APP_LOGIN: ${{ vars.CARR_REVIEW_APP_LOGIN }}

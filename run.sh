@@ -96,6 +96,7 @@ case "${1:-}" in
   regen)        shift; "$PY" "$REPO/tools/regen.py" "$@" ;;
   registry-audit) registry_audit "$@" ;;
   review-queue) review_queue "$@" ;;
+  review-pr) shift; "$PY" "$REPO/ops/review-submit.py" "$@" ;;
   brief-pack)   brief_pack "$@" ;;
   restore-rehearse) restore_rehearse "$@" ;;
   key-recovery-test) shift; key_recovery_test "$@" ;;
@@ -150,7 +151,7 @@ case "${1:-}" in
       "space-search <folder>|" \
       "salesforce-diff [--apply]|" \
       "registry-audit [--verbose] [--recovery --reason WHY [--vault PATH]]|" \
-      "review-queue [--fixture f.json]|" \
+      "review-queue [--fixture f.json]|review-pr <number> <approve|request-changes> --body-file <file> --reviewed-sha <sha>|" \
       "brief-pack [--section all|one-thing|prebriefs|capacity|monday-agenda|renewal-shortlist] [--quiet] [--recovery [--vault PATH]]|" \
       "retrieve [--recovery [--vault PATH]] <question>|" \
       "health [--act] [--recovery --reason WHY [--vault PATH]]|" \

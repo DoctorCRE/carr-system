@@ -27,25 +27,25 @@ def card_allowed(pr, files):
                 for line in (pr.get("body") or "").splitlines()))
 
 
-def approved(pr, files, comments):
+def approved(pr, files, reviews, reviewer_login):
     if SKIP_CI.search(pr.get("title") or ""):
         return False
-    sha_line = f'Reviewed-SHA: {pr["head"]["sha"]}'
-    # A changes verdict vetoes the current head until a new push.
-    verdicts = [lines[0] for lines in ((c.get("body") or "").splitlines() for c in comments)
-                if len(lines) >= 3 and lines[0] in ("VERDICT: APPROVE", "VERDICT: CHANGES")
-                and lines[1] == sha_line and lines[2].startswith("Reviewer: ")
-                and lines[2][10:].strip()]
-    if "VERDICT: CHANGES" in verdicts:
+    latest = {}
+    for review in sorted(reviews, key=lambda r: r.get("submitted_at") or ""):
+        user = (review.get("user") or {}).get("login")
+        state = review.get("state")
+        if user and state in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
+            latest[user.lower()] = review
+    if reviewer_login and latest.get(reviewer_login.lower(), {}).get("state") == "CHANGES_REQUESTED":
         return False
-    # Markdown-only PRs carry no runtime behaviour, so they merge on green CI at any size (Joe 2026-10-27).
-    if docs_only(pr, files):
-        return True
     risky = any(f.get("status") == "added" and f.get("filename", "").startswith(("bin/", "hooks/", "ops/", ".github/workflows/")) for f in files) or any(fnmatch.fnmatchcase(f.get(key, "").lower(), pattern)
                 for f in files for key in ("filename", "previous_filename") for pattern in RISKY)
-    if len(files) == pr["changed_files"] and pr["additions"] - pr["deletions"] <= 150 and not risky:
+    complete = len(files) == pr["changed_files"]
+    if complete and not pr.get("auto_merge") and pr["additions"] - pr["deletions"] <= 150 and not risky:
         return True
-    return verdicts[-1:] == ["VERDICT: APPROVE"]
+    author = (pr.get("user") or {}).get("login", "").lower()
+    return any(reviewer_login and user == reviewer_login.lower() and user != author and r["state"] == "APPROVED" and r.get("commit_id") == pr["head"]["sha"]
+               for user, r in latest.items())
 
 
 def api(path, payload=None):
@@ -76,13 +76,11 @@ def run(event, repo):
     sha = pr["head"]["sha"]
     status(sha, "pending")
     files = api(f"{root}/pulls/{number}/files?per_page=100")
-    comments = api(f"{root}/issues/{number}/comments?per_page=100")
     reviews = api(f"{root}/pulls/{number}/reviews?per_page=100")
-    comments = sorted(comments + [r for r in reviews if r.get("state") not in ("DISMISSED", "PENDING")], key=lambda item: item.get("submitted_at") or item.get("created_at") or "")
     card_ok = card_allowed(pr, files)
-    passed = card_ok and approved(pr, files, comments)
+    passed = card_ok and approved(pr, files, reviews, os.environ.get("CARR_REVIEW_APP_LOGIN", ""))
     latest = api(f"{root}/pulls/{number}")
-    if latest["head"]["sha"] == sha and latest.get("body") == pr.get("body"):
+    if latest["head"]["sha"] == sha and all(latest.get(k) == pr.get(k) for k in ("body", "title", "auto_merge", "base")):
         description = ("No skip-CI title; small safe diff or current-head approval required" if card_ok else
                        "Missing PR body line: Card: WR<number>.S<number>.J<number>")
         status(sha, "success" if passed else "failure", description)
