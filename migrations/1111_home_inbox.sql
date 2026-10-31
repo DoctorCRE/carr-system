@@ -7,7 +7,7 @@ returns boolean language sql stable set search_path=pg_catalog,ops as $$
 $$;
 
 create or replace function ops.notification_feed_facts(p_after timestamptz, p_limit integer)
-returns jsonb language plpgsql stable security definer set search_path=pg_catalog,ops,public
+returns jsonb language plpgsql stable security definer set search_path=pg_catalog,ops,public,pg_temp
 as $$
 declare v_actor uuid; v_limit integer; v_rows jsonb; v_unread integer;
 begin
