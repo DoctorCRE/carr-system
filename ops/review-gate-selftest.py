@@ -81,6 +81,26 @@ class ReviewGate(unittest.TestCase):
             self.assertEqual(api.call_count, 5)
 
 class MergeHistory(unittest.TestCase):
+    def test_text_blob_ids_are_ignored_but_binary_ids_are_not(self):
+        self.assertEqual(gate.review_delta(b"diff --git a/f b/f\nindex old..new 100644\n+x\n"), gate.review_delta(b"diff --git a/f b/f\nindex other..next 100644\n+x\n"))
+        self.assertNotEqual(gate.review_delta(b"diff --git a/f b/f\nindex old..new\nGIT binary patch\n"), gate.review_delta(b"diff --git a/f b/f\nindex old..next\nGIT binary patch\n"))
+
+    def test_main_changes_other_lines_in_same_file(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            def git(*args):
+                return subprocess.check_output(['git', '-C', raw, *args], text=True, stderr=subprocess.DEVNULL, env=fixture_env()).strip()
+            git('init', '-b', 'main'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.com')
+            lines = [f'line {i}\n' for i in range(30)]
+            (root / 'shared').write_text(''.join(lines)); git('add', 'shared'); git('commit', '-m', 'base')
+            git('checkout', '-b', 'feature'); lines[20] = 'reviewed change\n'
+            (root / 'shared').write_text(''.join(lines)); git('add', 'shared'); git('commit', '-m', 'feature')
+            old = git('rev-parse', 'HEAD'); git('checkout', 'main')
+            lines[20] = 'line 20\n'; lines[0] = 'main change\n'
+            (root / 'shared').write_text(''.join(lines)); git('add', 'shared'); git('commit', '-m', 'main')
+            base = git('rev-parse', 'HEAD'); git('checkout', 'feature'); git('merge', '--no-edit', 'main')
+            self.assertTrue(gate.unchanged_merges(raw, base, old, git('rev-parse', 'HEAD')))
+
     def test_only_unchanged_main_merge_preserves_review(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

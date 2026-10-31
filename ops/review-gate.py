@@ -54,6 +54,14 @@ def approved(pr, files, reviews, reviewer_login, preserved=lambda sha: False):
                for user, r in latest.items())
 
 
+def review_delta(diff):
+    sections = diff.split(b"diff --git ")
+    return b"diff --git ".join(
+        section if b"GIT binary patch\n" in section else
+        b"".join(line for line in section.splitlines(keepends=True) if not line.startswith(b"index "))
+        for section in sections)
+
+
 def unchanged_merges(git_dir, base, reviewed, head):
     def git(*args):
         return subprocess.check_output(["git", "-C", git_dir, *args], stderr=subprocess.DEVNULL, timeout=120, env=fixture_env())
@@ -73,7 +81,7 @@ def unchanged_merges(git_dir, base, reviewed, head):
         old_base = git("merge-base", base, reviewed).decode().strip()
         new_base = git("merge-base", base, head).decode().strip()
         opts = ("diff", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", "--no-renames")
-        return git(*opts, old_base, reviewed) == git(*opts, new_base, head)
+        return review_delta(git(*opts, old_base, reviewed)) == review_delta(git(*opts, new_base, head))
     except (subprocess.SubprocessError, OSError, UnicodeError):
         return False
 
