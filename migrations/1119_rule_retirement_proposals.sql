@@ -122,11 +122,11 @@ begin
   if coalesce(v_statement,'')='' and (v_text ~ '(^|\n)(Card|Packs|Convention):') then
     raise exception 'convention_proposal_malformed';
   end if;
-  -- The receipt references an existing replacement; assign its card after
-  -- retirement so the active-card uniqueness check permits reusing the id.
+  -- The receipt references an existing replacement. Its proposed status keeps
+  -- it outside the active-card unique index until retirement frees the card id.
   if coalesce(v_statement,'')<>'' then
-    insert into public.rule(statement,taught_by,status)
-    values (v_statement,v_actor,'proposed') returning id into v_rule;
+    insert into public.rule(statement,taught_by,status,card)
+    values (v_statement,v_actor,'proposed',v_card) returning id into v_rule;
   end if;
   for v_target in select value::uuid from jsonb_array_elements_text(v_retires) loop
     perform ops.retire_rule(v_target,
@@ -134,7 +134,6 @@ begin
       v_rule, 'adopt-rule:'||p_idempotency_key||':'||v_target::text);
   end loop;
   if coalesce(v_statement,'')<>'' then
-    update public.rule set card=v_card where id=v_rule;
     -- Delivery, never the capped shared layer0 boot recitation: a card on the
     -- control layer, a card-less convention on the pack layer of its named packs.
     v_layer := case when v_card is null then 'pack' else 'control' end;
