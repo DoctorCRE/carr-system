@@ -35,7 +35,8 @@ test('the correction fixture leases PostgreSQL before creating a cluster under t
       if (command === 'which') return { status: 0, stdout: ${JSON.stringify(postgres)} };
       throw new Error('unexpected command: ' + command);
     };
-    fs.existsSync = () => true;
+    const exists = fs.existsSync;
+    fs.existsSync = path => String(path).endsWith('/.venv/bin/python') ? exists(path) : true;
     syncBuiltinESMExports();
     await import(${JSON.stringify(pathToFileURL(join(repo, 'mcp-server/test/national-account-classification-correction.test.mjs')).href)});
   `;

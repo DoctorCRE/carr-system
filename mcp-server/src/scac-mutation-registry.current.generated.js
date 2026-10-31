@@ -4120,6 +4120,42 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "ingress_key": "db-relation-acl:ops.requirement_upload_visitor:carr_writer:delete",
       "ingress_kind": "db_relation_acl",
       "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "ops.future_work_link",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:ops.future_work_link:carr_writer:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_writer",
+      "relation": "ops.future_work_link",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:ops.future_work_link:carr_writer:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_authority",
+      "relation": "ops.future_work_link",
+      "grantable": false,
+      "privilege": "insert",
+      "ingress_key": "db-relation-acl:ops.future_work_link:carr_authority:insert",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
+    },
+    {
+      "grantee": "carr_authority",
+      "relation": "ops.future_work_link",
+      "grantable": false,
+      "privilege": "update",
+      "ingress_key": "db-relation-acl:ops.future_work_link:carr_authority:update",
+      "ingress_kind": "db_relation_acl",
+      "relation_kind": "r"
     }
   ],
   "secdef_execute": [
@@ -4464,6 +4500,21 @@ export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
       "signature": "ops.read_home_inbox()",
       "volatility": "s",
       "ingress_key": "db-function-acl:ops.read_home_inbox():carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.capture_sourced_work_request(p_origin_ref text, p_title text, p_desired_outcome text, p_acceptance_criteria jsonb, p_doctrine_section_id uuid, p_doctrine_revision_id uuid, p_idempotency_key uuid)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.capture_sourced_work_request(p_origin_ref text, p_title text, p_desired_outcome text, p_acceptance_criteria jsonb, p_doctrine_section_id uuid, p_doctrine_revision_id uuid, p_idempotency_key uuid):carr_authority:execute",
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true

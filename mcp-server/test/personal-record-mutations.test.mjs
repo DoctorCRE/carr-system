@@ -42,6 +42,9 @@ function database(verb, { owner = joe.id, shared = false, claimHolder = null,
   return { queries, writes, events, async query(text, params = []) {
     const sql = text.replace(/\s+/g, " ").trim();
     queries.push(sql);
+    if (sql.startsWith("select pg_advisory_xact_lock")) return {rows:[]};
+    if (sql.includes("ops.future_work_link")) return {rows:[{ref:'WR-999628'}]};
+    if (sql.includes("d.slug='team-memory'")) return {rows:[]};
     if (sql.startsWith("select request_hash")) return { rows: [] };
     if (sql.startsWith("select id from actor where slug"))
       return { rows: [joe, dell].filter(a => a.slug === params[0]).map(a => ({ id: a.id })) };

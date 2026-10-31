@@ -3,12 +3,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import { randomUUID, createHash, createHmac } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { postgresDatabase } from './helpers/postgres-database.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 import { createRequirementUploadHandler, MAX_UPLOAD_BYTES } from '../src/requirement-upload.js';
 import { readDealChecklist, CHECKLIST_SOURCES } from '../src/deal-checklist.ts';
-import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const actor = { id: randomUUID(), slug: 'joe', human: true };
@@ -16,29 +14,18 @@ const deal = randomUUID(), other = randomUUID();
 const pdf = Buffer.from('%PDF-1.7\nsynthetic closing document');
 
 test('a requested checklist row receives a quarantined PDF without becoming satisfied', async t => {
-  const fixture = await postgresDatabase('requirement-upload-');
-  const c = fixture.client;
+  const fixture = await acquireDisposablePostgres({prefix:'requirement-upload-',snapshot:true});
+  const c = new pg.Client(fixture.connection);
+  await c.connect();
   const objects = new Map();
   try {
-    const schema = readFileSync(new URL('../../db/schema.sql', import.meta.url), 'utf8');
-    for (const name of ['actor', 'attachment', 'event', 'tool_call'])
-      await c.query(schema.match(new RegExp(`CREATE TABLE public\\.${name} \\([\\s\\S]*?\\n\\);`))[0]);
-    await restoreEventIdentity(c, schema);
-    await c.query(`alter table actor add primary key(id); alter table attachment add primary key(id);
-      alter table tool_call add primary key(idempotency_key);
-      create role carr_reader; create role carr_writer; create role carr_authority; create schema ops;
-      create table deal(id uuid primary key, client_id uuid, deal_type text, owner text);
-      create table v_ref_index(subject_type text, subject_id uuid, ref text, display_name text);
-      create table doctrine_section(id uuid, status text, body_hash text);
-      create table v_deal_room_commission(deal_id uuid, commission_id uuid, status text, received_on date);
-      create function ops.scac_current_grant_contract() returns jsonb language sql as $$select '{"relation_dml":[]}'::jsonb$$;`);
-    await c.query("insert into actor(id,slug,kind,display_name,active) values($1,'joe','human','Synthetic partner',true)", [actor.id]);
-    await c.query("insert into deal values($1,$3,'purchase','joe'),($2,$3,'purchase','joe')", [deal, other, randomUUID()]);
-    await c.query("insert into v_ref_index values('deal',$1,'D-1','Synthetic closing'),('deal',$2,'D-2','Synthetic other')", [deal, other]);
-    for (const s of CHECKLIST_SOURCES) await c.query("insert into doctrine_section values($1,'active',$2)", [s.section_id, s.content_hash]);
-    await c.query(readFileSync(new URL('../../migrations/1105_requirement_requests.sql', import.meta.url), 'utf8'));
-    await c.query(readFileSync(new URL('../../migrations/1106_requirement_visitor_retention.sql', import.meta.url), 'utf8'));
-    await c.query('grant usage on schema ops to carr_writer');
+    actor.id = (await c.query("insert into actor(id,slug,kind,display_name,active) values($1,'joe','human','Synthetic partner',true) on conflict(slug) do update set active=true returning id", [actor.id])).rows[0].id;
+    const party=(await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic requirement client',$1,$1) returning id",[actor.id])).rows[0].id;
+    const client=(await c.query('insert into client(party_id,created_by,updated_by) values($1,$2,$2) returning id',[party,actor.id])).rows[0].id;
+    await c.query("insert into deal(id,name,client_id,deal_type,phase,owner,created_by,updated_by) values($1,'Synthetic closing',$3,'purchase','research','joe',$4,$4),($2,'Synthetic other',$3,'purchase','research','joe',$4,$4)",[deal,other,client,actor.id]);
+    const doc=(await c.query("insert into doctrine_document(slug,title,content_class,visibility) values('synthetic-requirements','Synthetic requirements','reference','shared') returning id")).rows[0].id;
+    for (const [index, source] of CHECKLIST_SOURCES.entries()) await c.query(`insert into doctrine_section(id,document_id,section_key,status,body_hash,ordinal)
+      values($1,$2,$3,'active',$4,$5) on conflict(id) do update set status='active',body_hash=excluded.body_hash`,[source.section_id,doc,'source-'+index,source.content_hash,index]);
     const call = async (name, args) => {
       await c.query('begin');
       try {
@@ -47,6 +34,7 @@ test('a requested checklist row receives a quarantined PDF without becoming sati
       } catch (error) { await c.query('rollback'); throw error; }
     };
     const requested = await call('request-checklist-document', { deal, row_key: 'title_commitment', owner: 'joe', due_on: '2020-01-01' });
+    assert.match(requested.work_request,/^WR-[0-9]+$/);
     assert.equal(requested.request.document_type, 'title_commitment');
     assert.equal(requested.request.source.section_id, CHECKLIST_SOURCES[2].section_id);
     await t.test('the checklist projects row ownership, deadline and request without altering milestone state', async () => {
@@ -223,5 +211,5 @@ test('a requested checklist row receives a quarantined PDF without becoming sati
       await c.query("update doctrine_section set body_hash='stale' where id=$1", [CHECKLIST_SOURCES[0].section_id]);
       await assert.rejects(call('request-checklist-document', { ...args, row_key: 'appraisal' }), /row_not_requestable/);
     });
-  } finally { await fixture.close(); }
+  } finally { try { await c.end(); } finally { await fixture.close(); } }
 });

@@ -1,3 +1,4 @@
+import { installFocusedFutureWorkStore } from './focused-future-work-store.mjs';
 import { readFileSync } from 'node:fs';
 
 // Restore event identity state after loading a database snapshot.
@@ -22,6 +23,10 @@ export async function applyPendingDealRoomReads(client) {
 }
 
 export async function applyFutureWorkSchema(client) {
+  if (!(await client.query("select to_regclass('ops.work_request') as relation")).rows[0].relation) {
+    await installFocusedFutureWorkStore(client);
+    return;
+  }
   if (!(await client.query("select to_regclass('ops.future_work_link') as relation")).rows[0].relation)
     await client.query(readFileSync(new URL('../../../migrations/1119_future_work_links.sql', import.meta.url), 'utf8'));
 }

@@ -12,9 +12,10 @@ create table ops.future_work_link (
   primary key(organization_tenant_id,source_ref)
 );
 create index future_work_link_work_request on ops.future_work_link(work_request_id);
-grant select on ops.future_work_link to carr_reader,carr_writer;
-grant insert on ops.future_work_link to carr_writer;
-grant update on ops.future_work_link to carr_writer;
+grant select on ops.future_work_link to carr_reader,carr_writer,carr_authority;
+grant select(id,ref,organization_tenant_id) on ops.work_request to carr_authority;
+grant insert on ops.future_work_link to carr_writer,carr_authority;
+grant update on ops.future_work_link to carr_writer,carr_authority;
 -- Extend the existing provenance alternatives without restating their lifecycle rules.
 do $record_capture_shape$
 declare existing_shape text;
@@ -131,16 +132,37 @@ end;
 $_$;
 
 
--- Account for the exact new writer grants in the existing live catalog.
+grant execute on function ops.capture_sourced_work_request(text,text,text,jsonb,uuid,uuid,uuid) to carr_authority;
+
+-- Account for exactly the new write capabilities in the existing live catalog.
 do $future_work_grants$
-declare contract jsonb := ops.scac_current_grant_contract(); privilege text;
+declare contract jsonb := ops.scac_current_grant_contract(); privilege text; grantee text; entry jsonb;
 begin
-  foreach privilege in array array['insert','update'] loop
-    contract := jsonb_set(contract,'{relation_dml}',contract->'relation_dml' || jsonb_build_array(jsonb_build_object(
-      'ingress_key','db-relation-acl:ops.future_work_link:carr_writer:'||privilege,
-      'ingress_kind','db_relation_acl','relation','ops.future_work_link','relation_kind','r',
-      'grantee','carr_writer','privilege',privilege,'grantable',false)));
+  foreach grantee in array array['carr_writer','carr_authority'] loop
+    foreach privilege in array array['insert','update'] loop
+      contract := jsonb_set(contract,'{relation_dml}',contract->'relation_dml' || jsonb_build_array(jsonb_build_object(
+        'ingress_key','db-relation-acl:ops.future_work_link:'||grantee||':'||privilege,
+        'ingress_kind','db_relation_acl','relation','ops.future_work_link','relation_kind','r',
+        'grantee',grantee,'privilege',privilege,'grantable',false)));
+    end loop;
   end loop;
+  select jsonb_build_object('config',to_jsonb(p.proconfig),'grantee','carr_authority',
+    'parallel',p.proparallel::text,'grantable',false,'privilege','execute',
+    'signature','ops.capture_sourced_work_request('||pg_get_function_identity_arguments(p.oid)||')',
+    'volatility',p.provolatile::text,'ingress_key','db-function-acl:ops.capture_sourced_work_request('
+      ||pg_get_function_identity_arguments(p.oid)||'):carr_authority:execute',
+    'ingress_kind','db_function_acl','function_kind',p.prokind::text,'security_definer',p.prosecdef)
+    into strict entry from pg_proc p where p.oid='ops.capture_sourced_work_request(text,text,text,jsonb,uuid,uuid,uuid)'::regprocedure;
+  contract := jsonb_set(contract,'{secdef_execute}',contract->'secdef_execute'||jsonb_build_array(entry));
   execute format('create or replace function ops.scac_current_grant_contract() returns jsonb '
     'language sql immutable set search_path=pg_catalog as %L','select '||quote_literal(contract::text)||'::jsonb');
 end $future_work_grants$;
+
+-- Existing SQL consumers (including incident links) use this same public card.
+do $record_card$
+declare definition text; marker text := '(w.doctrine_section_id is not null and d.visibility=''shared'' and w.state<>''needs_joe'')';
+begin
+  definition := pg_get_functiondef('ops.work_request_card(text,text)'::regprocedure);
+  if position(marker in definition)=0 then raise exception 'Work Request card visibility predicate drifted'; end if;
+  execute replace(definition,marker,'('||marker||' or (w.doctrine_section_id is null and w.origin_ref like ''record:%''))');
+end $record_card$;

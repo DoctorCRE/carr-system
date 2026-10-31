@@ -290,3 +290,16 @@ test('appending scope removes derived readiness until the added slice ships', as
   await close(2);
   assert.equal((await card()).ready_to_close,true);
 });
+
+test('shipped in-progress work is listed for closure while completion keeps its lifecycle guard',async()=>{
+  const ref='WR-999082';
+  await c.query(`insert into ops.work_request(ref,title,state,requester_actor,owner_actor,organization_tenant_id,program_key,program_ordinal,acceptance_criteria)
+    values($1,'Synthetic in-progress work','captured','joe','joe','carr-internal','carr-ai-engineering-suite-v1',9990,'[{"id":"AC-1","text":"Synthetic criterion"}]')`,[ref]);
+  await c.query("update ops.work_request set state='in_progress' where ref=$1",[ref]);
+  await command('plan-work-request-slices',{work_request:ref,slices:['Shipped scope'],idempotency_key:randomUUID()},actor,'carr_writer');
+  await command('close-work-request-slice',{work_request:ref,slice:1,base_version:1,outcome:'done',change_refs:completion(ref).change_refs,idempotency_key:randomUUID()},actor,'carr_writer');
+  const card=await command('work-request-card',{work_request:ref},actor,'carr_reader');
+  assert.equal(card.ready_to_close,true);
+  assert.equal(card.state,'in_progress');
+  await assert.rejects(command('complete-work-request',{...completion(ref),base_version:card.version},actor,'carr_writer'),e=>e.payload?.error==='work_request_not_completable');
+});

@@ -37,6 +37,7 @@ function records(verb, args, result, actor) {
   if (['set-next-step','set-next-action','log-outreach','add-deal-note'].includes(verb) && !result.next_action_id) return [];
   if (verb === 'resolve-candidate' && !args.accept) return [];
   if (verb === 'resolve-post-call-candidate' && result.status !== 'confirmed') return [];
+  if (kind === 'email_lead' && !result.pool_id) return [];
   if (verb === 'record-email-proposal' && !result.proposal_id) return [];
   if (verb === 'decide-meeting-action' && args.decision === 'decline') return [];
   if (kind === 'board_task') return Object.entries(args.snapshot.tasks || {})
@@ -50,7 +51,8 @@ function records(verb, args, result, actor) {
       .map(row => ({ ref: `convention:${row.section_id}`, section_id: row.section_id,
         title: args.title || args.items?.find(item => item.section_key === row.section_key)?.title || row.section_key || args.section_key, source: args }));
   }
-  const id = kind === 'board_question' ? `${partnerAuthoritySlugForActor(actor)}:${args.board_id}:${args.question_id}`
+  const id = ['capture','post_call_action'].includes(kind) ? args.candidate_id
+    : kind === 'board_question' ? `${partnerAuthoritySlugForActor(actor)}:${args.board_id}:${args.question_id}`
     : result.loop_id || result.decision_id || result.flag_id || result.defect_id || result.next_action_id
       || result.item?.id || result.request?.id || result.question?.id || result.proposal?.id
       || result.proposal_id || result.pool_id || result.critical_date_id || result.campaign_id || result.event?.id || args.item_id
@@ -58,7 +60,7 @@ function records(verb, args, result, actor) {
       || (kind === 'meeting_action' && `${args.meeting_id}:${result.action?.action_number || result.action_number || args.action_number || args.dedupe_key || args.idempotency_key}`)
       || result.ref || args.idempotency_key;
   return [{ ref: `${kind}:${id}`, title: args.title || args.summary || args.prompt || args.description
-    || args.next_step || args.goal || args.body || args.defect_class || args.kind || verb, source: args }];
+    || args.polished_text || args.proposed_text || args.next_action || args.row_key || args.text || args.name || args.next_step || args.goal || args.body || args.defect_class || args.kind || verb, source: args }];
 }
 
 export async function linkFutureWork(c, actor, verb, args, result, writeEvent) {
@@ -68,7 +70,13 @@ export async function linkFutureWork(c, actor, verb, args, result, writeEvent) {
     if (record.section_id && !(await c.query(`select 1 from doctrine_section s join doctrine_document d on d.id=s.document_id
       where s.id=$1 and d.slug='team-memory' and s.status='active' and s.section_key like 'conventions/proposed/%'`, [record.section_id])).rows.length) continue;
     const ref = record.ref;
-    const requested = args.work_request || record.work_request;
+    let requested = args.work_request || record.work_request;
+    if (FUTURE_WORK_WRITES[verb] === 'incident') {
+      const existing = (await c.query(`select l.ref from ops.incident_link l join ops.incident i on i.id=l.incident_id
+        where i.ref=$1 and l.kind='work_request' order by l.ref limit 1`, [args.ref])).rows[0];
+      if (existing && requested && requested !== existing.ref) throw new ToolError({error:'future_work_link_conflict',work_request:existing.ref});
+      requested ||= existing?.ref;
+    }
     await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [`future-work:${tenant}:${ref}`]);
     const prior = (await c.query(`select w.ref from ops.future_work_link f join ops.work_request w on w.id=f.work_request_id
       where f.organization_tenant_id=$1 and f.source_ref=$2`, [tenant,ref])).rows[0];
@@ -93,11 +101,14 @@ export async function linkFutureWork(c, actor, verb, args, result, writeEvent) {
         finding: ['select to_jsonb(r) as record from record_flag r where id=$1', result.flag_id],
         defect: ['select to_jsonb(r) as record from defect r where id=$1', result.defect_id],
         action: ['select to_jsonb(r) as record from next_action r where id=$1', result.next_action_id],
+        incident: ['select to_jsonb(r) as record from ops.incident r where ref=$1', args.ref],
         capture: ['select to_jsonb(r) as record from capture_candidate r where id=$1', args.candidate_id],
         post_call_action: ['select to_jsonb(r) as record from capture_post_call_candidate r where id=$1', args.candidate_id],
       }[kind];
       const source = persisted ? (await c.query(persisted[0], [persisted[1]])).rows[0]?.record || record.source : record.source;
-      const title = String(source.title || source.new_value?.title || source.body || source.description || source.actual || record.title).trim().slice(0,200) || verb;
+      const title = String(source.action_description || source.title || source.new_value?.title || source.payload?.title || source.payload?.text
+        || source.polished_text || source.proposed_text || source.summary || source.description || source.actual || source.body
+        || source.name || source.label || source.phrase || source.prompt || source.goal || record.title).trim().slice(0,200) || verb;
       const situation = JSON.stringify({ verb, source_ref:ref, record:source, result });
       wr = (await c.query(`select * from ops.capture_sourced_work_request($1,$2,$3,$4::jsonb,null,null,$5::uuid)`,
         [`record:${ref}`,title,`Complete the future work recorded at ${ref}.\nSource record (verbatim JSON):\n${situation}`,
@@ -107,6 +118,9 @@ export async function linkFutureWork(c, actor, verb, args, result, writeEvent) {
     }
     await c.query(`update ops.future_work_link set work_request_id=$3
       where organization_tenant_id=$1 and source_ref=$2`,[tenant,ref,wr.id]);
+    if (FUTURE_WORK_WRITES[verb] === 'incident') await c.query(`insert into ops.incident_link(incident_id,kind,ref,note)
+      select id,'work_request',$2,'Linked by future-work capture' from ops.incident where ref=$1
+      on conflict(incident_id,kind,ref) do nothing`,[args.ref,wr.ref]);
     links.push({source_ref:ref,work_request:wr.ref});
   }
   return links.length ? {...result,work_request:links[0].work_request,work_request_links:links} : result;

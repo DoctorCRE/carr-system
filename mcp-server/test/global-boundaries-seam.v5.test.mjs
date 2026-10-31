@@ -34,7 +34,7 @@ test("the seam call sits after coercion and before the handler, and maps an enfo
   const body = source.slice(start, source.indexOf("\nconst TOOL_REGISTRATION_SOURCE", start));
   const required = body.indexOf("assertRequiredArgs(tool.inputSchema, args);");
   const doorCall = body.indexOf("passBoundaryDoor({ verb: name, write: tool.write === true, actor, args,");
-  const handler = body.indexOf("return await tool.handler(client, actor, args);");
+  const handler = body.indexOf("const result = await tool.handler(client, actor, args);");
   assert.ok(required > 0 && doorCall > required && handler > doorCall,
     "the door runs after the required-argument check and before the handler");
   assert.match(body, /if \(error instanceof V5BoundaryDoorRefusal\) throw new ToolError\(error\.payload\);/);

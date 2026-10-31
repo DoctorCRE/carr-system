@@ -1,3 +1,4 @@
+import { applyFutureWorkSchema } from './helpers/snapshot-schema.mjs';
 // Tests canonical next action reads and concurrency safeguards.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,6 +30,7 @@ before(async () => {
   await c.query("create unique index one_open_next_action_per_owner on next_action(subject_type,subject_id,owner_id) where status='open' and item_title is null");
   await c.query('alter table tool_call add primary key(idempotency_key)');
   await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic owner'),($2,'codex','automation','Synthetic runtime')", [joe.id, agent.id]);
+  await applyFutureWorkSchema(c);
   await c.query(`create view v_ref_index as select 'client'::text subject_type, '${subject}'::uuid subject_id, 'C-901'::text ref`);
 });
 after(async () => fixture?.close());

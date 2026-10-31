@@ -1,4 +1,6 @@
 {
-  "expected": 410,
-  "external": ["invoice-review-regressions.postgres.mjs"]
+  "expected": 411,
+  "external": [
+    "invoice-review-regressions.postgres.mjs"
+  ]
 }

@@ -1,34 +1,17 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
-import { executeRegisteredTool } from '../src/tools.js';
+import { executeRegisteredTool, TOOLS } from '../src/tools.js';
 import { publicError } from '../src/public-errors.ts';
-import { applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
 
 let fixture, c, actor, connection;
 before(async () => {
-  const bin = ['/opt/homebrew/opt/postgresql@18/bin', '/usr/lib/postgresql/18/bin',
-    '/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin'].find(p => existsSync(`${p}/initdb`));
-  assert.ok(bin, 'PostgreSQL is required for the isolated record-layer proof');
-  fixture = await acquireDisposablePostgres({ prefix: 'complete-wr-', pgCtl: `${bin}/pg_ctl` });
-  await fixture.run(`${bin}/initdb`, ['-D', `${fixture.root}/data`, '-U', 'carr_ci', '--auth=trust', '--no-locale']);
-  await fixture.run(`${bin}/pg_ctl`, ['-D', `${fixture.root}/data`, '-l', `${fixture.root}/server.log`, '-o', `-k ${fixture.root} -h ''`, '-w', 'start']);
-  await fixture.run(`${bin}/createdb`, ['-h', fixture.root, '-U', 'carr_ci', 'carr_ci']);
-  connection = { host: fixture.root, user: 'carr_ci', database: 'carr_ci' };
+  fixture = await acquireDisposablePostgres({ prefix: 'future-work-', snapshot: true });
+  connection = fixture.connection;
   c = new pg.Client(connection);
   await c.connect();
-  await c.query('do $$ begin create role neondb_owner; exception when duplicate_object then null; end $$;');
-  const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
-  await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
-  await c.query(readFileSync(new URL('../../migrations/1006_complete_work_request.sql', import.meta.url), 'utf8'));
-  for (const name of ['1017_work_request_queue.sql', '1025_work_request_job_finished.sql', '1060_work_request_slice_outcome.sql', '1015_team_memory_store.sql'])
-    if (!(await c.query('select 1 from schema_migrations where filename=$1', [name])).rows.length)
-      await c.query(readFileSync(new URL('../../migrations/' + name, import.meta.url), 'utf8'));
-  await c.query(readFileSync(new URL('../../migrations/1119_future_work_links.sql', import.meta.url), 'utf8'));
-  await applyPendingDealRoomReads(c);
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => { try { await c?.end(); } finally { await fixture?.close(); } });
@@ -36,6 +19,7 @@ after(async () => { try { await c?.end(); } finally { await fixture?.close(); } 
 async function command(name, args = {}, identity = actor, role = null, client = c) {
   await client.query('begin');
   try {
+    await client.query("select set_config('carr.acting_actor_slug',$1,true),set_config('carr.verified_human_actor_slug',$1,true),set_config('carr.organization_tenant_id','carr-internal',true)",[identity.slug]);
     if (role) await client.query(`set local role ${role}`);
     const result = await executeRegisteredTool(client, identity, name, args);
     await client.query('commit');
@@ -61,7 +45,11 @@ let sharedWr;
 async function verify(verb, args, explicit = false) {
   const key = randomUUID();
   const call = {...args,idempotency_key:key,...(explicit ? {work_request:sharedWr} : {})};
-  const out=await command(verb,call,actor,'carr_writer');
+  const role=TOOLS[verb].authorityOnly ? 'carr_authority' : 'carr_writer';
+  const before=Number((await c.query('select count(*) from ops.work_request')).rows[0].count);
+  const out=await command(verb,call,actor,role);
+  const captured=Number((await c.query('select count(*) from ops.work_request')).rows[0].count);
+  if (explicit) assert.equal(captured,before,'an explicit WR must not mint another');
   assert.match(out.work_request,/^WR-[0-9]+$/);
   if (explicit) assert.equal(out.work_request,sharedWr);
   sharedWr ||= out.work_request;
@@ -71,9 +59,10 @@ async function verify(verb, args, explicit = false) {
     const stored=await c.query(`select w.ref from ops.future_work_link f join ops.work_request w on w.id=f.work_request_id where f.source_ref=$1`,[link.source_ref]);
     assert.equal(stored.rows[0].ref,out.work_request);
   }
-  const replay=await command(verb,call,actor,'carr_writer');
+  const replay=await command(verb,call,actor,role);
   assert.equal(replay.work_request,out.work_request);
   assert.deepEqual(replay.work_request_links,out.work_request_links);
+  assert.equal(Number((await c.query('select count(*) from ops.work_request')).rows[0].count),captured,'a replay must not mint again');
   return out;
 }
 for (const explicit of [false,true]) {
@@ -197,3 +186,83 @@ test('a conflicting explicit link refuses publicly and preserves the original as
   });
   assert.equal((await c.query('select count(*) from tool_call where idempotency_key=$1',[key])).rows[0].count,'0');
 });
+
+for (const explicit of [false,true]) {
+  test(`Doc obligations and correction proposals store ${explicit ? 'explicit' : 'minted'} WR`,async()=>{
+    await c.query(`insert into feature_switch(organization_tenant_id,name,description,default_enabled,enabled,audience,owner,expected_removal_on)
+      values('carr-internal','doc-suggestion-actions','Synthetic correction test',true,true,'team','joe','2099-12-31')
+      on conflict(organization_tenant_id,name) do update set enabled=true,audience='team',retired_at=null`);
+    const conversation=await command('create-doc-conversation',{title:'Synthetic follow-up conversation',idempotency_key:randomUUID()},actor,'carr_writer');
+    const turn=await command('add-doc-conversation-turn',{conversation_id:conversation.conversation_id,role:'human',body:'Deliver the synthetic product follow-up',idempotency_key:randomUUID()},actor,'carr_authority');
+    const out=await verify('suggest-doc-work',{conversation_id:conversation.conversation_id,source_sequence:turn.sequence,obligation_key:'synthetic-'+randomUUID(),polished_text:'Deliver synthetic follow-up',material_facts:{subject:'Synthetic product'}},explicit);
+    await verify('propose-doc-correction',{suggestion_id:out.suggestion_id,base_version:out.material_version,proposed_text:'Deliver and verify the synthetic follow-up',source_conversation_id:conversation.conversation_id,source_sequence:turn.sequence},explicit);
+  });
+  test(`meeting actions and acceptance preserve ${explicit ? 'explicit' : 'minted'} WR`,async()=>{
+    const meeting=await command('start-meeting',{title:'Synthetic follow-up meeting',platform:'zoom',native_identity:{source_system:'zoom',native_id:String(Date.now())+Number(explicit),native_id_epoch:randomUUID()},activation_intent:'one_tap_user_activation',client_instance:'synthetic',idempotency_key:randomUUID()},actor,'carr_writer');
+    const out=await verify('propose-meeting-action',{meeting_id:meeting.meeting_id,summary:'Deliver synthetic meeting follow-up',basis:'tentative_discussion',client_instance:'synthetic',command:{verb:'add-loop',args:{kind:'team_loop',owner:'joe',title:'Deliver synthetic meeting follow-up'}}},explicit);
+    await verify('decide-meeting-action',{meeting_id:meeting.meeting_id,action_number:out.action.action_number,base_revision:out.action.current_revision,decision:'accept',disposition:'execute',client_instance:'synthetic',work_request:out.work_request});
+  });
+  test(`email lead proposals store ${explicit ? 'explicit' : 'minted'} WR`,async()=>{
+    await verify('propose-email-lead',{address:'synthetic-'+randomUUID()+'@example.test',summary:'Synthetic request for practice space',first_seen_at:'2026-10-01T12:00:00Z',message_ref:'synthetic:'+randomUUID(),applies_to:'new_matter',evidence_quote:'I need help with a synthetic practice space.',confidence:0.9},explicit);
+  });
+  test(`email next-step proposals store ${explicit ? 'explicit' : 'minted'} WR`,async()=>{
+    await businessRecords();
+    const quote='Please call to discuss the synthetic practice space.';
+    const activity=(await c.query("insert into activity(client_id,actor_id,kind,summary,detail,occurred_at,source) values($1,$2,'email_in','Synthetic follow-up email',$3,now(),'stated') returning id",[syntheticClient,actor.id,quote])).rows[0].id;
+    await verify('record-email-proposal',{kind:'next_step',activity_id:activity,evidence_quote:quote,confidence:0.9,text:'Call the synthetic practice owner',next_date:'2026-11-04',owner:'joe'},explicit);
+  });
+}
+
+for (const explicit of [false,true]) {
+  test(`incident triage stores ${explicit ? 'explicit' : 'minted'} WR in its existing context links`,async()=>{
+    const ref='INC-20261031-'+(90+Number(explicit));
+    await c.query("insert into ops.incident(ref,title,severity,environment,detected_source,source_kind,source_ref) values($1,'Synthetic incident','SEV-2','local','synthetic','operator',$2)",[ref,'synthetic:'+randomUUID()]);
+    const out=await verify('triage-incident',{ref,next_action:'Investigate synthetic incident',impact_assessment:'unknown'},explicit);
+    assert.equal((await c.query("select l.ref from ops.incident_link l join ops.incident i on i.id=l.incident_id where i.ref=$1 and l.kind='work_request'",[ref])).rows[0].ref,out.work_request);
+    const native=await command('link-incident-work-request',{incident_ref:ref,work_request:out.work_request,idempotency_key:randomUUID()},actor,'carr_writer');
+    assert.equal(native.already_linked,true);
+  });
+}
+
+for (const explicit of [false,true]) {
+  test(`campaign objectives store ${explicit ? 'explicit' : 'minted'} WR`,async()=>{
+    const platform="synthetic-wr628";
+    await c.query("insert into marketing_subject(subject_type,slug,label) values('platform',$1,'Synthetic test platform') on conflict(subject_type,slug) do nothing",[platform]);
+    await verify('open-campaign',{name:'Synthetic campaign '+randomUUID(),goal:'Reach synthetic practice owners',success_criterion:'Three synthetic owner replies by the end of the window',starts_on:'2026-11-01',channels:[platform],confirm:true},explicit);
+  });
+  test(`captured next steps and assigned actions store ${explicit ? 'explicit' : 'minted'} WR`,async()=>{
+    await businessRecords();
+    const nonce=randomUUID();
+    const session=(await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,consent_announced_at,session_token_hash,expires_at,state_at)
+      values($1,'synthetic-device',$2,'meeting',now(),now(),$1,now()+interval '1 hour',now()) returning id`,[nonce,actor.id])).rows[0].id;
+    const candidate=(await c.query(`insert into capture_candidate(session_id,idempotency_key,batch_hash,item_index,kind,payload,evidence_quote,confidence)
+      values($1,$2,'synthetic',0,'next_step',$3::jsonb,'Introduce the synthetic lender',0.9) returning id`,[session,randomUUID(),JSON.stringify({deal:syntheticDeal,text:'Vendor introductions: synthetic lender '+randomUUID(),next_date:'2026-11-04'})])).rows[0].id;
+    await verify('resolve-candidate',{candidate_id:candidate,accept:true},explicit);
+    const post=(await c.query(`insert into capture_post_call_candidate(session_id,idempotency_key,batch_hash,item_index,kind,deal_id,assignee_slug,action_description,due_on,evidence_quote,confidence)
+      values($1,$2,'synthetic',0,'assigned_action',$3,'joe',$4,'2026-11-04','Call the synthetic vendor',0.9) returning id`,[session,randomUUID(),syntheticDeal,'Call synthetic vendor '+randomUUID()])).rows[0].id;
+    await verify('resolve-post-call-candidate',{candidate_id:post,accept:true},explicit);
+  });
+  test(`legacy checklist conversion stores ${explicit ? 'explicit' : 'minted'} WR`,async()=>{
+    await businessRecords();
+    const deal=(await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic legacy package',$1,'purchase','research','joe',$2,$2) returning id",[syntheticClient,actor.id])).rows[0].id;
+    await c.query("insert into deal_note(deal_id,kind,text,actor_id) values($1,'next_step','Vendor introductions: synthetic lender introduction',$2)",[deal,actor.id]);
+    await verify('backfill-deal-items',{deal},explicit);
+  });
+  test(`email action confirmation stores ${explicit ? 'explicit' : 'minted'} WR`,async()=>{
+    await businessRecords();
+    const quote='Can you send the synthetic floor plan by Friday?';
+    const activity=(await c.query("insert into activity(deal_id,client_id,actor_id,kind,summary,detail,occurred_at,source) values($1,$2,$3,'email_in','Synthetic request',$4,now(),'stated') returning id",[syntheticDeal,syntheticClient,actor.id,quote])).rows[0].id;
+    const args={deal:syntheticDeal,activity_id:activity,evidence_quote:quote,text:'Send the synthetic floor plan',next_date:'2026-11-06'};
+    const preview=await command('preview-email-next-step',args,actor,'carr_reader');
+    await verify('confirm-email-next-step',{...args,proposal_digest:preview.proposal_digest},explicit);
+  });
+  test(`checklist document requests store ${explicit ? 'explicit' : 'minted'} WR`,async()=>{
+    await businessRecords();
+    const {CHECKLIST_SOURCES}=await import('../src/deal-checklist.ts');
+    const doc=(await c.query("insert into doctrine_document(slug,title,content_class,visibility) values($1,'Synthetic requirements','reference','shared') returning id",['synthetic-requirements-'+randomUUID()])).rows[0].id;
+    for (const [index,source] of CHECKLIST_SOURCES.entries()) await c.query(`insert into doctrine_section(id,document_id,section_key,status,body_hash,ordinal)
+      values($1,$2,$3,'active',$4,$5) on conflict(id) do update set status='active',body_hash=excluded.body_hash`,[source.section_id,doc,'source-'+index,source.content_hash,index]);
+    const deal=(await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic request package',$1,'purchase','research','joe',$2,$2) returning id",[syntheticClient,actor.id])).rows[0].id;
+    await verify('request-checklist-document',{deal,row_key:'title_commitment',owner:'joe',due_on:'2026-11-04'},explicit);
+  });
+}
