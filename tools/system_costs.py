@@ -423,7 +423,8 @@ def collect(config, tokens, fetch=get_json, now=None):
         try:
             if provider == 'neon' and token:
                 cfg = config['neon']
-                neon_start = max(start, now.date() - timedelta(days=60))
+                # Neon's daily window is the last 60 days from the request; midnight 60 days back falls outside it.
+                neon_start = max(start, now.date() - timedelta(days=59))
                 base = {'from': neon_start.isoformat() + 'T00:00:00Z', 'to': end_iso, 'granularity': 'daily', 'org_id': cfg['org_id'],
                         'metrics': ','.join(cfg['rates']), 'limit': 100}
                 projects, seen, cursor = [], set(), None
