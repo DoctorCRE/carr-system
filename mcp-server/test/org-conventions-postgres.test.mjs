@@ -1,7 +1,8 @@
 // P1 S4 proof (docs/memory/team-memory-design.md §9): the staged convention
-// proposals, governance-queue's proposal lane, adopt-rule's refusals and one
-// in-person adoption, against a disposable PostgreSQL built as deploy builds
-// it: db/schema.sql, then every migration missing from its ledger.
+// proposals, governance-queue's proposal lane, adopt-rule's refusals and
+// adoption by partners and their sponsored agents, against a disposable
+// PostgreSQL built as deploy builds it: db/schema.sql, then every migration
+// missing from its ledger.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -19,9 +20,9 @@ const PLAN = JSON.parse(execFileSync('python3', [`${REPO}ops/stage-convention-pr
 
 // The connector Claude session and the local machine door, both sponsored by
 // Joe and both holding partner authority for ordinary humanOnly verbs.
-const claudeForJoe = { id: '10000000-0000-0000-0000-000000000011', slug: 'claude', human: false,
+const claudeForJoe = { slug: 'claude', human: false,
   sponsoring_human_slug: 'joe', native_agent_verified: true, via: 'oauth-agent', client_id: 'claude-client' };
-const joeLocal = { id: '10000000-0000-0000-0000-000000000010', slug: 'joe-local', human: false,
+const joeLocal = { slug: 'joe-local', human: false,
   sponsoring_human_slug: 'joe', native_agent_verified: true, via: 'local-token', client_id: 'local-verb' };
 
 let fixture, c, joe, dell;
@@ -41,6 +42,10 @@ before(async () => {
     via: 'dealroom-cookie', client_id: 'dealroom-pwa' });
   joe = await partner('joe');
   dell = await partner('dell');
+  // The dispatcher refuses an unprovisioned actor before any handler runs.
+  for (const agent of [claudeForJoe, joeLocal])
+    agent.id = (await c.query(`insert into actor(slug,kind,display_name) values($1,'automation','Synthetic agent')
+      on conflict(slug) do update set active=true returning id`, [agent.slug])).rows[0].id;
   await seedDeliveredRule();
 });
 
@@ -90,7 +95,7 @@ async function refused(promise, code) {
 
 const ruleCount = async () => Number((await c.query('select count(*) from rule')).rows[0].count);
 const adopt = (actor, proposal, as, extra = {}) => call(actor, 'adopt-rule', { section_id: proposal.section_id,
-  base_version: proposal.base_version, reason: 'Synthetic in-person adoption', ...extra }, as);
+  base_version: proposal.base_version, reason: 'Synthetic adoption', ...extra }, as);
 
 let queue;
 test('the staging plan writes every proposal through the team-memory gates, and no proposal touches rule', async () => {
@@ -107,16 +112,9 @@ test('the staging plan writes every proposal through the team-memory gates, and 
 
 const proposal = key => queue.find(p => p.section_key === `conventions/proposed/${key}`);
 
-test('adopt-rule refuses a claude-sponsored connector session and the local machine door', async () => {
-  for (const actor of [claudeForJoe, joeLocal])
-    await refused(adopt(actor, proposal('card-k01'), 'carr_authority_joe'), 'human_only_verb_requires_verified_partner');
+test('adopt-rule refuses the unattended runner', async () => {
   await refused(adopt({ ...joe, unattended: true }, proposal('card-k01'), 'carr_authority_joe'),
     'unattended_runner_authority_not_admitted');
-});
-
-test('adopt-rule refuses Joe\'s own claude.ai connector session: adoption is app-only', async () => {
-  const connector = { ...joe, via: 'oauth-google', client_id: 'claude-ai-connector' };
-  await refused(adopt(connector, proposal('card-k01'), 'carr_authority_joe'), 'rule_adoption_requires_app_approval');
   assert.equal((await c.query('select count(*) from rule where card is not null')).rows[0].count, '0');
 });
 
@@ -299,12 +297,27 @@ test('the governance queue describes retirement targets and optional replacement
   assert.deepEqual(row.packs, []);
 });
 
-test('agents and connector sessions cannot adopt a retirement proposal', async () => {
-  const old = await adoptCard('agent-retirement');
-  const p = await proposeText('agent-retire', `Retires: ["${old.rule_id}"]`);
-  for (const actor of [claudeForJoe, joeLocal])
-    await refused(adopt(actor, p, 'carr_authority_joe'), 'human_only_verb_requires_verified_partner');
-  await refused(adopt({ ...joe, via: 'oauth-google' }, p, 'carr_authority_joe'), 'rule_adoption_requires_app_approval');
+// Joe, 2026-10-31: "If you think a rule is needed you just make it a rule and
+// tell me you did it." The event row names the agent that adopted.
+test('Joe-sponsored agents and connector sessions adopt and retire rules themselves', async () => {
+  const connector = { ...joe, via: 'oauth-google', client_id: 'claude-ai-connector' };
+  for (const [i, actor] of [claudeForJoe, joeLocal, connector].entries()) {
+    const p = await proposeText(`agent-card-${i}`, `Convention: Synthetic agent rule ${i}.\nCard: {"id":"agent-card-${i}","placement":"CORE"}`);
+    const made = await adopt(actor, p, 'carr_authority_joe', { reason: 'The agent judged this rule useful.' });
+    assert.equal((await c.query('select status from rule where id=$1', [made.rule_id])).rows[0].status, 'active');
+    const r = await proposeText(`agent-retire-${i}`, `Retires: ["${made.rule_id}"]`);
+    const out = await adopt(actor, r, 'carr_authority_joe', { reason: 'The agent judged this rule obsolete.' });
+    assert.deepEqual(out.retired_rule_ids, [made.rule_id]);
+    assert.equal((await c.query('select status from rule where id=$1', [made.rule_id])).rows[0].status, 'retired');
+    const events = (await c.query(`select actor_id, via from event where verb='adopt-rule' and subject_id in ($1::uuid,$2::uuid)
+      order by recorded_at`, [made.rule_id, r.section_id])).rows;
+    assert.deepEqual(events, [{ actor_id: actor.id, via: actor.via }, { actor_id: actor.id, via: actor.via }]);
+  }
+});
+
+test('Dell\'s authority login still cannot retire through the Joe-only chain', async () => {
+  const old = await adoptCard('dell-retirement');
+  const p = await proposeText('dell-retire', `Retires: ["${old.rule_id}"]`);
   await refused(adopt(dell, p, 'carr_authority_dell'), 'rule_adoption_requires_joe');
   assert.equal((await c.query('select status from rule where id=$1', [old.rule_id])).rows[0].status, 'active');
 });

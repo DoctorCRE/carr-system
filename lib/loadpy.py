@@ -21,6 +21,7 @@ One helper, one error message that names the file it could not load.
 from __future__ import annotations
 
 import importlib.util
+import sys
 from types import ModuleType
 
 
@@ -31,5 +32,12 @@ def load_module_from_path(name: str, path: str) -> ModuleType:
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {name} from {path} — no importable module there")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # Register before executing: dataclasses and typing resolve the class's
+    # module through sys.modules while the module body runs.
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(name, None)
+        raise
     return module

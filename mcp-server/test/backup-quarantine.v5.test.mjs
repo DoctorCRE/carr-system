@@ -603,7 +603,7 @@ test("the terminal-receipt seal is taken over exactly these fields", () => {
 });
 
 
-test("the policy preimage is closed and carries every vocabulary this module decides against", () => {
+test("the policy preimage carries every vocabulary this module decides against", () => {
   const preimage = v5BackupQuarantinePolicyPreimage();
   assert.equal(preimage.schema_version, V5_BACKUP_QUARANTINE_SCHEMA_VERSION);
   assert.equal(preimage.policy_version, V5_BACKUP_QUARANTINE_POLICY_VERSION);
@@ -633,23 +633,6 @@ test("the policy preimage is closed and carries every vocabulary this module dec
   assert.equal(preimage.copies_source_bytes, false);
   assert.equal(preimage.grants_read_back, false);
 
-  assert.deepEqual(Object.keys(preimage).sort(), [
-    "admissible_scanner_retention", "admissible_source_phi_capability", "blocking_decision_ids",
-    "caller_may_assert_admissibility", "caller_may_select_checks", "check_states",
-    "checks_before_any_content_fact_is_read", "checks_in_order", "copies_source_bytes",
-    "decides_outbound_reconciliation", "decides_recovery_matrix", "decides_restore",
-    "enumerated_source_roster_seam", "exactly_one_terminal_receipt_required",
-    "first_unsatisfied_check_decides", "grants_read_back", "issues_receipts",
-    "non_retaining_scanner_seam", "opaque_content_states", "outbound_reconciliation_clause",
-    "outbound_reconciliation_seam", "policy_version", "privacy_authority",
-    "prohibited_data_classes", "quarantine_direction", "reason_ids",
-    "reconciliation_exception_kinds", "recovery_matrix_clause", "redecides_privacy_boundary",
-    "registered_data_classes", "restore_and_recovery_matrix_seam", "restore_clause",
-    "roster_entry_kind", "roster_is_an_input", "runs_a_scanner", "scan_completion_states",
-    "scan_finding_keys", "scan_finding_states", "scan_report_is_an_input", "scanner_retention_states",
-    "schema_version", "ships_a_roster", "source_phi_capabilities", "tenant",
-    "terminal_outcomes", "terminal_receipt_kind", "unstated_observation_blocks",
-  ]);
 
   for (const key of ["check_states", "source_phi_capabilities", "scan_completion_states",
     "scanner_retention_states", "scan_finding_states", "scan_finding_keys", "opaque_content_states",

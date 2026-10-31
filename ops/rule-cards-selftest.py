@@ -21,7 +21,9 @@ class CardTests(unittest.TestCase):
         cards = {c['id']: c['wording'] for c in load_cards()}
         for card in ('K12', 'A10'):
             self.assertIn('team-memory convention', cards[card])
-            self.assertIn('until Joe or Dell adopts', cards[card])
+            self.assertIn('adopt it with adopt-rule', cards[card])
+            self.assertIn('tell Joe', cards[card])
+            self.assertNotIn('bind', cards[card])
             self.assertNotIn(' in a PR', cards[card])
         self.assertIn('quote both, offer a skill', cards['K12'])
         self.assertNotIn('teach', cards['K12'])
