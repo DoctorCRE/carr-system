@@ -100,9 +100,9 @@ behavior, and CARR records. Do not ask for a separate Jev-specific approval or
 exclude a review merely because its category is not prelisted. Preserve source
 evidence, required checks, and any distinct reviewer-of-record requirement.
 
-## Run a Codex job
+## Run build sessions
 
-Launch `bin/codex-job <owner/repo> <new-branch> "<brief>" [-c model_reasoning_effort=high]` as a tracked background task and read its printed result; use several tasks for parallel work. Model and default effort come from `~/.codex/config.toml`.
+Use T3 Code to delegate work, wait for thread replies, and watch PRs.
 
 ## Authorized code homes and repository boundaries
 
@@ -274,6 +274,8 @@ Several sessions run against this one checkout at the same time.
 - Leave any modified file you did not write, and say so.
 
 ## Guidance changes
+
+A PR that retires a homemade piece in favor of a T3 feature updates CLAUDE.md in the same PR.
 
 Capture durable corrections as team-memory convention proposals, with the
 trade-off; they bind nobody until Joe or Dell adopts them in the app

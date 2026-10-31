@@ -75,17 +75,14 @@ no credential (the receipted break-glass close stays a human's call) and it is
 not `call-verb` — never reach for that generic passthrough to get at a verb
 the classifier declined; that is working around a denial rather than filing it.
 
-## Build sessions: lessons from the 2026-10-10 orchestrator
+## Build sessions
 
-Measured from the Orchestrator.macbook transcript (37 hours, 11 compactions,
-224 Stop turns). Each item is the fix, not the story.
-
-1. Launch `bin/codex-job <owner/repo> <new-branch> "<brief>" [-c model_reasoning_effort=high]` with the Bash tool's `run_in_background` and read its printed result. Start several tracked tasks for parallel work. Model and default effort come from `~/.codex/config.toml`.
-2. **The progress board is one per checkout**, resolved from the main working
-   tree; a worktree no longer needs its own `init`.
-3. **A Stop gate that holds the turn open is answered with the delta only**, and
-   if the gate misread a compaction summary or a request for instructions as an
-   order, that is the gate's defect: fix the gate, do not reword the reply.
+- Use T3 Code to delegate work, wait for thread replies, and watch PRs.
+- **The progress board is one per checkout**, resolved from the main working
+  tree; a worktree no longer needs its own `init`.
+- **A Stop gate that holds the turn open is answered with the delta only**, and
+  if the gate misread a compaction summary or a request for instructions as an
+  order, that is the gate's defect: fix the gate, do not reword the reply.
 
 ## Migration and release state
 Read current canonical migration/release state before naming frontier/blocker.
