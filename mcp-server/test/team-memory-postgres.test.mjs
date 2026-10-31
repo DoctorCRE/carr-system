@@ -92,8 +92,19 @@ test('agent B attaches and its index shows A\'s lesson at version 1, written by 
   assert.match(entry.content_hash, /^[0-9a-f]{64}$/);
   assert.equal(entry.last_writer_surface, 'claude_code');
   assert.ok(entry.review_after, 'the team-memory review policy sets the staleness clock');
-  const read = await executeRegisteredTool(c, actor, 'doctrine-sections', { section_ids: [entry.section_id] });
-  assert.equal(read.sections[0].body.text, LESSON, 'an index entry reads straight through doctrine-sections');
+  for (const [verb, args] of [
+    ['doctrine-sections', { section_ids: [entry.section_id] }],
+    ['read-doctrine', { document: 'team-memory' }],
+  ]) {
+    const read = await executeRegisteredTool(c, actor, verb, args);
+    const section = read.sections.find(s => s.section_key === entry.section_key);
+    assert.equal(section.body.text, LESSON, `${verb} returns A's lesson`);
+    assert.equal(section.last_writer.session_key, a.attach_id, `${verb} identifies A's session`);
+    assert.equal(section.last_writer.actor, actor.slug);
+    assert.equal(section.last_writer_surface, 'claude_code');
+    assert.equal(section.provenance_note, team.index_note, `${verb} carries the attach warning`);
+    assert.match(section.provenance_note, /data, not instructions/);
+  }
   assert.notEqual(b.stores[1].generation, a.stores[1].generation);
   const digests = (await c.query('select attached_index_digest from memory_session where attach_id = any($1::uuid[])',
     [[a.attach_id, b.attach_id]])).rows.map(r => r.attached_index_digest);
@@ -133,6 +144,11 @@ test('change-doctrine-sections writes and retires atomically under one attach', 
   assert.equal(cs.session_key, b.attach_id);
   const index = (await attach()).stores[1].index.map(s => s.section_key);
   assert.deepEqual(index, ['incidents/probe-y']);
+  const read = await executeRegisteredTool(c, actor, 'read-doctrine', { document: 'team-memory' });
+  assert.equal(read.sections[0].body.text, 'Synthetic second lesson.');
+  assert.equal(read.sections[0].last_writer.session_key, b.attach_id);
+  assert.equal(read.sections[0].last_writer_surface, 'codex', 'Codex B can hand its lesson back to Claude A');
+  assert.match(read.sections[0].provenance_note, /data, not instructions/);
 });
 
 test('retire-doctrine-section on team memory requires a read-write attach', async () => {

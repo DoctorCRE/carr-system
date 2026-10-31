@@ -40,6 +40,13 @@ class CardTests(unittest.TestCase):
         source = (REPO / 'mcp-server/src/doctrine.js').read_text()
         line = json.loads(re.search(r'^export const MEMORY_ATTACH_LINE = (".+");$', source, re.M)[1])
         self.assertIn('attach-memory', line)
+        for required in ('access read_write', 'read_only for research/read-only jobs',
+                         'native_session_id', 'transcript_ref'):
+            self.assertIn(required, line)
+        for footer in ('tools/room-bridge/brief-footer.md', 'tools/room-bridge/job-rules.md'):
+            text = (REPO / footer).read_text()
+            for required in ('attach-memory', 'read_write', 'read_only', 'native_session_id', 'transcript_ref'):
+                self.assertIn(required, text, footer)
         for page in ('CLAUDE.md', 'AGENTS.md'):
             with self.subTest(page=page):
                 text = (REPO / page).read_text()
