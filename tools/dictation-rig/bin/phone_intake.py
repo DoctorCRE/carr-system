@@ -256,7 +256,6 @@ def publish_status(session: Path, cfg: dict, token: str, bridge) -> bool:
 
 def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict:
     """One bounded sweep. The processor lock also excludes another invocation."""
-    from transcribe_session import TranscribeError
     counts = {'ready': 0, 'pending': 0}
     bridge = bridge_module()
     try:
@@ -307,7 +306,14 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                         counts['pending'] += 1
                         continue
                     counts['ready'] += 1
-                except (ValueError, OSError, RuntimeError, subprocess.SubprocessError, bridge.BridgeNetworkError, TranscribeError):
+                except Exception as exc:
+                    previous = post_call.read_json(session / post_call.STATUS_FILE) or {}
+                    attempts = previous.get('extraction_attempts', 0) + 1
+                    previous.update({'schema_version': post_call.SCHEMA_VERSION, 'session': session.name,
+                                     'state': 'needs_attention' if attempts >= config_limit('CALL_EXTRACTION_ATTEMPTS', 3) else 'blocked',
+                                     'updated_at': post_call.now(), 'extraction_attempts': attempts,
+                                     'next_attempt_at': None, 'reason': f'Phone processing failed: {type(exc).__name__}'})
+                    post_call.write_private(session / post_call.STATUS_FILE, previous)
                     counts['pending'] += 1
     except BlockingIOError:
         return {'busy': True}
@@ -318,9 +324,12 @@ def serve(root: Path, cfg: dict, token: str) -> None:
     stopped = threading.Event()
 
     def processor(slot):
-        while not stopped.is_set():
-            process_pending(root, cfg, token, slot=slot)
-            stopped.wait(30)
+        try:
+            while not stopped.is_set():
+                process_pending(root, cfg, token, slot=slot)
+                stopped.wait(30)
+        except BaseException:
+            os._exit(1)
 
     threads = [threading.Thread(target=processor, args=(slot,), daemon=True)
                for slot in range(config_limit('CALL_PROCESSORS', 1))]
