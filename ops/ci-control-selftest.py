@@ -134,9 +134,9 @@ class Controls(unittest.TestCase):
         new = state(event('synchronize',sha='b',run=2))
         self.assertEqual(old[0],new[0]); self.assertTrue(new[1])
         for action in wf['on']['pull_request']['types']:
-            self.assertEqual(state(event(action))[2:], (True, True))
+            self.assertEqual(state(event(action))[2:], (False, True))
         changed = state(event('synchronize',base='release',run=4))
-        self.assertEqual(changed[0],old[0]); self.assertEqual(changed[1:],(True,True,True))
+        self.assertEqual(changed[0],old[0]); self.assertEqual(changed[1:],(True,False,True))
         for name in ('schedule','workflow_dispatch'):
             a={'workflow':'CI','event_name':name,'event':{},'run_id':10}
             b={**a,'run_id':11}
@@ -145,7 +145,7 @@ class Controls(unittest.TestCase):
     def test_superseded_expensive_jobs_can_cancel(self):
         wf = workflow()
         event = {'event_name': 'pull_request', 'event': {'pull_request': {'draft': False}}}
-        for job in ('classes', 'migration-fixtures'):
+        for job in ('fast',):
             with self.subTest(job=job):
                 condition = wf['jobs'][job]['if']
                 self.assertTrue(expression(condition, event, cancelled=False))
@@ -157,7 +157,7 @@ class Controls(unittest.TestCase):
         self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
         self.assertIn('always()', wf['jobs']['checks']['if'])
         self.assertIn('!cancelled()', wf['jobs']['classes']['if'])
-        self.assertEqual(set(wf['jobs']['checks']['needs']), {'scope', 'classes', 'migration-fixtures'})
+        self.assertEqual(set(wf['jobs']['checks']['needs']), {'fast', 'scope', 'classes', 'migration-fixtures'})
         steps = wf['jobs']['checks']['steps']
         verdict = next(step for step in steps if step.get('name') == 'Fail unless every class group succeeded')
         self.assertIn('python3 ops/ci-evidence.py verdict', verdict['run'])

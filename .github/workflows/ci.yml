@@ -20,8 +20,49 @@ permissions:
   contents: read
 
 jobs:
+  fast:
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+      - run: python -m pip install -r requirements.lock
+      - run: npm --prefix mcp-server ci --no-audit
+      - run: npm --prefix practice-plugin ci --no-audit
+      - name: Identify the runner image for the zsh archive
+        id: zsh-image
+        run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
+      - name: Restore zsh package archives
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ runner.temp }}/zsh-debs/*.deb
+          key: zsh-ubuntu24-${{ runner.arch }}-${{ steps.zsh-image.outputs.version }}-${{ hashFiles('ops/ci-zsh.sh') }}
+      - name: Install zsh
+        timeout-minutes: 12
+        env:
+          ZSH_RETRY_BACKOFF: "5"
+          ZSH_ARCHIVE_DIR: ${{ runner.temp }}/zsh-debs
+        run: ops/ci-zsh.sh
+      - run: sudo apt-get update -qq && sudo apt-get install -y poppler-utils libreoffice-calc
+      - run: bash ops/ci-postgres.sh
+      - name: Fast checks
+        env:
+          CARR_CI_PORTABLE_ONLY: "1"
+          GH_TOKEN: ${{ github.token }}
+          CARR_LOCAL_PG_ALLOW_HOSTED: "1"
+          CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
+        run: ops/ci.sh --strict --only "pushfloor unit types secret gates" --unit-part fast
+
   scope:
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -40,8 +81,8 @@ jobs:
           if-no-files-found: error
 
   classes:
-    # Dispatch immediately; migration classifies locally with the same scope owner.
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    # The full class matrix runs on merge groups and scheduled/manual checks.
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
     name: ${{ matrix.gate_shard == 2 && matrix.job_names.gates_shard_2.name || matrix.job_names[matrix.classes].name }}
     runs-on: ubuntu-24.04
     strategy:
@@ -198,7 +239,6 @@ jobs:
             if [ "${{ steps.scope.outputs.full }}" = false ]; then
               echo "migration: not applicable; see db-scope receipt" | tee -a "$GITHUB_STEP_SUMMARY"
             else
-              python3 ops/migration-open-pr-gate.py
               python ops/local-pg-ci.py --class migration --migration-part proofs
             fi
           else
@@ -224,7 +264,7 @@ jobs:
 
   migration-fixtures:
     needs: scope
-    if: ${{ !cancelled() && needs.scope.outputs.full != 'false' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.full != 'false' }}
     name: Migration ${{ matrix.part }}
     strategy:
       fail-fast: false
@@ -316,7 +356,7 @@ jobs:
     # the merge silently instead of saying why.
     name: ops/ci.sh --strict
     runs-on: ubuntu-24.04
-    needs: [scope, classes, migration-fixtures]
+    needs: [fast, scope, classes, migration-fixtures]
     permissions:
       contents: read
     if: ${{ always() }}
@@ -329,12 +369,13 @@ jobs:
         env:
           CI_DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
           CI_NEEDS: ${{ toJSON(needs) }}
+          CI_EVENT: ${{ github.event_name }}
         run: python3 ops/ci-evidence.py verdict
       - name: Record the tested tree and class contract
-        if: needs.scope.outputs.full != 'false' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+        if: github.event_name == 'merge_group' && needs.scope.outputs.full != 'false'
         run: python3 ops/ci-evidence.py record --output ci-evidence.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: needs.scope.outputs.full != 'false' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+        if: github.event_name == 'merge_group' && needs.scope.outputs.full != 'false'
         with:
           name: ci-tree-evidence
           path: ci-evidence.json

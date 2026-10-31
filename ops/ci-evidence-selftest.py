@@ -35,6 +35,14 @@ class HostedVerdict(unittest.TestCase):
                 self.assertEqual(evidence.hosted_verdict(), 0)
             self.assertIn('classes: PASSED', summary.read_text())
 
+    def test_pr_fast_lane_must_succeed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for state, expected in [('success', 0), ('failure', 1), ('cancelled', 1), ('skipped', 1)]:
+                with self.subTest(state=state), patch.dict(os.environ,
+                    CI_EVENT='pull_request', CI_NEEDS=json.dumps({'fast': {'result': state}}),
+                    CI_DRAFT='false', GITHUB_STEP_SUMMARY=str(pathlib.Path(directory) / 'summary')):
+                    self.assertEqual(evidence.hosted_verdict(), expected)
+
     def test_full_scope_rejects_skipped_fixtures_regardless_of_legacy_output(self):
         with tempfile.TemporaryDirectory() as directory:
             for fixtures, expected in (('false', 1), ('true', 1), ('', 1)):
@@ -84,8 +92,8 @@ class Reuse(unittest.TestCase):
     def setUp(self):
         self.tree = 'a' * 40
         self.run = {'id': 42, 'run_attempt': 2, 'head_sha': 'b' * 40, 'status': 'completed',
-                    'conclusion': 'success', 'event': 'pull_request', 'name': 'CI'}
-        self.receipt = {'event': 'pull_request', 'draft': False, 'schema': 'carr-ci-evidence/v1', 'run_id': 42, 'run_attempt': 2,
+                    'conclusion': 'success', 'event': 'merge_group', 'name': 'CI'}
+        self.receipt = {'event': 'merge_group', 'draft': False, 'schema': 'carr-ci-evidence/v1', 'run_id': 42, 'run_attempt': 2,
                         'head_sha': 'b' * 40, 'tested_sha': 'c' * 40,
                         'tree_sha': self.tree, 'contract': 'd' * 64,
                         'groups': ['gates', 'migration']}
@@ -100,6 +108,23 @@ class Reuse(unittest.TestCase):
     def test_exact_tree_success_records_source_run(self):
         self.assertTrue(self.eligible())
 
+    def test_fast_pr_receipt_is_never_reusable(self):
+        self.run['event'] = self.receipt['event'] = 'pull_request'
+        self.assertFalse(self.eligible())
+
+    def test_fast_pr_cannot_create_full_suite_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            event = pathlib.Path(directory) / 'event.json'
+            event.write_text(json.dumps({'pull_request': {'draft': False}}))
+            output = pathlib.Path(directory) / 'receipt.json'
+            result = subprocess.run([sys.executable, str(ROOT / 'ops/ci-evidence.py'),
+                                     'record', '--output', str(output)],
+                env={**os.environ, 'GITHUB_EVENT_NAME': 'pull_request',
+                     'GITHUB_EVENT_PATH': str(event), 'GITHUB_RUN_ID': '42',
+                     'GITHUB_RUN_ATTEMPT': '1'}, capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(output.exists())
+
     def test_draft_record_refuses_even_when_called_directly(self):
         with tempfile.TemporaryDirectory() as directory:
             event = pathlib.Path(directory) / 'event.json'
@@ -113,22 +138,19 @@ class Reuse(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse(output.exists())
 
-    def test_ready_receipt_binds_event_head_tree_contract_and_attempt(self):
+    def test_merge_group_receipt_binds_tree_contract_and_attempt(self):
         with tempfile.TemporaryDirectory() as directory:
             event = pathlib.Path(directory) / 'event.json'
-            event.write_text(json.dumps({'action': 'ready_for_review', 'pull_request': {
-                'draft': False, 'head': {'sha': 'b' * 40}}}))
+            event.write_text(json.dumps({'action': 'checks_requested'}))
             output = pathlib.Path(directory) / 'receipt.json'
             subprocess.run([sys.executable, str(ROOT / 'ops/ci-evidence.py'),
                             'record', '--output', str(output)],
-                env={**os.environ, 'GITHUB_EVENT_NAME': 'pull_request',
+                env={**os.environ, 'GITHUB_EVENT_NAME': 'merge_group',
                      'GITHUB_EVENT_PATH': str(event), 'GITHUB_RUN_ID': '42',
                      'GITHUB_RUN_ATTEMPT': '2'}, capture_output=True, text=True, check=True, timeout=10)
             receipt = json.loads(output.read_text())
-            self.assertEqual((receipt['event'], receipt['action'], receipt['draft']),
-                             ('pull_request', 'ready_for_review', False))
-            self.assertEqual((receipt['run_id'], receipt['run_attempt'], receipt['head_sha']),
-                             (42, 2, 'b' * 40))
+            self.assertEqual((receipt['event'], receipt['run_id'], receipt['run_attempt']),
+                             ('merge_group', 42, 2))
             self.assertEqual(receipt['tested_sha'], evidence.git('HEAD'))
             self.assertEqual(receipt['tree_sha'], evidence.git('HEAD^{tree}'))
             self.assertEqual(receipt['contract'], evidence.contract_digest())
@@ -159,28 +181,6 @@ class Reuse(unittest.TestCase):
                       contract='d'*64,groups=['gates','migration'])
             args[key]='e'*40
             self.assertFalse(evidence.can_reuse(self.run,self.jobs,self.receipt,**args))
-
-    def test_resolver_records_source_and_refuses_newer_red_run(self):
-        test = self
-        class GH:
-            runs = [test.run]
-            def api(self, path):
-                if path.endswith('/pulls'):
-                    return [{'merged_at':'2026-10-05', 'number': 11,
-                             'base':{'ref':'main'},'head':{'sha':'b'*40}}]
-                if 'event=merge_group' in path:
-                    return {'workflow_runs': []}
-                if '/runs?' in path:
-                    return {'workflow_runs': self.runs}
-                return {'jobs': test.jobs}
-            def tree(self, sha): return test.tree
-            def receipt(self, run): return test.receipt
-        gh = GH()
-        result = evidence.resolve(gh, 'f'*40, self.tree, 'd'*64, ['gates','migration'])
-        self.assertEqual(result['source_run_id'], 42)
-        for conclusion in ('failure', 'cancelled', 'skipped'):
-            gh.runs = [self.run, dict(self.run, id=43, conclusion=conclusion)]
-            self.assertEqual(evidence.resolve(gh,'f'*40,self.tree,'d'*64,['gates','migration']), {'reused':False})
 
     def test_merge_group_resolver_reuses_only_successful_identical_tree(self):
         self.run['event'] = self.receipt['event'] = 'merge_group'
