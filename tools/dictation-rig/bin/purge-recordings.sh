@@ -20,7 +20,8 @@
 #
 # THE GATE — all three must hold, or the session keeps everything, forever:
 #   1. ingested.json exists in the session directory, AND
-#   2. it names a meeting_record — the attributed narrative that satisfies
+#   2. a post-call receipt has report hashes and zero pending items, or
+#      it names a meeting_record — the attributed narrative that satisfies
 #      Joe's "who said what" condition. A marker without one means the
 #      summary half was never done, so the transcript is still the only
 #      account of the meeting and must not be deleted. This is checked here
@@ -30,7 +31,7 @@
 #      because weekends are not workdays (rule 236ca227), so a Friday
 #      ingestion is still re-runnable Monday morning.
 #
-# MARKER CONTRACT, for the WO-4 capture bridge (the intended writer):
+# MARKER CONTRACT, written by the capture bridge:
 #   ~/Recordings/<session>/ingested.json
 #   {"ingested_at": "<ISO-8601 UTC>",
 #    "by": "<actor>",
@@ -43,9 +44,9 @@
 # ALWAYS SURVIVES: announcement.json (consent proof must outlive everything it
 # documents), meta.json, ingested.json.
 #
-# Until the bridge ships, nothing writes markers, so this job purges NOTHING
-# and reports the held backlog. That is deliberate and the safe direction: the
-# bar rises before the deletion does.
+# The capture bridge writes filing receipts only after review is complete.
+# Existing receipts remain authoritative, including sessions filed before the
+# question gate. Unfiled sessions have no receipt and keep their recordings.
 set -eu
 
 RECORDINGS="$HOME/Recordings"
@@ -59,8 +60,8 @@ log_line() {
 [ -d "$RECORDINGS" ] || exit 0
 
 # Validates a marker against the gate's first two conditions and the grace
-# clock. Prints PURGE, or HOLD with the reason. Pure stdlib python3, same
-# dependency posture as transcribe_session.py.
+# clock. Prints PURGE, or HOLD with the reason. Uses only Python's standard
+# library. Post-call receipts require report hashes and zero pending items.
 marker_verdict() {
     python3 - "$1" "$GRACE_HOURS" <<'PY' 2>/dev/null || echo "HOLD unreadable-marker"
 import datetime, json, sys
@@ -69,6 +70,9 @@ try:
     marker = json.load(open(path))
 except Exception:
     print("HOLD unreadable-marker"); raise SystemExit(0)
+from pathlib import Path
+if Path(path).parent.name.startswith("phone-") and marker.get("post_call") is not True:
+    print("HOLD no-phone-filing-receipt"); raise SystemExit(0)
 if marker.get("post_call") is True:
     import re
     if re.fullmatch(r"[0-9a-fA-F]{64}", str(marker.get("aggregate_report_hash") or "")) is None:
@@ -99,12 +103,15 @@ for dir in "$RECORDINGS"/*/; do
     [ -d "$dir" ] || continue
     case "$(basename "$dir")" in
         [0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]-[0-9][0-9][0-9][0-9]) ;;
+        phone-????????-????-????-????-????????????) ;;
         *) continue ;;
     esac
 
     # Nothing left to reclaim in this session?
     have_something=0
-    for f in "$dir/mic.caf" "$dir/system.caf" "$dir/transcript.json" "$dir/transcript.md"; do
+    for f in "$dir/mic.caf" "$dir/system.caf" "$dir/transcript.json" "$dir/transcript.md" \
+             "$dir/imported.audio" "$dir/imported.wav" "$dir/imported.m4a" \
+             "$dir/imported.mp3" "$dir/imported.mp4" "$dir/imported.webm"; do
         [ -f "$f" ] && have_something=1
     done
     [ "$have_something" = "1" ] || continue
@@ -125,7 +132,9 @@ for dir in "$RECORDINGS"/*/; do
             ;;
     esac
 
-    for f in "$dir/mic.caf" "$dir/system.caf" "$dir/transcript.json" "$dir/transcript.md"; do
+    for f in "$dir/mic.caf" "$dir/system.caf" "$dir/transcript.json" "$dir/transcript.md" \
+             "$dir/imported.audio" "$dir/imported.wav" "$dir/imported.m4a" \
+             "$dir/imported.mp3" "$dir/imported.mp4" "$dir/imported.webm"; do
         if [ -f "$f" ]; then
             size=$(du -h "$f" | cut -f1)
             rm "$f"

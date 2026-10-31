@@ -86,6 +86,7 @@ import { OAuthProvider, getOAuthApi } from "@cloudflare/workers-oauth-provider";
 import { neon, Pool } from "@neondatabase/serverless";
 import { mcpApiHandler, dispatch } from "./mcp.js";
 import { handleAuthorize, handleCallback, handleConsent } from "./google-oidc.js";
+export { PhoneAudioHandoff } from './phone-audio-handoff.js';
 export { OAuthConsentState } from "./oauth-consent-state.ts";
 export { VerbRequestBudget } from "./verb-request-budget.js";
 export { AiNeuronBudget } from "./ai-budget.js";
@@ -98,6 +99,7 @@ import { authorizeProgram6Action, createDealroomHandler, isDealroomRequest, isLe
 import { createProgram6RoutineController } from "./program6-routine-controller.js";
 import { appendRoomTurn, DEFAULT_ROOM, OBSERVATORY_ROOM, readRoomLatest, readRoomQueue, readRoomTurns } from "./partner-room.js";
 import { createCaptureHandler } from "./capture.js";
+import { createPhoneCallHandler, PHONE_STUDIO_PREFIX } from "./phone-call-sessions.js";
 import { TOOLS } from "./tools.js";
 import { buildRelease } from "./release.js";
 import { readCommandCenterSummary } from "./workspace-command-center.js";
@@ -225,25 +227,31 @@ async function pipelineApi(request, env, actor) {
   }
 }
 
+function captureWriter(env) {
+  return async (fn) => {
+    const pool = new Pool({ connectionString: env.DATABASE_URL_WRITER });
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      const result = await fn(client);
+      await client.query("commit");
+      return result;
+    } catch (error) {
+      await client.query("rollback").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+      await pool.end();
+    }
+  };
+}
+
 function captureHandler(env) {
-  return createCaptureHandler({
-    withWriter: async (fn) => {
-      const pool = new Pool({ connectionString: env.DATABASE_URL_WRITER });
-      const client = await pool.connect();
-      try {
-        await client.query("begin");
-        const result = await fn(client);
-        await client.query("commit");
-        return result;
-      } catch (error) {
-        await client.query("rollback").catch(() => {});
-        throw error;
-      } finally {
-        client.release();
-        await pool.end();
-      }
-    },
-  });
+  return createCaptureHandler({ withWriter: captureWriter(env) });
+}
+
+function phoneCallHandler(env) {
+  return createPhoneCallHandler({ withWriter: captureWriter(env) });
 }
 
 const protectedApiHandler = {
@@ -621,6 +629,7 @@ const program6RoutineController = createProgram6RoutineController({ authorizeAct
 const tourInternalHandler = createTourInternalWebHandler(createTourRuntimeAdapters());
 const reportsHandler = createReportsWebHandler(createReportsRuntimeAdapters());
 const dealroomHandler = createDealroomHandler({
+  phoneCallHandler: (request, env, actor) => phoneCallHandler(env).fetch(request, env, actor),
   mcpHandler: (request, env, ctx, actor, sessionKey) => dispatch(request, env, ctx, actor, sessionKey),
   pipelineHandler: (request, env, _ctx, actor) => pipelineApi(request, env, actor),
   program6Handler: (request, env, ctx, actor, session) =>
@@ -685,6 +694,7 @@ async function routeRequest(request, env, ctx) {
   // that hostname instead of reaching an unrelated machine surface.
   if (isLegacyDealroomRequest(request, env)) return dealroomHandler.fetch(request, env, ctx);
   if (url.pathname.startsWith("/capture/")) {
+    if (url.pathname === PHONE_STUDIO_PREFIX || url.pathname.startsWith(PHONE_STUDIO_PREFIX + '/')) return phoneCallHandler(env).studioFetch(request, env);
     return captureHandler(env).fetch(request, env, ctx);
   }
   if (url.pathname === "/mcp") {

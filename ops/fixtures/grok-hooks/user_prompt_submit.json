@@ -1,0 +1,13 @@
+{
+ "hookEventName": "user_prompt_submit",
+ "sessionId": "00000000-0000-4000-8000-0000000000a1",
+ "cwd": "/repo/.grok-capture",
+ "workspaceRoot": "/repo",
+ "timestamp":"2026-10-31T00:00:00+00:00",
+ "promptId": "00000000-0000-4000-8000-0000000000b1",
+ "permissionMode": "bypassPermissions",
+ "prompt": "run: git log --oneline -1",
+ "hook_event_name": "UserPromptSubmit",
+ "session_id": "00000000-0000-4000-8000-0000000000a1",
+ "permission_mode": "bypassPermissions"
+}
