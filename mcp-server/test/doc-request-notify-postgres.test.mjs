@@ -62,3 +62,14 @@ test('concurrent completions store one event and notification', async () => {
   assert.equal(results[0].notification_id, results[1].notification_id);
   await counts(ids);
 });
+test('overlapping calls with the same key both succeed and store one completion', async () => {
+  const ids = await setup();
+  const idempotency_key = randomUUID();
+  const [a, b] = await Promise.all([complete(ids, { idempotency_key }), complete(ids, { idempotency_key })]);
+  assert.equal(a.notification_id, b.notification_id);
+  assert.equal(a.outcome, b.outcome);
+  assert.equal(a.deep_link, b.deep_link);
+  await counts(ids);
+  const receipts = await pool.query("select count(*)::int as n from tool_call where verb='complete-doc-request' and idempotency_key=$1", [idempotency_key]);
+  assert.equal(receipts.rows[0].n, 1);
+});
