@@ -1,3 +1,4 @@
+-- rollback: revert the read in practice-origination.ts, then drop function practice_address_key(text).
 create function practice_address_key(address text) returns text
 language sql immutable strict parallel safe as $$
   select string_agg(case token
