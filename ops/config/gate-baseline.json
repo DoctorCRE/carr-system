@@ -19,12 +19,12 @@
     "session-brief.py": "9df9928e64598ac469492abcc4af2452a25238c8b6978cd8871bf4c200684850",
     "turn_origin.py": "7fe75beaec283cd3ce3a3c8a109ef36e44999eb1b27dcebbffafff590a261f7e",
     "worktree-self-plumb.py": "f7eac9fc2956f932787211d4fd638350ffb4df5a251f7d49afbd1bf707d3bc33",
-    "agent-card-gate.py": "b5f238545b81290669953cdd976c80356676b9b48c94a5c0fbc1631f6955184c"
+    "agent-card-gate.py": "21ca675e7baa9f9072d3327fcb1dbb09e4597cb13f168f5a67cb3f77f9336117"
   },
   "contracts": {
     "hook_runtime.py": "d33d7a86ccd6e92bcec12bbe860d11b5549dbc254975a4bcfa49843a366e4517",
-    "hooks.json": "a676ca5daf0821f02a5dac32642ab91ec355f91e4a729ee76f77fcbe514070bc",
-    "codex-hooks.json": "365e3604f903d78d11e2c8702fc4cbd6ec497fc436249f06c5ed7dbc0b39e112",
+    "hooks.json": "458e7992c3fcd43b9b980880a3eefe0bac2354fa9ce848ce74b4bc0d2d6fa355",
+    "codex-hooks.json": "52341e6c220cdcbca00d2e1ac6e3ae2a96e1b134bf3c2d31a7b7c1d3e487a189",
     "rule-enforcement-map.json": "168df7ba8abab350627531ad6a68b1b8d7ac2381087f0a21decd933cb67e1d28",
     "native_shell.py": "6b2f3b64b1a5f2be1e48383e7979a011fe2f88be91cc27627e9531464105f268",
     "claude-managed-settings.json": "15f4eefef5d8a9362633ad45f44db1b7e946f4539c537e4dc19aff394dd91a11",

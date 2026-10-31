@@ -16,10 +16,11 @@ class T3AgentCardGate(AgentCardGate):
     def dispatches(self, prompt):
         return {
             'delegate_task': {'task': prompt},
+            't3_queue': {'action': 'edit', 'queuedRunId': 'fixture', 'text': prompt},
             't3_thread_launch': {'title': 'Review', 'message': prompt},
             'create_threads': {'threads': [{'prompt': prompt}, {'prompt': prompt}]},
             't3_thread_send': {'threadId': 'fixture', 'message': prompt},
-            'schedule_task': {'prompt': prompt, 'schedule': {'type': 'interval', 'intervalMs': 60000}},
+            'schedule_task': {'prompt': prompt, 'schedule': {'type': 'interval', 'everyMs': 60000}},
             't3_thread_send_attachments': {'threadId': 'fixture', 'message': prompt,
                                            'attachments': [{'id': 'fixture'}]},
         }
@@ -59,6 +60,35 @@ class T3AgentCardGate(AgentCardGate):
             with self.subTest(threads=threads):
                 self.assertEqual(self.configured_call('create_threads', {'threads': threads}).returncode, 2)
 
+    def test_opaque_dispatch_cannot_bypass_prompt_validation(self):
+        for name, inputs in [('run_scheduled_task_now', {'taskId': 'fixture'}),
+                             ('t3_queue', {'action': 'promote_to_steer', 'queuedRunId': 'fixture'})]:
+            with self.subTest(name=name):
+                self.assertEqual(self.configured_call(name, inputs).returncode, 2)
+
+    def test_queue_reads_and_cancellations_do_not_check_cards(self):
+        self.lookup.write_text('raise SystemExit("queue must not be read")')
+        for action in ['list', 'read', 'cancel', 'reorder']:
+            with self.subTest(action=action):
+                self.assertEqual(self.configured_call('t3_queue', {'action': action}).returncode, 0)
+
+    def test_wrong_field_cannot_authorize_dispatch(self):
+        self.register_fixture()
+        for name, inputs in self.dispatches('Review.').items():
+            inputs['description'] = 'Card: WR557.S6.J1'
+            with self.subTest(name=name):
+                self.assertEqual(self.configured_call(name, inputs).returncode, 2)
+
+    def test_unattended_guard_sees_dispatch_tools(self):
+        for relative in ['ops/config/hooks.json', 'ops/config/codex-hooks.json']:
+            document = json.loads((REPO / relative).read_text())
+            groups = document.get('hooks', document)['PreToolUse']
+            for name in self.dispatches('Review.'):
+                with self.subTest(config=relative, name=name):
+                    self.assertTrue(any(re.search(group.get('matcher', ''), 'mcp__t3-code__' + name)
+                                        and any('guard-unattended.py' in h['command']
+                                                for h in group['hooks']) for group in groups))
+
     def test_read_tools_are_untouched(self):
         self.lookup.write_text('raise SystemExit("queue must not be read")')
         groups = json.loads((REPO / '.claude/settings.json').read_text())['hooks']['PreToolUse']
@@ -70,6 +100,9 @@ class T3AgentCardGate(AgentCardGate):
                                      any('agent-card-gate.py' in h['command'] for h in group['hooks'])
                                      for group in groups))
                 self.assertEqual(self.run_hook(tool).returncode, 0)
+
+
+del AgentCardGate
 
 
 if __name__ == '__main__':
