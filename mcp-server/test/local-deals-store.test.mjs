@@ -1223,6 +1223,24 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       }
     }));
 
+    await t.test('vendor-assignment-context reads its party columns as carr_reader, the role read verbs run as', async () => transaction(async () => {
+      await fixture(false);
+      await c.query("insert into party(id,kind,name,email,created_by,updated_by) values($1,'org','Synthetic Bank','desk@bank.invalid',$2,$2)", [id(20), actor.id]);
+      await c.query("insert into party(id,kind,name,org_id,email,created_by,updated_by) values($1,'person','Synthetic Banker',$2,'banker@example.invalid',$3,$3)", [id(21), id(20), actor.id]);
+      await c.query("insert into vendor(id,party_id,category,vendor_ref,created_by,updated_by) values($1,$2,'banker','V-DEMO-1',$3,$3)", [id(22), id(21), actor.id]);
+      // The fixture builds party from its table definition alone; install the snapshot's reader column grant.
+      await c.query(schema.match(/^grant select \([^)]*\) on table public\.party to carr_reader;$/m)[0]);
+      await c.query('savepoint before_grant');
+      await c.query('set local role carr_reader');
+      await assert.rejects(TOOLS['vendor-assignment-context'].handler(c,actor,{vendor:id(22)}),e=>e.code==='42501');
+      await c.query('rollback to savepoint before_grant');
+      await c.query(readMigration('1127_vendor_context_party_reader_columns.sql'));
+      await c.query('set local role carr_reader');
+      const {vendor} = await TOOLS['vendor-assignment-context'].handler(c,actor,{vendor:id(22)});
+      assert.equal(vendor.party_version,1);
+      assert.deepEqual(vendor.company_domains,['bank.invalid','example.invalid']);
+    }));
+
     await t.test('migration preserves every existing board prospect and audits the active backfill', async () => transaction(async () => {
       await fixture(true);
       await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'system','Synthetic System','system',true)",[id(99)]);
