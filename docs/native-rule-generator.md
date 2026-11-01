@@ -15,20 +15,62 @@ record-verb authentication and Python with `tiktoken==0.14.0` installed.
 CI's artifact class runs the offline check and behavioral tests. It does not
 contact production or claim the snapshot remains current forever.
 
-The snapshot contains the store's placement prose and active UUID/hash inventory,
-never raw historical examples, human quotes or contact data. Source versions
-come from the placement table; full statement SHA-256 equality is checked against
-the live catalog before capture. An amendment requires updating placement in
-the store before regeneration. The renderer has no local placement override.
+The snapshot contains the live statements verbatim alongside placement prose and
+UUID/hash inventory. Every statement hash must agree with the placement table.
+212 generated bodies contain their full statement, including examples and
+exceptions. Lossless export of rules 3b0cd546, 49533583, 54e2bcb9,
+5d44d3f3, 83b9a362, 9f15f21a, f47a8fe9, 5f8c661d, 76a1ae2b and 8cddc6ad is explicitly not doable
+under the task's no-client-PII instruction and existing identity guard: their historical examples identify
+clients. Their statements are withheld from the snapshot, the manifest names
+the exceptions, and generated bodies are visibly marked incomplete with placement
+text only. No all-222 lossless pass is claimed. A store-authorized de-identification
+is required before those ten bodies can be exported verbatim. No local placement or wording override is provided.
 
-CORE loads from `.claude/rules/carr-core.md` for Claude and an additive marked
-block in root `AGENTS.md` for Codex. The printed count covers the complete new
-CORE chain including markers, notice, UUIDs, versions and hashes. It excludes
-unchanged legacy startup guidance and separately discovered skill listings.
-The reference tokenizer is cl100k_base; no Claude-native count is claimed.
-Offline checks validate the measurement's exact content digest; live refresh
-remeasures with tiktoken. The store snapshot is a committed input, not a second
-authoring home.
+CORE loads from `.claude/rules/carr-core.md` for Claude and the marked block in
+root `AGENTS.md` for Codex. Loaded headings contain only eight-character IDs;
+UUIDs, versions and full hashes are indexed in the manifest. UUIDs occurring
+inside a live statement remain verbatim. Startup measurements use tiktoken
+0.14.0 and cl100k_base, with exact content hashes. These are file counts, not
+provider context totals or an adherence benchmark.
+
+WR675.S11.J10 measured the reviewed head 62b28f926 and the repaired files with
+the same tokenizer. Marked CORE was 1,160 tokens and is now 3,772. Lossless
+wording increases the total despite removing metadata. With the same full
+wording and old long metadata, CORE would be 4,467 tokens; compact metadata
+saves 695 tokens. The old 1,500-token ceiling cannot coexist with the required
+twelve full statements. The snapshot explicitly records the over-budget result;
+no claim of meeting that ceiling remains.
+
+The full chain is the newline-joined files in this order. It deliberately counts
+both CORE copies because the requested chain includes both, without asserting
+that either provider loads all three files.
+
+| File | Reviewed head tokens | Repaired tokens |
+|---|---:|---:|
+| Root AGENTS.md | 5,652 | 8,264 |
+| CLAUDE.md | 1,927 | 1,927 |
+| CORE file | 1,146 | 3,758 |
+| Full joined chain | 8,725 | 13,949 |
+
+Offline checks validate the exact startup file hashes against the manifest.
+Live refresh remeasures with tiktoken.
+
+All write/delete destinations are preflighted before mutation. Paths must be
+relative, contain no traversal segments, remain inside the repository after
+resolution, and contain no symlink component. Allowed destinations are native
+rules, carr-prefixed skills for both adapters, manifest-named nested AGENTS
+blocks, the root CORE block, the two proposal registers, snapshot and manifest.
+Existing skills require both a generated notice and prior manifest ownership.
+Directory-relative mutation uses O_NOFOLLOW, including every parent directory.
+Foreign guidance outside marked AGENTS blocks is preserved.
+
+CI continues to run offline `--check`. Inspection of all `.github/workflows`
+files found GitHub, deployment and database credentials, but no authenticated
+record-layer read identity usable by `--from-store`. Database read credentials
+are not record-layer authorization. Follow-up for WR675.S11 store freshness:
+connect live checking to an existing authenticated record-layer CI lane once
+one exists. This slice adds no secret or workflow. Live freshness was checked
+locally using the existing machine actor.
 
 Each UUID has exactly one logical primary home in the manifest. Claude/Codex
 copies are native adapters of that home, not additional census entries.
@@ -37,7 +79,8 @@ enforcement or enacted retirement. All existing guidance remains operative.
 Procedure skills use a carr- prefix to avoid replacing existing skills.
 
 PATH frontmatter retains the store's proposed globs. The manifest records actual
-matching files and every unmatched glob. Fourteen proposed globs match nothing
+matching files and every unmatched glob, explicitly marked dormant and excluded
+from active_glob_count. Fourteen proposed globs match nothing
 in carr-system; their native rules remain dormant until matching files exist.
 Nested Codex sections preserve proposed folders and add an existing literal
 directory scope where another proposed glob matches (the .agents folder).
@@ -61,22 +104,22 @@ probes. Codex has no InstructionsLoaded hook in the inspected CLI interface;
 these probes check the response's UUIDs and discovered skill name, a weaker
 observation than Claude's native events. Codex directory loading is tested
 by starting in that directory, not by claiming lazy injection on arbitrary
-file reads. Checkpoint body invocation and compaction remain manual for Codex.
+file reads. Checkpoint body invocation and compaction remain unverified for Codex.
 
 These opt-in CLI probes use provider accounts and are not run by offline CI.
 They test delivery, not a general rule-adherence improvement.
 
 ## Required manual compaction test
 
-Automated headless Claude cannot invoke /compact through Skill (the documented
-CLI excludes that built-in command). Avoid spending a full context window to
-force auto-compaction. The following interactive acceptance procedure remains
-unexecuted and is required before claiming compaction coverage. All steps apply.
+The following interactive procedure remains the full acceptance target. Headless
+attempt results are recorded below; an unavailable command or missing load event
+is not a pass. Avoid filling an entire context window merely to force compaction.
+All steps apply.
 
 1. Start `claude` in the checkout and record its version.
 2. Run `/context` and confirm `carr-core.md` under Memory files.
 3. Ask Claude to read `tools/room-bridge/brief-footer.md` with Read.
-4. Confirm the loaded rule names UUID `6da539b5-84e9-49d1-84d8-28f05e151b20`.
+4. Confirm the loaded rule names short ID `6da539b5`.
 5. Run `/carr-before-send` for a synthetic draft and confirm the skill body loads.
 6. Run `/compact`.
 7. Run `/context` and confirm CORE is present again.
@@ -87,10 +130,10 @@ unexecuted and is required before claiming compaction coverage. All steps apply.
 For Codex, all steps apply separately.
 
 1. Start `codex` in `tools/room-bridge` and record its version.
-2. Ask for the already-loaded CORE and room-bridge UUIDs without reading guidance files.
+2. Ask for the already-loaded CORE and room-bridge short IDs without reading guidance files.
 3. Invoke `$carr-before-send` on a synthetic draft and confirm the skill body loads.
 4. Run `/compact`.
-5. Ask for both UUIDs and the room-bridge exception again without reading guidance files.
+5. Ask for both short IDs and the room-bridge exception again without reading guidance files.
 6. Restart Codex at the repository root and confirm the room-bridge rule is absent.
 7. Record the assertions and CLI version, marking unavailable UI commands as unverified.
 
@@ -101,9 +144,52 @@ Claude formats and lifecycle are documented in
 PATH rules reload on matching access after compaction; skill bodies must be
 invoked again. Neither a file-presence test nor a model's agreement proves this.
 
+## WR675.S11.J10 adapter acceptance results
+
+Claude Code 2.1.316 passed both startup probes. The matching probe then resumed
+its own synthetic session with `claude -p /compact --resume <session-id>`.
+One `compact_boundary` event was observed. After requesting a fresh Read,
+InstructionsLoaded reported `carr-core.md` with `session_start` and
+`rule-6da539b5.md` with `path_glob_match`; the fixture was actually read and
+`carr-before-send` invoked again. Both files were unchanged copies of generated
+full statements, including the room-bridge doctorcre-app exception. These are
+loader and tool observations, not proof of general model adherence. An earlier
+attempt reused summarized fixture content without a new Read and therefore
+failed reload acceptance; the final probe explicitly requires a fresh Read.
+`tools/test_native_rule_loading.py` now reports these compaction assertions.
+
+Codex CLI 0.166.0 passed root and nested cwd loading probes with short IDs and
+checkpoint name discovery. Noninteractive `codex exec --json --sandbox read-only
+/compact` treated the slash command as a model prompt and responded that it could
+not manually compact. `codex exec --help` exposes resume/fork/review but no
+compaction control. The interactive procedure above is not doable through that
+exec interface; Codex compaction, post-compaction reload and checkpoint-body
+invocation remain unverified. No successful acceptance is claimed for them.
+
+Local verification passed 12 generator tests, offline checks, both loading scripts, and `ops/ci.sh --only artifact`. The first artifact
+attempt failed because the new worktree lacked locked Node dependencies; after
+`npm ci --prefix mcp-server --ignore-scripts`, the artifact class passed. No gate
+was bypassed.
+
 ## Later removal slice
 
 A later separately authorized slice can replace the legacy rule-lookup delivery,
 the old generated core cards and duplicated CLAUDE.md/AGENTS.md prose after
 behavior comparisons and missing mechanical controls are complete. adopt-rule
 continues to own store adoption. This PR leaves it and all existing hooks intact.
+
+Final live freshness recheck refused capture with `active rule coverage differs
+from placement`. The store changed during the job: 202 active IDs now differ
+from the 222-ID placement snapshot (13 added, 33 removed). The earlier live
+check passed before that change. Current live freshness is FAILED, not passed.
+Updating the authoritative placement tables for that new census is outside this
+repair and cannot preserve the task's specified twelve CORE entries unchanged.
+The committed snapshot retains the reviewed census; offline consistency passes.
+
+The commit hook's existing identity guard detected five additional protected
+identity statements beyond the two manually found examples. All ten are
+withheld; no scanner exemption or hook bypass was introduced.
+
+The pre-push client-data guard found three more source-restricted statements.
+Ten statements are withheld in total; 212 are exported verbatim. The unpublished
+repair commit was amended to remove them before any upload. No guard was bypassed.

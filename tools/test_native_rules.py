@@ -10,6 +10,88 @@ class NativeRulesTests(unittest.TestCase):
     def setUp(self):
         self.snapshot = rules.load_snapshot(rules.ROOT / rules.SNAPSHOT)
 
+    def test_symlink_overwrite_refused_before_any_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "repo"
+            root.mkdir()
+            outside = base / "outside"
+            outside.write_text("untouched")
+            (root / "AGENTS.md").symlink_to(outside)
+            with self.assertRaises(ValueError):
+                rules.write_outputs(root, {".claude/rules/first.md": rules.NOTICE,
+                                           "AGENTS.md": rules.NOTICE})
+            self.assertEqual(outside.read_text(), "untouched")
+            self.assertFalse((root / ".claude").exists())
+
+    def test_traversal_manifest_refused_before_any_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "repo"
+            root.mkdir()
+            outside = base / "outside"
+            outside.write_text(rules.NOTICE)
+            manifest = root / rules.REPORT
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text(rules.dump({"outputs": ["../outside"]}))
+            with self.assertRaises(ValueError):
+                rules.write_outputs(root, {".claude/rules/first.md": rules.NOTICE})
+            self.assertTrue(outside.exists())
+            self.assertFalse((root / ".claude").exists())
+
+    def test_every_rule_contains_full_statement(self):
+        outputs, report = rules.render(self.snapshot, rules.ROOT)
+        for row in self.snapshot["active"]:
+            if row["id"] in rules.WITHHELD:
+                self.assertIn(row["id"], report["withheld_statements"])
+                self.assertNotIn("statement", row)
+                continue
+            self.assertIn("statement", row)
+            self.assertTrue(any(row["statement"] in text for text in outputs.values()), row["id"])
+
+    def test_foreign_skill_directory_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            skill = root / ".agents/skills/carr-foreign"
+            skill.mkdir(parents=True)
+            (skill / "notes.txt").write_text("foreign")
+            with self.assertRaisesRegex(ValueError, "foreign skill"):
+                rules.write_outputs(root, {".agents/skills/carr-foreign/SKILL.md": rules.NOTICE})
+            self.assertFalse((skill / "SKILL.md").exists())
+
+    def test_invalid_destinations_and_parent_symlinks_refused(self):
+        for name in ("/tmp/absolute", "../outside", "tools/../AGENTS.md", "tools/source.py",
+                     ".agents/skills/foreign/SKILL.md"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                with self.assertRaises(ValueError):
+                    rules.write_outputs(root, {name: rules.NOTICE})
+                self.assertEqual(list(root.iterdir()), [])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "repo"
+            root.mkdir()
+            outside = Path(directory) / "outside"
+            outside.mkdir()
+            (root / ".agents").symlink_to(outside, target_is_directory=True)
+            with self.assertRaises(ValueError):
+                rules.write_outputs(root, {".agents/skills/carr-test/SKILL.md": rules.NOTICE})
+            self.assertEqual(list(outside.iterdir()), [])
+
+    def test_foreign_delete_refuses_entire_batch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / rules.REPORT
+            manifest.parent.mkdir(parents=True)
+            obsolete = ".claude/rules/obsolete.md"
+            path = root / obsolete
+            path.parent.mkdir(parents=True)
+            path.write_text("foreign")
+            manifest.write_text(rules.dump({"outputs": [obsolete]}))
+            with self.assertRaisesRegex(ValueError, "foreign"):
+                rules.write_outputs(root, {".claude/rules/new.md": rules.NOTICE})
+            self.assertFalse((root / ".claude/rules/new.md").exists())
+            self.assertEqual(path.read_text(), "foreign")
+
     def test_exactly_one_primary_home(self):
         rows = rules.placements(self.snapshot)
         self.assertEqual(len(rows), 222)
@@ -43,7 +125,7 @@ class NativeRulesTests(unittest.TestCase):
             self.assertIn("paths:\n", outputs[".claude/rules/rule-6da539b5.md"])
             skill = outputs[".claude/skills/carr-before-send/SKILL.md"]
             self.assertIn("email, Slack", skill)
-            self.assertIn("Exceptions", skill)
+            self.assertIn("Exempt: single drafts Joe reviews line-by-line.", skill)
             self.assertEqual(len(report["homes"]), 222)
             self.assertTrue(report["unmatched_globs"])
 
