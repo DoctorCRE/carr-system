@@ -166,6 +166,11 @@ class ResolvedNames(unittest.TestCase):
                 self.assertEqual(p["add"], [])
                 self.assertEqual(p["skipped"].get("no_name"), 1)
 
+    def test_validation_failure_stops_planning(self):
+        with mock.patch.object(loader, "check_names", side_effect=loader.VerbUncertain("name_check_failed")):
+            with self.assertRaises(loader.VerbUncertain):
+                plan({"event": [{"email": "robin@firm-z.test", "name": "Robin Vale"}]})
+
     def test_full_names_plan_a_party(self):
         for name in NAME_CASES["accept"]:
             with self.subTest(name=name):
@@ -216,6 +221,13 @@ class Apply(unittest.TestCase):
         self.assertEqual(calls, ["add-party", "vendor-assignment-context", "update-party-contact"])
         self.assertEqual((result["add_returned_candidates"], result["filled"], result["refused"]), (1, 0, 1))
         self.assertEqual(result["errors"], {"version_conflict": 1})
+
+    def test_server_name_refusal_is_counted_as_a_name_skip(self):
+        def call(verb, payload):
+            raise loader.VerbRefused("full_person_name_required")
+        p = {"add": [{"name": "Dr Smith", "email": "smith@firm-z.test"}], "fill": []}
+        result = loader.apply(p, call)
+        self.assertEqual((result["added"], result["refused"], result["name_skips"]), (0, 1, 1))
 
     def test_an_uncertain_write_is_counted_and_never_retried(self):
         calls = []

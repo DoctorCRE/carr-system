@@ -139,7 +139,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "add-party": {
     "ingress_key": "mcp-tool:add-party",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "bdcdae304ab7cf85ddd097249d544a38d29973e4bd7b2dc9a0790cd50d7f6697",
+    "schema_digest": "6c8be80e49451896c30387fc672a6f9413c24b2d361ba4363554a435743031f4",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

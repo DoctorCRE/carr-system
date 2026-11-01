@@ -111,3 +111,12 @@ for (const passthrough of [false, true]) {
     assert.equal((await transport(t, passthrough, verb, extra)).error, code);
   });
 }
+
+for (const [outcome, cases] of Object.entries(names)) {
+  for (const name of cases) test(`validation-only ${outcome} ${name} without database access`, async () => {
+    const db = { query() { assert.fail("validation-only queried the database"); } };
+    const request = executeRegisteredTool(db, actor, "add-party", { ...base, name, validate_only: true });
+    if (outcome === "accept") assert.deepEqual(await request, { ok: true, validated: true });
+    else await assert.rejects(request, e => e.payload?.error === (name === "" ? "missing_required" : "full_person_name_required"));
+  });
+}
