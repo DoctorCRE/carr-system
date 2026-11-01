@@ -153,7 +153,7 @@ begin
       ||pg_get_function_identity_arguments(p.oid)||'):carr_authority:execute',
     'ingress_kind','db_function_acl','function_kind',p.prokind::text,'security_definer',p.prosecdef)
     into strict entry from pg_proc p where p.oid='ops.capture_sourced_work_request(text,text,text,jsonb,uuid,uuid,uuid)'::regprocedure;
-  contract := jsonb_set(contract,'{secdef_execute}',contract->'secdef_execute'||jsonb_build_array(entry));
+  contract := jsonb_set(contract,'{secdef_execute}',jsonb_build_array(entry)||(contract->'secdef_execute'));
   execute format('create or replace function ops.scac_current_grant_contract() returns jsonb '
     'language sql immutable set search_path=pg_catalog as %L','select '||quote_literal(contract::text)||'::jsonb');
 end $future_work_grants$;
