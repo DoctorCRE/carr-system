@@ -910,9 +910,10 @@ def _complete_session(session_dir: Path, report: dict[str, Any]) -> dict[str, An
 
 
 def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]], *,
-                            run_checks: bool = True, max_attempts: int = 3) -> dict[str, Any]:
+                            run_checks: bool = True, max_attempts: int = 3,
+                            releasing: bool = False) -> dict[str, Any]:
     existing = read_json(session_dir / STATUS_FILE) or {}
-    if existing.get("state") == "held_review":
+    if existing.get("state") == "held_review" and not releasing and not (session_dir / REPORT_FILE).exists():
         return existing
     if (session_dir / REPORT_FILE).exists():
         held = hold_transcript_repeat(session_dir, read_json(session_dir / REPORT_FILE) or {})
@@ -926,7 +927,14 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
             hold_day = report.get("checks_hold_day") or call_budget.budget_day(
                 datetime.fromtimestamp((session_dir / REPORT_FILE).stat().st_mtime, timezone.utc))
             if call_budget.budget_day() <= hold_day:
-                return read_json(session_dir / STATUS_FILE) or _complete_session(session_dir, report)
+                retry_budget = "budget" in report["checks_hold"].lower() and not report.get("deal_check", {}).get("exception_class")
+                if retry_budget:
+                    try:
+                        call_budget.reserve(session_dir.parent / ".jev-budget.json", check_only=True)
+                    except call_budget.BudgetHold:
+                        retry_budget = False
+                if not retry_budget:
+                    return existing if existing.get("state") in {"ready_review", "filed"} else _complete_session(session_dir, report)
             import post_call_jev
 
             try:
@@ -955,7 +963,7 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
     if held is not None:
         return held
     existing = read_json(session_dir / STATUS_FILE) or {}
-    attempts = existing.get("extraction_attempts", 0)
+    attempts = 0 if releasing else existing.get("extraction_attempts", 0)
     if attempts >= max_attempts:
         existing.update({"state": "needs_attention", "next_attempt_at": None})
         write_private(session_dir / STATUS_FILE, existing)
@@ -978,6 +986,8 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
             reason = str(exc)
             context = context_from_session(session_dir)
     if context is None:
+        if releasing:
+            return existing
         status = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "state": "awaiting_context", "updated_at": now(), "extraction_attempts": attempts, "next_attempt_at": None}
         if reason:
             status["reason"] = reason
@@ -1000,7 +1010,8 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
                            + timedelta(seconds=EXTRACTION_RETRY_DELAYS[min(attempts - 1, len(EXTRACTION_RETRY_DELAYS) - 1)])).strftime("%Y-%m-%dT%H:%M:%SZ")
     status = {"schema_version": SCHEMA_VERSION, "session": session_dir.name, "state": "blocked", "updated_at": timestamp,
               "extraction_attempts": attempts, "next_attempt_at": next_attempt_at, "reason": "Extraction attempt did not finish."}
-    write_private(session_dir / STATUS_FILE, status)
+    if not releasing:
+        write_private(session_dir / STATUS_FILE, status)
     try:
         raw = distiller(request)
         held = hold_transcript_repeat(session_dir, raw)
@@ -1014,6 +1025,8 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         if next_attempt_at is not None:
             next_attempt_at = (datetime.fromisoformat(failed_at.replace("Z", "+00:00"))
                                + timedelta(seconds=EXTRACTION_RETRY_DELAYS[min(attempts - 1, len(EXTRACTION_RETRY_DELAYS) - 1)])).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if releasing:
+            raise
         status.update({"state": "needs_attention" if next_attempt_at is None else "blocked", "updated_at": failed_at,
                        "next_attempt_at": next_attempt_at, "reason": str(exc)})
         write_private(session_dir / STATUS_FILE, status)
