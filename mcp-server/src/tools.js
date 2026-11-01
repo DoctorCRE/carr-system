@@ -67,7 +67,7 @@ import { EMAIL_IDENTITY_SCHEMA, lockEmailIdentity, capturedEmail } from "./email
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
 import { clearTheDeckTools } from "./clear-the-deck.js";
 import { addCalendarMeetingPrep } from "./calendar-meeting-prep.js";
-import { CALENDAR_AGENDA_BOARD, calendarSection, addCalendarContacts, addCalendarDealSuggestions } from "./brief-calendar.js";
+import { CALENDAR_AGENDA_BOARD, calendarSection, addCalendarContacts, addCalendarDealSuggestions, addCalendarConfirmations } from "./brief-calendar.js";
 import { emailLeadProposalTools } from "./email-lead-proposal.ts";
 import { leadAutomationTools } from "./lead-automation.js";
 import { actionLinkTools } from "./action-links.js";
@@ -3799,6 +3799,7 @@ export const TOOLS = {
             where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=$3`,
           [organizationTenantForActor(actor), scope.sponsor, CALENDAR_AGENDA_BOARD]);
         calendar = calendarSection(result.rows[0]?.snapshot_json);
+        if (calendar?.follow_up_reviews?.length) await addCalendarConfirmations(c, calendar);
         if (calendar?.sources && calendar.items.length) {
           await addCalendarContacts(c, calendar);
           await addCalendarDealSuggestions(c, calendar, scope.sponsor);
@@ -4398,6 +4399,7 @@ export const TOOLS = {
               name: { type: ['string', 'null'] }, kind: { enum: ['to', 'cc'] }, internal: { type: 'boolean' } } } },
         } },
       email_identity: EMAIL_IDENTITY_SCHEMA,
+      calendar_event_key: { type: "string", pattern: "^[0-9a-f]{16}$", description: "Stable Outlook event key for a meeting confirmation" },
       email_source: { type: "object", additionalProperties: false, required: ["sender_email", "mailbox_owner"],
         properties: { sender_email: { type: "string", format: "email", maxLength: 254 },
           mailbox_owner: { type: "string", enum: ["joe", "dell"] } } },
@@ -4451,7 +4453,16 @@ export const TOOLS = {
       if (args.email_source !== undefined && (args.kind !== 'email_in' ||
           args.email_source.mailbox_owner !== partnerAuthoritySlugForActor(actor)))
         throw new ToolError({ error: 'email_source_owner_mismatch' });
+      if (args.calendar_event_key !== undefined && (typeof args.calendar_event_key !== 'string' || !/^[0-9a-f]{16}$/.test(args.calendar_event_key)))
+        throw new ToolError({ error: 'calendar_event_key_invalid', hint: 'calendar_event_key must be exactly 16 lowercase hexadecimal characters' });
       const s = await resolveSubject(c, args.ref);
+      if (args.calendar_event_key !== undefined) {
+        if (s.type !== 'deal' || args.kind !== 'meeting')
+          throw new ToolError({ error: 'calendar_event_key_requires_deal_meeting' });
+        await c.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`calendar-confirmation:${s.id}:${args.calendar_event_key}`]);
+        const existing = await c.query('select id from activity where calendar_event_key=$1 and deal_id=$2', [args.calendar_event_key, s.id]);
+        if (existing.rows.length) return { ok: true, activity_id: existing.rows[0].id, subject: s, deduped: true };
+      }
       let emailIdentity = null;
       if (args.email_identity) {
         if (!['email_in', 'email_out'].includes(args.kind) ||
@@ -4493,12 +4504,12 @@ export const TOOLS = {
           await c.query('update vendor set updated_by=$1 where id=$2',[actor.id,vendorId]);
       }
       const r = await c.query(
-        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_context, email_source, email_identity)
-         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb, $9::jsonb, $10::jsonb) returning id, occurred_at`,
+        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_context, email_source, email_identity, calendar_event_key)
+         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb, $9::jsonb, $10::jsonb, $11) returning id, occurred_at`,
         [args.occurred_at || null, actor.id, args.kind, args.summary, args.detail || null, args.owed || null, s.id,
           args.email_context ? JSON.stringify(args.email_context) : null,
           args.email_source ? JSON.stringify(args.email_source) : null,
-          emailIdentity ? JSON.stringify({ ...emailIdentity, subject: s.id }) : null]);
+          emailIdentity ? JSON.stringify({ ...emailIdentity, subject: s.id }) : null, args.calendar_event_key ?? null]);
       await writeEvent(c, actor, "log-activity", s.type, s.id,
         { new: { activity: r.rows[0].id, kind: args.kind }, human_quote: args.human_quote, idempotency_key: args.idempotency_key });
       const links = args.links && args.links.length
