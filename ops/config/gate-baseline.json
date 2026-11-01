@@ -20,7 +20,7 @@
     "team-memory-index.py": "7ba8a39bca14786b40c2816f052462fb1d395206cc73404953193b5065cba3ee",
     "turn_origin.py": "7fe75beaec283cd3ce3a3c8a109ef36e44999eb1b27dcebbffafff590a261f7e",
     "worktree-self-plumb.py": "f7eac9fc2956f932787211d4fd638350ffb4df5a251f7d49afbd1bf707d3bc33",
-    "orchestrator-rotation.py": "30e59a7ac232d83b3919d788d0cff0e1b3546193ecb1c4ba128b031d7a3c6e4c"
+    "orchestrator-rotation.py": "89ef61261454d381fdfa472b1b423a4e89fadea563cbe9bc3e1bcfb6f20ef908"
   },
   "contracts": {
     "hook_runtime.py": "617416d669ccf046041eac9798551932c63e10d6df5cb7b2c0da8a13b373a422",

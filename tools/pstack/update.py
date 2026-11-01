@@ -22,7 +22,15 @@ def write_atomic(path, data):
 
 
 def sync(source, destination, adapter):
+    destination = destination.expanduser().absolute()
+    if any(path.is_symlink() for path in [destination, *destination.parents]):
+        raise ValueError(f'refusing symlink: {destination}')
     destination = destination.resolve()
+    plugins = (Path.home()/'.claude/plugins').resolve()
+    if destination.is_relative_to(plugins):
+        raise ValueError(f'refusing plugins destination: {destination}')
+    if destination.is_relative_to(source.resolve()):
+        raise ValueError(f'refusing source destination: {destination}')
     manifest = destination / '.carr-pstack.json'
     previous = json.loads(manifest.read_text())['files'] if manifest.exists() else {}
     revision = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()

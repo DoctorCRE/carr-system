@@ -21,7 +21,7 @@ Read the matching `features/` file. Invoke the actual CLI or hook process throug
 
 ## Evidence
 
-Save the exact command, stdout, stderr, exit code and `git rev-parse HEAD` under the task's `out/pstack-verification/<feature>/<unique-run>/`. Capture before and after state for mutations. Record which entry points were exercised and which were skipped. No shared append-only verification document exists. Add a new feature file or update only the affected feature. Never append receipts to the index or another feature's file.
+Save the exact command, stdout, stderr, exit code and `git rev-parse HEAD` under the task's `out/pstack-verification/<feature>/<unique-run>/`. Capture before and after state for mutations. Record which entry points were exercised and which were skipped. No shared append-only verification document exists. Feature PRs add only their own `features/<name>.md` or update only the affected feature. They never edit `features/README.md`. Only the upstream `/maintain-verification-skill` pass rebuilds that index, including missing feature entries. Never append receipts to the index or another feature's file.
 
 ## Cleanup
 

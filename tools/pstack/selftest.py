@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('pstack_update', Path(__file__).with_name('update.py'))
 assert spec is not None and spec.loader is not None
@@ -16,7 +17,7 @@ class Install(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        root = Path(self.temp.name)
+        root = Path(self.temp.name).resolve()
         self.source, self.dest = root/'source', root/'dest'
         self.source.mkdir()
         subprocess.run(['git', 'init', '-q', self.source], check=True)
@@ -68,6 +69,38 @@ class Install(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.sync()
         self.assertEqual(list(outside.iterdir()), [])
+
+    def test_refuses_symlink_destination(self):
+        outside = self.dest.parent/'outside'
+        outside.mkdir()
+        self.dest.symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'symlink'):
+            self.sync()
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_refuses_symlink_ancestor(self):
+        outside = self.dest.parent/'outside'
+        outside.mkdir()
+        link = self.dest.parent/'link'
+        link.symlink_to(outside, target_is_directory=True)
+        self.dest = link/'nested'
+        with self.assertRaisesRegex(ValueError, 'symlink'):
+            self.sync()
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_refuses_plugin_destination(self):
+        home = self.dest.parent/'home'
+        self.dest = home/'.claude/plugins/cache/pstack'
+        with patch.object(Path, 'home', return_value=home):
+            with self.assertRaisesRegex(ValueError, 'plugins'):
+                self.sync()
+        self.assertFalse(home.exists())
+
+    def test_refuses_source_destination(self):
+        self.dest = self.source/'installed'
+        with self.assertRaisesRegex(ValueError, 'source destination'):
+            self.sync()
+        self.assertFalse(self.dest.exists())
 
     def test_no_heading(self):
         self.skill.write_text('---\nname: poteto-mode\n---\n\nInstructions.\n')
