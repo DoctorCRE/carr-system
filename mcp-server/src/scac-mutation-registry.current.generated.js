@@ -99,7 +99,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "add-doc-conversation-turn": {
     "ingress_key": "mcp-tool:add-doc-conversation-turn",
     "source_locator": "mcp-server/src/doc-conversation.js",
-    "schema_digest": "f725a94aa5d4f37c9241b3af22e025323bd1e39e97c02bcf2d0b295a7d116801",
+    "schema_digest": "5ecd7782c4e8d01e7e7e8131274c3bdbdc60a5fd25ca70cfe320ccdcd13df13c",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -1081,7 +1081,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "email-router-queue": {
     "ingress_key": "mcp-tool:email-router-queue",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "ae5bfa6b767b760d97145f87d94706a1392c2a5b061a136f45b7dcd510bd7b80",
+    "schema_digest": "0931bf81ae98eaf8f130c211a9fd86ca93edb4eacb4fef063b776fe13d4e8611",
     "write": false,
     "human_only": false,
     "human_caller_only": false,

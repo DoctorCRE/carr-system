@@ -1136,6 +1136,21 @@ test('the router queue keeps a partly proposed email until the router excludes i
   } finally { await c.query("update deal set phase='closed' where id=$1", [second]); }
 });
 
+test('the router queue routes email logged after its window, up to the unresolved hold', async () => {
+  await c.query('delete from email_proposal');
+  const late = await email(askQuote);
+  const stale = await email(askQuote);
+  await c.query("update activity set occurred_at=now()-interval '5 days' where id=$1", [late.activity_id]);
+  await c.query("update activity set occurred_at=now()-interval '31 days' where id=$1", [stale.activity_id]);
+  const ids = (await command('email-router-queue', { days: 3, limit: 200 }, router(), 'carr_reader')).emails
+    .map(row => row.activity_id);
+  assert.ok(ids.includes(late.activity_id), 'mail recorded late still reaches reply proposals');
+  assert.ok(!ids.includes(stale.activity_id), 'mail older than the unresolved hold stays out');
+  await c.query("update activity set recorded_at=now()-interval '4 days' where id=$1", [late.activity_id]);
+  const again = (await command('email-router-queue', { days: 3, limit: 200 }, router(), 'carr_reader')).emails;
+  assert.ok(!again.some(row => row.activity_id === late.activity_id), 'routed once, inside its recording window');
+});
+
 test('the router queue includes logged outbound email with sender evidence', async () => {
   const context = { subject: 'Synthetic commitment', sender: { email: 'sender@example.test', internal: true },
     recipients: [{ email: 'recipient@example.test', internal: false }] };
@@ -2172,4 +2187,24 @@ test('expiry pages past old actionable proposals and cannot expire another mailb
   assert.equal(next.expired_count, 1);
   assert.equal(next.next_cursor, null);
   assert.equal((await command('list-email-proposals', { status: 'dismissed', limit: 50, include_non_deal: true })).proposals[0].id, blocked.proposal_id);
+});
+
+test('the mailbox outcome monitor reads real filing and all draft statuses as carr_reader', async () => {
+  await c.query('delete from email_proposal');
+  await email();
+  const read = owner => command('email-router-queue',
+    { purpose: 'outcomes', account: `${owner}@example.test` }, machineFor(owner), 'carr_reader');
+  const initial = await read('joe');
+  assert.equal(initial.schema_version, 'email-outcomes.v1');
+  assert.ok(initial.journey_live_at);
+  assert.ok(initial.last_email_in_filed_at);
+  assert.equal(initial.reply_draft_count, 0);
+  const draft = await draftFor();
+  assert.equal((await read('joe')).reply_draft_count, 1);
+  await command('dismiss-email-proposal', { idempotency_key: randomUUID(),
+    proposal_id: draft.proposal_id, base_version: 1, reason: 'Synthetic monitor proof' });
+  assert.equal((await read('joe')).reply_draft_count, 1);
+  assert.equal((await read('dell')).reply_draft_count, 0);
+  assert.deepEqual(Object.keys(await read('joe')).sort(),
+    ['journey_live_at', 'last_email_in_filed_at', 'reply_draft_count', 'schema_version']);
 });

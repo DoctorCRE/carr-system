@@ -58,8 +58,10 @@ Attachment routing failures have client, folder and deal counters, counted per
 unfinished attachment. attachments_uncached means a valid cache path has no file;
 attachments_path_conflict means decoded revisions disagree on that path. Conflicts,
 refused paths and read failures count as attachments_unresolved and stay pending.
-Mail enters intake through membership in the configured folder account, including
-all user subfolders. Decoded recipients provide context, never admission evidence.
+Mail enters intake through the configured folder account, including all user
+subfolders. A typed current-folder reference in the verified message account also
+proves admission when that folder is not catalogued. Decoded recipients provide
+context, never admission evidence.
 
 An email whose body is still only Outlook's preview is logged with the preview
 and flagged preview_only. A later full body is logged as a note.
@@ -91,6 +93,7 @@ from typing import Callable
 import uuid
 
 from lib import email_links, unresolved_email
+from lib.email_outcomes import business_day_deadline
 from lib.outlook_settings import load_settings, OutlookSettings
 from lib.outlook_runtime import stamp
 OUT = Path('out/outlook-intake')
@@ -222,6 +225,7 @@ FOLDER_CLASSES = {
 }
 MAIL_STORE_COUNTERS = ('decoder_rejected', 'decoder_details_rejected', 'mail_outside_selected_account', 'mail_account_ambiguous', 'mail_account_unresolved',
                        'stored', 'admitted', 'stored_multi_class', 'mail_account_unknown_not_stored', 'body_complete',
+                       'sender_decoded', 'recipients_decoded',
                        'stored_not_admitted_account_ambiguous',
                        'stored_not_admitted_account_unresolved',
                        *(prefix + kind for prefix in ('stored_', 'admitted_') for kind in FOLDER_CLASSES),
@@ -245,18 +249,21 @@ RECEIPT_NAMES = {'calendar_lifecycle_unsupported': 'calendar_copies_in_store',
 LEAD_OUTCOMES = {'proposed': 'lead_proposed', 'known_party': 'lead_known_party', 'refused': 'lead_refused'}
 
 
-COVERAGE_SHORTFALLS = ('coverage_messages_shortfall', 'coverage_subjects_shortfall', 'coverage_text_shortfall')
+COVERAGE_SHORTFALLS = ('coverage_messages_shortfall', 'coverage_subjects_shortfall', 'coverage_text_shortfall',
+                      'coverage_sender_shortfall', 'coverage_recipients_shortfall')
 
 
 def coverage_verdict(counts: dict) -> dict:
     """WR-000587's daily check: messages not admitted (ALL-MESSAGES, including messages the decoder
-    rejected), admitted without a subject (ALL-SUBJECTS) and admitted without full text (ALL-TEXT).
+    rejected), admitted without a subject, full text, sender or recipients.
     All zero is a pass."""
     return dict(zip(COVERAGE_SHORTFALLS, (
         counts['stored'] - counts['admitted'] + counts['mail_account_unknown_not_stored']
         + counts.get('decoder_rejected', 0),
         counts['admitted'] - counts['subject_decoded'],
-        counts['admitted'] - counts['body_complete'])))
+        counts['admitted'] - counts['body_complete'],
+        counts['admitted'] - counts['sender_decoded'],
+        counts['admitted'] - counts['recipients_decoded'])))
 
 
 def receipt_counts(counts: dict) -> dict:
@@ -456,15 +463,18 @@ def _message_object_fields(con: sqlite3.Connection) -> dict[int, dict]:
             recipients.setdefault(key, {}).setdefault(kind, []).append(address)
     object_columns = {r['name'] for r in con.execute('PRAGMA table_info(message_objects)')}
     sender = 'o.sender' if 'sender' in object_columns else 'NULL AS sender'
+    ownership_fields = ', '.join(f'o.{name}' if name in object_columns else f'NULL AS {name}'
+                                 for name in ('account_id', 'folder_id'))
     found = {}
     for row in con.execute(
             'WITH k AS (SELECT message_id, MIN(local_key) AS local_key FROM message_keys '
             'GROUP BY message_id HAVING COUNT(DISTINCT local_key) = 1) '
-            f'SELECT k.message_id, o.local_key, o.subject, o.conversation_id, o.recipients_status, {sender} '
+            f'SELECT k.message_id, o.local_key, o.subject, o.conversation_id, o.recipients_status, {sender}, {ownership_fields} '
             'FROM k '
             'JOIN message_objects o ON o.local_key = k.local_key'):
         fields = {name: row[name] for name in ('subject', 'conversation_id', 'sender')
                   if row[name] is not None and str(row[name]).strip()}
+        fields.update(account_id=row['account_id'], folder_id=row['folder_id'])
         lists = recipients.get(row['local_key'])
         # No observed recipient objects does not prove an empty recipient list.
         if row['recipients_status'] == 'listed' and lists:
@@ -481,11 +491,13 @@ def _folder_kind(path: str | None) -> str:
 
 
 def _coverage_counts(mails: list[dict], classes: dict[int, set[str]]) -> dict:
-    """Subject and full-text coverage over every admitted message; a message counts once per class."""
+    """Field coverage over every admitted message; a message counts once per class."""
     counts = dict.fromkeys(('subject_decoded', 'subject_missing',
                             *('subject_missing_' + kind for kind in FOLDER_CLASSES)), 0)
     counts['admitted'] = len(mails)
     counts['body_complete'] = sum(m['body_kind'] == 'full' and bool((m['body'] or '').strip()) for m in mails)
+    counts['sender_decoded'] = sum(bool((m['sender'] or '').strip()) for m in mails)
+    counts['recipients_decoded'] = sum(bool(_addresses(m['recipients']) or _addresses(m.get('cc'))) for m in mails)
     for mail in mails:
         if (mail['subject'] or '').strip():
             counts['subject_decoded'] += 1
@@ -548,13 +560,26 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
         meta.update(dict.fromkeys(MAIL_STORE_COUNTERS, 0))
         meta['decoder_rejected'] = rejected
         meta['decoder_details_rejected'] = int(meta.get('details_rejected') or 0)
+        # Decoders built before folder export have no folders table.
+        folder_accounts = (dict(con.execute('SELECT id, account_id FROM folders'))
+                           if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='folders'").fetchone()
+                           else {})
         admitted = []
         for m in mails:
             owners = ownership.get(m['id'], {None})
-            reason = ('mail_account_unresolved' if None in owners or m['folder_links_unresolved'] else
+            typed_folder = (m.get('account_id') == account_id and m.get('folder_id') is not None
+                            and folder_accounts.get(m['folder_id'], account_id) == account_id)
+            # A current typed reference retains ownership when the folder catalogue omits the folder,
+            # never when the catalogue places that folder under another account.
+            reason = ('mail_outside_selected_account' if m.get('account_id') not in (None, account_id) else
+                      None if typed_folder and owners <= {None, account_id} else
+                      'mail_account_unresolved' if None in owners or m['folder_links_unresolved'] else
                       'mail_account_ambiguous' if len(owners) > 1 else
                       'mail_outside_selected_account' if owners != {account_id} else None)
             kinds = folder_classes.get(m['id'], set())
+            if typed_folder and reason is None and not kinds:
+                kinds = {'unknown'}
+                folder_classes[m['id']] = kinds
             if kinds:
                 meta['stored'] += 1
                 meta['stored_multi_class'] += len(kinds) > 1
@@ -896,6 +921,8 @@ class Run:
                 request['outcome'] = 'proposed' if reply.get('proposed') is True else str(reply.get('reason'))
             if verb == 'log-activity':
                 request['activity_id'] = reply.get('activity_id')
+                if args.get('kind') == 'email_in':
+                    self.state['last_email_in_filed_at'] = int(self.now.timestamp())
             request.update(acknowledged=True, disposition='acknowledged', retry_at=None, error_code=None)
             _save(self.out, self.state)
         self.written.append((who, args.get('ref', 'claim card'), verb, note))
@@ -1722,8 +1749,15 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
                 _remove(stale)
             if reconcile:
                 return _reconcile(out, home, ports, settings, state)
+            filing_account = _hash(f'{settings.owner}|{settings.account}|{settings.folder_account_id}')
+            if state.get('filing_account') != filing_account:
+                for name in ('filing_observed_at', 'last_email_in_filed_at'):
+                    state.pop(name, None)
+                state['filing_account'] = filing_account
             outcome = _run(out, home, ports, state)
             if outcome.state != 'succeeded':
+                if outcome.state == 'degraded':
+                    return _filing_outcome(out, state, outcome, ports.now(), settings)
                 return outcome
             state = json.loads((out / STATE).read_text())
             work = Run(ports, state, ports.now(), out, settings)
@@ -1761,14 +1795,29 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
                 failed = missed
             if missed:
                 outcome.counts.update(coverage_missed_verdict=1, coverage_failed=1)
+            if outcome.counts.get('coverage_checked') or missed:
+                state['coverage_failed'] = bool(failed)
             _save(out, state)
             if failed:
                 outcome.state, outcome.reason = 'failed', 'coverage_failed'
-            return outcome
+            return _filing_outcome(out, state, outcome, ports.now(), settings)
         except CleanupError:
             return Outcome('failed', 'cleanup_failed')
     finally:
         os.close(fd)
+
+
+def _filing_outcome(out: Path, state: dict, outcome: Outcome, now: datetime, settings: OutlookSettings) -> Outcome:
+    if outcome.counts.get('stored', 0):
+        since = state.setdefault('filing_observed_at', int(now.timestamp()))
+        since = max(state.get('last_email_in_filed_at', since), since)
+        if outcome.state != 'failed' and now >= business_day_deadline(
+                datetime.fromtimestamp(since, timezone.utc), settings.timezone):
+            outcome.state, outcome.reason = 'failed', 'no_email_in_business_day'
+    else:
+        state.pop('filing_observed_at', None)
+    _save(out, state)
+    return outcome
 
 
 def _save(out: Path, state: dict) -> None:

@@ -114,7 +114,7 @@ def read_json(path: Path) -> dict[str, Any] | None:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
         return value if isinstance(value, dict) else None
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeError, json.JSONDecodeError):
         return None
 
 
@@ -509,16 +509,9 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
                             f"{list_name} item {number} ({subject}): {resolved.review_reason}"
                         )
             if is_action:
+                # Only a date said on the call is kept; an undated task stays
+                # undated and normalize_distillation asks the partner for one.
                 item["due_defaulted"] = item["due_on"] is None
-                if item["due_defaulted"]:
-                    anchor = date.fromisoformat(call_date) if call_date else datetime.fromisoformat(now().replace("Z", "+00:00")).astimezone(ZoneInfo(CALL_TIME_ZONE)).date()
-                    due = anchor + timedelta(days=1)
-                    while due.weekday() >= 5:
-                        due += timedelta(days=1)
-                    item["due_on"] = due.isoformat()
-                    value["review_questions"].append(
-                        f"{list_name} item {number}: Due date defaulted to {item['due_on']} (next business day)."
-                    )
             if _word_count(item["evidence"]) > 15:
                 # Retain the quoted timing inside the remote 15-word ceiling.
                 # Other evidence keeps its original leading words.
@@ -584,13 +577,38 @@ def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
                 good.append(item)
         return good
 
+    def merge_repeats(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        # One owner's task named twice in one call is one task: same deal and
+        # case/whitespace-normalized title, the rule acceptance also merges on.
+        # A stated date wins over none; two different stated dates stay apart.
+        kept: list[dict[str, Any]] = []
+        for task in tasks:
+            title = " ".join(task["title"].split()).casefold()
+            first = next((k for k in kept if k["deal_id"] == task["deal_id"]
+                          and " ".join(k["title"].split()).casefold() == title
+                          and (k["due_on"] == task["due_on"] or None in (k["due_on"], task["due_on"]))), None)
+            if first is None:
+                kept.append(task)
+                continue
+            if first["due_on"] is None and task["due_on"] is not None:
+                first.update(due_on=task["due_on"], due_defaulted=task["due_defaulted"], evidence=task["evidence"])
+            first["participant_ids"] = list(dict.fromkeys(first["participant_ids"] + task["participant_ids"]))
+        return kept
+
     report = dict(raw["report"])
     result: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION, "session": session, "generated_at": now(), "report": report,
-        "joe_tasks": clean(raw["joe_tasks"], "joe_task"), "dell_tasks": clean(raw["dell_tasks"], "dell_task"),
+        "joe_tasks": merge_repeats(clean(raw["joe_tasks"], "joe_task")),
+        "dell_tasks": merge_repeats(clean(raw["dell_tasks"], "dell_task")),
         "deal_updates": clean(raw["deal_updates"], "deal_update"), "draft_proposals": clean(raw["draft_proposals"], "draft_proposal"),
         "review_questions": review, "missing_tracks": missing_tracks,
     }
+    for list_name in ("joe_tasks", "dell_tasks"):
+        for number, task in enumerate(result[list_name], 1):
+            if task["due_on"] is None:
+                review.append({"id": _review_id(session, f"undated_{list_name}", number), "resolved": False,
+                               "question": f"{list_name} item {number} ({task['title']}): "
+                                           "No due date was said on the call; set one if it has a deadline."})
     for index, draft in enumerate(result["draft_proposals"], 1):
         recipient = parties_by_deal[draft["deal_id"]].get(draft["recipient_party_id"])
         deal = next((deal for deal in context["deals"] if deal["id"] == draft["deal_id"]), None)
@@ -827,12 +845,20 @@ def transcript_repeat_field(report: Any, transcript: dict[str, Any]) -> str | No
 
 def hold_transcript_repeat(session_dir: Path, report: dict[str, Any]) -> dict[str, Any] | None:
     transcript = read_json(session_dir / "transcript.json")
-    field = transcript_repeat_field(report, transcript) if transcript is not None else None
-    if field is None:
+    segments = transcript.get("segments") if transcript else None
+    available = isinstance(segments, list) and all(
+        isinstance(segment, dict) and isinstance(segment.get("text"), str) for segment in segments
+    )
+    field = transcript_repeat_field(report, transcript) if available and transcript else None
+    if available and field is None:
         return None
     status = read_json(session_dir / STATUS_FILE) or {"schema_version": SCHEMA_VERSION, "session": session_dir.name}
-    status.update(state="held_review", reason="summary_repeats_transcript", field=field,
+    status.update(state="held_review", reason="summary_repeats_transcript" if available else "transcript_unavailable",
                   updated_at=now(), next_attempt_at=None)
+    status.pop("sync_attempts", None)
+    status.pop("field", None)
+    if field is not None:
+        status["field"] = field
     write_private(session_dir / STATUS_FILE, status)
     return status
 
@@ -917,6 +943,7 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
                 report = resumed
             except Exception as exc:
                 _deal_check_unavailable(report, session_dir, exc)
+                report["checks_hold_day"] = call_budget.budget_day()
             with update_report(session_dir, initial=report, locked=True) as current:
                 current.clear()
                 current.update(report)
@@ -924,6 +951,9 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         if existing.get("state") in {"ready_review", "filed"}:
             return existing
         return _complete_session(session_dir, report)
+    held = hold_transcript_repeat(session_dir, {})
+    if held is not None:
+        return held
     existing = read_json(session_dir / STATUS_FILE) or {}
     attempts = existing.get("extraction_attempts", 0)
     if attempts >= max_attempts:
@@ -975,6 +1005,7 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         raw = distiller(request)
         held = hold_transcript_repeat(session_dir, raw)
         if held is not None:
+            write_private(session_dir / "post-call-held-draft.json", raw)
             return held
         result = normalize_distillation(raw, context, session_dir.name,
                                        call_date=call_date, transcript=transcript)

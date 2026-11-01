@@ -161,7 +161,7 @@ def is_ordinary_main_window(window: dict) -> bool:
             and bounds.get('width', 0) >= 400 and bounds.get('height', 0) >= 400)
 
 
-def cua(tool: str, arguments: dict) -> dict:
+def _call(tool: str, arguments: dict) -> str:
     try:
         driver = str(load_settings().driver)
         result = subprocess.run([driver, 'call', tool, json.dumps(arguments)],
@@ -182,13 +182,29 @@ def cua(tool: str, arguments: dict) -> dict:
             diagnostic = match.group(1) if match else ''
         suffix = f': {diagnostic}' if diagnostic else ''
         raise CuaError(f'{tool}: exit {result.returncode}{suffix}')
+    return result.stdout
+
+
+def cua(tool: str, arguments: dict) -> dict:
+    stdout = _call(tool, arguments)
     try:
-        value = json.loads(result.stdout)
+        value = json.loads(stdout)
     except ValueError as exc:
-        raise CuaError(f'{tool}: {type(exc).__name__}') from None
+        raise CuaError(f"{tool}: {type(exc).__name__} {'text' if stdout.strip() else 'empty'}") from None
     if not isinstance(value, dict):
-        raise CuaError(f'{tool}: exit {result.returncode}')
+        raise CuaError(f'{tool}: exit 0')
     return value
+
+
+def act(tool: str, arguments: dict) -> None:
+    """One UI action. A zero exit is done whatever it prints; the caller's next walk proves the effect."""
+    try:
+        value = json.loads(_call(tool, arguments))
+    except ValueError:
+        return
+    if isinstance(value, dict) and (value.get('error') or value.get('refusal')
+                                    or value.get('status') in ('refused', 'failed', 'error')):
+        raise CuaError(f'{tool}: refused')
 
 
 def outlook_pid() -> int | None:
@@ -262,7 +278,7 @@ def _quit(pid: int, windows: list[dict], waits: Waits) -> bool:
     fallback_at = time.monotonic()
     if window is not None:
         try:
-            cua('invoke_menu', {'pid': pid, 'window_id': window['window_id'], 'path': QUIT})
+            act('invoke_menu', {'pid': pid, 'window_id': window['window_id'], 'path': QUIT})
             fallback_at = time.monotonic() + min(2, waits.quit_seconds / 2)
         except (CuaError, KeyError):
             pass
@@ -376,7 +392,7 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
         windows = _windows(pid)
         if windows:
             try:
-                cua('invoke_menu', {'pid': pid, 'window_id': windows[0]['window_id'],
+                act('invoke_menu', {'pid': pid, 'window_id': windows[0]['window_id'],
                                     'path': ['File', 'New', 'Main Window']})
             except CuaError:
                 pass
@@ -414,18 +430,18 @@ class Window:
         return state.get('elements') or []
 
     def _menu(self, path: list[str]) -> None:
-        cua('invoke_menu', {'pid': self.pid, 'window_id': self.window_id, 'path': path})
+        act('invoke_menu', {'pid': self.pid, 'window_id': self.window_id, 'path': path})
         time.sleep(self.waits.settle_seconds)
 
     def front(self) -> None:
-        cua('bring_to_front', {'pid': self.pid, 'window_id': self.window_id})
+        act('bring_to_front', {'pid': self.pid, 'window_id': self.window_id})
 
     def select_all_accounts(self) -> bool:
         buttons = [e for e in self._walk(**PANE_WALK)
                    if button_matches(e, 'All Accounts')]
         if len(buttons) != 1:
             return False
-        cua('click', {'pid': self.pid, 'element_token': buttons[0]['element_token'],
+        act('click', {'pid': self.pid, 'element_token': buttons[0]['element_token'],
                       'action': 'press'})
         time.sleep(self.waits.settle_seconds)
         return True
@@ -461,7 +477,7 @@ class Window:
         """Open the Inbox from the folder pane and confirm it by its selected row and the window title."""
         elements, found = self._inbox_rows()
         if not (any(row.get('selected') for row, _ in found) and _in_inbox(elements)):
-            cua('click', {'pid': self.pid, 'element_token': found[0][0]['element_token']})
+            act('click', {'pid': self.pid, 'element_token': found[0][0]['element_token']})
             time.sleep(self.waits.settle_seconds)
             elements, found = self._inbox_rows()
         if not (any(row.get('selected') for row, _ in found) and _in_inbox(elements)):
@@ -505,7 +521,7 @@ class Window:
         tables = [e for e in elements if e.get('role') == 'AXTable' and e.get('label') == 'Message List']
         if len(tables) != 1 or not tables[0].get('element_token'):
             raise UiError('message_list_not_found', step='scan_rows')
-        cua('scroll', {'pid': self.pid, 'window_id': self.window_id,
+        act('scroll', {'pid': self.pid, 'window_id': self.window_id,
                        'element_token': tables[0]['element_token'],
                        'direction': direction, 'by': 'line', 'amount': 50 if direction == 'up' else 1})
         time.sleep(self.waits.settle_seconds)
@@ -616,7 +632,7 @@ class Window:
             return Moved.NEXT_TO_UNREAD
         if not allowed():
             return Moved.WINDOW_CLOSED
-        cua('click', {'pid': self.pid, 'element_token': rows[index].token})
+        act('click', {'pid': self.pid, 'element_token': rows[index].token})
         time.sleep(self.waits.settle_seconds)
         selected = [r for r in self.rows()[1] if r.selected]
         if [r.label for r in selected] != [label]:
@@ -627,14 +643,14 @@ class Window:
         if len(moves) != 1:
             return Moved.FAILED
         fields_before = {(e.get('role'), e.get('label')) for e in elements if e.get('role') in FIELDS}
-        cua('click', {'pid': self.pid, 'element_token': moves[0]['element_token']})
+        act('click', {'pid': self.pid, 'element_token': moves[0]['element_token']})
         time.sleep(self.waits.settle_seconds)
         picker = self._walk(max_elements=LIST_WALK)
         fields = [e for e in picker if e.get('role') in FIELDS
                   and (e.get('role'), e.get('label')) not in fields_before]
         if len(fields) != 1:
             return self._abandon()
-        cua('type_text', {'pid': self.pid, 'element_token': fields[0]['element_token'], 'text': leaf})
+        act('type_text', {'pid': self.pid, 'element_token': fields[0]['element_token'], 'text': leaf})
         time.sleep(self.waits.settle_seconds)
         entries = [e for e in self._walk(max_elements=LIST_WALK)
                    if e.get('role') in ENTRIES and (e.get('label') or '').strip() == leaf]
@@ -642,7 +658,7 @@ class Window:
             return self._abandon()
         if not allowed():
             return self._abandon(Moved.WINDOW_CLOSED)
-        cua('click', {'pid': self.pid, 'element_token': entries[0]['element_token']})
+        act('click', {'pid': self.pid, 'element_token': entries[0]['element_token']})
         deadline = time.monotonic() + self.waits.move_seconds
         while True:
             time.sleep(self.waits.settle_seconds)
@@ -658,13 +674,13 @@ class Window:
                         key=lambda e: e.get('depth', 0))
         if not fields:
             raise UiError('search_field_not_found', step='search')
-        cua('type_text', {'pid': self.pid, 'element_token': fields[0]['element_token'], 'text': query})
-        cua('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'return'})
+        act('type_text', {'pid': self.pid, 'element_token': fields[0]['element_token'], 'text': query})
+        act('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'return'})
         time.sleep(self.waits.settle_seconds)
         return self.rows(require_inbox=False)[1]
 
     def end_search(self) -> None:
-        cua('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'escape'})
+        act('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'escape'})
         time.sleep(self.waits.settle_seconds)
 
     def refresh(self, key: str, allowed: Callable[[], bool]) -> Refreshed:
@@ -684,13 +700,13 @@ class Window:
             return Refreshed.UNCERTAIN
         if not allowed():
             return Refreshed.WINDOW_CLOSED
-        cua('click', {'pid': self.pid, 'element_token': rows[index].token})
+        act('click', {'pid': self.pid, 'element_token': rows[index].token})
         time.sleep(self.waits.render_seconds)
         selected = [r.label for r in self.rows(require_inbox=False)[1] if r.selected]
         return Refreshed.OPENED if selected == [rows[index].label] else Refreshed.NOT_OPENED
 
     def _abandon(self, result: Moved = Moved.FAILED) -> Moved:
-        cua('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'escape'})
+        act('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'escape'})
         time.sleep(self.waits.settle_seconds)
         return result
 
