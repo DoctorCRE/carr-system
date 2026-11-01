@@ -28,7 +28,7 @@ class ReviewPR(TestCase):
                 elif args[1] == 'comment': raise AssertionError('VERDICT comment publisher retired')
                 elif args[1] == 'merge' and moved == 'after-comment':
                     raise subprocess.CalledProcessError(1, command, stderr='head does not match')
-            elif name == sys.executable:
+            elif name in (sys.executable, str(CLI.resolve().parents[1] / '.venv/bin/python')):
                 self.assertTrue(args[0].endswith('ops/review-submit.py'))
                 self.assertEqual(args[1], '42')
                 self.assertIn(args[2], ('approve', 'request-changes'))

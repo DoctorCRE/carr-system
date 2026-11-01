@@ -21,6 +21,9 @@ Tell the successor: Start with /pstack:poteto-mode in its Orchestrate playbook.
 Resume from team-memory handoff/orchestrator-latest and pstack's Session pickup
 playbook. Run as the coordinator that owns the program, never the code (rule
 974655e1). pstack lives at /Users/booko/.claude/plugins/marketplaces/cursor-plugins/pstack.
+Read pstack's program store at /Users/booko/.claude/orchestrate/doctorcre-delivery
+and its preferences.md standing orders. Use /Users/booko/.claude/plugins/marketplaces/cursor-plugins/pstack/skills/poteto-mode/scripts/orch/orch.ts for state.
+Read ~/.claude/rules/pstack-models.md and ~/.claude/rules/pstack-routing.md.
 Preserve the running jobs' reporting destinations; do not duplicate their work.
 Post the successor's returned link to Joe, then stop this session.'''
 
