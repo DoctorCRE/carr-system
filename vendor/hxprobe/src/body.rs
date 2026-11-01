@@ -42,17 +42,22 @@ impl Sidecars {
 
     /// The HTML of the sidecar a body slot names, if it is present and readable.
     pub fn html(&mut self, stored_path: &str) -> Option<String> {
-        let html = self.files.get(stored_path).and_then(|path| {
-            let mut out = Vec::new();
-            flate2::read::GzDecoder::new(fs::File::open(path).ok()?).take(MAX_SIDECAR).read_to_end(&mut out).ok()?;
-            Some(String::from_utf8_lossy(&out).into_owned())
-        });
+        let html = self.resolve(stored_path).ok();
         if html.is_some() {
             self.linked += 1;
         } else {
             self.rejected += 1;
         }
         html
+    }
+
+    pub fn resolve(&self, stored_path: &str) -> Result<String, &'static str> {
+        let path = self.files.get(stored_path).ok_or("sidecar_missing")?;
+        let file = fs::File::open(path).map_err(|_| "sidecar_unreadable")?;
+        let mut out = Vec::new();
+        flate2::read::GzDecoder::new(file).take(MAX_SIDECAR).read_to_end(&mut out)
+            .map_err(|_| "sidecar_decode_failed")?;
+        Ok(String::from_utf8_lossy(&out).into_owned())
     }
 }
 
