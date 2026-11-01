@@ -3,6 +3,7 @@
 -- no `/`, so every such capture raised a bare P0001 that reached callers as
 -- unhandled_verb_failure. Admit slash-separated key segments in both checks;
 -- the function still requires the ref to name its exact section.
+-- rollback: forward-only — slash-scoped references may already be stored and cannot satisfy the old constraint.
 -- lock-review: ops.work_request size is unmeasured; replacing its CHECK takes ACCESS EXCLUSIVE and scans all rows.
 set local lock_timeout = '5s';
 set local statement_timeout = '60s';
