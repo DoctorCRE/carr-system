@@ -135,7 +135,7 @@ class QueueAndCutover(unittest.TestCase):
         event = {'merge_group': {'head_ref': 'refs/heads/gh-readonly-queue/main/pr-4-head', 'head_sha': 'queue', 'base_sha': 'base'}}
         large = {**self.pr, 'number': 4, 'state': 'open', 'additions': 900}
         other = {**large, 'number': 5, 'head': {'sha': 'other'}}
-        def exercise(approved_other, login='reviewer[bot]', broken=False):
+        def exercise(approved_other, login='reviewer[bot]', broken=False, moved=False):
             calls = []
             def api(path, payload=None):
                 calls.append((path, payload))
@@ -143,21 +143,22 @@ class QueueAndCutover(unittest.TestCase):
                 if broken: raise ValueError('lookup failed')
                 if '/compare/' in path: return {'commits': [{'sha': 'head'}, {'sha': 'other'}, {'sha': 'queue'}], 'total_commits': 3}
                 if '/commits/head/pulls' in path: return [large]
-                if '/commits/other/pulls' in path: return [other]
+                if '/commits/other/pulls' in path: return [{**other, 'head': {'sha': 'moved'}}] if moved else [other]
                 if '/commits/queue/pulls' in path: return []
                 if '/files?' in path: return self.files
                 if '/reviews?' in path: return [self.approval] if '/4/' in path else ([{**self.approval, 'commit_id': 'other'}] if approved_other else [])
                 if path.endswith('/4'): return large
-                if path.endswith('/5'): return other
+                if path.endswith('/5'): return {**other, 'head': {'sha': 'moved'}} if moved else other
                 raise AssertionError(path)
             with patch.dict(gate.os.environ, {'CARR_REVIEW_APP_LOGIN': login}), patch.object(gate, 'api', side_effect=api):
                 result = gate.run(event, 'owner/repo')
-            self.assertEqual(calls[-1][1]['state'], 'success' if approved_other and login and not broken else 'failure')
+            self.assertEqual(calls[-1][1]['state'], 'success' if approved_other and login and not broken and not moved else 'failure')
             return result
         self.assertEqual(exercise(True), 0)
         self.assertEqual(exercise(False), 1)
         self.assertEqual(exercise(True, login=''), 1)
         self.assertEqual(exercise(True, broken=True), 1)
+        self.assertEqual(exercise(True, moved=True), 1)
 
     def test_dispatch_evaluates_all_open_main_heads(self):
         prs = [{'number': 4}, {'number': 5}]

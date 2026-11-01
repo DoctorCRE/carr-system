@@ -84,7 +84,7 @@ def queue_prs(root, group):
     numbers = set()
     for sha in shas:
         for pr in api(f"{root}/commits/{sha}/pulls?per_page=100"):
-            if pr["state"] == "open" and pr["base"]["ref"] == "main" and pr["head"]["sha"] in shas:
+            if pr["state"] == "open" and pr["base"]["ref"] == "main":
                 numbers.add(pr["number"])
     if int(match[1]) not in numbers:
         raise ValueError("Merge queue constituent lookup failed")
