@@ -993,7 +993,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "dispatch-job": {
     "ingress_key": "mcp-tool:dispatch-job",
     "source_locator": "mcp-server/src/work-queue.js",
-    "schema_digest": "64fb13bd07030c4bd940be0f43e1bd7dcae37d25230bf203d999ec12d7b54906",
+    "schema_digest": "0d73978972a3f26946fd87dd8df3831afc4b9b8d50a240335cd3316c656c5235",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

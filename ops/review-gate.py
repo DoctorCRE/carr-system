@@ -73,26 +73,63 @@ def api(path, payload=None):
 
 
 def queue_prs(root, group):
-    match = re.fullmatch(r"(?:refs/heads/)?gh-readonly-queue/main/pr-([0-9]+)-.+", group["head_ref"])
-    if not match:
-        raise ValueError("Unrecognized merge queue ref")
+    if group.get("base_ref", "refs/heads/main") != "refs/heads/main":
+        raise ValueError("Merge queue must target main")
+    owner, name = root.removeprefix("repos/").split("/")
+    query = """query($owner:String!,$name:String!,$cursor:String) {
+      repository(owner:$owner,name:$name) { mergeQueue(branch:"main") {
+        entries(first:100,after:$cursor) {
+          nodes { headCommit { oid } pullRequest { number headRefOid } }
+          pageInfo { hasNextPage endCursor }
+        }
+      } }
+    }"""
+    cursor = None
+    entries = {}
+    while True:
+        response = api("graphql", {"query": query, "variables": {
+            "owner": owner, "name": name, "cursor": cursor}})
+        if response.get("errors"):
+            raise ValueError("Merge queue query failed")
+        page = response["data"]["repository"]["mergeQueue"]["entries"]
+        for entry in page["nodes"]:
+            if entry["headCommit"] is not None:
+                sha = entry["headCommit"]["oid"]
+                if sha in entries:
+                    raise ValueError("Duplicate merge queue commit")
+                entries[sha] = entry
+        if not page["pageInfo"]["hasNextPage"]:
+            break
+        next_cursor = page["pageInfo"]["endCursor"]
+        if not next_cursor or next_cursor == cursor:
+            raise ValueError("Incomplete merge queue pagination")
+        cursor = next_cursor
     comparison = api(f"{root}/compare/{group['base_sha']}...{group['head_sha']}?per_page=100")
     commits = comparison["commits"]
-    if len(commits) != comparison["total_commits"] or not commits:
+    if not commits or len(commits) != comparison["total_commits"]:
         raise ValueError("Incomplete merge queue comparison")
-    shas = {commit["sha"] for commit in commits}
-    numbers = set()
-    for sha in shas:
-        for pr in api(f"{root}/commits/{sha}/pulls?per_page=100"):
-            if pr["state"] == "open" and pr["base"]["ref"] == "main":
-                numbers.add(pr["number"])
-    if int(match[1]) not in numbers:
-        raise ValueError("Merge queue constituent lookup failed")
-    return numbers, shas
+    heads = {}
+    for commit in commits:
+        entry = entries.get(commit["sha"])
+        if entry is None:
+            raise ValueError("Merge queue constituent lookup failed")
+        pr = entry["pullRequest"]
+        if pr["number"] in heads or not pr["headRefOid"]:
+            raise ValueError("Invalid merge queue constituent")
+        heads[pr["number"]] = pr["headRefOid"]
+    if commits[-1]["sha"] != group["head_sha"]:
+        raise ValueError("Merge queue comparison does not reach group head")
+    return heads
 
 
 def run(event, repo):
     root = f"repos/{repo}"
+    recovery_sha = (event.get("inputs") or {}).get("queue_head_sha")
+    if recovery_sha:
+        if not re.fullmatch(r"[0-9a-f]{40}", recovery_sha):
+            raise ValueError("Recovery requires a full merge group SHA")
+        base = api(f"{root}/git/ref/heads/main")["object"]["sha"]
+        event = {"merge_group": {"head_sha": recovery_sha, "base_sha": base}}
     if "merge_group" in event:
         group = event["merge_group"]
         def status(state):
@@ -103,10 +140,11 @@ def run(event, repo):
         try:
             if not os.environ.get("CARR_REVIEW_APP_LOGIN", "").strip():
                 raise ValueError("Missing CARR_REVIEW_APP_LOGIN")
-            numbers, shas = queue_prs(root, group)
-            results = [evaluate_pr(root, number, shas) for number in sorted(numbers)]
-            passed = all(result == 0 for result in results)
-        except (ValueError, KeyError, TypeError, subprocess.SubprocessError):
+            heads = queue_prs(root, group)
+            results = [evaluate_pr(root, number, heads[number]) for number in sorted(heads)]
+            passed = all(result == 0 for result in results) and queue_prs(root, group) == heads
+        except (ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+            print(f"Merge queue review failed: {error}")
             passed = False
         status("success" if passed else "failure")
         return int(not passed)
@@ -117,7 +155,7 @@ def run(event, repo):
     return evaluate_pr(root, number)
 
 
-def evaluate_pr(root, number, queue_shas=None):
+def evaluate_pr(root, number, queue_head=None):
     def status(sha, state, description="No skip-CI title; small safe diff or current-head approval required"):
         api(f"{root}/statuses/{sha}", {"context": "review-gate", "state": state,
             "description": description})
@@ -125,7 +163,7 @@ def evaluate_pr(root, number, queue_shas=None):
     if pr["base"]["ref"] != "main":
         return
     sha = pr["head"]["sha"]
-    if queue_shas is not None and (pr.get("state") != "open" or sha not in queue_shas):
+    if queue_head is not None and (pr.get("state") != "open" or sha != queue_head):
         return 1
     status(sha, "pending")
     files = api(f"{root}/pulls/{number}/files?per_page=100")

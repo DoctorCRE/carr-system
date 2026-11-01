@@ -307,8 +307,8 @@ test("every tools.js ToolError code is classified", t => {
     "c313a94c9354e3f838359c0e457cadbbebd3d4246bcf5a1b765dae46a142c1d5",
     "c313a94c9354e3f838359c0e457cadbbebd3d4246bcf5a1b765dae46a142c1d5",
     "d991b45fcdc81eaa20d6007a204fb851ab870c0cf692adea81390b6a0268b152",
-    "efba707fdfa59669e1a3f44fe8bfb4309e4cd13437c54b20392363eba89b4f8e",
     "f63a0f2a5645ee4947efb2591ff71cead89f796204ec510bc9e682a4e66c6c1f",
+    "f9dde66e80d9054fb24315138b160492e95f21ea42f98ee20018448d728f0bd9",
   ], "review changed dynamic code producers");
   // Existing adapters forward codes from other modules; their source is outside this inventory.
   // Counts make new forwarding sites fail until reviewed.
