@@ -120,3 +120,34 @@ Single-context; the glossary and decisions live in the doctrine store and decisi
 
 `.github/workflows/deploy.yml` deploys a successful main canary. It runs
 `tools/migrate.py` and verifies the production `/release` identity.
+
+## Orchestrator rotation
+
+Claude Code coordinator launch prompts must contain the exact standalone line
+`CARR-Session-Role: orchestrator` in the first user message. Worker prompts must
+omit it. The rotation hook reads only that first non-meta user message, ignores
+sidechains and agent events, and is not installed for Codex. Existing unmarked
+sessions need a marked successor to opt in.
+
+The Stop hook requests handoff once per session when the latest assistant input
+plus cache-read and cache-creation counters reach 500000 tokens. Set
+`CARR_ORCHESTRATOR_ROTATION_TOKENS` in the Claude process environment to tune the
+absolute threshold in one place. The auto-compaction window is 700000 tokens.
+PreCompact blocks only the first automatic attempt, even below the threshold,
+and allows subsequent attempts and manual `/compact`. A pending backstop also
+requests handoff at the next Stop if the turn instruction has not fired.
+State lives under `~/.cache/carr/orchestrator-rotation/`, keyed by session ID.
+Unreadable transcripts or state fail open.
+
+Follow the hook instruction to write team-memory section handoff/orchestrator-latest,
+including every running delegated job and its reporting thread. Mint a card
+through `dispatch-job`, launch a successor with `t3_thread_launch`, post its link,
+and stop. The successor starts `/pstack:poteto-mode` in Orchestrate, reads the
+handoff and Session pickup playbook, and owns the program, never the code
+(rule 974655e1).
+
+Idle subscription sessions over about 200K tokens can compact near cache expiry
+regardless of the window. PreCompact is the one-attempt backstop for that case.
+Its reason reaching the model during automatic compaction is unverified; Stop
+is the primary model-visible instruction channel. Rotation requests a handoff;
+it cannot guarantee that a model completes the handoff or never compacts.

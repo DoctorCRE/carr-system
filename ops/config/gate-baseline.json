@@ -19,11 +19,12 @@
     "session-brief.py": "9df9928e64598ac469492abcc4af2452a25238c8b6978cd8871bf4c200684850",
     "team-memory-index.py": "7ba8a39bca14786b40c2816f052462fb1d395206cc73404953193b5065cba3ee",
     "turn_origin.py": "7fe75beaec283cd3ce3a3c8a109ef36e44999eb1b27dcebbffafff590a261f7e",
-    "worktree-self-plumb.py": "f7eac9fc2956f932787211d4fd638350ffb4df5a251f7d49afbd1bf707d3bc33"
+    "worktree-self-plumb.py": "f7eac9fc2956f932787211d4fd638350ffb4df5a251f7d49afbd1bf707d3bc33",
+    "orchestrator-rotation.py": "6b65ffe5ed7220b29556a72e9c048c7dc6dd2b0535c80dd147ad9432974adf67"
   },
   "contracts": {
     "hook_runtime.py": "617416d669ccf046041eac9798551932c63e10d6df5cb7b2c0da8a13b373a422",
-    "hooks.json": "c497c10de4a461134f0c0fcde4b75dca1c00261a81423f7ad84195c55cede542",
+    "hooks.json": "59580a9f56b301ebf8bef08bfdf1cc80dcadc27fc241c82e2a60cbe17d537d2e",
     "codex-hooks.json": "3631799714d7dbdd10a0a83d4c08e99af96226ed4487dd6661e15e449337579f",
     "rule-enforcement-map.json": "7fd3df5915191d622359be00c4ea96c05a29cb99ea3da394a01217824984062b",
     "native_shell.py": "6b2f3b64b1a5f2be1e48383e7979a011fe2f88be91cc27627e9531464105f268",
