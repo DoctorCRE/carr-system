@@ -1,5 +1,7 @@
 # Native issue tracking contract
 
+**Status:** Work Requests still live in the record layer: use `report-problem` and `work-request-card` until the cutover slice of WR-000675 lands. This file describes the GitHub flow that will replace it. Current triage remains human-only.
+
 WR675.S5.J2 defines the GitHub Issues contract from the WR675.S5.J1 plan.
 This slice installs templates and documentation only. It migrates no Work
 Requests, creates no issues or Project, applies no labels to GitHub, and changes
@@ -23,7 +25,7 @@ authority or a replacement for required checks.
 
 ## Public content rule
 
-**carr-system is PUBLIC.** Include no client names, contacts, deal identifiers,
+**carr-system is PUBLIC.** Include no client names, contact details, deal identifiers, deal facts (property addresses, rents, prices, terms),
 document extracts, screenshots or identifying links. Write engineering
 descriptions only, with opaque evidence references. This applies to issue titles,
 bodies, comments, attachments, PRs and Project fields. Reproduce bugs with

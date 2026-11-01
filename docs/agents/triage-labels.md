@@ -1,5 +1,7 @@
 # Native triage labels
 
+**Status:** Work Requests still live in the record layer: use `report-problem` and `work-request-card` until the cutover slice of WR-000675 lands. This file describes the GitHub flow that will replace it. Current triage remains human-only.
+
 The vocabulary is defined in [.github/labels.json](../../.github/labels.json).
 The [issue tracking contract](issue-tracker.md) defines ownership, public-data
 restrictions, issue bodies, Project fields and PR closure. Label application
