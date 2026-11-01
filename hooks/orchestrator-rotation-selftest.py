@@ -116,6 +116,27 @@ class Rotation(unittest.TestCase):
         self.write(prompt=[dict(type='text', text=MARKER)])
         self.blocked(self.run_hook())
 
+    def test_declarations(self):
+        repo = HOOK.parent.parent
+        for relative in ('ops/config/hooks.json', '.claude/settings.json'):
+            config = json.loads((repo / relative).read_text())
+            hooks = config.get('hooks', config)
+            for event in ('Stop', 'PreCompact'):
+                groups = [g for g in hooks[event] if any('orchestrator-rotation.py' in
+                          h.get('command', '') for h in g['hooks'])]
+                self.assertEqual(len(groups), 1)
+                if event == 'PreCompact':
+                    self.assertEqual(groups[0]['matcher'], 'auto')
+        self.assertEqual(config['autoCompactWindow'], 700000)
+        self.assertNotIn('orchestrator-rotation.py',
+                         (repo / 'ops/config/codex-hooks.json').read_text())
+
+    def test_corrupt_state_fails_open(self):
+        self.blocked(self.run_hook())
+        for path in self.home.glob('.cache/carr/orchestrator-rotation/*.json'):
+            path.write_text('{broken')
+        self.allowed(self.run_hook())
+
     def test_configuration(self):
         with unittest.mock.patch.dict(os.environ, CARR_ORCHESTRATOR_ROTATION_TOKENS='600000'):
             self.allowed(self.run_hook())
