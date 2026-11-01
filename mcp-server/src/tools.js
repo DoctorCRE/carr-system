@@ -2521,6 +2521,15 @@ const callNextStepItems = Symbol('call next step items');
 const captureKey = id => derivedIdempotencyKey("capture-candidate", id);
 const captureKeys = id => [`capture:${id}`, captureKey(id)];
 
+async function completedRetainedStep(c, dealId, candidateIds, step) {
+  return (await c.query(
+    `select 1 from event request join next_action n on n.subject_type='deal' and n.subject_id=$1
+       and request.new_value->'actions' @> jsonb_build_array(jsonb_build_object('id',n.id::text,'source','next_action'))
+      where request.subject_type='deal' and request.subject_id=$1 and request.field='overdue_assessment_pending'
+        and request.new_value->>'candidate_id'=any($2::text[]) and n.status='done' and n.description=$3
+      limit 1 /* call-outcome:undo-step-completed-prior */`, [dealId, candidateIds, step])).rows.length > 0;
+}
+
 async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args) {
   // Same lock order as resolve-candidate's apply: the checklist first, so a
   // partner completing one of the call's items waits for (or beats) the undo.
@@ -2567,7 +2576,8 @@ async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args) {
   const shown = (await c.query("select next_step from v_deal_room_board where id=$1", [dealId])).rows[0]?.next_step ?? null;
   // The board shows the newest open ball, else the newest unhidden note. Put
   // back the note it showed, or hide the call's note when it showed none.
-  if (priorStep !== null && shown !== priorStep)
+  const completedPrior = await completedRetainedStep(c, dealId, [candidate.id], priorStep);
+  if (priorStep !== null && shown !== priorStep && !completedPrior)
     await c.query("insert into deal_note (deal_id, kind, text, actor_id, created_at) values ($1,'next_step',$2,$3,clock_timestamp()) /* call-outcome:undo-step-note */",
       [dealId, priorStep, actor.id]);
   for (const [field, before, after] of [["next_step", candidate.payload.text, priorStep], ["next_date", candidate.payload.next_date ?? null, priorDate]])
@@ -10301,7 +10311,7 @@ registerTools({
             ? first.old_value.board_next_step : first.old_value?.[field] ?? null;
           restored[field] = value;
           if (field==='next_step') {
-            if (value !== null) await c.query(`insert into deal_note(deal_id,kind,text,actor_id,created_at)
+            if (value !== null && !await completedRetainedStep(c, dealId, own.map(row => row.id), value)) await c.query(`insert into deal_note(deal_id,kind,text,actor_id,created_at)
               values($1,'next_step',$2,$3,clock_timestamp())`, [dealId,value,actor.id]);
           } else await c.query(`update deal set ${field}=$2,updated_by=$3 where id=$1`, [dealId,value,actor.id]);
           await writeEvent(c,actor,field==='phase' ? 'revert-deal-field' : 'undo-call', 'deal',dealId,{
