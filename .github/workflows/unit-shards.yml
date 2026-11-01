@@ -63,7 +63,8 @@ jobs:
           packages: --postgres --documents
       - name: Run assigned MCP suites
         env:
-          CARR_CI_DATABASE_URL: postgres://carr_ci:postgres@127.0.0.1:5432/carr_ci # ci-secret-scan: allow - disposable loopback fixture
+          CARR_CI_DATABASE_URL: postgres://carr_ci@127.0.0.1:5432/carr_ci
+          PGPASSWORD: postgres
           CARR_CI_PORTABLE_ONLY: "1"
           CARR_LOCAL_PG_ALLOW_HOSTED: "1"
           CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin

@@ -113,6 +113,8 @@ jobs:
       - name: Verify edge incident delivery
         if: matrix.shard == 1
         run: python3 test/ci-noise-incident-test.py
+      - name: Install checksum-pinned official Gitleaks
+        run: python3 ops/gitleaks.py --install
       - name: Gates checks
         env:
           CARR_CI_PORTABLE_ONLY: "1"

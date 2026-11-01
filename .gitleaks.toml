@@ -434,12 +434,3 @@ paths = ['''(?:^|/)db/schema\.sql$''']
 regexes = [
   '''^\ \ \ \ \ \ \ \ \ \ \ and\ e\.idempotency_key='c4ad90f7\-d8dd\-4bf3\-8785\-659bae3d3f27'$''',
 ]
-
-[[allowlists]]
-description = "Disposable loopback PostgreSQL fixture in MCP shard jobs"
-condition = "AND"
-regexTarget = "line"
-paths = ['''(?:^|/)\.github/workflows/unit\-shards\.yml$''']
-regexes = [
-  '''^\ \ \ \ \ \ \ \ \ \ CARR_CI_DATABASE_URL:\ postgres[:]//carr_ci:postgres@127\.0\.0\.1:5432/carr_ci\ \#\ ci\-secret\-scan:\ allow\ \-\ disposable\ loopback\ fixture$''',
-]
