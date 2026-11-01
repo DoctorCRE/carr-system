@@ -1150,6 +1150,12 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal(context.vendor.base_version,1);
       assert.equal(context.vendor.party_version,partyVersion);
       assert.notEqual(context.vendor.party_version,context.vendor.base_version);
+      assert.equal(context.vendor.party_name,'Synthetic Banker');
+      assert.equal(context.vendor.party_email,'banker@example.invalid');
+      await c.query("insert into party(id,kind,name,created_by,updated_by) values($1,'org','Synthetic Bank',$2,$2)", [id(60), actor.id]);
+      await c.query("insert into party(id,kind,name,org_id,email,created_by,updated_by) values($1,'person','Same Name Elsewhere',$2,'x@other-bank.invalid',$3,$3)", [id(61), id(60), actor.id]);
+      assert.deepEqual(context.vendor.company_domains,['example.invalid']);
+      assert.deepEqual((await TOOLS['vendor-assignment-context'].handler(c,actor,{vendor:id(22)})).vendor.company_domains,['example.invalid']);
       assert.equal(context.vendor.company.id,id(20));
       assert.equal(context.vendor.contacts[0].id,id(21));
       const assignment = { deal_id: id(4), role: 'lender', company_party_id: id(20), contact_party_id: id(21) };
