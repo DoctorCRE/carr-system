@@ -5678,13 +5678,19 @@ export const TOOLS = {
 
   "vendor-assignment-context": {
     write: false,
-    description: "Read a live vendor's exact ID, base_version, assignment_version, company and existing contact party IDs before updating a deal assignment. Company can be null and contacts can be empty. Never creates identities or infers a role. Use find to resolve an ambiguous name first.",
+    description: "Read a live vendor's exact ID, base_version, assignment_version, company and existing contact party IDs before updating a deal assignment. Also returns party_version, the vendor party's own version (the base_version update-party-contact needs), its current party_name and party_email, and company_domains: the email domains carried by that company's own party and its people. Company can be null and contacts can be empty. Never creates identities or infers a role. Use find to resolve an ambiguous name first.",
     inputSchema: {type:'object',additionalProperties:false,properties:{vendor:{type:'string'}},required:['vendor']},
     handler: async (c,_actor,args) => {
       const subject = await resolveSubject(c,args.vendor);
       if (subject.type !== 'vendor') throw new ToolError({error:'not_a_vendor'});
       const vendor = (await c.query('select * from public.v_vendor_assignment_context where id=$1',[subject.id])).rows[0];
       if (!vendor) throw new ToolError({error:'vendor_not_live'});
+      const party = (await c.query(`select p.version,p.name,p.email,coalesce((select array_agg(distinct d.domain order by d.domain)
+          from public.party m cross join lateral (select lower(substring(m.email from '@([A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+)')) as domain) d
+          where (m.id=$2 or m.org_id=$2) and m.merged_into is null and m.deleted_at is null and d.domain is not null),'{}') as company_domains
+        from public.party p where p.id=$1`,[vendor.party_id,vendor.company?.id ?? null])).rows[0];
+      Object.assign(vendor,{party_version:party?.version ?? null,party_name:party?.name ?? null,
+        party_email:party?.email ?? null,company_domains:party?.company_domains ?? []});
       return {vendor};
     },
   },
