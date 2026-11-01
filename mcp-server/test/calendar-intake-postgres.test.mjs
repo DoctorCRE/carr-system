@@ -34,3 +34,32 @@ test('find resolves an exact attendee email under carr_reader without exposing c
   const name = await call('find', { query: 'Synthetic attendee' }, 'carr_reader');
   assert.ok(name.parties.some(row => row.ref === 'C-999636'));
 });
+
+test('calendar dismissals are durable board answers scoped to the partner and tenant', async () => {
+  const key = '6360000000000001';
+  const now = Date.now();
+  const review = { key, title: 'Synthetic review meeting', state: 'needs_review', prompt: 'Did it happen?',
+    start: new Date(now - 7200000).toISOString(), end: new Date(now - 3600000).toISOString() };
+  await call('publish-board-snapshot', { idempotency_key: randomUUID(), board_id: 'calendar-agenda', base_version: 0,
+    snapshot: { schema: 'carr-calendar-agenda.v1', observed_at: new Date(now).toISOString(), items: [], follow_up_reviews: [review] } });
+  const args = { idempotency_key: randomUUID(), board_id: 'calendar-agenda', question_id: key, base_version: 1, answer_text: 'Dismiss' };
+  const receipt = await call('answer-board-question', args);
+  assert.equal(receipt.answer.answer_text, 'Dismiss');
+  assert.equal((await call('answer-board-question', args)).answer.id, receipt.answer.id);
+  const section = { follow_up_reviews: [{ ...review }], notes: [] };
+  await c.query('begin'); await c.query('set local role carr_reader');
+  await addCalendarConfirmations(c, section, actor);
+  await c.query('rollback');
+  assert.equal(section.follow_up_reviews[0].dismissed, true);
+  const dell = { ...(await c.query("select id,slug from actor where slug='dell'")).rows[0], human: true, via: 'dealroom-cookie' };
+  const other = { follow_up_reviews: [{ ...review }], notes: [] };
+  await addCalendarConfirmations(c, other, dell);
+  assert.equal(other.follow_up_reviews[0].dismissed, false);
+  const otherTenant = { ...actor, organization_tenant_id: 'synthetic-other-tenant' };
+  const outside = { follow_up_reviews: [{ ...review }], notes: [] };
+  await addCalendarConfirmations(c, outside, otherTenant);
+  assert.equal(outside.follow_up_reviews[0].dismissed, false);
+  await assert.rejects(call('answer-board-question', { ...args, idempotency_key: randomUUID(), question_id: '6360000000000002' }));
+  await assert.rejects(call('answer-board-question', { ...args, idempotency_key: randomUUID(), answer_text: 'It happened' }));
+  await assert.rejects(call('answer-board-question', { ...args, idempotency_key: randomUUID() }, 'carr_writer', { ...actor, human: false }));
+});
