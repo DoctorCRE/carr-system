@@ -1,6 +1,6 @@
 {
   "autoCompactEnabled": true,
-  "autoCompactWindow": 500000,
+  "autoCompactWindow": 700000,
   "autoMemoryEnabled": false,
   "hooks": {
     "PreToolUse": [
@@ -35,6 +35,29 @@
             "timeout": 20
           }
         ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "exec /usr/bin/env python3 \"${CLAUDE_PROJECT_DIR}/hooks/orchestrator-rotation.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "exec /usr/bin/env python3 \"${CLAUDE_PROJECT_DIR}/hooks/orchestrator-rotation.py\"",
+            "timeout": 10
+          }
+        ],
+        "matcher": "auto"
       }
     ]
   },
