@@ -81,7 +81,8 @@ import { tourSharingTools } from "./tour-sharing.js";
 import { tourMapPromotionTools } from "./tour-map-promotion.js";
 import { tourArtifactTools } from "./tour-artifacts.js";
 import { DEAL_ROOM_FIELDS, assertDealRoomField, stripDealPlaceholders } from "./dealroom.ts";
-import { authenticatedIdentity, authorizationClassForActor, organizationTenantForActor,
+import { CALENDAR_BACKFILL_SCOPE, CALENDAR_BACKFILL_DIGESTS } from "./calendar-backfill-admissions.js";
+import { isAuthenticatedAttendedJoeLocal, authenticatedIdentity, authorizationClassForActor, organizationTenantForActor,
          permittedActionOwnerSlugs, personalScopeForActor } from "./identity.js";
 import { automaticApplyHold } from "./call-auto-apply.js";
 import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
@@ -630,9 +631,7 @@ async function insertOrgPartyGuarded(c, savepoint, insertSql, insertParams, name
 // validators run before every intake write that turns a contact into a client
 // or vendor, and before a directly-created person party.  The resulting
 // evidence is then persisted as a `verified` finding in the same envelope.
-// calendarAttestation is the one person create that is not research: a calendar
-// attendee record stays unverified, and new-client / new-vendor still require
-// research before those roles exist.
+// The frozen calendar backfill is separately admitted and never stamps verified.
 function researchEvidence(raw, requiredFields, gate) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw))
     throw new ToolError({ error: "research_evidence_required", gate,
@@ -683,16 +682,19 @@ async function stampResearch(c, actor, partyId, evidence) {
      evidence.sources.map(source => `${source.url} observed ${source.observed_at}`).join(" | "), actor.id]);
 }
 
-// A calendar attendee is a person the calendar named, not a researched contact.
-// The flag records that weaker origin. It is never the `verified` kind.
-function calendarAttestation(args, kind) {
-  if (!Object.hasOwn(args, "calendar_attestation") || args.calendar_attestation == null) return null;
-  const admitted = args.calendar_attestation === "calendar_attendee" && kind === "person"
-    && !args.force_new && !args.research_evidence;
-  if (!admitted) throw new ToolError({ error: "conflicting_party_inputs",
-    hint: "calendar_attestation admits only a person, never force_new and never research_evidence" });
-  if (!String(args.email || "").trim())
-    throw new ToolError({ error: "field_required", field: "email" });
+const CALENDAR_BACKFILL_ADMISSIONS = new Set(CALENDAR_BACKFILL_DIGESTS);
+
+async function calendarBackfillAdmission(actor, args, kind) {
+  if (kind !== "person" || args.research_evidence != null) return null;
+  const tokens = String(args.name || "").match(/\p{L}+/gu) || [];
+  if (tokens.length < 2 || tokens[0].length < 2 || tokens.at(-1).length < 2 || String(args.name).includes("@"))
+    throw new ToolError({ error: "full_person_name_required" });
+  if (!isAuthenticatedAttendedJoeLocal(actor)) return null;
+  const admission = await requestHash([CALENDAR_BACKFILL_SCOPE, args.name, args.email]);
+  if (!CALENDAR_BACKFILL_ADMISSIONS.has(admission)) return null;
+  if (args.force_new || Object.keys(args).some(key =>
+      !["idempotency_key", "kind", "name", "email", "force_new", "research_evidence"].includes(key)))
+    throw new ToolError({ error: "calendar_backfill_inputs_refused" });
   return "calendar_attendee";
 }
 
@@ -701,7 +703,8 @@ async function stampCalendarAttestation(c, actor, partyId) {
     `insert into record_flag (subject_type,subject_id,kind,value,source,created_by)
      values ('party',$1,'calendar_attendee',$2,$3,$4)`,
     [partyId, JSON.stringify({ found: true, epistemic_status: "calendar_attested",
-      checked_fields: ["name", "email"] }), "calendar attendee record", actor.id]);
+      checked_fields: ["name", "email"], import_scope: CALENDAR_BACKFILL_SCOPE }),
+     CALENDAR_BACKFILL_SCOPE, actor.id]);
 }
 
 function preferredMergeSurvivor(rows) {
@@ -5076,21 +5079,20 @@ export const TOOLS = {
 
   "add-party": {
     write: true,
-    description: "Create a party (person or org). CHECKS for existing matches first (email, similar name) and returns candidates INSTEAD of inserting when found — pass force_new:true only after the human confirms it is genuinely a different person. A calendar_attestation of calendar_attendee records an emailed person from a calendar attendee record without research verification; it refuses force_new, and candidates still block the insert.",
+    description: "Create a party (person or org). CHECKS for existing matches first (email, similar name) and returns candidates INSTEAD of inserting when found — pass force_new:true only after the human confirms it is genuinely a different person.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, name: { type: "string" },
       kind: { type: "string", enum: ["person","org"], default: "person" },
       org_name: { type: "string" }, phone: { type: "string" }, email: { type: "string" },
       city: { type: "string" }, state: { type: "string" }, county: { type: "string" },
       specialty: { type: "string" }, force_new: { type: "boolean" },
-      calendar_attestation: { type: "string", enum: ["calendar_attendee"] },
       research_evidence: RESEARCH_EVIDENCE_SCHEMA },
       required: ["idempotency_key","name"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "add-party", args, async () => {
       if (args.phone && args.phone.replace(/\D/g, "").endsWith("2056436555"))
         throw new ToolError({ error: "placeholder_phone", hint: "205-643-6555 is never stored as a contact" });
       const kind = args.kind || "person";
-      const calendar = calendarAttestation(args, kind);
+      const calendar = await calendarBackfillAdmission(actor, args, kind);
       if (!args.force_new) {
         const cand = await c.query(
           `select id, name, email, city,

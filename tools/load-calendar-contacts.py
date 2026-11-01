@@ -128,7 +128,9 @@ def _names_conflict(display: str | None, name: str) -> bool:
 
 
 def _full_name(name: str | None, email: str) -> bool:
-    return len(_tokens(name)) >= 2 and "@" not in (name or "") and _norm(name) != email
+    tokens = _tokens(name)
+    return (len(tokens) >= 2 and len(tokens[0]) > 1 and len(tokens[-1]) > 1
+            and "@" not in (name or "") and _norm(name) != email)
 
 
 def _local_forms(name: str) -> set[str]:
@@ -250,8 +252,7 @@ def apply(p: dict, call) -> dict:
 
     for person in p["add"]:
         response = attempt("add-party", {"idempotency_key": str(uuid4()), "kind": "person",
-                                         "name": person["name"], "email": person["email"],
-                                         "calendar_attestation": "calendar_attendee"})
+                                         "name": person["name"], "email": person["email"]})
         if response is not None:
             result["add_returned_candidates" if response.get("candidates") else "added"] += 1
     for gap in p["fill"]:

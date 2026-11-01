@@ -837,6 +837,16 @@ function authenticateConnection(actor, credentialBytes) {
   return actor;
 }
 
+// Read pinned authentication provenance, never a caller's claimed loader identity.
+export function isAuthenticatedAttendedJoeLocal(actor) {
+  const credential = AUTHENTICATED_CREDENTIAL.get(actor);
+  return credential?.slug === "joe-local" && credential.via === "local-token"
+    && credential.authority_class === "sponsored_agent"
+    && actor.slug === credential.slug && actor.via === credential.via
+    && actor.unattended !== true
+    && (actor.operational_profile == null || actor.operational_profile === "full");
+}
+
 /**
  * The `authenticated-receipt-identity.v1` for one server-established actor, or
  * null when this actor cannot be spoken for.

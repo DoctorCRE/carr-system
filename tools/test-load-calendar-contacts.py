@@ -157,6 +157,15 @@ class Plan(unittest.TestCase):
             self.assertNotIn(secret, text.lower())
 
 
+class ResolvedNames(unittest.TestCase):
+    def test_partial_names_never_plan_a_party(self):
+        for name in ("Robin", "R Vale", "R. Vale", "R V", "R. V.", "Robin V."):
+            with self.subTest(name=name):
+                p = plan({"event": [{"email": "robin@firm-z.test", "name": name}]})
+                self.assertEqual(p["add"], [])
+                self.assertEqual(p["skipped"].get("no_name"), 1)
+
+
 class Apply(unittest.TestCase):
     def test_writes_go_only_through_add_party_and_update_party_contact(self):
         calls = []
@@ -173,8 +182,9 @@ class Apply(unittest.TestCase):
         result = loader.apply(p, call)
         self.assertEqual([v for v, _ in calls], ["add-party", "vendor-assignment-context", "update-party-contact"])
         add, fill = calls[0][1], calls[2][1]
-        self.assertEqual((add["name"], add["email"], add["kind"], add["calendar_attestation"]),
-                         ("Robin Vale", "robin.vale@firm-z.test", "person", "calendar_attendee"))
+        self.assertEqual((add["name"], add["email"], add["kind"]),
+                         ("Robin Vale", "robin.vale@firm-z.test", "person"))
+        self.assertNotIn("calendar_attestation", add)
         self.assertNotIn("force_new", add)
         self.assertNotIn("research_evidence", add)
         self.assertEqual((fill["party"], fill["base_version"], fill["fields"]),
