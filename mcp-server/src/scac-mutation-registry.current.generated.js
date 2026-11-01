@@ -1204,7 +1204,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "get-incident": {
     "ingress_key": "mcp-tool:get-incident",
     "source_locator": "mcp-server/src/incident.js",
-    "schema_digest": "9e4c68f0d9cca239aa667f90ef8aa14b4f4327b397e60fa943d74fc3f9200143",
+    "schema_digest": "d977f0ebe822cfc040ca0f22325c5602d306f573582533a60c41a655fd47644f",
     "write": false,
     "human_only": false,
     "human_caller_only": false,

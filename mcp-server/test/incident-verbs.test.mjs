@@ -398,6 +398,7 @@ test("triage moves one detected incident and returns fields visible in both read
     "select count(*)::int as n from ops.incident_fact": [{ n: 0 }],
     "from ops.incident_fact where incident_id": [],
     "from ops.incident_hypothesis": [],
+    "count(*)::int as n from ops.incident_link": [{ n: 0 }],
     "from ops.incident_link": [],
     "from ops.incident_service": [],
     "where duplicate_of_id": [],
@@ -549,6 +550,37 @@ test("the refusal itself is unchanged by any of that", () => {
   assert.equal(r.ok, false, "an open window with no duplicate and no reason still refuses");
 });
 
+test("get-incident pages links the way it pages facts, and reports the cap", async () => {
+  // FOUND LIVE 2026-11-01 (WR-000665): INC-20261028-11 carries 25,270 run links
+  // (one per failed launchd run). get-incident returned every one of them, a
+  // 2.2 MB reply that no client would accept, while the same row's facts and
+  // trace were already capped. The ten open rows with 20+ links all share the
+  // shape; the unbounded read is what fails.
+  const links = Array.from({ length: 50 }, (_, i) =>
+    ({ kind: "run", ref: `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`, note: "launchd.run" }));
+  const fake = new Fake({
+    "from ops.incident i left join": [{ id: "inc-1", ref: "INC-1", state: "detected",
+      correlation_id: "00000000-0000-0000-0000-000000000000", db_now: NOW, duplicate_of: null }],
+    "count(*)::int as n from ops.incident_fact": [{ n: 0 }],
+    "count(*)::int as n from ops.incident_link": [{ n: 25270 }],
+    "from ops.incident_link where incident_id = $1 order by": links,
+  });
+  const out = await TOOLS["get-incident"].handler(fake, joe, { ref: "INC-1" });
+  const page = fake.sql.find(([sql]) => sql.includes("from ops.incident_link where incident_id = $1 order by"));
+  assert.match(page[0], /limit \$2/, "the link read is bounded in SQL, not trimmed after the fetch");
+  assert.match(page[0], /order by \(kind in \('run','deployment'\)\), kind, ref limit/,
+    "occurrence links sort last so a work_request link is never pushed past the cap");
+  assert.equal(page[1][1], 50, "the default page is 50 links");
+  assert.equal(out.links.length, 50);
+  assert.equal(out.links_total, 25270, "the total comes from a count, not from the page");
+  assert.equal(out.links_truncated, true, "a cap that is never reported is a silent truncation");
+
+  const wide = await TOOLS["get-incident"].handler(fake, joe, { ref: "INC-1", link_limit: 9999 });
+  const widePage = fake.sql.filter(([sql]) => sql.includes("from ops.incident_link where incident_id = $1 order by")).at(-1);
+  assert.equal(widePage[1][1], 500, "link_limit is clamped to 500");
+  assert.ok(wide.links_truncated);
+});
+
 test("get-incident counts correlations from the whole fact table, not from the page it returned", async () => {
   // FOUND LIVE: get-incident with fact_limit:3 on a row carrying 87 recurrences
   // reported "correlations 2/2" — a cap notice computed truthfully from the
@@ -560,6 +592,7 @@ test("get-incident counts correlations from the whole fact table, not from the p
     "group by 1 order by newest desc": Array.from({ length: 40 }, (_, i) =>
       ({ correlation_id: `1111111${i % 10}-2222-3333-4444-5555555555${String(i).padStart(2, "0")}` })),
     "count(*)::int as n from ops.incident_fact": [{ n: 173 }],
+    "count(*)::int as n from ops.incident_link": [{ n: 0 }],
   });
   const out = await TOOLS["get-incident"].handler(fake, joe, { ref: "INC-1", fact_limit: 1 });
   assert.ok(out.correlations_total > out.facts.length,
