@@ -270,7 +270,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           const stored = (await c.query(`update email_proposal set draft_subject=$2,draft_body=$3,
             version=version+1 where id=$1 returning version,draft_subject as subject,draft_body as body`,
           [row.id,args.subject,args.body])).rows[0];
-          await writeEvent(c, actor, 'edit-email-draft', 'deal', row.deal_id, {
+          await writeEvent(c, actor, 'edit-email-draft', row.deal_id ? 'deal' : 'activity', row.deal_id ?? row.activity_id, {
             old: { proposal_id: row.id, version: row.version, subject: row.draft_subject, body: row.draft_body },
             new: { proposal_id: row.id, ...stored },
             cause: 'human_correction', idempotency_key: args.idempotency_key });
@@ -315,7 +315,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             submitted_email=$2::jsonb,submitted_at=now(),resolved_by=$3,resolved_at=now(),
             send_result=null,result_recorded_at=null where id=$1`,
           [row.id, JSON.stringify(submitted), actor.id]);
-          await writeEvent(c, actor, 'submit-email-draft', 'deal', row.deal_id, {
+          await writeEvent(c, actor, 'submit-email-draft', row.deal_id ? 'deal' : 'activity', row.deal_id ?? row.activity_id, {
             new: { proposal_id: row.id, sha256: submitted.sha256, recipient_binding: {
               sha256: sha256(JSON.stringify(recipients)), cc_owner: row.owner === 'joe' ? 'dell' : 'joe',
               cc_sha256: sha256(recipients.cc[0]) } },
@@ -372,7 +372,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             const account = partner?.email;
             if (!args.sender_account || args.sender_account !== account) fail('email_draft_sender_mismatch');
             if (!args.sent_at || !Number.isFinite(Date.parse(args.sent_at))) fail('email_draft_sent_time_required');
-            const source = (await c.query('select email_context from activity where id=$1', [row.activity_id])).rows[0]?.email_context;
+            const sourceActivity = (await c.query('select email_context,deal_id,client_id,lead_id,vendor_id from activity where id=$1', [row.activity_id])).rows[0];
+            const source = sourceActivity?.email_context;
+            const sentDeal = row.deal_id ?? sourceActivity.deal_id;
             const context = { subject: row.submitted_email.subject, conversation_id: source?.conversation_id ?? null,
               sender: { email: args.sender_account, internal: true },
               recipients: [
@@ -386,14 +388,17 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             if (existing) {
               if (existing.kind !== 'email_out' || (existing.email_context?.send_id && existing.email_context.send_id !== row.id))
                 fail('email_identity_conflict');
-              await c.query(`update activity set occurred_at=$2,actor_id=$3,deal_id=$4,email_context=$5::jsonb,
+              await c.query(`update activity set occurred_at=$2,actor_id=$3,deal_id=coalesce($4,deal_id),email_context=$5::jsonb,
+                client_id=coalesce(client_id,$6),lead_id=coalesce(lead_id,$7),vendor_id=coalesce(vendor_id,$8),
                 version=version+1,updated_by=$3,updated_at=now() where id=$1`,
-              [existing.id, args.sent_at, partner.id, row.deal_id, JSON.stringify(context)]);
+              [existing.id, args.sent_at, partner.id, sentDeal, JSON.stringify(context),
+                sourceActivity.client_id,sourceActivity.lead_id,sourceActivity.vendor_id]);
             } else {
-              await c.query(`insert into activity(occurred_at,actor_id,kind,summary,deal_id,source,email_context,email_identity)
-                values($1,$2,'email_out','Partner-submitted email sent',$3,'outlook',$4::jsonb,$5::jsonb)`,
-              [args.sent_at, partner.id, row.deal_id, JSON.stringify(context),
-                JSON.stringify({ ...identity, subject: row.deal_id })]);
+              await c.query(`insert into activity(occurred_at,actor_id,kind,summary,deal_id,source,email_context,email_identity,client_id,lead_id,vendor_id)
+                values($1,$2,'email_out','Partner-submitted email sent',$3,'outlook',$4::jsonb,$5::jsonb,$6,$7,$8)`,
+              [args.sent_at, partner.id, sentDeal, JSON.stringify(context),
+                JSON.stringify({ ...identity, subject: sentDeal ?? sourceActivity.client_id ?? sourceActivity.lead_id ?? sourceActivity.vendor_id }),
+                sourceActivity.client_id,sourceActivity.lead_id,sourceActivity.vendor_id]);
             }
           }
           const result = args.status === 'sent' ? { status: 'sent', sent_item_id: args.sent_item_id, sender_account: args.sender_account, sent_at: args.sent_at,
@@ -401,7 +406,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             : { status: 'failed', reason: args.reason };
           await c.query(`update email_proposal set status=$2,version=version+1,send_result=$3::jsonb,result_recorded_at=now()
             where id=$1`, [row.id, args.status, JSON.stringify(result)]);
-          await writeEvent(c, actor, 'record-email-sent', 'deal', row.deal_id, {
+          await writeEvent(c, actor, 'record-email-sent', row.deal_id ? 'deal' : 'activity', row.deal_id ?? row.activity_id, {
             new: { proposal_id: row.id, sha256: args.sha256, ...result },
             cause: 'ingest_email', idempotency_key: args.idempotency_key });
           return { ok: true, proposal_id: row.id, version: row.version + 1, ...result };
@@ -433,7 +438,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'record-email-proposal': {
       write: true,
-      description: 'Store email match, progress, next-step, or reply-draft proposals for partner review. Matching kinds use sender_role and possible_new_deal may omit deal. Reply drafts retain proposed subject, body, and mailbox provenance. Non-deal next steps use the activity-linked subject. mode=expire_blocked rechecks up to 200 mailbox-owned pending proposals aged 30 days from creation and dismisses only those whose preview is still blocked, retaining evidence and the reason. This operation never files or sends email.',
+      description: 'Store email match, progress, next-step, or reply-draft proposals for partner review. Matching kinds use sender_role and possible_new_deal may omit deal. Reply drafts retain proposed subject, body, and mailbox provenance, and need no deal. Non-deal next steps use the activity-linked subject. mode=expire_blocked rechecks up to 200 mailbox-owned pending proposals aged 30 days from creation and dismisses only those whose preview is still blocked, retaining evidence and the reason. This operation never files or sends email.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: ['idempotency_key'], anyOf: [
           { required: ['kind','activity_id','evidence_quote','confidence'] }, { required: ['mode'] },
@@ -487,17 +492,18 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         if (!KINDS[args.kind]) fail('email_proposal_kind_invalid');
         if (typeof args.confidence !== 'number' || !(args.confidence >= 0 && args.confidence <= 1)) fail('email_proposal_confidence_invalid');
         const matching = MATCHING.has(args.kind), step = args.kind === 'next_step', draft = args.kind === 'reply_draft';
-        if ((!step && (args.kind === 'possible_new_deal') !== !args.deal) || (matching && !ROLES.includes(args.sender_role)) ||
+        if ((!step && !draft && (args.kind === 'possible_new_deal') !== !args.deal) || (matching && !ROLES.includes(args.sender_role)) ||
             (!matching && args.sender_role !== undefined) ||
             (args.kind === 'file_to_deal' && args.text !== undefined) ||
             (step ? (!args.text || !args.next_date || args.subject !== undefined || args.body !== undefined)
               : !matching && !draft && ['text','next_date','owner'].some(k => args[k] !== undefined)) ||
             (draft ? (typeof args.subject !== 'string' || typeof args.body !== 'string')
               : args.subject !== undefined || args.body !== undefined)) fail('email_proposal_fields_invalid');
-        const source = draft ? (await c.query(`select a.email_source,a.detail from activity a join deal d on d.id=$1
-          and (a.deal_id=d.id or (a.deal_id is null and a.client_id=d.client_id))
-          where a.id=$2 and a.kind='email_in' and a.occurred_at<=now() for share of a,d`,
-          [args.deal, args.activity_id])).rows[0] : null;
+        const source = draft ? (await c.query(`select a.email_source,a.detail from activity a
+          where a.id=$2 and a.kind='email_in' and a.occurred_at<=now()
+            and ($1::uuid is null or exists (select 1 from deal d where d.id=$1
+              and (a.deal_id=d.id or (a.deal_id is null and a.client_id=d.client_id)) for share of d))
+          for share of a`, [args.deal ?? null, args.activity_id])).rows[0] : null;
         if (draft && (!source?.email_source || !['joe','dell'].includes(source.email_source.mailbox_owner))) fail('email_proposal_source_missing');
         if (draft && (!source.detail?.includes(args.evidence_quote) || !args.subject.trim() || /[\r\n]/.test(args.subject) || !args.body.trim()))
           fail('email_proposal_quote_invalid');

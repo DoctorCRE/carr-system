@@ -1427,6 +1427,91 @@ const submitDraft = (proposal, extra = {}, identity = actor) => command('submit-
   cc: [identity.slug === 'dell' ? 'joe@example.test' : 'dell@example.test'], ...extra }, identity, 'carr_writer');
 const refuses = (promise, code) => assert.rejects(promise, error => error.payload?.error === code);
 
+for (const subjectType of ['client', 'lead', 'vendor']) test(`${subjectType} reply drafts reach Home and retain their contact through submission and sent receipts`, async () => {
+  await c.query("update actor set email='joe@example.test' where slug='joe'");
+  await c.query("insert into actor(slug,kind,display_name,email) values('dell','human','Synthetic Dell','dell@example.test') on conflict(slug) do update set email=excluded.email,active=true");
+  const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic reply contact',$1,$1) returning id", [actor.id])).rows[0].id;
+  const query = {
+    client: "insert into client(party_id,status,created_by,updated_by,roster_ref) values($1,'fixture_active',$2,$2,$3) returning id",
+    lead: "insert into lead(party_id,stage,created_by,updated_by,registry_ref) values($1,'new',$2,$2,$3) returning id",
+    vendor: "insert into vendor(party_id,category,created_by,updated_by,vendor_ref) values($1,'banker',$2,$2,$3) returning id",
+  }[subjectType];
+  const contact = (await c.query(query, [party,actor.id,`${subjectType}-${randomUUID()}`])).rows[0].id;
+  const source = await command('log-activity', { idempotency_key: randomUUID(), ref: contact,
+    kind: 'email_in', summary: 'Email from Synthetic Contact: Floor plan', detail: quote,
+    email_source: { mailbox_owner: 'joe', sender_email: 'sender@example.test' } }, machineFor('joe'));
+  const args = { kind: 'reply_draft', activity_id: source.activity_id, evidence_quote: quote,
+    confidence: 0.95, subject: 'Re: Floor plan', body: 'Thank you.' };
+  const proposal = await command('record-email-proposal', { idempotency_key: randomUUID(), ...args }, machineFor('joe'), 'carr_writer');
+  const retry = await command('record-email-proposal', { idempotency_key: randomUUID(), ...args }, machineFor('joe'), 'carr_writer');
+  assert.equal(retry.proposal_id, proposal.proposal_id);
+  const shown = (await listed()).find(item => item.id === proposal.proposal_id);
+  assert.equal(shown.deal, null);
+  assert.equal(shown.confirm_verb, 'submit-email-draft');
+  assert.deepEqual(shown.reply_draft.to, ['sender@example.test']);
+  const edited = await command('edit-email-draft', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+    base_version: 1, subject: args.subject, body: 'I will review the plan.' }, actor, 'carr_writer');
+  const submitted = await submitDraft(proposal, { base_version: edited.version });
+  const outbox = await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader');
+  assert.equal(outbox.drafts.find(item => item.proposal_id === proposal.proposal_id).deal, null);
+  await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+    base_version: submitted.version, status: 'sent', sha256: submitted.sha256,
+    sent_item_id: randomUUID() }, machineFor('joe'), 'carr_writer');
+  const sent = (await c.query("select client_id,lead_id,vendor_id,deal_id from activity where email_context->>'send_id'=$1", [proposal.proposal_id])).rows;
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0][`${subjectType}_id`], contact);
+  assert.equal(sent[0].deal_id, null);
+  assert.equal((await listed()).some(item => item.id === proposal.proposal_id), false);
+});
+
+for (const scenario of ['captured deal', 'new receipt', 'captured receipt']) test(`contact sent receipt keeps its deal filing for ${scenario}`, async () => {
+  await c.query("update actor set email='joe@example.test' where slug='joe'");
+  await c.query("insert into actor(slug,kind,display_name,email) values('dell','human','Synthetic Dell','dell@example.test') on conflict(slug) do update set email=excluded.email,active=true");
+  const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+    kind: 'email_in', summary: 'Email from Synthetic Contact: Floor plan', detail: quote,
+    email_source: { mailbox_owner: 'joe', sender_email: 'sender@example.test' } }, machineFor('joe'));
+  const proposal = await command('record-email-proposal', { idempotency_key: randomUUID(), kind: 'reply_draft',
+    activity_id: source.activity_id, evidence_quote: quote, confidence: 0.95,
+    subject: 'Re: Floor plan', body: 'Thank you.' }, machineFor('joe'), 'carr_writer');
+  const submitted = await submitDraft(proposal);
+  const itemId = randomUUID();
+  let captured;
+  if (scenario.startsWith('captured')) {
+    captured = (await c.query(`insert into activity(occurred_at,actor_id,kind,summary,deal_id,source,email_identity)
+      values(now(),$1,'email_out','Captured sent copy',$2,'outlook',$3::jsonb) returning id`,
+    [actor.id, scenario === 'captured deal' ? deal : null, JSON.stringify({ mailbox_owner: 'joe',
+      mailbox_account: 'joe@example.test', item_id: itemId, subject: deal })])).rows[0].id;
+  }
+  if (scenario !== 'captured deal')
+    await c.query('update activity set deal_id=$2,version=version+1 where id=$1', [source.activity_id, deal]);
+  const args = { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+    base_version: submitted.version, status: 'sent', sha256: submitted.sha256, sent_item_id: itemId };
+  await command('record-email-sent', args, machineFor('joe'), 'carr_writer');
+  assert.equal((await command('record-email-sent', { ...args, idempotency_key: randomUUID() }, machineFor('joe'), 'carr_writer')).replayed, true);
+  const sent = (await command('get-deal-room', { deal }, actor, 'carr_reader')).activities
+    .filter(a => a.email_context?.send_id === proposal.proposal_id);
+  assert.equal(sent.length, 1, 'the reply appears once in deal correspondence');
+  if (captured) assert.equal(sent[0].id, captured, 'the receipt updates the captured Sent copy');
+  const contacts = (await c.query('select client_id from activity where id=any($1::uuid[]) order by id',
+    [[source.activity_id, sent[0].id]])).rows;
+  assert.equal(contacts.length, 2);
+  assert.ok(contacts[0].client_id);
+  assert.equal(contacts[0].client_id, contacts[1].client_id, 'the reply retains the source contact');
+});
+
+test('contact reply drafts still require inbound mailbox provenance and literal evidence', async () => {
+  const args = { idempotency_key: randomUUID(), kind: 'reply_draft', evidence_quote: quote,
+    confidence: 0.95, subject: 'Re: Floor plan', body: 'Thank you.' };
+  for (const [kind, provenance] of [['email_out', false], ['email_in', false], ['email_in', true]]) {
+    const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+      kind, summary: 'Synthetic contact email', detail: quote,
+      ...(provenance ? { email_source: { mailbox_owner: 'joe', sender_email: 'sender@example.test' } } : {}) }, machineFor('joe'));
+    await refuses(command('record-email-proposal', { ...args, idempotency_key: randomUUID(), activity_id: source.activity_id,
+      ...(provenance ? { evidence_quote: 'This quote is absent from the source.' } : {}) }, machineFor('joe'), 'carr_writer'),
+    provenance ? 'email_proposal_quote_invalid' : 'email_proposal_source_missing');
+  }
+});
+
 const editDraft = (proposal, extra = {}, identity = actor) => command('edit-email-draft', {
   idempotency_key: randomUUID(), proposal_id: proposal.proposal_id, base_version: 1,
   subject: 'Re: Edited floor plan', body: '  Synthetic saved reply.\nThank you.  ', ...extra }, identity, 'carr_writer');

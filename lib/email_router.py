@@ -13,7 +13,8 @@ minutes). Unfiled email goes through lib.email_matching: thread continuity files
 automatically; otherwise one pinned Jev call proposes a deal, a possible new matter,
 or contact-only logging. That filing is written before any model call. Filed email retains the
 isolated phase-move, next-step and reply-draft model call (lib/model_call.py, model from settings);
-email just inherited to a deal gets its next step and reply draft. Unconfirmed filing hints
+email just inherited to a deal gets its next step and reply draft. Reply drafts also work
+without a deal, using the captured inbound mailbox provenance. Unconfirmed filing hints
 never select the next-step subject. Each proposal carries a
 literal evidence quote (capped at 2000 characters) and a confidence. Every surviving
 proposal is stored through `record-email-proposal`, which re-checks the evidence
@@ -37,7 +38,8 @@ transport, timeout, setup or authorization failure on a write, or a failed queue
 leaves work for the next run and makes this run exit 1; a filing already written stays
 written, so a model failure delays only the proposals. An email that fails
 MAX_ATTEMPTS times is abandoned (still exit 1). State lives in
-out/email-router/state.json (0600) and is pruned after the queue window. The receipt
+out/email-router/state.json (0600) and is pruned after the queue window. A state version
+change reconsiders recent mail handled under the earlier proposal contract. The receipt
 line carries counts and exception type names only.
 """
 from __future__ import annotations
@@ -64,6 +66,7 @@ MIN_CONFIDENCE = 0.6
 MAX_EMAILS = 25
 MAX_ATTEMPTS = 3
 WINDOW_DAYS = 3
+STATE_VERSION = 2
 MODEL_BODY_CHARS = 12_000
 MAX_QUOTE = 2000
 BUDGET = timedelta(minutes=20)
@@ -133,7 +136,7 @@ def proposals(reply: dict, email: dict, today: date) -> list[dict]:
                 'evidence_quote': quote, 'confidence': float(confidence)}
         if email.get('deal'):
             args['deal'] = email['deal']
-        elif item['kind'] != 'next_step':
+        elif item['kind'] == 'phase_move':
             continue
         if item['kind'] == 'next_step':
             text, due = (item.get('text') or '').strip(), item.get('next_date') or today.isoformat()
@@ -173,20 +176,26 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
                              'dropped', 'write_failed', 'queue_failed', 'more', 'out_of_time', 'inherited', 'contact_only')}
     codes: dict[str, int] = {}
     model_failed_types: dict[str, int] = {}
+    if state.get('version') != STATE_VERSION:
+        state.update(version=STATE_VERSION, reply_recheck=state.get('routed', {}).copy())
     routed, attempts = state.setdefault('routed', {}), state.setdefault('attempts', {})
+    reply_recheck = state.setdefault('reply_recheck', {})
     cutoff = (now - timedelta(days=WINDOW_DAYS + 1)).timestamp()
     for activity, at in list(routed.items()):
         if at < cutoff:
             del routed[activity]
+            reply_recheck.pop(activity, None)
 
     def failed(activity: str) -> None:
+        if activity in routed:
+            return
         attempts[activity] = attempts.get(activity, 0) + 1
         if attempts[activity] >= MAX_ATTEMPTS:
             routed[activity] = now.timestamp()
             attempts.pop(activity)
             counts['abandoned'] += 1
     try:
-        queue = call('email-router-queue', {'days': WINDOW_DAYS, 'limit': MAX_EMAILS, 'exclude': sorted(routed)})
+        queue = call('email-router-queue', {'days': WINDOW_DAYS, 'limit': MAX_EMAILS, 'exclude': sorted(routed.keys() - reply_recheck.keys())})
     except Exception:
         counts['queue_failed'] = 1
         return {**counts, 'refusal_codes': codes, 'model_failed_types': model_failed_types}
@@ -196,6 +205,8 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
             counts['out_of_time'] = 1
             break
         activity = email['activity_id']
+        rechecking = activity in reply_recheck
+        reply_recheck.pop(activity, None)
         counts['emails'] += 1
         if email.get('kind') == 'email_out' and (not account or
                 (email.get('sender', {}).get('email') or '').casefold() != account.casefold()):
@@ -239,7 +250,7 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
 
         # Filing first: matching and thread inheritance never wait on the next-step model below.
         deal = email.get('deal')
-        if not deal:
+        if not deal and not rechecking:
             try:
                 decision = matching(email, queue['open_deals'], email.get('thread_history', []))
             except Exception as error:
@@ -279,7 +290,9 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
             model_failed(error)
             continue
         kept = proposals(reply, source, now.date())
-        if email.get('kind') == 'email_out':
+        if rechecking:
+            kept = [item for item in kept if item['kind'] == 'reply_draft' and email.get('kind') != 'email_out']
+        elif email.get('kind') == 'email_out':
             kept = [item for item in kept if item['kind'] == 'next_step']
         elif source is not email:
             kept = [item for item in kept if item['kind'] in ('next_step', 'reply_draft')]
