@@ -174,6 +174,16 @@ export function incidentFactText({ routeKey, failureClass, correlationId, detail
   return detail ? `${base} — ${String(detail).slice(0, 200)}` : base;
 }
 
+/** Pure. Where an unhandled failure came from, safe to persist: a database
+ * error's SQLSTATE and raising PL/pgSQL function, else the error class name.
+ * Never the message, which can carry row values. */
+export function failureOrigin(error) {
+  if (!error) return "unknown";
+  if (!/^[0-9A-Z]{5}$/.test(String(error.code || ""))) return error.name || "Error";
+  const routine = /PL\/pgSQL function ([A-Za-z_][\w.]*)\(/.exec(String(error.where || ""))?.[1];
+  return `sqlstate=${error.code}${routine ? ` at ${routine}` : ""}`;
+}
+
 // ── the recorder ─────────────────────────────────────────────────────────────
 //
 // NEVER THROWS. Every branch below is inside one outer try/catch that swallows

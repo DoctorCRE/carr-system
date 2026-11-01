@@ -323,6 +323,55 @@ class IntakeTest(unittest.TestCase):
     def report_text(self):
         return '\n'.join(p.read_text() for p in sorted(self.out().glob('report-*.md')))
 
+    def test_no_filing_fails_at_one_business_day_and_recovers_on_inbound(self):
+        self.fake.now = datetime(2026, 10, 20, 23, tzinfo=timezone.utc)
+        quiet = mail('no-reply@example.test', -timedelta(hours=1))
+        self.assertEqual(self.run_intake([quiet]).state, 'succeeded')
+        self.fake.now += timedelta(days=1, seconds=-1)
+        self.assertEqual(self.run_intake([quiet], touch=False).state, 'succeeded')
+        self.fake.now += timedelta(seconds=1)
+        result = self.run_intake([quiet], touch=False)
+        self.assertEqual((result.state, result.reason), ('failed', 'no_email_in_business_day'))
+        state, detail, args = self.scheduled(result)
+        self.assertEqual((state, json.loads(detail)['reason']), ('failed', 'no_email_in_business_day'))
+        self.assertEqual(args[args.index('--failure-class') + 1], 'no_email_in_business_day')
+        incoming = mail(CLIENT.email, timedelta(hours=-1))
+        incoming['sent_unix'] = int((self.fake.now - timedelta(hours=1)).timestamp())
+        self.assertEqual(self.run_intake([quiet, incoming]).state, 'succeeded')
+        self.assertTrue(self.fake.writes('log-activity'))
+
+    def test_degraded_runs_cannot_report_success_after_filing_deadline(self):
+        quiet = mail('no-reply@example.test', -timedelta(hours=1))
+        self.assertEqual(self.run_intake([quiet], found=1000, verified=900).state, 'degraded')
+        self.fake.now += timedelta(days=1)
+        result = self.run_intake([quiet], found=1000, verified=900)
+        self.assertEqual((result.state, result.reason), ('failed', 'no_email_in_business_day'))
+        self.assertEqual(result.counts['decoder_alarm'], 0)
+
+    def test_no_filing_deadline_skips_weekends(self):
+        self.fake.now = datetime(2026, 10, 23, 23, tzinfo=timezone.utc)
+        quiet = mail('no-reply@example.test', -timedelta(hours=1))
+        self.assertEqual(self.run_intake([quiet]).state, 'succeeded')
+        for day in (24, 25):
+            self.fake.now = datetime(2026, 10, day, 23, tzinfo=timezone.utc)
+            self.assertEqual(self.run_intake([quiet], touch=False).state, 'succeeded')
+        self.fake.now = datetime(2026, 10, 26, 22, 59, 59, tzinfo=timezone.utc)
+        self.assertEqual(self.run_intake([quiet], touch=False).state, 'succeeded')
+        self.fake.now += timedelta(seconds=1)
+        result = self.run_intake([quiet], touch=False)
+        self.assertEqual((result.state, result.reason), ('failed', 'no_email_in_business_day'))
+
+    def test_outbound_filing_does_not_reset_inbound_deadline(self):
+        self.fake.now = datetime(2026, 10, 20, 23, tzinfo=timezone.utc)
+        quiet = mail('no-reply@example.test', -timedelta(hours=1))
+        self.run_intake([quiet])
+        self.fake.now += timedelta(days=1)
+        sent = mail(OWNER, -timedelta(hours=1), recipients=CLIENT.email)
+        sent['sent_unix'] = int((self.fake.now - timedelta(hours=1)).timestamp())
+        result = self.run_intake([quiet, sent])
+        self.assertEqual((result.state, result.reason), ('failed', 'no_email_in_business_day'))
+        self.assertTrue(any(args['kind'] == 'email_out' for _, args in self.fake.writes('log-activity')))
+
     def test_record_layer_receives_stable_mailbox_identity(self):
         first = mail(CLIENT.email, timedelta(hours=-1),
                      local_keys='77', message_id='<Stable@example.test>')
@@ -397,13 +446,26 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(intake.run(self.repo, self.home, self.fake.ports()).state, 'succeeded',
                          'one loud failure a day, not one per run')
 
+    def test_daily_coverage_failure_persists_until_a_passing_daily_verdict(self):
+        bad = mail('pat@example.test', -timedelta(hours=1), subject='', kind='preview')
+        result = self.coverage_run([bad])
+        self.assertEqual(result.reason, 'coverage_failed')
+        self.assertTrue(json.loads((self.out() / intake.STATE).read_text())['coverage_failed'])
+        self.assertEqual(self.run_intake([bad], touch=False).state, 'succeeded')
+        self.assertTrue(json.loads((self.out() / intake.STATE).read_text())['coverage_failed'])
+        self.fake.now += timedelta(days=1)
+        good = mail('pat@example.test', -timedelta(hours=1), subject='Complete')
+        result = self.run_intake([good])
+        self.assertEqual(result.counts['coverage_failed'], 0)
+        self.assertFalse(json.loads((self.out() / intake.STATE).read_text())['coverage_failed'])
+
     def test_next_run_reports_yesterdays_missing_verdict(self):
         self.run_intake()
         self.fake.now += timedelta(days=1)
         result = self.run_intake()
         self.assertEqual((result.state, result.reason), ('failed', 'coverage_failed'))
         self.assertEqual(result.counts['coverage_missed_verdict'], 1)
-        self.assertEqual(self.run_intake().state, 'succeeded')
+        self.assertEqual(self.run_intake().reason, 'no_email_in_business_day')
 
     def test_daily_verdict_fails_when_held_unknown_recipients_exceed_twenty(self):
         held = [mail(OWNER, -timedelta(hours=1), recipients=None, subject=f'Held {i}') for i in range(21)]
@@ -2492,7 +2554,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(result.counts['hydration_pending'], 0)
         notes = [args for _, args in self.fake.writes('log-activity') if args['kind'] == 'note']
         self.assertEqual([args['detail'] for args in notes], ['Complete original body'])
-        self.assertEqual(self.run_intake([full]).state, 'succeeded')
+        self.assertEqual(self.run_intake([full]).reason, 'no_email_in_business_day')
         self.assertEqual(len(self.fake.writes('log-activity')), 2)
 
     def test_duplicate_copies_collapse_and_the_full_body_wins(self):
@@ -3698,7 +3760,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(result.counts['flags_unfiled'], 0)
         self.assertEqual(result.counts['flags_unmatched'], 0)
         count = len(calls)
-        self.assertEqual(self.run_intake([closed]).state, 'succeeded')
+        self.assertEqual(self.run_intake([closed]).reason, 'no_email_in_business_day')
         self.assertEqual(len(self.flag_calls()), count)
 
     def test_a_flag_closes_without_its_activity_on_the_current_links_page(self):

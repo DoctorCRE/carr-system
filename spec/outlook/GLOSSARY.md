@@ -82,3 +82,9 @@ Mail whose sending partner approved its exact text, recipients, copies, and atta
 
 **Confirmed send**:
 A partner-submitted send matched to a Sent Items entry with a sender, recipients, identifier, and sent time.
+
+**Filing business day**:
+The interval ending at the same local wall time on the next Monday-Friday day in the mailbox timezone. Weekends are skipped; public holidays are included.
+
+**Observed email journey start**:
+The first inbound email filing in the mailbox, or the first intake observation of stored mail if no inbound filing exists yet.

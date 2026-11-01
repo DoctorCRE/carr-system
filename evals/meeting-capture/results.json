@@ -1,0 +1,501 @@
+{
+  "schema": "carr.whisper-comparison.v1",
+  "complete": true,
+  "created_at": "2026-11-01T07:49:20.201775+00:00",
+  "platform": "Darwin 27.0.0",
+  "machine": "arm64",
+  "synthetic_only": true,
+  "trials": 5,
+  "models": [
+    {
+      "name": "ggml-large-v3-turbo.bin",
+      "sha256": "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"
+    },
+    {
+      "name": "ggml-small.en.bin",
+      "sha256": "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d"
+    }
+  ],
+  "whisper_cli_sha256": "13650fc8ffaaa4e637c6951f7d2e492916877e70bd1b7a266fbfd0bdc597719e",
+  "prompt_sha256": "9aa2d8e5f808c490d14dbb2e37fe1b19fc6e4d39f3982bd885d5a753f0b195e3",
+  "normalization": "lowercase ASCII words, preserve apostrophes, ignore punctuation; strip Whisper [BLANK_AUDIO]; no number expansion",
+  "cases": [
+    {
+      "id": "lease",
+      "voice": "Samantha",
+      "reference": "The lease is ready for review. The tenant needs six operatories and a separate sterilization room. Please confirm the renewal option before we sign.",
+      "audio_sha256": "9e380e4a068a853170660953a6342b11dff1581f922d68065218f2314d80d93e",
+      "duration_seconds": 8.47575
+    },
+    {
+      "id": "followup",
+      "voice": "Daniel",
+      "reference": "Do not send the proposal yet. First ask the landlord about parking and tenant improvements. We can discuss the build out allowance at the next meeting.",
+      "audio_sha256": "0ed867bfc79016c7e3b08c0be355fe0e2a7ceee4c9641ef11f420712ba8da21a",
+      "duration_seconds": 8.9885625
+    },
+    {
+      "id": "debrief",
+      "voice": "Samantha",
+      "reference": "The tour went well. The second floor is acceptable if the elevator works. Follow up on the inspection and request the updated floor plan.",
+      "audio_sha256": "0c07ac65f04a3318b81aeecd168e8911923dbab3fb188cb880fa8704dc3c0d2e",
+      "duration_seconds": 8.10425
+    },
+    {
+      "id": "silence",
+      "voice": null,
+      "reference": "",
+      "audio_sha256": "262d1f34f300560a4c82ba8127ddea9e1d72946f187fdbd3e8f70ee096077aec",
+      "duration_seconds": 5.0
+    }
+  ],
+  "rows": [
+    {
+      "trial": 0,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "lease",
+      "status": "ok",
+      "hypothesis": "The lease is ready for review. The tenant needs six apparatories and a separate sterilization room. Please confirm the renewal option before we sign.",
+      "errors": 1,
+      "reference_words": 24,
+      "wer": 0.041666666666666664
+    },
+    {
+      "trial": 0,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "followup",
+      "status": "ok",
+      "hypothesis": "Do not send the proposal yet. First ask the landlord about parking and tenant improvements. We can discuss the build-out allowance at the next meeting.",
+      "errors": 0,
+      "reference_words": 26,
+      "wer": 0.0
+    },
+    {
+      "trial": 0,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "debrief",
+      "status": "ok",
+      "hypothesis": "The tour went well. The second floor is acceptable if the elevator works. Follow up on the inspection and request the updated floor plan.",
+      "errors": 0,
+      "reference_words": 24,
+      "wer": 0.0
+    },
+    {
+      "trial": 0,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "silence",
+      "status": "ok",
+      "hypothesis": "Thank you.",
+      "errors": 2,
+      "reference_words": 0,
+      "wer": null
+    },
+    {
+      "trial": 0,
+      "model": "ggml-small.en.bin",
+      "case": "lease",
+      "status": "ok",
+      "hypothesis": "The lease is ready for review. The tenant needs six aperitories and a separate sterilization room. Please confirm the renewal auction before we sign.",
+      "errors": 2,
+      "reference_words": 24,
+      "wer": 0.08333333333333333
+    },
+    {
+      "trial": 0,
+      "model": "ggml-small.en.bin",
+      "case": "followup",
+      "status": "ok",
+      "hypothesis": "Do not send the proposal yet. First ask the landlord about parking and tenant improvements. We can discuss the build-out allowance at the next meeting.",
+      "errors": 0,
+      "reference_words": 26,
+      "wer": 0.0
+    },
+    {
+      "trial": 0,
+      "model": "ggml-small.en.bin",
+      "case": "debrief",
+      "status": "ok",
+      "hypothesis": "The tour went well, the second floor is acceptable if the elevator works. Follow up on the inspection and request the updated floor plan.",
+      "errors": 0,
+      "reference_words": 24,
+      "wer": 0.0
+    },
+    {
+      "trial": 0,
+      "model": "ggml-small.en.bin",
+      "case": "silence",
+      "status": "ok",
+      "hypothesis": "[BLANK_AUDIO]",
+      "errors": 0,
+      "reference_words": 0,
+      "wer": null
+    },
+    {
+      "trial": 1,
+      "model": "ggml-small.en.bin",
+      "case": "lease",
+      "status": "ok",
+      "hypothesis": "The lease is ready for review. The tenant needs six aperitories and a separate sterilization room. Please confirm the renewal auction before we sign.",
+      "errors": 2,
+      "reference_words": 24,
+      "wer": 0.08333333333333333
+    },
+    {
+      "trial": 1,
+      "model": "ggml-small.en.bin",
+      "case": "followup",
+      "status": "ok",
+      "hypothesis": "Do not send the proposal yet. First ask the landlord about parking and tenant improvements. We can discuss the build-out allowance at the next meeting.",
+      "errors": 0,
+      "reference_words": 26,
+      "wer": 0.0
+    },
+    {
+      "trial": 1,
+      "model": "ggml-small.en.bin",
+      "case": "debrief",
+      "status": "ok",
+      "hypothesis": "The tour went well, the second floor is acceptable if the elevator works. Follow up on the inspection and request the updated floor plan.",
+      "errors": 0,
+      "reference_words": 24,
+      "wer": 0.0
+    },
+    {
+      "trial": 1,
+      "model": "ggml-small.en.bin",
+      "case": "silence",
+      "status": "ok",
+      "hypothesis": "[BLANK_AUDIO]",
+      "errors": 0,
+      "reference_words": 0,
+      "wer": null
+    },
+    {
+      "trial": 1,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "lease",
+      "status": "ok",
+      "hypothesis": "The lease is ready for review. The tenant needs six apparatories and a separate sterilization room. Please confirm the renewal option before we sign.",
+      "errors": 1,
+      "reference_words": 24,
+      "wer": 0.041666666666666664
+    },
+    {
+      "trial": 1,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "followup",
+      "status": "ok",
+      "hypothesis": "Do not send the proposal yet. First ask the landlord about parking and tenant improvements. We can discuss the build-out allowance at the next meeting.",
+      "errors": 0,
+      "reference_words": 26,
+      "wer": 0.0
+    },
+    {
+      "trial": 1,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "debrief",
+      "status": "ok",
+      "hypothesis": "The tour went well. The second floor is acceptable if the elevator works. Follow up on the inspection and request the updated floor plan.",
+      "errors": 0,
+      "reference_words": 24,
+      "wer": 0.0
+    },
+    {
+      "trial": 1,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "silence",
+      "status": "ok",
+      "hypothesis": "Thank you.",
+      "errors": 2,
+      "reference_words": 0,
+      "wer": null
+    },
+    {
+      "trial": 2,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "lease",
+      "status": "ok",
+      "hypothesis": "The lease is ready for review. The tenant needs six apparatories and a separate sterilization room. Please confirm the renewal option before we sign.",
+      "errors": 1,
+      "reference_words": 24,
+      "wer": 0.041666666666666664
+    },
+    {
+      "trial": 2,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "followup",
+      "status": "ok",
+      "hypothesis": "Do not send the proposal yet. First ask the landlord about parking and tenant improvements. We can discuss the build-out allowance at the next meeting.",
+      "errors": 0,
+      "reference_words": 26,
+      "wer": 0.0
+    },
+    {
+      "trial": 2,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "debrief",
+      "status": "ok",
+      "hypothesis": "The tour went well. The second floor is acceptable if the elevator works. Follow up on the inspection and request the updated floor plan.",
+      "errors": 0,
+      "reference_words": 24,
+      "wer": 0.0
+    },
+    {
+      "trial": 2,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "silence",
+      "status": "ok",
+      "hypothesis": "Thank you.",
+      "errors": 2,
+      "reference_words": 0,
+      "wer": null
+    },
+    {
+      "trial": 2,
+      "model": "ggml-small.en.bin",
+      "case": "lease",
+      "status": "ok",
+      "hypothesis": "The lease is ready for review. The tenant needs six aperitories and a separate sterilization room. Please confirm the renewal auction before we sign.",
+      "errors": 2,
+      "reference_words": 24,
+      "wer": 0.08333333333333333
+    },
+    {
+      "trial": 2,
+      "model": "ggml-small.en.bin",
+      "case": "followup",
+      "status": "ok",
+      "hypothesis": "Do not send the proposal yet. First ask the landlord about parking and tenant improvements. We can discuss the build-out allowance at the next meeting.",
+      "errors": 0,
+      "reference_words": 26,
+      "wer": 0.0
+    },
+    {
+      "trial": 2,
+      "model": "ggml-small.en.bin",
+      "case": "debrief",
+      "status": "ok",
+      "hypothesis": "The tour went well, the second floor is acceptable if the elevator works. Follow up on the inspection and request the updated floor plan.",
+      "errors": 0,
+      "reference_words": 24,
+      "wer": 0.0
+    },
+    {
+      "trial": 2,
+      "model": "ggml-small.en.bin",
+      "case": "silence",
+      "status": "ok",
+      "hypothesis": "[BLANK_AUDIO]",
+      "errors": 0,
+      "reference_words": 0,
+      "wer": null
+    },
+    {
+      "trial": 3,
+      "model": "ggml-small.en.bin",
+      "case": "lease",
+      "status": "ok",
+      "hypothesis": "The lease is ready for review. The tenant needs six aperitories and a separate sterilization room. Please confirm the renewal auction before we sign.",
+      "errors": 2,
+      "reference_words": 24,
+      "wer": 0.08333333333333333
+    },
+    {
+      "trial": 3,
+      "model": "ggml-small.en.bin",
+      "case": "followup",
+      "status": "ok",
+      "hypothesis": "Do not send the proposal yet. First ask the landlord about parking and tenant improvements. We can discuss the build-out allowance at the next meeting.",
+      "errors": 0,
+      "reference_words": 26,
+      "wer": 0.0
+    },
+    {
+      "trial": 3,
+      "model": "ggml-small.en.bin",
+      "case": "debrief",
+      "status": "ok",
+      "hypothesis": "The tour went well, the second floor is acceptable if the elevator works. Follow up on the inspection and request the updated floor plan.",
+      "errors": 0,
+      "reference_words": 24,
+      "wer": 0.0
+    },
+    {
+      "trial": 3,
+      "model": "ggml-small.en.bin",
+      "case": "silence",
+      "status": "ok",
+      "hypothesis": "[BLANK_AUDIO]",
+      "errors": 0,
+      "reference_words": 0,
+      "wer": null
+    },
+    {
+      "trial": 3,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "lease",
+      "status": "ok",
+      "hypothesis": "The lease is ready for review. The tenant needs six apparatories and a separate sterilization room. Please confirm the renewal option before we sign.",
+      "errors": 1,
+      "reference_words": 24,
+      "wer": 0.041666666666666664
+    },
+    {
+      "trial": 3,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "followup",
+      "status": "ok",
+      "hypothesis": "Do not send the proposal yet. First ask the landlord about parking and tenant improvements. We can discuss the build-out allowance at the next meeting.",
+      "errors": 0,
+      "reference_words": 26,
+      "wer": 0.0
+    },
+    {
+      "trial": 3,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "debrief",
+      "status": "ok",
+      "hypothesis": "The tour went well. The second floor is acceptable if the elevator works. Follow up on the inspection and request the updated floor plan.",
+      "errors": 0,
+      "reference_words": 24,
+      "wer": 0.0
+    },
+    {
+      "trial": 3,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "silence",
+      "status": "ok",
+      "hypothesis": "Thank you.",
+      "errors": 2,
+      "reference_words": 0,
+      "wer": null
+    },
+    {
+      "trial": 4,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "lease",
+      "status": "ok",
+      "hypothesis": "The lease is ready for review. The tenant needs six apparatories and a separate sterilization room. Please confirm the renewal option before we sign.",
+      "errors": 1,
+      "reference_words": 24,
+      "wer": 0.041666666666666664
+    },
+    {
+      "trial": 4,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "followup",
+      "status": "ok",
+      "hypothesis": "Do not send the proposal yet. First ask the landlord about parking and tenant improvements. We can discuss the build-out allowance at the next meeting.",
+      "errors": 0,
+      "reference_words": 26,
+      "wer": 0.0
+    },
+    {
+      "trial": 4,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "debrief",
+      "status": "ok",
+      "hypothesis": "The tour went well. The second floor is acceptable if the elevator works. Follow up on the inspection and request the updated floor plan.",
+      "errors": 0,
+      "reference_words": 24,
+      "wer": 0.0
+    },
+    {
+      "trial": 4,
+      "model": "ggml-large-v3-turbo.bin",
+      "case": "silence",
+      "status": "ok",
+      "hypothesis": "Thank you.",
+      "errors": 2,
+      "reference_words": 0,
+      "wer": null
+    },
+    {
+      "trial": 4,
+      "model": "ggml-small.en.bin",
+      "case": "lease",
+      "status": "ok",
+      "hypothesis": "The lease is ready for review. The tenant needs six aperitories and a separate sterilization room. Please confirm the renewal auction before we sign.",
+      "errors": 2,
+      "reference_words": 24,
+      "wer": 0.08333333333333333
+    },
+    {
+      "trial": 4,
+      "model": "ggml-small.en.bin",
+      "case": "followup",
+      "status": "ok",
+      "hypothesis": "Do not send the proposal yet. First ask the landlord about parking and tenant improvements. We can discuss the build-out allowance at the next meeting.",
+      "errors": 0,
+      "reference_words": 26,
+      "wer": 0.0
+    },
+    {
+      "trial": 4,
+      "model": "ggml-small.en.bin",
+      "case": "debrief",
+      "status": "ok",
+      "hypothesis": "The tour went well, the second floor is acceptable if the elevator works. Follow up on the inspection and request the updated floor plan.",
+      "errors": 0,
+      "reference_words": 24,
+      "wer": 0.0
+    },
+    {
+      "trial": 4,
+      "model": "ggml-small.en.bin",
+      "case": "silence",
+      "status": "ok",
+      "hypothesis": "[BLANK_AUDIO]",
+      "errors": 0,
+      "reference_words": 0,
+      "wer": null
+    }
+  ],
+  "failures": 0,
+  "summary": [
+    {
+      "model": "ggml-large-v3-turbo.bin",
+      "corpus_wer_by_trial": [
+        0.013513513513513514,
+        0.013513513513513514,
+        0.013513513513513514,
+        0.013513513513513514,
+        0.013513513513513514
+      ],
+      "median_wer": 0.013513513513513514,
+      "wer_range": [
+        0.013513513513513514,
+        0.013513513513513514
+      ],
+      "silence_insertions_by_trial": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "model": "ggml-small.en.bin",
+      "corpus_wer_by_trial": [
+        0.02702702702702703,
+        0.02702702702702703,
+        0.02702702702702703,
+        0.02702702702702703,
+        0.02702702702702703
+      ],
+      "median_wer": 0.02702702702702703,
+      "wer_range": [
+        0.02702702702702703,
+        0.02702702702702703
+      ],
+      "silence_insertions_by_trial": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  ]
+}

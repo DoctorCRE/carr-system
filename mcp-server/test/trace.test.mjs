@@ -32,6 +32,7 @@ import {
   RPC_INTERNAL_ERROR_CODE,
   incidentSignature,
   incidentFactText,
+  failureOrigin,
   recordWorkerFailure,
   scheduleFailureRecord,
   withFailureRecording,
@@ -864,4 +865,14 @@ test("tools.js: log-decision's own bespoke event insert also carries correlation
   assert.ok(idx > -1, "log-decision's direct event insert must still exist at this call site");
   const nearby = src.slice(idx - 400, idx + 800);
   assert.match(nearby, /correlation_id/, "log-decision's own insert must also carry correlation_id");
+});
+
+test("failureOrigin names a database error's SQLSTATE and raising function, never its message", () => {
+  const raised = Object.assign(new Error("private row value"), { code: "P0001",
+    where: "PL/pgSQL function ops.capture_sourced_work_request(text,uuid) line 22 at RAISE" });
+  assert.equal(failureOrigin(raised), "sqlstate=P0001 at ops.capture_sourced_work_request");
+  assert.equal(failureOrigin(Object.assign(new Error("x"), { code: "23505" })), "sqlstate=23505");
+  assert.equal(failureOrigin(new TypeError("private row value")), "TypeError");
+  assert.equal(failureOrigin(Object.assign(new Error("x"), { code: "not a sqlstate", where: "anything" })), "Error");
+  assert.equal(failureOrigin(undefined), "unknown");
 });

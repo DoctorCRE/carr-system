@@ -15,10 +15,10 @@ do $wr112_grants$
 declare v_bad text;
 begin
   -- The append: carr_authority ONLY.
-  if not has_function_privilege('carr_authority','ops.append_doc_conversation_turn(uuid,text,text,uuid,uuid)','execute')
-     or has_function_privilege('carr_writer','ops.append_doc_conversation_turn(uuid,text,text,uuid,uuid)','execute')
-     or has_function_privilege('carr_reader','ops.append_doc_conversation_turn(uuid,text,text,uuid,uuid)','execute')
-     or has_function_privilege('public','ops.append_doc_conversation_turn(uuid,text,text,uuid,uuid)','execute') then
+  if not has_function_privilege('carr_authority','ops.append_doc_conversation_turn(uuid,text,text,uuid,uuid,jsonb)','execute')
+     or has_function_privilege('carr_writer','ops.append_doc_conversation_turn(uuid,text,text,uuid,uuid,jsonb)','execute')
+     or has_function_privilege('carr_reader','ops.append_doc_conversation_turn(uuid,text,text,uuid,uuid,jsonb)','execute')
+     or has_function_privilege('public','ops.append_doc_conversation_turn(uuid,text,text,uuid,uuid,jsonb)','execute') then
     raise exception 'WR-000112: the append function is not authority-only';
   end if;
 

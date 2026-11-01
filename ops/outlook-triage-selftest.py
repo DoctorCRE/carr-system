@@ -364,7 +364,7 @@ elif tool in ('click', 'type_text'):
             if state.get('leave_inbox_after_move'):
                 state['folder'] = 'Archive'
     save()
-    print(json.dumps({'effect': 'unverifiable'}))
+    print(state.get('click_reply', json.dumps({'effect': 'unverifiable'})))
 elif tool == 'press_key':
     if payload['key'] == 'return':
         state['search'] = state.get('search_typed')
@@ -592,13 +592,9 @@ class PreflightQuitTest(FakeOutlookCase):
         self.assertFalse(any(call[1] == 'invoke_menu' for call in self.called('cua-driver')))
 
     def test_failed_menu_uses_graceful_quit(self):
-        from lib.outlook_ui import CuaError, cua
+        from lib.outlook_ui import CuaError
         self.given(windows=[ORDINARY])
-        def unavailable_menu(tool, arguments):
-            if tool == 'invoke_menu':
-                raise CuaError('menu unavailable')
-            return cua(tool, arguments)
-        with patch('lib.outlook_ui.cua', side_effect=unavailable_menu):
+        with patch('lib.outlook_ui.act', side_effect=CuaError('menu unavailable')):
             self.assertIsNone(self.prepare())
         self.assertEqual(len(self.called('osascript')), 1)
 
@@ -912,6 +908,30 @@ class OutlookTriageTest(FakeOutlookCase):
                 with self.assertRaises(CuaError) as caught:
                     cua('click', {})
                 self.assertEqual(str(caught.exception), 'click: UnicodeDecodeError')
+
+    def test_files_mail_when_clicks_reply_in_plain_text(self):
+        self.given([FILE_A], click_reply='Clicked AXRow')
+        outcome, state = self.run_triage()
+        self.assertEqual((outcome.state, outcome.reason), ('succeeded', 'filed'))
+        self.assertEqual(state['moved'], [[FILE_A['label'], 'folder-A']])
+
+    def test_triage_actions_accept_any_successful_driver_reply(self):
+        from lib.outlook_ui import CuaError, act, cua
+        from subprocess import CompletedProcess
+        for stdout in ('', 'Clicked AXRow Inbox\n', '{"effect":"unverifiable"}'):
+            with self.subTest(stdout=stdout), patch('lib.outlook_ui.subprocess.run',
+                    return_value=CompletedProcess([], 0, stdout, '')):
+                act('click', {})
+        for stdout in ('{"error":{"code":"AX_TIMEOUT"}}', '{"refusal":{"code":"background_unavailable"}}'):
+            with self.subTest(stdout=stdout), patch('lib.outlook_ui.subprocess.run',
+                    return_value=CompletedProcess([], 0, stdout, '')):
+                with self.assertRaises(CuaError) as caught:
+                    act('click', {})
+                self.assertEqual(str(caught.exception), 'click: refused')
+        with patch('lib.outlook_ui.subprocess.run', return_value=CompletedProcess([], 0, 'Clicked\n', '')):
+            with self.assertRaises(CuaError) as caught:
+                cua('get_window_state', {})
+        self.assertEqual(str(caught.exception), 'get_window_state: JSONDecodeError text')
 
     def test_driver_nonzero_error_diagnostic_excludes_mail(self):
         from lib.outlook_ui import CuaError, cua
