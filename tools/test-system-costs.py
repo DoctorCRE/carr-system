@@ -209,7 +209,7 @@ class ReviewRegressions(unittest.TestCase):
                 calls, writes = [], []
                 remote = {'version': 1, 'status': 'open'}
                 def transport(args, **kwargs):
-                    name, payload = args[2], json.loads(args[3])
+                    name, payload = args[2], json.loads(kwargs['input'])
                     calls.append(name)
                     if name == 'read-loop':
                         answer = {'loop': {'loop_id': 'loop-1', **remote}}
@@ -241,7 +241,7 @@ class ReviewRegressions(unittest.TestCase):
                     if args[2] == 'read-loop':
                         return subprocess.CompletedProcess(args, 0, json.dumps({'loop': {
                             'loop_id': 'loop-1', 'status': 'open', 'version': 1}}), '')
-                    writes.append((args[2], json.loads(args[3])))
+                    writes.append((args[2], json.loads(kwargs['input'])))
                     if len(writes) == 1:
                         if failure == 'timeout':
                             raise subprocess.TimeoutExpired(args, 35)

@@ -1,5 +1,9 @@
 """Synthetic record replies exercise ambiguous board writes without a service."""
 import copy
+import json
+import shutil
+import tempfile
+from pathlib import Path
 import unittest
 import uuid
 from unittest.mock import patch
@@ -72,6 +76,29 @@ class BoardRecoveryTests(unittest.TestCase):
         with patch.object(board.repo_lib("record_call"), "call_verb", side_effect=fixture):
             self.assertTrue(board.board_reply("ask-board-question", args)["ok"])
         self.assertEqual(len(fixture.writes), 1)
+
+    def test_large_inventory_reaches_local_transport_without_argv_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            preload = root / "fixture.mjs"
+            preload.write_text("""globalThis.fetch = async (url, options) => {
+  if (url !== 'http://fixture.invalid/never-contacted') throw Error('unexpected destination');
+  const call = JSON.parse(options.body);
+  if (call.params.arguments.payload.items[0].length !== 2000000) throw Error('truncated payload');
+  return {ok:true, status:200, text:async () => JSON.stringify({jsonrpc:'2.0', id:call.id,
+    result:{content:[{type:'text',text:JSON.stringify({ok:true})}]}})};
+};
+""")
+            node = shutil.which("node")
+            self.assertIsNotNone(node, "node is required for the local transport fixture")
+            fixture_env = {"HOME": directory, "PATH": f"{Path(node).parent}:/usr/bin:/bin",
+                           "CARR_MCP_LOCAL_TOKEN": "synthetic-fixture-bearer",
+                           "CARR_MCP_ENV": str(root / "absent-file"),
+                           "CARR_MCP_URL": "http://fixture.invalid/never-contacted",
+                           "NODE_OPTIONS": "--import=" + str(preload)}
+            with patch.dict(board.os.environ, fixture_env, clear=True):
+                result = board.publish_external_inventory({"items": ["x" * 2000000]})
+            self.assertEqual(result["item_count"], 1)
 
     def test_transport_diagnostics_exclude_reply_payload(self):
         record = board.repo_lib("record_call")
