@@ -151,3 +151,5 @@ regardless of the window. PreCompact is the one-attempt backstop for that case.
 Its reason reaching the model during automatic compaction is unverified; Stop
 is the primary model-visible instruction channel. Rotation requests a handoff;
 it cannot guarantee that a model completes the handoff or never compacts.
+
+For pstack on Codex/Grok, read `tools/pstack/codex-grok.md` and `tools/pstack/routing.md`. Install or refresh with `python3 tools/pstack/update.py`. Dispatch briefs begin in poteto-mode and carry the program standing orders from `tools/room-bridge/brief-footer.md`.

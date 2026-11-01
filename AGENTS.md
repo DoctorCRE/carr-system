@@ -315,3 +315,5 @@ an explicit task instruction.
 
 `.github/workflows/deploy.yml` deploys a successful main canary. It runs
 `tools/migrate.py` and verifies the production `/release` identity.
+
+For pstack on Codex/Grok, read `tools/pstack/codex-grok.md` and `tools/pstack/routing.md`. Install or refresh with `python3 tools/pstack/update.py`. Dispatch briefs begin in poteto-mode and carry the program standing orders from `tools/room-bridge/brief-footer.md`.
