@@ -6,6 +6,8 @@ Briefs require one Type: <type> line in the header before any blank line or task
 
 Pre-approved: decide test seams, interfaces and design forks yourself; nobody is available to confirm, so never pause for confirmation or message /root/orchestrator. Put every decision in the PR body and your final reply.
 
+Full autonomy: run until done. When the code or a verb contract lacks what the change needs (a field, column, option or guard), adding it is the job, not a reason to stop; poteto-mode's "show it and stop" applies only when the ask itself is ruled out. Stop only for money, client-facing sends, credentials, identity edits or rule retirement.
+
 Open the PR with GitHub auto-merge turned on (squash, pinned to your head commit); it merges itself when CI is green. App screen changes open as drafts until the independent taste score passes.
 
 Branch from a fresh `origin/main`. If work depends on an unmerged PR, wait for it or build on main and say so in the PR body.
