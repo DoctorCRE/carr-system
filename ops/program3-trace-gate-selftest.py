@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-import importlib.util
+"""Verify trace chronology across the repeated daylight-saving fallback hour."""
+import sys
 import unittest
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-spec = importlib.util.spec_from_file_location("trace_gate", Path(__file__).with_name("program3-trace-gate.py"))
-gate = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(gate)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.loadpy import load_module_from_path
+
+gate = load_module_from_path("trace_gate", str(Path(__file__).with_name("program3-trace-gate.py")))
 
 
 class TraceOrderTest(unittest.TestCase):
