@@ -101,7 +101,7 @@ print('complete; SQL bytes preserved')
                                     cwd=REPO, env=env, capture_output=True, text=True, timeout=120)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("a seeded credential is caught", result.stdout)
-            self.assertIn("an inline allow marker on the same line suppresses it", result.stdout)
+            self.assertIn("an unreviewed inline allow marker cannot suppress a finding", result.stdout)
 
     def test_snapshot_export_sanitizes_prose_preserving_sql_and_row_identity(self):
         salt = "d" * 64
@@ -235,8 +235,9 @@ print('complete; SQL bytes preserved')
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             (root / "ops" / "config").mkdir(parents=True)
-            for name in ["ci-secret-scan.py", "pii_guard.py", "git_env.py"]:
+            for name in ["ci-secret-scan.py", "pii_guard.py", "git_env.py", "gitleaks.py"]:
                 shutil.copy(REPO / "ops" / name, root / "ops" / name)
+            shutil.copy(REPO / ".gitleaks.toml", root / ".gitleaks.toml")
             salt = "c" * 64
             corpus = {"schema": "public-source-identities/v1", "salt": salt,
                       "hashes": [hashlib.sha256((salt + "\0exampledentalgroup").encode()).hexdigest()],

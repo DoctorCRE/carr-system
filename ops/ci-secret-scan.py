@@ -1,66 +1,9 @@
 #!/usr/bin/env python3
-"""ci-secret-scan.py — refuse a tree that carries a live credential.
+"""Detect secrets with pinned Gitleaks; retain shared redaction and identity checks.
 
-WHY THIS IS HAND-WRITTEN RATHER THAN gitleaks/trufflehog. The scan has to run
-identically in two places: a GitHub runner and Joe's Mac at push time. rule
-a8c55a47 says a manual path and an automated path doing the same job must be the
-same code, and the cheapest way to guarantee that is a scanner with no install
-step, no network fetch and no version to drift. It is stdlib only, so it cannot
-be the reason a check is skipped.
-
-WHAT IT LOOKS FOR. High-confidence, shaped credentials only — the ones whose
-format is distinctive enough that a match is almost never a false positive. It
-deliberately does NOT do generic entropy scoring. An entropy scanner in a repo
-holding 947 markdown files, migration SQL and doctrine prose produces noise, and
-a noisy gate is one people learn to bypass, which is worse than no gate.
-
-THREE BIND-MOMENTS, ONE IMPLEMENTATION. Rule a8c55a47 again: the scan that runs
-at commit, at push and in hosted CI must be the same code, so the scope is a
-FLAG rather than a second scanner.
-
-  * --staged      the blobs entering the index, INCLUDING newly added files.
-                  This is the cheap moment, and it is the one that was missing.
-                  The default scope reads files git already TRACKS, so a brand-new
-                  file carrying a key passed every local check until `git add`
-                  made it tracked -- and then failed at pre-push, the most
-                  expensive boundary a session can hit. Sessions hit it often
-                  enough to be written down as a standing gotcha. Reading the
-                  INDEX rather than the working tree also means a partially
-                  staged file is judged by the bytes actually being committed.
-  * --range A..B  the blobs introduced by a range of commits. This is the push
-                  scope: it costs O(what is being pushed) rather than O(repo),
-                  and it still catches content that reached the branch without
-                  passing this file at commit time -- a rebase, a cherry-pick,
-                  an amend, or a plain `git commit --no-verify`.
-  * (no flag)     every tracked file in the working tree. Unchanged, and this is
-                  what hosted CI runs: the depth that does not depend on which
-                  commits happen to be in front of it.
-
-WHAT IT DOES NOT PROTECT AGAINST. The default scope reads the working tree, not
-git history. A credential already committed and later removed is still in the
-history and this will not find it. That is a separate, one-time job (history
-rewrite), not a per-push check, and saying so here is the point: a gate that
-quietly implies coverage it does not have is how loop #276 happened in another
-form. --range narrows that gap for the commits actually leaving the machine; it
-does not close it for history already on the remote.
-
-ALLOWLISTING, because a repo about credentials must be able to write about them.
-Two mechanisms, both deliberately narrow:
-  * an inline `ci-secret-scan: allow` marker on the same line, which forces the
-    author to make the claim at the exact site rather than in a distant config;
-  * ops/config/secret-scan-allow.json, for whole paths that are documentation or
-    fixtures by construction.
-Neither can allowlist a real private-key block — that pattern is unconditional,
-because there is no legitimate reason for one to be in this tree at all.
-
-Usage:
-    ops/ci-secret-scan.py                 # scan tracked files, exit 1 on a hit
-    ops/ci-secret-scan.py --staged        # scan the index, new files included
-    ops/ci-secret-scan.py --range A..B    # scan blobs introduced by a range
-    ops/ci-secret-scan.py --list-patterns # what it looks for, and why
-    ops/ci-secret-scan.py --redact        # stdin -> stdout, every match masked
+Scopes are index blobs (--staged), commits (--range A..B or --history), and
+tracked working files (default). --redact remains a stdin filter for CI and Dream.
 """
-
 import json
 import os
 import pathlib
@@ -69,8 +12,6 @@ import subprocess
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-ALLOW_FILE = REPO / "ops" / "config" / "secret-scan-allow.json"
-INLINE_ALLOW = "ci-secret-scan: allow"
 
 PRIVATE_KEY_KINDS = ('PRIVATE KEY', 'RSA PRIVATE KEY', 'EC PRIVATE KEY', 'DSA PRIVATE KEY',
                      'ENCRYPTED PRIVATE KEY', 'OPENSSH PRIVATE KEY', 'PGP PRIVATE KEY',
@@ -81,7 +22,8 @@ PRIVATE_KEY_BLOCK = re.compile(
     + r')-----[\s\S]*?(?:-----END \1-----|\Z)')
 
 
-# (name, regex, why it is high-confidence, allowlistable)
+# Redaction/evidence patterns retained for current importers. Detection lives in .gitleaks.toml.
+# (name, regex, rationale, legacy metadata)
 PATTERNS = [
     ("private-key-block",
      PRIVATE_KEY_BLOCK,
@@ -246,42 +188,6 @@ def identity_changed_files():
                 yield name, text
 
 
-def load_allowed_paths():
-    if not ALLOW_FILE.exists():
-        return set()
-    try:
-        data = json.loads(ALLOW_FILE.read_text())
-    except json.JSONDecodeError as exc:
-        print(f"secret-scan: {ALLOW_FILE} is not valid JSON — {exc}", file=sys.stderr)
-        sys.exit(2)
-    return set(data.get("paths", []))
-
-
-def scan(source=None):
-    """Findings from a (name, text) source. Every scope shares this body, so a
-    pattern or allowlist rule cannot hold at one bind-moment and not another."""
-    allowed_paths = load_allowed_paths()
-    findings = []
-
-    for name, text in (source if source is not None else tracked_files()):
-        if name in allowed_paths:
-            continue
-
-        for lineno, line in enumerate(text.splitlines(), 1):
-            for pname, rx, _why, allowlistable in PATTERNS:
-                m = rx.search(line)
-                if not m:
-                    continue
-                if allowlistable and INLINE_ALLOW in line:
-                    continue
-                # Never print the value. The finding names the location and the
-                # shape; a scanner that echoes the credential into a CI log has
-                # published it to a second place.
-                findings.append((name, lineno, pname, len(m.group(0))))
-
-    return findings
-
-
 class Redactor:
     """Redact ordered text chunks; private blocks remain hidden across chunks."""
 
@@ -321,26 +227,7 @@ class Redactor:
 
 
 def redact(text):
-    """Mask every shaped credential in ARBITRARY TEXT, reusing this one list.
-
-    WHY IT LIVES HERE AND NOT WHERE IT IS CALLED. ops/ci.sh prints a failing
-    gate's captured child output — up to a whole log — so that output is a
-    second place a credential could be published, and CI logs outlive the run.
-    The obvious fix is a handful of regexes at the call site, and that is the
-    fix that rots: a second pattern set drifts from this one, and the drift is
-    invisible because both sides look fine on their own. A pattern added to
-    PATTERNS must protect every place this repository prints untrusted text, so
-    the redactor is the scanner's own function over the scanner's own list.
-
-    NO ALLOWLIST APPLIES HERE, deliberately. The inline marker and the path
-    allowlist exist so this repository can WRITE about credentials in its own
-    tracked files; neither has any meaning for a child process's stdout, which
-    is not a file anyone reviewed. Every match is masked, unconditionally.
-
-    The mask keeps the pattern name and drops the value. Single-value masks
-    include the match length; private blocks may span chunks and omit lengths.
-    Use one Redactor for ordered chunks so a block cannot leak across calls.
-    """
+    """Mask credential shapes in logs without applying detection allowlists."""
     return Redactor().redact(text, final=True)
 
 
@@ -356,37 +243,15 @@ def main():
         sys.stdout.write(redact(raw.decode("utf-8", errors="replace")))
         return 0
 
-    if "--list-patterns" in sys.argv:
-        print("ci-secret-scan patterns:\n")
-        for pname, _rx, why, allowlistable in PATTERNS:
-            flag = "" if allowlistable else "  [NOT allowlistable]"
-            print(f"  {pname}{flag}\n      {why}")
-        print(f"\nInline allow marker: {INLINE_ALLOW!r}")
-        print(f"Path allowlist:      {ALLOW_FILE.relative_to(REPO)}")
-        return 0
-
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument('--staged', action='store_true')
+    scope.add_argument('--range')
+    scope.add_argument('--history', action='store_true')
+    args = parser.parse_args()
     argv = sys.argv[1:]
-    scope, source = "tracked files", None
-    if "--staged" in argv:
-        scope, source = "staged blobs (new files included)", staged_files()
-    elif "--range" in argv:
-        i = argv.index("--range")
-        if i + 1 >= len(argv):
-            print("ci-secret-scan: --range needs a revision range, e.g. "
-                  "origin/main..HEAD", file=sys.stderr)
-            return 64
-        rev_range = argv[i + 1]
-        scope, source = f"blobs introduced by {rev_range}", range_files(rev_range)
-
-    try:
-        findings = scan(source)
-    except subprocess.CalledProcessError as exc:
-        # A scope that cannot be READ is not a scope that is clean. Rule
-        # 88e9b5eb: "not possible" and "not authorized" are not "no findings".
-        cmd = " ".join(exc.cmd) if isinstance(exc.cmd, list) else str(exc.cmd)
-        print(f"ci-secret-scan: could not read {scope} -- `{cmd}` failed. "
-              "Reporting failure rather than a clean scan.", file=sys.stderr)
-        return 2
+    rev_range = args.range
 
     import pii_guard
     identity_source = (staged_files() if "--staged" in argv else
@@ -402,38 +267,19 @@ def main():
     if identity_status:
         return identity_status
 
-    if not findings:
-        print(f"secret scan: clean ({scope})")
-        return 0
-
-    print(f"secret scan: {len(findings)} finding(s) in {scope}\n",
-          file=sys.stderr)
-    for name, lineno, pname, length in findings:
-        print(f"  {name}:{lineno}  {pname}  ({length} chars, value not printed)",
-              file=sys.stderr)
-    print(
-        "\nIf a finding is documentation or a fixture, mark it at the site with"
-        f"\n  {INLINE_ALLOW}"
-        f"\non the same line, or add the path to {ALLOW_FILE.relative_to(REPO)}."
-        "\nThe marker must be on the SAME LINE as the match."
-        "\nIf it is a real credential: rotate it first, then remove it. Removing"
-        "\nit from the working tree does NOT remove it from git history.",
-        file=sys.stderr,
-    )
-    if source is not None and scope.startswith("blobs introduced"):
-        # Reached only at push time, and the distinction is the whole reason the
-        # remedy differs: the credential is already in a COMMIT. Removing it from
-        # the tree and committing again leaves it reachable in the history this
-        # push would publish.
-        print(
-            "\nThis scope reads commits, not the working tree. Deleting the line"
-            "\nand committing again does NOT unpublish it -- the earlier commit"
-            "\nstill carries it. Rotate the credential, then rewrite the branch"
-            "\n(git rebase -i / git commit --amend) before pushing.",
-            file=sys.stderr,
-        )
-    return 1
+    from gitleaks import detect
+    try:
+        status = detect(REPO, redactor=redact, rev_range=args.range, history=args.history,
+                        files=staged_files() if args.staged else tracked_files()
+                        if not (args.range or args.history) else None)
+        if args.range:
+            tip_status = detect(REPO, redactor=redact, files=range_files(args.range))
+            return max(status, tip_status)
+        return status
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+        print(redact(str(exc)), file=sys.stderr)
+        return 2
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     sys.exit(main())
