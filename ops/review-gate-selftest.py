@@ -60,11 +60,25 @@ class ReviewGate(unittest.TestCase):
         self.assertFalse(gate.approved(self.pr, self.files, [changes], "reviewer"))
         self.assertTrue(gate.approved(large, self.files, [changes, {**self.approval, 'submitted_at': '2026-01-03T00:00:00Z'}], 'reviewer'))
 
-    def test_older_approval_requires_proven_unchanged_merges(self):
-        pr = {**self.pr, "additions": 151}
-        old = {**self.approval, "commit_id": "old"}
-        self.assertTrue(gate.approved(pr, self.files, [old], "reviewer", lambda sha: sha == "old"))
-        self.assertFalse(gate.approved(pr, self.files, [old], "reviewer", lambda sha: False))
+    def test_missing_app_setting_depends_only_on_diff(self):
+        cases = [(self.pr, self.files, 0),
+                 ({**self.pr, 'additions': 151}, self.files, 1),
+                 (self.pr, [{'filename': 'migrations/a'}], 1)]
+        for pr, files, expected in cases:
+            with self.subTest(pr=pr, files=files), patch.dict(gate.os.environ, {'CARR_REVIEW_APP_LOGIN': ''}):
+                with patch.object(gate, 'api', side_effect=[pr, {}, files, [self.approval], pr, {}]) as api:
+                    self.assertEqual(gate.run({'number': 4}, 'owner/repo'), expected)
+                    status = api.call_args.args[1]
+                    self.assertEqual(status['state'], 'failure' if expected else 'success')
+                    if expected:
+                        self.assertIn('CARR_REVIEW_APP_LOGIN', status['description'])
+
+    def test_self_and_non_app_approvals_fail(self):
+        pr = {**self.pr, 'additions': 151}
+        for login, configured in [('author', 'author'), ('someone', 'reviewer')]:
+            with self.subTest(login=login):
+                review = {**self.approval, 'user': {'login': login}}
+                self.assertFalse(gate.approved(pr, self.files, [review], configured))
 
     def test_unknown_reviewer_never_approves(self):
         large = {**self.pr, "additions": 151}
@@ -93,50 +107,12 @@ class ReviewGate(unittest.TestCase):
             self.assertEqual(api.call_count, 5)
 
 class MergeHistory(unittest.TestCase):
-    def test_index_at_start_of_hunk_is_preserved(self):
-        before = b"diff --git a/f b/f\nindex old..new 100644\n@@ -1 +1 @@\nindex safe\n"
-        after = before.replace(b"index safe", b"index evil")
-        self.assertNotEqual(gate.review_delta(before), gate.review_delta(after))
-
-    def test_text_blob_ids_are_ignored_but_binary_ids_are_not(self):
-        self.assertEqual(gate.review_delta(b"diff --git a/f b/f\nindex old..new 100644\n+x\n"), gate.review_delta(b"diff --git a/f b/f\nindex other..next 100644\n+x\n"))
-        self.assertNotEqual(gate.review_delta(b"diff --git a/f b/f\nindex old..new\nGIT binary patch\n"), gate.review_delta(b"diff --git a/f b/f\nindex old..next\nGIT binary patch\n"))
-
-    def test_main_changes_other_lines_in_same_file(self):
+    def test_main_merge_requires_new_head_approval(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             def git(*args):
-                return subprocess.check_output(['git', '-C', raw, *args], text=True, stderr=subprocess.DEVNULL, env=fixture_env()).strip()
-            git('init', '-b', 'main'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.com')
-            lines = [f'line {i}\n' for i in range(30)]
-            (root / 'shared').write_text(''.join(lines)); git('add', 'shared'); git('commit', '-m', 'base')
-            git('checkout', '-b', 'feature'); lines[20] = 'reviewed change\n'
-            (root / 'shared').write_text(''.join(lines)); git('add', 'shared'); git('commit', '-m', 'feature')
-            old = git('rev-parse', 'HEAD'); git('checkout', 'main')
-            lines[20] = 'line 20\n'; lines[0] = 'main change\n'
-            (root / 'shared').write_text(''.join(lines)); git('add', 'shared'); git('commit', '-m', 'main')
-            base = git('rev-parse', 'HEAD'); git('checkout', 'feature'); git('merge', '--no-edit', 'main')
-            self.assertTrue(gate.unchanged_merges(raw, base, old, git('rev-parse', 'HEAD')))
-
-    def test_diff_markers_inside_content_cannot_hide_merge_edits(self):
-        for original, changed in [('msg = "diff --git index "; ok()\n', 'msg = "diff --git index "; evil()\n'), ("# diff --git index  ok\n", "# diff --git index  evil\n"), ("index safe\n", "index evil\n")]:
-            with self.subTest(original=original), tempfile.TemporaryDirectory() as raw:
-                root = Path(raw)
-                def git(*args):
-                    return subprocess.check_output(["git", "-C", raw, *args], text=True, stderr=subprocess.DEVNULL, env=fixture_env()).strip()
-                git("init", "-b", "main"); git("config", "user.name", "Test"); git("config", "user.email", "test@example.com")
-                (root / "base").write_text("base\n"); git("add", "base"); git("commit", "-m", "base")
-                git("checkout", "-b", "feature"); (root / "run.py").write_text(original); git("add", "run.py"); git("commit", "-m", "reviewed")
-                old = git("rev-parse", "HEAD"); git("checkout", "main"); (root / "base").write_text("main moved\n"); git("add", "base"); git("commit", "-m", "main")
-                base = git("rev-parse", "HEAD"); git("checkout", "feature"); git("merge", "--no-commit", "--no-ff", "main")
-                (root / "run.py").write_text(changed); git("add", "run.py"); git("commit", "-m", "merge")
-                self.assertFalse(gate.unchanged_merges(raw, base, old, git("rev-parse", "HEAD")))
-
-    def test_only_unchanged_main_merge_preserves_review(self):
-        with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw)
-            def git(*args):
-                return subprocess.check_output(['git', '-C', raw, *args], text=True, stderr=subprocess.DEVNULL, env=fixture_env()).strip()
+                return subprocess.check_output(['git', '-C', raw, *args], text=True,
+                    stderr=subprocess.DEVNULL, env=fixture_env()).strip()
             git('init', '-b', 'main')
             git('config', 'user.name', 'Test')
             git('config', 'user.email', 'test@example.com')
@@ -149,16 +125,13 @@ class MergeHistory(unittest.TestCase):
             git('checkout', 'main')
             (root / 'base').write_text('main advanced')
             git('add', 'base'); git('commit', '-m', 'main moved')
-            base = git('rev-parse', 'HEAD')
             git('checkout', 'feature'); git('merge', '--no-edit', 'main')
             head = git('rev-parse', 'HEAD')
-            self.assertTrue(gate.unchanged_merges(raw, base, old, head))
-            (root / 'feature').write_text('unreviewed merge resolution')
-            git('add', 'feature'); git('commit', '--amend', '--no-edit')
-            self.assertFalse(gate.unchanged_merges(raw, base, old, git('rev-parse', 'HEAD')))
-            git('reset', '--hard', head)
-            (root / 'feature').write_text('changed after review')
-            git('add', 'feature'); git('commit', '-m', 'author change')
-            self.assertFalse(gate.unchanged_merges(raw, base, old, git('rev-parse', 'HEAD')))
+            self.assertNotEqual(old, head)
+            pr = {'head': {'sha': head}, 'additions': 151, 'deletions': 0, 'changed_files': 1}
+            review = {'user': {'login': 'reviewer'}, 'state': 'APPROVED', 'commit_id': old}
+            self.assertFalse(gate.approved(pr, [{'filename': 'feature'}], [review], 'reviewer'))
+            self.assertTrue(gate.approved(pr, [{'filename': 'feature'}],
+                [{**review, 'commit_id': head}], 'reviewer'))
 
 if __name__ == '__main__': unittest.main()
