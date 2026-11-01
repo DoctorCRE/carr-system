@@ -50,6 +50,63 @@ class OriginationTests(unittest.TestCase):
         self.assertNotIn("enrollment_date", correction)
         self.assertNotEqual(first["facts"], correction["facts"])
 
+    def test_florida_fixed_width_document_identity_and_filing_date(self):
+        from tools.import_practice_origination import florida_rows
+        line = ("L26000000001" + "Synthetic Dental LLC".ljust(192) + "20261019" +
+                "SYNTHETIC_LOCATION_A".ljust(42) + "Pensacola".ljust(28) + "FL" +
+                "SYNTHETIC_AGENT_LOCATION".ljust(42) + "32501".ljust(10))
+        row = florida_rows(line, published_on=date(2026, 10, 21), line_number=1)[0]
+        self.assertEqual(row['record_key'], 'L26000000001')
+        self.assertEqual(row['document_number'], 'L26000000001')
+        self.assertNotIn('npi', row)
+        self.assertEqual(row['filing_on'], '2026-10-19')
+        self.assertEqual(row['evidence_date'], '2026-10-19')
+        self.assertEqual(row['date_basis'], 'filing')
+        self.assertEqual(florida_rows(line.replace('32501'.ljust(10), '33101'.ljust(10)),
+                                    published_on=date(2026, 10, 21), line_number=2), [])
+        self.assertEqual(florida_rows(line.replace('Dental', 'Retail'),
+                                    published_on=date(2026, 10, 21), line_number=3), [])
+        with self.assertRaisesRegex(ValueError, 'line 4.*width'):
+            florida_rows(line[:-1], published_on=date(2026, 10, 21), line_number=4)
+
+    def test_florida_import_disabled_and_bad_batch_preserves_checkpoint(self):
+        from tools.import_practice_origination import import_file, FLORIDA_SOURCE
+        state = {'checkpoint': None, 'status': 'available', 'enabled': False}
+        batches = []
+
+        def call(verb, args):
+            if verb == 'list-practice-origination':
+                return {'coverage': [{'source': 'formation-fl', **state}]}
+            self.assertEqual(args['expected_checkpoint'], state['checkpoint'])
+            batches.append(args)
+            if args['status'] == 'available':
+                state['checkpoint'] = args['checkpoint']
+            return {'inserted': len(args['records']), **state}
+
+        self.assertFalse(FLORIDA_SOURCE['enabled'])
+        from tools.routines.lead_signals import PREFIXES
+        self.assertTrue(set(FLORIDA_SOURCE['territory_zip_prefixes']).issubset(PREFIXES))
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'synthetic.txt'
+            line = ("L26000000001" + "Synthetic Dental LLC".ljust(192) + "20261019" +
+                    "SYNTHETIC_LOCATION_A".ljust(42) + "Pensacola".ljust(28) + "FL" + "".ljust(42) + "32501".ljust(10))
+            path.write_text(line + '\n')
+            with self.assertRaisesRegex(ValueError, 'disabled'):
+                import_file(path, source='formation-fl', published_on=date(2026, 10, 21), call=call)
+            self.assertEqual(batches, [])
+            state['enabled'] = True
+            result = import_file(path, source='formation-fl', published_on=date(2026, 10, 21), call=call)
+            self.assertEqual(result['inserted'], 1)
+            import_file(path, source='formation-fl', published_on=date(2026, 10, 21), call=call)
+            self.assertEqual(len(batches), 1)
+            saved = state['checkpoint']
+            path.write_text(line + '\ninvalid row\n')
+            with self.assertRaisesRegex(ValueError, 'line 2.*width'):
+                import_file(path, source='formation-fl', published_on=date(2026, 10, 21), call=call)
+            self.assertEqual(batches[-1]['records'], [])
+            self.assertEqual(batches[-1]['status'], 'blocked')
+            self.assertEqual(state['checkpoint'], saved)
+
     def test_import_recovery_replays_only_unacknowledged_batches_and_reports_drift(self):
         from tools.import_practice_origination import import_file
         row = {'NPI': '1234567890', 'Entity Type Code': '2',

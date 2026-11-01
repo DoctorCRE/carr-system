@@ -17,9 +17,42 @@
     "rate_control": "Local published-file import only; at most 100 records per transaction, sequential batches. No network fetching by this API.",
     "recovery": "Echo the read checkpoint; atomic batch and checkpoint, content deduplication on retry."
   },
-  {"source":"formation-al","enabled":false,"coverage":"unavailable","reason":"Alabama formation adapter and public automated-access terms have not been reviewed."},
-  {"source":"formation-fl","enabled":false,"coverage":"unavailable","reason":"Florida formation adapter and public automated-access terms have not been reviewed."},
-  {"source":"recorder-escambia-fl","enabled":false,"coverage":"unavailable","reason":"Escambia County, Florida is in launch scope; adapter and public automated-access terms remain unverified."},
-  {"source":"recorder-baldwin-al","enabled":false,"coverage":"unavailable","reason":"Baldwin County, Alabama is in launch scope; adapter and public automated-access terms remain unverified."},
-  {"source":"recorder-other","enabled":false,"coverage":"uncovered","reason":"All other counties are outside the approved recorder launch scope."}
+  {
+    "source": "formation-al",
+    "enabled": false,
+    "coverage": "unavailable",
+    "reason": "Alabama formation adapter and public automated-access terms have not been reviewed."
+  },
+  {
+    "source": "formation-fl",
+    "enabled": false,
+    "coverage": "FL principal ZIP prefixes within the existing NPPES territory; healthcare-name research candidates only",
+    "reason": "Corporate-file adapter uses synthetic provisional offsets. Confirm the field layout against the official usage guide and a real daily corporate file before enabling. Daily files are as-is and events omit some changes; never a complete change history.",
+    "terms_url": "https://dos.fl.gov/sunbiz/other-services/data-downloads/data-usage-guide/",
+    "rate_control": "Local file only; no downloads. Atomic batches of at most 100 records.",
+    "healthcare_name_pattern": "\\b(DENTAL|DENTIST|MEDICAL|CLINIC|HEALTHCARE|HEALTH CARE|PHYSICIAN|THERAPY|ORTHOPEDIC|PEDIATRIC|DERMATOLOGY|CARDIOLOGY|OPTOMETRY|CHIROPRACTIC)\\b",
+    "territory_zip_prefixes": [
+      "323",
+      "324",
+      "325"
+    ]
+  },
+  {
+    "source": "recorder-escambia-fl",
+    "enabled": false,
+    "coverage": "unavailable",
+    "reason": "Escambia County, Florida is in launch scope; adapter and public automated-access terms remain unverified."
+  },
+  {
+    "source": "recorder-baldwin-al",
+    "enabled": false,
+    "coverage": "unavailable",
+    "reason": "Baldwin County, Alabama is in launch scope; adapter and public automated-access terms remain unverified."
+  },
+  {
+    "source": "recorder-other",
+    "enabled": false,
+    "coverage": "uncovered",
+    "reason": "All other counties are outside the approved recorder launch scope."
+  }
 ]
