@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 
 RISKY = ("*launchagents*", "*.plist", "install-*.sh", "*/install-*.sh",
+         "claude.md", "agents.md", "*/claude.md", "*/agents.md",
+         ".claude/*", ".agents/*", "docs/agents/*",
          "*outlook*", "*hxstore*", "*hxprobe*", "*calendar*",
          ".github/workflows/deploy*", "migrations/*", "db/*", "*wrangler*", "tools/migrate.py")
 
@@ -31,10 +33,12 @@ def review_exempt(pr, files):
     risky = any(f.get("status") == "added" and f.get("filename", "").startswith(("bin/", "hooks/", "ops/", ".github/workflows/")) for f in files) or any(fnmatch.fnmatchcase(f.get(key, "").lower(), pattern)
                 for f in files for key in ("filename", "previous_filename") for pattern in RISKY)
     complete = len(files) == pr["changed_files"]
-    return docs_only(pr, files) or (complete and pr["additions"] - pr["deletions"] <= 150 and not risky)
+    return complete and pr["additions"] - pr["deletions"] <= 150 and not risky
 
 
 def approved(pr, files, reviews, reviewer_login):
+    if reviewer_login and not reviewer_login.endswith("[bot]"):
+        return False
     if SKIP_CI.search(pr.get("title") or ""):
         return False
     latest = {}
@@ -49,7 +53,7 @@ def approved(pr, files, reviews, reviewer_login):
     if review_exempt(pr, files):
         return True
     author = (pr.get("user") or {}).get("login", "").lower()
-    return any(reviewer_login and user == reviewer_login.lower() and user != author and r["state"] == "APPROVED" and r.get("commit_id") == pr["head"]["sha"]
+    return any(reviewer_login and user == reviewer_login.lower() and user != author and (r.get("user") or {}).get("type") == "Bot" and r["state"] == "APPROVED" and r.get("commit_id") == pr["head"]["sha"]
                for user, r in latest.items())
 
 
@@ -91,6 +95,8 @@ def run(event, repo):
                        "Missing PR body line: Card: WR<number>.S<number>.J<number>")
         if card_ok and not reviewer_login and not review_exempt(pr, files):
             description = "Missing CARR_REVIEW_APP_LOGIN; review-required PR cannot pass"
+        if reviewer_login and not reviewer_login.endswith("[bot]"):
+            description = "CARR_REVIEW_APP_LOGIN must name an App bot ending in [bot]"
         status(sha, "success" if passed else "failure", description)
         print(description)
         return int(not passed)
