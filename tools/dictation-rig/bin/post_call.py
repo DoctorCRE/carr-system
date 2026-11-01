@@ -900,9 +900,6 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         held = hold_transcript_repeat(session_dir, read_json(session_dir / REPORT_FILE) or {})
         if held is not None:
             return held
-        existing = read_json(session_dir / STATUS_FILE) or {}
-        if existing.get("state") in {"ready_review", "filed"}:
-            return existing
         report = read_json(session_dir / REPORT_FILE)
         if report is None:
             raise ContractError("post-call report is unreadable")
