@@ -350,7 +350,7 @@ def replay_cards_live(world, case, *, hook=None):
             row = json.loads(output['hookSpecificOutput']['additionalContext']) if output else {}
             card_ids = [c['id'] for c in row.get('cards', [])]
             events.append({'kind': kind, 'tool': payload.get('tool_name'), 'card_ids': card_ids,
-                           'rule_ids': row.get('rule_ids', [])})
+                           'rule_ids': sorted(r['id'] for r in row.get('rules', []) + row.get('overflow', []))})
     return events
 
 
