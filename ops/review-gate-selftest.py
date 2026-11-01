@@ -131,34 +131,105 @@ class ReviewGate(unittest.TestCase):
 
 class QueueAndCutover(unittest.TestCase):
     setUp = ReviewGate.setUp
-    def test_queue_checks_all_current_constituents(self):
-        event = {'merge_group': {'head_ref': 'refs/heads/gh-readonly-queue/main/pr-4-head', 'head_sha': 'queue', 'base_sha': 'base'}}
-        large = {**self.pr, 'number': 4, 'state': 'open', 'additions': 900}
-        other = {**large, 'number': 5, 'head': {'sha': 'other'}}
-        def exercise(approved_other, login='reviewer[bot]', broken=False, moved=False):
-            calls = []
-            def api(path, payload=None):
-                calls.append((path, payload))
-                if payload: return {}
+    def exercise_queue(self, count=1, missing=False, moved=False, changed=False,
+                       broken=False, truncated=False, unknown=False, dispatch=False,
+                       login="reviewer[bot]"):
+        event = {'merge_group': {'head_ref': 'refs/heads/gh-readonly-queue/main/pr-4-base',
+                                'head_sha': 'queue' + str(count), 'base_sha': 'base',
+                                'base_ref': 'refs/heads/main'}}
+        prs = {n: {**self.pr, 'number': n, 'state': 'open', 'additions': 900,
+                   'head': {'sha': 'head' + str(n)}} for n in range(4, 4 + count)}
+        entries = [{'headCommit': {'oid': 'queue' + str(i + 1)},
+                    'pullRequest': {'number': n, 'headRefOid': pr['head']['sha']}}
+                   for i, (n, pr) in enumerate(prs.items())]
+        calls = []
+        def api(path, payload=None):
+            calls.append((path, payload))
+            if path == 'graphql':
                 if broken: raise ValueError('lookup failed')
-                if '/compare/' in path: return {'commits': [{'sha': 'head'}, {'sha': 'other'}, {'sha': 'queue'}], 'total_commits': 3}
-                if '/commits/head/pulls' in path: return [large]
-                if '/commits/other/pulls' in path: return [{**other, 'head': {'sha': 'moved'}}] if moved else [other]
-                if '/commits/queue/pulls' in path: return []
-                if '/files?' in path: return self.files
-                if '/reviews?' in path: return [self.approval] if '/4/' in path else ([{**self.approval, 'commit_id': 'other'}] if approved_other else [])
-                if path.endswith('/4'): return large
-                if path.endswith('/5'): return {**other, 'head': {'sha': 'moved'}} if moved else other
-                raise AssertionError(path)
-            with patch.dict(gate.os.environ, {'CARR_REVIEW_APP_LOGIN': login}), patch.object(gate, 'api', side_effect=api):
-                result = gate.run(event, 'owner/repo')
-            self.assertEqual(calls[-1][1]['state'], 'success' if approved_other and login and not broken and not moved else 'failure')
-            return result
-        self.assertEqual(exercise(True), 0)
-        self.assertEqual(exercise(False), 1)
-        self.assertEqual(exercise(True, login=''), 1)
-        self.assertEqual(exercise(True, broken=True), 1)
-        self.assertEqual(exercise(True, moved=True), 1)
+                nodes = entries
+                if changed and sum(p == 'graphql' for p, _ in calls) > 1:
+                    nodes = [{**e, 'pullRequest': {**e['pullRequest'], 'headRefOid': 'moved'}}
+                             for e in entries]
+                return {'data': {'repository': {'mergeQueue': {'entries': {
+                    'nodes': nodes, 'pageInfo': {'hasNextPage': truncated, 'endCursor': None}}}}}}
+            if '/compare/' in path:
+                commits = [{'sha': e['headCommit']['oid']} for e in entries]
+                if unknown: commits.insert(0, {'sha': 'unknown'})
+                return {'commits': commits, 'total_commits': len(commits)}
+            if payload: return {}
+            if path.endswith('/git/ref/heads/main'): return {'object': {'sha': 'base'}}
+            n = int(path.split('/pulls/')[1].split('/')[0])
+            if '/files?' in path: return self.files
+            if '/reviews?' in path:
+                return [] if missing and n == 3 + count else [{**self.approval, 'commit_id': 'head' + str(n)}]
+            if moved and n == 4:
+                return {**prs[n], 'head': {'sha': 'moved'}}
+            return prs[n]
+        if dispatch:
+            event = {'inputs': {'queue_head_sha': 'a' * 40}}
+            entries[-1]['headCommit']['oid'] = 'a' * 40
+        with patch.dict(gate.os.environ, {'CARR_REVIEW_APP_LOGIN': login}), \
+                patch.object(gate, 'api', side_effect=api):
+            result = gate.run(event, 'owner/repo')
+        self.assertEqual(calls[-1][1]['state'], 'success' if result == 0 else 'failure')
+        return result, calls
+
+    def test_single_squash_queue_entry(self):
+        self.assertEqual(self.exercise_queue()[0], 0)
+
+    def test_multiple_squash_queue_entries(self):
+        result, calls = self.exercise_queue(count=3)
+        self.assertEqual(result, 0)
+        self.assertTrue(all(any(p.endswith('/pulls/' + str(n)) for p, _ in calls)
+                            for n in (4, 5, 6)))
+
+    def test_multiple_queue_entries_need_every_approval(self):
+        self.assertEqual(self.exercise_queue(count=3, missing=True)[0], 1)
+
+    def test_queue_moved_head_is_refused(self):
+        self.assertEqual(self.exercise_queue(moved=True)[0], 1)
+
+    def test_queue_missing_approval_is_refused(self):
+        self.assertEqual(self.exercise_queue(missing=True)[0], 1)
+
+    def test_queue_missing_reviewer_setting_is_refused(self):
+        self.assertEqual(self.exercise_queue(login="")[0], 1)
+
+    def test_queue_changed_after_approval_is_refused(self):
+        self.assertEqual(self.exercise_queue(changed=True)[0], 1)
+
+    def test_queue_lookup_failure_is_refused(self):
+        self.assertEqual(self.exercise_queue(broken=True)[0], 1)
+
+    def test_queue_incomplete_pagination_is_refused(self):
+        self.assertEqual(self.exercise_queue(truncated=True)[0], 1)
+
+    def test_queue_unmapped_commit_is_refused(self):
+        self.assertEqual(self.exercise_queue(unknown=True)[0], 1)
+
+    def test_manual_queue_recovery_checks_approvals(self):
+        self.assertEqual(self.exercise_queue(dispatch=True)[0], 0)
+        self.assertEqual(self.exercise_queue(dispatch=True, missing=True)[0], 1)
+
+    def test_queue_reads_all_pages(self):
+        def page(nodes, more=False, cursor=None):
+            return {'data': {'repository': {'mergeQueue': {'entries': {
+                'nodes': nodes, 'pageInfo': {'hasNextPage': more, 'endCursor': cursor}}}}}}
+        entry = {'headCommit': {'oid': 'queue'},
+                 'pullRequest': {'number': 4, 'headRefOid': 'head'}}
+        responses = [page([{'headCommit': None}], True, 'next'), page([entry]),
+                     {'commits': [{'sha': 'queue'}], 'total_commits': 1}]
+        with patch.object(gate, 'api', side_effect=responses) as api:
+            self.assertEqual(gate.queue_prs('repos/owner/repo',
+                {'base_sha': 'base', 'head_sha': 'queue'}), {4: 'head'})
+            self.assertEqual(api.call_args_list[1].args[1]['variables']['cursor'], 'next')
+
+    def test_manual_recovery_rejects_invalid_sha(self):
+        with patch.object(gate, 'api') as api:
+            with self.assertRaises(ValueError):
+                gate.run({'inputs': {'queue_head_sha': 'not-a-sha'}}, 'owner/repo')
+            api.assert_not_called()
 
     def test_dispatch_evaluates_all_open_main_heads(self):
         prs = [{'number': 4}, {'number': 5}]
@@ -167,7 +238,10 @@ class QueueAndCutover(unittest.TestCase):
             self.assertIn('state=open&base=main', api.call_args.args[0])
             self.assertEqual([c.args[1] for c in evaluate.call_args_list], [4, 5])
         workflow = Path(__file__).resolve().parents[1] / '.github/workflows/review-gate.yml'
-        self.assertIn('workflow_dispatch:', workflow.read_text())
+        text = workflow.read_text()
+        self.assertIn('workflow_dispatch:', text)
+        self.assertIn('queue_head_sha:', text)
+        self.assertIn("github.event_name == 'workflow_dispatch' && github.sha || github.event.repository.default_branch", text)
 
 class MergeHistory(unittest.TestCase):
     def test_main_merge_requires_new_head_approval(self):
