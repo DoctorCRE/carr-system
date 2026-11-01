@@ -105,6 +105,11 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
   const checkVersion = (row, version) => {
     if (row.version !== version) fail('version_conflict', { current_version: row.version });
   };
+  const checkDraftText = args => {
+    if ([...args.subject].length > 998 || [...args.body].length > 20000) fail('invalid_field_value');
+    if (!args.body.trim()) fail('email_draft_empty_body');
+    if (!args.subject.trim() || /[\r\n]/.test(args.subject)) fail('email_draft_subject_invalid');
+  };
   const draftProperties = {
     idempotency_key: { type: 'string', minLength: 1, maxLength: 200 },
     proposal_id: { type: 'string', format: 'uuid' },
@@ -247,6 +252,32 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         return { ok: true, deal: prior.deal, activity_id: current.activity_id };
       }),
     },
+    'edit-email-draft': {
+      write: true, humanOnly: true, humanCallerOnly: true,
+      description: 'The owning partner saves the exact subject and body of a pending reply draft at base_version. Refuses stale versions with version_conflict. Returns the stored text and incremented version. Changes no recipients, status, or send state; sends and queues nothing.',
+      inputSchema: { type: 'object', additionalProperties: false,
+        required: [...Object.keys(draftProperties), 'subject', 'body'], properties: { ...draftProperties,
+          subject: { type: 'string', minLength: 1, maxLength: 998 },
+          body: { type: 'string', minLength: 1, maxLength: 20000 } } },
+      handler: async (c, actor, args) => {
+        if (actor.human !== true || !['joe', 'dell'].includes(actor.slug)) fail('email_draft_not_owner');
+        await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
+        return withEnvelope(c, actor, 'edit-email-draft', args, async () => {
+          const row = await draftRow(c, args.proposal_id, actor.slug);
+          if (row.status !== 'pending') fail('email_draft_not_pending');
+          checkVersion(row, args.base_version);
+          checkDraftText(args);
+          const stored = (await c.query(`update email_proposal set draft_subject=$2,draft_body=$3,
+            version=version+1 where id=$1 returning version,draft_subject as subject,draft_body as body`,
+          [row.id,args.subject,args.body])).rows[0];
+          await writeEvent(c, actor, 'edit-email-draft', 'deal', row.deal_id, {
+            old: { proposal_id: row.id, version: row.version, subject: row.draft_subject, body: row.draft_body },
+            new: { proposal_id: row.id, ...stored },
+            cause: 'human_correction', idempotency_key: args.idempotency_key });
+          return { ok: true, proposal_id: row.id, ...stored };
+        });
+      },
+    },
     'submit-email-draft': {
       write: true, humanOnly: true, humanCallerOnly: true,
       description: 'The owning partner submits the exact final subject, body and displayed to/cc arrays from a review card. Missing or changed recipients refuse email_draft_recipients_mismatch. Approval freezes the original sender as recipient, the other partner actor.email as cc, and the supplied attachment paths, sha256 and byte sizes. Paths must be canonical absolute paths under the local attachment root. Missing copy address refuses. Enqueues for that partner’s Mac; does not send mail.',
@@ -269,8 +300,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             fail('email_draft_failure_not_resubmittable', { reason: row.send_result?.reason ?? null });
           if (row.status !== 'pending' && row.status !== 'failed') fail('email_draft_already_submitted');
           checkVersion(row, args.base_version);
-          if (!args.body.trim()) fail('email_draft_empty_body');
-          if (!args.subject.trim() || /[\r\n]/.test(args.subject)) fail('email_draft_subject_invalid');
+          checkDraftText(args);
           const recipients = await draftRecipients(c, row, true);
           if (['to', 'cc'].some(field => !Array.isArray(args[field]) || args[field].length !== 1 ||
               args[field][0] !== recipients[field][0])) fail('email_draft_recipients_mismatch');
