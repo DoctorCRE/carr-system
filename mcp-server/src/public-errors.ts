@@ -121,6 +121,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["missing_plan_base", "Review this older call proposal before applying it."],
   ["newer_change_exists", "The record changed after this proposal. Review its current state before deciding."],
   ["invalid_work_queue_fields", "Use only the documented queue fields and positive 32-bit slice, job, and position numbers."],
+  ["invalid_job_type", "Supply job_type from the documented job-types.v1.json vocabulary."],
   ["invalid_work_request", "Supply a numeric Work Request reference such as WR-000014."],
   ["invalid_idempotency_key", "Supply a UUID as idempotency_key and reuse it only for the same action."],
   ["invalid_slice_plan", "Supply one through one hundred non-empty slice titles, each at most 200 characters."],

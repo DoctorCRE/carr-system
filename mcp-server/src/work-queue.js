@@ -17,6 +17,7 @@ const base = { idempotency_key: { type: 'string', format: 'uuid' }, work_request
 const slice = { ...positive, default: 1 };
 const jobFacts = ['executor', 'model', 'effort', 'card_title', 'description'];
 const jobStart = ['job', 'runner_job_id'];
+const titleVerbRepairs = new Map([['Update', 'Revise'], ['Rereview', 'Review'], ['Resync', 'Fix']]);
 export const repositories = Object.keys(addressFormat.repositories);
 export const changeUrlPattern = `^https://github\\.com/(${repositories.map(repo => repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})/pull/[1-9][0-9]*$`;
 export const validChangeUrl = url => {
@@ -306,7 +307,9 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError, completeWo
   };
   const suggestTitle = async (c, wr, args, current) => {
     const words = (String(args.card_title || args.description || '').match(/[A-Za-z']+/g) || []).filter(word => /[A-Za-z]/.test(word));
-    const verb = cardVerbs.includes(words[0]) ? words.shift() : 'Build';
+    const first = words[0];
+    const verb = titleVerbRepairs.get(first) || (cardVerbs.includes(first) ? first : 'Build');
+    if (titleVerbRepairs.has(first) || cardVerbs.includes(first)) words.shift();
     const subject = (words[0] || 'work').slice(0, 30);
     const used = new Set((await c.query(`select card_title from ops.work_request_job where work_request_id=$1
       and not (slice_ordinal=$2 and j_number=$3)`, [wr.id, current?.slice ?? 0, current?.job ?? 0])).rows.map(row => row.card_title.toLowerCase()));
@@ -357,11 +360,17 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError, completeWo
           const normalized = typeof args.work_request === 'string' && /^WR-?([0-9]{1,6})$/.exec(args.work_request);
           if (normalized) args = { ...args, work_request: `WR-${normalized[1].padStart(6, '0')}` };
           if (field_errors.length && normalized && !jobStart.some(key => Object.hasOwn(args, key))) {
-            const wr = await request(c, actor, args.work_request);
-            if (typeof args.card_title === 'string' && (await c.query(`select 1 from ops.work_request_job
+            let wr;
+            try { wr = await request(c, actor, args.work_request); }
+            catch (error) {
+              if (!(error instanceof ToolError) || error.payload.error !== 'work_request_not_found') throw error;
+              field_errors.push({ field: 'work_request', value: args.work_request, code: 'work_request_not_found',
+                pattern: 'an existing Work Request visible to this actor' });
+            }
+            if (wr && typeof args.card_title === 'string' && (await c.query(`select 1 from ops.work_request_job
               where work_request_id=$1 and lower(card_title)=lower($2)`, [wr.id, args.card_title])).rows.length)
               field_errors.push({ field: 'card_title', value: args.card_title, code: 'card_title_duplicate', pattern: titleRule, allowed_values: cardVerbs });
-            if (field_errors.some(e => e.field === 'card_title'))
+            if (wr && field_errors.some(e => e.field === 'card_title'))
               suggested_card_title = await suggestTitle(c, wr, args);
           }
           if (field_errors.length) {
