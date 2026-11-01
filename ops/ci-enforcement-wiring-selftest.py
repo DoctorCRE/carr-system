@@ -92,9 +92,9 @@ class EnforcementWiringTest(unittest.TestCase):
         catalog = {"example": {"failure_mode": "CI failure",
                                "implementation": ["ops/example-check.py"]}}
         def mutate(root):
-            ci = root / "ops/ci.sh"
-            ci.write_text(ci.read_text().replace("check_dependency() {",
-                'check_dependency() {\n  run_quiet "$LOGDIR/example.log" "$PY" ops/example-check.py'))
+            ci = root / "ops/ci.py"
+            ci.write_text(ci.read_text().replace("    def check_dependency(self):",
+                '    def check_dependency(self):\n        self.run_quiet("example", [self.python, "ops/example-check.py"])'))
         self.assertEqual([], unwired_checks(catalog, mutate))
 
     def test_guarded_checker_is_not_reachable(self):
@@ -116,8 +116,8 @@ class EnforcementWiringTest(unittest.TestCase):
 
     def test_inactive_class_is_not_reachable(self):
         def mutate(root):
-            ci = root / "ops/ci.sh"
-            ci.write_text(ci.read_text().replace("dependency migration binding", "dependency binding"))
+            ci = root / "ops/ci.py"
+            ci.write_text(ci.read_text().replace("    'migration': 'seeded bad migration / trigger permission',\n", ""))
         self.assertEqual(["example: ops/trigger-grant-check.py"], unwired_checks(self.catalog, mutate))
 
     def test_commented_call_is_not_reachable(self):

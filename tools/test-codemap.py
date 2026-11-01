@@ -226,6 +226,7 @@ class CodemapTests(unittest.TestCase):
         (self.repo / "hooks").mkdir()
         checker = self.repo / "ops/ci.sh"
         shutil.copyfile(ROOT / "ops/ci.sh", checker)
+        shutil.copyfile(ROOT / "ops/ci.py", self.repo / "ops/ci.py")
         checker.chmod(0o755)
         shutil.copyfile(ROOT / "ops/ci-gates.py", self.repo / "ops/ci-gates.py")
         shutil.copyfile(ROOT / "ops/ci-secret-scan.py", self.repo / "ops/ci-secret-scan.py")

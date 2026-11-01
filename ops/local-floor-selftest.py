@@ -116,6 +116,7 @@ class PushFloorTests(RepositoryFixture):
     def setUp(self):
         super().setUp()
         self.copy("ops/ci.sh")
+        self.copy("ops/ci.py")
         self.copy("ops/ci-pushfloor.py")
         self.copy("ops/node_test_summary.py")
         for name in ("ops/no-client-deliverables-gate.py", "ops/hook-deletion-check.py",
@@ -131,7 +132,7 @@ class PushFloorTests(RepositoryFixture):
                    "with Path('calls').open('a') as log:\n    log.write('paired\\n')\n")
         self.write("mcp-server/src/scac-mutation-registry.current.generated.js", "// baseline\n")
         self.write("mcp-server/src/tool-families/fixture.js", "// reviewed family\n")
-        self.commit("ops/ci.sh", "ops/ci-pushfloor.py", "ops/node_test_summary.py",
+        self.commit("ops/ci.sh", "ops/ci.py", "ops/ci-pushfloor.py", "ops/node_test_summary.py",
                     "ops/no-client-deliverables-gate.py",
                     "ops/hook-deletion-check.py", "ops/ci-selftest.py", "bin/type-check.sh",
                     "bin/node", "hooks/example.py", "ops/example-selftest.py",

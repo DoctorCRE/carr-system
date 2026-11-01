@@ -76,7 +76,7 @@ class MigrationTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         for name in ("ops", "bin", "tools", "db", "mcp-server/test"):
             (self.root / name).mkdir(parents=True, exist_ok=True)
-        for name in ("ci.sh", "ci-migration.py"):
+        for name in ("ci.sh", "ci.py", "ci-migration.py"):
             source = ROOT / "ops" / name
             if source.exists():
                 shutil.copy2(source, self.root / "ops" / name)
@@ -232,7 +232,7 @@ SHIM = r"""#!REAL_SHEBANG
 import json, os, subprocess, sys
 from pathlib import Path
 args = sys.argv[1:]
-if args and args[0].endswith('ops/ci-migration.py'):
+if args and args[0].endswith(('ops/ci-migration.py', 'ops/ci.py')):
     os.execv(REAL_PYTHON, [REAL_PYTHON, *args])
 if args and args[0].endswith('ops/ci-secret-scan.py'):
     print(sys.stdin.read(), end='')

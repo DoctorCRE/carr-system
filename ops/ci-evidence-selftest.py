@@ -20,6 +20,17 @@ evidence = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(evidence)
 
 
+class ControllerContractTest(unittest.TestCase):
+    def test_controller_source_changes_the_evidence_contract(self):
+        read_bytes = pathlib.Path.read_bytes
+        before = evidence.contract_digest()
+        def changed(path):
+            source = read_bytes(path)
+            return source + b"\n" if path == ROOT / 'ops/ci.py' else source
+        with patch.object(pathlib.Path, 'read_bytes', changed):
+            self.assertNotEqual(before, evidence.contract_digest())
+
+
 class HostedVerdict(unittest.TestCase):
     def test_completed_needs_succeeds_without_contacting_github(self):
         with tempfile.TemporaryDirectory() as directory:
