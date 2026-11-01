@@ -13,4 +13,8 @@ COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
 PY="$(dirname "$COMMON_DIR")/.venv/bin/python"
 [ -x "$PY" ] || PY=python3
 export CARR_CI_PYTHON="$PY"
+if [ "${1:-}" = "--doc-drift" ]; then
+  shift
+  exec "${CARR_DOC_DRIFT_PYTHON:-$PY}" "$REPO/scripts/doc-drift/ci.py" "$@"
+fi
 exec "$PY" "$REPO/ops/ci.py" "$@"

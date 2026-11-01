@@ -383,9 +383,6 @@ def main(argv=None):
     os.chdir(ROOT)
     python = os.environ.get('CARR_CI_PYTHON', sys.executable)
     os.environ['CARR_CI_PYTHON'] = python
-    if argv[:1] == ['--doc-drift']:
-        interpreter = os.environ.get('CARR_DOC_DRIFT_PYTHON') or python
-        os.execvp(interpreter, [interpreter, str(ROOT / 'scripts/doc-drift/ci.py'), *argv[1:]])
     try:
         options = parse_options(argv)
     except ValueError as error:

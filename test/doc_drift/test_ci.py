@@ -3,7 +3,6 @@ import importlib.util
 import os
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 import unittest
 
@@ -35,17 +34,12 @@ class CiTest(unittest.TestCase):
 
     @unittest.skipUnless((ROOT / 'ops/ci.sh').exists(), 'CARR owns the single CI script')
     def test_carr_ci_entrypoint_forwards_arguments_to_local_checker(self):
-        scratch = Path(self.enterContext(tempfile.TemporaryDirectory(prefix='doc-drift-ci-fixture-'))).resolve()
+        scratch = Path(self.enterContext(tempfile.TemporaryDirectory(prefix='doc-drift-ci-fixture-')))
         (scratch / 'ops').mkdir()
         (scratch / 'ops/ci.sh').write_bytes((ROOT / 'ops/ci.sh').read_bytes())
-        (scratch / 'ops/ci.py').write_bytes((ROOT / 'ops/ci.py').read_bytes())
         (scratch / '.venv/bin').mkdir(parents=True)
         executable = scratch / '.venv/bin/python'
-        executable.write_text(
-            '#!' + sys.executable + '\nimport os,sys\n'
-            "if sys.argv[1].endswith('ops/ci.py'):\n"
-            "    os.execv(sys.executable, [sys.executable, *sys.argv[1:]])\n"
-            "print(*sys.argv[1:], sep='\\n')\n")
+        executable.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
         executable.chmod(0o755)
         env = dict(os.environ)
         env.pop('CARR_DOC_DRIFT_PYTHON', None)
