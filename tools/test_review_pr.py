@@ -21,11 +21,17 @@ class ReviewPR(TestCase):
             calls.append((name, args, request))
             if name == 'gh':
                 if args[1] == 'view':
-                    output = json.dumps(dict(headRefOid=('b' if moved and (sum(n == 'gh' and a[1] == 'view' for n, a, _ in calls) > 1 if moved is True else comments) else 'a')*40, title='Fix correctness'))
+                    output = json.dumps(dict(headRefOid=('b' if moved and (sum(n == 'gh' and a[1] == 'view' for n, a, _ in calls) > 1 if moved is True else comments) else 'a')*40, title='Fix correctness', body='Card: WR622.S1.J37'))
                 elif args[1] == 'diff': output = 'diff --git a/example b/example'
-                elif args[1] == 'comment': comments.append(Path(args[args.index('--body-file')+1]).read_text())
+                elif args[1] == 'comment': raise AssertionError('VERDICT comment publisher retired')
                 elif args[1] == 'merge' and moved == 'after-comment':
                     raise subprocess.CalledProcessError(1, command, stderr='head does not match')
+            elif name == sys.executable:
+                self.assertTrue(args[0].endswith('ops/review-submit.py'))
+                self.assertEqual(args[1], '42')
+                self.assertIn(args[2], ('approve', 'request-changes'))
+                self.assertEqual(args[-2:], ['--reviewed-sha', 'a'*40])
+                comments.append(args[2] + '\n' + Path(args[args.index('--body-file')+1]).read_text())
             elif name == 'git' and args[0] == 'rev-parse': output = 'a'*40
             elif name == 'claude':
                 if 'mcp__claude_ai_Slack__slack_send_message' in args: output = '123.456'
@@ -34,7 +40,7 @@ class ReviewPR(TestCase):
             return output
 
         main_fn = runpy.run_path(str(CLI))['main']
-        with mock.patch('sys.argv', [str(CLI), 'owner/repo', '42']), mock.patch.dict(main_fn.__globals__, run=run, skill_findings=lambda body: list(missing)):
+        with mock.patch('sys.argv', [str(CLI), 'DoctorCRE/carr-system', '42']), mock.patch.dict(main_fn.__globals__, run=run, skill_findings=lambda body: list(missing)):
             try: main_fn()
             except (ValueError, subprocess.CalledProcessError) as failure: return str(failure), calls, ''.join(comments)
         return None, calls, ''.join(comments)
@@ -49,7 +55,7 @@ class ReviewPR(TestCase):
         error, calls, comment = self.run_review()
         self.assertIsNone(error)
         self.assertTrue(any(name == 'git' and args == ['fetch', 'origin', 'pull/42/head'] for name, args, _ in calls))
-        self.assertTrue(comment.startswith('VERDICT: APPROVE\nReviewed-SHA: '+'a'*40+'\nReviewer: the Dot\n'))
+        self.assertTrue(comment.startswith('approve\nCard: WR622.S1.J37\n'))
         self.assertTrue(any('--auto' in args and '--squash' in args and args[-2:] == ['--match-head-commit', 'a'*40] for name, args, _ in calls if name == 'gh'))
         self.assertIn('<@U0C5R40MBPE>', next(request for name, _, request in calls if name == 'claude'))
         self.assertTrue(all(name != 'grok-run.sh' for name, _, _ in calls))
@@ -65,7 +71,7 @@ class ReviewPR(TestCase):
     def test_missing_skill_is_posted_and_prevents_auto_merge(self):
         error, calls, comment = self.run_review(missing=['Required skill did not run: example'])
         self.assertIsNone(error)
-        self.assertIn('VERDICT: CHANGES', comment)
+        self.assertTrue(comment.startswith('request-changes\n'))
         self.assertIn('Required skill did not run: example', comment)
         self.assertFalse(any(args[1:2] == ['merge'] for name, args, _ in calls if name == 'gh'))
 
@@ -77,7 +83,7 @@ class ReviewPR(TestCase):
                 with self.subTest(finding=finding, verdict=verdict):
                     error, _, comment = self.run_review(verdict=verdict, missing=[finding])
                     self.assertIsNone(error)
-                    self.assertTrue(comment.startswith('VERDICT: ' + verdict))
+                    self.assertTrue(comment.startswith(('approve' if verdict == 'APPROVE' else 'request-changes') + '\n'))
                     self.assertIn(finding, comment)
 
     def test_dot_polls_thread_on_paid_run_schedule(self):

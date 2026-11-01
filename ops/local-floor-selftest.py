@@ -310,11 +310,12 @@ class PrePrTests(RepositoryFixture):
         super().setUp()
         self.copy("ops/ci-pushfloor.py")
         self.copy("ops/review-gate.py")
+        self.copy("ops/git_env.py")
         self.scanner("security/leak_guard.py", "leak")
         self.scanner("hooks/gate-integrity.py", "integrity")
         self.write("bin/gh", "#!/bin/sh\nexit 1\n").chmod(0o755)
         self.child_env["PATH"] = str(self.repo / "bin") + os.pathsep + os.defpath
-        self.commit("ops/ci-pushfloor.py", "ops/review-gate.py", "security/leak_guard.py",
+        self.commit("ops/ci-pushfloor.py", "ops/review-gate.py", "ops/git_env.py", "security/leak_guard.py",
                     "hooks/gate-integrity.py", "bin/gh")
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
         self.base = self.git("rev-parse", "HEAD").stdout.strip()

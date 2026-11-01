@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 
 RISKY = ("*launchagents*", "*.plist", "install-*.sh", "*/install-*.sh",
+         "claude.md", "agents.md", "*/claude.md", "*/agents.md",
+         ".claude/*", ".agents/*", "docs/agents/*",
          "*outlook*", "*hxstore*", "*hxprobe*", "*calendar*",
          ".github/workflows/deploy*", "migrations/*", "db/*", "*wrangler*", "tools/migrate.py")
 
@@ -27,30 +29,34 @@ def card_allowed(pr, files):
                 for line in (pr.get("body") or "").splitlines()))
 
 
-def approved(pr, files, comments):
-    if SKIP_CI.search(pr.get("title") or ""):
-        return False
-    # Share the existing comment parser with Worker completion; input is JSON, never executable text.
-    module = (Path(__file__).resolve().parents[1] / 'mcp-server/src/review-gate-comments.js').as_uri()
-    script = (f'import {{reviewComments}} from {json.dumps(module)}; '
-              'import {readFileSync} from "node:fs"; '
-              'const [sha,comments]=JSON.parse(readFileSync(0,"utf8")); '
-              'console.log(JSON.stringify(reviewComments(sha,comments)));')
-    parsed = subprocess.run(['node', '--input-type=module', '-e', script],
-                            input=json.dumps([pr['head']['sha'], comments]),
-                            text=True, capture_output=True, check=True)
-    # A changes verdict vetoes the current head until a new push.
-    verdicts = [review['verdict'] for review in json.loads(parsed.stdout)]
-    if "VERDICT: CHANGES" in verdicts:
-        return False
-    # Markdown-only PRs carry no runtime behaviour, so they merge on green CI at any size (Joe 2026-10-27).
+def review_exempt(pr, files):
     if docs_only(pr, files):
         return True
     risky = any(f.get("status") == "added" and f.get("filename", "").startswith(("bin/", "hooks/", "ops/", ".github/workflows/")) for f in files) or any(fnmatch.fnmatchcase(f.get(key, "").lower(), pattern)
                 for f in files for key in ("filename", "previous_filename") for pattern in RISKY)
-    if len(files) == pr["changed_files"] and pr["additions"] - pr["deletions"] <= 150 and not risky:
+    complete = len(files) == pr["changed_files"]
+    return complete and pr["additions"] - pr["deletions"] <= 150 and not risky
+
+
+def approved(pr, files, reviews, reviewer_login):
+    if reviewer_login and not reviewer_login.endswith("[bot]"):
+        return False
+    if SKIP_CI.search(pr.get("title") or ""):
+        return False
+    latest = {}
+    for review in sorted(reviews, key=lambda r: r.get("submitted_at") or ""):
+        user = (review.get("user") or {}).get("login")
+        state = review.get("state")
+        if user and state in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
+            latest[user.lower()] = review
+    current_review = latest.get(reviewer_login.lower(), {}) if reviewer_login else {}
+    if current_review.get("state") == "CHANGES_REQUESTED" and current_review.get("commit_id") == pr["head"]["sha"]:
+        return False
+    if review_exempt(pr, files):
         return True
-    return verdicts[-1:] == ["VERDICT: APPROVE"]
+    author = (pr.get("user") or {}).get("login", "").lower()
+    return any(reviewer_login and user == reviewer_login.lower() and user != author and (r.get("user") or {}).get("type") == "Bot" and r["state"] == "APPROVED" and r.get("commit_id") == pr["head"]["sha"]
+               for user, r in latest.items())
 
 
 def api(path, payload=None):
@@ -66,30 +72,75 @@ def api(path, payload=None):
     return data if payload else (sum(data, []) if data and isinstance(data[0], list) else data[0])
 
 
+def queue_prs(root, group):
+    match = re.fullmatch(r"(?:refs/heads/)?gh-readonly-queue/main/pr-([0-9]+)-.+", group["head_ref"])
+    if not match:
+        raise ValueError("Unrecognized merge queue ref")
+    comparison = api(f"{root}/compare/{group['base_sha']}...{group['head_sha']}?per_page=100")
+    commits = comparison["commits"]
+    if len(commits) != comparison["total_commits"] or not commits:
+        raise ValueError("Incomplete merge queue comparison")
+    shas = {commit["sha"] for commit in commits}
+    numbers = set()
+    for sha in shas:
+        for pr in api(f"{root}/commits/{sha}/pulls?per_page=100"):
+            if pr["state"] == "open" and pr["base"]["ref"] == "main":
+                numbers.add(pr["number"])
+    if int(match[1]) not in numbers:
+        raise ValueError("Merge queue constituent lookup failed")
+    return numbers, shas
+
+
 def run(event, repo):
     root = f"repos/{repo}"
+    if "merge_group" in event:
+        group = event["merge_group"]
+        def status(state):
+            api(f"{root}/statuses/{group['head_sha']}", {
+                "context": "review-gate", "state": state,
+                "description": "Every queued PR needs exemption or current-head App approval"})
+        status("pending")
+        try:
+            if not os.environ.get("CARR_REVIEW_APP_LOGIN", "").strip():
+                raise ValueError("Missing CARR_REVIEW_APP_LOGIN")
+            numbers, shas = queue_prs(root, group)
+            results = [evaluate_pr(root, number, shas) for number in sorted(numbers)]
+            passed = all(result == 0 for result in results)
+        except (ValueError, KeyError, TypeError, subprocess.SubprocessError):
+            passed = False
+        status("success" if passed else "failure")
+        return int(not passed)
+    if not event.get("number") and not event.get("pull_request") and not event.get("issue"):
+        results = [evaluate_pr(root, pr["number"]) for pr in api(f"{root}/pulls?state=open&base=main&per_page=100")]
+        return int(any(result != 0 for result in results))
+    number = event.get("number") or (event.get("pull_request") or event["issue"])["number"]
+    return evaluate_pr(root, number)
+
+
+def evaluate_pr(root, number, queue_shas=None):
     def status(sha, state, description="No skip-CI title; small safe diff or current-head approval required"):
         api(f"{root}/statuses/{sha}", {"context": "review-gate", "state": state,
             "description": description})
-    if "merge_group" in event:
-        status(event["merge_group"]["head_sha"], "success")
-        return
-    number = event.get("number") or (event.get("pull_request") or event["issue"])["number"]
     pr = api(f"{root}/pulls/{number}")
     if pr["base"]["ref"] != "main":
         return
     sha = pr["head"]["sha"]
+    if queue_shas is not None and (pr.get("state") != "open" or sha not in queue_shas):
+        return 1
     status(sha, "pending")
     files = api(f"{root}/pulls/{number}/files?per_page=100")
-    comments = api(f"{root}/issues/{number}/comments?per_page=100")
     reviews = api(f"{root}/pulls/{number}/reviews?per_page=100")
-    comments = sorted(comments + [r for r in reviews if r.get("state") not in ("DISMISSED", "PENDING")], key=lambda item: item.get("submitted_at") or item.get("created_at") or "")
     card_ok = card_allowed(pr, files)
-    passed = card_ok and approved(pr, files, comments)
+    reviewer_login = os.environ.get("CARR_REVIEW_APP_LOGIN", "").strip()
+    passed = card_ok and approved(pr, files, reviews, reviewer_login)
     latest = api(f"{root}/pulls/{number}")
-    if latest["head"]["sha"] == sha and latest.get("body") == pr.get("body"):
+    if latest["head"]["sha"] == sha and all(latest.get(k) == pr.get(k) for k in ("body", "title", "base")):
         description = ("No skip-CI title; small safe diff or current-head approval required" if card_ok else
                        "Missing PR body line: Card: WR<number>.S<number>.J<number>")
+        if card_ok and not reviewer_login and not review_exempt(pr, files):
+            description = "Missing CARR_REVIEW_APP_LOGIN; review-required PR cannot pass"
+        if reviewer_login and not reviewer_login.endswith("[bot]"):
+            description = "CARR_REVIEW_APP_LOGIN must name an App bot ending in [bot]"
         status(sha, "success" if passed else "failure", description)
         print(description)
         return int(not passed)
