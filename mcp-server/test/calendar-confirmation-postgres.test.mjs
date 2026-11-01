@@ -36,6 +36,6 @@ test('meeting confirmation deduplicates across request keys', async () => {
 });
 test('calendar reviews show confirmed keys after a reload', async () => {
   const section = { follow_up_reviews: [{ key: '0000000000000000' }, { key: '1111111111111111' }] };
-  await addCalendarConfirmations(c, section);
+  await addCalendarConfirmations(c, section, actor);
   assert.deepEqual(section.follow_up_reviews.map(x => x.confirmed), [true, false]);
 });

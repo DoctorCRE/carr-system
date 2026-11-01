@@ -1,3 +1,5 @@
+import { organizationTenantForActor } from "./identity.js";
+import { partnerAuthoritySlugForActor } from "./partner-authority.js";
 // The morning brief's calendar section. The Outlook intake on the partner's own
 // machine publishes the next fourteen days of their meetings as one display
 // snapshot (publish-board-snapshot, board "calendar-agenda"); this shapes the
@@ -198,14 +200,20 @@ export async function addCalendarDealSuggestions(c, section, sponsor) {
 }
 
 // Confirmation is derived from durable activity, not the Outlook snapshot.
-export async function addCalendarConfirmations(c, section) {
+export async function addCalendarConfirmations(c, section, actor) {
   const reviews = section.follow_up_reviews;
   if (c.inTransaction) await c.query("savepoint calendar_confirmations");
   try {
     const { rows } = await c.query('select distinct calendar_event_key from activity where calendar_event_key = any($1::text[])', [reviews.map(row => row.key)]);
-    if (c.inTransaction) await c.query("release savepoint calendar_confirmations");
     const confirmed = new Set(rows.map(row => row.calendar_event_key));
     for (const review of reviews) review.confirmed = confirmed.has(review.key);
+    const answers = await c.query(`select question_id from board_answer where organization_tenant_id=$1
+        and sponsoring_human_slug=$2 and board_id=$3 and question_id=any($4::text[])
+        and question_revision=1 and answer_text='Dismiss'`,
+      [organizationTenantForActor(actor), partnerAuthoritySlugForActor(actor), CALENDAR_AGENDA_BOARD, reviews.map(row => row.key)]);
+    const dismissed = new Set(answers.rows.map(row => row.question_id));
+    for (const review of reviews) review.dismissed = dismissed.has(review.key);
+    if (c.inTransaction) await c.query("release savepoint calendar_confirmations");
   } catch {
     if (c.inTransaction) {
       await c.query("rollback to savepoint calendar_confirmations");
