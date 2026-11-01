@@ -22,6 +22,10 @@ def caller_violations(root):
     found, violations = [], []
     for name in filter(None, paths):
         path = Path(name)
+        # These registers quote store history and proposed controls, not runnable restore steps.
+        if path in (Path('docs/generated-rules/mechanical.md'),
+                    Path('docs/generated-rules/merge-retire.md')):
+            continue
         if 'selftest' in path.name or path.name.startswith(('test_', 'test-')):
             continue
         text = (root / name).read_text()
@@ -90,11 +94,13 @@ class RestoreCallers(unittest.TestCase):
             proposal.write_text('Historical command: `./run.sh restore-rehearse`.\n')
             runbook = root / 'docs/recovery.md'
             runbook.write_text('./run.sh restore-rehearse\n')
-            subprocess.run(['git', 'add', str(proposal), str(runbook)],
+            command = proposal.with_name('restore.sh')
+            command.write_text('./run.sh restore-rehearse\n')
+            subprocess.run(['git', 'add', str(proposal), str(runbook), str(command)],
                            cwd=root, env=env, check=True)
             found, violations = caller_violations(root)
-            self.assertEqual(found, ['docs/recovery.md:1'])
-            self.assertEqual(violations, ['docs/recovery.md:1'])
+            self.assertEqual(found, ['docs/generated-rules/restore.sh:1', 'docs/recovery.md:1'])
+            self.assertEqual(violations, found)
 
     def test_recovery_argument_parser_accepts_run_ids_and_refuses_local_backups(self):
         source = (ROOT / 'bin/key-recovery-test.sh').read_text()

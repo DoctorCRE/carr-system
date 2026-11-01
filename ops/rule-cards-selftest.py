@@ -110,6 +110,8 @@ class CardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
                 checker, 'ROOT', Path(directory)):
             self.assertEqual(checker.missing_paths(text), ['after.py', 'before.py'])
+            self.assertIn('settings.json', checker.missing_paths(
+                text.replace('<!-- carr-native-rules:end -->', '')))
 
     def test_cards_file_renders_from_the_store(self):
         spec = importlib.util.spec_from_file_location('sync', REPO / 'ops/sync-core-rule-cards.py')

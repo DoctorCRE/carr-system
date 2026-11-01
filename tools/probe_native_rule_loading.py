@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise Claude native loading in disposable synthetic projects; no CARR hooks or data."""
+"""Probe live Claude native loading using an authenticated provider account."""
 import json
 from pathlib import Path
 import shutil

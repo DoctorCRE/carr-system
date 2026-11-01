@@ -91,7 +91,7 @@ that a product surface exists.
 
 ## Loading verification
 
-Run `python3 tools/test_native_rule_loading.py` for two disposable Claude
+Run `python3 tools/probe_native_rule_loading.py` for two disposable Claude
 projects. It copies the generated CORE, room-bridge PATH rule and before-send
 skill, creates synthetic text fixtures, and records InstructionsLoaded events.
 It requires actual Read and Skill tool calls, CORE at startup, PATH absent
@@ -99,7 +99,7 @@ for the unrelated file, and PATH present for the matching file. It uses project
 settings only in a temporary repository; production hooks are untouched.
 It never sends a message. Authentication and model access must already work.
 
-Run `python3 tools/test_native_codex_loading.py` for root/nested Codex cwd
+Run `python3 tools/probe_native_codex_loading.py` for root/nested Codex cwd
 probes. Codex has no InstructionsLoaded hook in the inspected CLI interface;
 these probes check the response's UUIDs and discovered skill name, a weaker
 observation than Claude's native events. Codex directory loading is tested
@@ -107,6 +107,7 @@ by starting in that directory, not by claiming lazy injection on arbitrary
 file reads. Checkpoint body invocation and compaction remain unverified for Codex.
 
 These opt-in CLI probes use provider accounts and are not run by offline CI.
+Their `probe_` names keep them outside the gate runner's `test_` discovery.
 They test delivery, not a general rule-adherence improvement.
 
 ## Required manual compaction test
@@ -156,7 +157,7 @@ full statements, including the room-bridge doctorcre-app exception. These are
 loader and tool observations, not proof of general model adherence. An earlier
 attempt reused summarized fixture content without a new Read and therefore
 failed reload acceptance; the final probe explicitly requires a fresh Read.
-`tools/test_native_rule_loading.py` now reports these compaction assertions.
+`tools/probe_native_rule_loading.py` now reports these compaction assertions.
 
 Codex CLI 0.166.0 passed root and nested cwd loading probes with short IDs and
 checkpoint name discovery. Noninteractive `codex exec --json --sandbox read-only

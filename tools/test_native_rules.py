@@ -1,3 +1,4 @@
+"""Test native rule generation, ownership checks, and offline CI discovery."""
 import copy
 import importlib.util
 import tempfile

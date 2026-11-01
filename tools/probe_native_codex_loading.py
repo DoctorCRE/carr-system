@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test Codex cwd-scoped AGENTS loading; this CLI does not expose Claude's load hook."""
+"""Probe live Codex cwd-scoped AGENTS loading using an authenticated provider account."""
 import json
 from pathlib import Path
 import shutil

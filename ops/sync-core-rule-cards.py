@@ -59,6 +59,9 @@ def render(text):
 
 
 def missing_paths(text):
+    # Store statements describe multiple machines; their paths are not repository links.
+    text = re.sub(r'(?ms)^<!-- carr-native-rules:start -->\n.*?^<!-- carr-native-rules:end -->\n?',
+                  '', text)
     references = {path.lstrip('/') for pair in re.findall(
         r'\[[^]\n]*\]\(([^)\s]+)\)|^\s*\[[^]\n]+\]:\s*<?([^\s>]+)',
         text, re.M) for path in pair if path}
