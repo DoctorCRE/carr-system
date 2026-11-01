@@ -24,7 +24,7 @@
   },
   "contracts": {
     "hook_runtime.py": "617416d669ccf046041eac9798551932c63e10d6df5cb7b2c0da8a13b373a422",
-    "hooks.json": "d6ffd6d30194b289b3467d0185cdffc85bf00083456f4d6ac4bcdfa1aad4f686",
+    "hooks.json": "59580a9f56b301ebf8bef08bfdf1cc80dcadc27fc241c82e2a60cbe17d537d2e",
     "codex-hooks.json": "3631799714d7dbdd10a0a83d4c08e99af96226ed4487dd6661e15e449337579f",
     "rule-enforcement-map.json": "7fd3df5915191d622359be00c4ea96c05a29cb99ea3da394a01217824984062b",
     "native_shell.py": "6b2f3b64b1a5f2be1e48383e7979a011fe2f88be91cc27627e9531464105f268",

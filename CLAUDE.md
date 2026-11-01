@@ -139,7 +139,7 @@ requests handoff at the next Stop if the turn instruction has not fired.
 State lives under `~/.cache/carr/orchestrator-rotation/`, keyed by session ID.
 Unreadable transcripts or state fail open.
 
-Follow the hook instruction to write team-memory `handoff/orchestrator-latest`,
+Follow the hook instruction to write team-memory section handoff/orchestrator-latest,
 including every running delegated job and its reporting thread. Mint a card
 through `dispatch-job`, launch a successor with `t3_thread_launch`, post its link,
 and stop. The successor starts `/pstack:poteto-mode` in Orchestrate, reads the

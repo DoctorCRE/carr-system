@@ -78,7 +78,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/orchestrator-rotation.py",
+          "command": "if [ ! -f \"{{REPO}}/hooks/orchestrator-rotation.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/orchestrator-rotation.py; skipping\" >&2; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/orchestrator-rotation.py",
           "timeout": 10
         }
       ]
@@ -114,7 +114,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/orchestrator-rotation.py",
+          "command": "if [ ! -f \"{{REPO}}/hooks/orchestrator-rotation.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/orchestrator-rotation.py; skipping\" >&2; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/orchestrator-rotation.py",
           "timeout": 10
         }
       ]

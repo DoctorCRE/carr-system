@@ -118,7 +118,7 @@ class Rotation(unittest.TestCase):
 
     def test_declarations(self):
         repo = HOOK.parent.parent
-        for relative in ('ops/config/hooks.json', '.claude/settings.json'):
+        for relative in ('ops/config/hooks.json',):
             config = json.loads((repo / relative).read_text())
             hooks = config.get('hooks', config)
             for event in ('Stop', 'PreCompact'):
@@ -127,7 +127,8 @@ class Rotation(unittest.TestCase):
                 self.assertEqual(len(groups), 1)
                 if event == 'PreCompact':
                     self.assertEqual(groups[0]['matcher'], 'auto')
-        self.assertEqual(config['autoCompactWindow'], 700000)
+        settings = json.loads((repo / '.claude/settings.json').read_text())
+        self.assertEqual(settings['autoCompactWindow'], 700000)
         self.assertNotIn('orchestrator-rotation.py',
                          (repo / 'ops/config/codex-hooks.json').read_text())
 

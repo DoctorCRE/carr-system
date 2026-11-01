@@ -36,29 +36,6 @@
           }
         ]
       }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "exec /usr/bin/env python3 \"${CLAUDE_PROJECT_DIR}/hooks/orchestrator-rotation.py\"",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "exec /usr/bin/env python3 \"${CLAUDE_PROJECT_DIR}/hooks/orchestrator-rotation.py\"",
-            "timeout": 10
-          }
-        ],
-        "matcher": "auto"
-      }
     ]
   },
   "permissions": {
