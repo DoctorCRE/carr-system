@@ -420,3 +420,21 @@ test('malformed retirement lists are non-adoptable and cannot retire rules', asy
   }
   assert.equal((await c.query('select status from rule where id=$1', [old.rule_id])).rows[0].status, 'active');
 });
+
+
+test('PR card attribution is not rule-card JSON and unknown packs name the options', async () => {
+  const p = await proposeText('pr-attribution', 'Convention: Synthetic attributed rule.\nCard: WR698.S1.J1\nPacks: governance-rules');
+  const out = await adopt(joe, p, 'carr_authority_joe');
+  assert.ok(out.rule_id);
+  await assert.rejects(adopt(joe, p, 'carr_authority_joe'), error => {
+    assert.match(publicError(error).hint, /Retires:/);
+    return true;
+  });
+  const bad = await proposeText('pack-options', 'Convention: Synthetic unknown pack.\nPacks: does-not-exist');
+  await assert.rejects(adopt(joe, bad, 'carr_authority_joe'), error => {
+    const field = publicError(error).field_errors.find(e => e.field === 'Packs');
+    assert.deepEqual(field.value, ['does-not-exist']);
+    assert.ok(field.allowed_values.includes('governance-rules'));
+    return true;
+  });
+});

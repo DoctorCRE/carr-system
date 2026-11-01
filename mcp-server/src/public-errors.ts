@@ -7,6 +7,7 @@ type PublicError = {
   error: string; correlation_id: string; hint: string;
   candidates?: Record<string, string | null>[]; retired_aliases?: Record<string, string | null>[];
   current_version?: number; fields?: unknown[]; invalid_deal_ids?: string[]; recorded_titles?: string[];
+  field_errors?: { field: string; value: unknown; code: string; pattern?: string; allowed_values?: string[] }[];
   suggested_card_title?: string; suggested_description?: string; allowed_values?: string[];
 };
 type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSchema; enum?: unknown[] };
@@ -75,7 +76,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["sponsored_actor_required", "An authenticated partner or sponsored agent must perform this operation."],
   ["memory_attach_required", "Call attach-memory first, then pass the attach_id it returned to this actor when writing or retiring team-memory."],
   ["memory_read_only", "This attach is read_only. Call attach-memory with access read_write, then retry with the new attach_id."],
-  ["convention_proposal_not_found", "Choose an active proposal from governance-queue pending_convention_proposals."],
+  ["convention_proposal_not_found", "Choose an active proposal from governance-queue pending_convention_proposals. An adopted proposal is consumed. To amend it, write a new Convention proposal with Retires: [<full rule UUID as a JSON string>] and adopt the new section."],
   ["convention_proposal_malformed", "Use 'Convention: <statement>' with Card or Packs, or 'Retires: [<full rule UUID>, ...]' for retirement only. A replacement may also name Retires."],
   ["convention_retirement_rule_not_found", "A retirement target does not exist. Re-read find-rule and use its full rule UUID."],
   ["convention_retirement_rule_not_active", "A retirement target is no longer active. Re-read find-rule and review the proposal before adopting."],
@@ -316,6 +317,16 @@ export function publicError(error: unknown, { env, inputSchema, fallback = "unha
       result.hint = PUBLIC_ERRORS.get(result.error)!;
       delete result.fields;
     }
+  }
+  if (["invalid_work_queue_fields", "invalid_card_title", "card_title_verb", "card_title_duplicate", "invalid_job_description",
+    "invalid_work_request", "invalid_idempotency_key", "invalid_job_type", "value_not_in_declared_vocabulary",
+    "convention_pack_unknown", "convention_proposal_malformed"].includes(code) && Array.isArray(payload?.field_errors)) {
+    result.field_errors = payload.field_errors.filter((item): item is Record<string, unknown> =>
+      !!item && typeof item === "object" && typeof item.field === "string" && typeof item.code === "string")
+      .map(item => ({ field: String(item.field), value: item.value, code: String(item.code),
+        ...(typeof item.pattern === "string" ? { pattern: item.pattern } : {}),
+        ...(Array.isArray(item.allowed_values) && item.allowed_values.every(v => typeof v === "string")
+          ? { allowed_values: item.allowed_values } : {}) }));
   }
   return result;
 }

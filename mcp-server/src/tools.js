@@ -9005,7 +9005,8 @@ function assertDeclaredVocabularies(name, tool, args) {
 }
 
 export async function assertRegisteredToolInput(name, tool, args = {}) {
-  assertDeclaredVocabularies(name, tool, args);
+  // dispatch-job aggregates schema vocabulary and copy errors in its handler.
+  if (name !== 'dispatch-job') assertDeclaredVocabularies(name, tool, args);
   try {
     await assertRegisteredOperation(name, tool, args);
   } catch (error) {
