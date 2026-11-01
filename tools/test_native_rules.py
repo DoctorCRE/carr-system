@@ -1,9 +1,15 @@
 """Test native rule generation, ownership checks, and offline CI discovery."""
 import copy
+from contextlib import contextmanager, redirect_stdout
 import importlib.util
+import io
+import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import native_rules as rules
 
@@ -11,6 +17,90 @@ import native_rules as rules
 class NativeRulesTests(unittest.TestCase):
     def setUp(self):
         self.snapshot = rules.load_snapshot(rules.ROOT / rules.SNAPSHOT)
+
+    def git(self, root, *args):
+        subprocess.run(["git", "-C", str(root), "-c", "core.hooksPath=/dev/null", *args],
+                       check=True, capture_output=True)
+
+    @contextmanager
+    def fixture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.git(root, "init", "-q")
+            (root / "AGENTS.md").write_text("Maintained instructions.\n")
+            (root / "CLAUDE.md").write_text("Maintained Claude instructions.\n")
+            folder = root / "tools/room-bridge"
+            folder.mkdir(parents=True)
+            (folder / "tracked.py").write_text("pass\n")
+            (root / ".gitignore").write_text("__pycache__/\n")
+            self.git(root, "add", "AGENTS.md", "CLAUDE.md", ".gitignore", "tools/room-bridge/tracked.py")
+            outputs, report = rules.render(self.snapshot, root)
+            startup = {"AGENTS.md": outputs["AGENTS.md"],
+                       "CLAUDE.md": (root / "CLAUDE.md").read_text(),
+                       ".claude/rules/carr-core.md": outputs[".claude/rules/carr-core.md"]}
+            report["startup_measurement"] = {
+                "tokenizer": "cl100k_base", "tokens": 1,
+                "files": {p: {"sha256": rules.digest(t), "tokens": 1} for p, t in startup.items()}}
+            outputs[rules.REPORT] = rules.dump(report)
+            outputs[rules.SNAPSHOT] = rules.dump(self.snapshot)
+            rules.write_outputs(root, outputs)
+            yield root
+
+    def check(self, root):
+        with patch.object(rules, "ROOT", root), patch.object(sys, "argv", ["native_rules.py", "--check"]):
+            with redirect_stdout(io.StringIO()):
+                rules.main()
+
+    def test_untracked_and_ignored_files_do_not_change_check(self):
+        with self.fixture() as root:
+            self.check(root)
+            (root / "tools/room-bridge/untracked.py").write_text("pass\n")
+            cache = root / "tools/room-bridge/__pycache__"
+            cache.mkdir()
+            (cache / "module.pyc").write_bytes(b"synthetic bytecode")
+            self.check(root)
+
+    def test_add_tracked_file_under_active_glob_does_not_change_check(self):
+        with self.fixture() as root:
+            self.check(root)
+            name = "tools/room-bridge/another.py"
+            (root / name).write_text("pass\n")
+            self.git(root, "add", name)
+            self.check(root)
+
+    def test_maintained_guidance_edit_does_not_require_measurement(self):
+        with self.fixture() as root:
+            self.check(root)
+            for name in ("CLAUDE.md", "AGENTS.md"):
+                path = root / name
+                path.write_text(path.read_text() + "\nMore maintained instructions.\n")
+                self.check(root)
+
+    def test_check_rejects_oversized_codex_chain(self):
+        with self.fixture() as root:
+            path = root / "src/AGENTS.md"
+            path.write_text(path.read_text() + "é" * 16384)
+            with self.assertRaisesRegex(ValueError, "Codex.*32768"):
+                self.check(root)
+
+    def test_retired_nested_block_deletes_empty_file_and_preserves_guidance(self):
+        for maintained in ("", "Keep this guidance.\n"):
+            with self.subTest(maintained=maintained), self.fixture() as root:
+                path = root / "retired/AGENTS.md"
+                path.parent.mkdir()
+                path.write_text(rules.block(maintained, rules.NOTICE))
+                manifest = root / rules.REPORT
+                report = json.loads(manifest.read_text())
+                report["outputs"].append("retired/AGENTS.md")
+                report["nested_agents"].append("retired/AGENTS.md")
+                manifest.write_text(rules.dump(report))
+                outputs, report = rules.render(self.snapshot, root)
+                outputs[rules.REPORT] = rules.dump(report)
+                rules.write_outputs(root, outputs)
+                if maintained:
+                    self.assertEqual(path.read_text().strip(), maintained.strip())
+                else:
+                    self.assertFalse(path.exists())
 
     def test_offline_ci_discovers_generator_tests_without_live_probes(self):
         spec = importlib.util.spec_from_file_location('ci_gates', rules.ROOT / 'ops/ci-gates.py')
