@@ -473,15 +473,17 @@ for (const route of ['tool', 'sql']) {
     }
   });
 
-  test(`${route} keeps NBSP-terminated attribution significant`, async () => {
-    const old = await adoptCard(`attribution-nbsp-${route}`);
-    const p = await proposeText(`attribution-nbsp-proposal-${route}`,
-      `Retires: ["${old.rule_id}"]\nCard: WR1.S1.J1\u00a0`);
-    const row = (await call(joe, 'governance-queue', {})).pending_convention_proposals
-      .find(row => row.section_id === p.section_id);
-    assert.equal(row.adoptable, false);
-    await assert.rejects(adoptVia(p), /convention_proposal_malformed/);
-    assert.equal((await c.query('select status from rule where id=$1', [old.rule_id])).rows[0].status, 'active');
+  test(`${route} keeps NBSP- and VT-terminated attribution significant`, async () => {
+    for (const [suffix, whitespace] of [['nbsp', '\u00a0'], ['vt', '\v']]) {
+      const old = await adoptCard(`attribution-${suffix}-${route}`);
+      const p = await proposeText(`attribution-${suffix}-proposal-${route}`,
+        `Retires: ["${old.rule_id}"]\nCard: WR1.S1.J1${whitespace}`);
+      const row = (await call(joe, 'governance-queue', {})).pending_convention_proposals
+        .find(row => row.section_id === p.section_id);
+      assert.equal(row.adoptable, false);
+      await assert.rejects(adoptVia(p), /convention_proposal_malformed/);
+      assert.equal((await c.query('select status from rule where id=$1', [old.rule_id])).rows[0].status, 'active');
+    }
   });
 
   test(`${route} ignores PR attribution without Packs when JSON card metadata exists`, async () => {
