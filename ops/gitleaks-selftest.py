@@ -16,6 +16,16 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class DetectionTest(unittest.TestCase):
+    def test_unit_workflow_is_clean_and_does_not_hide_other_credentials(self):
+        name = '.github/workflows/unit-shards.yml'
+        source = (ROOT / name).read_text()
+        self.assertEqual(gitleaks.detect(ROOT, files=[(name, source)]), 0)
+        values = ['postgres://admin:' + 's3cretpass' + '@db.prod.example/carr',
+                  'ghp_' + 'z' * 36, 'AKIA' + 'Z' * 16]
+        for value in values:
+            with self.subTest(shape=value[:8]):
+                self.assertEqual(gitleaks.detect(ROOT, files=[(name, source + '\n          X: ' + value + '\n')]), 1)
+
     def test_missing_or_tampered_binary_fails_closed(self):
         verified = gitleaks.binary()
         with tempfile.TemporaryDirectory() as directory:

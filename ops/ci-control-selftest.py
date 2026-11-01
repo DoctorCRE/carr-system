@@ -39,6 +39,14 @@ def expression(value, github, cancelled=False, matrix=None):
 
 
 class Controls(unittest.TestCase):
+    def test_pr_gates_install_the_shared_pinned_scanner_before_checks(self):
+        jobs = workflow()['jobs']
+        install = next(step for step in jobs['secret']['steps']
+                       if step.get('run') == 'python3 ops/gitleaks.py --install')
+        steps = jobs['gates']['steps']
+        checks = next(step for step in steps if step.get('name') == 'Gates checks')
+        self.assertIn(install, steps[:steps.index(checks)])
+
     def test_node_install_reuses_downloads_without_duplicating_dependency_audit(self):
         wf = workflow()
         setup = next(step for step in wf['jobs']['classes']['steps']
