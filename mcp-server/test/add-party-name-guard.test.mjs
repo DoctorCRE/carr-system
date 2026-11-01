@@ -1,8 +1,11 @@
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Pool } from "@neondatabase/serverless";
 import { executeRegisteredTool } from "../src/tools.js";
 import { dispatch } from "./helpers/budgeted-dispatch.mjs";
+
+const names = JSON.parse(readFileSync(new URL("./fixtures/full-name-cases.json", import.meta.url), "utf8"));
 
 const partyId = "20000000-0000-0000-0000-000000000001";
 const actor = { id: "10000000-0000-4000-8000-000000000002", slug: "codex", human: false, via: "agent-token" };
@@ -34,7 +37,7 @@ class Fake {
 }
 
 for (const researched of [false, true]) {
-  for (const name of ["Robin", "R Vale", "R. Vale", "R V", "R. V.", "Robin V.", "R.V.", "Robin-Vale", "Robin.Vale", "robin@firm.test"]) {
+  for (const name of names.refuse) {
     for (const force_new of [false, true]) test(`registered ${researched ? "researched" : "unresearched"} create refuses ${name}, force_new=${force_new}`, async () => {
       const db = new Fake();
       await assert.rejects(executeRegisteredTool(db, actor, "add-party", {
@@ -46,7 +49,7 @@ for (const researched of [false, true]) {
   }
 }
 
-for (const name of ["Robin Vale", "Robin Q. Vale", "Zélori Varneth", "Zélori-Mavren Varneth"]) test(`registered researched create accepts ${name}`, async () => {
+for (const name of names.accept) test(`registered researched create accepts ${name}`, async () => {
   const db = new Fake();
   const out = await executeRegisteredTool(db, actor, "add-party", { ...base, name, research_evidence: research });
   assert.equal(out.ok, true);

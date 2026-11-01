@@ -18,6 +18,7 @@ spec = importlib.util.spec_from_file_location("load_calendar_contacts", REPO / "
 assert spec is not None and spec.loader is not None
 loader = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(loader)
+NAME_CASES = json.loads((REPO / "mcp-server/test/fixtures/full-name-cases.json").read_text())
 FREE = sorted(loader.FREE_MAIL)[0]
 
 CONTACTS = [
@@ -159,14 +160,14 @@ class Plan(unittest.TestCase):
 
 class ResolvedNames(unittest.TestCase):
     def test_partial_names_never_plan_a_party(self):
-        for name in ("Robin", "R Vale", "R. Vale", "R V", "R. V.", "Robin V.", "R.V.", "Robin-Vale", "Robin.Vale", "robin@firm.test"):
+        for name in NAME_CASES["refuse"]:
             with self.subTest(name=name):
                 p = plan({"event": [{"email": "robin@firm-z.test", "name": name}]})
                 self.assertEqual(p["add"], [])
                 self.assertEqual(p["skipped"].get("no_name"), 1)
 
     def test_full_names_plan_a_party(self):
-        for name in ("Robin Vale", "Robin Q. Vale", "Zélori Varneth", "Zélori-Mavren Varneth"):
+        for name in NAME_CASES["accept"]:
             with self.subTest(name=name):
                 p = plan({"event": [{"email": "robin@firm-z.test", "name": name}]})
                 self.assertEqual(len(p["add"]), 1)
