@@ -130,7 +130,7 @@ class AgentCardGate(unittest.TestCase):
                 self.assertEqual(result.returncode, 2, result.stderr)
 
     def test_foreground_agents_need_card(self):
-        for kind in ('Explore', 'Plan', 'general-purpose'):
+        for kind in ('Plan', 'general-purpose'):
             with self.subTest(kind=kind):
                 result = self.run_hook(prompt='Search code.', subagent_type=kind,
                                        run_in_background=False)
@@ -139,8 +139,12 @@ class AgentCardGate(unittest.TestCase):
     def test_agent_default_foreground_needs_card(self):
         self.assertEqual(self.run_hook(prompt='Search code.', run_in_background=None).returncode, 2)
 
-    def test_background_explore_needs_card(self):
-        self.assertEqual(self.run_hook(prompt='Search code.', subagent_type='Explore').returncode, 2)
+    def test_read_only_agents_need_no_card(self):
+        for kind in ('web-fetch', 'Explore'):
+            for background in (False, True):
+                with self.subTest(kind=kind, background=background):
+                    result = self.run_hook(prompt='Read.', subagent_type=kind, run_in_background=background)
+                    self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_registered_card_survives_outage(self):
         self.register_fixture()
